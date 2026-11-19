@@ -730,12 +730,10 @@ export interface TenantCredential {
  */
 const heldTenantCredential = async (
   vault: Vault,
-  held: typeof connectionTenantTokens.$inferSelect | undefined,
-  row: TokenRow
+  held: typeof connectionTenantTokens.$inferSelect | undefined
 ): Promise<TenantCredential | undefined> => {
   if (
     held === undefined ||
-    held.generation !== row.generation ||
     held.accessExpiresAt.getTime() - expirySkewMs <= Date.now()
   ) {
     return undefined;
@@ -787,7 +785,10 @@ export const tenantCredentialFor = async (
     .from(connectionTenantTokens)
     .where(eq(connectionTenantTokens.connectionId, connectionId))
     .get();
-  const fresh = await heldTenantCredential(vault, held, row);
+  // Its grant's own: the row goes with the grant's `connection_tokens` row
+  // (ON DELETE CASCADE), which a grant connected again replaces, so a
+  // Graph renewal keeps it and a new grant never reads it.
+  const fresh = await heldTenantCredential(vault, held);
   if (fresh !== undefined) {
     return fresh;
   }
@@ -796,19 +797,24 @@ export const tenantCredentialFor = async (
   if (client === undefined || tenant === null) {
     throw connectionErrors.create("connection.provider_unavailable");
   }
-  let host: string;
+  // The host this grant found, else found now: none when the company's
+  // root site isn't on such a host. A read that fails or is throttled
+  // fails the call, to be tried again: never nobody's for a blip.
+  let host: string | null;
   try {
     host =
-      held?.generation === row.generation
-        ? held.host
-        : await provider.tenantResource.hostOf(
-            await freshAccessToken(env, active)
-          );
+      held?.host ??
+      (await provider.tenantResource.hostOf(
+        await freshAccessToken(env, active)
+      ));
   } catch (error) {
-    log.warn("connection.tenant_host_unknown", {
+    log.warn("connection.tenant_host_failed", {
       provider: provider.id,
       ...errorFields(error),
     });
+    throw connectionErrors.create("connection.refresh_failed");
+  }
+  if (host === null) {
     return undefined;
   }
   let minted: TokenSet;
@@ -831,25 +837,13 @@ export const tenantCredentialFor = async (
     });
     throw connectionErrors.create("connection.refresh_failed");
   }
-  // A token whose answer names the rights it holds holds the one asked
-  // for, or it is no use: no token.
-  const right = provider.tenantResource.scope(host).toLowerCase();
-  if (
-    minted.scope !== undefined &&
-    !minted.scope
-      .toLowerCase()
-      .split(" ")
-      .some((granted) => granted === right || right.endsWith(`/${granted}`))
-  ) {
-    return undefined;
-  }
   const sealed = await vault.seal(
     minted.accessToken,
     tenantSealContext(connectionId)
   );
   const now = Date.now();
-  // Only for the grant it was asked with: a grant connected again
-  // meanwhile asks for its own.
+  // Only for the grant it was asked with, as it stands: a grant connected
+  // again, or renewed, meanwhile keeps none of this one's.
   await env.DB.prepare(
     `INSERT INTO connection_tenant_tokens (connection_id, host, sealed, access_expires_at, generation, updated_at)
     SELECT ?1, ?2, ?3, ?4, ?5, ?6

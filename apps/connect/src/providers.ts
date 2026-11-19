@@ -139,7 +139,8 @@ export interface OAuthProviderConfig {
    * for that host is asked with (tokens.ts `tenantCredentialFor`).
    */
   tenantResource?: {
-    hostOf: (accessToken: string) => Promise<string>;
+    /** The host, or none when the company has none; a failed read throws. */
+    hostOf: (accessToken: string) => Promise<string | null>;
     scope: (host: string) => string;
   };
   /**
@@ -253,9 +254,12 @@ const rootSiteSchema = z.object({ webUrl: z.string() });
  * The company's SharePoint host, from its root site as the connection's
  * own Graph token finds it
  * (https://learn.microsoft.com/en-us/graph/api/site-get?view=graph-rest-1.0):
- * `<tenant>.sharepoint.com`, or refused.
+ * `<tenant>.sharepoint.com`, or none when the root site is anywhere else.
+ * A read Graph refuses, throttles or doesn't answer in time throws.
  */
-const sharePointHostOf = async (accessToken: string): Promise<string> => {
+const sharePointHostOf = async (
+  accessToken: string
+): Promise<string | null> => {
   const response = await fetch(
     "https://graph.microsoft.com/v1.0/sites/root?$select=webUrl",
     {
@@ -270,10 +274,9 @@ const sharePointHostOf = async (accessToken: string): Promise<string> => {
   }
   const { webUrl } = rootSiteSchema.parse(await response.json());
   const url = URL.parse(webUrl);
-  if (url?.protocol !== "https:" || !sharePointHostPattern.test(url.hostname)) {
-    throw new Error("The root site isn't on a company's SharePoint host");
-  }
-  return url.hostname;
+  return url?.protocol === "https:" && sharePointHostPattern.test(url.hostname)
+    ? url.hostname
+    : null;
 };
 
 const microsoftLogin = "https://login.microsoftonline.com";
@@ -483,6 +486,8 @@ const microsoftDirectoryScopes = [
 const microsoftDirectory: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-directory",
+  // Reads Graph alone: no SharePoint host of its own.
+  tenantResource: undefined,
   // Read-only: the write a Microsoft 365 renewal must still hold isn't
   // asked for here, so its renewal requires nothing of it.
   renewalRequires: [],
@@ -602,6 +607,8 @@ const microsoftDocumentsScopes = [
 const microsoftDocuments: OAuthProviderConfig = {
   ...microsoft,
   id: "microsoft-documents",
+  // Reads Graph alone: no SharePoint host of its own.
+  tenantResource: undefined,
   // Read-only: the write a Microsoft 365 renewal must still hold isn't
   // asked for here, so its renewal requires nothing of it.
   renewalRequires: [],

@@ -400,8 +400,9 @@ const restUrl = (site: URL, path: string): URL =>
  * One GET of SharePoint's REST API on the company's host: its answer, or
  * null when it was refused (by SharePoint, or by connect's egress, which
  * holds no token for the host or another host) or isn't what `schema`
- * reads, or "late". A throttled or failing SharePoint fails the page,
- * which waits.
+ * reads, or "late". A token SharePoint no longer takes (401, revoked
+ * within its hour), or a throttled or failing SharePoint, fails the page,
+ * which waits: never nobody's for a day.
  */
 const restGet = async <Schema extends z.ZodType>(
   room: SyncRoom,
@@ -414,6 +415,14 @@ const restGet = async <Schema extends z.ZodType>(
   const response = await fetchInRoom(room, url, { headers: restJson });
   if (response === "late") {
     return "late";
+  }
+  // A token SharePoint no longer takes says nothing of the grant: the
+  // page fails, and the grant stays as it is.
+  if (response.status === 401) {
+    await response.body?.cancel();
+    throw new ToolError("SharePoint didn't take the connection's token", {
+      code: "unavailable",
+    });
   }
   if (response.status === 429 || response.status >= 500) {
     throw await graphFailure(response);

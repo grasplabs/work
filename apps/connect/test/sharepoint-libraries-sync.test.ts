@@ -1,6 +1,6 @@
 import { syncErrors } from "@grasp-os/shared/sync";
 import type { SyncPage } from "@grasp-os/shared/sync";
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -137,6 +137,10 @@ interface SharePoint {
   sitePages: { id: string; displayName: string; webUrl?: string }[][];
   /** The root site's address, as Graph gives it. */
   rootWebUrl: string;
+  /** A status Graph answers the root site with instead, when set. */
+  rootStatus?: number;
+  /** A status SharePoint's REST API answers everything with instead, when set. */
+  restStatus?: number;
   /** The sites, by path, whose permissions the account may read (an owner). */
   owners: Set<string>;
   /** Files, by ID, whose own permissions leave the account short of Full Control. */
@@ -293,6 +297,8 @@ const reset = (): void => {
     ],
   ];
   sharePoint.rootWebUrl = `https://${storageHost}`;
+  sharePoint.rootStatus = undefined;
+  sharePoint.restStatus = undefined;
   // The account owns Sales; in Legal it is a member.
   sharePoint.owners = new Set(["/sites/sales"]);
   sharePoint.notOwned = new Set();
@@ -501,6 +507,12 @@ const fileAt = (listId: string, item: string): string | undefined =>
  * members to its members alone hides.
  */
 const restCall = (url: URL): Response => {
+  if (sharePoint.restStatus !== undefined) {
+    return Response.json(
+      { "odata.error": { code: "-2147024891" } },
+      { status: sharePoint.restStatus }
+    );
+  }
   const match =
     /^(?<site>(?:\/(?:sites|teams)\/[^/]+)?)\/_api\/web\/(?<rest>.+)$/u.exec(
       decodeURIComponent(url.pathname)
@@ -535,7 +547,12 @@ const internet = fakeInternet((_request, url) => {
     return restCall(url);
   }
   if (url.hostname === graphHost && url.pathname === "/v1.0/sites/root") {
-    return Response.json({ webUrl: sharePoint.rootWebUrl });
+    return sharePoint.rootStatus === undefined
+      ? Response.json({ webUrl: sharePoint.rootWebUrl })
+      : Response.json(
+          { error: { code: "throttled" } },
+          { status: sharePoint.rootStatus }
+        );
   }
   if (url.hostname === storageHost) {
     const content =
@@ -1062,6 +1079,7 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
               siteUrl: `https://${otherHost}/sites/sales`,
               listId: whereIs[salesDocs.id]?.list,
               listItemId: "1",
+              tenantId: acmeTenant,
             },
           }),
         ],
@@ -1088,6 +1106,107 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
       sharePoint: 1,
       asked: [`https://${storageHost}/AllSites.Read`],
       downloads: [null, null, null],
+    });
+  });
+
+  it("fails the page, writing no file, when Graph throttles the root site or SharePoint no longer takes its token", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    sharePoint.rootStatus = 429;
+    const throttled = await outcomeOf(
+      async () => await read(connectionId, salesDocs.id, null)
+    );
+    sharePoint.rootStatus = undefined;
+    // A SharePoint token revoked within its hour.
+    sharePoint.restStatus = 401;
+    const revoked = await outcomeOf(
+      async () => await read(connectionId, salesDocs.id, null)
+    );
+
+    expect({ throttled, revoked }).toStrictEqual({
+      throttled: "sync.provider_failed",
+      // The page waits: SharePoint's refusal says nothing of the grant.
+      revoked: "sync.throttled",
+    });
+  });
+
+  it("keeps a grant's SharePoint token across Graph's renewals, and gives a grant connected again its own", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    const sharePointToken = () =>
+      internet.sent.findLast(
+        ({ host, path }) => host === storageHost && path.includes("/_api/")
+      )?.headers.authorization;
+    const asked = () =>
+      providers
+        .tokenRequests("refresh_token")
+        .filter(({ form }) => (form.get("scope") ?? "").includes("AllSites"))
+        .length;
+    const rootReads = () =>
+      internet.sent.filter(({ path }) => path.startsWith("/v1.0/sites/root"))
+        .length;
+
+    await readAll(connectionId, salesDocs.id);
+    const first = sharePointToken();
+    // Graph's access token runs out: the next read renews it.
+    await env.DB.prepare(
+      "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .run();
+    await readAll(connectionId, salesDocs.id);
+    const renewed = {
+      token: sharePointToken() === first,
+      asked: asked(),
+      rootReads: rootReads(),
+    };
+    // Its SharePoint token runs out: another, for the host this grant found.
+    await env.DB.prepare(
+      "UPDATE connection_tenant_tokens SET access_expires_at = 0 WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .run();
+    await readAll(connectionId, salesDocs.id);
+    const expired = { asked: asked(), rootReads: rootReads() };
+    // Connected again: as a reconnect does (oauth.ts), the grant's row
+    // goes and the new grant's takes its place, its tokens the same.
+    const grant = await env.DB.prepare(
+      "SELECT sealed, access_expires_at, granted_scopes, updated_at FROM connection_tokens WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .first<{
+        sealed: string;
+        access_expires_at: number;
+        granted_scopes: string | null;
+        updated_at: number;
+      }>();
+    await env.DB.batch([
+      env.DB.prepare(
+        "DELETE FROM connection_tokens WHERE connection_id = ?"
+      ).bind(connectionId),
+      env.DB.prepare(
+        "INSERT INTO connection_tokens (connection_id, sealed, access_expires_at, generation, refresh_until, granted_scopes, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?)"
+      ).bind(
+        connectionId,
+        grant?.sealed ?? "",
+        grant?.access_expires_at ?? 0,
+        Date.now(),
+        grant?.granted_scopes ?? null,
+        grant?.updated_at ?? 0
+      ),
+    ]);
+    await readAll(connectionId, salesDocs.id);
+
+    expect({
+      renewed,
+      expired,
+      own: sharePointToken() !== first,
+      asked: asked(),
+    }).toStrictEqual({
+      renewed: { token: true, asked: 1, rootReads: 1 },
+      expired: { asked: 2, rootReads: 1 },
+      own: true,
+      asked: 3,
     });
   });
 

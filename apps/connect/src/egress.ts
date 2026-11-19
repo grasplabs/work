@@ -168,9 +168,10 @@ const refuse = (
 };
 
 /**
- * Whether `route`'s host is `hostname`: one of the connector's as named,
- * or the connection's own (`tenantHost`) as connect learned it, and never
- * one of the connector's hosts.
+ * Whether `route`'s host is `hostname`, the one check of where a request
+ * goes: one of the connector's as named (each route's host is one of the
+ * manifest's), or the connection's own (`tenantHost`) as connect learned
+ * it, and never one of the connector's hosts.
  */
 const routeHostIs = (
   { hosts, tenant }: Pick<EgressProps, "hosts" | "tenant">,
@@ -182,19 +183,15 @@ const routeHostIs = (
     : route.host === hostname;
 
 /**
- * Whether `url` goes to exactly one of the connector's hosts, or the
- * connection's own, over HTTPS on its own port, without credentials in
- * the URL.
+ * Whether `url` is one a request may go to: HTTPS on its own port,
+ * without credentials in the URL. Which host is the route's to say
+ * (`routeHostIs`): only a declared route's host is reached.
  */
-const reachable = (
-  { hosts, tenant }: Pick<EgressProps, "hosts" | "tenant">,
-  url: URL
-): boolean =>
+const reachable = (url: URL): boolean =>
   url.protocol === "https:" &&
   url.username === "" &&
   url.password === "" &&
-  url.port === "" &&
-  (hosts.includes(url.hostname) || tenant?.host === url.hostname);
+  url.port === "";
 
 /** The route the request is for, if the call declares it. */
 const routeFor = (
@@ -368,7 +365,7 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
     if (remainingMs <= 0) {
       return refuse(call, "expired", url, method);
     }
-    if (!reachable(call, url)) {
+    if (!reachable(url)) {
       return refuse(call, "host", url, method);
     }
     const route = routeFor(call, method, url);
