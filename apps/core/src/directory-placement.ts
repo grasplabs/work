@@ -9,11 +9,7 @@ import type {
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import {
-  mayAct,
-  memberNotRemoved,
-  organizationId,
-} from "./auth/membership-sql.ts";
+import { mayAct, organizationId } from "./auth/membership-sql.ts";
 import {
   directoryDepartments,
   directoryMemberships,
@@ -123,12 +119,9 @@ export const directoryPlacementOf = async (
       .from(teamPins)
       .innerJoin(users, eq(users.id, teamPins.userId))
       .innerJoin(teams, eq(teams.id, teamPins.teamId))
-      .where(
-        and(
-          eq(teams.organizationId, organizationId),
-          memberNotRemoved(teamPins.userId)
-        )
-      )
+      // A removal and an erasure delete the person's pins (members.ts,
+      // person-erasure.ts), and a pin is written only for an active member.
+      .where(eq(teams.organizationId, organizationId))
       .orderBy(asc(teams.name), asc(users.name), asc(users.id)),
   ]);
   const ties = new Map<string, Tie>();

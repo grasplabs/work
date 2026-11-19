@@ -295,7 +295,12 @@ const Movers = ({
   );
 };
 
-/** A pin, and letting the directory decide that pair again. */
+/**
+ * A pin, and what undoes it. Kept out: letting the directory decide again,
+ * whose next read adds them where their department says. Kept in: taking
+ * them off by hand, since the read never takes away a membership it didn't
+ * make, so releasing it would change nothing.
+ */
 const PinRow = ({
   pin,
   onChanged,
@@ -309,34 +314,38 @@ const PinRow = ({
   const team = pin.team.name;
   const date = formatDate(pin.pinnedAt);
   const who = pin.name;
+  const release = (
+    <>
+      <Button
+        aria-label={t`Let the directory decide whether ${who} is in ${team}`}
+        disabled={busy}
+        onClick={() => {
+          void run(
+            async () => {
+              await core.withSession(
+                async (session) =>
+                  await session.members.releaseTeamPin(pin.userId, pin.team.id)
+              );
+            },
+            t`The pin on ${who} couldn't be released. Try again.`
+          );
+        }}
+        size="sm"
+        variant="outline"
+      >
+        <Trans>Let the directory decide</Trans>
+      </Button>
+      <ErrorText>{failure}</ErrorText>
+    </>
+  );
   return (
     <PersonRow
       actions={
-        <>
-          <Button
-            aria-label={t`Let the directory decide whether ${who} is in ${team}`}
-            disabled={busy}
-            onClick={() => {
-              void run(
-                async () => {
-                  await core.withSession(
-                    async (session) =>
-                      await session.members.releaseTeamPin(
-                        pin.userId,
-                        pin.team.id
-                      )
-                  );
-                },
-                t`The pin on ${who} couldn't be released. Try again.`
-              );
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <Trans>Let the directory decide</Trans>
-          </Button>
-          <ErrorText>{failure}</ErrorText>
-        </>
+        pin.kept ? (
+          <TakeOff onChanged={onChanged} person={pin} team={pin.team} />
+        ) : (
+          release
+        )
       }
       person={pin}
     >
@@ -367,7 +376,7 @@ const Pins = ({
   }
   return (
     <SettingsSection
-      description={t`An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is. Letting the directory decide takes the pin away: from its next read, the directory may add them to that team, or take them off it if it put them there.`}
+      description={t`An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is.`}
       title={t`Placed by hand`}
     >
       {pins.map((pin) => (
@@ -381,7 +390,11 @@ const Pins = ({
   );
 };
 
-/** Who the directory leaves for an admin to place, and the hand pins. */
+/**
+ * Who the directory leaves for an admin to place, and the hand pins, as
+ * the Teams tab read them with its teams (and reads again after every
+ * change): mounted there with one line.
+ */
 export const DirectoryPlacementSections = ({
   placement,
   teams,

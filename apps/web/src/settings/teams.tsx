@@ -45,21 +45,17 @@ import { TeamMembersDialog } from "./team-members-dialog.tsx";
 import { useTeamChange } from "./use-team-change.ts";
 
 // Teams, for admins (GRA-1296): the organization's teams, each with how
-// many are in it; making one, renaming it, deleting it, and who is in it;
-// then whom the directory leaves for an admin to place, and the hand pins
-// (directory-placement.tsx).
+// many are in it; making one, renaming it, deleting it, and who is in it.
 // Everything that is shared with a team ("Chosen teams") picks from these,
 // and so does the onboarding's staff list, which names these same teams
 // (GRA-2055). Better Auth checks the role on every
 // change and core on every read; only admins see this tab at all.
 
-/**
- * What the tab shows: the teams, the members to put in them, and whom the
- * directory leaves for an admin to place (directory-placement.tsx).
- */
+/** What the tab shows: the teams, and the members to put in them. */
 interface TeamsData {
   teams: OrganizationTeam[];
   members: Member[];
+  /** Whom the directory leaves for an admin to place (directory-placement.tsx). */
   placement: DirectoryPlacement;
 }
 
@@ -376,7 +372,7 @@ const TeamsList = ({
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const { teams, members, placement } = data;
+  const { teams, members } = data;
   return (
     <div className="flex flex-col gap-6">
       <SettingsSection
@@ -406,7 +402,7 @@ const TeamsList = ({
       </SettingsSection>
       <DirectoryPlacementSections
         onChanged={onChanged}
-        placement={placement}
+        placement={data.placement}
         teams={teams}
       />
     </div>

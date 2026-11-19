@@ -2505,8 +2505,8 @@ msgid "An admin connects this for everyone."
 msgstr "Un admin le connecte pour tout le monde."
 
 #: src/settings/directory-placement.tsx
-msgid "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is. Letting the directory decide takes the pin away: from its next read, the directory may add them to that team, or take them off it if it put them there."
-msgstr "Un administrateur les a mis dans une équipe, ou retirés d’une équipe, à la main, et la lecture quotidienne de l’annuaire laisse cela tel quel. Laisser l’annuaire décider retire ce choix : dès sa prochaine lecture, l’annuaire peut les ajouter à cette équipe, ou les en retirer si c’est lui qui les y avait mis."
+msgid "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is."
+msgstr "Un administrateur les a mis dans une équipe, ou retirés d’une équipe, à la main, et la lecture quotidienne de l’annuaire laisse cela tel quel."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "An admin refused or took back its reading of these events: it hears nothing."

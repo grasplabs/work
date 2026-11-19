@@ -2505,8 +2505,8 @@ msgid "An admin connects this for everyone."
 msgstr "Een beheerder koppelt dit voor iedereen."
 
 #: src/settings/directory-placement.tsx
-msgid "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is. Letting the directory decide takes the pin away: from its next read, the directory may add them to that team, or take them off it if it put them there."
-msgstr "Een beheerder heeft ze met de hand aan een team toegevoegd of eruit gehaald, en de dagelijkse uitlezing van de directory laat dat zo. Laat je de directory beslissen, dan vervalt die vastzetting: vanaf de volgende uitlezing kan de directory ze aan dat team toevoegen, of eruit halen als de directory ze erin had gezet."
+msgid "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is."
+msgstr "Een beheerder heeft ze met de hand aan een team toegevoegd of eruit gehaald, en de dagelijkse uitlezing van de directory laat dat zo."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "An admin refused or took back its reading of these events: it hears nothing."
