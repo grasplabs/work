@@ -8,7 +8,13 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { accounts, members, teamMembers, teams } from "../db/core/schema.ts";
+import {
+  accounts,
+  members,
+  teamMembers,
+  teams,
+  users,
+} from "../db/core/schema.ts";
 import { staffMayStay } from "../onboarding/gate.ts";
 import { reachesWorkspace } from "../session-check.ts";
 import { authFor, currentMembership, organizationId } from "./auth.ts";
@@ -51,6 +57,19 @@ export const memberRole = async (
   const [membership] = await read;
   const role = roleSchema.safeParse(membership?.role);
   return role.success ? role.data : undefined;
+};
+
+/** A person's name as their account holds it, read now; `undefined` for none. */
+export const accountNameOf = async (
+  database: D1Database,
+  userId: string
+): Promise<string | undefined> => {
+  const [user] = await drizzle(database)
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, userId));
+  const name = user?.name.trim();
+  return name === undefined || name === "" ? undefined : name;
 };
 
 /** The teams of the organization a person is in, read now, by name. */
