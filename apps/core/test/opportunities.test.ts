@@ -32,7 +32,7 @@ import type { Ids, Key } from "./onboarding-team.ts";
 import type { ProviderReply } from "./provider-streams.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { outcome, routed, signedInApi, signedInWithRole } from "./sign-in.ts";
-import { teamAs } from "./teams.ts";
+import { namedTeam, teamAs } from "./teams.ts";
 
 // Opportunities (GRA-1750): each of a team's routines (GRA-1749) as an
 // admin reads it, ranked by the hours a week it takes, with its evidence
@@ -822,6 +822,33 @@ describe("opportunities", { timeout: 120_000 }, () => {
         },
       ],
     });
+  });
+
+  it("pair a routine described for a staff-list team an earlier release saved, under an id no members' team has, with the one seen in the Settings team of its name", async () => {
+    const { ids } = await drawnTeam("Send the answer from the Excel sheet.");
+    const admin = await signedInApi(idp, "admin");
+    const tag = crypto.randomUUID().slice(0, 8);
+    // The list's team keeps the id an earlier release gave it; the members'
+    // team of its name is another (GRA-2055): they pair by the name.
+    await onboardingStore(env).renameTeam(ids.team, `Ops ${tag}`);
+    const ops = await membersOf(5);
+    await namedTeam(`ops ${tag.toUpperCase()}`, ...ops);
+    await recordEvents(
+      env,
+      eachTook(
+        ops,
+        { step: "tickets.read", system: "zendesk", writes: false },
+        { step: "tickets.update", system: "zendesk", writes: true }
+      )
+    );
+    const { tickets } = await ticketsOf(admin.api, ids);
+    // What was seen goes with its people, so no later test meets it.
+    for (const person of ops) {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await erasedBy(admin, person);
+    }
+
+    expect(tickets?.basis).toBe("both");
   });
 
   it("say which systems were described and not seen only once a proposal names them, never that both use the same before", async () => {
