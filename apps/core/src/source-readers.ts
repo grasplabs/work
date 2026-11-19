@@ -10,6 +10,8 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { providerIds, signInConfig } from "./auth/config.ts";
 import {
   accounts,
+  directoryGroupMembers,
+  directoryPeople,
   personErasures,
   signInAddresses,
   sourceReaderGroups,
@@ -18,6 +20,7 @@ import {
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
+import { entra } from "./directory-ties.ts";
 
 // Readers copied from where an item lives (GRA-1761; the threat model and
 // the decisions are on the issue). A sync hands core each item's readers as
@@ -66,8 +69,17 @@ import { derivedHmacKey } from "./derived-keys.ts";
 // is recent (`readerProofMaxAgeMs`, as every proof here). So a person who
 // leaves a group stops reading by it at their connection's next token
 // renewal, and a day after its last read whatever happens; nobody holds a
-// group by a directory's word, or by a read that failed, and nothing of
-// anyone else's groups is kept (GRA-1719, "Group members").
+// group by a read that failed, and nothing of anyone else's groups is
+// kept by that read (GRA-1719, "Group members").
+//
+// An Entra group is held too through the company's directory (GRA-2146):
+// its read of the members of each group a list names
+// (directory-reader-groups.ts, or the daily read's of a group mapped to a
+// team) counts for the member the daily read tied to that object ID in
+// the deployment's tenant, while their directory account is on, for a day
+// from the read that listed them (`directory_group_members.read_at`). An
+// admin consented to that read for the company, and the tie is by tenant
+// and object ID, which Entra never gives anyone else; never by address.
 //
 // A group's name is its kind, then its parts joined by ":", which no part
 // holds (`sourceReaderSchema`), so two readers never share a name. No other
@@ -150,6 +162,9 @@ const tenantPrincipal = (provider: string, tenant: string): string =>
 
 /** What the Brain's name of a provider's group starts with. */
 const groupPrefix = "group:";
+
+/** What the Brain's name of every Entra group starts with (`groupPrincipal`). */
+export const entraGroupPrefix = `${groupPrefix}microsoft:`;
 
 /**
  * The Brain's group of the group `group` in `tenant` at `provider`: a
@@ -271,7 +286,7 @@ export const readerPrincipalsOf = async (
   const nameGroups = db
     .insert(sourceReaderGroups)
     .select(
-      sql`SELECT value FROM json_each(${JSON.stringify(named)}) WHERE true`
+      sql`SELECT value, NULL FROM json_each(${JSON.stringify(named)}) WHERE true`
     )
     .onConflictDoNothing();
   // The place's pairs: of the readers named by a group or a tenant, and
@@ -445,6 +460,44 @@ const readingAccountsOf = (
 };
 
 /**
+ * The read of the Entra groups the company's directory lists the member
+ * `userId` in (`directory_group_members`), for one batch with their
+ * membership (brain-next.ts `memberGroupsOf`): through the person the
+ * daily read tied to them (`directory_people.user_id`), while their
+ * directory account is on, each with when the read that listed them
+ * started.
+ */
+export const directoryGroupsRead = (db: DrizzleD1Database, userId: string) =>
+  db
+    .select({
+      tenant: directoryGroupMembers.tenant,
+      group: directoryGroupMembers.groupId,
+      readAt: directoryGroupMembers.readAt,
+    })
+    .from(directoryPeople)
+    .innerJoin(
+      directoryGroupMembers,
+      and(
+        eq(directoryGroupMembers.provider, directoryPeople.provider),
+        eq(directoryGroupMembers.tenant, directoryPeople.tenant),
+        eq(directoryGroupMembers.accountId, directoryPeople.accountId)
+      )
+    )
+    .where(
+      and(
+        eq(directoryPeople.provider, entra.provider),
+        eq(directoryPeople.userId, userId),
+        // A deleted account is kept as one turned off.
+        eq(directoryPeople.enabled, true)
+      )
+    );
+
+/** A group the directory lists someone in, as `directoryGroupsRead` reads it. */
+export type DirectoryGroupProof = Awaited<
+  ReturnType<typeof directoryGroupsRead>
+>[number];
+
+/**
  * The Brain's groups of the groups a member provably holds, the one place
  * a group is proved for a person, whatever proves it. Each source of
  * proof is one field of `proofs`, and counts only while it is recent
@@ -453,19 +506,24 @@ const readingAccountsOf = (
  * - `connected`: the suite accounts they connected as their own: of each
  *   connection still connected, the groups its last whole read with
  *   their own token found (connect's reader-groups.ts), in its own tenant.
- *
- * The company's directory read of a group's members, tied by Entra object
- * ID, is to be one more (GRA-2146).
+ * - `directory`: the Entra groups the company's directory read lists them
+ *   in (`directoryGroupsRead`), in the tenant it read, each from the read
+ *   that listed them.
  */
 const provedGroupsOf = (proofs: {
   connected: readonly PersonalAccount[];
-}): string[] =>
-  proofs.connected.flatMap(
+  directory: readonly DirectoryGroupProof[];
+}): string[] => [
+  ...proofs.connected.flatMap(
     ({ provider, tenant, groups, groupsReadAt, connected: live }) =>
       live && recent(groupsReadAt)
         ? groups.map((group) => groupPrincipal(provider, tenant, group))
         : []
-  );
+  ),
+  ...proofs.directory.flatMap(({ tenant, group, readAt }) =>
+    recent(readAt.getTime()) ? [groupPrincipal("microsoft", tenant, group)] : []
+  ),
+];
 
 /**
  * The read of which of `groups` a copied reader list ever named
@@ -537,7 +595,8 @@ const pairsFrom = (found: readonly (Pair & { at: number })[]): Pair[] =>
 
 /**
  * The Brain's groups the member `userId` holds, reading as themselves, by
- * the accounts they proved are theirs (`signIns`, `connected`): each
+ * the accounts they proved are theirs (`signIns`, `connected`) and the
+ * groups the directory lists them in (`directory`): each
  * account's token and its tenant's name (`accounts`), those of the
  * groups they provably hold (`provedGroupsOf`) that a list named, sorted
  * (`groups`), and the pairs of the places `places` with any of these an
@@ -551,8 +610,15 @@ const pairsFrom = (found: readonly (Pair & { at: number })[]): Pair[] =>
 export const heldPrincipalsOf = async (
   env: Pick<Env, "DB" | "SIGN_IN" | "BETTER_AUTH_SECRET">,
   userId: string,
-  signIns: readonly SignIn[],
-  connected: readonly PersonalAccount[],
+  {
+    signIns,
+    connected,
+    directory,
+  }: {
+    signIns: readonly SignIn[];
+    connected: readonly PersonalAccount[];
+    directory: readonly DirectoryGroupProof[];
+  },
   places: readonly string[] = [],
   pairsMost = 0
 ): Promise<{
@@ -561,7 +627,7 @@ export const heldPrincipalsOf = async (
   pairs: Pair[];
 }> => {
   const reading = readingAccountsOf(env, signIns, connected);
-  const groups = [...new Set(provedGroupsOf({ connected }))];
+  const groups = [...new Set(provedGroupsOf({ connected, directory }))];
   const db = drizzle(env.DB);
   if (reading.length === 0) {
     if (groups.length === 0) {

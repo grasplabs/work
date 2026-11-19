@@ -762,12 +762,13 @@ export const directoryGroupTeams = sqliteTable(
 );
 
 /**
- * The members of each mapped group, nested groups' included, as the last
- * read that read the group whole listed them (GRA-2056,
- * directory-group-reads.ts): one row per group and person the read keeps
- * (`directory_people`), by the provider's ID. Goes with the person's row,
- * so with them leaving the directory or being erased, and with the
- * group's mapping.
+ * The members of each group mapped to a team (GRA-2056,
+ * directory-group-reads.ts) or named by a copied reader list (GRA-2146,
+ * directory-reader-groups.ts), nested groups' included, as the last read
+ * that read the group whole listed them: one row per group and person the
+ * read keeps (`directory_people`), by the provider's ID. Goes with the
+ * person's row, so with them leaving the directory or being erased; and
+ * once the group is neither mapped nor named (`unneededGroupRows`).
  */
 export const directoryGroupMembers = sqliteTable(
   "directory_group_members",
@@ -776,6 +777,15 @@ export const directoryGroupMembers = sqliteTable(
     tenant: text().notNull(),
     groupId: text("group_id").notNull(),
     accountId: text("account_id").notNull(),
+    /**
+     * When the read that last listed them in the group started: a proof
+     * of the group for a reader list counts a day from it
+     * (source-readers.ts `provedGroupsOf`). 0, which proves nothing, for
+     * a row a release before this one wrote.
+     */
+    readAt: timestamp("read_at")
+      .notNull()
+      .default(sql`0`),
   },
   (table) => [
     primaryKey({
@@ -792,13 +802,6 @@ export const directoryGroupMembers = sqliteTable(
         directoryPeople.provider,
         directoryPeople.tenant,
         directoryPeople.accountId,
-      ],
-    }).onDelete("cascade"),
-    foreignKey({
-      columns: [table.provider, table.groupId],
-      foreignColumns: [
-        directoryGroupTeams.provider,
-        directoryGroupTeams.groupId,
       ],
     }).onDelete("cascade"),
   ]
@@ -7316,6 +7319,13 @@ export const sourceReaderTokens = sqliteTable(
  */
 export const sourceReaderGroups = sqliteTable("source_reader_groups", {
   name: text().primaryKey(),
+  /**
+   * When the directory's read of an Entra group's members
+   * (directory-reader-groups.ts, GRA-2146) last started on it, whether it
+   * read the group whole or held it; null while it never has. Only paces
+   * those reads: what proves a group is `directory_group_members.read_at`.
+   */
+  directoryReadAt: timestamp("directory_read_at"),
 });
 
 /**

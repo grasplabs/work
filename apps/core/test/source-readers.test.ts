@@ -1908,7 +1908,11 @@ describe("readers copied from the source", () => {
       await erasedBy(admin, alice);
       // A list copied since names her account: its token, nobody's.
       await sharedItem(uniqueWord(), readersOf(alice.account));
-      await heldPrincipalsOf(env, alice.userId, [], read);
+      await heldPrincipalsOf(env, alice.userId, {
+        signIns: [],
+        connected: read,
+        directory: [],
+      });
 
       await expect(tokensClaimedBy(alice.userId)).resolves.toBe(0);
     }

@@ -192,6 +192,7 @@ import type { SkillCardText } from "./skill-cards.ts";
 import { skillNeedsOf } from "./skill-needs.ts";
 import type { SkillNeeds } from "./skill-needs.ts";
 import {
+  directoryGroupsRead,
   heldPrincipalsOf,
   pairPrincipalOf,
   plainPrincipalOf,
@@ -1055,18 +1056,22 @@ const memberGroupsOf = async (
 }> => {
   const id = checked(idSchema, personId);
   // One snapshot: their teams, the audiences, the places picked on the
-  // connections and their sign-in accounts, as one batch reads them.
+  // connections, their sign-in accounts and the groups the directory
+  // lists them in, as one batch reads them.
   const db = drizzle(env.DB);
-  const [[membership, memberTeams, audiences, places, signIns], connected] =
-    await Promise.all([
-      db.batch([
-        ...memberReads(db, id),
-        audiencesRead(db),
-        sharedPlacesRead(db),
-        signInAccountsRead(db, id),
-      ]),
-      asThemselves ? env.CONNECT.personalAccounts(id) : [],
-    ]);
+  const [
+    [membership, memberTeams, audiences, places, signIns, directory],
+    connected,
+  ] = await Promise.all([
+    db.batch([
+      ...memberReads(db, id),
+      audiencesRead(db),
+      sharedPlacesRead(db),
+      signInAccountsRead(db, id),
+      directoryGroupsRead(db, id),
+    ]),
+    asThemselves ? env.CONNECT.personalAccounts(id) : [],
+  ]);
   const member = memberFrom(id, membership, memberTeams);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
@@ -1090,8 +1095,7 @@ const memberGroupsOf = async (
     ? await heldPrincipalsOf(
         env,
         member.userId,
-        signIns,
-        connected,
+        { signIns, connected, directory },
         reached.places,
         readerGroupsMax - new Set(reached.groups).size
       )

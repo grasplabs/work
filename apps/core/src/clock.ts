@@ -23,6 +23,7 @@ import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { readDirectories } from "./directory-people.ts";
+import { readReaderGroups } from "./directory-reader-groups.ts";
 import { suspendedUserIds } from "./directory-suspensions.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
@@ -334,6 +335,14 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // provider's IDs of its people, tied to the members who signed in
   // (src/directory-people.ts, GRA-2056).
   { name: "directory.people", period: "quarterHour", run: readDirectories },
+  // The members of the Entra groups reader lists name, through the same
+  // directory, each read again every half day (src/directory-reader-groups.ts,
+  // GRA-2146).
+  {
+    name: "directory.reader_groups",
+    period: "quarterHour",
+    run: readReaderGroups,
+  },
   // Model usage past its retention (src/model-usage.ts).
   { name: "models.usage", period: "quarterHour", run: sweepModelUsage },
   {

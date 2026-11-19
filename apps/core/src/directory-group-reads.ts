@@ -65,18 +65,25 @@ export type EveryPage = <Page extends { next: string | null }>(
 ) => Promise<void>;
 
 /** The failures of a group's read that hold it rather than fail the read. */
-const holding = new Map<string | undefined, GroupHeld>([
+const holding = new Map<string | undefined, "gone" | "refused">([
   ["directory.group_gone", "gone"],
   ["directory.group_refused", "refused"],
 ]);
 
-/** The mapped group `groupId` read whole, or held. */
-const readGroup = async (
+/**
+ * The group `groupId` read whole through connect, every page: the group
+ * as Microsoft answered it and its users; or why it is held, for a
+ * failure that is this group's alone (`gone`, `refused`). Any other
+ * failure is thrown: nothing of a group read in part is answered.
+ */
+export const readWholeGroup = async (
   env: Env,
   connection: DirectoryConnection,
   everyPage: EveryPage,
-  { groupId, teamId }: { groupId: string; teamId: string }
-): Promise<GroupRead> => {
+  groupId: string
+): Promise<
+  { group: DirectoryGroup; users: string[] } | { held: "gone" | "refused" }
+> => {
   const users = new Set<string>();
   // The group, as the first page answers it.
   const answered: DirectoryGroup[] = [];
@@ -102,7 +109,7 @@ const readGroup = async (
     if (held === undefined) {
       throw error;
     }
-    return { groupId, teamId, group: null, users: [], held };
+    return { held };
   }
   // Connect answers the group on the first page: a read without it is
   // the provider failing.
@@ -110,18 +117,32 @@ const readGroup = async (
   if (group === undefined) {
     throw directoryErrors.create("directory.provider_failed");
   }
-  const { refusal } = group;
+  return { group, users: [...users] };
+};
+
+/** The mapped group `groupId` read whole, or held. */
+const readGroup = async (
+  env: Env,
+  connection: DirectoryConnection,
+  everyPage: EveryPage,
+  { groupId, teamId }: { groupId: string; teamId: string }
+): Promise<GroupRead> => {
+  const read = await readWholeGroup(env, connection, everyPage, groupId);
+  if ("held" in read) {
+    return { groupId, teamId, group: null, users: [], held: read.held };
+  }
+  const { group, users } = read;
   let held: GroupHeld | null = null;
-  if (refusal !== null) {
+  if (group.refusal !== null) {
     held = "not_mappable";
-  } else if (users.size === 0) {
+  } else if (users.length === 0) {
     held = "empty";
   }
   return {
     groupId,
     teamId,
     group,
-    users: held === null ? [...users] : [],
+    users: held === null ? users : [],
     held,
   };
 };
@@ -191,20 +212,26 @@ export const groupStatements = (
   const outcome = (at: 1 | 2 | 3 | 4) =>
     sql`(SELECT value ->> ${sql.raw(String(at))} FROM json_each(${outcomes}) WHERE value ->> 0 = ${directoryGroupTeams.groupId})`;
   return [
-    db
-      .delete(directoryGroupMembers)
-      .where(
-        and(
-          eq(directoryGroupMembers.provider, kind.provider),
-          sql`${directoryGroupMembers.groupId} IN (SELECT value FROM json_each(${wholeIds}))`,
-          claimed
-        )
-      ),
+    db.delete(directoryGroupMembers).where(
+      and(
+        eq(directoryGroupMembers.provider, kind.provider),
+        sql`${directoryGroupMembers.groupId} IN (SELECT value FROM json_each(${wholeIds}))`,
+        // Only while still mapped: a group unmapped meanwhile that a
+        // reader list names is the reader groups' read's now
+        // (directory-reader-groups.ts), its rows as that read left them.
+        sql`EXISTS (
+            SELECT 1 FROM ${directoryGroupTeams}
+            WHERE ${directoryGroupTeams.provider} = ${kind.provider}
+              AND ${directoryGroupTeams.groupId} = ${directoryGroupMembers.groupId}
+          )`,
+        claimed
+      )
+    ),
     ...pairs.map((value) =>
       db
         .insert(directoryGroupMembers)
         .select(
-          sql`SELECT ${kind.provider}, ${tenant}, value ->> 0, value ->> 1
+          sql`SELECT ${kind.provider}, ${tenant}, value ->> 0, value ->> 1, ${readAt.getTime()}
             FROM json_each(${value})
             WHERE ${claimed}
               AND EXISTS (
