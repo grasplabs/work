@@ -42,7 +42,10 @@ interface Drive {
    * their Drive), and whether its access is limited, which Google gives a
    * folder alone.
    */
-  folders: Record<string, { parent?: string; limited?: boolean }>;
+  folders: Record<
+    string,
+    { parent?: string; limited?: boolean; throttled?: boolean }
+  >;
   /** A file's version now, by ID, when it moved since it was listed or changed. */
   versions: Record<string, string>;
   /** Answers every request instead, when it answers. */
@@ -119,6 +122,39 @@ const versionOf = (id: string): string => {
   );
 };
 
+/**
+ * A folder's own fields, as Drive answers them: the top of My Drive by its
+ * alias ("The alias root can be used to refer to the root folder anywhere
+ * a file ID is provided"), each folder where it is and whether its access
+ * is limited, which only a folder carries, or a rate limit; none for
+ * anything else.
+ */
+const folderCall = (id: string): Response | undefined => {
+  if (id === "root") {
+    return Response.json({ id: myDrive, inheritedPermissionsDisabled: false });
+  }
+  const held = drive.folders[id];
+  if (held?.throttled === true) {
+    return Response.json(
+      {
+        error: {
+          code: 403,
+          message: "Rate limit exceeded",
+          errors: [{ reason: "rateLimitExceeded" }],
+        },
+      },
+      { status: 403 }
+    );
+  }
+  return held === undefined
+    ? undefined
+    : Response.json({
+        id,
+        ...(held.parent === undefined ? {} : { parents: [held.parent] }),
+        inheritedPermissionsDisabled: held.limited === true,
+      });
+};
+
 const internet = fakeInternet((request, url) => {
   const refused = scopeRefusal(providers, request, url);
   if (refused !== undefined) {
@@ -148,13 +184,9 @@ const internet = fakeInternet((request, url) => {
     return listing(url);
   }
   const [id = "", exported] = path.slice("/drive/v3/files/".length).split("/");
-  const asFolder = drive.folders[id];
-  if (asFolder !== undefined && exported === undefined) {
-    return Response.json({
-      id,
-      ...(asFolder.parent === undefined ? {} : { parents: [asFolder.parent] }),
-      inheritedPermissionsDisabled: asFolder.limited === true,
-    });
+  const asFolder = exported === undefined ? folderCall(id) : undefined;
+  if (asFolder !== undefined) {
+    return asFolder;
   }
   const content = drive.contents[id];
   if (content === undefined) {
@@ -333,6 +365,66 @@ describe("syncing a person's own Drive", () => {
         { kind: "account", id: "hr@acme.test" },
       ],
     ]);
+  });
+
+  it("gives nobody a file whose folders don't reach the top of the person's My Drive, and keeps a file there as it is", async () => {
+    const connectionId = await connected();
+    // Someone else's folder the person's file is in, with nothing above it
+    // the person can see; and a folder Drive no longer gives.
+    drive.folders["their-folder"] = {};
+    drive.owned = [
+      ownedFile("at-top"),
+      ownedFile("in-theirs", { parents: ["their-folder"] }),
+      ownedFile("in-lost", { parents: ["lost-folder"] }),
+      ownedFile("nowhere", { parents: undefined }),
+    ];
+    for (const { id } of drive.owned) {
+      drive.contents[id] = id;
+    }
+
+    const { items } = await read(connectionId, null);
+
+    expect(
+      items.map((item) => (item.gone ? undefined : [item.id, item.readers]))
+    ).toStrictEqual([
+      ["at-top", [{ kind: "account", id: owner }]],
+      ["in-theirs", null],
+      ["in-lost", null],
+      ["nowhere", null],
+    ]);
+  });
+
+  it("reads the top of My Drive once a read, whatever the files", async () => {
+    const connectionId = await connected();
+    drive.owned = Array.from({ length: 4 }, (_, index) =>
+      ownedFile(`top-${index}`)
+    );
+    for (const { id } of drive.owned) {
+      drive.contents[id] = id;
+    }
+    const before = sentToGoogle().length;
+
+    await read(connectionId, null);
+
+    expect(
+      sentToGoogle()
+        .slice(before)
+        .filter(({ path }) => path.startsWith("/drive/v3/files/root"))
+    ).toHaveLength(1);
+  });
+
+  it("waits when Google throttles a folder's read, rather than giving its files nobody", async () => {
+    const connectionId = await connected();
+    drive.folders.slow = { parent: myDrive, throttled: true };
+    drive.owned = [ownedFile("plan", { parents: ["slow"] })];
+    drive.contents.plan = "plan";
+
+    await expect(
+      exports.default
+        .readSyncPage(request(connectionId, null))
+        .then(() => "ok")
+        .catch((error: unknown) => syncErrors.codeOf(error))
+    ).resolves.toBe("sync.throttled");
   });
 
   it("then brings only what changed, and what went away", async () => {

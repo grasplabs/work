@@ -75,8 +75,13 @@ export const driveSyncFake = () => {
     const id = decodeURIComponent(rawId);
     // The top of the person's My Drive, where every file is: a folder
     // with nothing above it, its access not limited.
-    if (id === "my-drive" && exported === undefined) {
-      return Response.json({ id, inheritedPermissionsDisabled: false });
+    // "root" is its alias ("The alias root can be used to refer to the
+    // root folder anywhere a file ID is provided").
+    if ((id === "my-drive" || id === "root") && exported === undefined) {
+      return Response.json({
+        id: "my-drive",
+        inheritedPermissionsDisabled: false,
+      });
     }
     const content = field(field(world, "contents"), id);
     if (typeof content !== "string") {
