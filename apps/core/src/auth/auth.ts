@@ -6,7 +6,10 @@ import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { relayRedirectUri } from "@grasp-os/shared/oauth-relay";
-import { staffListTeamRefusals } from "@grasp-os/shared/onboarding";
+import {
+  staffListTeamRefusals,
+  teamNameKey,
+} from "@grasp-os/shared/onboarding";
 import { roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import type { SignInRefusal } from "@grasp-os/shared/sign-in";
@@ -779,6 +782,21 @@ const loadSso = async (): Promise<typeof sso> => {
   return plugin;
 };
 
+/**
+ * Refuses a team made or renamed in Settings › Members under a name the
+ * staff list gives a team it hasn't made yet (GRA-2055): the confirm keeps
+ * the list's team by its id, so it would be a second of the name.
+ */
+const refuseNameOnListUnmade = async (env: Env, name: string) => {
+  if (await namedOnListUnmade(env, name)) {
+    throw new APIError("CONFLICT", {
+      code: staffListTeamRefusals.notMadeYet,
+      message:
+        "A team on the staff list has this name. It appears here once the staff list is confirmed.",
+    });
+  }
+};
+
 const createAuth = (
   env: Env,
   config: SignInConfig,
@@ -1038,15 +1056,17 @@ const createAuth = (
             }
           },
           // A name the staff list gives a team it hasn't made yet stays its
-          // own: made here first, the confirm would keep the list's team by
-          // its id and make a second of the name (GRA-2055).
+          // own (GRA-2055, `refuseNameOnListUnmade`).
           beforeCreateTeam: async ({ team }) => {
-            if (await namedOnListUnmade(env, team.name)) {
-              throw new APIError("CONFLICT", {
-                code: staffListTeamRefusals.notMadeYet,
-                message:
-                  "A team on the staff list has this name. It appears here once the staff list is confirmed.",
-              });
+            await refuseNameOnListUnmade(env, team.name);
+          },
+          // Renamed to it too: the same second team at the confirm.
+          beforeUpdateTeam: async ({ team, updates }) => {
+            if (
+              updates.name !== undefined &&
+              teamNameKey(updates.name) !== teamNameKey(team.name)
+            ) {
+              await refuseNameOnListUnmade(env, updates.name);
             }
           },
         },

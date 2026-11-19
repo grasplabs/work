@@ -202,6 +202,14 @@ const withOneRenameLost = (): Env => {
   return { ...env, ONBOARDING: namespace(env.ONBOARDING) };
 };
 
+/** A Settings › Members answer: its status and Better Auth's error code, if any. */
+const answerOf = async (response: Response) => {
+  const { code } = z
+    .object({ code: z.string().optional() })
+    .parse(await response.json());
+  return { status: response.status, code };
+};
+
 describe("the staff list's teams", { timeout: 120_000 }, () => {
   it("are the members' teams: one id each, a new one core's own, made only once the admin confirms", async () => {
     const admin = await signedInApi(idp, "admin");
@@ -327,14 +335,14 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     expect({
       listed: listed.get(`Operations ${tag}`),
       read: read.find(({ id }) => id === ops)?.name,
-      refused: refused.status,
+      refused: await answerOf(refused),
       removed: removed.status,
       again: again !== undefined && again !== old,
       drafted: drafted !== undefined && drafted !== old,
     }).toStrictEqual({
       listed: ops,
       read: `Operations ${tag}`,
-      refused: 409,
+      refused: { status: 409, code: "STAFF_LIST_TEAM_ON_LIST" },
       removed: 200,
       again: true,
       drafted: true,
@@ -839,27 +847,35 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     }).toStrictEqual({ sameId: true, settings: `Sales ${tag}` });
   });
 
-  it("refuse to make a team in Settings under a name the list gives a team it hasn't made yet, in any case or Unicode form, and keep the list's team its one", async () => {
+  it("refuse to make or rename a team in Settings under a name the list gives a team it hasn't made yet, in any case or Unicode form, and keep the list's team its one", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
+    const ops = await settingsTeam(admin, `Ops ${tag}`);
     const listed: RosterInput = {
       teams: [{ id: "cafe", name: `Caf\u00E9 ${tag}`, lead: null }],
       people: [{ id: `bo-${tag}`, name: "Bo", team: "cafe" }],
     };
     const { roster: drafted } = await admin.api.onboarding.saveRoster(listed);
-    const create = async (name: string) => {
-      const made = await callAuth("/organization/create-team", admin.session, {
-        name,
-      });
-      const { code } = z
-        .object({ code: z.string().optional() })
-        .parse(await made.json());
-      return { status: made.status, code };
-    };
+    const create = async (name: string) =>
+      await answerOf(
+        await callAuth("/organization/create-team", admin.session, { name })
+      );
+    const rename = async (name: string) =>
+      await answerOf(
+        await callAuth("/organization/update-team", admin.session, {
+          teamId: ops,
+          data: { name },
+        })
+      );
     const refused = {
       same: await create(`Caf\u00E9 ${tag}`),
       otherCase: await create(` CAFE\u0301 ${tag.toUpperCase()}`),
+      renamed: await rename(`Caf\u00E9 ${tag}`),
     };
+    // A free name, then only its own name in another case: both go through.
+    const free = await rename(`Operations ${tag}`);
+    const ownInCaps = await rename(`OPERATIONS ${tag}`);
+    const passed = [free.status, ownInCaps.status];
     const { roster: confirmed } = await admin.api.onboarding.confirmRoster(
       drafted ?? listed
     );
@@ -871,10 +887,12 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
 
     expect({
       refused,
+      passed,
       named: teams.filter(({ name }) => name === `Caf\u00E9 ${tag}`).length,
       sameId: confirmed?.teams[0]?.id === drafted?.teams[0]?.id,
     }).toStrictEqual({
-      refused: { same: notMadeYet, otherCase: notMadeYet },
+      refused: { same: notMadeYet, otherCase: notMadeYet, renamed: notMadeYet },
+      passed: [200, 200],
       named: 1,
       sameId: true,
     });
@@ -984,8 +1002,11 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       .bind(board)
       .first();
 
-    expect({ refused: refused.status, madeAgain: row !== null }).toStrictEqual({
-      refused: 409,
+    expect({
+      refused: await answerOf(refused),
+      madeAgain: row !== null,
+    }).toStrictEqual({
+      refused: { status: 409, code: "STAFF_LIST_TEAM_ON_LIST" },
       madeAgain: false,
     });
   });
