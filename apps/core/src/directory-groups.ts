@@ -1,9 +1,5 @@
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
-import {
-  directoryErrors,
-  directoryGroupKindSchema,
-  directoryGroupMembersFromSchema,
-} from "@grasp-os/shared/directory";
+import { directoryErrors } from "@grasp-os/shared/directory";
 import type {
   DirectoryConnection,
   DirectoryGroup,
@@ -216,22 +212,15 @@ const preview = async (
 
 const mappingOf = (
   row: typeof directoryGroupTeams.$inferSelect
-): DirectoryGroupMapping => {
-  // A value no version of this code wrote is one nobody can vouch for.
-  const kind = directoryGroupKindSchema.safeParse(row.kind);
-  const membersFrom = directoryGroupMembersFromSchema.safeParse(
-    row.membersFrom
-  );
-  return {
-    groupId: row.groupId,
-    name: row.name,
-    kind: kind.success ? kind.data : "unknown",
-    membersFrom: membersFrom.success ? membersFrom.data : "unknown",
-    teamId: row.teamId,
-    mappedAt: row.mappedAt.toISOString(),
-    readAt: row.readAt?.toISOString() ?? null,
-  };
-};
+): DirectoryGroupMapping => ({
+  groupId: row.groupId,
+  name: row.name,
+  kind: row.kind,
+  membersFrom: row.membersFrom,
+  teamId: row.teamId,
+  mappedAt: row.mappedAt.toISOString(),
+  readAt: row.readAt?.toISOString() ?? null,
+});
 
 /** The mapping of `groupId`, as it is now. */
 const mappingNow = async (

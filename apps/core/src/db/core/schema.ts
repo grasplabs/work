@@ -5,6 +5,10 @@ import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { ChatFileType } from "@grasp-os/shared/chat";
 import type { DependencyFinding } from "@grasp-os/shared/dependencies";
 import { modelRoles } from "@grasp-os/shared/deployment-config";
+import {
+  directoryGroupKinds,
+  directoryGroupMembersFrom,
+} from "@grasp-os/shared/directory";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
 import type {
@@ -721,8 +725,10 @@ export const directoryGroupTeams = sqliteTable(
       .references(() => teams.id, { onDelete: "cascade" }),
     /** The group's name, kind and who decides its members, as Microsoft last answered. */
     name: text().notNull(),
-    kind: text().notNull(),
-    membersFrom: text("members_from").notNull(),
+    kind: text({ enum: directoryGroupKinds }).notNull(),
+    membersFrom: text("members_from", {
+      enum: directoryGroupMembersFrom,
+    }).notNull(),
     mappedAt: timestamp("mapped_at").notNull(),
     /**
      * When the daily read last read the group whole: until it has, since

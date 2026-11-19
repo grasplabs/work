@@ -141,25 +141,24 @@ export interface DirectoryLookup {
 }
 
 /** What kind of group a directory group is. */
-export const directoryGroupKindSchema = z.enum([
+export const directoryGroupKinds = [
   "security",
   "microsoft_365",
   "distribution",
   "unknown",
-]);
-export type DirectoryGroupKind = z.infer<typeof directoryGroupKindSchema>;
+] as const;
+export type DirectoryGroupKind = (typeof directoryGroupKinds)[number];
 
 /** Who decides a directory group's members. */
-export const directoryGroupMembersFromSchema = z.enum([
+export const directoryGroupMembersFrom = [
   "owners",
   "rule",
   "on_premises",
   "privileged_admins",
   "unknown",
-]);
-export type DirectoryGroupMembersFrom = z.infer<
-  typeof directoryGroupMembersFromSchema
->;
+] as const;
+export type DirectoryGroupMembersFrom =
+  (typeof directoryGroupMembersFrom)[number];
 
 /**
  * A directory group, as an admin picks one for a team (GRA-2056): what it
