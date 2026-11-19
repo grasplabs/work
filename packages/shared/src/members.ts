@@ -334,6 +334,4 @@ export const memberErrors = defineErrorFamily({
   "member.invalid": "That isn't a page of this list as it was shown.",
   "member.erase_name_mismatch":
     "That isn't their name as it stands now. Check who you're erasing, and type their name exactly.",
-  "member.release_erasing":
-    "Their erasure is still taking their address off the staff list. Try again in a minute.",
 });

@@ -151,9 +151,9 @@ export const links = sqliteTable("links", {
   /** When they deleted their interview: a copy left open can't save it back. */
   deletedAt: text("deleted_at"),
   /**
-   * No longer read or written: core's erasure marks the entry instead
-   * (`erasedPeople`), the one mark. Dropped in a later release, as a
-   * schema contracts only after the code that read it is gone.
+   * When core erased them (person-erasure.ts): their link is closed for
+   * good. No code is made for it again, so nothing is saved under the
+   * entry that stays on the list, until an admin takes them off it.
    */
   erasedAt: text("erased_at"),
   /**
@@ -577,25 +577,6 @@ export const brainSent = sqliteTable(
 export const referrals = sqliteTable("referrals", {
   person: text().primaryKey(),
   at: text().notNull(),
-});
-
-/**
- * The addresses of people core erased (person-erasure.ts), as the keyed
- * hash core keeps of each (erased-people.ts `emailHashOf`), never the
- * address: an address that hashes to one is saved blank, in the save's own
- * transaction, until an admin releases it (`releaseAddress`).
- */
-export const erasedAddresses = sqliteTable("erased_addresses", {
-  hash: text().primaryKey(),
-});
-
-/**
- * Entries on the list whose person core erased: the entry stays, the
- * company's record (D5), without an address, and gets no link, no mail and
- * no referral. The mark goes when an admin takes the entry off the list.
- */
-export const erasedPeople = sqliteTable("erased_people", {
-  person: text().primaryKey(),
 });
 
 export const drawFailures = sqliteTable("draw_failures", {
