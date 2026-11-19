@@ -38,6 +38,7 @@ import { composerWords } from "../grasp/composer/words.ts";
 import { connectionRowWords } from "../grasp/connection-row/words.ts";
 import { contextMenuWords } from "../grasp/context-menu/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
+import { englishWords as dataGridWords } from "../grasp/data-grid/words.ts";
 import {
   dataTableWords,
   englishFilterWords,
@@ -45,6 +46,8 @@ import {
 import { datePickerWords } from "../grasp/date-picker/words.ts";
 import { dateRangePickerWords } from "../grasp/date-range-picker/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
+import { draftWords } from "../grasp/draft/words.ts";
+import type { DraftWords } from "../grasp/draft/words.ts";
 import { drawerWords } from "../grasp/drawer/words.ts";
 import { dropdownMenuWords } from "../grasp/dropdown-menu/words.ts";
 import { emptyWords } from "../grasp/empty/words.ts";
@@ -91,6 +94,37 @@ import type { GraspWordsCatalog } from "../grasp/words/words.tsx";
 // Lingui's own, as ever.
 
 const MS_PER_MINUTE = 60_000;
+const MINUTES_PER_HOUR = 60;
+
+/** A day ("Thu 19 Nov") in `locale`, in the zone given. */
+const dayIn = (locale: string, iso: string, timeZone: string | undefined) =>
+  new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone,
+  }).format(new Date(iso));
+
+/** A time of day ("14:00") in `locale`, in the zone given. */
+const clockIn = (locale: string, iso: string, timeZone: string | undefined) =>
+  new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone,
+  }).format(new Date(iso));
+
+/**
+ * The drafts' words in English, the library's own but for a task's due:
+ * the tasks Grasp makes (Microsoft To Do, Planner) are due on a day, never
+ * at a time, so its row says the day alone.
+ */
+const englishDraftWords: DraftWords = {
+  ...draftWords,
+  task: {
+    ...draftWords.task,
+    at: (iso, timeZone) => dayIn("en-GB", iso, timeZone),
+  },
+};
 
 /** Every installed part's words in English: the library's own. */
 export const englishPartWords: GraspWordsCatalog = {
@@ -127,9 +161,11 @@ export const englishPartWords: GraspWordsCatalog = {
   chatMessage: chatMessageWords,
   codeBlock: codeBlockWords,
   copyField: copyFieldWords,
+  dataGrid: dataGridWords,
   dataTable: dataTableWords,
   dataTableFilters: englishFilterWords,
   dialog: dialogWords,
+  draft: englishDraftWords,
   drawer: drawerWords,
   dropdownMenu: dropdownMenuWords,
   empty: emptyWords,
@@ -923,6 +959,90 @@ export const usePartWords = (): GraspWordsCatalog => {
       invalid: t({ message: "not valid", context: "a tag typed" }),
     },
     dialog: { close: t`Close` },
+    // Only a sheet's draft has a grid, which no page shows yet: the
+    // library's own words until one does.
+    dataGrid: dataGridWords,
+    // The kinds a held write stands as (an email, an event, a task) and
+    // their frame. A reply, a sheet and a message aren't shown yet: their
+    // words stay the library's own until a page uses them. Dates and
+    // times are Intl's, in the page's language.
+    draft: {
+      ...draftWords,
+      frame: {
+        dismiss: t({ message: "Discard", context: "a draft" }),
+        dismissed: t`Draft discarded`,
+        restore: t({ message: "Restore", context: "a discarded draft" }),
+        undo: t`Undo`,
+        working: t`Working`,
+        failed: t`Try again`,
+        remove: (name) => t`Remove ${name}`,
+        you: t({ message: "You", context: "the person looking, in a draft" }),
+      },
+      email: {
+        kind: t({ message: "Email", context: "a draft's kind" }),
+        to: t({ message: "To", context: "an email's addressees" }),
+        cc: t({ message: "Cc", context: "an email's copies" }),
+        bcc: t({ message: "Bcc", context: "an email's blind copies" }),
+        subject: t({ message: "Subject", context: "an email's" }),
+        body: t({ message: "Message", context: "an email's body" }),
+        addCc: t({ message: "Cc / Bcc", context: "show an email's copies" }),
+        send: t({ message: "Send", context: "send an email" }),
+        attach: t`Attach a file`,
+        sent: t({ message: "Sent", context: "an email" }),
+        time: (iso, timeZone) => clockIn(i18n.locale, iso, timeZone),
+      },
+      event: {
+        kind: t({ message: "Event", context: "a calendar event" }),
+        title: t`Event name`,
+        create: t`Create event`,
+        open: t`Open in calendar`,
+        created: t`Added to the calendar`,
+        day: t`The day, with everyone's busy time`,
+        conflicts: t({ message: "Conflicts", context: "an event's" }),
+        busy: (name, from, to) => t`${name}: busy ${from} to ${to}`,
+        when: t({ message: "When", context: "an event's time" }),
+        starts: t({ message: "Starts", context: "an event's start" }),
+        ends: t({ message: "Ends", context: "an event's end" }),
+        people: t({ message: "People", context: "an event's guests" }),
+        call: t`Video call`,
+        place: t({ message: "Place", context: "where an event is" }),
+        description: t({ message: "Description", context: "an event's" }),
+        addPlace: t({ message: "Add a place", context: "an event's" }),
+        addDescription: t`Add a description`,
+        time: (iso, timeZone) => clockIn(i18n.locale, iso, timeZone),
+        span: (start, end, timeZone) => {
+          const day = dayIn(i18n.locale, start, timeZone);
+          const from = clockIn(i18n.locale, start, timeZone);
+          const to = clockIn(i18n.locale, end, timeZone);
+          return `${day} · ${from} → ${to}`;
+        },
+        lasts: (start, length, timeZone) => {
+          const from = clockIn(i18n.locale, start, timeZone);
+          const hours = Math.floor(length / MINUTES_PER_HOUR);
+          const minutes = length % MINUTES_PER_HOUR;
+          if (hours === 0) {
+            return `${from} · ${t`${minutes} min`}`;
+          }
+          return minutes === 0
+            ? `${from} · ${t`${hours} h`}`
+            : `${from} · ${t`${hours} h ${minutes} min`}`;
+        },
+      },
+      task: {
+        kind: t({ message: "Task", context: "a draft's kind" }),
+        title: t`Task name`,
+        add: t`Add task`,
+        added: t`Added to your tasks`,
+        due: t({ message: "Due", context: "when a task is due" }),
+        people: t({ message: "Who", context: "who does a task" }),
+        note: t({ message: "Note", context: "a task's" }),
+        addDue: t`Add a due date`,
+        addNote: t`Add a note`,
+        time: (iso, timeZone) => clockIn(i18n.locale, iso, timeZone),
+        // A day alone: the tasks Grasp makes are due on a day (englishDraftWords).
+        at: (iso, timeZone) => dayIn(i18n.locale, iso, timeZone),
+      },
+    },
     dropdownMenu: {
       working: t({ message: "Working", context: "a menu item's action" }),
       more: t`More actions`,

@@ -701,10 +701,18 @@ msgstr "{hidden, plural, one {Mostrar # más} other {Mostrar # más}}"
 msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
 msgstr "{hours, plural, one {# hora a la semana en todo lo que Grasp puede contar} other {# horas a la semana en todo lo que Grasp puede contar}}"
 
+#: src/frame/part-words.tsx
+msgid "{hours} h"
+msgstr "{hours} h"
+
 #: src/workflows/requests/request-plan.tsx
 msgctxt "hours, short"
 msgid "{hours} h"
 msgstr "{hours} h"
+
+#: src/frame/part-words.tsx
+msgid "{hours} h {minutes} min"
+msgstr "{hours} h {minutes} min"
 
 #: src/brain/thinking/use-thinking.ts
 msgid "{hours} of the {all} hours a week"
@@ -1028,6 +1036,10 @@ msgstr "{name}: {reason}"
 #: src/brain/sources-page.tsx
 msgid "{name}: agents search it live when you ask. The Brain keeps nothing from it."
 msgstr "{name}: los agentes lo buscan en directo cuando preguntas. El cerebro no guarda nada de ello."
+
+#: src/frame/part-words.tsx
+msgid "{name}: busy {from} to {to}"
+msgstr "{name}: ocupado de {from} a {to}"
 
 #: src/agents/agent-section.tsx
 msgid "{name}'s pages"
@@ -2161,6 +2173,14 @@ msgstr "Añadir {what}"
 msgid "Add a chat"
 msgstr "Añadir un chat"
 
+#: src/frame/part-words.tsx
+msgid "Add a description"
+msgstr "Añadir una descripción"
+
+#: src/frame/part-words.tsx
+msgid "Add a due date"
+msgstr "Añadir una fecha de vencimiento"
+
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
 msgstr "Añadir un modelo de reserva"
@@ -2174,10 +2194,19 @@ msgid "Add a logo"
 msgstr "Añadir un logo"
 
 #: src/frame/part-words.tsx
+msgid "Add a note"
+msgstr "Añadir una nota"
+
+#: src/frame/part-words.tsx
 msgid "Add a picture"
 msgstr "Añadir una imagen"
 
 #: src/settings/stephen-settings.tsx
+msgid "Add a place"
+msgstr "Añadir un lugar"
+
+#: src/frame/part-words.tsx
+msgctxt "an event's"
 msgid "Add a place"
 msgstr "Añadir un lugar"
 
@@ -2266,6 +2295,10 @@ msgstr "Añadir búsqueda"
 msgid "Add something"
 msgstr "Añadir algo"
 
+#: src/frame/part-words.tsx
+msgid "Add task"
+msgstr "Añadir tarea"
+
 #: src/connections/http-connections.tsx
 msgid "Add the connection"
 msgstr "Añadir la conexión"
@@ -2338,6 +2371,14 @@ msgstr "Añadida el"
 #: src/activity/audit-words.ts
 msgid "Added someone to a team"
 msgstr "Añadió a alguien a un equipo"
+
+#: src/frame/part-words.tsx
+msgid "Added to the calendar"
+msgstr "Añadido al calendario"
+
+#: src/frame/part-words.tsx
+msgid "Added to your tasks"
+msgstr "Añadida a tus tareas"
 
 #: src/agents/agent-documents.tsx
 #: src/apps/app-webhooks.tsx
@@ -3418,6 +3459,11 @@ msgstr "Bayer"
 msgid "Bayer grid"
 msgstr "Bayer en cuadrícula"
 
+#: src/frame/part-words.tsx
+msgctxt "an email's blind copies"
+msgid "Bcc"
+msgstr "CCO"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Before"
@@ -3803,6 +3849,16 @@ msgstr "Seguir ahora"
 #: src/routes/interview.tsx
 msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new start."
 msgstr "Sigue allí. ¿Ya no tienes ese dispositivo? Pide a quien te envió el enlace que lo vuelva a abrir para ti."
+
+#: src/frame/part-words.tsx
+msgctxt "an email's copies"
+msgid "Cc"
+msgstr "CC"
+
+#: src/frame/part-words.tsx
+msgctxt "show an email's copies"
+msgid "Cc / Bcc"
+msgstr "CC / CCO"
 
 #: src/agents/new-agent.tsx
 msgid "Change"
@@ -4609,6 +4665,11 @@ msgstr "Confirmado ({role})"
 msgid "Confirmed by the board"
 msgstr "Confirmado por el consejo"
 
+#: src/frame/part-words.tsx
+msgctxt "an event's"
+msgid "Conflicts"
+msgstr "Coincide"
+
 #: src/chat/plan-card.tsx
 #: src/connections/integration-inspector.tsx
 #: src/connections/integration-item.tsx
@@ -5111,6 +5172,10 @@ msgstr "Crear colección"
 msgid "Create document"
 msgstr "Crear documento"
 
+#: src/frame/part-words.tsx
+msgid "Create event"
+msgstr "Crear evento"
+
 #: src/apps/app-data-model.tsx
 msgid "Create table"
 msgstr "Crear tabla"
@@ -5479,6 +5544,11 @@ msgstr "Denegar"
 msgid "Describe the App"
 msgstr "Describe la App"
 
+#: src/frame/part-words.tsx
+msgctxt "an event's"
+msgid "Description"
+msgstr "Descripción"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Design and media"
@@ -5596,6 +5666,11 @@ msgstr "No funcionó"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Directorio"
+
+#: src/frame/part-words.tsx
+msgctxt "a draft"
+msgid "Discard"
+msgstr "Descartar"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -5823,6 +5898,10 @@ msgstr "Descargar el archivo"
 msgid "Draft"
 msgstr "Borrador"
 
+#: src/frame/part-words.tsx
+msgid "Draft discarded"
+msgstr "Borrador descartado"
+
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Sus propios borradores, eventos y archivos, después de pulsar una tarjeta."
@@ -5876,6 +5955,11 @@ msgstr "Descartó un evento que ningún flujo de trabajo pudo recibir"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Dublin"
 msgstr "Dublín"
+
+#: src/frame/part-words.tsx
+msgctxt "when a task is due"
+msgid "Due"
+msgstr "Vence"
 
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
@@ -5968,6 +6052,11 @@ msgstr "Editando un flujo de trabajo"
 msgid "Email"
 msgstr "Correo electrónico"
 
+#: src/frame/part-words.tsx
+msgctxt "a draft's kind"
+msgid "Email"
+msgstr "Correo"
+
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
 msgid "Email"
@@ -6038,6 +6127,11 @@ msgstr "Terminó el {ended}"
 #: src/settings/staff-access.tsx
 msgid "Ending access"
 msgstr "Terminando el acceso"
+
+#: src/frame/part-words.tsx
+msgctxt "an event's end"
+msgid "Ends"
+msgstr "Termina"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
@@ -6110,6 +6204,11 @@ msgstr "Unión Europea"
 msgid "Event"
 msgstr "Evento"
 
+#: src/frame/part-words.tsx
+msgctxt "a calendar event"
+msgid "Event"
+msgstr "Evento"
+
 #: src/activity/audit-event.tsx
 #: src/routes/_shell.settings.audit.tsx
 msgid "Event details"
@@ -6118,6 +6217,10 @@ msgstr "Detalles del evento"
 #: src/activity/audit-event.tsx
 msgid "Event ID"
 msgstr "ID del evento"
+
+#: src/frame/part-words.tsx
+msgid "Event name"
+msgstr "Nombre del evento"
 
 #: src/workflows/workflow-triggers.tsx
 msgid "Event type"
@@ -9267,6 +9370,11 @@ msgid "Menu"
 msgstr "Menú"
 
 #: src/frame/part-words.tsx
+msgctxt "an email's body"
+msgid "Message"
+msgstr "Mensaje"
+
+#: src/frame/part-words.tsx
 msgid "Message actions"
 msgstr "Acciones del mensaje"
 
@@ -10578,6 +10686,11 @@ msgctxt "a badge's dot"
 msgid "Note"
 msgstr "Nota"
 
+#: src/frame/part-words.tsx
+msgctxt "a task's"
+msgid "Note"
+msgstr "Nota"
+
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "tab: a piece of work's note in the brain"
 msgid "Note"
@@ -11182,6 +11295,10 @@ msgstr "Abrir a página completa"
 msgid "Open in a new tab"
 msgstr "Abrir en una pestaña nueva"
 
+#: src/frame/part-words.tsx
+msgid "Open in calendar"
+msgstr "Abrir en el calendario"
+
 #: src/chat/answer-words.tsx
 msgid "Open link"
 msgstr "Abrir enlace"
@@ -11713,6 +11830,11 @@ msgstr "personas"
 msgid "People"
 msgstr "Personas"
 
+#: src/frame/part-words.tsx
+msgctxt "an event's guests"
+msgid "People"
+msgstr "Personas"
+
 #: src/brain/brain-source-contents.tsx
 msgctxt "column: how many people"
 msgid "People"
@@ -11848,6 +11970,11 @@ msgstr "Arena de píxeles"
 
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: where people reach Stephen"
+msgid "Place"
+msgstr "Lugar"
+
+#: src/frame/part-words.tsx
+msgctxt "where an event is"
 msgid "Place"
 msgstr "Lugar"
 
@@ -12874,6 +13001,11 @@ msgstr "Recursos"
 msgid "Restore"
 msgstr "Restaurar"
 
+#: src/frame/part-words.tsx
+msgctxt "a discarded draft"
+msgid "Restore"
+msgstr "Restaurar"
+
 #: src/apps/app-workspace.tsx
 msgid "Restore it to change it again."
 msgstr "Restáurala para volver a cambiarla."
@@ -13795,6 +13927,11 @@ msgid "Send"
 msgstr "Enviar"
 
 #: src/frame/part-words.tsx
+msgctxt "send an email"
+msgid "Send"
+msgstr "Enviar"
+
+#: src/frame/part-words.tsx
 msgctxt "send the question"
 msgid "Send"
 msgstr "Enviar"
@@ -13851,6 +13988,11 @@ msgstr "Sensible"
 #: src/chat/chat-files.tsx
 #: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
+msgid "Sent"
+msgstr "Enviado"
+
+#: src/frame/part-words.tsx
+msgctxt "an email"
 msgid "Sent"
 msgstr "Enviado"
 
@@ -14705,6 +14847,11 @@ msgstr "Iniciándose"
 msgid "Starting…"
 msgstr "Iniciando…"
 
+#: src/frame/part-words.tsx
+msgctxt "an event's start"
+msgid "Starts"
+msgstr "Empieza"
+
 #: src/workflows/workflow-flow.tsx
 msgctxt "where a workflow starts"
 msgid "Starts"
@@ -14917,6 +15064,11 @@ msgid "Stopped."
 msgstr "Detenido."
 
 #: src/frame/part-words.tsx
+msgctxt "an email's"
+msgid "Subject"
+msgstr "Asunto"
+
+#: src/frame/part-words.tsx
 msgid "Suggested"
 msgstr "Sugeridos"
 
@@ -15081,6 +15233,15 @@ msgstr "Diana"
 #: src/brain/brain.ts
 msgid "Target design agreed"
 msgstr "Diseño objetivo acordado"
+
+#: src/frame/part-words.tsx
+msgctxt "a draft's kind"
+msgid "Task"
+msgstr "Tarea"
+
+#: src/frame/part-words.tsx
+msgid "Task name"
+msgstr "Nombre de la tarea"
 
 #: src/apps/app-data-model.tsx
 msgid "tasks"
@@ -15581,6 +15742,10 @@ msgstr "Pasado mañana"
 #: src/onboarding/send-plan-form.tsx
 msgid "The day the other teams get their links"
 msgstr "El día en que los demás equipos reciben sus enlaces"
+
+#: src/frame/part-words.tsx
+msgid "The day, with everyone's busy time"
+msgstr "El día, con las horas ocupadas de todos"
 
 #: src/settings/ai-providers.tsx
 msgid "The default model's provider was removed. Choose a new default."
@@ -16512,6 +16677,11 @@ msgstr "Cronología"
 msgid "To"
 msgstr "Hasta"
 
+#: src/frame/part-words.tsx
+msgctxt "an email's addressees"
+msgid "To"
+msgstr "Para"
+
 #: src/routes/staff.tsx
 msgid "To act in this workspace, ask its admin to add you as a user, and sign in as one."
 msgstr "Para actuar en este espacio de trabajo, pide a su administrador que te añada como usuario e inicia sesión como tal."
@@ -17211,6 +17381,10 @@ msgstr "Muy bien"
 msgid "via {app}"
 msgstr "vía {app}"
 
+#: src/frame/part-words.tsx
+msgid "Video call"
+msgstr "Videollamada"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Vienna"
@@ -17844,6 +18018,11 @@ msgstr "Lo que ve tu equipo"
 msgid "When"
 msgstr "Cuándo"
 
+#: src/frame/part-words.tsx
+msgctxt "an event's time"
+msgid "When"
+msgstr "Cuándo"
+
 #: src/workflows/runs.tsx
 msgctxt "column: when a run happened"
 msgid "When"
@@ -17988,6 +18167,11 @@ msgid "Which tools do people actually use?"
 msgstr "¿Qué herramientas usa realmente la gente?"
 
 #: src/activity/audit-event.tsx
+msgid "Who"
+msgstr "Quién"
+
+#: src/frame/part-words.tsx
+msgctxt "who does a task"
 msgid "Who"
 msgstr "Quién"
 
@@ -18515,6 +18699,11 @@ msgstr "ti"
 #: src/knowledge/timeline.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
+msgid "You"
+msgstr "Tú"
+
+#: src/frame/part-words.tsx
+msgctxt "the person looking, in a draft"
 msgid "You"
 msgstr "Tú"
 
