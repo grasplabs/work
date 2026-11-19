@@ -4,7 +4,7 @@ import { Link, useMatchRoute } from "@tanstack/react-router";
 
 import { readFolded } from "../fold.ts";
 import { AppShell } from "../grasp/app-shell/index.ts";
-import { Composer } from "../grasp/composer/index.ts";
+import { Composer, ComposerAdd } from "../grasp/composer/index.ts";
 import { iconVars } from "../grasp/icons/icon.stylex.ts";
 import {
   AgentPerson,
@@ -69,8 +69,12 @@ export const ShellPending = () => {
               activity="disabled"
               compact
               aria-label={ask}
+              // The real bar's add and dictate, still, so its foot keeps
+              // its shape as it takes over (chat/chat-composer.tsx).
+              onDictate={wait}
               onSend={wait}
               placeholder={ask}
+              start={<ComposerAdd onAttach={wait} />}
             />
           )
         }
