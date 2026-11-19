@@ -2299,11 +2299,11 @@ const isPersonsOwnWordOnly = (
  *
  * `replaces` names memories its writer says it replaces (GRA-2184): each
  * one, of its own lineage, entity and readers, ends from this one's start
- * for a reader who may read this one, retired or not: retired while
- * nothing of its readers ended it (an undo, `retireMemory`), it no longer
- * replaces anything, and what it named is current again; retired as
- * history, it keeps them ended; erased, what it named is retired, so
- * nothing comes back. Only a writer's memory names any: one drawn from a source ends
+ * for a reader who may read this one, retired or not, until an undo of
+ * this one's save (`RetireRequest.undo`) while nothing ends it: then what
+ * it named is current again. Forgetting it never brings anything back.
+ * Erased, it is as if it never was: what only it ended is current again.
+ * Only a writer's memory names any: one drawn from a source ends
  * by its source's versions. At most as many as an add's memories: the add
  * checks each one inside its one synchronous transaction, which holds the
  * store for every other call meanwhile, so the bound is what keeps that
@@ -2723,6 +2723,15 @@ export const retireRequestSchema = z.strictObject({
    * so a repeat tells the call that retired the memory from another.
    */
   change: changeKeySchema,
+  /**
+   * An undo of the memory's own save, as a host that offers one sets it
+   * (the notice of a save, with its Undo): what the memory replaced
+   * (`NewMemory.replaces`) is current again, unless something newer ends
+   * the memory by then. Without it, a retirement never brings anything
+   * back: forgetting is not undoing. The Brain learns nothing of where the
+   * save was made.
+   */
+  undo: z.literal(true).optional(),
 });
 export type RetireRequest = z.infer<typeof retireRequestSchema>;
 

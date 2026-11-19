@@ -1154,8 +1154,10 @@ export const memoryConfirmedOver = sqliteTable(
 /**
  * A memory its writer said replaces another of theirs (contract.ts
  * `NewMemory.replaces`): `replaced` ends from `memory`'s start, for a
- * reader who may read `memory`, while `memory` isn't retired (memories.ts
- * `newerSql`). Goes with either memory when it is deleted.
+ * reader who may read `memory`, whether `memory` is retired or not, until
+ * an undo of `memory`'s save (`undoneAt`, contract.ts `RetireRequest.undo`)
+ * (memories.ts `newerSql`). Goes with either memory when it is deleted,
+ * and never otherwise.
  */
 export const memoryReplacements = sqliteTable(
   "memory_replacements",
@@ -1166,6 +1168,8 @@ export const memoryReplacements = sqliteTable(
     replaced: integer()
       .notNull()
       .references(() => memories.row, { onDelete: "cascade" }),
+    /** When an undo of `memory` (`retireMemory`) ended the replacement, in milliseconds: null while it stands. */
+    undoneAt: integer("undone_at"),
   },
   (table) => [
     primaryKey({ columns: [table.memory, table.replaced] }),

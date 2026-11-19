@@ -196,7 +196,7 @@ const outSql = (alias: string, at: string, only = ""): string => `
  * `learned`. One of the first two ends nothing once retired by then, so
  * forgetting a newer value makes the one before current again; a
  * replacement ends what it names retired or not, as its writer said, until
- * an undo deletes the link (`retireMemory`); nor does one whose
+ * an undo of it (`retireMemory`), as read at `learned`; nor does one whose
  * quote left its source (quotes.ts), so a source that says "Anna", then
  * "Bob", then "Anna" again, with no memory drawn from the last, has Anna
  * current again. `visible` keeps to those the reader may read, so a
@@ -246,7 +246,8 @@ export const newerSql = (
   UNION ALL
   SELECT ${startSql("newer")} AS at FROM memory_replacements AS named
   CROSS JOIN memories AS newer ON newer.row = named.memory
-  WHERE named.replaced = ${alias}.row${named}
+  WHERE named.replaced = ${alias}.row
+    AND (named.undone_at IS NULL OR named.undone_at > ${learned})${named}
   )`;
 };
 
@@ -515,43 +516,6 @@ export const stampWrite = (sql: SqlStorage): number => {
   const stamp = nextStamp(sql);
   keepStamp(sql, stamp);
   return stamp;
-};
-
-/** The change a memory is retired by when what replaced it is erased (`keepReplacedEnded`). */
-export const replacerErased = "erased:replacer";
-
-/**
- * Keeps ended what the memories of `rows` replaced (`memory_replacements`)
- * once an erasure hides them: each one they name, not retired and not
- * ended by another newer memory of its readers (`endedForItsReadersSql`,
- * which a hidden memory never is), is retired now. It was history; it
- * stays so, never current again because what replaced it is gone. In the
- * caller's transaction, once `rows` are hidden (people.ts). A writer's
- * erasure needs none: what its memories replaced is its own, erased too.
- */
-export const keepReplacedEnded = (
-  sql: SqlStorage,
-  rows: readonly number[]
-): void => {
-  const stamp = nextStamp(sql);
-  const retired = sql
-    .exec(
-      `UPDATE memories AS m SET retired_at = ?2, retired_change = ?3
-      WHERE m.retired_at IS NULL
-        AND m.row IN (
-          SELECT replaced FROM memory_replacements
-          WHERE memory IN (SELECT value FROM json_each(?1))
-        )
-        AND NOT ${endedForItsReadersSql("m", "?2")}
-      RETURNING row`,
-      JSON.stringify(rows),
-      stamp,
-      replacerErased
-    )
-    .toArray();
-  if (retired.length > 0) {
-    keepStamp(sql, stamp);
-  }
 };
 
 /**
@@ -1251,9 +1215,10 @@ export const confirmMemory = (
  * read it, it is not retired, and it is in its world time now: current, or
  * ended by a newer memory of its lineage, which a writer forgets as well,
  * so it never becomes current again when the newer one is retired too.
- * Retired while current to its readers (an undo), it no longer replaces
- * what it named, which is current again; retired as history, it keeps
- * them ended.
+ * An undo of its save (`undo`), while nothing of its readers ends it, no
+ * longer replaces what it named from then on
+ * (`memory_replacements.undone_at`), which is current again; any other
+ * retirement keeps them ended: forgetting never brings anything back.
  * Answers when it was retired and by which change (`change`, kept with
  * it), as recorded: one this writer already retired answers its recorded
  * time and change again, never new ones, whatever change the call names,
@@ -1269,7 +1234,14 @@ export const retireMemory = (
     reader,
     writer,
     change,
-  }: { id: string; reader: Reader; writer: string; change: string }
+    undo,
+  }: {
+    id: string;
+    reader: Reader;
+    writer: string;
+    change: string;
+    undo: boolean;
+  }
 ): RetiredMemory | null => {
   const asked = [
     id,
@@ -1295,18 +1267,22 @@ export const retireMemory = (
     .toArray();
   if (retired !== undefined) {
     keepStamp(sql, stamp);
-    // An undo: retired while nothing of its readers ended it, it no
-    // longer replaces anything, so what it replaced is current again.
-    // Retired as history, it keeps them ended (`newerSql`).
-    sql.exec(
-      `DELETE FROM memory_replacements
+    // An undo of its save, while nothing of its readers ends it: it no
+    // longer replaces anything from now on, so what it replaced is
+    // current again; a read of a moment before still sees it replaced.
+    // Any other retirement, and an undo of one already ended, keeps them
+    // ended (`newerSql`): forgetting brings nothing back.
+    if (undo) {
+      sql.exec(
+        `UPDATE memory_replacements SET undone_at = ?2
       WHERE memory = ?1 AND NOT EXISTS (
         SELECT 1 FROM memories AS m
         WHERE m.row = ?1 AND ${endedForItsReadersSql("m", "?2")}
       )`,
-      retired.row,
-      stamp
-    );
+        retired.row,
+        stamp
+      );
+    }
     return {
       retiredAt: new Date(retired.retired_at),
       change: retired.retired_change,

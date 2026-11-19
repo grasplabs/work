@@ -1,6 +1,6 @@
 import { syncErrors } from "@grasp-os/shared/sync";
-import type { SyncPage } from "@grasp-os/shared/sync";
-import { exports } from "cloudflare:workers";
+import type { SyncPage, SyncPlaceChoices } from "@grasp-os/shared/sync";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -11,6 +11,7 @@ import {
 } from "./connect.ts";
 import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
+import { acmeTenant } from "./provider-config.ts";
 
 // The Microsoft 365 connector's sync of a shared connection's picked
 // SharePoint document libraries (library-sync.ts), through connect's real
@@ -21,8 +22,12 @@ import { fakeProviders } from "./oauth-provider.ts";
 // properties. The ways it can fail come first: a library nobody picked
 // read; a pick that names someone's OneDrive read; the connected
 // account's own OneDrive or mail read through a shared connection; a
-// deleted file or a shortcut kept; the library's own permissions taken as
-// the readers; a personal site offered as a place.
+// deleted file or a shortcut kept; a personal site offered as a place.
+// Who may open a file is read from SharePoint's REST API on the company's
+// host (GRA-2145), mocked at that host too: an account that isn't the
+// site's owner, a group whose members are hidden, a list read in part, a
+// grant that doesn't reach SharePoint, and either token sent to the
+// other's host each give nobody, or never happen.
 
 const providers = fakeProviders();
 
@@ -34,6 +39,8 @@ const documented: readonly { path: RegExp; options: readonly string[] }[] = [
   // https://learn.microsoft.com/en-us/graph/api/site-search?view=graph-rest-1.0
   // (and the `$skiptoken` of Graph's own next link).
   { path: /^\/v1\.0\/sites$/u, options: ["search", "$skiptoken"] },
+  // https://learn.microsoft.com/en-us/graph/api/site-get?view=graph-rest-1.0
+  { path: /^\/v1\.0\/sites\/root$/u, options: ["$select", "$expand"] },
   // https://learn.microsoft.com/en-us/graph/api/drive-list?view=graph-rest-1.0
   {
     path: /^\/v1\.0\/sites\/[^/]+\/drives$/u,
@@ -48,6 +55,11 @@ const documented: readonly { path: RegExp; options: readonly string[] }[] = [
   },
   // https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0
   { path: /^\/v1\.0\/drives\/[^/]+\/items\/[^/]+\/content$/u, options: [] },
+  // https://learn.microsoft.com/en-us/graph/api/driveitem-list-permissions?view=graph-rest-1.0
+  {
+    path: /^\/v1\.0\/drives\/[^/]+\/items\/[^/]+\/permissions$/u,
+    options: ["$select"],
+  },
 ];
 
 /** The drive resource's properties, for a `$select` of a drive. */
@@ -122,7 +134,28 @@ interface Library {
 /** What SharePoint holds, for each test to set. */
 interface SharePoint {
   /** The sites a search finds, a page at a time. */
-  sitePages: { id: string; displayName: string }[][];
+  sitePages: { id: string; displayName: string; webUrl?: string }[][];
+  /** The root site's address, as Graph gives it. */
+  rootWebUrl: string;
+  /** A status Graph answers the root site with instead, when set. */
+  rootStatus?: number;
+  /** A status SharePoint's REST API answers everything with instead, when set. */
+  restStatus?: number;
+  /** SharePoint tokens SharePoint no longer takes (401), as sent. */
+  refusedTokens: Set<string>;
+  /** The sites, by path, whose permissions the account may read (an owner). */
+  owners: Set<string>;
+  /** Files, by ID, whose own permissions leave the account short of Full Control. */
+  notOwned: Set<string>;
+  /**
+   * Each file's permissions as Graph lists them, by ID, or a list Graph
+   * pages: the site's Members and Owners groups when unset.
+   */
+  permissions: Record<string, unknown[] | "paged">;
+  /** A status Graph answers a file's permissions with instead, by ID. */
+  permissionsStatus: Record<string, number>;
+  /** Each SharePoint group's users (`<site path>|<id>`), or hidden ("refused"). */
+  groups: Record<string, unknown[] | "refused">;
   /** Each site's drives. */
   drives: Record<string, Library[]>;
   /**
@@ -164,21 +197,67 @@ const ownOneDrive: Library = {
 
 const sharePoint: SharePoint = {
   sitePages: [],
+  rootWebUrl: "",
+  owners: new Set(),
+  refusedTokens: new Set(),
+  notOwned: new Set(),
+  permissions: {},
+  permissionsStatus: {},
+  groups: {},
   drives: {},
   feeds: {},
   contents: {},
 };
+
+/** Each library's site, by its path on the company's host, and its list. */
+const whereIs: Record<string, { site: string; list: string }> = {
+  "b!sales-docs": {
+    site: "/sites/sales",
+    list: "11111111-1111-4111-8111-111111111111",
+  },
+  "b!sales-contracts": {
+    site: "/sites/sales",
+    list: "22222222-2222-4222-8222-222222222222",
+  },
+  "b!legal-docs": {
+    site: "/sites/legal",
+    list: "33333333-3333-4333-8333-333333333333",
+  },
+};
+
+/** Full Control, and an editor's rights, as REST gives a web's or an item's. */
+const fullControl = { High: "2147483647", Low: "4294967295" };
+const editRights = { High: "432", Low: "1011030767" };
+
+/** A permission Graph lists as granted to a site group, by its ID in the site. */
+const siteGroupGrant = (id: string, role = "write") => ({
+  roles: [role],
+  grantedToV2: { siteGroup: { id, displayName: `Group ${id}` } },
+});
+
+/** A user as SharePoint names one, with their Entra object ID. */
+const spUser = (id: number, name: string, oid?: string) => ({
+  Id: id,
+  LoginName: `i:0#.f|membership|${name}@acme.test`,
+  PrincipalType: 1,
+  ...(oid === undefined ? {} : { AadObjectId: { NameId: oid } }),
+});
+
+/** Entra object IDs of the site's people. */
+const ada = "aaaaaaaa-0000-4000-8000-000000000001";
+const ben = "bbbbbbbb-0000-4000-8000-000000000002";
 
 /** Graph's clock, as its `Date` header gives it. */
 const graphDate = "Tue, 17 Nov 2026 10:00:00 GMT";
 /** When a listing began, by Graph's clock, as a timestamp token. */
 const listedAt = "2026-11-17T10:00:00Z";
 
-/** A file in `library`. */
+/** A file in `library`, list item `item` of its list. */
 const fileIn = (
   library: Library,
   id: string,
-  fields: Record<string, unknown> = {}
+  fields: Record<string, unknown> = {},
+  item = "1"
 ): Entry => ({
   id,
   name: `${id}.pdf`,
@@ -188,6 +267,16 @@ const fileIn = (
   file: { mimeType: "application/pdf" },
   parentReference: { driveId: library.id },
   lastModifiedBy: { user: { id: "5D33DD65-0000-4000-8000-000000000001" } },
+  ...(whereIs[library.id] === undefined
+    ? {}
+    : {
+        sharepointIds: {
+          siteUrl: `https://${storageHost}${whereIs[library.id]?.site ?? ""}`,
+          listId: whereIs[library.id]?.list,
+          listItemId: item,
+          tenantId: acmeTenant,
+        },
+      }),
   ...fields,
 });
 
@@ -195,11 +284,35 @@ const reset = (): void => {
   sharePoint.drivesPerPage = undefined;
   sharePoint.sitePages = [
     [
-      { id: salesSite, displayName: "Sales" },
+      {
+        id: salesSite,
+        displayName: "Sales",
+        webUrl: `https://${storageHost}/sites/sales`,
+      },
       { id: personalSite, displayName: "Owner's OneDrive" },
     ],
-    [{ id: legalSite, displayName: "Legal" }],
+    [
+      {
+        id: legalSite,
+        displayName: "Legal",
+        webUrl: `https://${storageHost}/sites/legal`,
+      },
+    ],
   ];
+  sharePoint.rootWebUrl = `https://${storageHost}`;
+  sharePoint.rootStatus = undefined;
+  sharePoint.restStatus = undefined;
+  sharePoint.refusedTokens = new Set();
+  // The account owns Sales; in Legal it is a member.
+  sharePoint.owners = new Set(["/sites/sales"]);
+  sharePoint.notOwned = new Set();
+  // Each file inherits its site's: its Members and its Owners.
+  sharePoint.permissions = {};
+  sharePoint.permissionsStatus = {};
+  sharePoint.groups = {
+    "/sites/sales|3": [spUser(10, "ada", ada)],
+    "/sites/sales|4": [spUser(11, "ben", ben)],
+  };
   sharePoint.drives = {
     [salesSite]: [salesDocs, salesContracts],
     [legalSite]: [legalDocs],
@@ -301,6 +414,25 @@ const driveCall = (library: Library, rest: string, url: URL): Response => {
   if (rest === "/root/delta") {
     return deltaPage(library.id, url);
   }
+  const listed = /^\/items\/(?<item>[^/]+)\/permissions$/u.exec(rest)?.groups
+    ?.item;
+  if (listed !== undefined) {
+    const status = sharePoint.permissionsStatus[listed];
+    if (status !== undefined) {
+      return Response.json({ error: { code: "throttled" } }, { status });
+    }
+    // The site's Members and Owners, unless a test says otherwise.
+    const permissions = sharePoint.permissions[listed] ?? [
+      siteGroupGrant("3"),
+      siteGroupGrant("4", "owner"),
+    ];
+    return permissions === "paged"
+      ? Response.json({
+          value: [siteGroupGrant("3")],
+          "@odata.nextLink": `https://${graphHost}${url.pathname}?$skiptoken=1`,
+        })
+      : Response.json({ value: permissions });
+  }
   const item = /^\/items\/(?<item>[^/]+)\/content$/u.exec(rest)?.groups?.item;
   if (item !== undefined && sharePoint.contents[item] !== undefined) {
     // Graph redirects to the file on SharePoint, as it does.
@@ -323,10 +455,27 @@ const siteOrDriveCall = (url: URL): Response => {
     }
     // Graph's position in the site's drives, as its next link carries it.
     const from = Number(url.searchParams.get("$skiptoken") ?? 0);
-    const size = sharePoint.drivesPerPage ?? drives.length;
+    // At most `$top` ("The service may return fewer"), and as the test asks.
+    const size = Math.min(
+      sharePoint.drivesPerPage ?? drives.length,
+      Number(url.searchParams.get("$top") ?? drives.length)
+    );
     const next = from + size;
     return Response.json({
-      value: drives.slice(from, next),
+      // Each library with where SharePoint keeps it.
+      value: drives.slice(from, next).map((library) => {
+        const where = whereIs[library.id];
+        return where === undefined
+          ? library
+          : {
+              ...library,
+              sharepointIds: {
+                siteUrl: `https://${storageHost}${where.site}`,
+                listId: where.list,
+                tenantId: acmeTenant,
+              },
+            };
+      }),
       ...(next < drives.length
         ? {
             "@odata.nextLink": `https://${graphHost}/v1.0/sites/${encodeURIComponent(decoded)}/drives?$select=id,name,driveType&$skiptoken=${next}`,
@@ -340,7 +489,91 @@ const siteOrDriveCall = (url: URL): Response => {
     : itemNotFound();
 };
 
-const internet = fakeInternet((_request, url) => {
+const accessDenied = (): Response =>
+  Response.json(
+    {
+      "odata.error": {
+        code: "-2147024891, System.UnauthorizedAccessException",
+      },
+    },
+    { status: 403 }
+  );
+
+/** The list of `listId`'s file at list item `item`, by the file's ID. */
+const fileAt = (listId: string, item: string): string | undefined =>
+  Object.entries(whereIs).find(([, { list }]) => list === listId)?.[0] ===
+  undefined
+    ? undefined
+    : `${listId}|${item}`;
+
+/**
+ * SharePoint's REST API on the company's host: the account's own
+ * permissions on a list or a list item ("the effective permissions… that
+ * are assigned to the current user": Full Control where it owns the
+ * site, an editor's elsewhere, or on a file whose own permissions leave
+ * it out), and a site group's users, which a group that shows its
+ * members to its members alone hides.
+ */
+/** How SharePoint refuses a request outright, if it does: none otherwise. */
+const restRefusal = (request: Request): Response | undefined => {
+  if (
+    sharePoint.refusedTokens.has(request.headers.get("authorization") ?? "")
+  ) {
+    return Response.json(
+      { error_description: "Invalid JWT token." },
+      { status: 401 }
+    );
+  }
+  return sharePoint.restStatus === undefined
+    ? undefined
+    : Response.json(
+        { "odata.error": { code: "-2147024891" } },
+        { status: sharePoint.restStatus }
+      );
+};
+
+const restCall = (url: URL): Response => {
+  const match =
+    /^(?<site>(?:\/(?:sites|teams)\/[^/]+)?)\/_api\/web\/(?<rest>.+)$/u.exec(
+      decodeURIComponent(url.pathname)
+    );
+  const site = match?.groups?.site ?? "";
+  const rest = match?.groups?.rest ?? "";
+  const held =
+    /^lists\(guid'(?<list>[^']+)'\)(?:\/items\((?<item>\d+)\))?\/EffectiveBasePermissions$/u.exec(
+      rest
+    )?.groups;
+  if (held !== undefined) {
+    const file =
+      held.item === undefined ? undefined : fileAt(held.list ?? "", held.item);
+    const owns =
+      sharePoint.owners.has(site) &&
+      (file === undefined || !sharePoint.notOwned.has(file));
+    return Response.json(owns ? fullControl : editRights);
+  }
+  const group = /^sitegroups\/getbyid\((?<id>\d+)\)\/users$/u.exec(rest)?.groups
+    ?.id;
+  if (group !== undefined) {
+    const users = sharePoint.groups[`${site}|${group}`] ?? [];
+    return users === "refused"
+      ? accessDenied()
+      : Response.json({ value: users });
+  }
+  return itemNotFound();
+};
+
+const internet = fakeInternet((request, url) => {
+  if (url.hostname === storageHost && url.pathname.includes("/_api/")) {
+    return restRefusal(request) ?? restCall(url);
+  }
+  if (url.hostname === graphHost && url.pathname === "/v1.0/sites/root") {
+    return sharePoint.rootStatus === undefined
+      ? Response.json({ webUrl: sharePoint.rootWebUrl })
+      : Response.json(
+          { error: { code: "throttled" } },
+          { status: sharePoint.rootStatus }
+        );
+  }
   if (url.hostname === storageHost) {
     const content =
       sharePoint.contents[url.pathname.slice("/download/".length)];
@@ -429,8 +662,18 @@ const readAll = async (
   }
 };
 
+/** Readers in one order, to compare as sets. */
+const ordered = (readers: readonly unknown[]): string[] =>
+  readers.map((reader) => JSON.stringify(reader)).toSorted();
+
+/** The readers of each item a whole read of `place` gives: none for one gone. */
+const readersRead = async (connectionId: string, place: string) => {
+  const { items } = await readAll(connectionId, place);
+  return items.map((item) => (item.gone ? undefined : item.readers));
+};
+
 describe("syncing a shared connection's picked SharePoint libraries", () => {
-  it("shows an admin the document libraries of the sites the account finds, never a OneDrive", async () => {
+  it("shows an admin the document libraries of the sites the account finds, whether it may read who opens their files, never a OneDrive", async () => {
     const { admin, connectionId } = await sharedConnection();
     await pick(admin, connectionId, [salesContracts.id, legalDocs.id]);
 
@@ -459,21 +702,22 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
             place: salesDocs.id,
             title: "Documents",
             within: "Sales",
-            // Not read until the next slice of GRA-2145: nobody reads them.
-            sharingRead: false,
+            // The account owns Sales.
+            sharingRead: true,
             picked: false,
           },
           {
             place: salesContracts.id,
             title: "Contracts",
             within: "Sales",
-            sharingRead: false,
+            sharingRead: true,
             picked: true,
           },
           {
             place: legalDocs.id,
             title: "Documents",
             within: "Legal",
+            // A member of Legal, not its owner.
             sharingRead: false,
             picked: true,
           },
@@ -483,6 +727,56 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
       },
       places: { places: [salesContracts.id, legalDocs.id], cursor: null },
     });
+  });
+
+  it("lists every library of a site with as many libraries as one read can check, and one more or one fewer", async () => {
+    const outcomes = [];
+    for (const count of [47, 48, 49]) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection after another
+      const { admin, connectionId } = await sharedConnection();
+      const libraries = Array.from({ length: count }, (_, index) => ({
+        id: `b!many-${count}-${index}`,
+        name: `Library ${index}`,
+        driveType: "documentLibrary",
+      }));
+      for (const [index, { id }] of libraries.entries()) {
+        whereIs[id] = {
+          site: "/sites/sales",
+          list: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        };
+      }
+      sharePoint.sitePages = [[{ id: salesSite, displayName: "Sales" }]];
+      sharePoint.drives = { [salesSite]: libraries };
+      const listed: string[] = [];
+      const failed: string[] = [];
+      let cursor: string | null = null;
+      for (let at = 0; at < 4; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one read after another, each from the last one's cursor
+        const answer: SyncPlaceChoices | null | string = await exports.default
+          .syncPlaceChoices({ person: admin, connectionId, feed, cursor })
+          .catch((error: unknown) => syncErrors.codeOf(error) ?? "failed");
+        if (typeof answer === "string") {
+          failed.push(answer);
+          break;
+        }
+        listed.push(
+          ...(answer?.choices ?? [])
+            .filter(({ sharingRead }) => sharingRead)
+            .map(({ place }) => place)
+        );
+        cursor = answer?.cursor ?? null;
+        if (cursor === null) {
+          break;
+        }
+      }
+      outcomes.push({ count, listed: listed.length, failed });
+    }
+
+    expect(outcomes).toStrictEqual([
+      { count: 47, listed: 47, failed: [] },
+      { count: 48, listed: 48, failed: [] },
+      { count: 49, listed: 49, failed: [] },
+    ]);
   });
 
   it("lists a site with more pages of drives than one read can take, across reads, every library once, no read past its requests", async () => {
@@ -514,10 +808,16 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
     const listed: string[] = [];
     const perRead: number[] = [];
     let cursor: string | null = null;
-    for (;;) {
-      const before = internet.sent.filter(
-        ({ host }) => host === graphHost
+    // Connect's own read of the company's root site, once a grant, for
+    // its SharePoint host (tokens.ts `tenantCredentialFor`), isn't the
+    // connector's.
+    const connectorsGraph = () =>
+      internet.sent.filter(
+        ({ host, path }) =>
+          host === graphHost && !path.startsWith("/v1.0/sites/root")
       ).length;
+    for (;;) {
+      const before = connectorsGraph();
       // oxlint-disable-next-line no-await-in-loop -- one read after another, each from the last one's cursor
       const answer = await exports.default.syncPlaceChoices({
         person: admin,
@@ -525,9 +825,7 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
         feed,
         cursor,
       });
-      perRead.push(
-        internet.sent.filter(({ host }) => host === graphHost).length - before
-      );
+      perRead.push(connectorsGraph() - before);
       listed.push(...(answer?.choices ?? []).map(({ place }) => place));
       cursor = answer?.cursor ?? null;
       if (cursor === null) {
@@ -551,7 +849,7 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
     }).toStrictEqual({ listed: expected, overLimit: [], reads: true });
   });
 
-  it("reads a picked library whole, catches up from when it began, then its changes, with no reader copied", async () => {
+  it("reads a picked library whole, catches up from when it began, then its changes, each file read by those SharePoint lets open it", async () => {
     const { admin, connectionId } = await sharedConnection();
     await pick(admin, connectionId, [salesDocs.id]);
     const before = sentToGraph().length;
@@ -570,8 +868,11 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
           contentType: "application/pdf",
           base64: btoa(`bytes of ${salesDocs.id}`),
         },
-        // The connection's Brain audience reads it, chosen in Grasp.
-        readers: null,
+        // The site's Members and Owners, each SharePoint group's users.
+        readers: [
+          { kind: "account", id: ada },
+          { kind: "account", id: ben },
+        ],
         changedBy: "5d33dd65-0000-4000-8000-000000000001",
         partOf: null,
       },
@@ -610,18 +911,550 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
       expect.objectContaining({
         id: "plan",
         version: '"{plan},2"',
-        readers: null,
+        readers: [
+          { kind: "account", id: ada },
+          { kind: "account", id: ben },
+        ],
       }),
       { gone: true, id: `${salesDocs.id}-file`, kind: "file" },
       { gone: true, id: "shortcut", kind: "file" },
       { gone: true, id: "moved", kind: "file" },
     ]);
-    // Nothing of the account's own, and no permissions read.
+    // Nothing of the account's own.
     expect(
-      sentToGraph().filter(
-        (path) => path.startsWith("/v1.0/me") || path.endsWith("/permissions")
-      )
+      sentToGraph().filter((path) => path.startsWith("/v1.0/me"))
     ).toStrictEqual([]);
+  });
+
+  it("reads who may open a file from Graph's list of its permissions: roles that open it, users and groups by their IDs, each site group's members, and links as personal sync reads them", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    const [kim, lee] = [
+      "cccccccc-0000-4000-8000-000000000003",
+      "dddddddd-0000-4000-8000-000000000004",
+    ];
+    const [entraGroup, teamGroup, otherTeam, sharedWith] = [
+      "eeeeeeee-0000-4000-8000-000000000005",
+      "ffffffff-0000-4000-8000-000000000006",
+      "99999999-0000-4000-8000-000000000007",
+      "88888888-0000-4000-8000-000000000008",
+    ];
+    const otherTenant = "77777777-0000-4000-8000-000000000009";
+    sharePoint.permissions[`${salesDocs.id}-file`] = [
+      siteGroupGrant("5"),
+      // A role that opens nothing.
+      { roles: ["sp.limitedAccess"], grantedToV2: { user: { id: lee } } },
+      // An Entra group shared with directly.
+      { roles: ["read"], grantedToV2: { group: { id: sharedWith } } },
+      // A SharePoint user Graph gives no Entra ID for.
+      { roles: ["read"], grantedToV2: { siteUser: { id: "31" } } },
+      // Links: for the organisation, and for specific people.
+      { roles: ["read"], link: { scope: "organization", type: "view" } },
+      {
+        roles: ["write"],
+        link: { scope: "users", type: "edit" },
+        grantedToIdentitiesV2: [{ user: { id: kim } }],
+      },
+    ];
+    sharePoint.groups["/sites/sales|5"] = [
+      spUser(10, "ada", ada),
+      { LoginName: `c:0t.c|tenant|${entraGroup}` },
+      { LoginName: `c:0o.c|federateddirectoryclaimprovider|${teamGroup}` },
+      // A group's owners, a user without an Entra object ID, "Everyone",
+      // and another tenant's everyone: nobody.
+      { LoginName: `c:0o.c|federateddirectoryclaimprovider|${otherTeam}_o` },
+      spUser(23, "old"),
+      { LoginName: "c:0(.s|true" },
+      {
+        LoginName: `c:0-.f|rolemanager|spo-grid-all-users/${otherTenant}`,
+      },
+      {
+        LoginName: `c:0-.f|rolemanager|spo-grid-all-users/${acmeTenant}`,
+      },
+    ];
+    const expected = [
+      { kind: "account", id: ada },
+      { kind: "group", id: entraGroup },
+      { kind: "group", id: teamGroup },
+      { kind: "tenant", id: acmeTenant },
+      { kind: "group", id: sharedWith },
+      { kind: "link" },
+      { kind: "account", id: kim },
+    ];
+
+    const [readers] = await readersRead(connectionId, salesDocs.id);
+
+    expect(ordered(readers ?? [])).toStrictEqual(ordered(expected));
+  });
+
+  it("gives nobody a file the account doesn't own, without asking for its permissions, or whose list or group members SharePoint won't give whole", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [
+      salesDocs.id,
+      salesContracts.id,
+      legalDocs.id,
+    ]);
+    // A list Graph pages.
+    sharePoint.permissions[`${salesDocs.id}-file`] = "paged";
+    // A group whose members show to its members alone; and a SharePoint
+    // group Graph names only globally, whose members it reads only in
+    // SharePoint Embedded.
+    sharePoint.permissions[`${salesContracts.id}-file`] = [siteGroupGrant("6")];
+    sharePoint.groups["/sites/sales|6"] = "refused";
+    sharePoint.feeds[salesContracts.id] = {
+      ...sharePoint.feeds[salesContracts.id],
+      "": {
+        entries: [
+          fileIn(salesContracts, `${salesContracts.id}-file`),
+          fileIn(salesContracts, "board", {}, "2"),
+        ],
+        end: "t1",
+      },
+    };
+    sharePoint.contents.board = "board";
+    sharePoint.permissions.board = [
+      { roles: ["read"], grantedToV2: { sharePointGroup: { id: "0a-board" } } },
+    ];
+    const notWhole = {
+      paged: await readersRead(connectionId, salesDocs.id),
+      hidden: await readersRead(connectionId, salesContracts.id),
+      // A member of Legal, not its owner.
+      notOwner: await readersRead(connectionId, legalDocs.id),
+    };
+    // A file in a site it owns, whose own permissions leave it out.
+    sharePoint.permissions[`${salesDocs.id}-file`] = [siteGroupGrant("3")];
+    sharePoint.notOwned.add(`${whereIs[salesDocs.id]?.list ?? ""}|1`);
+    const before = internet.sent.length;
+    const fileNotOwned = await readersRead(connectionId, salesDocs.id);
+
+    expect({
+      ...notWhole,
+      fileNotOwned,
+      // Not one permission asked for, of the file it doesn't own.
+      asked: internet.sent
+        .slice(before)
+        .filter(({ path }) => path.includes("/permissions")),
+    }).toStrictEqual({
+      paged: [null],
+      hidden: [null, null],
+      notOwner: [null],
+      fileNotOwned: [null],
+      asked: [],
+    });
+  });
+
+  it("reads everyone but guests as the company only when it is the file's own tenant", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    const otherTenant = "77777777-0000-4000-8000-000000000009";
+    sharePoint.feeds[salesDocs.id] = {
+      ...sharePoint.feeds[salesDocs.id],
+      "": {
+        entries: [
+          fileIn(salesDocs, "theirs"),
+          fileIn(salesDocs, "ours", {}, "2"),
+        ],
+        end: "t1",
+      },
+    };
+    sharePoint.contents.theirs = "theirs";
+    sharePoint.contents.ours = "ours";
+    sharePoint.permissions.theirs = [siteGroupGrant("8")];
+    sharePoint.permissions.ours = [siteGroupGrant("9")];
+    sharePoint.groups["/sites/sales|8"] = [
+      { LoginName: `c:0-.f|rolemanager|spo-grid-all-users/${otherTenant}` },
+    ];
+    sharePoint.groups["/sites/sales|9"] = [
+      { LoginName: `c:0-.f|rolemanager|spo-grid-all-users/${acmeTenant}` },
+    ];
+
+    await expect(
+      readersRead(connectionId, salesDocs.id)
+    ).resolves.toStrictEqual([[], [{ kind: "tenant", id: acmeTenant }]]);
+  });
+
+  it("reads a site group's members on the file's own site, as its ID names it only there", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id, legalDocs.id]);
+    sharePoint.owners.add("/sites/legal");
+    const kim = "cccccccc-0000-4000-8000-000000000003";
+    sharePoint.groups["/sites/legal|3"] = [spUser(12, "kim", kim)];
+    sharePoint.groups["/sites/legal|4"] = [];
+    sharePoint.feeds[legalDocs.id] = {
+      ...sharePoint.feeds[legalDocs.id],
+      // One page with both: a group read on one site never stands for the other's.
+      "": {
+        entries: [
+          fileIn(salesDocs, "sales-plan", {
+            parentReference: { driveId: legalDocs.id },
+          }),
+          fileIn(legalDocs, "legal-plan"),
+        ],
+        end: "t1",
+      },
+    };
+    sharePoint.contents["sales-plan"] = "sales";
+    sharePoint.contents["legal-plan"] = "legal";
+
+    await expect(
+      readersRead(connectionId, legalDocs.id)
+    ).resolves.toStrictEqual([
+      [
+        { kind: "account", id: ada },
+        { kind: "account", id: ben },
+      ],
+      [{ kind: "account", id: kim }],
+    ]);
+  });
+
+  it("moves on past a file whose readers take every request a read has left, and one more or one fewer", async () => {
+    // A read's room (50 requests): the library and its delta leave 48, for
+    // the file's own permissions, its list of them and its site groups.
+    const outcomes = [];
+    for (const groups of [45, 46, 47]) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection after another
+      const { admin, connectionId } = await sharedConnection();
+      // oxlint-disable-next-line no-await-in-loop -- one connection after another
+      await pick(admin, connectionId, [salesDocs.id]);
+      const ids = Array.from({ length: groups }, (_, index) =>
+        String(100 + index)
+      );
+      sharePoint.permissions[`${salesDocs.id}-file`] = ids.map((id) =>
+        siteGroupGrant(id)
+      );
+      for (const id of ids) {
+        sharePoint.groups[`/sites/sales|${id}`] = [spUser(10, "ada", ada)];
+      }
+      const pages: (number | string)[] = [];
+      let cursor: string | null = null;
+      for (let at = 0; at < 4; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one read after another
+        const page: SyncPage | string = await read(
+          connectionId,
+          salesDocs.id,
+          cursor
+        ).catch((error: unknown) => syncErrors.codeOf(error) ?? "failed");
+        pages.push(typeof page === "string" ? page : page.items.length);
+        if (typeof page === "string") {
+          break;
+        }
+        ({ cursor } = page);
+        if (page.items.length > 0) {
+          break;
+        }
+      }
+      outcomes.push({
+        groups,
+        reached: pages.at(-1) === 1,
+        failed: pages.filter((page) => typeof page === "string"),
+      });
+    }
+
+    expect(outcomes).toStrictEqual([
+      { groups: 45, reached: true, failed: [] },
+      { groups: 46, reached: true, failed: [] },
+      { groups: 47, reached: true, failed: [] },
+    ]);
+  });
+
+  it("waits when Graph throttles a file's permissions, rather than giving it nobody", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    sharePoint.permissionsStatus[`${salesDocs.id}-file`] = 429;
+
+    await expect(
+      outcomeOf(async () => await read(connectionId, salesDocs.id, null))
+    ).resolves.toBe("sync.throttled");
+  });
+
+  it("sends SharePoint's token only to the company's own SharePoint host and Graph's only to Graph, asking for SharePoint's once a grant", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+
+    await readAll(connectionId, salesDocs.id);
+    await readAll(connectionId, salesDocs.id);
+    const tokensAt = (host: string, rest: boolean) =>
+      new Set(
+        internet.sent
+          .filter(
+            ({ host: to, path }) =>
+              to === host && path.includes("/_api/") === rest
+          )
+          .map(({ headers }) => headers.authorization)
+      );
+    const graph = tokensAt(graphHost, false);
+    const sharePointTokens = tokensAt(storageHost, true);
+    const asked = providers
+      .tokenRequests("refresh_token")
+      .map(({ form }) => form.get("scope"));
+
+    // A file Graph says lives on another company's SharePoint host.
+    const otherHost = "other.sharepoint.com";
+    sharePoint.feeds[salesDocs.id] = {
+      ...sharePoint.feeds[salesDocs.id],
+      "": {
+        entries: [
+          fileIn(salesDocs, "foreign", {
+            sharepointIds: {
+              siteUrl: `https://${otherHost}/sites/sales`,
+              listId: whereIs[salesDocs.id]?.list,
+              listItemId: "1",
+              tenantId: acmeTenant,
+            },
+          }),
+        ],
+        end: "t1",
+      },
+    };
+    sharePoint.contents.foreign = "foreign";
+    const foreign = await readersRead(connectionId, salesDocs.id);
+
+    expect({
+      foreign,
+      toOtherHost: internet.sent.filter(({ host }) => host === otherHost),
+      apart: [...sharePointTokens].filter((token) => graph.has(token)),
+      sharePoint: sharePointTokens.size,
+      asked,
+      // A download's redirect carries no token at all.
+      downloads: internet.sent
+        .filter(({ path }) => path.startsWith("/download/"))
+        .map(({ headers }) => headers.authorization ?? null),
+    }).toStrictEqual({
+      foreign: [null],
+      toOtherHost: [],
+      apart: [],
+      sharePoint: 1,
+      asked: [`https://${storageHost}/AllSites.Read`],
+      downloads: [null, null, null],
+    });
+  });
+
+  it("fails the page, writing no file, when Graph throttles the root site", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    sharePoint.rootStatus = 429;
+
+    await expect(
+      outcomeOf(async () => await read(connectionId, salesDocs.id, null))
+    ).resolves.toBe("sync.provider_failed");
+  });
+
+  it("lets go of a kept SharePoint token SharePoint no longer takes, failing the page once, and goes on with a fresh one", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    const lastToken = () =>
+      internet.sent.findLast(
+        ({ host, path }) => host === storageHost && path.includes("/_api/")
+      )?.headers.authorization ?? "";
+
+    const first = await readersRead(connectionId, salesDocs.id);
+    // Revoked within its hour.
+    sharePoint.refusedTokens.add(lastToken());
+    const refused = await outcomeOf(
+      async () => await read(connectionId, salesDocs.id, null)
+    );
+    const again = await readersRead(connectionId, salesDocs.id);
+    const people = [
+      { kind: "account", id: ada },
+      { kind: "account", id: ben },
+    ];
+
+    expect({ first, refused, again }).toStrictEqual({
+      first: [people],
+      // The page waits: a kept token's refusal says nothing of the grant.
+      refused: "sync.throttled",
+      again: [people],
+    });
+  });
+
+  it("gives every file nobody under a SharePoint policy that refuses every token, and never fails two pages in a row", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    // An access policy of SharePoint's that refuses every token for this
+    // account, however fresh.
+    sharePoint.restStatus = 401;
+    sharePoint.feeds[salesDocs.id] = {
+      ...sharePoint.feeds[salesDocs.id],
+      // Each change page brings the file again, as the sync's clock reads it.
+      t1: { entries: [fileIn(salesDocs, `${salesDocs.id}-file`)], end: "t1" },
+    };
+    const outcomes: string[] = [];
+    const readers: unknown[] = [];
+    let cursor: string | null = null;
+    for (let at = 0; at < 6; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one page after another, as the sync reads them
+      const page: SyncPage | string = await read(
+        connectionId,
+        salesDocs.id,
+        cursor
+      ).catch((error: unknown) => syncErrors.codeOf(error) ?? "failed");
+      if (typeof page === "string") {
+        outcomes.push(page);
+      } else {
+        outcomes.push("ok");
+        readers.push(
+          ...page.items.flatMap((item) => (item.gone ? [] : [item.readers]))
+        );
+        ({ cursor } = page);
+      }
+    }
+
+    expect({
+      // A failed page is always followed by one that completes.
+      twoFailedInARow: outcomes.some(
+        (outcome, index) =>
+          outcome !== "ok" &&
+          outcomes[index + 1] !== "ok" &&
+          index + 1 < outcomes.length
+      ),
+      // A failed page waits, as a refused kept token does: never more.
+      otherFailures: outcomes.filter(
+        (outcome) => outcome !== "ok" && outcome !== "sync.throttled"
+      ),
+      completed: outcomes.filter((outcome) => outcome === "ok").length >= 3,
+      // One page fails: the one after the listing's empty catch-up, whose
+      // token was minted and never sent, so it counts as kept. A refused
+      // fresh token is let go, so it never fails the page after it.
+      failed: outcomes.filter((outcome) => outcome !== "ok").length,
+      readers: [...new Set(readers.map((reader) => JSON.stringify(reader)))],
+    }).toStrictEqual({
+      twoFailedInARow: false,
+      otherFailures: [],
+      completed: true,
+      failed: 1,
+      readers: ["null"],
+    });
+  });
+
+  it("keeps a grant's SharePoint token across Graph's renewals, and gives a grant connected again its own", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    const sharePointToken = () =>
+      internet.sent.findLast(
+        ({ host, path }) => host === storageHost && path.includes("/_api/")
+      )?.headers.authorization;
+    const asked = () =>
+      providers
+        .tokenRequests("refresh_token")
+        .filter(({ form }) => (form.get("scope") ?? "").includes("AllSites"))
+        .length;
+    const rootReads = () =>
+      internet.sent.filter(({ path }) => path.startsWith("/v1.0/sites/root"))
+        .length;
+
+    await readAll(connectionId, salesDocs.id);
+    const first = sharePointToken();
+    // Graph's access token runs out: the next read renews it.
+    await env.DB.prepare(
+      "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .run();
+    await readAll(connectionId, salesDocs.id);
+    const renewed = {
+      token: sharePointToken() === first,
+      asked: asked(),
+      rootReads: rootReads(),
+    };
+    // Its SharePoint token runs out: another, for the host this grant found.
+    await env.DB.prepare(
+      "UPDATE connection_tenant_tokens SET access_expires_at = 0 WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .run();
+    await readAll(connectionId, salesDocs.id);
+    const expired = { asked: asked(), rootReads: rootReads() };
+    // Connected again: as a reconnect does (oauth.ts), the grant's row
+    // goes and the new grant's takes its place, its tokens the same.
+    const grant = await env.DB.prepare(
+      "SELECT sealed, access_expires_at, granted_scopes, updated_at FROM connection_tokens WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .first<{
+        sealed: string;
+        access_expires_at: number;
+        granted_scopes: string | null;
+        updated_at: number;
+      }>();
+    await env.DB.batch([
+      env.DB.prepare(
+        "DELETE FROM connection_tokens WHERE connection_id = ?"
+      ).bind(connectionId),
+      env.DB.prepare(
+        "INSERT INTO connection_tokens (connection_id, sealed, access_expires_at, generation, refresh_until, granted_scopes, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?)"
+      ).bind(
+        connectionId,
+        grant?.sealed ?? "",
+        grant?.access_expires_at ?? 0,
+        Date.now(),
+        grant?.granted_scopes ?? null,
+        grant?.updated_at ?? 0
+      ),
+    ]);
+    await readAll(connectionId, salesDocs.id);
+
+    expect({
+      renewed,
+      expired,
+      own: sharePointToken() !== first,
+      asked: asked(),
+    }).toStrictEqual({
+      renewed: { token: true, asked: 1, rootReads: 1 },
+      expired: { asked: 2, rootReads: 1 },
+      own: true,
+      asked: 3,
+    });
+  });
+
+  it("reads nobody, and sends nothing to SharePoint, for a grant that doesn't reach it or a root site off SharePoint", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    // A connection made before SharePoint's right was asked for.
+    providers.state.refresh = () => providers.oauthError("consent_required");
+    let notConsented: unknown;
+    let choices: unknown;
+    try {
+      notConsented = await readersRead(connectionId, salesDocs.id);
+      const listed = await exports.default.syncPlaceChoices({
+        person: admin,
+        connectionId,
+        feed,
+        cursor: null,
+      });
+      choices = listed?.choices.map(({ sharingRead }) => sharingRead);
+    } finally {
+      providers.state.refresh = undefined;
+    }
+    const restBefore = internet.sent.filter(({ path }) =>
+      path.includes("/_api/")
+    ).length;
+
+    const { connectionId: elsewhere } = await sharedConnection();
+    await pick(admin, elsewhere, [salesDocs.id]);
+    sharePoint.rootWebUrl = "https://files.example.com";
+    const offSharePoint = await readersRead(elsewhere, salesDocs.id);
+
+    expect({
+      notConsented,
+      choices,
+      offSharePoint,
+      // No token was ever asked for a host off SharePoint.
+      askedOff: providers
+        .tokenRequests("refresh_token")
+        .filter(({ form }) =>
+          (form.get("scope") ?? "").includes("example.com")
+        ),
+      rest: restBefore,
+      restAfter: internet.sent.filter(({ path }) => path.includes("/_api/"))
+        .length,
+    }).toStrictEqual({
+      notConsented: [null],
+      choices: [false, false, false],
+      offSharePoint: [null],
+      askedOff: [],
+      rest: 0,
+      restAfter: 0,
+    });
   });
 
   it("never reads a library nobody picked, nor a pick that names someone's OneDrive", async () => {
@@ -656,7 +1489,13 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
       outcomes,
       asked: sentToGraph()
         .slice(before)
-        .filter((path) => path !== "/v1.0/sites" && !path.endsWith("/drives")),
+        .filter(
+          (path) =>
+            path !== "/v1.0/sites" &&
+            // Connect's own read of the root site, for its SharePoint host.
+            path !== "/v1.0/sites/root" &&
+            !path.endsWith("/drives")
+        ),
       places,
     }).toStrictEqual({
       outcomes: {

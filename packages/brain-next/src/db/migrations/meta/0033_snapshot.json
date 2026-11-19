@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "da5bf179-9115-4fae-a7f8-bdff17f7e796",
+  "id": "e9c1769e-42d9-4d97-9f8c-d529fb3dad18",
   "prevId": "725bed32-5e38-4fb3-b617-534cac5ed073",
   "tables": {
     "chunk_blocks": {
@@ -2137,6 +2137,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "undone_at": {
+          "name": "undone_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
