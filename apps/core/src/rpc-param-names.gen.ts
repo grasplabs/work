@@ -300,6 +300,7 @@ export const rpcParamNames: ParamNames = {
     "save": ["saved"],
   },
   "MembersRpc": {
+    "directoryReads": [],
     "erase": ["userId","name"],
     "erasure": ["userId"],
     "invitations": [],

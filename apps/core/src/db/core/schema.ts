@@ -5,6 +5,11 @@ import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { ChatFileType } from "@grasp-os/shared/chat";
 import type { DependencyFinding } from "@grasp-os/shared/dependencies";
 import { modelRoles } from "@grasp-os/shared/deployment-config";
+import type {
+  DirectoryDeletedFailure,
+  DirectoryProvider,
+  DirectoryReadFailure,
+} from "@grasp-os/shared/directory";
 import {
   directoryGroupHelds,
   directoryGroupKinds,
@@ -808,7 +813,7 @@ export const directoryGroupMembers = sqliteTable(
  * lands after a newer one.
  */
 export const directoryReads = sqliteTable("directory_reads", {
-  provider: text().primaryKey(),
+  provider: text().$type<DirectoryProvider>().primaryKey(),
   /** The directory connection last read or tried. */
   connectionId: text("connection_id").notNull(),
   tenant: text().notNull(),
@@ -820,7 +825,7 @@ export const directoryReads = sqliteTable("directory_reads", {
   people: integer(),
   disabled: integer(),
   /** The last read's failure since `readAt`, as a directory error code. */
-  failure: text(),
+  failure: text().$type<DirectoryReadFailure>(),
   failedAt: timestamp("failed_at"),
   /**
    * Why the last applied read went on without the deleted accounts, as a
@@ -828,7 +833,7 @@ export const directoryReads = sqliteTable("directory_reads", {
    * `directory.deleted_unsupported`): nobody was suspended for having
    * left. Null when it read them.
    */
-  deletedFailure: text("deleted_failure"),
+  deletedFailure: text("deleted_failure").$type<DirectoryDeletedFailure>(),
 });
 
 /**

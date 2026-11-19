@@ -60,6 +60,7 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import { initials } from "../frame/person-menu.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { DirectoryReads } from "../settings/directory-reads.tsx";
 import { RemovedPeople } from "../settings/erasures.tsx";
 import { InvitationRow, InviteButton } from "../settings/invitations.tsx";
 import { MemberSuspension } from "../settings/member-suspension.tsx";
@@ -507,6 +508,7 @@ const Members = () => {
   const { identity } = Route.useRouteContext();
   return (
     <>
+      <DirectoryReads />
       <Roles />
       {page.state === "ready" ? (
         <>
