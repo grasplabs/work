@@ -76,7 +76,8 @@ export const directoryControlUrl = "https://graph-control.test/directory";
 export const hibobControlUrl = "https://hibob-control.test/people";
 
 /** What the directory's Entra app is granted, as Entra's token answer says. */
-export const directoryGranted = "openid profile email User.Read User.Read.All";
+export const directoryGranted =
+  "openid profile email User.Read User.Read.All Group.ReadBasic.All";
 
 /** Grasp's Entra app for the documents' connection, as set on connect. */
 export const documentsClient = clients.microsoftDocuments;

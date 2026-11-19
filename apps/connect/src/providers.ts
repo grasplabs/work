@@ -406,6 +406,12 @@ const microsoftDirectoryScopes = [
   // Everyone's department, job title and manager: `User.ReadBasic.All`
   // holds names and addresses only.
   "User.Read.All",
+  // The groups an admin maps to teams, and their members, nested groups'
+  // included (GRA-2056, directory-groups.ts): asked of every company when
+  // it connects, so mapping a group never needs a second consent.
+  // `GroupMember.ReadBasic.All` reads members only, not the groups
+  // themselves, which a search and a group's properties need.
+  "Group.ReadBasic.All",
 ] as const;
 
 /**
@@ -429,7 +435,7 @@ const microsoftDirectory: OAuthProviderConfig = {
     allowed: new Set(
       microsoftDirectoryScopes.map((scope) => scope.toLowerCase())
     ),
-    required: ["User.Read.All"],
+    required: ["User.Read.All", "Group.ReadBasic.All"],
   },
   sharedOnly: true,
   client: (env) =>
