@@ -25,6 +25,7 @@ import type { RunFailure } from "@grasp-os/shared/workflows";
 import { sql } from "drizzle-orm";
 import {
   check,
+  foreignKey,
   index,
   integer,
   primaryKey,
@@ -729,10 +730,59 @@ export const directoryGroupTeams = sqliteTable(
      * the group was mapped to this team, the mapping places nobody.
      */
     readAt: timestamp("read_at"),
+    /**
+     * Why the last read left the group as it was, null when it didn't:
+     * `gone` (Microsoft has no such group), `refused` (Microsoft refused
+     * to read it), `not_mappable` (it can't be a team's now) or `empty`.
+     */
+    held: text(),
   },
   (table) => [
     primaryKey({ columns: [table.provider, table.groupId] }),
     index("directory_group_teams_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The members of each mapped group, nested groups' included, as the last
+ * read that read the group whole listed them (GRA-2056,
+ * directory-group-reads.ts): one row per group and person the read keeps
+ * (`directory_people`), by the provider's ID. Goes with the person's row,
+ * so with them leaving the directory or being erased, and with the
+ * group's mapping.
+ */
+export const directoryGroupMembers = sqliteTable(
+  "directory_group_members",
+  {
+    provider: text().notNull(),
+    tenant: text().notNull(),
+    groupId: text("group_id").notNull(),
+    accountId: text("account_id").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.provider, table.groupId, table.tenant, table.accountId],
+    }),
+    index("directory_group_members_person_idx").on(
+      table.provider,
+      table.tenant,
+      table.accountId
+    ),
+    foreignKey({
+      columns: [table.provider, table.tenant, table.accountId],
+      foreignColumns: [
+        directoryPeople.provider,
+        directoryPeople.tenant,
+        directoryPeople.accountId,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.provider, table.groupId],
+      foreignColumns: [
+        directoryGroupTeams.provider,
+        directoryGroupTeams.groupId,
+      ],
+    }).onDelete("cascade"),
   ]
 );
 

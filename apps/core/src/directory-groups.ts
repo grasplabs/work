@@ -1,6 +1,7 @@
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import {
   directoryErrors,
+  directoryGroupHeldSchema,
   directoryGroupKindSchema,
   directoryGroupMembersFromSchema,
 } from "@grasp-os/shared/directory";
@@ -222,6 +223,7 @@ const mappingOf = (
   const membersFrom = directoryGroupMembersFromSchema.safeParse(
     row.membersFrom
   );
+  const held = directoryGroupHeldSchema.safeParse(row.held);
   return {
     groupId: row.groupId,
     name: row.name,
@@ -230,6 +232,7 @@ const mappingOf = (
     teamId: row.teamId,
     mappedAt: row.mappedAt.toISOString(),
     readAt: row.readAt?.toISOString() ?? null,
+    held: held.success ? held.data : null,
   };
 };
 
@@ -304,7 +307,7 @@ const map = async (
     db
       .insert(directoryGroupTeams)
       .select(
-        sql`SELECT ${provider}, ${id}, ${team.data}, ${group.name}, ${group.kind}, ${group.membersFrom}, ${mappedAt.getTime()}, NULL
+        sql`SELECT ${provider}, ${id}, ${team.data}, ${group.name}, ${group.kind}, ${group.membersFrom}, ${mappedAt.getTime()}, NULL, NULL
           WHERE ${changes}`
       )
       .onConflictDoUpdate({
