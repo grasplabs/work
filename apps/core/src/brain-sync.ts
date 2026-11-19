@@ -2776,8 +2776,9 @@ const claimNext = async (
           AND (due.person_id IS NOT NULL OR (${audienced(sql`due.connection_id`)}))
           -- A person's own connection, only while they may act: a
           -- suspended person's sources wait, cursors and all, until it
-          -- lifts (GRA-2143). A shared one is the company's, and goes on.
-          AND (due.person_id IS NULL OR ${mayAct(sql`due.person_id`)})
+          -- lifts (GRA-2143). A shared one has no person, which the check
+          -- lets through: it is the company's, and goes on.
+          AND ${mayAct(sql`due.person_id`)}
         ORDER BY CASE
             WHEN due.due_at <= ${now} AND due.relist_at <= ${now} THEN min(due.due_at, due.relist_at)
             WHEN due.due_at <= ${now} THEN due.due_at
