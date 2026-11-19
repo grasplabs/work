@@ -7,10 +7,12 @@ import type { ReactNode } from "react";
 
 import { grantReviewed, reviewedVersion } from "../activity/pending.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { draftOf } from "../chat/held-drafts.ts";
 import {
   confirmHeld,
   declineHeld,
   HeldWriteDetails,
+  HeldWriteDraft,
   useShown,
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
@@ -409,6 +411,8 @@ const ApprovalFrame = ({
 /**
  * A held write: confirming it is for what the person was shown, all of
  * it. Confirm waits, with why, until every part of what it sends was shown.
+ * One that makes a thing (an email, an event, a task) stands as its draft,
+ * as in the chat.
  */
 const HeldItem = ({
   frame,
@@ -418,8 +422,30 @@ const HeldItem = ({
   source: Extract<InboxSource, { type: "held" }>;
 }) => {
   const { t } = useLingui();
+  const router = useRouter();
   const { action } = source;
   const shown = useShown(action);
+  const draft = draftOf(action);
+  if (draft !== undefined) {
+    const { title } = frame.item;
+    return (
+      <div {...stylex.props(styles.item)}>
+        <HeldWriteDraft
+          action={action}
+          draft={draft}
+          onDecided={async (done, confirmed) => {
+            // A refusal stays on the draft, in core's words, with the item.
+            if (done) {
+              frame.onSaid(
+                confirmed ? t`Approved: ${title}` : t`Declined: ${title}`
+              );
+              await router.invalidate({ sync: true });
+            }
+          }}
+        />
+      </div>
+    );
+  }
   return (
     <ApprovalFrame
       approveHeld={

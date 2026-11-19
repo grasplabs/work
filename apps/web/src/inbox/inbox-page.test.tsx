@@ -1,5 +1,11 @@
 // @vitest-environment happy-dom
 import type { Gap } from "@grasp-os/shared/brain";
+import type { PendingAction } from "@grasp-os/shared/connect";
+import {
+  agentIdSchema,
+  chatIdSchema,
+  workspaceIdSchema,
+} from "@grasp-os/shared/ids";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -77,13 +83,59 @@ const windowOf = (width: number): void => {
   );
 };
 
+/** A held email from a chat, as its tool describes it. */
+const heldEmail: PendingAction = {
+  id: "write-1",
+  subject: { type: "agent", agentId: agentIdSchema.parse("agent-1") },
+  appVersion: null,
+  mode: "interactive",
+  context: {
+    type: "chat",
+    workspaceId: workspaceIdSchema.parse("workspace-1"),
+    chatId: chatIdSchema.parse("chat-1"),
+  },
+  restricted: false,
+  permissionId: "permission-1",
+  connectionId: "connection-1",
+  connectionName: "Microsoft 365 (ada@acme.test)",
+  resource: "ada@acme.test",
+  action: "mail.send",
+  description: {
+    title: "Send an email",
+    fields: [
+      { input: "mailbox", label: "From", value: "ada@acme.test" },
+      { input: "to", label: "To", value: ["cleo@acme.test"] },
+      { input: "subject", label: "Subject", value: "Refunds" },
+      { input: "body", label: "Body", value: "Who approves a refund?" },
+    ],
+    complete: true,
+  },
+  idempotencyKey: "key-1",
+  input: JSON.stringify({
+    mailbox: "ada@acme.test",
+    to: ["cleo@acme.test"],
+    subject: "Refunds",
+    body: "Who approves a refund?",
+  }),
+  inputHash: "b".repeat(64),
+  requestedAt: "2026-11-17T10:00:00.000Z",
+  binding: null,
+};
+
 /**
- * The Inbox at `/inbox` for an admin, with the Brain's open `gaps` as what
- * waits, in a window `width` wide.
+ * The Inbox at `/inbox` for an admin, with the Brain's open `gaps` and the
+ * person's `held` writes as what waits, in a window `width` wide.
  */
-const shown = async (gaps: Gap[], width: number, at = "/inbox") => {
+const shown = async (
+  gaps: Gap[],
+  width: number,
+  at = "/inbox",
+  held: PendingAction[] = []
+) => {
   windowOf(width);
   let open = gaps;
+  let waitingWrites = held;
+  const decided: string[] = [];
   const brain = {
     answerGap: async (gap: string) => {
       await Promise.resolve();
@@ -91,26 +143,41 @@ const shown = async (gaps: Gap[], width: number, at = "/inbox") => {
       return {};
     },
   };
+  const pendingActions = {
+    confirm: async (id: string, hash: string) => {
+      await Promise.resolve();
+      decided.push(`confirm ${id} ${hash}`);
+      waitingWrites = waitingWrites.filter((write) => write.id !== id);
+    },
+    decline: async (id: string) => {
+      await Promise.resolve();
+      decided.push(`decline ${id}`);
+      waitingWrites = waitingWrites.filter((write) => write.id !== id);
+    },
+  };
   const core = {
     withSession: async <T,>(
-      action: (session: { brain: typeof brain }) => Promise<T>
-    ): Promise<T> => await action({ brain }),
+      action: (session: {
+        brain: typeof brain;
+        pendingActions: typeof pendingActions;
+      }) => Promise<T>
+    ): Promise<T> => await action({ brain, pendingActions }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const inbox = createRoute({
     getParentRoute: () => rootRoute,
     path: "/inbox",
     validateSearch: z.object({ item: z.string().optional() }),
-    loader: async (): Promise<Gap[]> => {
+    loader: async (): Promise<{ gaps: Gap[]; held: PendingAction[] }> => {
       await Promise.resolve();
-      return open;
+      return { gaps: open, held: waitingWrites };
     },
   });
   const Inbox = () => {
-    const waits: Gap[] = inbox.useLoaderData();
+    const { gaps: waits, held: writes } = inbox.useLoaderData();
     const { item } = inbox.useSearch();
     const waiting = {
-      held: { state: "ready", data: [] },
+      held: { state: "ready", data: writes },
       outcomes: { state: "ready", data: [] },
       notifications: {
         state: "ready",
@@ -158,6 +225,8 @@ const shown = async (gaps: Gap[], width: number, at = "/inbox") => {
   return {
     /** The item in the address, as a link would carry it. */
     item: () => router.state.location.search.item,
+    /** What core was told of each held write. */
+    decided,
   };
 };
 
@@ -273,6 +342,39 @@ describe("the inbox in the shell", () => {
     expect(document.querySelector("output")?.textContent).toBe(
       "Answered: Who pays the invoices?"
     );
+  });
+
+  it("shows a held email as its draft, and Send confirms exactly its input and the item leaves", async () => {
+    const page = await shown(three(), 1440, "/inbox?item=held:write-1", [
+      heldEmail,
+    ]);
+    const draft = document.querySelector(
+      "section[aria-label='Email: Refunds']"
+    );
+    const atFirst = {
+      draft: draft !== null,
+      subject: draft?.querySelector("input")?.value,
+    };
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        // The press's words, then what it says while working, hidden till then.
+        .find((each) => each.textContent.trim().startsWith("Send"))
+        ?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect({
+      atFirst,
+      decided: page.decided,
+      left: document.querySelector("section[aria-label='Email: Refunds']"),
+      said: document.querySelector("output")?.textContent,
+    }).toStrictEqual({
+      atFirst: { draft: true, subject: "Refunds" },
+      decided: [`confirm write-1 ${"b".repeat(64)}`],
+      left: null,
+      said: "Approved: Approve Send an email on Microsoft 365 (ada@acme.test)?",
+    });
   });
 
   it("opens an item as the shell's sheet on a phone once its row is pressed, and closing it leaves the item", async () => {
