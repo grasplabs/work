@@ -344,7 +344,7 @@ export interface BrainSharedPage {
 
 /** The person's memories, over `/rpc` as `session.brainMemories`. */
 export interface BrainMemoriesApi {
-  /** Undoes a memory saved for them in their own word: it stops being current, and stays as history. */
+  /** Undoes a memory saved for them in their own word: it stops being current, and stays as history; what its save replaced is current again. */
   forget: (memory: string) => Promise<BrainMemoryOutcome>;
   /** A page of the entities of `kind` they may see: their own store's first, then the shared one's. */
   entities: (

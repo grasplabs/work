@@ -1153,6 +1153,37 @@ describe("the agent remembering in a person's own chat", () => {
     }
   );
 
+  it(
+    "brings back nothing a memory replaced when the person corrects it on their Memories page",
+    slow,
+    async () => {
+      const member = await signedInApi(idp, "user");
+      const person = member.userId;
+      const pizza = await lovesPizza(person);
+      const sushi = await rememberAs(env, person, {
+        change: `chat:${crypto.randomUUID()}:call`,
+        about: { kind: "person", own: true },
+        attribute: "preference",
+        value: "sushi",
+        type: "preference",
+        statement: "Loves sushi",
+        quote: "it's sushi now",
+        replaces: [pizza],
+      });
+      await member.api.brainMemories.correct({
+        wrong: { store: "own", entity: sushi.entity, memory: sushi.memory },
+        right: "Loves ramen",
+        change: crypto.randomUUID(),
+      });
+
+      await expect(ownHistoryOf(person)).resolves.toStrictEqual({
+        "Loves pizza": false,
+        "Loves sushi": false,
+        "Loves ramen": true,
+      });
+    }
+  );
+
   it("never makes the person into an entity named me", slow, async () => {
     const member = await signedInApi(idp, "user");
     const chats = await personalChatsOf(
