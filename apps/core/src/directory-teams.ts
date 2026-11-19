@@ -273,7 +273,10 @@ const memberPlacementOf = async (
  * That `team` follows the directory's groups, as SQL: a group mapped to
  * it was read whole since. No department fills such a team.
  */
-const followsGroups = (kind: DirectoryKind, team: SQL): SQL => sql`EXISTS (
+export const followsGroups = (
+  kind: DirectoryKind,
+  team: SQL
+): SQL => sql`EXISTS (
   SELECT 1 FROM ${directoryGroupTeams}
   WHERE ${directoryGroupTeams.provider} = ${kind.provider}
     AND ${directoryGroupTeams.teamId} = ${team}
@@ -314,6 +317,20 @@ const filled = (kind: DirectoryKind, user: SQL, team: SQL): SQL => sql`EXISTS (
     AND ${team}
     AND NOT ${followsGroups(kind, sql`${directoryDepartments.teamId}`)}
 )`;
+
+/**
+ * That the directory, as `kind`'s read holds it, wants `user` in `team`,
+ * as SQL: a group of `team`'s lists them, or, for a team that doesn't
+ * follow groups, their department fills it. The read joins whom it wants
+ * (`placementStatements`); Settings shows whom it put in a team it no
+ * longer wants them in (directory-placement.ts).
+ */
+export const directoryWants = (
+  kind: DirectoryKind,
+  user: SQL,
+  team: SQL
+): SQL => sql`(${filled(kind, user, sql`${directoryDepartments.teamId} = ${team}`)}
+  OR ${grouped(kind, user, team)})`;
 
 /**
  * That an admin kept `user` in `team` by hand (`kept`), or out of it, as
@@ -383,8 +400,7 @@ export const placementStatements = (
   // A link names only a team that exists, which takes its links with it.
   // A tie names an active member, but at sign-in the tie is a batch of its
   // own: whether they still are one is asked again here.
-  const joinable = sql`(${filled(kind, user, sql`${directoryDepartments.teamId} = ${team}`)}
-      OR ${grouped(kind, user, team)})
+  const joinable = sql`${directoryWants(kind, user, team)}
     AND ${activeMember(user)}
     AND NOT ${pinned(user, team, false)}
     AND NOT EXISTS (
