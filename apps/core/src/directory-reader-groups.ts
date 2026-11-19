@@ -47,13 +47,18 @@ import {
 // - A member removed from a group: their row goes at the group's next
 //   whole read, half a day after the last at most while reads work, and
 //   counts for nothing a day after the last whole read whatever happens.
-// - Two writers undoing each other: a group mapped to a team is the daily
-//   read's (directory-group-reads.ts), which alone can place its members
-//   and mark the mapping read in one batch; this read skips it, checked
-//   in each statement that writes, so a group mapped meanwhile is left to
-//   the daily read. An older run landing after a newer one writes
-//   nothing: each batch holds only while no run of a later slot recorded
-//   a read of the group (`directory_read_at`).
+//   Only a whole read moves when a group was last read
+//   (`directory_read_at`): one that fails is due again at the next run.
+// - Two writers undoing each other: a group the daily read has read for
+//   the team it is mapped to is that read's (directory-group-reads.ts),
+//   which alone can place its members and mark the mapping read in one
+//   batch; this read skips it, checked in each statement that writes, so
+//   one the daily read reads meanwhile is left to it. Until the daily read
+//   has read a newly mapped group, this read goes on with it, so its
+//   members' proof doesn't lapse; placement waits for the daily read. An
+//   older run landing after a newer one writes nothing: each batch holds
+//   only while no run of a later slot tried the group
+//   (`directory_tried_at`).
 // - A group of another tenant: only names in the deployment's own Entra
 //   tenant are read; another's is proved only by its member's own
 //   connection.
@@ -62,9 +67,10 @@ import {
 //   (directory-groups.ts `unmap`).
 // - Too many groups: a run sends connect at most as many calls as the
 //   personal reads of groups may (`readerGroupRequestsPerTick`), stops at
-//   the clock's lease, and the rest are read in the next quarter hour,
-//   the longest unread first. A group whose read fails has its turn spent
-//   all the same, so one that keeps failing holds up no other.
+//   the clock's lease, and the rest wait unread for the next quarter
+//   hour. Groups are taken the longest untried first, so a group whose
+//   read fails goes behind the others (`directory_tried_at`), and one
+//   that keeps failing holds up no other.
 
 /** How long after a group's last read it is read again: half the proof's day, so a failed read has time to be tried again before the proof lapses. */
 const readAgainAfterMs = readerProofMaxAgeMs / 2;
@@ -74,13 +80,15 @@ const namePrefixOf = (tenant: string): string =>
   `${entraGroupPrefix}${tenant}:`;
 
 /**
- * That the row being considered (`directory_group_members`) belongs to a
- * group mapped to a team, as SQL.
+ * That the group `groupId` is mapped to a team, as SQL; with `readForTeam`,
+ * only once the daily read has read it for that team (the mapping's
+ * `read_at`), from when its rows are that read's.
  */
-const mapped = (groupId: SQL | string): SQL => sql`EXISTS (
+const mapped = (groupId: SQL | string, readForTeam = false): SQL => sql`EXISTS (
   SELECT 1 FROM ${directoryGroupTeams}
   WHERE ${directoryGroupTeams.provider} = ${entra.provider}
     AND ${directoryGroupTeams.groupId} = ${groupId}
+    ${readForTeam ? sql`AND ${directoryGroupTeams.readAt} IS NOT NULL` : sql``}
 )`;
 
 /**
@@ -113,30 +121,35 @@ export const unneededGroupRows = (db: DrizzleD1Database, groupId?: string) =>
     );
 
 /**
- * The statements that keep the read of `groupId` (Brain name `name`) the
- * clock's run of the slot `slot` made, started at `startedAt`: its users'
- * rows replaced by those of `users` the daily read keeps, each from
- * `startedAt`, unless it is held or failed (`users` null); and the read
- * recorded at `slot`. Each only while the group isn't mapped and no run of
- * a later slot recorded a read of it.
+ * The statements that keep what the clock's run of the slot `slot` found
+ * of `groupId` (Brain name `name`), its read started at `startedAt`: its
+ * users' rows replaced by those of `users` the daily read keeps, each from
+ * `startedAt` (none when it was read whole but proves nothing: `null`);
+ * the group recorded as tried at `slot`, and as read when it was read
+ * whole (`whole`). Each only while the daily read hasn't read the group
+ * for its team and no run of a later slot tried it.
  */
 const keptRead = (
   db: DrizzleD1Database,
   tenant: string,
   { groupId, name }: { groupId: string; name: string },
-  users: readonly string[] | null,
+  { whole, users }: { whole: boolean; users: readonly string[] | null },
   { slot, startedAt }: { slot: number; startedAt: number }
 ) => {
   const { provider } = entra;
   // Checked in each statement, as written: the record goes last.
-  const ours = sql`NOT ${mapped(groupId)} AND NOT EXISTS (
+  const ours = sql`NOT ${mapped(groupId, true)} AND NOT EXISTS (
     SELECT 1 FROM ${sourceReaderGroups}
     WHERE ${sourceReaderGroups.name} = ${name}
-      AND ${sourceReaderGroups.directoryReadAt} > ${slot}
+      AND ${sourceReaderGroups.directoryTriedAt} > ${slot}
   )`;
   const record = db
     .update(sourceReaderGroups)
-    .set({ directoryReadAt: new Date(slot) })
+    .set(
+      whole
+        ? { directoryTriedAt: new Date(slot), directoryReadAt: new Date(slot) }
+        : { directoryTriedAt: new Date(slot) }
+    )
     .where(and(eq(sourceReaderGroups.name, name), ours));
   if (users === null) {
     return [record] as const;
@@ -173,9 +186,10 @@ const keptRead = (
 
 /**
  * The clock's read of the Entra groups reader lists name (clock.ts), every
- * quarter hour: each named group of the deployment's tenant, not mapped
- * to a team, whose last read is half a day old or that was never read,
- * the longest unread first, one at a time, each kept in its own batch.
+ * quarter hour: each named group of the deployment's tenant that the daily
+ * read hasn't read for a team, whose last whole read is half a day old or
+ * that was never read whole, the longest untried first, one at a time,
+ * each kept in its own batch.
  */
 export const readReaderGroups = async (env: Env, at: Date): Promise<void> => {
   const config = signInConfig(env);
@@ -204,12 +218,13 @@ export const readReaderGroups = async (env: Env, at: Date): Promise<void> => {
             new Date(at.getTime() - readAgainAfterMs)
           )
         ),
-        sql`NOT ${mapped(sql`substr(${sourceReaderGroups.name}, ${prefix.length + 1})`)}`
+        sql`NOT ${mapped(sql`substr(${sourceReaderGroups.name}, ${prefix.length + 1})`, true)}`
       )
     )
     .orderBy(
-      sql`${sourceReaderGroups.directoryReadAt} IS NOT NULL`,
-      asc(sourceReaderGroups.directoryReadAt)
+      sql`${sourceReaderGroups.directoryTriedAt} IS NOT NULL`,
+      asc(sourceReaderGroups.directoryTriedAt),
+      asc(sourceReaderGroups.name)
     );
   const deadline = at.getTime() + clockLeaseMs;
   const run = { calls: 0 };
@@ -234,39 +249,44 @@ export const readReaderGroups = async (env: Env, at: Date): Promise<void> => {
     }
     const groupId = name.slice(prefix.length);
     const startedAt = Date.now();
-    let users: string[] | null = null;
-    let stopped: unknown = null;
+    let found: { whole: boolean; users: string[] | null };
     try {
       // oxlint-disable-next-line no-await-in-loop -- one group at a time, within the run's calls
       const read = await readWholeGroup(env, connection, counted, groupId);
-      // Held: gone or refused, or members that can't all be read.
-      if (
-        !("held" in read) &&
-        read.group.refusal !== "hidden_membership" &&
-        read.group.refusal !== "unknown"
-      ) {
-        ({ users } = read);
+      if ("held" in read) {
+        // Gone or refused: not read whole.
+        found = { whole: false, users: null };
+      } else {
+        const { refusal } = read.group;
+        // Read whole, but its members can't all be read: it proves nothing.
+        const provesNothing =
+          refusal === "hidden_membership" || refusal === "unknown";
+        found = { whole: true, users: provesNothing ? null : read.users };
       }
     } catch (error) {
-      stopped = error;
+      const code = directoryErrors.codeOf(error);
+      log.warn("directory.reader_group_failed", {
+        ...errorFields(error),
+        code,
+      });
+      // The run's calls or lease spent, or a connection that can't read
+      // groups at all: the rest wait for the next run, this one untried.
+      if (
+        code === "directory.read_too_long" ||
+        code === "directory.groups_not_granted"
+      ) {
+        return;
+      }
+      // Throttling, a server error: tried, not read, so it goes behind the
+      // others and is due again at the next run; its rows stay as they were.
+      found = { whole: false, users: null };
     }
-    // A group's turn is spent whether its read worked or not, so one that
-    // keeps failing holds up no other: its rows stay as they were.
     // oxlint-disable-next-line no-await-in-loop -- each group's own batch
     await db.batch([
-      ...keptRead(db, tenant, { groupId, name }, users, {
+      ...keptRead(db, tenant, { groupId, name }, found, {
         slot: at.getTime(),
         startedAt,
       }),
     ]);
-    if (stopped !== null) {
-      // Throttling, a server error, a connection that can't read groups,
-      // the run's calls or lease spent: the rest wait for the next run.
-      log.warn("directory.reader_groups_stopped", {
-        ...errorFields(stopped),
-        code: directoryErrors.codeOf(stopped),
-      });
-      return;
-    }
   }
 };

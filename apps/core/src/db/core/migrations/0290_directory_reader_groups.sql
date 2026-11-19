@@ -14,4 +14,5 @@ DROP TABLE `directory_group_members`;--> statement-breakpoint
 ALTER TABLE `__new_directory_group_members` RENAME TO `directory_group_members`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
 CREATE INDEX `directory_group_members_person_idx` ON `directory_group_members` (`provider`,`tenant`,`account_id`);--> statement-breakpoint
-ALTER TABLE `source_reader_groups` ADD `directory_read_at` integer;
+ALTER TABLE `source_reader_groups` ADD `directory_read_at` integer;--> statement-breakpoint
+ALTER TABLE `source_reader_groups` ADD `directory_tried_at` integer;

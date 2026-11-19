@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
+import { readerGroupRequestsPerTick } from "../src/source-readers.ts";
 import { landingAt } from "./d1-landing.ts";
 import {
   connectedDirectory,
@@ -65,6 +66,19 @@ const readDirectory = async (at = later()): Promise<void> => {
 /** The clock's read of the groups reader lists name, at `at`. */
 const readGroups = async (at = later()): Promise<void> => {
   await runClockTask("directory.reader_groups", {}, at);
+};
+
+/**
+ * The clock's read of the groups reader lists name, at `ms` as both its
+ * slot and the clock's time: so the rows it keeps date from then.
+ */
+const readGroupsAsOf = async (ms: number): Promise<void> => {
+  vi.useFakeTimers({ toFake: ["Date"], now: ms });
+  try {
+    await runClockTask("directory.reader_groups", {}, new Date(ms));
+  } finally {
+    vi.useRealTimers();
+  }
 };
 
 /** Someone who signed in with Microsoft under a new object ID, as a member. */
@@ -550,6 +564,166 @@ describe("a member's Entra groups proved by the company's directory", () => {
         landed: landed(),
         ann: await finds(ann.userId, file, marker),
       }).toStrictEqual({ landed: true, ann: false });
+    }
+  );
+
+  it(
+    "try a group whose read failed again at the next run, so one failure cuts nobody off",
+    setUpTime,
+    async () => {
+      await connectedDirectory(idp);
+      const [ann, bob] = [await member(), await member()];
+      await directoryHolds(
+        [ann, bob].map(({ oid }) => inDirectory({ id: oid }))
+      );
+      const finance = group();
+      const id = String(finance.id);
+      await directoryGroupsHold([finance], { [id]: listing(ann) });
+      await readDirectory();
+      const marker = uniqueWord();
+      const file = await sharedWith(marker, entraGroup(finance.id));
+      const start = Date.now();
+      await readGroupsAsOf(start);
+      // Bob joins; the read half a day on is throttled, the next one works.
+      await directoryGroupsHold([finance], { [id]: listing(ann, bob) });
+      await directoryGroupFails(id, 429);
+      await readGroupsAsOf(start + 12 * hourMs + 15 * 60_000);
+      await directoryGroupsHold([finance], { [id]: listing(ann, bob) });
+      await readGroupsAsOf(start + 12 * hourMs + 30 * 60_000);
+
+      expect({
+        refreshed: await finds(bob.userId, file, marker),
+        annJustAfterTheDay: await finds(
+          ann.userId,
+          file,
+          marker,
+          dayMs + 15 * 60_000
+        ),
+      }).toStrictEqual({ refreshed: true, annJustAfterTheDay: true });
+    }
+  );
+
+  it(
+    "write nothing of a group the daily read reads for its new team while this read reads it",
+    setUpTime,
+    async () => {
+      const { admin } = await connectedDirectory(idp);
+      const [ann, cy] = [await member(), await member()];
+      await directoryHolds(
+        [ann, cy].map(({ oid }) => inDirectory({ id: oid }))
+      );
+      const finance = group();
+      const id = String(finance.id);
+      await directoryGroupsHold([finance], { [id]: listing(ann) });
+      await readDirectory();
+      const marker = uniqueWord();
+      const file = await sharedWith(marker, entraGroup(finance.id));
+      const team = await teamNamed(admin.session, `Finance ${unique()}`);
+      const { coreEnv, landed } = landingAt(
+        /update "source_reader_groups"/iu,
+        "before",
+        async () => {
+          // Mapped, Cy joins, and the daily read reads it for its team.
+          await admin.api.directoryGroups.mapToTeam(id, team);
+          await directoryGroupsHold([finance], { [id]: listing(ann, cy) });
+          await readDirectory();
+        }
+      );
+      await runClockTask(
+        "directory.reader_groups",
+        { DB: coreEnv.DB },
+        later()
+      );
+
+      expect({
+        landed: landed(),
+        cy: await finds(cy.userId, file, marker),
+        cysTeams: await teamsOf(cy.userId),
+        rows: await rowsOf(cy.oid),
+      }).toStrictEqual({ landed: true, cy: true, cysTeams: [team], rows: 1 });
+    }
+  );
+
+  it(
+    "go on proving a named group once it is mapped to a team, until the daily read reads it for that team, which alone places its members",
+    setUpTime,
+    async () => {
+      const { admin } = await connectedDirectory(idp);
+      const [ann, bob] = [await member(), await member()];
+      await directoryHolds(
+        [ann, bob].map(({ oid }) => inDirectory({ id: oid }))
+      );
+      const finance = group();
+      const id = String(finance.id);
+      await directoryGroupsHold([finance], { [id]: listing(ann) });
+      await readDirectory();
+      const marker = uniqueWord();
+      const file = await sharedWith(marker, entraGroup(finance.id));
+      const first = later();
+      await readGroups(first);
+      const team = await teamNamed(admin.session, `Finance ${unique()}`);
+      await admin.api.directoryGroups.mapToTeam(id, team);
+      await directoryGroupsHold([finance], { [id]: listing(ann, bob) });
+      await readGroups(new Date(first.getTime() + 13 * hourMs));
+      const beforeDailyRead = {
+        bob: await finds(bob.userId, file, marker),
+        teams: [...(await teamsOf(ann.userId)), ...(await teamsOf(bob.userId))],
+      };
+      await readDirectory();
+
+      expect({
+        beforeDailyRead,
+        afterDailyRead: {
+          bob: await finds(bob.userId, file, marker),
+          ann: await teamsOf(ann.userId),
+          bobs: await teamsOf(bob.userId),
+        },
+      }).toStrictEqual({
+        beforeDailyRead: { bob: true, teams: [] },
+        afterDailyRead: { bob: true, ann: [team], bobs: [team] },
+      });
+    }
+  );
+
+  // Last: it leaves many groups named.
+  it(
+    "read no more groups in a run than its calls cover, and leave the rest unread for the next",
+    { timeout: 300_000 },
+    async () => {
+      await connectedDirectory(idp);
+      const ann = await member();
+      await directoryHolds([inDirectory({ id: ann.oid })]);
+      // Taken after every group below: they go by ID when none was tried.
+      const finance = group({
+        id: `ffffffff-ffff-4fff-bfff-${crypto.randomUUID().slice(-12)}`,
+      });
+      await directoryGroupsHold([finance], {
+        [String(finance.id)]: listing(ann),
+      });
+      await readDirectory();
+      // As many named groups as one run's calls cover, none in the
+      // directory any more: each is one call.
+      const tenant = acmeTenant.toLowerCase();
+      const gone = Array.from(
+        { length: readerGroupRequestsPerTick },
+        (_, at) =>
+          `group:microsoft:${tenant}:00000000-0000-4000-8000-${at.toString(16).padStart(12, "0")}`
+      );
+      await env.DB.prepare(
+        "INSERT INTO source_reader_groups (name) SELECT value FROM json_each(?)"
+      )
+        .bind(JSON.stringify(gone))
+        .run();
+      const marker = uniqueWord();
+      const file = await sharedWith(marker, entraGroup(finance.id));
+      await readGroups();
+      const afterOneRun = await finds(ann.userId, file, marker);
+      await readGroups();
+
+      expect({
+        afterOneRun,
+        afterTheNext: await finds(ann.userId, file, marker),
+      }).toStrictEqual({ afterOneRun: false, afterTheNext: true });
     }
   );
 });

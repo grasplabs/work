@@ -286,7 +286,7 @@ export const readerPrincipalsOf = async (
   const nameGroups = db
     .insert(sourceReaderGroups)
     .select(
-      sql`SELECT value, NULL FROM json_each(${JSON.stringify(named)}) WHERE true`
+      sql`SELECT value, NULL, NULL FROM json_each(${JSON.stringify(named)}) WHERE true`
     )
     .onConflictDoNothing();
   // The place's pairs: of the readers named by a group or a tenant, and

@@ -780,8 +780,7 @@ export const directoryGroupMembers = sqliteTable(
     /**
      * When the read that last listed them in the group started: a proof
      * of the group for a reader list counts a day from it
-     * (source-readers.ts `provedGroupsOf`). 0, which proves nothing, for
-     * a row a release before this one wrote.
+     * (source-readers.ts `provedGroupsOf`). 0 proves nothing.
      */
     readAt: timestamp("read_at")
       .notNull()
@@ -7320,12 +7319,18 @@ export const sourceReaderTokens = sqliteTable(
 export const sourceReaderGroups = sqliteTable("source_reader_groups", {
   name: text().primaryKey(),
   /**
-   * When the directory's read of an Entra group's members
-   * (directory-reader-groups.ts, GRA-2146) last started on it, whether it
-   * read the group whole or held it; null while it never has. Only paces
-   * those reads: what proves a group is `directory_group_members.read_at`.
+   * The clock's slot of the directory's last whole read of an Entra
+   * group's members (directory-reader-groups.ts, GRA-2146); null while it
+   * never read it whole. Only paces those reads: what proves a group is
+   * `directory_group_members.read_at`.
    */
   directoryReadAt: timestamp("directory_read_at"),
+  /**
+   * The clock's slot of the directory's last try of the group, whether it
+   * read it whole or not: the reads take groups the longest untried
+   * first, so one that keeps failing holds up no other.
+   */
+  directoryTriedAt: timestamp("directory_tried_at"),
 });
 
 /**

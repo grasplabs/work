@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "741c06a4-812b-4a34-937f-6a58cf867018",
+  "id": "f0140c2c-ea85-443a-8750-15b03e34152c",
   "prevId": "7af54b26-0e96-4135-85a6-5b5cf49a10af",
   "tables": {
     "access_revocations": {
@@ -12786,6 +12786,13 @@
         },
         "directory_read_at": {
           "name": "directory_read_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "directory_tried_at": {
+          "name": "directory_tried_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
