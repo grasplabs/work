@@ -223,11 +223,11 @@ export const members = sqliteTable(
      */
     suspendedBy: text("suspended_by"),
     /**
-     * When an admin lifted their suspension and kept them active: the
-     * directory's read never suspends them while it is set, until an
-     * admin lets the directory decide again (members.ts). Who did it is
-     * the audit log's (`member.suspension_lifted`). Null for the
-     * directory to decide.
+     * Unused, and always null: the lift by hand it was added for was
+     * taken back (GRA-2141), as only the directory lifts a suspension.
+     * Nothing reads or writes it. Dropped by a later contract migration,
+     * as columns go only once no release a client may roll back to has
+     * them.
      */
     keptActiveAt: timestamp("kept_active_at"),
   },

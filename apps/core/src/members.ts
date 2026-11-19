@@ -25,17 +25,7 @@ import {
 } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gt,
-  isNotNull,
-  isNull,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -194,11 +184,7 @@ const stillAdmin = async (env: Env, userId: string): Promise<boolean> => {
 
 const memberEntry = (
   by: Identity,
-  action:
-    | "member.removed"
-    | "member.sessions.revoked"
-    | "member.suspension_lifted"
-    | "member.kept_active_released",
+  action: "member.removed" | "member.sessions.revoked",
   memberId: string,
   userId: string
 ): AuditEntry => ({
@@ -222,7 +208,6 @@ export const membersOf = async (env: Pick<Env, "DB">): Promise<Member[]> => {
       role: members.role,
       joinedAt: members.createdAt,
       suspendedAt: members.suspendedAt,
-      keptActiveAt: members.keptActiveAt,
       // Their account as the directory read holds it now: none for one it
       // no longer holds. One account each (accounts are never linked);
       // ordered all the same, so the answer never depends on the scan.
@@ -253,7 +238,7 @@ export const membersOf = async (env: Pick<Env, "DB">): Promise<Member[]> => {
     )
     .orderBy(asc(users.name), asc(users.id));
   return rows.flatMap(
-    ({ role, joinedAt, suspendedAt, keptActiveAt, directory, ...member }) => {
+    ({ role, joinedAt, suspendedAt, directory, ...member }) => {
       // A role that isn't ours gives no access, so it isn't listed as one.
       const parsed = roleSchema.safeParse(role);
       return parsed.success
@@ -268,13 +253,6 @@ export const membersOf = async (env: Pick<Env, "DB">): Promise<Member[]> => {
                   : {
                       since: suspendedAt.toISOString(),
                       reason: directory ?? "unlisted",
-                    },
-              keptActive:
-                keptActiveAt === null
-                  ? null
-                  : {
-                      since: keptActiveAt.toISOString(),
-                      directory: directory ?? "unlisted",
                     },
             },
           ]
@@ -553,101 +531,6 @@ const releaseTeamPin = async (
       target: { type: "team", id: team.data },
       detail: { userId: person.data },
     }),
-  ]);
-  if (released.length === 0 && !(await stillAdmin(env, by.userId))) {
-    throw refusal(by, roleErrors.create("role.forbidden"));
-  }
-  return { released: released.length > 0 };
-};
-
-/**
- * Lifts the suspension of the member `userId` and keeps them active
- * (GRA-2141): the directory's read skips a member so marked
- * (directory-suspensions.ts) until an admin lets it decide again. One
- * statement clears the suspension and sets the mark together, so a read
- * landing on either side of it finds both or neither. Only while they are
- * suspended, are a member (a removal deletes the row), and the admin still
- * is one; audited. It mints no session: they sign in again.
- */
-const liftSuspension = async (
-  env: Env,
-  by: Identity,
-  userId: unknown
-): Promise<void> => {
-  requireMemberAdmin(by);
-  const target = targetOf(by, userId);
-  const membership = await membershipOf(env, target);
-  if (!membership) {
-    throw refusal(by, memberErrors.create("member.not_found"));
-  }
-  const db = drizzle(env.DB);
-  const [lifted] = await auditedBatch(env, db, [
-    db
-      .update(members)
-      .set({ suspendedAt: null, suspendedBy: null, keptActiveAt: new Date() })
-      .where(
-        and(
-          eq(members.organizationId, organizationId),
-          eq(members.userId, target),
-          isNotNull(members.suspendedAt),
-          isActiveAdmin(by.userId)
-        )
-      )
-      .returning({ id: members.id }),
-    outboxedIfChanged(
-      db,
-      memberEntry(by, "member.suspension_lifted", membership.id, target)
-    ),
-  ]);
-  if (lifted.length > 0) {
-    return;
-  }
-  if (!(await stillAdmin(env, by.userId))) {
-    throw refusal(by, roleErrors.create("role.forbidden"));
-  }
-  throw refusal(
-    by,
-    (await membershipOf(env, target))
-      ? memberErrors.create("member.not_suspended")
-      : memberErrors.create("member.not_found")
-  );
-};
-
-/**
- * Lets the directory's read decide again whether the member `userId` is
- * suspended: takes away the mark `liftSuspension` left. Nothing changes
- * until the next read. Only while the admin still is one, in the same
- * statement; audited when a mark went.
- */
-const letDirectoryDecide = async (
-  env: Env,
-  by: Identity,
-  userId: unknown
-): Promise<{ released: boolean }> => {
-  requireMemberAdmin(by);
-  const target = targetOf(by, userId);
-  const membership = await membershipOf(env, target);
-  if (!membership) {
-    throw refusal(by, memberErrors.create("member.not_found"));
-  }
-  const db = drizzle(env.DB);
-  const [released] = await auditedBatch(env, db, [
-    db
-      .update(members)
-      .set({ keptActiveAt: null })
-      .where(
-        and(
-          eq(members.organizationId, organizationId),
-          eq(members.userId, target),
-          isNotNull(members.keptActiveAt),
-          isActiveAdmin(by.userId)
-        )
-      )
-      .returning({ id: members.id }),
-    outboxedIfChanged(
-      db,
-      memberEntry(by, "member.kept_active_released", membership.id, target)
-    ),
   ]);
   if (released.length === 0 && !(await stillAdmin(env, by.userId))) {
     throw refusal(by, roleErrors.create("role.forbidden"));
@@ -1162,19 +1045,6 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await releaseTeamPin(this.#env, person, userId, teamId)
-    );
-  }
-
-  async liftSuspension(userId: string): Promise<void> {
-    await withPerson(this.#check, async (person) => {
-      await liftSuspension(this.#env, person, userId);
-    });
-  }
-
-  async letDirectoryDecide(userId: string): Promise<{ released: boolean }> {
-    return await withPerson(
-      this.#check,
-      async (person) => await letDirectoryDecide(this.#env, person, userId)
     );
   }
 
