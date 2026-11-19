@@ -92,6 +92,7 @@ const opened = async (
         <TileGrid label="Apps">
           {integrations.map((integration) => (
             <IntegrationTile
+              identity={identity}
               integration={integration}
               key={integration.key}
               open={false}
@@ -184,6 +185,12 @@ describe("the Integrations overview", () => {
     const { host } = await opened(
       [connection("google", { status: "needs_reauth" })],
       member
+    );
+    const tile = [
+      ...host.querySelectorAll<HTMLElement>('ul[aria-label="Apps"] li'),
+    ].find((each) => heard(each).startsWith("Google Workspace"));
+    expect(tile === undefined ? "" : heard(tile)).toBe(
+      "Google WorkspaceWaiting for an admin"
     );
     expect(host.textContent).toContain(
       "An admin needs to connect Google Workspace again."

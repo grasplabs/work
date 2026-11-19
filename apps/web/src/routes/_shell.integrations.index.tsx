@@ -222,6 +222,7 @@ const Connected = ({
   uses: readonly ConnectionWorkflows[] | undefined;
   open: string | undefined;
 }) => {
+  const { identity } = Route.useRouteContext();
   const { t } = useLingui();
   const shown = [...sections.lapsed, ...sections.connected, ...sections.unused];
   if (shown.length === 0) {
@@ -236,6 +237,7 @@ const Connected = ({
       <TileGrid label={title}>
         {shown.map((integration) => (
           <IntegrationTile
+            identity={identity}
             integration={integration}
             key={integration.key}
             open={integration.key === open}
@@ -257,6 +259,7 @@ const Drawn = ({
   label: string;
   open: string | undefined;
 }) => {
+  const { identity } = Route.useRouteContext();
   const [drawn, setDrawn] = useState(step);
   // The end of what is drawn: once it is near the page, well before it
   // shows, more is drawn. It is a new mark after every step, so it is
@@ -284,6 +287,7 @@ const Drawn = ({
       <TileGrid label={label}>
         {integrations.slice(0, drawn).map((integration) => (
           <IntegrationTile
+            identity={identity}
             integration={integration}
             key={integration.key}
             open={integration.key === open}
@@ -310,6 +314,7 @@ const Kinds = ({
   others: readonly Integration[];
   open: string | undefined;
 }) => {
+  const { identity } = Route.useRouteContext();
   const { t, i18n } = useLingui();
   return catalogGroups.map((group) => {
     const ofKind = others.filter((integration) => integration.group === group);
@@ -323,6 +328,7 @@ const Kinds = ({
         <TileGrid label={label}>
           {ofKind.slice(0, perKind).map((integration) => (
             <IntegrationTile
+              identity={identity}
               integration={integration}
               key={integration.key}
               open={integration.key === open}

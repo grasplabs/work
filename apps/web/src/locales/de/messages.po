@@ -17596,6 +17596,7 @@ msgid "Waiting for a decision"
 msgstr "Wartet auf eine Entscheidung"
 
 #: src/apps/app-webhooks.tsx
+#: src/connections/integration-tile.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Waiting for an admin"
 msgstr "Wartet auf einen Admin"

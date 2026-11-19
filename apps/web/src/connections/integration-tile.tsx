@@ -1,4 +1,4 @@
-import { oauthProviderSchema } from "@grasp-os/shared/connect-names";
+import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -16,6 +16,7 @@ import {
 } from "../grasp/item/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { groupLabel } from "./groups.ts";
+import { fixOf } from "./integrations-header.tsx";
 import type { Integration } from "./integrations.ts";
 import { reliedOnLapsed, workflowsOf } from "./integrations.ts";
 import { ProviderMark } from "./provider-mark.tsx";
@@ -65,23 +66,25 @@ export const TileGrid = ({
 const ConnectedFact = ({
   integration,
   uses,
+  identity,
 }: {
   integration: Integration;
   /** Which workflows use each connection, once read. */
   uses: readonly ConnectionWorkflows[] | undefined;
+  identity: Pick<Identity, "role" | "staff">;
 }) => {
   const { t } = useLingui();
   // Amber, the one sign that something needs someone; the small badge
-  // keeps the tile's height (the grid sets it either way).
-  // Only Grasp's Microsoft and Google connectors can be signed in to
-  // again; anything else is connected anew.
+  // keeps the tile's height (the grid sets it either way). It says what
+  // this person can do, as the header card does (`fixOf`): sign in again,
+  // connect it anew, or wait for an admin who can.
   if (reliedOnLapsed(integration, uses)) {
+    const fix = fixOf(integration, identity);
     return (
       <Badge size="sm" tone="attention">
-        {integration.source === "native" &&
-        oauthProviderSchema.safeParse(integration.id).success
-          ? t`Sign in again`
-          : t`Connect again`}
+        {fix === "sign-in" ? t`Sign in again` : null}
+        {fix === "reconnect" ? t`Connect again` : null}
+        {fix === "none" ? t`Waiting for an admin` : null}
       </Badge>
     );
   }
@@ -113,8 +116,11 @@ export const IntegrationTile = ({
   integration,
   uses,
   open,
+  identity,
 }: {
   integration: Integration;
+  /** Who looks: what a tile that needs someone says depends on what they may do. */
+  identity: Pick<Identity, "role" | "staff">;
   uses?: readonly ConnectionWorkflows[] | undefined;
   /** It is the one open beside the list. */
   open: boolean;
@@ -147,7 +153,11 @@ export const IntegrationTile = ({
           <ItemTitle>{integration.name}</ItemTitle>
           <ItemDescription>
             {connected ? (
-              <ConnectedFact integration={integration} uses={uses} />
+              <ConnectedFact
+                identity={identity}
+                integration={integration}
+                uses={uses}
+              />
             ) : (
               <Kind integration={integration} />
             )}

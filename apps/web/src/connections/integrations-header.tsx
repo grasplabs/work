@@ -59,9 +59,9 @@ const styles = stylex.create({
  * signed in to again (a Composio toolkit) and connect it anew, from its
  * Sheet; or nothing, when only an admin can.
  */
-type Fix = "sign-in" | "reconnect" | "none";
+export type Fix = "sign-in" | "reconnect" | "none";
 
-const fixOf = (
+export const fixOf = (
   integration: Integration,
   identity: Pick<Identity, "role" | "staff">
 ): Fix => {
