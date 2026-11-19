@@ -25,6 +25,7 @@ import {
 } from "./app-settings.tsx";
 import type { AppSettingsSection } from "./app-settings.tsx";
 import type { WorkspaceView } from "./app-workspace.tsx";
+import { PreviewWidthToggle } from "./preview-controls.tsx";
 import { useCoreRead } from "./use-core-read.ts";
 
 // An App's workspace as the sidebar's section, while one who builds it has
@@ -32,6 +33,7 @@ import { useCoreRead } from "./use-core-read.ts";
 // .tsx): Back to the Apps, the App's mark and name, then its views (App,
 // Code, Data) and its settings' sections as rows. They are the workspace's
 // own addresses (`?view=`, `?section=`), so a row is a link the page reads.
+// Above Back, while the preview shows, how wide it is drawn (`?width=`).
 // It takes the views out of the App's bar, which keeps the preview's own
 // controls and Share; and the settings' tabs out of Settings. Whoever only
 // uses the App gets the live App, with no section: the main list stays.
@@ -96,6 +98,9 @@ export const useAppSection = (
       ? { icon: AppWindow }
       : { mark: <ProcessTile process={app.process} /> }),
     navLabel: t`${name}'s workspace`,
+    // How wide the preview is drawn, above Back while the preview shows:
+    // out of the App's bar, which keeps Reload, the page and Open.
+    ...(view === "preview" ? { top: <PreviewWidthToggle /> } : {}),
     back: {
       label: t`Apps`,
       render: <Link to="/apps" />,

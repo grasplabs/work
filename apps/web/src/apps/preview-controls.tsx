@@ -1,5 +1,6 @@
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Button } from "../grasp/button/index.ts";
@@ -20,8 +21,9 @@ import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
-// The preview's own controls, in the bar's middle beside the views while
-// the App's preview shows (app-workspace.tsx): how wide it is drawn, a
+// The preview's own controls while the App's preview shows: how wide it
+// is drawn, at the top of the sidebar's section (app-section.tsx), kept in
+// the address (`?width=`); and in the bar's middle (app-workspace.tsx) a
 // Reload, which of the App's pages it shows, and Open in a new tab. A
 // phone has none of them: its bar has no room, and its preview is as wide
 // as the phone; the bar's "…" opens the App full page.
@@ -112,6 +114,55 @@ export const useAppPages = (
   return read?.state === "ready" ? pagesOf(read.data) : [];
 };
 
+/** How wide the App's preview is drawn, as its address says. */
+export const usePreviewWidth = (): PreviewWidth =>
+  useSearch({
+    from: "/_shell/apps/$app",
+    shouldThrow: false,
+    select: (search) => search.width,
+  }) ?? "desktop";
+
+/** Desktop, Tablet and Phone: how wide the App's preview is drawn, kept in its address. */
+export const PreviewWidthToggle = () => {
+  const { t } = useLingui();
+  const width = usePreviewWidth();
+  const navigate = useNavigate({ from: "/apps/$app" });
+  const widthLabels: Record<PreviewWidth, string> = {
+    desktop: t`Desktop`,
+    tablet: t`Tablet`,
+    phone: t`Phone`,
+  };
+  const icons = { desktop: Desktop, tablet: Tablet, phone: Phone };
+  return (
+    <ToggleGroup
+      aria-label={t`Preview width`}
+      onValueChange={(chosen: unknown[]) => {
+        const picked = widths.find((each) => each === chosen[0]);
+        if (picked !== undefined) {
+          void navigate({
+            replace: true,
+            search: (before) => ({
+              ...before,
+              width: picked === "desktop" ? undefined : picked,
+            }),
+          });
+        }
+      }}
+      size="sm"
+      value={[width]}
+    >
+      {widths.map((each) => (
+        <Toggle
+          aria-label={widthLabels[each]}
+          icon={icons[each]}
+          key={each}
+          value={each}
+        />
+      ))}
+    </ToggleGroup>
+  );
+};
+
 /**
  * The preview's controls as the workspace holds them: how wide it is
  * drawn, which page it shows, and each Reload, which starts it afresh
@@ -123,7 +174,7 @@ export const usePreviewControls = (
   theirs: boolean,
   draft: { revision: number } | undefined
 ) => {
-  const [width, setWidth] = useState<PreviewWidth>("desktop");
+  const width = usePreviewWidth();
   const [page, setPage] = useState<string>();
   const [reloads, setReloads] = useState(0);
   const pages = useAppPages(
@@ -136,8 +187,6 @@ export const usePreviewControls = (
     pages,
     page,
     onPage: setPage,
-    width,
-    onWidth: setWidth,
     onReload: () => {
       setReloads((before) => before + 1);
     },
@@ -170,8 +219,6 @@ export interface PreviewControlsProps {
   /** The page shown; the first while none was picked. */
   page: string | undefined;
   onPage: (page: string) => void;
-  width: PreviewWidth;
-  onWidth: (width: PreviewWidth) => void;
   onReload: () => void;
 }
 
@@ -181,48 +228,18 @@ export const PreviewControls = ({
   pages,
   page,
   onPage,
-  width,
-  onWidth,
   onReload,
 }: PreviewControlsProps) => {
   const { t } = useLingui();
   const shown = page ?? pages[0] ?? "/";
   const href = `${opens}${shown === "/" ? "" : shown}`;
-  const widthLabels: Record<PreviewWidth, string> = {
-    desktop: t`Desktop`,
-    tablet: t`Tablet`,
-    phone: t`Phone`,
-  };
-  const icons = { desktop: Desktop, tablet: Tablet, phone: Phone };
   return (
     <div {...stylex.props(styles.inline)}>
-      <ToggleGroup
-        aria-label={t`Preview width`}
-        onValueChange={(chosen: unknown[]) => {
-          const picked = widths.find((each) => each === chosen[0]);
-          if (picked !== undefined) {
-            onWidth(picked);
-          }
-        }}
-        size="sm"
-        value={[width]}
-      >
-        {widths.map((each) => (
-          <Toggle
-            aria-label={widthLabels[each]}
-            icon={icons[each]}
-            key={each}
-            title={widthLabels[each]}
-            value={each}
-          />
-        ))}
-      </ToggleGroup>
       <Button
         aria-label={t`Reload`}
         icon={Retry}
         onClick={onReload}
         size="sm"
-        title={t`Reload`}
         variant="ghost"
       />
       {pages.length > 1 ? (
@@ -254,7 +271,6 @@ export const PreviewControls = ({
           />
         }
         size="sm"
-        title={t`Open in a new tab`}
         variant="ghost"
       />
     </div>

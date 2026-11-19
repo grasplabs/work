@@ -184,6 +184,11 @@ export interface SidebarSection {
   mark?: ReactNode;
   /** The Back row at the top: a link to the parent or the last main page. */
   back: SidebarBack;
+  /**
+   * Controls for what the section's page shows, above Back (an App's preview widths): a few small
+   * controls in one row on the gutter, kept out of a crowded bar.
+   */
+  top?: ReactNode;
   /** Its rows, in runs, top to bottom, as the main list's `groups`. */
   groups: readonly SidebarGroupEntry[];
   /** Where its groups' folds are kept in localStorage, apart from the main list's. */
@@ -1923,6 +1928,7 @@ const ListArea = ({
           back={section.back}
           backLabel={section.back.label}
           renderBack={(back) => <BackRow back={back} />}
+          top={section.top}
         />
       )}
       {tabbed && (

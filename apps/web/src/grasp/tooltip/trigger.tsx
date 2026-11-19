@@ -164,7 +164,7 @@ export const TooltipTrigger = ({
     <TriggerPrimitive
       {...rest}
       render={(props: Record<string, unknown>) => (
-        <Button {...props} {...look} />
+        <Button {...props} {...look} data-tooltip-trigger="" />
       )}
     />
   );

@@ -133,7 +133,6 @@ const IndexRow = ({
         icon={Trash}
         onClick={onRemove}
         size="sm"
-        title={removeLabel}
         variant="ghost"
       />
     </ItemActions>

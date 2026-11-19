@@ -12729,7 +12729,6 @@ msgstr "{words} entfernen"
 
 #: src/brain/brain-article/kern.tsx
 #: src/brain/brain-transcript.tsx
-#: src/brain/forget.tsx
 msgid "Remove from the brain"
 msgstr "Aus dem Gehirn entfernen"
 

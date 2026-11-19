@@ -96,6 +96,7 @@ const validateSearch = (
   point?: number | undefined;
   version?: number | undefined;
   project?: string | undefined;
+  width?: "tablet" | "phone" | undefined;
 } => ({
   view: viewOf(search.view),
   section: settingsSectionOf(search.section),
@@ -110,6 +111,12 @@ const validateSearch = (
   version: whole(search.version),
   // The project it was started or opened from: the way back.
   project: projectSearchOf(search),
+  // How wide the preview is drawn, chosen in the sidebar (app-section.tsx):
+  // a desktop's unless it names another.
+  width:
+    search.width === "tablet" || search.width === "phone"
+      ? search.width
+      : undefined,
 });
 
 export const Route = createFileRoute("/_shell/apps/$app")({

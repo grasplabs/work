@@ -843,8 +843,7 @@ describe(AppWorkspace, () => {
       await settled();
       seen[who] = {
         name: document.querySelector("h1")?.textContent,
-        controls:
-          document.querySelector('[aria-label="Preview width"]') !== null,
+        controls: document.querySelector('[aria-label="Reload"]') !== null,
         share: [...document.querySelectorAll("button")].some(
           (each) => nameOf(each) === "Publish"
         ),
@@ -2361,7 +2360,7 @@ describe(AppWorkspace, () => {
       calm: says("It shows here as soon as there is something to see."),
       state: says("Setting up"),
       shareOff: off(share),
-      controls: document.querySelector('[aria-label="Preview width"]'),
+      controls: document.querySelector('[aria-label="Reload"]'),
       // The preview that failed under it never shows, nor the tip.
       failure: [...document.querySelectorAll("body *")].some(
         (each) =>
@@ -2451,8 +2450,7 @@ describe(AppWorkspace, () => {
       seen[state] = {
         settingUp: says("Setting up Invoices…"),
         notReady,
-        controls:
-          document.querySelector('[aria-label="Preview width"]') !== null,
+        controls: document.querySelector('[aria-label="Reload"]') !== null,
         asked: sent.map(({ question }) => question.text),
       };
       takenDown();

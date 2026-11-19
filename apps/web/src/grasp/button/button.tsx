@@ -4,6 +4,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { Button as ButtonPrimitive } from "@ui-sdk/react/button";
 import type { ButtonActionDetails } from "@ui-sdk/react/button";
+import { mergeProps } from "@ui-sdk/react/primitive";
 import {
   Suspense,
   isValidElement,
@@ -29,6 +30,7 @@ import { simply } from "../motion/simply.stylex";
 import { Spinner } from "../spinner";
 import { spinnerVars } from "../spinner/spinner.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { WithTip } from "../tooltip/lazy-tip";
 import { useWords } from "../words/words";
 import { wrap } from "../wrap/wrap";
 import { buttonMarker, layerMarker } from "./button.stylex";
@@ -1383,6 +1385,22 @@ const LazyCut = (allProps: ButtonProps) => (
 const drawnByPart = (props: Record<string, unknown>) =>
   typeof props["data-slot"] === "string";
 
+/**
+ * The name an icon-only button shows in its tooltip: its `aria-label`, unless it has words of its
+ * own or a tooltip already drives it (a TooltipTrigger, a layer's `tooltip`, a cut button).
+ */
+const shownName = (props: Record<string, unknown>): string | undefined => {
+  const words = props.children;
+  const iconOnly =
+    props.icon !== undefined &&
+    (words === undefined || words === null || words === false || words === "");
+  if (!iconOnly || "data-tooltip-trigger" in props) {
+    return undefined;
+  }
+  const name = props["aria-label"] ?? props.label;
+  return typeof name === "string" && name !== "" ? name : undefined;
+};
+
 export const Button = (allProps: ButtonProps) => {
   // A hold is a popover's trigger first (hold.tsx), which draws this Button inside it.
   const held = useContext(HoldContext);
@@ -1392,10 +1410,30 @@ export const Button = (allProps: ButtonProps) => {
       allProps.truncate === true &&
       held === null &&
       !drawnByPart({ ...allProps });
-    return cut ? (
-      <LazyCut {...allProps} />
-    ) : (
-      <Pressable {...allProps} held={held} />
+    if (cut) {
+      return <LazyCut {...allProps} />;
+    }
+    // An icon alone says what it does in a tooltip, its name: on a pointer's rest and on focus.
+    const name = held === null ? shownName({ ...allProps }) : undefined;
+    if (name === undefined) {
+      return <Pressable {...allProps} held={held} />;
+    }
+    return (
+      <WithTip
+        name
+        render={(trigger) => {
+          // One element takes the tooltip trigger's props and ref with the caller's, handlers merged.
+          const merged: Record<string, unknown> = mergeProps(
+            trigger,
+            allProps,
+            {
+              ref: allProps.ref,
+            }
+          );
+          return <Pressable {...allProps} {...merged} held={held} />;
+        }}
+        tooltip={name}
+      />
     );
   }
   return <LazyHold {...allProps} />;

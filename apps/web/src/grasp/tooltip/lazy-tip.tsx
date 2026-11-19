@@ -17,16 +17,23 @@ export interface WithTipProps {
   render: (props: Record<string, unknown>) => ReactElement;
   /** The tooltip is kept but never opens (tip.tsx). @default false */
   off?: boolean;
+  /** The tooltip only repeats the trigger's name (tip.tsx). @default false */
+  name?: boolean;
 }
 
 /** The trigger drawn by `render`, with the tooltip on it when there are words for it. */
-export const WithTip = ({ tooltip, render, off = false }: WithTipProps) => {
+export const WithTip = ({
+  tooltip,
+  render,
+  off = false,
+  name = false,
+}: WithTipProps) => {
   if (tooltip === undefined) {
     return render({});
   }
   return (
     <Suspense fallback={render({})}>
-      <Tip tooltip={tooltip} render={render} off={off} />
+      <Tip tooltip={tooltip} render={render} off={off} name={name} />
     </Suspense>
   );
 };

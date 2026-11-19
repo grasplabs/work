@@ -88,6 +88,14 @@ const styles = stylex.create({
     paddingInline: grasp.shellGutter,
     paddingBlockStart: grasp.space1,
   },
+  // Controls above Back: one row, at a row's inset, with room under them before Back.
+  sectionTop: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    paddingInline: grasp.shellRowInline,
+    paddingBlockEnd: grasp.space2,
+  },
   // The section's name: a heading in a row's box (it leads nowhere, so not a link), in the shell's ink.
   title: {
     display: "flex",
@@ -292,6 +300,8 @@ export interface SectionHeadProps {
   backLabel?: string;
   /** Draws the Back row with the sidebar's own row part. */
   renderBack: (back: SidebarBack & { label: string }) => ReactElement;
+  /** Controls above Back (SidebarSection's `top`). */
+  top?: ReactNode;
   /**
    * This instance's own words, over its Sidebar's `words` and the catalogue's (GraspWords), key by key (`{ back: "All settings" }`). Any left out
    * are the Sidebar's, else the catalogue's, else English. A flat text prop given beside it still wins until the
@@ -308,6 +318,7 @@ export const SectionHead = ({
   back,
   backLabel: backGiven,
   renderBack,
+  top,
   words,
 }: SectionHeadProps) => {
   const fromSidebar = useSidebarGivenWords();
@@ -331,6 +342,14 @@ export const SectionHead = ({
   }
   return (
     <div data-slot="sidebar-section-head" {...stylex.props(styles.sectionHead)}>
+      {top === undefined ? null : (
+        <div
+          data-slot="sidebar-section-top"
+          {...stylex.props(styles.sectionTop)}
+        >
+          {top}
+        </div>
+      )}
       {renderBack({ ...back, label: backLabel })}
       <h2 data-slot="sidebar-section-title" {...stylex.props(styles.title)}>
         {lead}
