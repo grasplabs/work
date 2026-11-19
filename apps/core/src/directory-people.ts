@@ -11,12 +11,14 @@ import { tellKept } from "./access-revocations.ts";
 import { auditedBatch, outboxedEventWithDetailWhere } from "./audit-outbox.ts";
 import { signInConfig } from "./auth/config.ts";
 import {
+  accounts,
   directoryPeople,
   directoryReads,
   erasedSubjects,
 } from "./db/core/schema.ts";
 import { suspensionStatements } from "./directory-suspensions.ts";
 import {
+  jsonValuesOf,
   keptIn,
   placementStatements,
   readPlacementOf,
@@ -99,12 +101,10 @@ interface Listed {
 
 /**
  * Every page `readPage` answers, from the first on, each handed to `take`:
- * refused past the clock's lease on the task (`deadline`), for another
- * tenant than `tenant`, and at a next link handed back before, the
- * provider failing, never read again.
+ * refused past the clock's lease on the task (`deadline`), and at a next
+ * link handed back before, the provider failing, never read again.
  */
-const everyPage = async <Page extends { tenant: string; next: string | null }>(
-  tenant: string,
+const everyPage = async <Page extends { next: string | null }>(
   deadline: number,
   readPage: (cursor: string | null) => Promise<Page>,
   take: (page: Page) => void
@@ -117,9 +117,6 @@ const everyPage = async <Page extends { tenant: string; next: string | null }>(
     }
     // oxlint-disable-next-line no-await-in-loop -- each read goes on from the last
     const page = await readPage(cursor);
-    if (page.tenant.toLowerCase() !== tenant) {
-      throw directoryErrors.create("directory.other_tenant");
-    }
     take(page);
     cursor = page.next;
     if (cursor !== null) {
@@ -151,14 +148,14 @@ const deletedUnreadable = new Set<string | undefined>([
 const deletedOf = async (
   env: Env,
   connection: DirectoryConnection,
-  tenant: string,
   deadline: number
 ): Promise<{ ids: string[] } | { failure: string }> => {
   const ids = new Set<string>();
   let pages = 0;
   try {
+    // Connect answers the same connection's tenant as for its people,
+    // whose pages were checked already.
     await everyPage(
-      tenant,
       deadline,
       async (cursor) =>
         await env.CONNECT.readDeletedDirectoryUsers({
@@ -183,6 +180,42 @@ const deletedOf = async (
 };
 
 /**
+ * Of the deleted accounts `ids`, those a sign-in account of `kind`
+ * carries: kept before the batch, so the many deleted accounts nobody
+ * signed in with never take room in its one value (`d1ValueBytes`) nor
+ * time. It drops none that matters: only such an account ties a row to a
+ * member (directory-ties.ts `tiedMember`, which asks its tenant and
+ * membership again as it ties), and none can appear after this, as Entra
+ * signs no deleted account in. Someone restored and signing in meanwhile
+ * is listed by the next read, and owes no suspension. Sought by the
+ * index on the provider and `lower()` of the ID
+ * (`accounts_provider_oid_lower_idx`), as the tie seeks it.
+ */
+const carriedOf = async (
+  env: Env,
+  kind: DirectoryKind,
+  ids: string[]
+): Promise<string[]> => {
+  const db = drizzle(env.DB);
+  const id = sql<string>`lower(${kind.signedInAs})`;
+  const found = await Promise.all(
+    jsonValuesOf(ids).map(
+      async (value) =>
+        await db
+          .selectDistinct({ id })
+          .from(accounts)
+          .where(
+            and(
+              eq(accounts.providerId, kind.signInProvider),
+              sql`${id} IN (SELECT value FROM json_each(${value}))`
+            )
+          )
+    )
+  );
+  return found.flat().map((row) => row.id);
+};
+
+/**
  * Every page of `connection`, read through connect: the whole directory
  * of `tenant`, the deployment's own sign-in tenant, then its deleted
  * users, or a directory error (`everyPage`). Someone missing from the
@@ -191,6 +224,7 @@ const deletedOf = async (
  */
 const listedIn = async (
   env: Env,
+  kind: DirectoryKind,
   connection: DirectoryConnection,
   tenant: string,
   deadline: number
@@ -206,11 +240,14 @@ const listedIn = async (
     deletedFailure: null,
   };
   await everyPage(
-    tenant,
     deadline,
     async (cursor) =>
       await env.CONNECT.readDirectory({ connectionId: connection.id, cursor }),
     (read) => {
+      // Refused for another tenant than the deployment's own.
+      if (read.tenant.toLowerCase() !== tenant) {
+        throw directoryErrors.create("directory.other_tenant");
+      }
       for (const { id, department } of read.people) {
         listed.people.push({ id, department });
       }
@@ -224,15 +261,15 @@ const listedIn = async (
     ...listed.people.map(({ id }) => id),
     ...listed.disabled,
   ]);
-  const deleted = await deletedOf(env, connection, tenant, deadline);
+  const deleted = await deletedOf(env, connection, deadline);
   if ("failure" in deleted) {
     listed.deletedFailure = deleted.failure;
-    log.warn("directory.deleted_unread", {
-      provider: connection.provider,
-      code: deleted.failure,
-    });
   } else {
-    listed.deleted = deleted.ids.filter((id) => !listedIds.has(id));
+    listed.deleted = await carriedOf(
+      env,
+      kind,
+      deleted.ids.filter((id) => !listedIds.has(id))
+    );
   }
   return listed;
 };
@@ -502,13 +539,21 @@ const readKind = async (
   const startedAt = new Date();
   const deadline = at.getTime() + clockLeaseMs;
   try {
-    const listed = await listedIn(env, connection, tenant, deadline);
+    const listed = await listedIn(env, kind, connection, tenant, deadline);
     const json = await entriesOf(env, kind, listed);
     const placement = await readPlacementOf(env, kind, listed.people);
     if (Date.now() >= deadline) {
       throw directoryErrors.create("directory.read_too_long");
     }
     await apply(env, kind, connection, listed, json, placement, startedAt);
+    if (listed.deletedFailure !== null) {
+      // The fall-back `deletedOf` chose: the rest of the read was applied,
+      // with nobody suspended for having left.
+      log.warn("directory.read_applied_without_deleted", {
+        provider: kind.provider,
+        code: listed.deletedFailure,
+      });
+    }
   } catch (error) {
     await failedWith(env, kind, connection, tenant, startedAt, error);
   }

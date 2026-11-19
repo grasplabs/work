@@ -62,7 +62,8 @@ export const directoryClient = clients.microsoftDirectory;
  * a page Graph then fails with a server error; and `{ loopAt }`, the
  * offset of a page whose next link points back at itself (null for none).
  * Its deleted users likewise: `{ deleted }` (`/directory/deletedItems`),
- * `{ deletedFailAt }` with `{ deletedFailStatus }`, and `{ deletedNext }`, the next link every page of
+ * `{ deletedFailAt }` with `{ deletedFailStatus }` and `{ deletedFailBody }`
+ * (null for Graph's error), and `{ deletedNext }`, the next link every page of
  * them answers in place of its own (null for its own).
  */
 export const directoryControlUrl = "https://graph-control.test/directory";
@@ -602,7 +603,7 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const directory = { users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedNext: null };
+const directory = { users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null };
 const hibob = { key: null, employees: [] };
 /** Graph's users, as the directory's reads ask for them, a page at a time. */
 const directoryGraph = (url) => {
@@ -628,6 +629,10 @@ const deletedGraph = (url) => {
   const from = Number(url.searchParams.get("$skiptoken") ?? "0");
   const next = from + top;
   if (directory.deletedFailAt === from) {
+    // A body a test chose, as it came: empty, or not JSON.
+    if (directory.deletedFailBody !== null) {
+      return new Response(directory.deletedFailBody, { status: directory.deletedFailStatus });
+    }
     return Response.json({ error: { code: "generalException" } }, { status: directory.deletedFailStatus });
   }
   const link = directory.deletedNext ?? (next < directory.deleted.length

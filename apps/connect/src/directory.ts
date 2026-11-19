@@ -19,7 +19,13 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { connections } from "./db/schema.ts";
-import { SourceError, readFromProvider, requestBudget } from "./event-kinds.ts";
+import {
+  SourceError,
+  answerMaxBytes,
+  bytesFromProvider,
+  readFromProvider,
+  requestBudget,
+} from "./event-kinds.ts";
 import type { ProviderAccess } from "./event-kinds.ts";
 import { accessTokenFor } from "./tokens.ts";
 
@@ -67,7 +73,10 @@ const googleHost = "admin.googleapis.com";
 const googleUsersPath = "/admin/directory/v1/users";
 
 /** Each provider's API, sent the token: only on its own host, over HTTPS. */
-const graph = readFromProvider({ name: "Microsoft Graph", hosts: [graphHost] });
+const graphSpec = { name: "Microsoft Graph", hosts: [graphHost] };
+const graph = readFromProvider(graphSpec);
+/** Graph's answer as it came: its deleted users are parsed apart from the fetch (`deletedPageOf`). */
+const graphBytes = bytesFromProvider(graphSpec);
 const googleDirectory = readFromProvider({
   name: "Google's directory",
   hosts: [googleHost],
@@ -477,20 +486,38 @@ const readFailure = (error: unknown): unknown => {
 };
 
 /**
- * Why Entra's deleted users couldn't be read, as the directory's error.
- * The line core goes by (directory-people.ts `deletedOf`): a refusal of
- * the list itself, or an answer that isn't one, is the endpoint or its
- * permission, not the moment, and doesn't pass by retrying in a quarter
- * hour: `directory.deleted_refused` (401 or 403 on this call: its
- * permission, `User.Read.All` without an Entra role, is still unproved on
- * a real tenant) and `directory.deleted_unsupported` (400, 404, or a body
- * of another shape). Anything else, throttling and server errors among
- * it, is the moment: the read's own failures (`readFailure`).
+ * A page of Entra's deleted users as Graph answered it, or null when the
+ * answer, though it came, isn't such a page: empty, not JSON, or JSON of
+ * another shape. Told apart by what failed, here, from a fetch that
+ * failed (`deletedReadFailure`).
+ */
+const deletedPageOf = (
+  bytes: Uint8Array
+): z.output<typeof graphDeletedPageSchema> | null => {
+  let json: unknown;
+  try {
+    json = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+  const page = graphDeletedPageSchema.safeParse(json);
+  return page.success ? page.data : null;
+};
+
+/**
+ * Why Entra's deleted users couldn't be fetched, as the directory's
+ * error. The line core goes by (directory-people.ts `deletedOf`): a
+ * refusal of the list itself, or an endpoint that isn't one, is its
+ * permission or the endpoint, not the moment, and doesn't pass by
+ * retrying in a quarter hour: `directory.deleted_refused` (401 or 403 on
+ * this call: its permission, `User.Read.All` without an Entra role, is
+ * still unproved on a real tenant) and `directory.deleted_unsupported`
+ * (400 or 404; an answer that came but isn't a list is the same,
+ * `deletedPageOf`). Anything else, throttling, server errors and a fetch
+ * that never got an answer among it, is the moment: the read's own
+ * failures (`readFailure`).
  */
 const deletedReadFailure = (error: unknown): unknown => {
-  if (error instanceof z.ZodError) {
-    return directoryErrors.create("directory.deleted_unsupported");
-  }
   if (error instanceof SourceError) {
     if (error.status === 401 || error.status === 403) {
       return directoryErrors.create("directory.deleted_refused");
@@ -603,11 +630,15 @@ export const readDeletedDirectoryUsers = async (
     token: await directoryToken(env, connection.connectionId),
     budget: requestBudget(1),
   };
-  let page: z.output<typeof graphDeletedPageSchema>;
+  let bytes: Uint8Array;
   try {
-    page = graphDeletedPageSchema.parse(await graph(access, url.href));
+    bytes = await graphBytes(access, url.href, answerMaxBytes);
   } catch (error) {
     throw deletedReadFailure(error);
+  }
+  const page = deletedPageOf(bytes);
+  if (page === null) {
+    throw directoryErrors.create("directory.deleted_unsupported");
   }
   const next = page["@odata.nextLink"] ?? null;
   // A next link elsewhere is never kept, nor taken for the end. Its size

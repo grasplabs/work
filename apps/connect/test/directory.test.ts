@@ -593,6 +593,8 @@ describe("a directory read", () => {
       badRequest: await answered(answeredWith(400)),
       notFound: await answered(answeredWith(404)),
       notAList: await answered(() => Response.json({ value: "none" })),
+      empty: await answered(() => new Response("")),
+      notJson: await answered(() => new Response("<html>Sign in</html>")),
       throttled: await answered(answeredWith(429)),
       serverError: await answered(answeredWith(500)),
     }).toStrictEqual({
@@ -601,6 +603,8 @@ describe("a directory read", () => {
       badRequest: "directory.deleted_unsupported",
       notFound: "directory.deleted_unsupported",
       notAList: "directory.deleted_unsupported",
+      empty: "directory.deleted_unsupported",
+      notJson: "directory.deleted_unsupported",
       throttled: "directory.throttled",
       serverError: "directory.provider_failed",
     });
