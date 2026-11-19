@@ -3,6 +3,7 @@
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { mergeProps } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import {
   createContext,
   createElement,
@@ -152,6 +153,12 @@ export interface SidebarGroupEntry {
   label?: string;
   /** Its rows, in order. */
   rows: readonly SidebarRow[];
+  /**
+   * Its own content in place of the rows, under its label: a Tree of what the section holds, with
+   * branches that open and close. Its rows are then left out (give `rows: []`), and it is not
+   * filtered.
+   */
+  content?: ReactNode;
   /** What its fold is kept under in `storageKey`. @default its label */
   id?: string;
   /** Its label is a button that folds the rows away and opens them again. Needs a `label`. */
@@ -184,6 +191,14 @@ export interface SidebarSection {
   mark?: ReactNode;
   /** The Back row at the top: a link to the parent or the last main page. */
   back: SidebarBack;
+  /**
+   * The section's own first page, as a router's link (`<Link to="/brain" />`): its name is then
+   * drawn above Back as a press of its own, one raised segment in the main list's tabs' track, so
+   * the section reads apart from what every page shares. Without it, the name is a heading under Back.
+   */
+  home?: RenderProp;
+  /** `home`'s page is the one open: it says so (`aria-current`). */
+  homeCurrent?: boolean;
   /**
    * Views of the section's page, under its name, in the same switch as the main list's tabs (an
    * App's preview: Desktop, Tablet, Phone). They switch what the page shows, not the rows.
@@ -1966,6 +1981,8 @@ const ListArea = ({
           back={section.back}
           backLabel={section.back.label}
           renderBack={(back) => <BackRow back={back} />}
+          home={section.home}
+          homeCurrent={section.homeCurrent === true}
         />
       )}
       <SectionViews id={id} section={section} />

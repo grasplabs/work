@@ -1407,7 +1407,6 @@ msgstr "{team} · unsere E-Mail hat sie nicht erreicht"
 msgid "{team} (team)"
 msgstr "{team} (Team)"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "{team} has a region of its own"
 msgstr "{team} hat eine eigene Region"
@@ -1419,10 +1418,6 @@ msgstr "{team} ist bisher still. Eine kurze Nachricht von {lead}, der Teamleitun
 #: src/brain/brain.ts
 msgid "{team} interviewed"
 msgstr "{team} interviewt"
-
-#: src/brain/brain-section.tsx
-msgid "{team} moved to {name}"
-msgstr "{team} nach {name} verschoben"
 
 #: src/brain/region-edit.tsx
 msgid "{team} moved to {to}"
@@ -3109,10 +3104,6 @@ msgstr "Bereiche abgeschlossen"
 #: src/brain/region-edit.tsx
 msgid "Arrange {name}"
 msgstr "{name} einordnen"
-
-#: src/brain/brain-section.tsx
-msgid "Arrange {team}"
-msgstr "{team} einordnen"
 
 #: src/frame/part-words.tsx
 msgid "Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page"
@@ -9665,7 +9656,6 @@ msgstr "Nach hinten"
 msgid "Move the panel"
 msgstr "Bereich verschieben"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "Move to"
 msgstr "Verschieben nach"
@@ -9885,7 +9875,6 @@ msgstr "Neue Option"
 msgid "New project"
 msgstr "Neues Projekt"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "New region"
 msgstr "Neue Region"
@@ -11577,7 +11566,6 @@ msgid "Over the next two weeks you’ll get a short personal link to talk with S
 msgstr "In den nächsten zwei Wochen erhalten Sie einen kurzen persönlichen Link, um mit Stephen zu sprechen, dem KI-Interviewer von Grasp: Teamleitungen etwa 20 Minuten, alle anderen 10 bis 15. Per Sprache oder per Tippen."
 
 #: src/agents/agent-section.tsx
-#: src/brain/brain-section.tsx
 msgid "Overview"
 msgstr "Übersicht"
 
@@ -12856,7 +12844,6 @@ msgstr "Chat umbenennen"
 msgid "Renamed the organization"
 msgstr "Hat die Organisation umbenannt"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx

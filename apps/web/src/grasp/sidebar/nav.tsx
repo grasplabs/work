@@ -17,7 +17,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { ReactElement, RefObject } from "react";
+import type { ReactElement, ReactNode, RefObject } from "react";
 
 import { focus } from "../focus/focus";
 import { ChevronRight, Icon, Search } from "../icons";
@@ -65,6 +65,7 @@ export interface NavGroup<Row extends NavRow> {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
   count?: number;
+  content?: ReactNode;
 }
 
 // The list's end fades out over its last rows (black to here, clear by its end, less a hair).
@@ -205,6 +206,11 @@ export const navStyles = stylex.create({
   },
   // Folded, it points the way of reading: the mirrored icon already does.
   chevronFolded: { transform: { default: "none", ":dir(rtl)": "none" } },
+  // A group's own content in place of its rows (a Tree), at the rows' inset.
+  content: {
+    display: { default: "block", ":is([hidden])": "none" },
+    minWidth: 0,
+  },
   list: {
     display: { default: "flex", ":is([hidden])": "none" },
     flexDirection: "column",
@@ -919,29 +925,39 @@ export const SidebarNav = <Row extends NavRow>({
                 }}
               />
             )}
-            <ul
-              id={listId}
-              aria-labelledby={named ? heading : undefined}
-              {...foldedLook(shut, foldsRead)}
-              data-sidebar-fold={
-                group.collapsible === true && group.collapsed === undefined
-                  ? keyOf(group, index)
-                  : undefined
-              }
-              {...stylex.props(
-                navStyles.list,
-                group.collapsible === true && navStyles.listUnder
-              )}
-            >
-              <GroupRows
-                rows={rows}
-                index={index}
-                list={list}
-                branched={group.collapsible === true}
-                more={needle === "" ? renderMore : undefined}
-                renderRow={renderRow}
-              />
-            </ul>
+            {group.content === undefined ? (
+              <ul
+                id={listId}
+                aria-labelledby={named ? heading : undefined}
+                {...foldedLook(shut, foldsRead)}
+                data-sidebar-fold={
+                  group.collapsible === true && group.collapsed === undefined
+                    ? keyOf(group, index)
+                    : undefined
+                }
+                {...stylex.props(
+                  navStyles.list,
+                  group.collapsible === true && navStyles.listUnder
+                )}
+              >
+                <GroupRows
+                  rows={rows}
+                  index={index}
+                  list={list}
+                  branched={group.collapsible === true}
+                  more={needle === "" ? renderMore : undefined}
+                  renderRow={renderRow}
+                />
+              </ul>
+            ) : (
+              <div
+                id={listId}
+                {...foldedLook(shut, foldsRead)}
+                {...stylex.props(navStyles.content)}
+              >
+                {group.content}
+              </div>
+            )}
           </div>
         );
       })}

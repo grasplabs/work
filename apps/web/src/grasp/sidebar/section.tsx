@@ -1,7 +1,8 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { mergeProps } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
+import { mergeProps, renderElement } from "@ui-sdk/react/primitive";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type {
   KeyboardEvent,
@@ -179,6 +180,10 @@ const styles = stylex.create({
     transitionDuration: `${simply.ui}, ${grasp.durationHover}`,
     transitionTimingFunction: grasp.ease,
   },
+  // A section's name as its home: a heading that holds the track, with no room of its own.
+  homeHeading: { margin: 0, fontSize: "inherit", fontWeight: "inherit" },
+  // The home segment: its words at the start, as a row's, in the shell's ink.
+  home: { justifyContent: "flex-start", textDecoration: "none" },
   // Chosen: its ink, and its own ground only until the thumb stands (and always in forced colours).
   tabChosen: {
     color: { default: grasp.shellText, [FORCED]: "HighlightText" },
@@ -294,6 +299,10 @@ export interface SectionHeadProps {
   backLabel?: string;
   /** Draws the Back row with the sidebar's own row part. */
   renderBack: (back: SidebarBack & { label: string }) => ReactElement;
+  /** The section's own first page (SidebarSection's `home`): its name, above Back, opens it. */
+  home?: RenderProp;
+  /** That page is the one open. */
+  homeCurrent?: boolean;
   /**
    * This instance's own words, over its Sidebar's `words` and the catalogue's (GraspWords), key by key (`{ back: "All settings" }`). Any left out
    * are the Sidebar's, else the catalogue's, else English. A flat text prop given beside it still wins until the
@@ -310,6 +319,8 @@ export const SectionHead = ({
   back,
   backLabel: backGiven,
   renderBack,
+  home,
+  homeCurrent = false,
   words,
 }: SectionHeadProps) => {
   const fromSidebar = useSidebarGivenWords();
@@ -330,6 +341,53 @@ export const SectionHead = ({
     );
   } else if (icon !== undefined) {
     lead = <Icon icon={icon} />;
+  }
+  if (home !== undefined) {
+    // Its name first, above Back, as a press of its own: the one raised segment of the track the
+    // main list's tabs stand in, so the section reads apart from the rows every page shares.
+    return (
+      <div
+        data-slot="sidebar-section-head"
+        {...stylex.props(styles.sectionHead)}
+      >
+        <h2
+          data-slot="sidebar-section-title"
+          {...stylex.props(styles.homeHeading)}
+        >
+          <div
+            {...stylex.props(
+              rowMarker,
+              tabStyles.list,
+              tabStyles.listSegmented,
+              styles.tabs
+            )}
+          >
+            {renderElement(
+              "a",
+              {
+                "aria-current": homeCurrent ? "page" : undefined,
+                className: stylex.props(
+                  tabStyles.tab,
+                  tabStyles.segment,
+                  styles.tab,
+                  styles.home,
+                  styles.tabChosen,
+                  focus.inside
+                ).className,
+                children: (
+                  <>
+                    {lead}
+                    <span {...stylex.props(styles.titleWords)}>{title}</span>
+                  </>
+                ),
+              },
+              home
+            )}
+          </div>
+        </h2>
+        {renderBack({ ...back, label: backLabel })}
+      </div>
+    );
   }
   return (
     <div data-slot="sidebar-section-head" {...stylex.props(styles.sectionHead)}>

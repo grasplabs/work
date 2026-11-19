@@ -1407,7 +1407,6 @@ msgstr "{team} · our email didn’t reach them"
 msgid "{team} (team)"
 msgstr "{team} (team)"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "{team} has a region of its own"
 msgstr "{team} has a region of its own"
@@ -1419,10 +1418,6 @@ msgstr "{team} has been quiet so far. A short message from {lead}, their lead, u
 #: src/brain/brain.ts
 msgid "{team} interviewed"
 msgstr "{team} interviewed"
-
-#: src/brain/brain-section.tsx
-msgid "{team} moved to {name}"
-msgstr "{team} moved to {name}"
 
 #: src/brain/region-edit.tsx
 msgid "{team} moved to {to}"
@@ -3109,10 +3104,6 @@ msgstr "Areas finished"
 #: src/brain/region-edit.tsx
 msgid "Arrange {name}"
 msgstr "Arrange {name}"
-
-#: src/brain/brain-section.tsx
-msgid "Arrange {team}"
-msgstr "Arrange {team}"
 
 #: src/frame/part-words.tsx
 msgid "Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page"
@@ -9665,7 +9656,6 @@ msgstr "Move later"
 msgid "Move the panel"
 msgstr "Move the panel"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "Move to"
 msgstr "Move to"
@@ -9885,7 +9875,6 @@ msgstr "New option"
 msgid "New project"
 msgstr "New project"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "New region"
 msgstr "New region"
@@ -11577,7 +11566,6 @@ msgid "Over the next two weeks you’ll get a short personal link to talk with S
 msgstr "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
 
 #: src/agents/agent-section.tsx
-#: src/brain/brain-section.tsx
 msgid "Overview"
 msgstr "Overview"
 
@@ -12856,7 +12844,6 @@ msgstr "Rename chat"
 msgid "Renamed the organization"
 msgstr "Renamed the organization"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx

@@ -1407,7 +1407,6 @@ msgstr "{team} · nuestro correo no les llegó"
 msgid "{team} (team)"
 msgstr "{team} (equipo)"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "{team} has a region of its own"
 msgstr "{team} tiene una región propia"
@@ -1419,10 +1418,6 @@ msgstr "{team} ha estado callado hasta ahora. Un mensaje breve de {lead}, su res
 #: src/brain/brain.ts
 msgid "{team} interviewed"
 msgstr "Equipo entrevistado: {team}"
-
-#: src/brain/brain-section.tsx
-msgid "{team} moved to {name}"
-msgstr "{team} se movió a {name}"
 
 #: src/brain/region-edit.tsx
 msgid "{team} moved to {to}"
@@ -3109,10 +3104,6 @@ msgstr "Áreas terminadas"
 #: src/brain/region-edit.tsx
 msgid "Arrange {name}"
 msgstr "Organizar {name}"
-
-#: src/brain/brain-section.tsx
-msgid "Arrange {team}"
-msgstr "Organizar {team}"
 
 #: src/frame/part-words.tsx
 msgid "Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page"
@@ -9665,7 +9656,6 @@ msgstr "Mover después"
 msgid "Move the panel"
 msgstr "Mover el panel"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "Move to"
 msgstr "Mover a"
@@ -9885,7 +9875,6 @@ msgstr "Opción nueva"
 msgid "New project"
 msgstr "Nuevo proyecto"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "New region"
 msgstr "Nueva región"
@@ -11577,7 +11566,6 @@ msgid "Over the next two weeks you’ll get a short personal link to talk with S
 msgstr "En las próximas dos semanas recibirás un enlace personal breve para hablar con Stephen, el entrevistador de IA de Grasp: los responsables unos 20 minutos, los demás de 10 a 15. Hablando o escribiendo."
 
 #: src/agents/agent-section.tsx
-#: src/brain/brain-section.tsx
 msgid "Overview"
 msgstr "Resumen"
 
@@ -12856,7 +12844,6 @@ msgstr "Cambiar nombre del chat"
 msgid "Renamed the organization"
 msgstr "Cambió el nombre de la organización"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx

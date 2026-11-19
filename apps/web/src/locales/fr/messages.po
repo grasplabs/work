@@ -1407,7 +1407,6 @@ msgstr "{team} · notre e-mail ne leur est pas parvenu"
 msgid "{team} (team)"
 msgstr "{team} (équipe)"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "{team} has a region of its own"
 msgstr "{team} a sa propre région"
@@ -1419,10 +1418,6 @@ msgstr "{team} est resté silencieux jusqu’ici. Un petit message de {lead}, le
 #: src/brain/brain.ts
 msgid "{team} interviewed"
 msgstr "Entretien avec {team}"
-
-#: src/brain/brain-section.tsx
-msgid "{team} moved to {name}"
-msgstr "{team} déplacé vers {name}"
 
 #: src/brain/region-edit.tsx
 msgid "{team} moved to {to}"
@@ -3109,10 +3104,6 @@ msgstr "Domaines terminés"
 #: src/brain/region-edit.tsx
 msgid "Arrange {name}"
 msgstr "Organiser {name}"
-
-#: src/brain/brain-section.tsx
-msgid "Arrange {team}"
-msgstr "Organiser {team}"
 
 #: src/frame/part-words.tsx
 msgid "Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page"
@@ -9665,7 +9656,6 @@ msgstr "Reculer"
 msgid "Move the panel"
 msgstr "Déplacer le panneau"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "Move to"
 msgstr "Déplacer vers"
@@ -9885,7 +9875,6 @@ msgstr "Nouvelle option"
 msgid "New project"
 msgstr "Nouveau projet"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "New region"
 msgstr "Nouvelle région"
@@ -11577,7 +11566,6 @@ msgid "Over the next two weeks you’ll get a short personal link to talk with S
 msgstr "Dans les deux prochaines semaines, vous recevrez un court lien personnel pour parler avec Stephen, l’intervieweur IA de Grasp : les responsables pendant environ 20 minutes, les autres 10 à 15. À la voix ou par écrit."
 
 #: src/agents/agent-section.tsx
-#: src/brain/brain-section.tsx
 msgid "Overview"
 msgstr "Vue d’ensemble"
 
@@ -12856,7 +12844,6 @@ msgstr "Renommer la discussion"
 msgid "Renamed the organization"
 msgstr "A renommé l’organisation"
 
-#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx
