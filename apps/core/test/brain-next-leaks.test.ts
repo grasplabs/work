@@ -82,7 +82,7 @@ import { saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
-import { acmeTenant } from "./sign-in-config.ts";
+import { acmeTenant, otherTenant } from "./sign-in-config.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import { holdsNothing } from "./stored-skills.ts";
 import {
@@ -373,7 +373,7 @@ describe(
         "the holder's own source": markerWord(),
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
-        "a file shared with a group the outsider proved they were in over a day ago":
+        "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
           markerWord(),
         "the holder's interview": markerWord(),
         "a source narrowed away from the outsider": markerWord(),
@@ -447,7 +447,7 @@ describe(
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
-        "a file shared with a group the outsider proved they were in over a day ago":
+        "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
           staleGroupMarker,
         "the holder's interview": interviewMarker,
         "a source narrowed away from the outsider": narrowedMarker,
@@ -1094,6 +1094,33 @@ describe(
           readAtNow
         )
         .run();
+      // And with Entra groups the company's directory lists the outsider in
+      // (GRA-2146), tied to them by their object ID: one by a read over a
+      // day old, which proves nothing any more; and one read now, but named
+      // by the file in another tenant, which is another group.
+      const [directoryStaleGroup, directoryOtherTenantGroup] = [
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+      ];
+      const outsiderOid = String(outsiderPerson.oid).toLowerCase();
+      const directoryTenant = acmeTenant.toLowerCase();
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO directory_people (provider, tenant, account_id, department, enabled, user_id) VALUES ('microsoft-directory', ?, ?, '', 1, ?)"
+        ).bind(directoryTenant, outsiderOid, outsider),
+        env.DB.prepare(
+          "INSERT INTO directory_group_members (provider, tenant, group_id, account_id, read_at) VALUES ('microsoft-directory', ?, ?, ?, ?), ('microsoft-directory', ?, ?, ?, ?)"
+        ).bind(
+          directoryTenant,
+          directoryStaleGroup,
+          outsiderOid,
+          Date.now() - readerProofMaxAgeMs - 60_000,
+          directoryTenant,
+          directoryOtherTenantGroup,
+          outsiderOid,
+          Date.now()
+        ),
+      ]);
       const staleGroupId = await add(
         `Lease annex ${sharedWord} ${staleGroupMarker}`,
         {
@@ -1104,6 +1131,18 @@ describe(
               provider: "microsoft",
               tenant: acmeTenant,
               group: staleGroup,
+            },
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: acmeTenant,
+              group: directoryStaleGroup,
+            },
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: otherTenant,
+              group: directoryOtherTenantGroup,
             },
           ],
         }
@@ -2273,7 +2312,7 @@ describe(
         },
         {
           "a source nobody is known to read": world.noneMarker,
-          "a file shared with a group the outsider proved they were in over a day ago":
+          "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
             world.staleGroupMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           "another agent's instruction file": world.agentFileMarker,
@@ -2341,7 +2380,7 @@ describe(
           "a memory shared with a team, though the holder is in the team":
             world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
-          "a file shared with a group the outsider proved they were in over a day ago":
+          "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
             world.staleGroupMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
@@ -2429,7 +2468,7 @@ describe(
           "a memory shared with a team the grant doesn't name, though the holder is in it":
             world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
-          "a file shared with a group the outsider proved they were in over a day ago":
+          "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
             world.staleGroupMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,

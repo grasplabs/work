@@ -122,6 +122,15 @@ import { connectionOf } from "./onboarding/directory.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
+/**
+ * How long before a day has passed since the last read the next one
+ * starts: the clock's quarter hour and its ten-minute lease, rounded up.
+ * A group the daily read keeps proves its members for a reader list for a
+ * day from the read (source-readers.ts `provedGroupsOf`, GRA-2146), so the
+ * next read's rows land before that day is over.
+ */
+const readAheadMs = 30 * 60 * 1000;
+
 /** The most D1 takes in one value (its limits page: "Maximum string, BLOB or table row size"). */
 const d1ValueBytes = 2_000_000;
 
@@ -149,7 +158,7 @@ interface Listed {
  * refused past the clock's lease on the task (`deadline`), and at a next
  * link handed back before, the provider failing, never read again.
  */
-const everyPage = async <Page extends { next: string | null }>(
+export const everyPage = async <Page extends { next: string | null }>(
   deadline: number,
   readPage: (cursor: string | null) => Promise<Page>,
   take: (page: Page) => void
@@ -637,7 +646,7 @@ const readKind = async (
   if (
     status?.readAt !== null &&
     status?.readAt !== undefined &&
-    at.getTime() - status.readAt.getTime() < dayMs
+    at.getTime() - status.readAt.getTime() < dayMs - readAheadMs
   ) {
     return;
   }

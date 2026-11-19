@@ -2031,6 +2031,13 @@
       "when": 1795125151845,
       "tag": "0289_knowledge_leftovers_dropped",
       "breakpoints": true
+    },
+    {
+      "idx": 290,
+      "version": "6",
+      "when": 1795128718550,
+      "tag": "0290_directory_reader_groups",
+      "breakpoints": true
     }
   ]
 }

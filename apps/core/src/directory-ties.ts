@@ -55,7 +55,7 @@ export interface DirectoryKind {
  * Microsoft Entra: its object ID, which Graph answers as the user's `id`
  * and Entra's ID tokens as `oid`, in the tenant (`tid`).
  */
-const entra: DirectoryKind = {
+export const entra: DirectoryKind = {
   provider: "microsoft-directory",
   signInProvider: providerIds.entra,
   madeProvider: directoryProviderId,
