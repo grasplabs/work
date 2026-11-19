@@ -6,7 +6,7 @@ import type {
   TeamPin,
   UnplacedMember,
 } from "@grasp-os/shared/members";
-import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { mayAct, organizationId } from "./auth/membership-sql.ts";
@@ -21,6 +21,7 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { directoryWants, followsGroups } from "./directory-teams.ts";
 import { directoryKinds } from "./directory-ties.ts";
 
 // What the directory leaves for an admin to place, and what admins placed
@@ -34,10 +35,15 @@ import { directoryKinds } from "./directory-ties.ts";
 // - Not in a team: a member who may act (a suspended one can't, and the
 //   read places nobody turned off) and is in no team at all.
 // - Team doesn't match the directory: a membership the read made (only
-//   those it ever takes away, `directory_memberships`) whose team their
-//   department no longer fills. The read moves someone only into the team
-//   their department fills, never into none, so they stay until an admin
-//   acts. Not a pair an admin kept in by hand: that is the admin's choice.
+//   those it ever takes away, `directory_memberships`) in a team the
+//   directory no longer wants them in, by the read's own rule
+//   (directory-teams.ts `directoryWants`: a group of the team lists them,
+//   or, for a team that doesn't follow groups, their department fills
+//   it). The read moves someone by department only into the team their
+//   department fills, never into none, and keeps a team its group was
+//   unmapped from as it was (GRA-2162), so they stay until an admin acts.
+//   Not a pair an admin kept in by hand: that is the admin's choice. The
+//   team a department fills is likewise never one that follows groups.
 // - Pins: those on a member tied to the directory, whom the read places;
 //   on anyone else a pin changes nothing the read does.
 
@@ -80,7 +86,19 @@ export const directoryPlacementOf = async (
           eq(directoryDepartments.department, directoryPeople.department)
         )
       )
-      .leftJoin(teams, eq(teams.id, directoryDepartments.teamId))
+      // The team the department fills: none that follows groups.
+      .leftJoin(
+        teams,
+        and(
+          eq(teams.id, directoryDepartments.teamId),
+          sql`NOT (${or(
+            ...directoryKinds.map(
+              (kind) =>
+                sql`(${directoryPeople.provider} = ${kind.provider} AND ${followsGroups(kind, sql`${teams.id}`)})`
+            )
+          )})`
+        )
+      )
       .where(
         and(
           isNotNull(directoryPeople.userId),
@@ -100,6 +118,16 @@ export const directoryPlacementOf = async (
         madeByRead: sql<number>`${teamMembers.membershipKey} IN (
           SELECT ${directoryMemberships.membershipKey} FROM ${directoryMemberships}
         )`,
+        // The read's own rule for whom the directory wants in a team.
+        wanted: sql<number>`${or(
+          ...directoryKinds.map((kind) =>
+            directoryWants(
+              kind,
+              sql`${teamMembers.userId}`,
+              sql`${teamMembers.teamId}`
+            )
+          )
+        )}`,
       })
       .from(teamMembers)
       .innerJoin(teams, eq(teams.id, teamMembers.teamId))
@@ -155,13 +183,13 @@ export const directoryPlacementOf = async (
     .toSorted(byName);
   const actingById = new Map(acting.map((member) => [member.userId, member]));
   const movers: DirectoryMover[] = memberships
-    .flatMap(({ userId, teamId, teamName, madeByRead }) => {
+    .flatMap(({ userId, teamId, teamName, madeByRead, wanted }) => {
       const member = actingById.get(userId);
       const tie = ties.get(userId);
       const mismatched =
         madeByRead === 1 &&
         tie !== undefined &&
-        tie.departmentTeam?.id !== teamId &&
+        wanted === 0 &&
         !keptIn.has(`${userId} ${teamId}`);
       return member === undefined || tie === undefined || !mismatched
         ? []

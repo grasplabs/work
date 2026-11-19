@@ -5,6 +5,8 @@ import { z } from "zod";
 
 import {
   connectedDirectory,
+  directoryGroup,
+  directoryGroupsHold,
   directoryHolds,
   directoryUser as user,
 } from "./directory.ts";
@@ -247,6 +249,57 @@ describe("whom the directory leaves for an admin to place", () => {
       movers: {},
       gus: [support.id],
       hal: [support.id],
+    });
+  });
+
+  it("follows the read's own rule for teams that follow groups: a member a group placed isn't a mismatch whatever their department, is one once the group no longer lists them, and a department fills no team that follows groups", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const engineering = await team(admin.session, "Engineering");
+    const [ann, cy] = [await someone(), await someone()];
+    const nowhere = `Nowhere ${crypto.randomUUID()}`;
+    await directoryHolds([
+      user({ id: ann.oid, department: nowhere }),
+      user({ id: cy.oid, department: engineering.name }),
+    ]);
+    // Cy joins Engineering by department, linked by its name.
+    await readAt(nextDay());
+    const engineers = directoryGroup();
+    const groupId = String(engineers.id);
+    await directoryGroupsHold([engineers], {
+      [groupId]: [{ "@odata.type": "#microsoft.graph.user", id: ann.oid }],
+    });
+    await admin.api.directoryGroups.mapToTeam(groupId, engineering.id);
+    // Engineering follows the group now: Ann joins, Cy leaves.
+    await readAt(nextDay());
+    const grouped = await admin.api.members.directoryPlacement();
+
+    await admin.api.directoryGroups.unmap(groupId);
+    // No group lists Ann any more; Engineering follows departments again.
+    await readAt(nextDay());
+    const unmapped = await admin.api.members.directoryPlacement();
+
+    const ids = [ann.userId, cy.userId];
+    expect({
+      movers: of(grouped.movers, ids, mover),
+      unplaced: of(grouped.unplaced, ids, unplaced),
+    }).toStrictEqual({
+      movers: {},
+      unplaced: {
+        [cy.userId]: [{ department: engineering.name, departmentTeam: null }],
+      },
+    });
+    expect({
+      movers: of(unmapped.movers, ids, mover),
+      unplaced: of(unmapped.unplaced, ids, unplaced),
+      ann: await teamsOf(ann.userId),
+    }).toStrictEqual({
+      movers: {
+        [ann.userId]: [
+          { team: engineering.id, department: nowhere, departmentTeam: null },
+        ],
+      },
+      unplaced: {},
+      ann: [engineering.id],
     });
   });
 
