@@ -1154,9 +1154,10 @@ export const memoryConfirmedOver = sqliteTable(
 /**
  * A memory its writer said replaces another of theirs (contract.ts
  * `NewMemory.replaces`): `replaced` ends from `memory`'s start, for a
- * reader who may read `memory`, until an undo of `memory` (`undoneAt`),
- * whether `memory` is retired or not (memories.ts `newerSql`). Goes with
- * either memory when it is deleted, and never otherwise.
+ * reader who may read `memory`, whether `memory` is retired or not, until
+ * an undo of `memory`'s save (`undoneAt`, contract.ts `RetireRequest.undo`)
+ * (memories.ts `newerSql`). Goes with either memory when it is deleted,
+ * and never otherwise.
  */
 export const memoryReplacements = sqliteTable(
   "memory_replacements",

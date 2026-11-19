@@ -1215,9 +1215,10 @@ export const confirmMemory = (
  * read it, it is not retired, and it is in its world time now: current, or
  * ended by a newer memory of its lineage, which a writer forgets as well,
  * so it never becomes current again when the newer one is retired too.
- * Retired while current to its readers (an undo), it no longer replaces
- * what it named from then on (`memory_replacements.undone_at`), which is
- * current again; retired as history, it keeps them ended.
+ * An undo of its save (`undo`), while nothing of its readers ends it, no
+ * longer replaces what it named from then on
+ * (`memory_replacements.undone_at`), which is current again; any other
+ * retirement keeps them ended: forgetting never brings anything back.
  * Answers when it was retired and by which change (`change`, kept with
  * it), as recorded: one this writer already retired answers its recorded
  * time and change again, never new ones, whatever change the call names,
@@ -1233,7 +1234,14 @@ export const retireMemory = (
     reader,
     writer,
     change,
-  }: { id: string; reader: Reader; writer: string; change: string }
+    undo,
+  }: {
+    id: string;
+    reader: Reader;
+    writer: string;
+    change: string;
+    undo: boolean;
+  }
 ): RetiredMemory | null => {
   const asked = [
     id,
@@ -1259,19 +1267,22 @@ export const retireMemory = (
     .toArray();
   if (retired !== undefined) {
     keepStamp(sql, stamp);
-    // An undo: retired while nothing of its readers ended it, it no
+    // An undo of its save, while nothing of its readers ends it: it no
     // longer replaces anything from now on, so what it replaced is
     // current again; a read of a moment before still sees it replaced.
-    // Retired as history, it keeps them ended (`newerSql`).
-    sql.exec(
-      `UPDATE memory_replacements SET undone_at = ?2
+    // Any other retirement, and an undo of one already ended, keeps them
+    // ended (`newerSql`): forgetting brings nothing back.
+    if (undo) {
+      sql.exec(
+        `UPDATE memory_replacements SET undone_at = ?2
       WHERE memory = ?1 AND NOT EXISTS (
         SELECT 1 FROM memories AS m
         WHERE m.row = ?1 AND ${endedForItsReadersSql("m", "?2")}
       )`,
-      retired.row,
-      stamp
-    );
+        retired.row,
+        stamp
+      );
+    }
     return {
       retiredAt: new Date(retired.retired_at),
       change: retired.retired_change,
