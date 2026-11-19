@@ -12004,6 +12004,10 @@ msgstr "Responsabilité"
 msgid "Restore"
 msgstr "Restaurer"
 
+#: src/settings/member-suspension.tsx
+msgid "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Restaurez le compte dans l’annuaire, et Grasp lève la suspension à sa prochaine lecture quotidienne. Pour mettre fin à son accès définitivement, retirez cette personne."
+
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "Restaurer cet état antérieur ?"
@@ -13378,6 +13382,22 @@ msgstr "La connexion est enregistrée par le service de connexion de votre entre
 msgid "Signing out didn't work"
 msgstr "La déconnexion n'a pas abouti"
 
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: the directory turned their account off."
+msgstr "Depuis le {date} : l’annuaire a désactivé son compte."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account is no longer in the directory."
+msgstr "Depuis le {date} : son compte n’est plus dans l’annuaire."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account was deleted in the directory."
+msgstr "Depuis le {date} : son compte a été supprimé dans l’annuaire."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}. The directory has turned their account on again, so its next daily read lifts this."
+msgstr "Depuis le {date}. L’annuaire a réactivé son compte : sa prochaine lecture quotidienne lève donc la suspension."
+
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
 msgstr "Taille"
@@ -13904,6 +13924,10 @@ msgctxt "kind of app"
 msgid "Support"
 msgstr "Service client"
 
+#: src/settings/member-suspension.tsx
+msgid "Suspended"
+msgstr "Suspendu"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
 msgstr "Désactivez une équipe et personne dedans ne reçoit de lien."
@@ -14317,6 +14341,10 @@ msgstr "Le compte connecté en tant que {label} ne peut ouvrir aucun drive parta
 #: src/connections/sync-places.tsx
 msgid "The account connected as {label} can't open any SharePoint document libraries."
 msgstr "Le compte connecté en tant que {label} ne peut ouvrir aucune bibliothèque de documents SharePoint."
+
+#: src/settings/member-suspension.tsx
+msgid "The account is no longer listed in the directory. If it was deleted and can still be restored there, restoring it lets Grasp lift the suspension at its next daily read. Otherwise, to end their access for good, remove them."
+msgstr "Le compte n’apparaît plus dans l’annuaire. S’il a été supprimé et peut encore y être restauré, le restaurer permet à Grasp de lever la suspension à sa prochaine lecture quotidienne. Sinon, pour mettre fin à son accès définitivement, retirez cette personne."
 
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
@@ -15778,6 +15806,10 @@ msgstr "Couper le son"
 #: src/voice/sound-controls.tsx
 msgid "Turn sound on"
 msgstr "Activer le son"
+
+#: src/settings/member-suspension.tsx
+msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Réactivez le compte dans l’annuaire, et Grasp lève la suspension à sa prochaine lecture quotidienne. Pour mettre fin à son accès définitivement, retirez cette personne."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."

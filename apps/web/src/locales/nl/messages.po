@@ -12004,6 +12004,10 @@ msgstr "Verantwoordelijkheid"
 msgid "Restore"
 msgstr "Herstellen"
 
+#: src/settings/member-suspension.tsx
+msgid "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Zet het account in de directory terug, dan heft Grasp de schorsing op bij de volgende dagelijkse uitlezing. Wil je hun toegang voorgoed beëindigen, verwijder hen dan."
+
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "Deze eerdere stand herstellen?"
@@ -13378,6 +13382,22 @@ msgstr "Het inloggen wordt vastgelegd door de inlog van je bedrijf, zoals elke k
 msgid "Signing out didn't work"
 msgstr "Uitloggen is niet gelukt"
 
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: the directory turned their account off."
+msgstr "Sinds {date}: de directory heeft hun account uitgeschakeld."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account is no longer in the directory."
+msgstr "Sinds {date}: hun account staat niet meer in de directory."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account was deleted in the directory."
+msgstr "Sinds {date}: hun account is in de directory verwijderd."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}. The directory has turned their account on again, so its next daily read lifts this."
+msgstr "Sinds {date}. De directory heeft hun account weer ingeschakeld, dus de volgende dagelijkse uitlezing heft dit op."
+
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
 msgstr "Grootte"
@@ -13904,6 +13924,10 @@ msgctxt "kind of app"
 msgid "Support"
 msgstr "Klantenservice"
 
+#: src/settings/member-suspension.tsx
+msgid "Suspended"
+msgstr "Geschorst"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
 msgstr "Zet een team uit en niemand erin krijgt een link."
@@ -14317,6 +14341,10 @@ msgstr "Het account dat als {label} is verbonden, kan geen gedeelde drives opene
 #: src/connections/sync-places.tsx
 msgid "The account connected as {label} can't open any SharePoint document libraries."
 msgstr "Het account dat als {label} is verbonden, kan geen SharePoint-documentbibliotheken openen."
+
+#: src/settings/member-suspension.tsx
+msgid "The account is no longer listed in the directory. If it was deleted and can still be restored there, restoring it lets Grasp lift the suspension at its next daily read. Otherwise, to end their access for good, remove them."
+msgstr "Het account staat niet meer in de directory. Is het verwijderd en kan het daar nog worden teruggezet, dan heft Grasp de schorsing na het terugzetten op bij de volgende dagelijkse uitlezing. Wil je anders hun toegang voorgoed beëindigen, verwijder hen dan."
 
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
@@ -15778,6 +15806,10 @@ msgstr "Geluid uitzetten"
 #: src/voice/sound-controls.tsx
 msgid "Turn sound on"
 msgstr "Geluid aanzetten"
+
+#: src/settings/member-suspension.tsx
+msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Schakel het account in de directory weer in, dan heft Grasp de schorsing op bij de volgende dagelijkse uitlezing. Wil je hun toegang voorgoed beëindigen, verwijder hen dan."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."
