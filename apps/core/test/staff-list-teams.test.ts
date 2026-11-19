@@ -239,7 +239,9 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       drafted: [...drafted.keys()].filter((name) => name.endsWith(tag)),
       typo: members.has(`Salse ${tag}`),
       sameIds: [...list].every(([name, id]) => members.get(name)?.id === id),
-      support: list.get(`support ${tag.toUpperCase()}`),
+      // Under the Settings team's id, and its name: the members' team
+      // owns the name, the list follows it.
+      support: list.get(`Support ${tag}`),
       salesIsCores: sales !== undefined && sales !== `sales-${tag}`,
       people: saved?.people.map(({ team }) => team),
       created: events
@@ -320,7 +322,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
 
     expect({
       listed: listed.get(`Operations ${tag}`),
-      read: read.find(({ id }) => id === `team-${ops}`)?.name,
+      read: read.find(({ id }) => id === ops)?.name,
       refused: refused.status,
       removed: removed.status,
       again: again !== undefined && again !== old,
@@ -450,7 +452,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     const desk = drafted?.teams[0]?.id ?? "";
     // Placed by the admin while the team is only on the draft.
     await admin.api.brain.saveTeamGroups([
-      { id: `front-${tag}`, name: "Front office", teamIds: [`team-${desk}`] },
+      { id: `front-${tag}`, name: "Front office", teamIds: [desk] },
     ]);
     if (drafted === null) {
       throw new Error("The draft wasn't kept");
@@ -461,7 +463,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
 
     expect(
       teamGroups.find(({ id }) => id === `front-${tag}`)?.teamIds
-    ).toStrictEqual([`team-${desk}`]);
+    ).toStrictEqual([desk]);
   });
 
   it("make a confirmed team as Better Auth makes one in Settings, under the id the draft gave it", async () => {

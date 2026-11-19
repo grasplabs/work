@@ -890,8 +890,8 @@ describe("AI providers", { timeout: 60_000 }, () => {
           ],
         })
       );
-      const sales = `team-sales-${tag}`;
-      const support = `team-support-${tag}`;
+      const sales = `sales-${tag}`;
+      const support = `support-${tag}`;
       await plan(key, [
         answered(
           openaiCase.api,
