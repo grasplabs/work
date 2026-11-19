@@ -90,3 +90,47 @@ export const landingAt = (
   });
   return { coreEnv: { ...env, DB: db }, landed: () => landed };
 };
+
+/** The most D1 takes in one value, as its limits page states it. */
+const d1ValueBytes = 2_000_000;
+
+/**
+ * `env`'s D1 refusing a statement that binds a value over D1's limit of
+ * 2 MB, as D1 does in production; the local one takes any size.
+ */
+export const withD1ValueLimit = (): D1Database =>
+  new Proxy(env.DB, {
+    get: (target, key) => {
+      if (key === "prepare") {
+        return (query: string): D1PreparedStatement => {
+          const statement = target.prepare(query);
+          return new Proxy(statement, {
+            get: (inner, innerKey) => {
+              if (innerKey === "bind") {
+                return (...values: unknown[]) => {
+                  const over = values.some(
+                    (value) =>
+                      typeof value === "string" &&
+                      new TextEncoder().encode(value).length > d1ValueBytes
+                  );
+                  if (over) {
+                    throw new Error("D1_ERROR: string or blob too big");
+                  }
+                  return inner.bind(...values);
+                };
+              }
+              const value: unknown = Reflect.get(inner, innerKey, inner);
+              return typeof value === "function"
+                ? (...args: unknown[]): unknown =>
+                    Reflect.apply(value, inner, args)
+                : value;
+            },
+          });
+        };
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });

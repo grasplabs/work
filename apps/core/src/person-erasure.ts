@@ -69,6 +69,7 @@ import {
   stephenSummaries,
   stephenSummaryReaders,
   teamMembers,
+  teamPins,
   users,
   workflowDecisionConfirmations,
   apps as appRegistry,
@@ -630,6 +631,9 @@ const channels: ErasureStep = {
       ...theirInvitations,
       db.delete(notifications).where(eq(notifications.personId, userId)),
       db.delete(teamMembers).where(eq(teamMembers.userId, userId)),
+      // What an admin pinned of their teams (directory-teams.ts), whatever
+      // their removal cleaned up before.
+      db.delete(teamPins).where(eq(teamPins.userId, userId)),
       // The cards still to be pressed of their requests, then the requests.
       db
         .delete(stephenRequestCards)

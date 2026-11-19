@@ -663,7 +663,10 @@ export const teamPins = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    /** Kept in the team (true) or kept out of it (false). */
+    /**
+     * Kept in the team (true) or out of it (false): the read never takes
+     * them out of it, or never puts them in it (directory-teams.ts).
+     */
     kept: integer({ mode: "boolean" }).notNull(),
     pinnedAt: timestamp("pinned_at").notNull(),
   },

@@ -49,7 +49,7 @@ import {
   users,
   verifications,
 } from "../db/core/schema.ts";
-import { pinTeamMember, placeSignedIn } from "../directory-teams.ts";
+import { pinTeamMember, placeMember } from "../directory-teams.ts";
 import { directoryKinds, tieSignedIn } from "../directory-ties.ts";
 import {
   isErasedEmail,
@@ -593,7 +593,7 @@ const tieAtSignIn = async (env: Env, userId: string): Promise<void> => {
     // And placed in the teams their departments fill, by the same rule.
     for (const kind of directoryKinds) {
       // oxlint-disable-next-line no-await-in-loop -- one provider at a time
-      await tellKept(env, await placeSignedIn(env, kind, userId));
+      await tellKept(env, await placeMember(env, kind, userId));
     }
   } catch (error) {
     log.error("directory.tie_failed", errorFields(error));

@@ -112,8 +112,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     via: "team_members",
   },
   // What an admin pinned of a member's teams: deleted with their removal,
-  // which every erasure needs first; a removed person is in no team to
-  // pin again.
+  // and again by the erasure's channels step.
   "core.team_pins": { erased: "removal" },
   // Where the daily read stands: a connection, a tenant and counts.
   "core.directory_reads": {

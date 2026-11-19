@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { landingAt } from "./d1-landing.ts";
+import { landingAt, withD1ValueLimit } from "./d1-landing.ts";
 import {
   connectedDirectory,
   directoryHolds,
@@ -10,10 +10,11 @@ import {
 } from "./directory.ts";
 import { mockIdp } from "./idp.ts";
 import { runClockTask } from "./maintenance.ts";
-import { acmeTenant, entraClient } from "./sign-in-config.ts";
+import { acmeTenant, clientOrigin, entraClient } from "./sign-in-config.ts";
 import {
   auditedDuring,
   callAuth,
+  routed,
   entraPerson,
   signedIn,
   whoami,
@@ -77,6 +78,47 @@ const byHand = async (
   );
   await response.body?.cancel();
   return response.status;
+};
+
+/** `byHand`, through core with `coreEnv`. */
+const byHandOn = async (
+  coreEnv: Env,
+  session: string,
+  change: "add" | "remove",
+  teamId: string,
+  userId: string
+): Promise<number> => {
+  const response = await routed(
+    `/api/auth/organization/${change}-team-member`,
+    {
+      method: "POST",
+      headers: {
+        origin: clientOrigin,
+        cookie: session,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ teamId, userId }),
+    },
+    coreEnv
+  );
+  await response.body?.cancel();
+  return response.status;
+};
+
+/** Two teams an admin made, by id, and each one's name. */
+const twoTeams = async (session: string, first: string, second: string) => {
+  const ids = [
+    await teamNamed(session, `${first} ${crypto.randomUUID()}`),
+    await teamNamed(session, `${second} ${crypto.randomUUID()}`),
+  ] as const;
+  const { results } = await env.DB.prepare(
+    "SELECT id, name FROM teams WHERE id IN (?, ?)"
+  )
+    .bind(...ids)
+    .all<{ id: string; name: string }>();
+  const nameOf = (id: string) =>
+    results.find((team) => team.id === id)?.name ?? "";
+  return { ids, nameOf };
 };
 
 interface Membership {
@@ -593,6 +635,13 @@ describe("the directory's teams", () => {
     )
       .bind(rex.userId)
       .first<number>("n");
+    // A pin the removal didn't clean up (one written by anything after it):
+    // the erasure deletes it itself.
+    await env.DB.prepare(
+      "INSERT INTO team_pins (team_id, user_id, kept, pinned_at) VALUES (?, ?, 1, ?)"
+    )
+      .bind(byHandTeam, rex.userId, Date.now())
+      .run();
     await admin.api.members.erase(rex.userId, rex.name);
 
     const { results: pins } = await env.DB.prepare(
@@ -673,7 +722,7 @@ describe("the directory's teams", () => {
     let userId = "";
     // The placement's batch, as its first statement shows it.
     const { coreEnv, landed } = landingAt(
-      /insert into "directory_departments"/u,
+      /insert into "team_members"/u,
       "before",
       async () => {
         const row = await env.DB.prepare(
@@ -700,5 +749,243 @@ describe("the directory's teams", () => {
       landed: true,
       teams: [],
     });
+  });
+
+  it("never leaves a mover in neither team when their first sign-in lands between the read's snapshot and its batch", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const [before, after] = [
+      await teamNamed(admin.session, `Before ${crypto.randomUUID()}`),
+      await teamNamed(admin.session, `After ${crypto.randomUUID()}`),
+    ];
+    const names = await env.DB.prepare(
+      "SELECT id, name FROM teams WHERE id IN (?, ?)"
+    )
+      .bind(before, after)
+      .all<{ id: string; name: string }>();
+    const nameOf = (id: string) =>
+      names.results.find((team) => team.id === id)?.name ?? "";
+    const oid = crypto.randomUUID();
+    // Known to the directory in the first team, not signed in yet.
+    await directoryHolds([user({ id: oid, department: nameOf(before) })]);
+    await readAt(nextDay());
+    await directoryHolds([user({ id: oid, department: nameOf(after) })]);
+    let userId = "";
+    // Their first sign-in places them by the department saved so far,
+    // after the read took its snapshot and before its batch.
+    const { coreEnv, landed } = landingAt(readsBatch, "before", async () => {
+      ({ userId } = await memberWith(oid));
+    });
+
+    await readAt(nextDay(), { DB: coreEnv.DB });
+
+    expect({ landed: landed(), teams: await teamsOf(userId) }).toStrictEqual({
+      landed: true,
+      teams: [after],
+    });
+  });
+
+  it("places thousands of signed-in people whose memberships, as one JSON value, are over what D1 takes in one", async () => {
+    const { admin } = await connectedDirectory(idp);
+    // A short name: the directory's own JSON stays under D1's value.
+    const team = await teamNamed(
+      admin.session,
+      `M${crypto.randomUUID().slice(0, 8)}`
+    );
+    const name = await env.DB.prepare("SELECT name FROM teams WHERE id = ?")
+      .bind(team)
+      .first<string>("name");
+    // Each membership a read may make is two ids, its key and a row id,
+    // about 165 bytes of JSON: 15,000 of them are over 2 MB, while the
+    // directory's own entries, with a short department, are not.
+    const count = 15_000;
+    const people = Array.from({ length: count }, () => ({
+      oid: crypto.randomUUID(),
+      userId: crypto.randomUUID(),
+    }));
+    const now = Date.now();
+    const listed = JSON.stringify(
+      people.map(({ oid, userId }) => [oid, userId])
+    );
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) SELECT value ->> 1, 'Someone', (value ->> 1) || '@acme.test', 0, ?1, ?1 FROM json_each(?2)"
+      ).bind(now, listed),
+      env.DB.prepare(
+        "INSERT INTO accounts (id, account_id, provider_id, user_id, oid, verified_tenant, created_at, updated_at) SELECT value ->> 1, 'sub-' || (value ->> 1), 'microsoft', value ->> 1, value ->> 0, ?1, ?2, ?2 FROM json_each(?3)"
+      ).bind(acmeTenant, now, listed),
+      env.DB.prepare(
+        "INSERT INTO members (id, organization_id, user_id, role, created_at) SELECT value ->> 1, 'organization', value ->> 1, 'user', ?1 FROM json_each(?2)"
+      ).bind(now, listed),
+    ]);
+    await directoryHolds(
+      people.map(({ oid }) => user({ id: oid, department: name ?? "" }))
+    );
+
+    await readAt(nextDay(), { DB: withD1ValueLimit() });
+    const placed = await env.DB.prepare(
+      "SELECT count(*) AS n FROM team_members WHERE team_id = ?"
+    )
+      .bind(team)
+      .first<number>("n");
+    const failure = await env.DB.prepare(
+      "SELECT failure FROM directory_reads WHERE provider = 'microsoft-directory'"
+    ).first<string | null>("failure");
+
+    expect({ placed, failure }).toStrictEqual({ placed: count, failure: null });
+  });
+
+  it("never takes a mover out of their old team while they can't join the new one", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const {
+      ids: [before, after],
+      nameOf,
+    } = await twoTeams(admin.session, "Before", "After");
+    const una = await memberWith(crypto.randomUUID());
+    await directoryHolds([user({ id: una.oid, department: nameOf(before) })]);
+    await readAt(nextDay());
+    // An admin keeps her out of the new team by hand.
+    await byHand(admin.session, "add", after, una.userId);
+    await byHand(admin.session, "remove", after, una.userId);
+    await directoryHolds([user({ id: una.oid, department: nameOf(after) })]);
+
+    await readAt(nextDay());
+
+    await expect(teamsOf(una.userId)).resolves.toStrictEqual([before]);
+  });
+
+  it("takes only the mover out of the team, not a colleague who stays in its department", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const {
+      ids: [finance, sales],
+      nameOf,
+    } = await twoTeams(admin.session, "Finance", "Sales");
+    const [vic, wim] = [
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+    ];
+    await directoryHolds([
+      user({ id: vic.oid, department: nameOf(finance) }),
+      user({ id: wim.oid, department: nameOf(finance) }),
+    ]);
+    await readAt(nextDay());
+    await directoryHolds([
+      user({ id: vic.oid, department: nameOf(finance) }),
+      user({ id: wim.oid, department: nameOf(sales) }),
+    ]);
+
+    await readAt(nextDay());
+
+    expect({
+      vic: await teamsOf(vic.userId),
+      wim: await teamsOf(wim.userId),
+    }).toStrictEqual({ vic: [finance], wim: [sales] });
+  });
+
+  it("links no department from an older read that lands after a newer one", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const team = await teamNamed(admin.session, `Late ${crypto.randomUUID()}`);
+    const name = await env.DB.prepare("SELECT name FROM teams WHERE id = ?")
+      .bind(team)
+      .first<string>("name");
+    const xia = await memberWith(crypto.randomUUID());
+    await directoryHolds([user({ id: xia.oid, department: name ?? "" })]);
+    const at = nextDay();
+    // The older read pairs the department by name; before its batch, a
+    // newer one reads the department cleared, and applies that.
+    const { coreEnv, landed } = landingAt(readsBatch, "before", async () => {
+      await directoryHolds([user({ id: xia.oid, department: null })]);
+      await readAt(at);
+    });
+
+    await readAt(at, { DB: coreEnv.DB });
+    const links = await env.DB.prepare(
+      "SELECT count(*) AS n FROM directory_departments WHERE team_id = ?"
+    )
+      .bind(team)
+      .first<number>("n");
+
+    expect({
+      landed: landed(),
+      links,
+      teams: await teamsOf(xia.userId),
+    }).toStrictEqual({ landed: true, links: 0, teams: [] });
+  });
+
+  it("keeps no pin of someone an admin removed while another added them to a team, once they are erased", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const team = await teamNamed(admin.session, `Both ${crypto.randomUUID()}`);
+    const yan = await memberWith(crypto.randomUUID());
+    // The removal lands after Better Auth checked the membership, before
+    // the add's pin is written.
+    const { coreEnv, landed } = landingAt(
+      /insert into "team_pins"/u,
+      "before",
+      async () => {
+        await admin.api.members.remove(yan.userId);
+      }
+    );
+
+    await byHandOn(coreEnv, admin.session, "add", team, yan.userId);
+    const pinned = await env.DB.prepare(
+      "SELECT count(*) AS n FROM team_pins WHERE user_id = ?"
+    )
+      .bind(yan.userId)
+      .first<number>("n");
+    await admin.api.members.erase(yan.userId, yan.name);
+    const kept = await env.DB.prepare(
+      "SELECT count(*) AS n FROM team_pins WHERE user_id = ?"
+    )
+      .bind(yan.userId)
+      .first<number>("n");
+
+    expect({ landed: landed(), pinned, kept }).toStrictEqual({
+      landed: true,
+      pinned: 0,
+      kept: 0,
+    });
+  });
+
+  it("still places someone in a team an admin's hand add to it failed for", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const team = await teamNamed(admin.session, `Fail ${crypto.randomUUID()}`);
+    const name = await env.DB.prepare("SELECT name FROM teams WHERE id = ?")
+      .bind(team)
+      .first<string>("name");
+    const zoe = await memberWith(crypto.randomUUID());
+    // Better Auth's own write of the membership fails, after its before
+    // hook pinned the pair.
+    const failing = new Proxy(env.DB, {
+      get: (target, key) => {
+        if (key === "prepare") {
+          return (query: string): unknown =>
+            query.startsWith('insert into "team_members"')
+              ? target.prepare("SELECT no_such_column FROM teams")
+              : target.prepare(query);
+        }
+        const value: unknown = Reflect.get(target, key, target);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const status = await byHandOn(
+      { ...env, DB: failing },
+      admin.session,
+      "add",
+      team,
+      zoe.userId
+    );
+    const failed = await teamsOf(zoe.userId);
+    await directoryHolds([user({ id: zoe.oid, department: name ?? "" })]);
+
+    await readAt(nextDay());
+
+    expect({ status, failed, placed: await teamsOf(zoe.userId) }).toStrictEqual(
+      {
+        status: 500,
+        failed: [],
+        placed: [team],
+      }
+    );
   });
 });

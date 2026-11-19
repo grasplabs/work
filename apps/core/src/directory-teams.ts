@@ -7,6 +7,7 @@ import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 
 import { revocationsOf } from "./access-revocations.ts";
 import type { KeptRevocation } from "./access-revocations.ts";
@@ -69,18 +70,50 @@ type Candidate = [string, string, string, string];
 /** A department a read may link, the one team named as it, and that name. */
 type NewLink = [string, string, string];
 
-/** What a placement may write, as its statements' JSON values. */
+/**
+ * What a placement may write, as its statements' JSON values, each within
+ * what D1 takes in one (`jsonValuesOf`).
+ */
 export interface Placement {
   /** Every membership it may make (`Candidate`); each is checked as written. */
-  candidates: string;
+  candidates: string[];
   /** Every department it may link (`NewLink`), likewise. */
-  links: string;
+  links: string[];
+  /** The members it may make a membership of. */
+  members: Set<string>;
 }
+
+/** The most D1 takes in one value (its limits page: "Maximum string, BLOB or table row size"). */
+const d1ValueBytes = 2_000_000;
+
+/**
+ * `items` as JSON arrays, as few as fit, each at most `d1ValueBytes` of
+ * UTF-8: one statement each, in the one batch.
+ */
+export const jsonValuesOf = (items: readonly unknown[]): string[] => {
+  const values: string[] = [];
+  let parts: string[] = [];
+  // The brackets.
+  let bytes = 2;
+  for (const item of items) {
+    const part = JSON.stringify(item);
+    // The item and the comma before it.
+    const size = new TextEncoder().encode(part).length + 1;
+    if (parts.length > 0 && bytes + size > d1ValueBytes) {
+      values.push(`[${parts.join(",")}]`);
+      parts = [];
+      bytes = 2;
+    }
+    parts.push(part);
+    bytes += size;
+  }
+  return parts.length === 0 ? [] : [...values, `[${parts.join(",")}]`];
+};
 
 /** `pairs` (user, team) as candidates, each with its key and a new row id. */
 const candidatesOf = async (
   pairs: readonly (readonly [string, string])[]
-): Promise<string> => {
+): Promise<Pick<Placement, "candidates" | "members">> => {
   const seen = new Set<string>();
   const candidates: Candidate[] = [];
   for (const [userId, teamId] of pairs) {
@@ -92,19 +125,22 @@ const candidatesOf = async (
       candidates.push([userId, teamId, key, crypto.randomUUID()]);
     }
   }
-  return JSON.stringify(candidates);
+  return {
+    candidates: jsonValuesOf(candidates),
+    members: new Set(candidates.map(([userId]) => userId)),
+  };
 };
 
 /**
  * What the daily read of `kind` may place, from what holds before its
  * batch: each listed person's department, linked to a team already or by
- * name now, and the members whose sign-in names them. Only candidates: the
- * batch writes each only if it still holds as it is written.
+ * name now, and the members whose sign-in names them, in any tenant. Only
+ * candidates: the batch writes each only if it still holds as it is
+ * written, the tie's tenant among it.
  */
 export const readPlacementOf = async (
   env: Env,
   kind: DirectoryKind,
-  tenant: string,
   people: readonly { id: string; department: string }[]
 ): Promise<Placement> => {
   const db = drizzle(env.DB);
@@ -118,8 +154,7 @@ export const readPlacementOf = async (
       .where(
         and(
           eq(accounts.providerId, kind.signInProvider),
-          isNotNull(kind.signedInAs),
-          sql`lower(${accounts.verifiedTenant}) = ${tenant}`
+          isNotNull(kind.signedInAs)
         )
       ),
     db
@@ -165,17 +200,14 @@ export const readPlacementOf = async (
       ? []
       : (usersOf.get(id) ?? []).map((userId) => [userId, teamId] as const);
   });
-  return {
-    candidates: await candidatesOf(pairs),
-    links: JSON.stringify(links),
-  };
+  return { ...(await candidatesOf(pairs)), links: jsonValuesOf(links) };
 };
 
 /**
  * What placing `userId` as they sign in may write: the teams the
  * departments of the directory's people tied to them fill now.
  */
-const signInPlacementOf = async (
+const memberPlacementOf = async (
   env: Env,
   kind: DirectoryKind,
   userId: string
@@ -197,10 +229,10 @@ const signInPlacementOf = async (
       )
     );
   return {
-    candidates: await candidatesOf(
+    ...(await candidatesOf(
       filled.map(({ teamId }) => [userId, teamId] as const)
-    ),
-    links: "[]",
+    )),
+    links: [],
   };
 };
 
@@ -215,10 +247,18 @@ const filled = (kind: DirectoryKind, user: SQL, team: SQL): SQL => sql`EXISTS (
     AND ${team}
 )`;
 
-/** That an admin pinned `user` in or out of `team`, as SQL. */
-const pinned = (user: SQL, team: SQL): SQL => sql`EXISTS (
+/**
+ * That an admin kept `user` in `team` by hand (`kept`), or out of it, as
+ * SQL. Each pin stops only the step that would undo the admin's change:
+ * kept out, the read never adds them; kept in, it never takes them out.
+ * So a pin whose hand change didn't happen after all (Better Auth's write
+ * failed after its before hook, which runs no after hook on an unexpected
+ * error) never stops the read doing what the admin asked for.
+ */
+const pinned = (user: SQL, team: SQL, kept: boolean): SQL => sql`EXISTS (
   SELECT 1 FROM ${teamPins}
   WHERE ${teamPins.userId} = ${user} AND ${teamPins.teamId} = ${team}
+    AND ${teamPins.kept} = ${kept ? 1 : 0}
 )`;
 
 /** An audit entry the read records for each row, its ids filled in by SQL. */
@@ -235,10 +275,14 @@ const systemEntry = (action: string, detail: AuditEntry["detail"]) =>
     )
   );
 
+/** `team_members` again, for a member's other membership. */
+const replacement = alias(teamMembers, "replacement");
+
 /**
  * The statements that place `kind`'s tied members as `placement` and what
  * holds when each runs say, taking out only members `scope` (on
- * `team_members.user_id`) names. Each reads what the directory's rows
+ * `team_members.user_id`) names, and linking departments only while
+ * `linking` holds (a read's claim: its list of departments is its own). Each reads what the directory's rows
  * hold as it runs, and changes nothing a second run would change again,
  * so a read that lost its claim (directory-people.ts) places as the one
  * that holds it. In order: the departments linked by name; the memberships
@@ -252,7 +296,8 @@ export const placementStatements = (
   db: DrizzleD1Database,
   kind: DirectoryKind,
   placement: Placement,
-  scope: SQL
+  scope: SQL,
+  linking: SQL
 ): { statements: BatchItem<"sqlite">[]; revocation: number } => {
   const { candidates, links } = placement;
   const now = Date.now();
@@ -265,23 +310,35 @@ export const placementStatements = (
     )
     AND EXISTS (
       SELECT 1 FROM ${teams} WHERE ${teams.id} = value ->> 1 AND ${teams.name} = value ->> 2
-    )`;
+    )
+    AND ${linking}`;
   // A link names only a team that exists, which takes its links with it.
   // A tie names an active member, but at sign-in the tie is a batch of its
   // own: whether they still are one is asked again here.
   const joinable = sql`${filled(kind, user, sql`${directoryDepartments.teamId} = ${team}`)}
     AND ${activeMember(user)}
-    AND NOT ${pinned(user, team)}
+    AND NOT ${pinned(user, team, false)}
     AND NOT EXISTS (
       SELECT 1 FROM ${teamMembers}
       WHERE ${teamMembers.teamId} = ${team} AND ${teamMembers.userId} = ${user}
     )`;
+  // A member leaves a team the read made them a member of only once they
+  // are in the one their department fills now, at this point in the same
+  // batch: never into no team at all.
   const leavable = sql`${teamMembers.membershipKey} IN (
       SELECT ${directoryMemberships.membershipKey} FROM ${directoryMemberships}
     )
     AND NOT ${filled(kind, sql`${teamMembers.userId}`, sql`${directoryDepartments.teamId} = ${teamMembers.teamId}`)}
-    AND ${filled(kind, sql`${teamMembers.userId}`, sql`${directoryDepartments.teamId} <> ${teamMembers.teamId}`)}
-    AND NOT ${pinned(sql`${teamMembers.userId}`, sql`${teamMembers.teamId}`)}
+    AND ${filled(
+      kind,
+      sql`${teamMembers.userId}`,
+      sql`${directoryDepartments.teamId} <> ${teamMembers.teamId} AND EXISTS (
+        SELECT 1 FROM ${teamMembers} AS ${replacement}
+        WHERE ${replacement.userId} = ${teamMembers.userId}
+          AND ${replacement.teamId} = ${directoryDepartments.teamId}
+      )`
+    )}
+    AND NOT ${pinned(sql`${teamMembers.userId}`, sql`${teamMembers.teamId}`, true)}
     AND ${scope}`;
   const linked = systemEntry("directory.department_linked", {
     provider: kind.provider,
@@ -301,36 +358,40 @@ export const placementStatements = (
     sql`EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${leavable})`
   );
   const statements: BatchItem<"sqlite">[] = [
-    db.insert(auditOutbox).select(
-      sql`SELECT id, json_set(${linked}, '$.id', id, '$.target.id', value ->> 1), ${now}
-        FROM (SELECT ${uuidSql} AS id, value FROM json_each(${links}) WHERE ${linkable})`
-    ),
-    db
-      .insert(directoryDepartments)
-      .select(
-        sql`SELECT ${kind.provider}, value ->> 0, value ->> 1 FROM json_each(${links}) WHERE ${linkable}`
-      )
-      .onConflictDoNothing(),
-    db.insert(auditOutbox).select(
-      sql`SELECT id, json_set(${added}, '$.id', id, '$.target.id', value ->> 1, '$.detail.userId', value ->> 0), ${now}
-        FROM (SELECT ${uuidSql} AS id, value FROM json_each(${candidates}) WHERE ${joinable})`
-    ),
-    db
-      .insert(teamMembers)
-      .select(
-        sql`SELECT value ->> 3, value ->> 1, value ->> 0, value ->> 2, ${now}
-          FROM json_each(${candidates}) WHERE ${joinable}`
-      )
-      .onConflictDoNothing(),
-    // Marked only where this batch's own insert made the membership: its
-    // row holds the id the candidate gave it.
-    db
-      .insert(directoryMemberships)
-      .select(
-        sql`SELECT value ->> 2 FROM json_each(${candidates})
-          WHERE EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.id} = value ->> 3)`
-      )
-      .onConflictDoNothing(),
+    ...links.flatMap((value) => [
+      db.insert(auditOutbox).select(
+        sql`SELECT id, json_set(${linked}, '$.id', id, '$.target.id', value ->> 1), ${now}
+          FROM (SELECT ${uuidSql} AS id, value FROM json_each(${value}) WHERE ${linkable})`
+      ),
+      db
+        .insert(directoryDepartments)
+        .select(
+          sql`SELECT ${kind.provider}, value ->> 0, value ->> 1 FROM json_each(${value}) WHERE ${linkable}`
+        )
+        .onConflictDoNothing(),
+    ]),
+    ...candidates.flatMap((value) => [
+      db.insert(auditOutbox).select(
+        sql`SELECT id, json_set(${added}, '$.id', id, '$.target.id', value ->> 1, '$.detail.userId', value ->> 0), ${now}
+          FROM (SELECT ${uuidSql} AS id, value FROM json_each(${value}) WHERE ${joinable})`
+      ),
+      db
+        .insert(teamMembers)
+        .select(
+          sql`SELECT value ->> 3, value ->> 1, value ->> 0, value ->> 2, ${now}
+            FROM json_each(${value}) WHERE ${joinable}`
+        )
+        .onConflictDoNothing(),
+      // Marked only where this batch's own insert made the membership: its
+      // row holds the id the candidate gave it.
+      db
+        .insert(directoryMemberships)
+        .select(
+          sql`SELECT value ->> 2 FROM json_each(${value})
+            WHERE EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.id} = value ->> 3)`
+        )
+        .onConflictDoNothing(),
+    ]),
     db.insert(auditOutbox).select(
       sql`SELECT id, json_set(${removed}, '$.id', id, '$.target.id', team_id, '$.detail.userId', user_id), ${now}
         FROM (
@@ -359,22 +420,24 @@ export const keptIn = (result: unknown): KeptRevocation[] =>
   Array.isArray(result) ? result.filter(isKept) : [];
 
 /**
- * Places `userId`, who is signing in, by the read's own statements, for
- * them alone: in the teams their directory people's departments fill.
- * Answers the revocations its batch kept, for the caller to tell.
+ * Places `userId` by the read's own statements, for them alone: in the
+ * teams their directory people's departments fill. As they sign in, and
+ * at the end of a read for whoever it tied that its snapshot didn't know
+ * yet. Answers the revocations its batch kept, for the caller to tell.
  */
-export const placeSignedIn = async (
+export const placeMember = async (
   env: Env,
   kind: DirectoryKind,
   userId: string
 ): Promise<KeptRevocation[]> => {
-  const placement = await signInPlacementOf(env, kind, userId);
+  const placement = await memberPlacementOf(env, kind, userId);
   const db = drizzle(env.DB);
   const { statements, revocation } = placementStatements(
     db,
     kind,
     placement,
-    sql`${teamMembers.userId} = ${userId}`
+    sql`${teamMembers.userId} = ${userId}`,
+    sql`0`
   );
   const [first, ...rest] = statements;
   if (first === undefined) {
@@ -397,9 +460,14 @@ export const pinTeamMember = async (
   kept: boolean
 ): Promise<void> => {
   const pinnedAt = new Date();
+  // Only while they are a member, in the statement: a removal landing
+  // after Better Auth checked it leaves nothing of them here.
   await drizzle(env.DB)
     .insert(teamPins)
-    .values({ teamId, userId, kept, pinnedAt })
+    .select(
+      sql`SELECT ${teamId}, ${userId}, ${kept ? 1 : 0}, ${pinnedAt.getTime()}
+        WHERE ${activeMember(userId)}`
+    )
     .onConflictDoUpdate({
       target: [teamPins.userId, teamPins.teamId],
       set: { kept, pinnedAt },
