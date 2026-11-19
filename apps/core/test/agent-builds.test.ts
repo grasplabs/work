@@ -106,7 +106,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // its preview: the first, not the later one that only read it.
     const messages = await transcript(chat.stub, chat.chat.id);
     const steps = messages.flatMap((message) =>
-      message.role === "toolResult" ? [message.toolCallId] : []
+      message.role === "toolResult" && message.toolName === "executeCode"
+        ? [message.toolCallId]
+        : []
     );
     expect(listed).toMatchObject([
       { kind: "app", id: existing, callId: steps[0] },

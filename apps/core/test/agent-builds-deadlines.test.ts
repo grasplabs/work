@@ -93,14 +93,15 @@ export const Route = createFileRoute("/late")({ component: Page });
 
     // The write is let in at once, then waits on the App's files while the
     // person presses Stop: refused as it commits. The chat shows the
-    // question, then the call under way.
+    // question, the recall before it (its call and result), then the call
+    // under way.
     await slowFilesDuring(chat.stub, async () => {
       const reply = chat.ask("Write it.");
       await vi.waitFor(
         async () => {
           await expect(
             transcript(chat.stub, chat.chat.id)
-          ).resolves.toHaveLength(2);
+          ).resolves.toHaveLength(4);
         },
         { timeout: 10_000 }
       );
@@ -121,7 +122,8 @@ export const Route = createFileRoute("/late")({ component: Page });
         runInDurableObject(chat.stub, (_instance, state) =>
           state.storage.sql
             .exec<{ status: string }>(
-              "SELECT status FROM chat_code_runs WHERE chat_id = ?",
+              // The write's run, never the recall's before the question.
+              "SELECT status FROM chat_code_runs WHERE chat_id = ? AND tool_call_id NOT LIKE 'recall\\_%' ESCAPE '\\'",
               chat.chat.id
             )
             .toArray()

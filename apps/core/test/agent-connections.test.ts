@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { withheldResult } from "../src/agent.ts";
+import { turnRecallMethod } from "../src/turn-recall.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -214,8 +215,11 @@ describe("a chat's connections", setUpTime, () => {
       (all) =>
         all.filter(
           ({ action, detail }) =>
-            // Not the catalog each turn reads for its skills.
-            (action === "agent.call" && detail.turn !== true) ||
+            // Not the catalog each turn reads for its skills, nor the
+            // recall before its question.
+            (action === "agent.call" &&
+              detail.turn !== true &&
+              detail.method !== turnRecallMethod) ||
             action === "connection.call"
         ).length === 4
     );
@@ -224,8 +228,11 @@ describe("a chat's connections", setUpTime, () => {
       events
         .filter(
           ({ action, detail }) =>
-            // Not the catalog each turn reads for its skills.
-            (action === "agent.call" && detail.turn !== true) ||
+            // Not the catalog each turn reads for its skills, nor the
+            // recall before its question.
+            (action === "agent.call" &&
+              detail.turn !== true &&
+              detail.method !== turnRecallMethod) ||
             action === "connection.call"
         )
         .map(({ action, actor: by, target, detail }) => ({

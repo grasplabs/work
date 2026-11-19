@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { addSource } from "../src/brain-next.ts";
-import { turnRecallMethod, turnRecallTool } from "../src/turn-recall.ts";
+import { turnRecallMethod } from "../src/turn-recall.ts";
 import { newTeam } from "./admin-teams.ts";
 import {
   chatOf,
@@ -70,7 +70,7 @@ describe("a chat's brain", setUpTime, () => {
     // The turn recalls for the question before the model's first request
     // (turn-recall.ts): its own search step, then the model's code step.
     const [read] = await codeResults(stub, chat.id);
-    const [recalled] = await toolResults(stub, chat.id);
+    const [recalled] = await toolResults(stub, chat.id, { recalls: true });
     expect({
       recalled:
         recalled?.tool === "searchBrain" &&
@@ -128,7 +128,7 @@ describe("a chat's brain", setUpTime, () => {
     await ask("What's still unknown?");
 
     // The recall before the first request, then the model's own read.
-    const [recalled] = await toolResults(stub, chat.id);
+    const [recalled] = await toolResults(stub, chat.id, { recalls: true });
     const [read] = await codeResults(stub, chat.id);
     const text = read?.text ?? "";
     expect(recalled?.text).not.toContain(secret);
@@ -170,7 +170,10 @@ describe("a chat's brain", setUpTime, () => {
         api: sent.includes("env.brain:"),
       };
     });
-    const searched = await toolResults(stub, chat.id);
+    const searched = [
+      ...(await toolResults(stub, chat.id, { recalls: true })),
+      ...(await toolResults(stub, chat.id)),
+    ];
     expect({
       first,
       searched: searched
@@ -225,8 +228,7 @@ describe("a chat's brain", setUpTime, () => {
       },
       { timeout: 10_000, interval: 50 }
     );
-    const results = await toolResults(stub, chat.id);
-    const steps = results.filter(({ tool }) => tool === turnRecallTool);
+    const steps = await toolResults(stub, chat.id, { recalls: true });
     expect({
       recalled,
       steps: steps.map(({ text }) => text.includes(fact)),

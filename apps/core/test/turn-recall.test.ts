@@ -2123,7 +2123,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
     const sent = JSON.stringify([
       outsider.provider.requests.map(({ body }) => body),
       outsider.provider.analyses.map(({ body }) => body),
-      await toolResults(outsider.stub, outsider.chat.id),
+      await toolResults(outsider.stub, outsider.chat.id, { recalls: true }),
     ]);
     expect({
       steered: outsider.provider.analyses.length,
