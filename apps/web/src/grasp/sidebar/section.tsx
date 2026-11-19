@@ -22,7 +22,7 @@ import { tabStyles } from "../tabs/tabs";
 import { rowMarker } from "../tabs/tabs.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
-import { Tip } from "../tooltip/tip";
+import { WithTip } from "../tooltip/lazy-tip";
 import { useWords, withGiven } from "../words/words";
 import { useSidebarGivenWords } from "./shell";
 import { sidebarWords } from "./words";
@@ -90,7 +90,6 @@ const styles = stylex.create({
     paddingInline: grasp.shellGutter,
     paddingBlockStart: grasp.space1,
   },
-
   // The section's name: a heading in a row's box (it leads nowhere, so not a link), in the shell's ink.
   title: {
     display: "flex",
@@ -421,17 +420,12 @@ const Tab = ({
   tab: SidebarTab;
   chosen: boolean;
   onChoose: (value: string) => void;
-  /** Ties it to the tab panel round the rows; views of the page have none. */
+  /** Ties it to the tab panel round the rows; a section's views have none. */
   panel: boolean;
-  /** Its icon alone, its words its name and its tooltip: for three or more tabs in the row. */
+  /** Its icon alone: its words are its name, and its tooltip. */
   iconOnly: boolean;
 }) => {
   const counted = tab.count !== undefined && tab.count > 0;
-  const words = (
-    <span data-slot="sidebar-tab-words" {...stylex.props(styles.tabWords)}>
-      {tab.label}
-    </span>
-  );
   const own = {
     role: "tab",
     id: tabId(id, tab.value),
@@ -443,8 +437,9 @@ const Tab = ({
       const next = tabFor(event);
       if (next !== null) {
         event.preventDefault();
-        next.focus();
+        // Chosen, then focused: a press closes a tab's tooltip, so focus after it opens the tip.
         next.click();
+        next.focus();
       }
     },
     onClick: () => {
@@ -478,14 +473,24 @@ const Tab = ({
         <Unseen>{tab.label}</Unseen>
       ) : (
         <span {...stylex.props(styles.hold)}>
-          {words}
+          <span
+            data-slot="sidebar-tab-words"
+            {...stylex.props(styles.tabWords)}
+          >
+            {tab.label}
+          </span>
           {counted && tab.icon === undefined && <TabCount atWords />}
         </span>
       )}
       {counted && <Unseen>{` ${tab.countLabel ?? String(tab.count)}`}</Unseen>}
     </button>
   );
-  return iconOnly ? <Tip name render={drawn} tooltip={tab.label} /> : drawn({});
+  // The tip repeats the name, so it describes nothing (`name`): a screen reader hears it once.
+  return iconOnly ? (
+    <WithTip name tooltip={tab.label} render={drawn} />
+  ) : (
+    drawn({})
+  );
 };
 
 /** The chosen tab in the switch. */
@@ -612,7 +617,11 @@ const crossfade = (panel: HTMLElement | null) => {
   });
 };
 
-/** The tabs at the top of the main list: one tab stop, ←/→, Home and End move and choose. */
+/** Whether three or more tabs, each with an icon: worded, they would cut their words in the sidebar's width. */
+const crowded = (tabs: readonly SidebarTab[]) =>
+  tabs.length > 2 && tabs.every((tab) => tab.icon !== undefined);
+
+/** The tabs at the top of the main list, or a section's views: one tab stop, ←/→, Home and End move and choose. */
 export const SidebarTabs = ({
   id,
   tabs,
@@ -620,7 +629,7 @@ export const SidebarTabs = ({
   label,
   onChoose,
   panel = true,
-  iconOnly = false,
+  iconOnly = crowded(tabs),
 }: {
   id: string;
   tabs: readonly SidebarTab[];
@@ -628,12 +637,15 @@ export const SidebarTabs = ({
   label: string;
   onChoose: (value: string) => void;
   /**
-   * The tabs switch the rows under them, in a tab panel; false for a section's views, which switch
-   * what its page shows.
+   * The tabs switch the rows under them, in a tab panel (each tab's `aria-controls`, the lists'
+   * crossfade). False for a section's views, which switch what its page shows, not the rows.
    * @default true
    */
   panel?: boolean;
-  /** Each tab its icon alone, its words its name and its tooltip. @default false */
+  /**
+   * Each tab its icon alone, its words its name and its tooltip.
+   * @default true from three tabs that all have an icon
+   */
   iconOnly?: boolean;
 }) => {
   useCountVoice(tabs);

@@ -28,18 +28,18 @@ export interface TipProps {
    */
   off?: boolean;
   /**
-   * The tooltip only repeats the trigger's name (an icon-only Button's or Toggle's `aria-label`): it
-   * is not tied to the trigger as a description, so a screen reader does not hear the name twice.
+   * The tooltip repeats the trigger's own name, so it adds no `aria-describedby`: a screen reader
+   * would hear the name twice.
    * @default false
    */
   name?: boolean;
 }
 
-/** The trigger's props without its tie to the tooltip as a description. */
-const withoutDescription = (trigger: Record<string, unknown>) => {
-  const { "aria-describedby": _repeated, ...own } = trigger;
-  return own;
-};
+/** The tooltip trigger's props without its description, for a tip that only repeats the name. */
+const undescribed = (trigger: Record<string, unknown>) =>
+  Object.fromEntries(
+    Object.entries(trigger).filter(([key]) => key !== "aria-describedby")
+  );
 
 /** Whether the layer this trigger opens is open now. */
 const layerOpen = (element: HTMLElement | null) =>
@@ -71,8 +71,8 @@ export const Tip = ({
         render={(trigger: Record<string, unknown>) =>
           render(
             mergeProps(
-              name ? withoutDescription(trigger) : trigger,
-              // Says a tooltip already drives this element: a Button in it adds none of its own.
+              name ? undescribed(trigger) : trigger,
+              // Work's own until the library's "tooltips everywhere": a Button in it adds none.
               { "data-tooltip-trigger": "" },
               { ref: keep }
             )

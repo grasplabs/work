@@ -17,7 +17,11 @@ export interface WithTipProps {
   render: (props: Record<string, unknown>) => ReactElement;
   /** The tooltip is kept but never opens (tip.tsx). @default false */
   off?: boolean;
-  /** The tooltip only repeats the trigger's name (tip.tsx). @default false */
+  /**
+   * The tooltip repeats the trigger's own name (an icon-only tab's words): it describes nothing, so
+   * a screen reader hears the name once (tip.tsx).
+   * @default false
+   */
   name?: boolean;
 }
 

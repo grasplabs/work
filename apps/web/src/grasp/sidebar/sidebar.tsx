@@ -199,13 +199,16 @@ export interface SidebarSection {
 
 export type { SidebarBack, SidebarTab } from "./section";
 
-/** A section's views (SidebarSection's `views`). */
+/** A section's views (SidebarSection's `views`): what its page shows, chosen in the sidebar. */
 export interface SidebarSectionViews {
   /** What the views are of ("Preview width"), as a screen reader says it. */
   label: string;
-  /** The views, as the main list's tabs: each its icon alone from three on, its words its tooltip. */
+  /**
+   * The views, as the main list's tabs. From three, each with an icon, only the icons show: each
+   * view's words are its name and its tooltip.
+   */
   tabs: readonly SidebarTab[];
-  /** The view shown. */
+  /** The view shown: one of the tabs' `value`. */
   value: string;
   /** Runs with the view chosen. */
   onChange: (value: string) => void;
@@ -1868,7 +1871,7 @@ interface ListAreaProps {
 const loadingSaid = (loading: boolean | undefined, said: string) =>
   loading === true ? said : undefined;
 
-/** A section's views, under its name, in the main list's tabs' switch. */
+/** A section's views, under its name, in the main list's tabs' switch: no tab panel, as they switch the page. */
 const SectionViews = ({
   id,
   section,
@@ -1887,7 +1890,6 @@ const SectionViews = ({
         views.onChange(value);
       }}
       panel={false}
-      iconOnly={views.tabs.length > 2}
     />
   );
 };
