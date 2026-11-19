@@ -400,6 +400,10 @@ describe(
           markerWord(),
         "a file native sync copied from a place picked on a shared connection with no Brain audience":
           markerWord(),
+        "a file native sync copied from a place everyone may read in the Brain that its source lets the holder alone read":
+          markerWord(),
+        "a file native sync copied from a place everyone may read in the Brain whose readers couldn't be read":
+          markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
         "a file the source shares with the holder, by their account":
@@ -475,6 +479,10 @@ describe(
           unpickedPlaceMarker,
         "a file native sync copied from a place picked on a shared connection with no Brain audience":
           nobodyPlaceMarker,
+        "a file native sync copied from a place everyone may read in the Brain that its source lets the holder alone read":
+          holderPlaceMarker,
+        "a file native sync copied from a place everyone may read in the Brain whose readers couldn't be read":
+          unreadPlaceMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
         "a file the source shares with the holder, by their account":
@@ -867,17 +875,22 @@ describe(
         })}`,
       };
       // Copied by native sync from places an admin picked on shared
-      // connections (GRA-1719), each for its place's own group, which a
+      // connections (GRA-1719), each read by those of its readers at the
+      // source whom its place's group holds too (GRA-2145), a group a
       // reader holds beside the connection's audience only while the place
-      // is picked (brain-next.ts `withConnections`): one for a team the
-      // outsider isn't in; one whose place was un-picked, though everyone
-      // may read the connection; one whose connection has no audience.
-      // Their places, as the sync run keeps them, are never due in a run.
+      // is picked (brain-next.ts `withConnections`). The outsider may open
+      // the first three at the source: one for a team they aren't in; one
+      // whose place was un-picked, though everyone may read the
+      // connection; one whose connection has no audience. Two more that
+      // everyone may read in the Brain: one its source lets the holder
+      // alone read, one whose readers couldn't be read. Their places, as
+      // the sync run keeps them, are never due in a run.
       const neverDue = Date.parse("2100-01-01T00:00:00.000Z");
       const placeCopy = async (
         marker: string,
         audience: Parameters<typeof chooseAudience>[2] | undefined,
-        dropped: boolean
+        dropped: boolean,
+        readers: SourceReader[] = [accountOf(outsiderPerson)]
       ): Promise<SourceRef> => {
         // Its ID holds no marker: everyone holds the group of a connection
         // everyone may read.
@@ -906,7 +919,13 @@ describe(
           source,
           change: crypto.randomUUID(),
           text: `Site plan ${sharedWord} ${marker}`,
-          readers: { kind: "place", connectionId, feed: "sites", place },
+          readers: {
+            kind: "place",
+            connectionId,
+            feed: "sites",
+            place,
+            readers,
+          },
         });
         return source;
       };
@@ -924,6 +943,18 @@ describe(
         nobodyPlaceMarker,
         undefined,
         false
+      );
+      const holderPlaceId = await placeCopy(
+        holderPlaceMarker,
+        { kind: "everyone" },
+        false,
+        [accountOf(holderApi.person)]
+      );
+      const unreadPlaceId = await placeCopy(
+        unreadPlaceMarker,
+        { kind: "everyone" },
+        false,
+        []
       );
       // A step the holder took, kept as an event of a team of theirs large
       // enough to keep one (GRA-1763): nobody reads it back, that team
@@ -1468,6 +1499,8 @@ describe(
           teamPlaceMarker,
           unpickedPlaceMarker,
           nobodyPlaceMarker,
+          holderPlaceMarker,
+          unreadPlaceMarker,
           readersMarker,
           staleReadersMarker,
           syncMarker,
@@ -1500,6 +1533,8 @@ describe(
           teamPlaceId,
           unpickedPlaceId,
           nobodyPlaceId,
+          holderPlaceId,
+          unreadPlaceId,
           readersId,
           staleReadersId,
           goneSyncId,
@@ -1670,9 +1705,19 @@ describe(
         unsharedReadMarker,
         unpickedPlaceMarker,
         nobodyPlaceMarker,
-        placeMarkers: [teamPlaceMarker, unpickedPlaceMarker, nobodyPlaceMarker],
+        holderPlaceMarker,
+        unreadPlaceMarker,
+        placeMarkers: [
+          teamPlaceMarker,
+          unpickedPlaceMarker,
+          nobodyPlaceMarker,
+          holderPlaceMarker,
+          unreadPlaceMarker,
+        ],
         unpickedPlaceId,
         nobodyPlaceId,
+        holderPlaceId,
+        unreadPlaceId,
         runMarker,
         askedMarker,
         answerMarker,
@@ -2127,6 +2172,8 @@ describe(
             world.unsharedReadMarker,
             world.unpickedPlaceMarker,
             world.nobodyPlaceMarker,
+            world.holderPlaceMarker,
+            world.unreadPlaceMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
             world.ownUploadMarker,
@@ -2145,6 +2192,8 @@ describe(
             world.runCaptureId,
             world.unpickedPlaceId,
             world.nobodyPlaceId,
+            world.holderPlaceId,
+            world.unreadPlaceId,
             world.runSource,
             world.turnSource
           ),

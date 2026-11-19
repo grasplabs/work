@@ -7373,6 +7373,31 @@ export const sourceReaderGroups = sqliteTable("source_reader_groups", {
 });
 
 /**
+ * Every pair of a place picked on a shared connection and a reader of an
+ * item synced from it (GRA-2145) that a copied reader list ever named:
+ * the place's group in the Brain (`place`, brain-next.ts `placeGroupOf`)
+ * and the reader's (`principal`: an account's token, a tenant, a group,
+ * as `readerPrincipalsOf` names them, never an address or an object ID).
+ * Written before the list reaches the Brain, in the batch that names its
+ * readers. A person holds the pair's group (`pairPrincipalOf`) only for
+ * pairs here whose place they hold and whose reader they proved
+ * (`heldPrincipalsOf`): those a kept item may name. Nothing is removed:
+ * a pair no item names any more gives its holder nothing.
+ */
+export const sourceReaderPairs = sqliteTable(
+  "source_reader_pairs",
+  {
+    place: text().notNull(),
+    principal: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.place, table.principal] }),
+    // A read finds a person's pairs by the readers they proved.
+    index("source_reader_pairs_principal_idx").on(table.principal, table.place),
+  ]
+);
+
+/**
  * What Grasp proposes for a team's routine (opportunities.ts, GRA-1750),
  * at the evidence it rests on: the model's answer, held to what it was
  * given, kept so it is asked once per evidence. Only while that evidence

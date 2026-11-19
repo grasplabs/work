@@ -171,8 +171,19 @@ export const connectSampleFeed = async (
   return { connectionId: connection.id, post, world, fetchedOf };
 };
 
-/** A file of a shared site, its readers unread (as a shared drive's are), as a sync item. */
-const siteFileOf = (id: string, text: string, version: string) => ({
+/**
+ * Who may open a file at its source, as a sync item names them: everyone
+ * in the company's tenant, the sample connector's tenant (`acmeTenant`).
+ */
+export const everyoneAtSource = [{ kind: "tenant", id: acmeTenant }];
+
+/** A file of a shared site, as a sync item, with its readers at the source (null: unread). */
+const siteFileOf = (
+  id: string,
+  text: string,
+  version: string,
+  readers: readonly unknown[] | null
+) => ({
   gone: false,
   id,
   kind: "file",
@@ -180,20 +191,23 @@ const siteFileOf = (id: string, text: string, version: string) => ({
   changedAt: "2026-11-18T09:00:00.000Z",
   title: id,
   content: { type: "text", text },
-  readers: null,
+  readers,
   changedBy: null,
   partOf: null,
 });
 
 /**
  * Has the account `subject` hold the sites `sites` to pick, each one file
- * with its marker, in its `version`, as the sample sync connector's sync
- * of picked places (`sites`) reads them (test/sample-sync-fake.ts).
+ * with its marker, in its `version`, which `readers` may open at the
+ * source (everyone in the tenant unless named), as the sample sync
+ * connector's sync of picked places (`sites`) reads them
+ * (test/sample-sync-fake.ts).
  */
 export const sitesHeld = async (
   subject: string,
   sites: Record<string, string>,
-  version = "1"
+  version = "1",
+  readers: readonly unknown[] | null = everyoneAtSource
 ): Promise<void> => {
   const providers = testBinding("CONNECT_PROVIDERS");
   if (!isFetcher(providers)) {
@@ -209,7 +223,9 @@ export const sitesHeld = async (
           site,
           {
             "": {
-              changes: [siteFileOf(`${site}-plan`, `Plan ${marker}`, version)],
+              changes: [
+                siteFileOf(`${site}-plan`, `Plan ${marker}`, version, readers),
+              ],
               next: "1",
               more: false,
             },
@@ -217,6 +233,85 @@ export const sitesHeld = async (
           },
         ])
       ),
+    }),
+  });
+};
+
+/**
+ * Has the account `subject` hold the sites `files` names, each one file
+ * holding its `text`, which its `readers` may open at the source.
+ */
+export const sitesHeldWith = async (
+  subject: string,
+  files: Record<string, { text: string; readers: readonly unknown[] | null }>
+): Promise<void> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker");
+  }
+  await providers.fetch(sampleSyncControlUrl, {
+    method: "POST",
+    body: JSON.stringify({
+      subject,
+      sites: Object.keys(files).map((id) => ({ id, name: id })),
+      siteFeeds: Object.fromEntries(
+        Object.entries(files).map(([site, { text, readers }]) => [
+          site,
+          {
+            "": {
+              changes: [siteFileOf(`${site}-plan`, text, "1", readers)],
+              next: "1",
+              more: false,
+            },
+            "1": { changes: [], next: "1", more: false },
+          },
+        ])
+      ),
+    }),
+  });
+};
+
+/**
+ * Has the account `subject` hold the site `site` alone, its one file
+ * holding `text`, and whose readers at the source are `steps`: the first
+ * at its first page, each next one a change of readers on the next page.
+ */
+export const siteChanged = async (
+  subject: string,
+  site: string,
+  text: string,
+  steps: readonly (readonly unknown[] | null)[]
+): Promise<void> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker");
+  }
+  const id = `${site}-plan`;
+  const pages = Object.fromEntries(
+    steps.map((readers, step) => [
+      step === 0 ? "" : String(step),
+      {
+        changes: [siteFileOf(id, text, String(step + 1), readers)],
+        next: String(step + 1),
+        more: false,
+      },
+    ])
+  );
+  await providers.fetch(sampleSyncControlUrl, {
+    method: "POST",
+    body: JSON.stringify({
+      subject,
+      sites: [{ id: site, name: site }],
+      siteFeeds: {
+        [site]: {
+          ...pages,
+          [String(steps.length)]: {
+            changes: [],
+            next: String(steps.length),
+            more: false,
+          },
+        },
+      },
     }),
   });
 };
@@ -244,10 +339,11 @@ export const sitesFailing = async (
  */
 export const connectSharedSites = async (
   admin: Person,
-  sites: Record<string, string>
+  sites: Record<string, string>,
+  readers: readonly unknown[] | null = everyoneAtSource
 ): Promise<{ connectionId: string; subject: string }> => {
   const subject = `shared-${unique()}`;
-  await sitesHeld(subject, sites);
+  await sitesHeld(subject, sites, "1", readers);
   const { url } = await admin.api.connections.start({
     provider: "microsoft",
     scope: "shared",
