@@ -79,8 +79,6 @@ export interface Placement {
   candidates: string[];
   /** Every department it may link (`NewLink`), likewise. */
   links: string[];
-  /** The members it may make a membership of. */
-  members: Set<string>;
 }
 
 /** The most D1 takes in one value (its limits page: "Maximum string, BLOB or table row size"). */
@@ -113,7 +111,7 @@ export const jsonValuesOf = (items: readonly unknown[]): string[] => {
 /** `pairs` (user, team) as candidates, each with its key and a new row id. */
 const candidatesOf = async (
   pairs: readonly (readonly [string, string])[]
-): Promise<Pick<Placement, "candidates" | "members">> => {
+): Promise<string[]> => {
   const seen = new Set<string>();
   const candidates: Candidate[] = [];
   for (const [userId, teamId] of pairs) {
@@ -125,10 +123,7 @@ const candidatesOf = async (
       candidates.push([userId, teamId, key, crypto.randomUUID()]);
     }
   }
-  return {
-    candidates: jsonValuesOf(candidates),
-    members: new Set(candidates.map(([userId]) => userId)),
-  };
+  return jsonValuesOf(candidates);
 };
 
 /**
@@ -200,7 +195,7 @@ export const readPlacementOf = async (
       ? []
       : (usersOf.get(id) ?? []).map((userId) => [userId, teamId] as const);
   });
-  return { ...(await candidatesOf(pairs)), links: jsonValuesOf(links) };
+  return { candidates: await candidatesOf(pairs), links: jsonValuesOf(links) };
 };
 
 /**
@@ -229,9 +224,9 @@ const memberPlacementOf = async (
       )
     );
   return {
-    ...(await candidatesOf(
+    candidates: await candidatesOf(
       filled.map(({ teamId }) => [userId, teamId] as const)
-    )),
+    ),
     links: [],
   };
 };
@@ -420,10 +415,12 @@ export const keptIn = (result: unknown): KeptRevocation[] =>
   Array.isArray(result) ? result.filter(isKept) : [];
 
 /**
- * Places `userId` by the read's own statements, for them alone: in the
- * teams their directory people's departments fill. As they sign in, and
- * at the end of a read for whoever it tied that its snapshot didn't know
- * yet. Answers the revocations its batch kept, for the caller to tell.
+ * Places `userId` by the read's own statements, for them alone, as they
+ * sign in: in the teams their directory people's departments fill. Whom a
+ * read's snapshot didn't know yet (signed in between it and its batch)
+ * this placed already; the read leaves them where it put them, and the
+ * next read moves them. Answers the revocations its batch kept, for the
+ * caller to tell.
  */
 export const placeMember = async (
   env: Env,
