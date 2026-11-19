@@ -1,12 +1,12 @@
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import type { DirectoryProvider } from "@grasp-os/shared/directory";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
-import { providerIds } from "./auth/config.ts";
+import { directoryProviderId, providerIds } from "./auth/config.ts";
 import { memberNotRemoved } from "./auth/membership-sql.ts";
 import { accounts, directoryPeople } from "./db/core/schema.ts";
 import { entraSubject } from "./erased-people.ts";
@@ -26,6 +26,13 @@ export interface DirectoryKind {
   provider: DirectoryProvider;
   /** The sign-in provider (auth/config.ts) whose accounts name its people. */
   signInProvider: string;
+  /**
+   * The provider of the accounts the directory itself made its people
+   * members under, before they signed in (auth/directory-members.ts): the
+   * same ID, and the tenant it was read in, until their first sign-in
+   * takes the member over (auth.ts `adoptDirectoryMember`).
+   */
+  madeProvider: string;
   /**
    * The column of an account holding the provider's ID of its person, as
    * the provider gave it: a sign-in's, which ties them, or another of
@@ -48,6 +55,7 @@ export interface DirectoryKind {
 const entra: DirectoryKind = {
   provider: "microsoft-directory",
   signInProvider: providerIds.entra,
+  madeProvider: directoryProviderId,
   signedInAs: accounts.oid,
   subjectOf: entraSubject,
   tenantIn: (config) => config.entra?.tenantId,
@@ -57,17 +65,28 @@ const entra: DirectoryKind = {
 export const directoryKinds: readonly DirectoryKind[] = [entra];
 
 /**
+ * That an account is one naming a person of `kind`, as SQL: their sign-in,
+ * or the account the directory made them a member under before they
+ * signed in. Either carries the provider's ID, sought by
+ * `accounts_provider_oid_lower_idx`.
+ */
+export const namingAccount = (kind: DirectoryKind): SQL =>
+  inArray(accounts.providerId, [kind.signInProvider, kind.madeProvider]);
+
+/**
  * The member tied to the row being written (both sides compared through
  * `lower()`: the row's ID is lower case already, and so written, SQLite
  * seeks the account by `accounts_provider_oid_lower_idx` rather than
- * scanning the provider's accounts): the one whose `kind` sign-in
- * account names the row's ID in the row's tenant, while they are a member.
- * One account per sign-in subject, so at most one member; the lowest user
- * ID if ever two.
+ * scanning the provider's accounts): the one whose account of `kind`
+ * (`namingAccount`) names the row's ID in the row's tenant, while they are
+ * a member. The tenant is the one a verified sign-in named, or the one the
+ * directory read the person in as it made their account. One account per
+ * sign-in subject, and none made by the directory where any account names
+ * the ID already, so at most one member; the lowest user ID if ever two.
  */
 const tiedMember = (kind: DirectoryKind): SQL => sql`(
   SELECT ${accounts.userId} FROM ${accounts}
-  WHERE ${accounts.providerId} = ${kind.signInProvider}
+  WHERE ${namingAccount(kind)}
     AND lower(${kind.signedInAs}) = lower(${directoryPeople.accountId})
     AND lower(${accounts.verifiedTenant}) = ${directoryPeople.tenant}
     AND ${memberNotRemoved(accounts.userId)}

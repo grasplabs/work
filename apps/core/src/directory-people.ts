@@ -11,10 +11,16 @@ import { tellKept } from "./access-revocations.ts";
 import { auditedBatch, outboxedEventWithDetailWhere } from "./audit-outbox.ts";
 import { signInConfig } from "./auth/config.ts";
 import {
+  madeMemberStatements,
+  madeMembersRecorded,
+} from "./auth/directory-members.ts";
+import {
   accounts,
   directoryPeople,
   directoryReads,
   erasedSubjects,
+  teamMembers,
+  users,
 } from "./db/core/schema.ts";
 import { suspensionStatements } from "./directory-suspensions.ts";
 import {
@@ -24,7 +30,11 @@ import {
   readPlacementOf,
 } from "./directory-teams.ts";
 import type { Placement } from "./directory-teams.ts";
-import { directoryKinds, tieDirectoryPeople } from "./directory-ties.ts";
+import {
+  directoryKinds,
+  namingAccount,
+  tieDirectoryPeople,
+} from "./directory-ties.ts";
 import type { DirectoryKind } from "./directory-ties.ts";
 import { subjectHashOf, subjectKeyVersion } from "./erased-people.ts";
 import { connectionOf } from "./onboarding/directory.ts";
@@ -74,6 +84,31 @@ import { connectionOf } from "./onboarding/directory.ts";
 //   (`clockLeaseMs`), and at a next link the provider handed back before,
 //   failed as a whole. Every failure, D1's refusal of the batch too, is
 //   recorded (`directory_reads`), and nothing of the read is kept.
+//
+// And everyone it places in a team whom no account names yet, it makes a
+// member before they sign in (GRA-2156; the threat model is on the
+// issue), so teams, audiences and their counts hold from the first day:
+//
+// - Who is a person: someone the read places, and nobody else. The
+//   directory can't tell a person from a service account or a shared
+//   mailbox; a team's department or group can. A member is made for each
+//   person a placement names (directory-teams.ts `placedIn`), and taken
+//   back in the same batch unless its own join placed them, so the one
+//   rule of who joins which team decides it, whatever places them.
+// - A guest, a turned-off or deleted account, an erased person: made only
+//   for someone the read lists on (`placedIn`), which connect never lists
+//   a guest as; and kept only where a join placed them, which needs their
+//   row tied to them: the read writes none for an erased person.
+// - Someone made twice, or over someone who signed in or was removed:
+//   made only where no account names the ID (`namingAccount`), checked in
+//   the statement; removal keeps accounts, so nobody removed comes back.
+// - Their first sign-in landing on someone else: they hold an account of
+//   the directory's own, by the provider's ID and the tenant read; their
+//   sign-in takes the member over by the object ID its verified token
+//   names (auth.ts `adoptDirectoryMember`), never by an address: theirs is
+//   a placeholder no mail reaches and no sign-in or invitation matches.
+// - Thousands at once: they go as JSON values within D1's 2 MB a value
+//   (`jsonValuesOf`), one bound value a statement, in the one batch.
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -86,8 +121,8 @@ const readAction = "directory.people_read";
 /** Everyone one read of a directory listed, by the provider's ID. */
 interface Listed {
   tenant: string;
-  /** Turned on, with their department. */
-  people: { id: string; department: string }[];
+  /** Turned on, with their department and name. */
+  people: { id: string; department: string; name: string }[];
   /** Turned off. */
   disabled: string[];
   /**
@@ -206,7 +241,7 @@ const carriedOf = async (
           .from(accounts)
           .where(
             and(
-              eq(accounts.providerId, kind.signInProvider),
+              namingAccount(kind),
               sql`${id} IN (SELECT value FROM json_each(${value}))`
             )
           )
@@ -248,8 +283,8 @@ const listedIn = async (
       if (read.tenant.toLowerCase() !== tenant) {
         throw directoryErrors.create("directory.other_tenant");
       }
-      for (const { id, department } of read.people) {
-        listed.people.push({ id, department });
+      for (const { id, department, name } of read.people) {
+        listed.people.push({ id, department, name });
       }
       listed.disabled.push(...read.disabled);
     }
@@ -356,6 +391,30 @@ const apply = async (
     "core"
   );
   const placing = placementStatements(db, kind, placement, sql`1`, claimed);
+  const now = startedAt.getTime();
+  // Someone a placement names (`placement.made`, as `value`) whom no
+  // account names yet: none of someone who signed in, was made already or
+  // was removed (removal keeps their accounts), checked as it is written.
+  // Nothing more: whether the read places them is decided after its
+  // joins, by `kept`, from what holds by then; a join needs their row tied
+  // to them, and the read writes none of someone erased.
+  const makeable = sql`NOT EXISTS (
+    SELECT 1 FROM ${accounts}
+    WHERE ${namingAccount(kind)} AND lower(${kind.signedInAs}) = value ->> 0
+  )`;
+  const making = placement.made.flatMap((value) =>
+    madeMemberStatements(db, value, listed.tenant, makeable, now)
+  );
+  // After the placement: a member made for it whom its joins placed in no
+  // team (one gone, or a department that names none now) is taken back,
+  // their account and membership with them; those kept are recorded.
+  const kept = placement.made.flatMap((value) => [
+    db.delete(users).where(
+      sql`${users.id} IN (SELECT value ->> 1 FROM json_each(${value}))
+          AND NOT EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.userId} = ${users.id})`
+    ),
+    madeMembersRecorded(db, value, now),
+  ]);
   // The read's own statements, then its placement's, then its outcome's.
   const claim = db
     .insert(directoryReads)
@@ -405,6 +464,8 @@ const apply = async (
           deleted: sql`excluded.deleted`,
         },
       }),
+    // Before the tie, which ties each to the account made for them.
+    ...making,
     tieDirectoryPeople(db, kind, claimed),
     // Before the placement, so someone listed on again is lifted and
     // placed in the same batch.
@@ -414,6 +475,7 @@ const apply = async (
     claim,
     ...own,
     ...placing.statements,
+    ...kept,
     db
       .update(directoryReads)
       .set({

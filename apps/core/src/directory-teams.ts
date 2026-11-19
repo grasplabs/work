@@ -12,6 +12,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import { revocationsOf } from "./access-revocations.ts";
 import type { KeptRevocation } from "./access-revocations.ts";
 import { auditedBatch } from "./audit-outbox.ts";
+import type { Made } from "./auth/directory-members.ts";
 import { activeMember, organizationId } from "./auth/membership-sql.ts";
 import {
   accounts,
@@ -24,6 +25,7 @@ import {
   teams,
 } from "./db/core/schema.ts";
 import { uuidSql } from "./db/d1.ts";
+import { namingAccount } from "./directory-ties.ts";
 import type { DirectoryKind } from "./directory-ties.ts";
 
 // Each member tied to a directory person in the team their department
@@ -79,6 +81,13 @@ export interface Placement {
   candidates: string[];
   /** Every department it may link (`NewLink`), likewise. */
   links: string[];
+  /**
+   * Everyone it may make a member to place (`Made`), as their candidates
+   * name them: listed on, placed in a team, and named by no account yet.
+   * Made only where no account names them as the batch runs, and kept
+   * only where its own join placed them (directory-people.ts).
+   */
+  made: string[];
 }
 
 /** The most D1 takes in one value (its limits page: "Maximum string, BLOB or table row size"). */
@@ -129,14 +138,15 @@ const candidatesOf = async (
 /**
  * What the daily read of `kind` may place, from what holds before its
  * batch: each listed person's department, linked to a team already or by
- * name now, and the members whose sign-in names them, in any tenant. Only
- * candidates: the batch writes each only if it still holds as it is
- * written, the tie's tenant among it.
+ * name now, and the members whose accounts name them (`namingAccount`), in
+ * any tenant; or, for someone it places whom no account names, a member
+ * to make (GRA-2156), by a new user ID. Only candidates: the batch writes
+ * each only if it still holds as it is written, the tie's tenant among it.
  */
 export const readPlacementOf = async (
   env: Env,
   kind: DirectoryKind,
-  people: readonly { id: string; department: string }[]
+  people: readonly { id: string; department: string; name: string }[]
 ): Promise<Placement> => {
   const db = drizzle(env.DB);
   const [signedIn, linked, named] = await db.batch([
@@ -146,12 +156,7 @@ export const readPlacementOf = async (
         userId: accounts.userId,
       })
       .from(accounts)
-      .where(
-        and(
-          eq(accounts.providerId, kind.signInProvider),
-          isNotNull(kind.signedInAs)
-        )
-      ),
+      .where(and(namingAccount(kind), isNotNull(kind.signedInAs))),
     db
       .select({
         department: directoryDepartments.department,
@@ -189,13 +194,41 @@ export const readPlacementOf = async (
   for (const { id, userId } of signedIn) {
     usersOf.set(id, [...(usersOf.get(id) ?? []), userId]);
   }
+  const nameOf = new Map(people.map(({ id, name }) => [id, name]));
+  const made = new Map<string, Made>();
+  /**
+   * The pairs that place the person with provider ID `id` in `teamId`:
+   * each member an account of theirs names, or one made for them, if the
+   * read lists them on (`people`; never a turned-off account another
+   * placement might name). Every placement of the read goes through it,
+   * so whom the read places, and only they, are made members ahead of
+   * their sign-in.
+   */
+  const placedIn = (id: string, teamId: string) => {
+    const known = usersOf.get(id);
+    if (known !== undefined) {
+      return known.map((userId) => [userId, teamId] as const);
+    }
+    if (!nameOf.has(id)) {
+      return [];
+    }
+    const entry = made.get(id) ?? [
+      id,
+      crypto.randomUUID(),
+      nameOf.get(id) ?? "",
+    ];
+    made.set(id, entry);
+    return [[entry[1], teamId] as const];
+  };
   const pairs = people.flatMap(({ id, department }) => {
     const teamId = teamOf.get(department);
-    return teamId === undefined
-      ? []
-      : (usersOf.get(id) ?? []).map((userId) => [userId, teamId] as const);
+    return teamId === undefined ? [] : placedIn(id, teamId);
   });
-  return { candidates: await candidatesOf(pairs), links: jsonValuesOf(links) };
+  return {
+    candidates: await candidatesOf(pairs),
+    links: jsonValuesOf(links),
+    made: jsonValuesOf([...made.values()]),
+  };
 };
 
 /**
@@ -228,6 +261,7 @@ const memberPlacementOf = async (
       filled.map(({ teamId }) => [userId, teamId] as const)
     ),
     links: [],
+    made: [],
   };
 };
 
