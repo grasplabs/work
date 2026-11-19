@@ -4,7 +4,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 // moves to Grasp UI.
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useMatchRoute } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -23,6 +22,7 @@ import {
 } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
 import { InFrame } from "./in-frame.ts";
+import { useMatchLatest } from "./match-latest.ts";
 import { usePageFills, usePageWhole } from "./page-fill.ts";
 import { PagePanelProvider, usePagePanelSlot } from "./page-panel.tsx";
 import { PersonTheme } from "./person-theme.tsx";
@@ -160,8 +160,7 @@ export const AppFrame = ({
   // with no room under it (App shell's page for an open chat), and no dock
   // over its foot: the chat is the page.
   // The address being loaded, so a chat's pending state already has its frame.
-  const chatPage =
-    useMatchRoute()({ to: "/chats/$chatId", pending: true }) !== false;
+  const chatPage = useMatchLatest()({ to: "/chats/$chatId" }) !== false;
   const whole = usePageWhole();
   // A page's own side panel, which the shell seats (frame/page-panel.tsx).
   const pagePanel = usePagePanelSlot();

@@ -2,9 +2,9 @@ import { catalogGroups } from "@grasp-os/shared/connect-names";
 import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useLocation, useMatch } from "@tanstack/react-router";
-import { useState } from "react";
 
 import { formatNumber } from "../format.ts";
+import { useWayOut } from "../frame/way-out.tsx";
 import {
   AgentPerson,
   AppWindow,
@@ -75,26 +75,17 @@ const kindCounts = (
   return counts;
 };
 
-/** The last page outside Integrations, to go back to. */
-interface Outside {
-  pathname: string;
-  search: Record<string, unknown>;
-}
-
 /** Integrations' kinds of app, as the sidebar's section; undefined outside Integrations. */
 export const useIntegrationsSection = (): SidebarSection | undefined => {
   const { t, i18n } = useLingui();
-  const { pathname, search } = useLocation();
+  const { pathname } = useLocation();
   const overview = useMatch({
     from: "/_shell/integrations/",
     shouldThrow: false,
   });
-  const [outside, setOutside] = useState<Outside>();
+  const wayOut = useWayOut();
   const inIntegrations =
     pathname === "/integrations" || pathname.startsWith("/integrations/");
-  if (!inIntegrations && outside?.pathname !== pathname) {
-    setOutside({ pathname, search });
-  }
   if (!inIntegrations) {
     return undefined;
   }
@@ -118,12 +109,7 @@ export const useIntegrationsSection = (): SidebarSection | undefined => {
     homeCurrent: overview !== undefined && chosen === undefined,
     back: {
       label: t`Back`,
-      render:
-        outside === undefined ? (
-          <Link to="/" />
-        ) : (
-          <Link search={outside.search} to={outside.pathname} />
-        ),
+      render: wayOut,
     },
     groups: [
       {

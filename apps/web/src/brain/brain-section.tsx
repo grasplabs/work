@@ -1,7 +1,7 @@
 import { useLingui } from "@lingui/react/macro";
 import { Link, useLocation, useMatch } from "@tanstack/react-router";
-import { useState } from "react";
 
+import { useWayOut } from "../frame/way-out.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import {
   Brain as BrainMark,
@@ -31,12 +31,6 @@ import type { Folder, Note } from "./brain.ts";
 // draws it, in place of a second column of the Brain's own. An admin
 // renames a part and moves a team on the map. What it shows is what the
 // brain's layout read: no read of its own.
-
-/** The last page outside the Brain, to go back to. */
-interface Outside {
-  pathname: string;
-  search: Record<string, unknown>;
-}
 
 /** Each part's icon: the board's goals, the teams in a lobe, and what came in. */
 const partIcon = (id: RegionId): IconData => {
@@ -78,14 +72,7 @@ export const useBrainSection = (): SidebarSection | undefined => {
   const match = useMatch({ from: "/_shell/brain", shouldThrow: false });
   const loaded = match?.loaderData;
   const read = loaded?.state === "ready" ? loaded.data : undefined;
-  const [outside, setOutside] = useState<Outside>();
-  // By the address, not the route's match: the match comes after the address
-  // as the Brain loads, and the Brain itself was then kept as the page to go
-  // back to, so Back led nowhere.
-  const inBrain = pathname === "/brain" || pathname.startsWith("/brain/");
-  if (!inBrain && outside?.pathname !== pathname) {
-    setOutside({ pathname, search });
-  }
+  const wayOut = useWayOut();
   if (read === undefined) {
     return undefined;
   }
@@ -141,12 +128,7 @@ export const useBrainSection = (): SidebarSection | undefined => {
     homeCurrent: overview,
     back: {
       label: t`Back`,
-      render:
-        outside === undefined ? (
-          <Link to="/" />
-        ) : (
-          <Link search={outside.search} to={outside.pathname} />
-        ),
+      render: wayOut,
     },
     groups: [
       {

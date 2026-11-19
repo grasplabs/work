@@ -1,6 +1,6 @@
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useMatchRoute } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 
 import { readFolded } from "../fold.ts";
 import { AppShell } from "../grasp/app-shell/index.ts";
@@ -20,6 +20,8 @@ import {
 } from "../grasp/icons/index.ts";
 import { Sidebar } from "../grasp/sidebar/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { useMatchLatest } from "./match-latest.ts";
+import type { RouteTo } from "./match-latest.ts";
 import { PageLoading } from "./page-states.tsx";
 import { wasSignedIn } from "./signed-in-here.ts";
 
@@ -49,12 +51,11 @@ const wait = (): void => undefined;
  */
 export const ShellPending = () => {
   const { t } = useLingui();
-  const matchRoute = useMatchRoute();
+  const matchRoute = useMatchLatest();
   if (!wasSignedIn()) {
     return null;
   }
-  const at = (to: string, fuzzy = true) =>
-    matchRoute({ to, fuzzy, pending: true }) !== false;
+  const at = (to: RouteTo, fuzzy = true) => matchRoute({ to, fuzzy }) !== false;
   const sectioned =
     at("/settings") || at("/brain") || at("/apps/$app") || at("/agents/$agent");
   // Chat's start and a chat's own page have no bar (app-frame.tsx).

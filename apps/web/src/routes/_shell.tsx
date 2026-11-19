@@ -3,7 +3,6 @@ import {
   createFileRoute,
   Outlet,
   redirect,
-  useMatchRoute,
   useRouter,
 } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
@@ -16,6 +15,7 @@ import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
 import { readWithin, shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
+import { useMatchLatest } from "../frame/match-latest.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { ShellPending } from "../frame/shell-pending.tsx";
 import { forgetSignedIn, markSignedIn } from "../frame/signed-in-here.ts";
@@ -80,7 +80,7 @@ const ShellFrame = () => {
   const { stage } = useGlobalChat();
   const { failing } = Route.useLoaderData();
   // Chat's start has no bar: its backdrop takes the whole card.
-  const chatStart = useMatchRoute()({ to: "/", pending: true }) !== false;
+  const chatStart = useMatchLatest()({ to: "/" }) !== false;
   useSidebarPagesFetched();
   return (
     <AppFrame

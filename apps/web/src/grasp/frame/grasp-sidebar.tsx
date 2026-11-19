@@ -3,12 +3,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import {
-  Link,
-  useLocation,
-  useMatchRoute,
-  useNavigate,
-} from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useAgentSection } from "../../agents/agent-section.tsx";
@@ -18,6 +13,8 @@ import { chatsKey, useChatsWindow } from "../../chat/chat-switcher.tsx";
 import { useRecentChats } from "../../chat/sidebar-chats.tsx";
 import { useIntegrationsSection } from "../../connections/integrations-sidebar.tsx";
 import type { CoreConnection } from "../../core-connection.ts";
+import { useMatchLatest } from "../../frame/match-latest.ts";
+import type { RouteTo } from "../../frame/match-latest.ts";
 import {
   organizationOf,
   useShownOrganization,
@@ -26,6 +23,7 @@ import { useSignOut } from "../../frame/person-menu.tsx";
 import { usePersonTheme } from "../../frame/person-theme.tsx";
 import { useSidebarApps } from "../../frame/surface-nav.tsx";
 import { chooseTheme, isTheme } from "../../frame/theme.ts";
+import { useWayOut } from "../../frame/way-out.tsx";
 import type { InboxItem } from "../../inbox/items.ts";
 import { useInboxGroups, useWaitingItems } from "../../inbox/sidebar-inbox.tsx";
 import { appSplat } from "../../pages/app-address.ts";
@@ -94,7 +92,7 @@ const useGroups = (
   waitingItems: readonly InboxItem[] | undefined
 ): SidebarGroupEntry[] => {
   const { t } = useLingui();
-  const matchRoute = useMatchRoute();
+  const matchRoute = useMatchLatest();
   const inbox = useInboxGroups(waitingItems);
   const workflowsWaiting = useWorkflowsWaiting();
   const apps = useSidebarApps(core);
@@ -108,8 +106,7 @@ const useGroups = (
   }
   // The address being loaded, not the last one loaded: a page's pending state
   // already marks its own row (main.tsx shows it at once).
-  const at = (to: string, fuzzy = true) =>
-    matchRoute({ to, fuzzy, pending: true }) !== false;
+  const at = (to: RouteTo, fuzzy = true) => matchRoute({ to, fuzzy }) !== false;
   const inWorkflows = at("/workflows");
   const onRequests = at("/workflows/requests");
   const sections: SidebarGroupEntry = {
@@ -185,7 +182,6 @@ const useGroups = (
                   to: "/apps/$app",
                   params: { app: app.app },
                   fuzzy: true,
-                  pending: true,
                 }) !== false,
               rows: app.entries.map((entry) => {
                 const splat = appSplat(entry.path);
@@ -231,12 +227,6 @@ const useGroups = (
   return tab === "inbox" ? inbox : [sections, ...chats, ...fromApps];
 };
 
-/** A page outside Settings, to go back to: its path and its search. */
-interface Outside {
-  pathname: string;
-  search: Record<string, unknown>;
-}
-
 /**
  * Settings as the sidebar's section while the person is in it: Back to the
  * page they came from (Chat, when they landed on Settings), then the
@@ -244,15 +234,10 @@ interface Outside {
  */
 const useSettingsSection = (identity: Identity): SidebarSection | undefined => {
   const { t, i18n } = useLingui();
-  const { pathname, search } = useLocation();
+  const { pathname } = useLocation();
   const inSettings =
     pathname === "/settings" || pathname.startsWith("/settings/");
-  // The last page outside Settings; kept while the frame is, so a reload on
-  // a section goes back to Chat.
-  const [outside, setOutside] = useState<Outside>();
-  if (!inSettings && outside?.pathname !== pathname) {
-    setOutside({ pathname, search });
-  }
+  const wayOut = useWayOut();
   if (!inSettings) {
     return undefined;
   }
@@ -264,12 +249,7 @@ const useSettingsSection = (identity: Identity): SidebarSection | undefined => {
     home: <Link to="/settings" />,
     back: {
       label: t`Back`,
-      render:
-        outside === undefined ? (
-          <Link to="/" />
-        ) : (
-          <Link search={outside.search} to={outside.pathname} />
-        ),
+      render: wayOut,
     },
     groups: groupedSectionsFor(identity).map(({ group, sections }) => ({
       label: i18n._(group.title),
