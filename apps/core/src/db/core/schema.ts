@@ -222,6 +222,14 @@ export const members = sqliteTable(
      * the suspensions it made. Null while they may act.
      */
     suspendedBy: text("suspended_by"),
+    /**
+     * When an admin lifted their suspension and kept them active: the
+     * directory's read never suspends them while it is set, until an
+     * admin lets the directory decide again (members.ts). Who did it is
+     * the audit log's (`member.suspension_lifted`). Null for the
+     * directory to decide.
+     */
+    keptActiveAt: timestamp("kept_active_at"),
   },
   (table) => [
     uniqueIndex("members_organization_user_idx").on(
@@ -610,6 +618,12 @@ export const directoryPeople = sqliteTable(
     department: text().notNull(),
     /** Whether their account is turned on; nothing acts on it yet. */
     enabled: integer({ mode: "boolean" }).notNull(),
+    /**
+     * Whether their account is turned off because it was deleted (Entra
+     * keeps a deleted account 30 days), as the read found it; null as
+     * false, for rows of reads before it was kept.
+     */
+    deleted: integer({ mode: "boolean" }),
     /**
      * The member whose sign-in account names the same ID in the same
      * tenant, while they are a member (`tieDirectoryPeople`); null for

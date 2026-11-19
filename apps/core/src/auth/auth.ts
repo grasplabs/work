@@ -344,7 +344,7 @@ const ensureMember = async (
   const join = db
     .insert(members)
     .select(
-      sql`SELECT ${memberId}, ${organizationId}, ${userId}, ${role}, ${now.getTime()}, NULL, NULL
+      sql`SELECT ${memberId}, ${organizationId}, ${userId}, ${role}, ${now.getTime()}, NULL, NULL, NULL
         WHERE ${notRemoved(userId)}`
     )
     .onConflictDoNothing();
@@ -1066,6 +1066,7 @@ const createAuth = (
             additionalFields: {
               suspendedAt: { type: "date", required: false, input: false },
               suspendedBy: { type: "string", required: false, input: false },
+              keptActiveAt: { type: "date", required: false, input: false },
             },
           },
         },

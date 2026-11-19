@@ -34,7 +34,9 @@ import type { DirectoryKind } from "./directory-ties.ts";
 //   in the statement from what holds as it runs, so the order of rows never
 //   matters. When every admin would go, none does, and that is recorded.
 // - An admin's own decision undone: the read lifts only the suspensions it
-//   made (`suspended_by = 'directory'`), and never touches a removal.
+//   made (`suspended_by = 'directory'`), and never touches a removal. Nor
+//   does it suspend a member an admin keeps active (`kept_active_at`,
+//   members.ts `liftSuspension`) until an admin lets it decide again.
 
 /** What a suspension the daily read makes is marked as made by. */
 const byDirectory = "directory";
@@ -90,17 +92,21 @@ export const suspensionStatements = (
   const liftable = sql`${members.suspendedBy} = ${byDirectory}
     AND ${members.suspendedAt} IS NOT NULL
     AND ${tiedTo(kind, user, true)}`;
-  // Another admin who may act, and whom this read isn't suspending.
+  // Another admin who may act, and whom this read isn't suspending: one
+  // kept active stays whatever the directory says.
   const anotherAdminStays = sql`EXISTS (
     SELECT 1 FROM ${members} AS ${otherAdmin}
     WHERE ${otherAdmin.organizationId} = ${organizationId}
       AND ${otherAdmin.userId} <> ${members.userId}
       AND ${otherAdmin.role} = 'admin'
       AND ${mayAct(sql`${otherAdmin.userId}`)}
-      AND NOT ${tiedTo(kind, sql`${otherAdmin.userId}`, false)}
+      AND (${otherAdmin.keptActiveAt} IS NOT NULL
+        OR NOT ${tiedTo(kind, sql`${otherAdmin.userId}`, false)})
   )`;
-  // A removal deletes the membership, so there is no removed row to skip.
+  // A removal deletes the membership, so there is no removed row to skip;
+  // a member an admin keeps active is neither suspended nor withheld.
   const disabled = sql`${members.suspendedAt} IS NULL
+    AND ${members.keptActiveAt} IS NULL
     AND ${tiedTo(kind, user, false)}`;
   const suspendable = sql`${disabled}
     AND (${members.role} <> 'admin' OR ${anotherAdminStays})`;
