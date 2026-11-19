@@ -5466,6 +5466,10 @@ msgstr "Each area is erased on its own. One that fails is tried again until it i
 msgid "Each event of this type from the source starts a run, with its data as the input."
 msgstr "Each event of this type from the source starts a run, with its data as the input."
 
+#: src/connections/sync-places.tsx
+msgid "Each file is read in the Brain only by those {label} lets open it, of those you let read {label} here. The account you connected must be able to share files in each drive you pick: nobody reads the files it can't share."
+msgstr "Each file is read in the Brain only by those {label} lets open it, of those you let read {label} here. The account you connected must be able to share files in each drive you pick: nobody reads the files it can't share."
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Each invoice as a PDF, as soon as it is issued."
@@ -9648,6 +9652,10 @@ msgstr "Nobody is waiting for you to decide a share."
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
 msgstr "Nobody matches."
+
+#: src/connections/sync-places.tsx
+msgid "Nobody reads its files"
+msgstr "Nobody reads its files"
 
 #: src/apps/access-view.tsx
 msgid "Nobody sees the records in {table}, Sam included."

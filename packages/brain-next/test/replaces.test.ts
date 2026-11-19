@@ -325,25 +325,24 @@ describe("a memory that replaces earlier ones of its writer", () => {
     ).rejects.toThrow("Only a writer's memory replaces memories");
   });
 
-  it("ends nothing for a reader who can't read the newer memory, as a store without it would tell", async () => {
+  it("refuses to replace a memory of other readers, also one the add's reader may read", async () => {
     const at = setUp();
-    const narrow = unique("g");
-    const both = readerOf(unique("p"), at.group, narrow);
-    const outside = readerOf(unique("p"), at.group);
-    const old = await add(at, requirement("old", at.writer));
-    await add(
-      { ...at, access: audience(narrow) },
-      requirement("new", at.writer, [old.memory]),
-      { entity: old.entity, reader: both }
+    const other = unique("g");
+    const both = readerOf(unique("p"), at.group, other);
+    const mine = await add(at, requirement("mine", at.writer));
+    // The reader of the add may read it: only its readers differ.
+    const elsewhere = await add(
+      { ...at, access: audience(other) },
+      requirement("elsewhere", at.writer),
+      { entity: mine.entity, reader: both }
     );
 
-    expect({
-      both: await currentOf(old.entity, both),
-      outside: await readOf(old.entity, outside),
-    }).toStrictEqual({
-      both: ["new"],
-      outside: { current: ["old"], ended: { old: null } },
-    });
+    await expect(
+      add(at, requirement("new", at.writer, [elsewhere.memory]), {
+        entity: mine.entity,
+        reader: both,
+      })
+    ).rejects.toThrow(refusal);
   });
 
   it("answers a repeat of its change with what it added, replacing once, and refuses the change naming others", async () => {
@@ -375,7 +374,7 @@ describe("a memory that replaces earlier ones of its writer", () => {
     });
   });
 
-  it("brings the replaced memory back when a person's erasure hides the one in their word that replaced it", async () => {
+  it("keeps what a memory replaced history when a person's erasure takes the memory in their word that replaced it", async () => {
     const at = setUp();
     const person = unique("person");
     const old = await add(at, requirement("old", at.writer));
@@ -393,14 +392,73 @@ describe("a memory that replaces earlier ones of its writer", () => {
       identifiers: [],
       reason: "person_erased",
     });
+    const after = await readOf(old.entity, at.reader);
 
     expect({
       before,
-      after: await currentOf(old.entity, at.reader),
+      after: after.current,
+      oldEnded: after.ended.old !== null,
     }).toStrictEqual({
       before: ["theirs"],
-      after: ["old"],
+      after: [],
+      oldEnded: true,
     });
+  });
+
+  it("keeps what a memory replaced history while a person's erasure hides it, before its tick deletes it", async () => {
+    const at = setUp();
+    const person = unique("person");
+    const old = await add(at, requirement("old", at.writer));
+    await add(
+      at,
+      {
+        ...requirement("theirs", at.writer, [old.memory]),
+        speaker: { kind: "internal", person },
+      },
+      { entity: old.entity, reader: at.reader }
+    );
+    await hiddenByErasure(person);
+    try {
+      await expect(currentOf(old.entity, at.reader)).resolves.toStrictEqual([]);
+    } finally {
+      await holdDeletes(false);
+    }
+  });
+
+  it("brings back, after an erasure, what another memory still replaced and was then undone", async () => {
+    const at = setUp();
+    const person = unique("person");
+    const old = await add(at, requirement("old", at.writer));
+    const options = { entity: old.entity, reader: at.reader };
+    await add(
+      at,
+      {
+        ...requirement("theirs", at.writer, [old.memory]),
+        speaker: { kind: "internal", person },
+      },
+      options
+    );
+    const other = await add(
+      at,
+      requirement("other", at.writer, [old.memory]),
+      options
+    );
+    await shared().erasePersonShared({
+      person,
+      identifiers: [],
+      reason: "person_erased",
+    });
+    // Still ended by the other, not retired: undoing the other brings it back.
+    await shared().retireMemory({
+      memory: other.memory,
+      reader: at.reader,
+      writer: at.writer,
+      change: "undo other",
+    });
+
+    await expect(currentOf(old.entity, at.reader)).resolves.toStrictEqual([
+      "old",
+    ]);
   });
 
   it("deletes memories that replaced one another with their writer's erasure", async () => {
@@ -491,35 +549,173 @@ describe("a memory that replaces earlier ones of its writer", () => {
     }).toStrictEqual({ before: ["last", "third"], after: [] });
   });
 
-  it("keeps what a memory replaced ended when that memory is forgotten after it was itself replaced, for a reader of what replaced it", async () => {
+  it("keeps what a memory replaced ended when that memory is forgotten as history, and brings it back when it is undone while current", async () => {
     const at = setUp();
-    const narrow = unique("g");
-    const both = readerOf(unique("p"), at.group, narrow);
+    const forget = async (memory: string) =>
+      await shared().retireMemory({
+        memory,
+        reader: at.reader,
+        writer: at.writer,
+        change: `forget ${memory}`,
+      });
+    /** A chain first ← second ← third: the ids of each. */
+    const chain = async () => {
+      const first = await add(at, requirement("first", at.writer));
+      const options = { entity: first.entity, reader: at.reader };
+      const second = await add(
+        at,
+        requirement("second", at.writer, [first.memory]),
+        options
+      );
+      const third = await add(
+        at,
+        requirement("third", at.writer, [second.memory]),
+        options
+      );
+      return { first, second, third };
+    };
+    // The second forgotten while the third replaced it: history.
+    const history = await chain();
+    await forget(history.second.memory);
+    // The third undone, then the second, now current, undone too.
+    const undone = await chain();
+    await forget(undone.third.memory);
+    await forget(undone.second.memory);
+
+    expect({
+      history: await currentOf(history.first.entity, at.reader),
+      undone: await currentOf(undone.first.entity, at.reader),
+    }).toStrictEqual({ history: ["third"], undone: ["first"] });
+  });
+
+  it("keeps what a memory replaced ended when that memory is forgotten after its attribute's next value ended it", async () => {
+    const at = setUp();
+    const status = (statement: string, replaces?: string[]): NewMemory => ({
+      ...requirement(statement, at.writer, replaces),
+      attribute: "status",
+    });
+    const asked = await add(at, requirement("asked", at.writer));
+    const options = { entity: asked.entity, reader: at.reader };
+    const first = await add(at, status("first", [asked.memory]), options);
+    await add(at, status("second"), options);
+    await shared().retireMemory({
+      memory: first.memory,
+      reader: at.reader,
+      writer: at.writer,
+      change: "forget first",
+    });
+
+    await expect(currentOf(asked.entity, at.reader)).resolves.toStrictEqual([
+      "second",
+    ]);
+  });
+
+  it("undoes a memory ended only by one of other readers as current, so its readers get back what it replaced", async () => {
+    const at = setUp();
+    const other = unique("g");
+    const both = readerOf(unique("p"), at.group, other);
+    const status = (statement: string, replaces?: string[]): NewMemory => ({
+      ...requirement(statement, at.writer, replaces),
+      attribute: "status",
+    });
+    const asked = await add(at, requirement("asked", at.writer));
+    const replacing = await add(at, status("replacing", [asked.memory]), {
+      entity: asked.entity,
+      reader: at.reader,
+    });
+    // Its attribute's next value, which its readers can't read.
+    await add({ ...at, access: audience(other) }, status("hidden"), {
+      entity: asked.entity,
+      reader: both,
+    });
+    await shared().retireMemory({
+      memory: replacing.memory,
+      reader: at.reader,
+      writer: at.writer,
+      change: "forget replacing",
+    });
+
+    await expect(currentOf(asked.entity, at.reader)).resolves.toStrictEqual([
+      "asked",
+    ]);
+  });
+
+  it("undoes a memory ended only by one an erasure hides as current, so its readers get back what it replaced", async () => {
+    const at = setUp();
+    const person = unique("person");
+    const status = (statement: string, replaces?: string[]): NewMemory => ({
+      ...requirement(statement, at.writer, replaces),
+      attribute: "status",
+    });
+    const asked = await add(at, requirement("asked", at.writer));
+    const options = { entity: asked.entity, reader: at.reader };
+    const replacing = await add(
+      at,
+      status("replacing", [asked.memory]),
+      options
+    );
+    // Its attribute's next value, in a person's word their erasure hides.
+    await add(
+      at,
+      { ...status("hidden"), speaker: { kind: "internal", person } },
+      options
+    );
+    await hiddenByErasure(person);
+    try {
+      await shared().retireMemory({
+        memory: replacing.memory,
+        reader: at.reader,
+        writer: at.writer,
+        change: "forget replacing",
+      });
+      await expect(currentOf(asked.entity, at.reader)).resolves.toStrictEqual([
+        "asked",
+      ]);
+    } finally {
+      await holdDeletes(false);
+    }
+  });
+
+  it("keeps a chain history when the last is taken back after the middle was forgotten, also once an erasure takes the middle", async () => {
+    const at = setUp();
+    const person = unique("person");
     const first = await add(at, requirement("first", at.writer));
+    const options = { entity: first.entity, reader: at.reader };
     const second = await add(
       at,
-      requirement("second", at.writer, [first.memory]),
-      { entity: first.entity, reader: at.reader }
+      {
+        ...requirement("second", at.writer, [first.memory]),
+        speaker: { kind: "internal", person },
+      },
+      options
     );
-    // Only readers of `narrow` may read what replaced the second.
-    await add(
-      { ...at, access: audience(narrow) },
+    const third = await add(
+      at,
       requirement("third", at.writer, [second.memory]),
-      { entity: first.entity, reader: both }
+      options
     );
-    // Forgotten as history, from the Memories page.
     await shared().retireMemory({
       memory: second.memory,
-      reader: both,
+      reader: at.reader,
       writer: at.writer,
       change: "forget second",
     });
+    await shared().retireWritten({
+      memory: third.memory,
+      writer: at.writer,
+      change: "taken back",
+    });
+    const takenBack = await currentOf(first.entity, at.reader);
+    await shared().erasePersonShared({
+      person,
+      identifiers: [],
+      reason: "person_erased",
+    });
 
     expect({
-      both: await currentOf(first.entity, both),
-      // Without the third, the second was forgotten while current.
-      outside: await currentOf(first.entity, at.reader),
-    }).toStrictEqual({ both: ["third"], outside: ["first"] });
+      takenBack,
+      erased: await currentOf(first.entity, at.reader),
+    }).toStrictEqual({ takenBack: [], erased: [] });
   });
 
   it("keeps a chain ended when each memory of it is forgotten after the next replaced it", async () => {

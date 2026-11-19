@@ -5466,6 +5466,10 @@ msgstr "Jeder Bereich wird für sich gelöscht. Schlägt einer fehl, wird er ern
 msgid "Each event of this type from the source starts a run, with its data as the input."
 msgstr "Jedes Ereignis dieses Typs aus der Quelle startet einen Lauf, mit seinen Daten als Eingabe."
 
+#: src/connections/sync-places.tsx
+msgid "Each file is read in the Brain only by those {label} lets open it, of those you let read {label} here. The account you connected must be able to share files in each drive you pick: nobody reads the files it can't share."
+msgstr "Jede Datei lesen im Brain nur die, denen {label} das Öffnen erlaubt, unter denen, die Sie {label} hier lesen lassen. Das verbundene Konto muss in jeder ausgewählten Ablage Dateien freigeben können: Dateien, die es nicht freigeben kann, liest niemand."
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Jede Rechnung als PDF, sobald sie ausgestellt ist."
@@ -9648,6 +9652,10 @@ msgstr "Niemand wartet darauf, dass du über eine Freigabe entscheidest."
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
 msgstr "Niemand passt."
+
+#: src/connections/sync-places.tsx
+msgid "Nobody reads its files"
+msgstr "Niemand liest die Dateien"
 
 #: src/apps/access-view.tsx
 msgid "Nobody sees the records in {table}, Sam included."

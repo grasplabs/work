@@ -520,8 +520,10 @@ const keepMentions = (into: Into, plan: Planned, row: number): void => {
 /**
  * Records that the memory of row `row` replaces each memory `replaces`
  * names, if any (contract.ts `NewMemory.replaces`), refused unless every
- * one is of its lineage, about its entity and readable by the add's
- * reader (so none without one), no erasure hiding it: one that isn't is
+ * one is of its lineage, about its entity, of its own readers (so whoever
+ * reads one reads the other, and what ends one for a reader ends it for
+ * all of its readers) and readable by the add's reader (so none without
+ * one), no erasure hiding it: one that isn't is
  * refused as one there isn't. Each was stored before it, so is earlier in
  * its lineage: a replacement never comes round to itself.
  */
@@ -545,7 +547,7 @@ const keepReplaces = (
             INSERT INTO memory_replacements (memory, replaced)
             SELECT ?1, m.row FROM memories AS m
             WHERE m.id IN (SELECT value FROM json_each(?4))
-              AND m.lineage = ?5 AND m.entity = ?6
+              AND m.lineage = ?5 AND m.entity = ?6 AND m.readers = ?7
               AND ${visibleSql("m")}
             RETURNING replaced`,
             row,
@@ -553,7 +555,8 @@ const keepReplaces = (
             JSON.stringify(reader.groups),
             JSON.stringify(asked),
             lineage,
-            entity
+            entity,
+            into.readers
           )
           .toArray().length;
   if (written !== asked.length) {

@@ -5466,6 +5466,10 @@ msgstr "Chaque domaine est effacé à part. Un domaine qui échoue est réessay�
 msgid "Each event of this type from the source starts a run, with its data as the input."
 msgstr "Chaque événement de ce type venant de la source lance une exécution, avec ses données comme entrée."
 
+#: src/connections/sync-places.tsx
+msgid "Each file is read in the Brain only by those {label} lets open it, of those you let read {label} here. The account you connected must be able to share files in each drive you pick: nobody reads the files it can't share."
+msgstr "Dans le Brain, chaque fichier n’est lu que par les personnes que {label} autorise à l’ouvrir, parmi celles que vous autorisez à lire {label} ici. Le compte que vous avez connecté doit pouvoir partager des fichiers dans chaque drive que vous choisissez : personne ne lit les fichiers qu’il ne peut pas partager."
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Chaque facture en PDF, dès son émission."
@@ -9648,6 +9652,10 @@ msgstr "Personne n'attend que vous décidiez d'un partage."
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
 msgstr "Personne ne correspond."
+
+#: src/connections/sync-places.tsx
+msgid "Nobody reads its files"
+msgstr "Personne ne lit ses fichiers"
 
 #: src/apps/access-view.tsx
 msgid "Nobody sees the records in {table}, Sam included."
