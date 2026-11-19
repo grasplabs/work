@@ -1828,15 +1828,18 @@ describe(
 
       // What was sent to a model while planting: only the holder's own
       // chat turn, which carries their question and what their chat is
-      // given (their instruction file, their skill, their team's skill).
-      // The passes count prompts from there, so this is where any other
-      // marker in a prompt then must fail.
+      // given (their instruction file, their skill, their team's skill),
+      // and what the recall before it found as them, which every agent
+      // makes in their own chat (GRA-2203): their own source, which shares
+      // the question's word. The passes count prompts from there, so this
+      // is where any other marker in a prompt then must fail.
       const chat = promptedAtPlanting["a question in the holder's chat"] ?? [];
       const ownChat = new Set([
         "a question in the holder's chat",
         "the holder's instruction file",
         "the holder's own skill",
         "a team's skill the outsider isn't in",
+        "the holder's own source",
       ]);
 
       expect({

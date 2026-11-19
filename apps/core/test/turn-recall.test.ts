@@ -1,4 +1,5 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
+import { agentErrors } from "@grasp-os/shared/agent";
 import { auditProvenanceMaxItems } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { runInDurableObject } from "cloudflare:test";
@@ -1007,7 +1008,7 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
     }).toStrictEqual({ first: true, rewrite: false, found: true });
   });
 
-  it("logs a recall revoked after it was recorded and before it was handed over as failed for its run, and the turn stops with nothing handed over", async () => {
+  it("logs a recall revoked after it was recorded and before it was handed over as failed for its run, and hands the model nothing of it", async () => {
     const depot = word();
     const fact = `Depot ${depot} opens at seven`;
     const chat = await recallingChat(says("I can't say."));
@@ -1066,16 +1067,19 @@ describe("a recall before a question that doesn't hand over", setUpTime, () => {
       recallsIn(events, chat.chat.id).map(({ detail }) => detail.run)
     );
     const [run] = runs;
+    const sent = JSON.stringify(chat.provider.requests.map(({ body }) => body));
     expect({
-      stopped: ended.includes("can no longer read"),
+      ended,
       runs: runs.size,
-      asked: chat.provider.requests.length,
+      // The turn goes on, told the recall was revoked, with none of it.
+      handed: sent.includes(fact),
+      told: sent.includes(agentErrors.create("agent.run_revoked").message),
       logged: outcomesOf(events, typeof run === "string" ? run : undefined),
     }).toStrictEqual({
-      stopped: true,
+      ended: "answered",
       runs: 1,
-      // Nothing of it reached the model: the turn stopped first.
-      asked: 0,
+      handed: false,
+      told: true,
       logged: [
         { outcome: "ok", reason: null },
         { outcome: "failed", reason: "agent.run_revoked" },

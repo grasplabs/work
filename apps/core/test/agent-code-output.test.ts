@@ -41,7 +41,11 @@ describe("chat agent code output", () => {
       output = applyOutput(output, update.output);
       seen.push({
         output,
-        result: update.messages.some(({ role }) => role === "result"),
+        // A code step's result, never the recall's before the question.
+        result: update.messages.some(
+          (message) =>
+            message.role === "result" && !message.callId.startsWith("recall_")
+        ),
       });
       await Promise.resolve();
     });

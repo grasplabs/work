@@ -5933,27 +5933,21 @@ const appWithBrain = async (
 };
 
 /**
- * An agent of the reader's holding a grant to read the Brain that holds
- * in every chat, as an admin gives one: a chat's code reads under it.
+ * An agent of the reader's: a chat's code reads the Brain under no grant
+ * (GRA-2203).
  */
-const agentWithBrain = async (
+const readerAgent = (
   personId: string
-): Promise<{ authority: Authority; permissionId: string }> => {
-  const authority = readersAgent(personId);
-  const permissionId = crypto.randomUUID();
-  if (authority.subject.type !== "agent") {
-    throw new Error("Not an agent");
-  }
-  await env.DB.prepare(
-    "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at) VALUES (?, 'agent', ?, 'platform', 'platform', '[\"brain\"]', 'BRAIN', 'active', ?, ?)"
-  )
-    .bind(permissionId, authority.subject.agentId, personId, Date.now())
-    .run();
-  return { authority, permissionId };
-};
+): { authority: Authority; permissionId: null } => ({
+  authority: readersAgent(personId),
+  permissionId: null,
+});
 
-/** An App recalling as `as`, in its own context, under `grant`. */
-const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
+/** An App recalling as `as`, in its own context, under `grant` (none for an agent). */
+const callerOf = (
+  as: Authority,
+  grant: string | null
+): codeRecall.RecallCaller => ({
   authority: as,
   context:
     as.subject.type === "app"
@@ -5963,7 +5957,7 @@ const callerOf = (as: Authority, grant: string): codeRecall.RecallCaller => ({
           workspaceId: workspaceIdSchema.parse(crypto.randomUUID()),
           chatId: chatIdSchema.parse(crypto.randomUUID()),
         },
-  permissionId: permissionIdSchema.parse(grant),
+  permissionId: grant === null ? null : permissionIdSchema.parse(grant),
   // An App's as the company; a chat's code as its person's teams, as in
   // their own chat in Grasp.
   ...(as.subject.type === "app" ? {} : { reach: "teams" as const }),
@@ -5985,7 +5979,7 @@ const skillsCallerOf = (
  */
 const entitiesCallerOf = (
   as: Authority,
-  grant: string
+  grant: string | null
 ): codeRecall.EntitiesCaller => {
   const { keep: _keep, reach: _reach, ...caller } = callerOf(as, grant);
   return caller;
@@ -6013,11 +6007,11 @@ const codeRecallProbe =
     const { authority, permissionId } =
       caller === "app"
         ? await appWithBrain(probing.personId, probing.codeTeams)
-        : await agentWithBrain(probing.personId);
+        : readerAgent(probing.personId);
     const recall = async (
       input: unknown,
       as = authority,
-      grant = permissionId
+      grant: string | null = permissionId
     ) => await codeRecall.recallFor(env, callerOf(as, grant), input);
     const hidden = probing.markers.join(" ");
     const whole = { tokens: recallBudgetMax };
@@ -6060,15 +6054,20 @@ const codeRecallProbe =
         async () =>
           await recall({ question: hidden, budget: whole, reader: hidden })
       ),
-      await answer(
-        "the markers, under a grant the App doesn't hold",
-        async () =>
-          await recall(
-            { question: hidden, budget: whole },
-            authority,
-            crypto.randomUUID()
-          )
-      ),
+      // An agent holds no grant, so none it doesn't hold.
+      ...(caller === "app"
+        ? [
+            await answer(
+              "the markers, under a grant the App doesn't hold",
+              async () =>
+                await recall(
+                  { question: hidden, budget: whole },
+                  authority,
+                  crypto.randomUUID()
+                )
+            ),
+          ]
+        : []),
       await answer(
         "the markers, for someone who isn't a member",
         async () =>
@@ -6260,7 +6259,7 @@ export const recallProbes = {
   entitiesCallFor: showingEntities(async (probing) => {
     const { personId, markers } = probing;
     const { authority, permissionId } = await appWithBrain(personId);
-    const agent = await agentWithBrain(personId);
+    const agent = readerAgent(personId);
     const [fixture, others] = await Promise.all([
       recallFixture(probing),
       othersOwnMemory(markers),
@@ -6274,7 +6273,7 @@ export const recallProbes = {
         as = authority,
         grant = permissionId,
         reach,
-      }: { as?: Authority; grant?: string; reach?: "teams" } = {},
+      }: { as?: Authority; grant?: string | null; reach?: "teams" } = {},
       like?: string
     ) =>
       await answer(
@@ -6308,7 +6307,7 @@ export const recallProbes = {
       coreBrain.CodeEntitiesOperation,
       unknown,
       Answer["about"],
-      { as?: Authority; grant?: string; reach?: "teams" },
+      { as?: Authority; grant?: string | null; reach?: "teams" },
       string | undefined,
     ];
     const cases: Case[] = [
@@ -6500,7 +6499,7 @@ export const recallProbes = {
     ];
   },
   // Who knows (GRA-1744), as a chat's code asks anywhere but its person's
-  // own chat: under an agent's grant, acting for the reader, as the
+  // own chat: as an agent, with no grant, acting for the reader, as the
   // company, as code's recall is probed (its teams' reach is recall's,
   // probed through `recallPassagesAs`, and the uploads it names are held
   // in agent-brain-who-knows.test.ts). Asked of the markers and of their
@@ -6508,13 +6507,13 @@ export const recallProbes = {
   // names nobody. Then every way it refuses, the markers in what is
   // refused.
   whoKnowsFor: async (probing) => {
-    const { authority, permissionId } = await agentWithBrain(probing.personId);
-    const ask = async (input: unknown, as = authority, grant = permissionId) =>
+    const { authority } = readerAgent(probing.personId);
+    const ask = async (input: unknown, as = authority) =>
       inPackShape(
         await codeRecall.whoKnowsFor(
           env,
           {
-            ...entitiesCallerOf(as, grant),
+            ...entitiesCallerOf(as, null),
             keep: async () => {
               await Promise.resolve();
             },
@@ -6556,15 +6555,6 @@ export const recallProbes = {
         "a reader named by the markers",
         async () =>
           await ask({ question: hidden, budget: whole, reader: hidden })
-      ),
-      await answer(
-        "the markers, under a grant the agent doesn't hold",
-        async () =>
-          await ask(
-            { question: hidden, budget: whole },
-            authority,
-            crypto.randomUUID()
-          )
       ),
       await answer(
         "the markers, for someone who isn't a member",

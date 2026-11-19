@@ -1148,12 +1148,6 @@ describe("a linked person's direct message in Slack", () => {
     // A direct message is the person's own chat (GRA-1821): only one
     // Slack names a direct message both ways (`im`, a `D…` channel) is
     // one, and Slack's channels and group DMs never reach a turn at all.
-    await requestGranted(idp, await signedInApi(idp, "admin"), {
-      subject: { type: "agent", agentId: chatAgentId },
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     const { slackUser, userId, api } = await linkedPerson();
     const provider = await fakeProvider(says("Noted."));
     const [depot, own, ownWord, file] = [

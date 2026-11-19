@@ -117,7 +117,8 @@ describe("a chat's history", setUpTime, () => {
     await runInDurableObject(stub, (_instance, state) => {
       const { run } = state.storage.sql
         .exec<{ run: string }>(
-          "SELECT id AS run FROM chat_code_runs WHERE chat_id = ?",
+          // The code step's run, never the recall before the question.
+          "SELECT id AS run FROM chat_code_runs WHERE chat_id = ? AND tool_call_id NOT LIKE 'recall\\_%' ESCAPE '\\'",
           chat.id
         )
         .one();

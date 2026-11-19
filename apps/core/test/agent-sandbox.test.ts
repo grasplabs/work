@@ -80,7 +80,7 @@ describe("chat agent sandbox", () => {
 
     expect(result?.isError).toBeTruthy();
     expect(result?.text).toContain(
-      "This chat has no API named env.mailbox. It has: env.chat, env.connections, env.apps, env.build, env.workflows, env.workflowBuild, env.skills, env.dashboard."
+      "This chat has no API named env.mailbox. It has: env.chat, env.connections, env.apps, env.build, env.workflows, env.workflowBuild, env.skills, env.brain, env.dashboard."
     );
   });
 
@@ -373,9 +373,11 @@ describe("chat agent sandbox", () => {
     );
 
     const reply = ask("Wait, then look.");
+    // The question, the recall before it (its call and result), and the
+    // code step's call: the code is running.
     await vi.waitFor(
       async () => {
-        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(4);
       },
       { timeout: 10_000 }
     );

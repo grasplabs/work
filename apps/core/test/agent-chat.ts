@@ -215,11 +215,14 @@ export const toolResults = async (stub: WorkspaceStub, chatId: string) => {
   );
 };
 
-/** How each code step of the chat ended, as the host recorded it. */
+/**
+ * How each code step of the chat ended, as the host recorded it: its
+ * `executeCode` runs, never the recall before a question every turn runs.
+ */
 export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
   const messages = await transcript(stub, chatId);
   return messages.flatMap((message) => {
-    if (message.role !== "toolResult") {
+    if (message.role !== "toolResult" || message.toolName !== "executeCode") {
       return [];
     }
     const details: unknown = message.details;

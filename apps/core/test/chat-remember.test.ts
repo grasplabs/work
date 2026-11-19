@@ -49,6 +49,18 @@ import { signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
+/**
+ * The results of the chat's `remember` calls: never the recall before a
+ * question, which every turn runs.
+ */
+const savesIn = async (
+  stub: Parameters<typeof toolResults>[0],
+  chatId: string
+) => {
+  const results = await toolResults(stub, chatId);
+  return results.filter(({ tool }) => tool === "remember");
+};
+
 /** Signing in and a whole turn take a while on CI. */
 const slow = { timeout: 120_000 };
 
@@ -495,7 +507,7 @@ describe("the agent remembering in a person's own chat", () => {
       await other.ask("Actually it has churned.");
       const checks = checksSent(second.provider);
       const notices = await savedShown(member, later.chat.id);
-      const results = await toolResults(second.stub, other.chat.id);
+      const results = await savesIn(second.stub, other.chat.id);
 
       expect({
         first: saved?.about,
@@ -1249,7 +1261,7 @@ describe("the agent remembering in a person's own chat", () => {
     );
     const { chat, ask } = await chats.newChat();
     await ask("I always want answers in Dutch.");
-    const results = await toolResults(chats.stub, chat.id);
+    const results = await savesIn(chats.stub, chat.id);
 
     expect({
       refused: results.map(({ isError, text }) => ({
@@ -1287,7 +1299,7 @@ describe("the agent remembering in a person's own chat", () => {
       { members: [member.userId, colleague.userId], outsiders: false }
     );
     await stub.ask(chat.id, { text: "I always want answers in Dutch.", model });
-    const results = await toolResults(stub, chat.id);
+    const results = await savesIn(stub, chat.id);
 
     expect({
       outcomes: results.map(({ tool, isError }) => ({ tool, isError })),
@@ -1336,13 +1348,13 @@ describe("the agent remembering in a person's own chat", () => {
       await stub.sendUnattended(own.id, { text: said, model });
       await vi.waitFor(
         async () => {
-          await expect(toolResults(stub, own.id)).resolves.toHaveLength(1);
+          await expect(savesIn(stub, own.id)).resolves.toHaveLength(1);
         },
         { timeout: 10_000 }
       );
       const outcomes = await Promise.all(
         [shared.chatId, own.id].map(async (chatId) => {
-          const results = await toolResults(stub, chatId);
+          const results = await savesIn(stub, chatId);
           return results.map(({ tool, isError }) => ({ tool, isError }));
         })
       );

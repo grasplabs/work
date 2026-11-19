@@ -14,6 +14,7 @@ import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { chatSession, workspace } from "../src/durable-objects.ts";
+import { analysisPurpose } from "../src/turn-recall.ts";
 import { endedRunsKept } from "../src/workspace.ts";
 import {
   codeResults,
@@ -46,11 +47,13 @@ const modelCallsBy = async (
 ): Promise<AuditEvent[]> => {
   const mine = async () => {
     const events = await allEvents();
+    // Never the recall's analysis of a question, a call of its own.
     return events.filter(
-      ({ action, actor }) =>
+      ({ action, actor, detail }) =>
         action === "model.call" &&
         actor.type === "agent" &&
-        actor.onBehalfOf === userId
+        actor.onBehalfOf === userId &&
+        detail.purpose !== analysisPurpose
     );
   };
   await vi.waitFor(
@@ -148,6 +151,9 @@ describe("chat agent", () => {
     const messages = await transcript(stub, chat.id);
     expect(messages.map(({ role }) => role)).toStrictEqual([
       "user",
+      // The recall before the question: its call and its result.
+      "assistant",
+      "toolResult",
       "assistant",
       "toolResult",
       "assistant",
@@ -345,8 +351,9 @@ describe("chat agent turns", () => {
     await vi.waitFor(
       async () => {
         expect(provider.requests).toHaveLength(1);
-        // The step has started once its call is kept.
-        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
+        // The step has started once its call is kept, after the question
+        // and the recall before it (its call and result).
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(4);
       },
       { timeout: 10_000 }
     );
@@ -363,7 +370,8 @@ describe("chat agent turns", () => {
         runInDurableObject(stub, (_instance, state) =>
           state.storage.sql
             .exec<{ status: string }>(
-              "SELECT status FROM chat_code_runs WHERE chat_id = ?",
+              // The code step's run, never the recall's before the question.
+              "SELECT status FROM chat_code_runs WHERE chat_id = ? AND tool_call_id NOT LIKE 'recall\\_%' ESCAPE '\\'",
               chat.id
             )
             .toArray()
@@ -595,9 +603,11 @@ describe("chat agent after a restart", () => {
       () => "settled",
       () => "settled"
     );
+    // The question, the recall before it (its call and result), and the
+    // code step's call.
     await vi.waitFor(
       async () => {
-        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(4);
       },
       { timeout: 10_000 }
     );
@@ -617,7 +627,7 @@ describe("chat agent after a restart", () => {
     answer.release();
     await vi.waitFor(
       async () => {
-        await expect(transcript(woken, chat.id)).resolves.toHaveLength(4);
+        await expect(transcript(woken, chat.id)).resolves.toHaveLength(6);
       },
       { timeout: 15_000 }
     );
@@ -653,9 +663,11 @@ describe("chat agent after a restart", () => {
     );
     // The question's call breaks with the restarts: the turn goes on.
     void ask("What is 6 * 7?").catch(() => "settled");
+    // The question, the recall before it (its call and result), and the
+    // code step's call.
     await vi.waitFor(
       async () => {
-        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(4);
       },
       { timeout: 10_000 }
     );
@@ -696,7 +708,7 @@ describe("chat agent after a restart", () => {
     const messages = await vi.waitFor(
       async () => {
         const kept = await transcript(woken, chat.id);
-        expect(kept).toHaveLength(4);
+        expect(kept).toHaveLength(6);
         return kept;
       },
       { timeout: 15_000 }
@@ -773,7 +785,8 @@ describe("chat agent code run retention", () => {
       runInDurableObject(stub, (instance) => instance.codeRunRetention())
     ).resolves.toStrictEqual({
       open: 0,
-      closed: turns * 10,
+      // Each turn's recall before the question is a run of its own too.
+      closed: turns * 11,
       outputs: 0,
     });
     const records = await runRecords(stub, chat.id);

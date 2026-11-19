@@ -10,6 +10,7 @@ import { questionDataOf } from "../src/chat-harness.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { personOf } from "../src/connections.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
+import { analysisPurpose } from "../src/turn-recall.ts";
 import {
   chatOf,
   model,
@@ -257,7 +258,9 @@ describe("a chat's ChatSession", () => {
       }).toStrictEqual({
         first: "cancelled",
         again: "cancelled",
-        kept: ["user", "assistant:aborted"],
+        // The question, the recall before it (its call and result), and the
+        // stopped answer.
+        kept: ["user", "assistant:toolUse", "toolResult", "assistant:aborted"],
       });
     } finally {
       never.resolve(true);
@@ -317,11 +320,13 @@ describe("a chat's ChatSession", () => {
     const calls = await vi.waitFor(
       async () => {
         const all = await allEvents();
+        // Never the recall's analysis of a question, a call of its own.
         const events = all.filter(
-          ({ action, actor }) =>
+          ({ action, actor, detail }) =>
             action === "model.call" &&
             actor.type === "agent" &&
-            actor.onBehalfOf === userId
+            actor.onBehalfOf === userId &&
+            detail.purpose !== analysisPurpose
         );
         expect(events).toHaveLength(provider.requests.length);
         return events;
