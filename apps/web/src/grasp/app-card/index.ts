@@ -1,6 +1,8 @@
-export { AppCard, AppCardGrid } from "./app-card";
+export { AppCard, AppCardGrid, AppCardNew } from "./app-card";
 export type {
+  AppCardGridDensity,
   AppCardGridProps,
+  AppCardNewProps,
   AppCardLayoutStyle,
   AppCardOwner,
   AppCardProps,

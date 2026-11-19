@@ -9,7 +9,9 @@ import type { ReactNode } from "react";
 import { AppBuilding } from "../app-building";
 import { DropdownMenuMore } from "../dropdown-menu";
 import type { DropdownMenuAction } from "../dropdown-menu";
+import { Skeleton } from "../skeleton";
 import { styles } from "./styles";
+import { useInView, useReducedMotion } from "./watch";
 
 /**
  * A screenshot of the app: the card's default preview, sharp at any scale. Take it at 2x of the
@@ -66,6 +68,13 @@ export interface AppCardLive {
    * @default "allow-scripts"
    */
   sandbox?: string;
+  /**
+   * A screenshot of the app, the still it shows while the app is not running: before it has loaded,
+   * once its card has left the view (the app stops then), and with reduced motion until the card is
+   * hovered or focused. A running app can't be photographed from the page, so without a poster the
+   * window holds its Skeleton there.
+   */
+  poster?: AppCardImage;
 }
 
 /** What the window shows: a screenshot of the app (the default kind), or the app running. */
@@ -155,6 +164,10 @@ interface WindowProps {
   preview: AppCardPreview | ReactNode;
   /** The app's title, the frame's name when the source gives none. */
   title: string;
+  /** The app's mark, over the quiet line of a window that has nothing to show. */
+  mark: ReactNode;
+  /** The card is hovered or holds the focus. */
+  attention: boolean;
   building: boolean;
   failed: boolean;
   buildingLabel: string;
@@ -248,6 +261,10 @@ interface PictureProps {
   scheme: "light" | "dark" | undefined;
   /** Which width it is for, where the shot has a narrow twin; otherwise every width. */
   width: "wide" | "narrow" | undefined;
+  /** The shot has loaded (again on hydrating, for one loaded before). */
+  onLoaded: () => void;
+  /** The shot could not load. */
+  onFailed: () => void;
 }
 
 // The dark source's condition: the system's scheme until the card knows its own, then always or
@@ -259,8 +276,20 @@ const darkWhen = (scheme: PictureProps["scheme"]) => {
   return scheme === "dark" ? "all" : "not all";
 };
 
+/** The library's Skeleton, the window's whole box, while what it shows loads: nothing jumps when it comes. */
+const Waiting = () => <Skeleton variant="block" layout={styles.waiting} />;
+
 /** One screenshot: only the shot of the scheme the card stands in is loaded, at the size it is drawn. */
-const Picture = ({ light, dark, alt, sizes, scheme, width }: PictureProps) => (
+const Picture = ({
+  light,
+  dark,
+  alt,
+  sizes,
+  scheme,
+  width,
+  onLoaded,
+  onFailed,
+}: PictureProps) => (
   <picture>
     {dark === undefined ? null : (
       <source
@@ -277,6 +306,14 @@ const Picture = ({ light, dark, alt, sizes, scheme, width }: PictureProps) => (
       loading="lazy"
       decoding="async"
       draggable={false}
+      // An image loaded before the page woke fired its load unseen: read it from the image itself.
+      ref={(image) => {
+        if (image !== null && image.complete && image.naturalWidth > 0) {
+          onLoaded();
+        }
+      }}
+      onLoad={onLoaded}
+      onError={onFailed}
       data-slot="app-card-image"
       data-width={width}
       {...stylex.props(
@@ -300,8 +337,18 @@ const SIZES = "(width < 40rem) 100vw, (width < 96rem) 40vw, 30vw";
  * is followed and the other shot loads only when the theme changes. With a narrow one, a container
  * query on the frame hides the shots of the other width: a hidden lazy image is never loaded.
  */
-const Shot = ({ image }: { image: AppCardImage }) => {
+const Shot = ({
+  image,
+  onFailed,
+}: {
+  image: AppCardImage;
+  onFailed: () => void;
+}) => {
   const [box, setBox] = useState<HTMLDivElement | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const loadedNow = () => {
+    setLoaded(true);
+  };
   const [scheme, drawn] = useShotRoom(box);
   const narrow = given(image.srcNarrow);
   const widths: PictureProps["width"][] = narrow
@@ -331,8 +378,10 @@ const Shot = ({ image }: { image: AppCardImage }) => {
       ref={setBox}
       inert
       data-slot="app-card-shot"
+      data-loaded={loaded ? "" : undefined}
       {...stylex.props(styles.shot)}
     >
+      {loaded ? null : <Waiting />}
       {widths.map((width) => {
         const sources = sourcesOf(width);
         return (
@@ -344,6 +393,8 @@ const Shot = ({ image }: { image: AppCardImage }) => {
             sizes={sizes}
             scheme={scheme}
             width={width}
+            onLoaded={loadedNow}
+            onFailed={onFailed}
           />
         );
       })}
@@ -351,33 +402,142 @@ const Shot = ({ image }: { image: AppCardImage }) => {
   );
 };
 
+/** What stands in the window while the app doesn't run: its poster, or the Skeleton. */
+const Still = ({ poster }: { poster: AppCardImage | undefined }) => {
+  if (poster === undefined) {
+    return (
+      <div aria-hidden="true" {...stylex.props(styles.fill)}>
+        <Waiting />
+      </div>
+    );
+  }
+  return <Shot image={poster} onFailed={keep} />;
+};
+
+/** How long a running app may take to load before its window says it didn't start. */
+const LOAD_LIMIT = 15_000;
+
+interface RunningProps {
+  live: AppCardLive;
+  title: string;
+  onFailed: () => void;
+}
+
+/**
+ * The app running in its window: mounted only while its card is in view (Live), laid out at a
+ * desktop's width and scaled to fit, sharp. Until it has loaded the poster stands over it (or the
+ * Skeleton), so it comes in whole; mounted afresh each time, it starts unloaded each time.
+ */
+const Running = ({ live, title, onFailed }: RunningProps) => {
+  const [room, setRoom] = useState<HTMLDivElement | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  // The still is gone once it has faded out (with reduced motion it is cut, and simply stays clear).
+  const [gone, setGone] = useState(false);
+  const fit = useFit(room);
+  useEffect(() => {
+    if (loaded) {
+      return keep;
+    }
+    const limit = setTimeout(onFailed, LOAD_LIMIT);
+    return () => {
+      clearTimeout(limit);
+    };
+  }, [loaded, onFailed]);
+  return (
+    <div
+      ref={setRoom}
+      data-slot="app-card-running"
+      data-loaded={loaded ? "" : undefined}
+      {...stylex.props(styles.fill)}
+    >
+      <div
+        data-slot="app-card-canvas"
+        {...stylex.props(
+          styles.canvas,
+          fit !== undefined && [
+            styles.measured,
+            styles.fit(fit.scale, fit.width, fit.shiftX, fit.shiftY),
+          ]
+        )}
+      >
+        <iframe
+          src={live.src}
+          title={live.title ?? title}
+          sandbox={live.sandbox ?? "allow-scripts"}
+          referrerPolicy="no-referrer"
+          loading="lazy"
+          inert
+          aria-hidden="true"
+          tabIndex={-1}
+          onLoad={() => {
+            setLoaded(true);
+          }}
+          data-slot="app-card-app"
+          {...stylex.props(styles.iframe)}
+        />
+      </div>
+      {/* The still over the app until it has loaded, then fading out: one calm change, no flash. */}
+      {gone ? null : (
+        <div
+          aria-hidden="true"
+          onTransitionEnd={(event) => {
+            if (event.target === event.currentTarget) {
+              setGone(true);
+            }
+          }}
+          {...stylex.props(styles.fill, styles.over, loaded && styles.faded)}
+        >
+          <Still poster={live.poster} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface LiveProps {
+  live: AppCardLive;
+  title: string;
+  /** The card is hovered or holds the focus: with reduced motion, the only time the app runs. */
+  attention: boolean;
+  onFailed: () => void;
+}
+
+/**
+ * A running app that runs only while its card is in view (one observer for the page, watch.ts),
+ * and stops a moment after it leaves, its poster standing in its place; with reduced motion only
+ * while its card is hovered or focused.
+ */
+const Live = ({ live, title, attention, onFailed }: LiveProps) => {
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  const inView = useInView(box);
+  const reduced = useReducedMotion();
+  const runs = inView && (!reduced || attention);
+  return (
+    <div
+      ref={setBox}
+      data-slot="app-card-live"
+      data-running={runs ? "" : undefined}
+      {...stylex.props(styles.fill)}
+    >
+      {runs ? (
+        <Running live={live} title={title} onFailed={onFailed} />
+      ) : (
+        <Still poster={live.poster} />
+      )}
+    </div>
+  );
+};
+
 /** What the canvas holds, laid out at a desktop's width: App building, the running app, or a picture. */
 const Inside = ({
   preview,
-  title,
   building,
   buildingLabel,
-}: Pick<WindowProps, "preview" | "title" | "building" | "buildingLabel">) => {
+}: Pick<WindowProps, "preview" | "building" | "buildingLabel">) => {
   if (building) {
     return <AppBuilding aria-label={buildingLabel} />;
   }
-  if (isLive(preview)) {
-    return (
-      <iframe
-        src={preview.src}
-        title={preview.title ?? title}
-        sandbox={preview.sandbox ?? "allow-scripts"}
-        referrerPolicy="no-referrer"
-        loading="lazy"
-        inert
-        aria-hidden="true"
-        tabIndex={-1}
-        data-slot="app-card-app"
-        {...stylex.props(styles.iframe)}
-      />
-    );
-  }
-  // A screenshot stands in the window itself (Window), not on the canvas.
+  // A screenshot and a running app stand in the window itself (Window), not on this canvas.
   if (!isNode(preview)) {
     return null;
   }
@@ -395,6 +555,8 @@ const Inside = ({
 export const Window = ({
   preview,
   title,
+  mark,
+  attention,
   building,
   failed,
   buildingLabel,
@@ -402,21 +564,50 @@ export const Window = ({
   emptyLabel,
 }: WindowProps) => {
   const [room, setRoom] = useState<HTMLDivElement | null>(null);
+  // The preview itself failed: its screenshot didn't load, or the app didn't load in time.
+  const [broken, setBroken] = useState(false);
+  const breaks = () => {
+    setBroken(true);
+  };
   const empty = preview === undefined || preview === null || preview === false;
   const fit = useFit(room);
-  if (failed || (empty && !building)) {
+  if (failed || broken || (empty && !building)) {
+    const isFailed = failed || broken;
     return (
-      <div {...stylex.props(styles.window)} data-slot="app-card-window">
-        <p {...stylex.props(styles.quiet)}>
-          {failed ? failedLabel : emptyLabel}
-        </p>
+      <div
+        {...stylex.props(styles.window)}
+        data-slot="app-card-window"
+        data-failed={isFailed ? "" : undefined}
+      >
+        <div {...stylex.props(styles.quiet)}>
+          {mark === undefined || mark === null ? null : (
+            <span aria-hidden="true" {...stylex.props(styles.quietMark)}>
+              {mark}
+            </span>
+          )}
+          <p {...stylex.props(styles.quietWords)}>
+            {isFailed ? failedLabel : emptyLabel}
+          </p>
+        </div>
       </div>
     );
   }
   if (!building && isImage(preview)) {
     return (
       <div {...stylex.props(styles.window)} data-slot="app-card-window">
-        <Shot image={preview} />
+        <Shot image={preview} onFailed={breaks} />
+      </div>
+    );
+  }
+  if (!building && isLive(preview)) {
+    return (
+      <div {...stylex.props(styles.window)} data-slot="app-card-window">
+        <Live
+          live={preview}
+          title={title}
+          attention={attention}
+          onFailed={breaks}
+        />
       </div>
     );
   }
@@ -438,7 +629,6 @@ export const Window = ({
       >
         <Inside
           preview={preview}
-          title={title}
           building={building}
           buildingLabel={buildingLabel}
         />

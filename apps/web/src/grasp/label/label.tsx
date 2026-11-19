@@ -39,25 +39,19 @@ export const labelStyles = stylex.create({
     // A field that is out of use takes its label with it.
     opacity: { default: 1, ":is([data-disabled])": grasp.dim },
   },
-  // The required mark: a quiet asterisk after the words. It is for the eye only; the control's own
-  // `required` says it to a screen reader and to an agent.
-  mark: {
-    marginInlineStart: grasp.space1,
-    fontWeight: grasp.weightRegular,
-    color: grasp.muted,
+  // The required mark: a quiet asterisk after the words, drawn by the label itself (::after), so
+  // it is never in the label's text: not in its textContent, not in the name it gives its control
+  // (the empty alternative after the slash), not found by a page search. It is for the eye only;
+  // the control's own `required` says it to a screen reader and to an agent.
+  required: {
+    "::after": {
+      content: '"*" / ""',
+      marginInlineStart: grasp.space1,
+      fontWeight: grasp.weightRegular,
+      color: grasp.muted,
+    },
   },
 });
-
-/** The asterisk after a required label. Hidden from screen readers: the control says it. */
-export const RequiredMark = ({ layout }: { layout?: stylex.StyleXStyles }) => (
-  <span
-    aria-hidden="true"
-    data-slot="required-mark"
-    {...stylex.props(labelStyles.mark, layout)}
-  >
-    *
-  </span>
-);
 
 type LabelPrimitiveProps = ComponentProps<typeof LabelPrimitive>;
 
@@ -92,9 +86,13 @@ export const Label = ({
   <LabelPrimitive
     {...rest}
     data-slot="label"
-    {...stylex.props(labelStyles.label, wrap.words, layout ?? styleProp)}
+    {...stylex.props(
+      labelStyles.label,
+      wrap.words,
+      required && labelStyles.required,
+      layout ?? styleProp
+    )}
   >
     {children}
-    {required && <RequiredMark />}
   </LabelPrimitive>
 );

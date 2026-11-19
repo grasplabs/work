@@ -23,3 +23,9 @@ export const ListenContext = createContext<
 >(null);
 
 export const useComposerListen = () => useContext(ListenContext);
+
+// The one row stood tall (its text over the controls) as a takeover came: a dictation keeps that
+// form, so the card never changes height for it (voice.tsx).
+export const RowTallContext = createContext(false);
+
+export const useComposerRowTall = () => useContext(RowTallContext);

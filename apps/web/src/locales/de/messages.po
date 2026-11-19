@@ -2425,6 +2425,7 @@ msgstr "Agent nicht gefunden"
 
 #: src/agents/agent-section.tsx
 #: src/agents/agents-overview.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.agents.$agent.tsx
 #: src/routes/_shell.agents.index.tsx
@@ -2996,6 +2997,7 @@ msgstr "Wird genehmigt"
 #: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-view.tsx
@@ -3153,6 +3155,7 @@ msgid "Ask for it"
 msgstr "Anfragen"
 
 #: src/chat/global-chat.tsx
+#: src/frame/shell-pending.tsx
 #: src/settings/composer-settings.tsx
 msgid "Ask Grasp"
 msgstr "Grasp fragen"
@@ -3293,6 +3296,10 @@ msgstr "Fragt nach dem Mikrofon"
 #: src/chat/thread.tsx
 msgid "Asking to connect {binding}"
 msgstr "Verbindung {binding} wird angefragt"
+
+#: src/frame/part-words.tsx
+msgid "Asking…"
+msgstr "Frage…"
 
 #: src/onboarding/send-plan-form.tsx
 msgctxt "at an hour of the day: on Tuesday at 9:00"
@@ -3530,6 +3537,7 @@ msgstr "Gebunden an"
 
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain-section.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
@@ -4037,6 +4045,7 @@ msgid "Chases unpaid invoices and drafts the reminders."
 msgstr "Verfolgt offene Rechnungen nach und entwirft die Erinnerungen."
 
 #: src/agents/agent-page.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/settings/ai-spend.tsx
 msgid "Chat"
@@ -4385,6 +4394,7 @@ msgstr "Chat schließen"
 
 #: src/frame/app-frame.tsx
 #: src/frame/part-words.tsx
+#: src/frame/shell-pending.tsx
 msgid "Close the menu"
 msgstr "Menü schließen"
 
@@ -7520,6 +7530,7 @@ msgstr "Zum Bestätigen gedrückt halten: {words}"
 msgid "Hold to delete the key"
 msgstr "Gedrückt halten, um den Schlüssel zu löschen"
 
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Home"
 msgstr "Start"
@@ -7811,6 +7822,7 @@ msgstr "In Workflows"
 msgid "In your documents I saw {tools}."
 msgstr "In Ihren Dokumenten habe ich {tools} gesehen."
 
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
@@ -7876,6 +7888,7 @@ msgid "Integration"
 msgstr "Integration"
 
 #: src/apps/app-integrations.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
@@ -9058,6 +9071,7 @@ msgstr "Postfach"
 msgid "Mailbox or drive, if not the account's own"
 msgstr "Postfach oder Laufwerk, falls nicht das eigene des Kontos"
 
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Main"
 msgstr "Hauptmenü"
@@ -9225,6 +9239,7 @@ msgstr "Genannt"
 
 #: src/frame/app-frame.tsx
 #: src/frame/part-words.tsx
+#: src/frame/shell-pending.tsx
 msgid "Menu"
 msgstr "Menü"
 
@@ -9649,6 +9664,10 @@ msgstr "Neu"
 #: src/routes/_shell.agents.new.tsx
 msgid "New agent"
 msgstr "Neuer Agent"
+
+#: src/frame/part-words.tsx
+msgid "New app"
+msgstr "Neue App"
 
 #: src/apps/blueprints.tsx
 msgid "New Apps can start from version {version} of {name}, as a copy with none of its data. {name} itself stays as it is."
@@ -10783,6 +10802,7 @@ msgstr "Ältere Versionen"
 
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
+#: src/settings/stephen-card.tsx
 #: src/settings/stephen-settings.tsx
 msgid "On"
 msgstr "An"
@@ -10838,10 +10858,6 @@ msgstr "An in {name}"
 #: src/agents/new-agent.tsx
 msgid "On its own"
 msgstr "Selbstständig"
-
-#: src/settings/stephen-card.tsx
-msgid "On outside Grasp"
-msgstr "Außerhalb von Grasp an"
 
 #: src/workflows/trigger-description.ts
 msgid "On the schedule {cron}, in {zone}"
@@ -11348,6 +11364,10 @@ msgstr "Ausgabe"
 msgid "Outside APIs an admin approved, by origin, methods and paths. Apps and workflows call them only with a permission."
 msgstr "Externe APIs, die ein Admin freigegeben hat, nach Origin, Methoden und Pfaden. Apps und Workflows rufen sie nur mit einer Berechtigung auf."
 
+#: src/settings/stephen-card.tsx
+msgid "Outside Grasp"
+msgstr "Außerhalb von Grasp"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
 msgstr "In den nächsten zwei Wochen erhalten Sie einen kurzen persönlichen Link, um mit Stephen zu sprechen, dem KI-Interviewer von Grasp: Teamleitungen etwa 20 Minuten, alle anderen 10 bis 15. Per Sprache oder per Tippen."
@@ -11570,6 +11590,7 @@ msgstr "Stephen außerhalb von Grasp pausieren?"
 #: src/agents/agents-overview.tsx
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
+#: src/settings/stephen-card.tsx
 #: src/workflows/runs.tsx
 msgid "Paused"
 msgstr "Pausiert"
@@ -11584,10 +11605,6 @@ msgstr "Pausiert"
 msgctxt "status of a workflow run"
 msgid "Paused"
 msgstr "Pausiert"
-
-#: src/settings/stephen-card.tsx
-msgid "Paused outside Grasp"
-msgstr "Außerhalb von Grasp pausiert"
 
 #: src/inbox/interviews-item.tsx
 msgid "Paused: no link opens and none goes out."
@@ -11943,6 +11960,7 @@ msgstr "Profil"
 msgid "Project"
 msgstr "Projekt"
 
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -13509,6 +13527,7 @@ msgid "Search by name or kind"
 msgstr "Nach Name oder Art suchen"
 
 #: src/chat/chat-window.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Search chats"
 msgstr "Chats durchsuchen"
@@ -14070,6 +14089,7 @@ msgid "Show or hide the panel"
 msgstr "Bereich ein- oder ausblenden"
 
 #: src/frame/part-words.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Show or hide the sidebar"
 msgstr "Seitenleiste ein- oder ausblenden"
@@ -14143,6 +14163,7 @@ msgid "Shown with the App. It opens the App to nobody: who may use it is who it 
 msgstr "Wird mit der App angezeigt. Es öffnet die App für niemanden: Nutzen darf sie, mit wem sie geteilt ist."
 
 #: src/frame/part-words.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Sidebar"
 msgstr "Seitenleiste"
@@ -17143,6 +17164,7 @@ msgstr "Änderungen ansehen"
 
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Views"
 msgstr "Ansichten"
@@ -18185,6 +18207,7 @@ msgstr "Workflows"
 #: src/chat/mentions.tsx
 #: src/connections/integration-inspector.tsx
 #: src/connections/workflows-using.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/report-view.tsx
 #: src/projects/file-item-dialog.tsx

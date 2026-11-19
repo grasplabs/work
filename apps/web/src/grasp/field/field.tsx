@@ -33,7 +33,7 @@ import {
   choiceIds,
   rowStyles,
 } from "../choice/row";
-import { RequiredMark, labelStyles } from "../label/label";
+import { labelStyles } from "../label/label";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp } from "../tokens/tokens.stylex";
 import { wrap } from "../wrap/wrap";
@@ -55,9 +55,14 @@ const styles = stylex.create({
   // The required mark shows when the field holds a required control. Read from the page itself
   // (:has), so it is there before any script runs and with none.
   mark: {
-    display: {
-      default: "none",
-      [stylex.when.ancestor(":has(:required)", fieldMarker)]: "inline",
+    "::after": {
+      content: {
+        default: "none",
+        [stylex.when.ancestor(":has(:required)", fieldMarker)]: '"*" / ""',
+      },
+      marginInlineStart: grasp.space1,
+      fontWeight: grasp.weightRegular,
+      color: grasp.muted,
     },
   },
 });
@@ -240,10 +245,9 @@ export const FieldLabel = ({ children, ...rest }: FieldLabelProps) => {
     <FieldLabelPrimitive
       {...rest}
       {...row}
-      {...stylex.props(labelStyles.label, wrap.words)}
+      {...stylex.props(labelStyles.label, wrap.words, styles.mark)}
     >
       {children}
-      <RequiredMark layout={styles.mark} />
     </FieldLabelPrimitive>
   );
 };

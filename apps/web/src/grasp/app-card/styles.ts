@@ -162,20 +162,49 @@ export const styles = stylex.create({
   onNarrow: {
     display: { default: "none", "@container (width < 25.5rem)": "block" },
   },
+  // The running app's room, the still over it, and the Skeleton: each the window's whole box.
+  fill: {
+    position: "absolute",
+    inset: 0,
+  },
+  // The still over the running app until it has loaded, then fading out in one calm change.
+  over: {
+    zIndex: 1,
+    opacity: 1,
+    transitionProperty: "opacity",
+    transitionDuration: simply.swap,
+    transitionTimingFunction: grasp.ease,
+    pointerEvents: "none",
+  },
+  faded: { opacity: 0 },
+  waiting: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+  },
   // A picture given as children fills the app's room.
   picture: {
     width: "100%",
     height: "100%",
     overflow: "hidden",
   },
-  // No app to show: the window holds a quiet line in its middle.
+  // No app to show, or it didn't start: the window holds the app's mark and a quiet line in its
+  // middle, above the frame's foot.
   quiet: {
     display: "flex",
+    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
+    gap: grasp.space3,
     paddingBlockEnd: grasp.appCardWindowCorner,
     boxSizing: "border-box",
     height: "100%",
+  },
+  quietMark: {
+    display: "flex",
+  },
+  quietWords: {
     margin: 0,
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
@@ -195,6 +224,11 @@ export const styles = stylex.create({
     minWidth: 0,
     minHeight: grasp.controlSm,
   },
+  // The app's mark before its title.
+  mark: {
+    display: "flex",
+    flexShrink: 0,
+  },
   heading: {
     flexGrow: 1,
     minWidth: 0,
@@ -211,6 +245,14 @@ export const styles = stylex.create({
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     color: "inherit",
+    // As a button (onOpen), the link's words with none of a button's own look.
+    width: "100%",
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    font: "inherit",
+    textAlign: "start",
+    cursor: "pointer",
     // Under the pointer the title underlines: the card is a link, and says which words name it.
     textDecorationLine: {
       default: "none",
@@ -254,10 +296,7 @@ export const styles = stylex.create({
   // none, so the title, the description and the owner's line stand level across a row. In one
   // column, or a card on its own, nothing stands beside it: it keeps only the lines it has.
   description: {
-    minHeight: {
-      default: 0,
-      "@container (width >= 40rem)": `calc(2 * ${grasp.textSmLine})`,
-    },
+    minHeight: `calc(var(--app-card-side, 0) * 2 * ${grasp.textSmLine})`,
     display: "-webkit-box",
     WebkitBoxOrient: "vertical",
     WebkitLineClamp: 2,
@@ -288,8 +327,9 @@ export const styles = stylex.create({
   owner: {
     color: grasp.text,
   },
-  // The grid: one card a row on a narrow room, two from 40rem, three from 96rem. The room, not the
-  // window: on the Apps page a sidebar takes part of the width.
+  // The grid: by its density, one card a row on a narrow room, then two, three and (dense) four. The
+  // room, not the window: on the Apps page a sidebar takes part of the width. Where cards stand
+  // side by side it sets --app-card-side, which keeps two lines for every description.
   room: {
     containerType: "inline-size",
     width: "100%",
@@ -297,12 +337,67 @@ export const styles = stylex.create({
   },
   grid: {
     display: "grid",
+    columnGap: grasp.space6,
+    rowGap: grasp.space8,
+  },
+  // Comfortable, the default: two from 40rem, three from 96rem, each frame wide enough to read the app.
+  comfortable: {
     gridTemplateColumns: {
       default: "minmax(0, 1fr)",
       "@container (width >= 40rem)": "repeat(2, minmax(0, 1fr))",
       "@container (width >= 96rem)": "repeat(3, minmax(0, 1fr))",
     },
-    columnGap: grasp.space6,
-    rowGap: grasp.space8,
+    "--app-card-side": { default: "0", "@container (width >= 40rem)": "1" },
+  },
+  // Compact: two from 36rem, three from 60rem: the Apps page beside a sidebar at a desktop's width.
+  compact: {
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      "@container (width >= 36rem)": "repeat(2, minmax(0, 1fr))",
+      "@container (width >= 60rem)": "repeat(3, minmax(0, 1fr))",
+    },
+    "--app-card-side": { default: "0", "@container (width >= 36rem)": "1" },
+  },
+  // Dense: two from 32rem, three from 52rem, four from 80rem: a wide canvas of many apps.
+  dense: {
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      "@container (width >= 32rem)": "repeat(2, minmax(0, 1fr))",
+      "@container (width >= 52rem)": "repeat(3, minmax(0, 1fr))",
+      "@container (width >= 80rem)": "repeat(4, minmax(0, 1fr))",
+    },
+    "--app-card-side": { default: "0", "@container (width >= 32rem)": "1" },
+    columnGap: grasp.space5,
+    rowGap: grasp.space6,
+  },
+  // The grid with no apps: its empty state across every column.
+  empty: {
+    gridColumn: "1 / -1",
+  },
+  // The New app card: the frame's box on the soft ground with a dashed rim, a plus in its middle.
+  newFrame: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundImage: "none",
+    borderWidth: grasp.hairline,
+    borderStyle: "dashed",
+    borderColor: grasp.line,
+    boxShadow: "none",
+    boxSizing: "border-box",
+    color: grasp.muted,
+  },
+  newPlus: {
+    display: "flex",
+    color: {
+      default: grasp.muted,
+      [stylex.when.ancestor(":has([data-card-link]:hover)", cardMarker)]: {
+        default: grasp.muted,
+        [media.hover]: grasp.ink,
+      },
+    },
+    transitionProperty: "color",
+    transitionDuration: simply.hover,
+    transitionTimingFunction: grasp.ease,
   },
 });

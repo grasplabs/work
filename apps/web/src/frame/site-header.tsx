@@ -112,7 +112,7 @@ export const SiteHeader = ({
   return (
     <AppShellBar
       actions={actions}
-      breadcrumbLabel={t`Breadcrumb`}
+      words={{ breadcrumb: t`Breadcrumb` }}
       crumbs={crumbs.map((crumb) =>
         "to" in crumb ? { label: crumb.label, render: crumbLink(crumb) } : crumb
       )}
