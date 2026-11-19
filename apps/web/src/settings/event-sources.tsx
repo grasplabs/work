@@ -16,6 +16,7 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { CopyButton, ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { SourceActivity } from "./event-source-activity.tsx";
 import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 
 // Settings › Webhooks, for the organization's own admins: the event
@@ -26,7 +27,8 @@ import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 // it away. The section stays mounted whatever its list's read came to, so
 // a read after a change that fails (offline, refused) says so in place of
 // the list and never takes away a secret not yet copied. Rotating,
-// revoking and deleting ask first. Builders start workflows on a source's
+// revoking and deleting ask first. Under each, what it received lately
+// (event-source-activity.tsx). Builders start workflows on a source's
 // events from a workflow's Triggers tab.
 
 /**
@@ -108,6 +110,7 @@ const SourceRow = ({
           <Trans>It takes no event until you make it a new secret.</Trans>
         </p>
       ) : null}
+      <SourceActivity source={source} />
       <div className="flex flex-wrap items-center gap-2">
         <Confirmed
           busy={busy}

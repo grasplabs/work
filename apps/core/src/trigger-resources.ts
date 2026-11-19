@@ -3,6 +3,7 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { connectorEventActions } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import type { EventSourceTrigger } from "@grasp-os/shared/event-sources";
 import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { TriggerId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -47,6 +48,7 @@ import {
   permissions,
   triggerResources,
   triggerSchedules,
+  workflowResources,
 } from "./db/core/schema.ts";
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { triggerWorkflowNoticed } from "./notifications.ts";
@@ -1049,6 +1051,48 @@ export const triggerSummaries = async (
       },
     ])
   );
+};
+
+/**
+ * The live webhook triggers on event source `sourceId`, oldest first, each
+ * with the workflow it starts: every one, as only an admin sees them,
+ * so whoever calls decides who asks (workflows/source-deliveries.ts).
+ */
+export const triggersOnSource = async (
+  env: Env,
+  sourceId: string
+): Promise<EventSourceTrigger[]> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      id: triggerResources.id,
+      type: triggerResources.eventType,
+      enabled: triggerResources.enabled,
+      start: startStatusSql,
+      workflowId: workflowResources.id,
+      workflowName: workflowResources.name,
+    })
+    .from(triggerResources)
+    // A workflow a live trigger starts is live: it can't be deleted first.
+    .innerJoin(
+      workflowResources,
+      eq(workflowResources.id, triggerResources.workflowResourceId)
+    )
+    .where(
+      and(
+        eq(triggerResources.kind, "webhook"),
+        eq(triggerResources.eventSourceId, sourceId),
+        isNull(triggerResources.deletedAt)
+      )
+    )
+    .orderBy(asc(triggerResources.createdAt), asc(triggerResources.id))
+    .all();
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type ?? "",
+    enabled: row.enabled,
+    start: permissionStatusSchema.nullable().parse(row.start),
+    workflow: { id: row.workflowId, name: row.workflowName },
+  }));
 };
 
 /** Live trigger `id`, as anyone who may manage it (`requireTriggerManager`) sees it. */

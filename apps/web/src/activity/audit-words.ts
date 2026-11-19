@@ -329,6 +329,14 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "event_source.deleted", text: msg`Deleted a webhook source` },
   {
+    action: "event_source.delivery.read",
+    text: msg`Read the payload of a webhook event`,
+  },
+  {
+    action: "event_source.test_sent",
+    text: msg`Sent a webhook source a test event`,
+  },
+  {
     action: "workflow.webhook.refused",
     text: msg`Didn't start a workflow from a webhook event`,
   },

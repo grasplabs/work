@@ -86,6 +86,10 @@ msgstr "{about} costó {cost} por ejecución en llamadas al modelo, en {runs, pl
 msgid "{about} has {open, plural, one {# decision open} other {# decisions open}}; the oldest has waited {waited}."
 msgstr "{about} tiene {open, plural, one {# decisión abierta} other {# decisiones abiertas}}; la más antigua lleva {waited} esperando."
 
+#: src/settings/event-source-activity.tsx
+msgid "{accepted, plural, one {# event accepted in the last 24 hours.} other {# events accepted in the last 24 hours.}}"
+msgstr "{accepted, plural, one {# evento aceptado en las últimas 24 horas.} other {# eventos aceptados en las últimas 24 horas.}}"
+
 #: src/apps/resource-bindings.tsx
 msgid "{account} on {provider}"
 msgstr "{account} en {provider}"
@@ -278,6 +282,38 @@ msgstr "{count, plural, one {# cambio espera a que lo confirmes o lo rechaces.} 
 msgid "{count, plural, one {# conversation came in: with the board, the teams and their people.} other {# conversations came in: with the board, the teams and their people.}}"
 msgstr "{count, plural, one {Llegó # conversación: con la dirección, los equipos y su gente.} other {Llegaron # conversaciones: con la dirección, los equipos y su gente.}}"
 
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: it was larger than 64 KiB.} other {# deliveries refused in the last seven days: they were larger than 64 KiB.}}"
+msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: superaba los 64 KiB.} other {# entregas rechazadas en los últimos siete días: superaban los 64 KiB.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: it was signed, but its body wasn't a JSON object with a type and data.} other {# deliveries refused in the last seven days: they were signed, but their bodies weren't JSON objects with a type and data.}}"
+msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: estaba firmada, pero su cuerpo no era un objeto JSON con un tipo y datos.} other {# entregas rechazadas en los últimos siete días: estaban firmadas, pero su cuerpo no era un objeto JSON con un tipo y datos.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: it wasn't signed with this source's secret.} other {# deliveries refused in the last seven days: they weren't signed with this source's secret.}}"
+msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: no estaba firmada con el secreto de esta fuente.} other {# entregas rechazadas en los últimos siete días: no estaban firmadas con el secreto de esta fuente.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: its secret was revoked.} other {# deliveries refused in the last seven days: its secret was revoked.}}"
+msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: el secreto de la fuente estaba revocado.} other {# entregas rechazadas en los últimos siete días: el secreto de la fuente estaba revocado.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: its signing headers were missing or more than five minutes old.} other {# deliveries refused in the last seven days: their signing headers were missing or more than five minutes old.}}"
+msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: faltaban sus cabeceras de firma o tenían más de cinco minutos.} other {# entregas rechazadas en los últimos siete días: faltaban sus cabeceras de firma o tenían más de cinco minutos.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: its webhook-id came before with another event.} other {# deliveries refused in the last seven days: their webhook-id came before with another event.}}"
+msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: su webhook-id ya había llegado con otro evento.} other {# entregas rechazadas en los últimos siete días: su webhook-id ya había llegado con otro evento.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: the secret changed as it arrived.} other {# deliveries refused in the last seven days: the secret changed as they arrived.}}"
+msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: el secreto cambió mientras llegaba.} other {# entregas rechazadas en los últimos siete días: el secreto cambió mientras llegaban.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery told to try again in the last seven days: a workflow it starts or a run waiting for it couldn't take it then.} other {# deliveries told to try again in the last seven days: a workflow they start or a run waiting for them couldn't take them then.}}"
+msgstr "{count, plural, one {A # entrega se le pidió reintentar en los últimos siete días: un flujo de trabajo que inicia o una ejecución que la esperaba no pudo aceptarla en ese momento.} other {A # entregas se les pidió reintentar en los últimos siete días: un flujo de trabajo que inician o una ejecución que las esperaba no pudo aceptarlas en ese momento.}}"
+
 #: src/onboarding/document-drop.tsx
 msgid "{count, plural, one {# document added. I’m reading it.} other {# documents added. I’m reading them.}}"
 msgstr "{count, plural, one {# documento añadido. Lo estoy leyendo.} other {# documentos añadidos. Los estoy leyendo.}}"
@@ -369,6 +405,10 @@ msgstr "{count, plural, one {# pérdida de tiempo} other {# pérdidas de tiempo}
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{count, plural, one {# tool allowed} other {# tools allowed}}"
 msgstr "{count, plural, one {# herramienta permitida} other {# herramientas permitidas}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# trigger matches this type. A test event starts no workflow.} other {# triggers match this type. A test event starts no workflow.}}"
+msgstr "{count, plural, one {# disparador coincide con este tipo. Un evento de prueba no inicia ningún flujo de trabajo.} other {# disparadores coinciden con este tipo. Un evento de prueba no inicia ningún flujo de trabajo.}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# wish} other {# wishes}}"
@@ -1051,6 +1091,10 @@ msgstr "{rating} de 5"
 msgid "{records, plural, one {# record kept} other {# records kept}}"
 msgstr "{records, plural, one {# registro guardado} other {# registros guardados}}"
 
+#: src/settings/event-source-activity.tsx
+msgid "{refused, plural, one {# refused in the last 24 hours} other {# refused in the last 24 hours}}"
+msgstr "{refused, plural, one {# rechazada en las últimas 24 horas} other {# rechazadas en las últimas 24 horas}}"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -1168,6 +1212,10 @@ msgstr "{sponsor} me dio la visión general. Ahora necesito los detalles."
 #: src/onboarding/setup-steps.tsx
 msgid "{sponsor} told me a lot about your company in our first conversation."
 msgstr "{sponsor} me contó mucho sobre tu empresa en nuestra primera conversación."
+
+#: src/settings/event-source-activity.tsx
+msgid "{started, plural, one {Started # workflow} other {Started # workflows}}"
+msgstr "{started, plural, one {Inició # flujo de trabajo} other {Inició # flujos de trabajo}}"
 
 #: src/brain/brain.ts
 msgid "{statements, plural, one {# statement: {breakdown}} other {# statements: {breakdown}}}"
@@ -2538,6 +2586,22 @@ msgstr "Un evento en una conexión"
 #: src/workflows/workflow-triggers.tsx
 msgid "An event from a webhook source"
 msgstr "Un evento de una fuente de webhook"
+
+#: src/settings/event-source-activity.tsx
+msgid "An event from the sender would not start {name}: its trigger has no approval."
+msgstr "Un evento del remitente no iniciaría {name}: su disparador no tiene aprobación."
+
+#: src/settings/event-source-activity.tsx
+msgid "An event from the sender would not start {name}: its trigger still waits for an admin's approval."
+msgstr "Un evento del remitente no iniciaría {name}: su disparador aún espera la aprobación de un administrador."
+
+#: src/settings/event-source-activity.tsx
+msgid "An event from the sender would not start {name}: its trigger's approval was taken back."
+msgstr "Un evento del remitente no iniciaría {name}: se retiró la aprobación de su disparador."
+
+#: src/settings/event-source-activity.tsx
+msgid "An event from the sender would start {name} now, if its data is an input the workflow takes."
+msgstr "Un evento del remitente iniciaría {name} ahora, si sus datos son una entrada que el flujo de trabajo acepta."
 
 #: src/apps/app-webhooks.tsx
 msgid "An https address on the public internet, with no user name, password or IP address in it."
@@ -5590,6 +5654,10 @@ msgstr "Evento"
 msgid "Event type"
 msgstr "Tipo de evento"
 
+#: src/settings/event-source-activity.tsx
+msgid "Event type of a test event"
+msgstr "Tipo de evento de un evento de prueba"
+
 #: src/settings/audit-archive.tsx
 msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
 msgstr "Eventos más antiguos de lo que conserva el registro de auditoría, trasladados al archivo. La búsqueda y la exportación usan los filtros de arriba."
@@ -6977,6 +7045,10 @@ msgstr "Ocultas para todos los administradores hasta que cambie su evidencia o u
 msgid "Hide"
 msgstr "Ocultar"
 
+#: src/settings/event-source-activity.tsx
+msgid "Hide events"
+msgstr "Ocultar eventos"
+
 #: src/chat/held-writes.tsx
 msgid "Hide exactly what was sent"
 msgstr "Ocultar exactamente lo que se envió"
@@ -6993,6 +7065,10 @@ msgstr "Ocultar para todos los administradores"
 #: src/workflows/requests/request-who.tsx
 msgid "Hide people one by one"
 msgstr "Ocultar personas una a una"
+
+#: src/settings/event-source-activity.tsx
+msgid "Hide what {name} received"
+msgstr "Ocultar lo que recibió {name}"
 
 #: src/chat/package-requests.tsx
 msgctxt "an advisory's severity"
@@ -7821,6 +7897,10 @@ msgstr "Su versión actual no tiene parámetros."
 msgid "Its data"
 msgstr "Sus datos"
 
+#: src/settings/event-source-activity.tsx
+msgid "Its data, as JSON"
+msgstr "Sus datos, en JSON"
+
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Su definición para guardarla o moverla, y una plantilla desde la que otros pueden empezar."
@@ -8023,6 +8103,10 @@ msgstr "Mantuvo el acceso en el proveedor para una cuenta conectada de nuevo"
 msgid "Kept between runs"
 msgstr "Guardado entre ejecuciones"
 
+#: src/settings/event-source-activity.tsx
+msgid "Kept for 24 hours after the event came. Opening it is recorded in the audit trail."
+msgstr "Se conserva 24 horas desde que llegó el evento. Abrirlo queda anotado en el registro de auditoría."
+
 #: src/activity/audit-words.ts
 msgid "Kept something the chat can no longer read from the model"
 msgstr "Ocultó al modelo algo que el chat ya no puede leer"
@@ -8090,6 +8174,10 @@ msgstr "Última pregunta"
 #: src/agents/agent-page.tsx
 msgid "Last changed {0}"
 msgstr "Último cambio: {0}"
+
+#: src/settings/event-source-activity.tsx
+msgid "Last event {last}."
+msgstr "Último evento {last}."
 
 #: src/brain/brain-article/kern.tsx
 msgid "Last heard {day}"
@@ -9184,9 +9272,17 @@ msgstr "Aún no hay comandos"
 msgid "No connector yet"
 msgstr "Aún sin conector"
 
+#: src/settings/event-source-activity.tsx
+msgid "No event accepted in the last seven days."
+msgstr "No se aceptó ningún evento en los últimos siete días."
+
 #: src/settings/event-sources.tsx
 msgid "No event from this source starts anything until you make it a new secret."
 msgstr "Ningún evento de esta fuente inicia nada hasta que le generes un secreto nuevo."
+
+#: src/settings/event-source-activity.tsx
+msgid "No event in the last seven days."
+msgstr "Ningún evento en los últimos siete días."
 
 #: src/activity/audit-log.tsx
 msgid "No events match in the latest stretch of the log."
@@ -9348,6 +9444,10 @@ msgstr "Ningún equipo"
 #: src/settings/teams.tsx
 msgid "No teams yet."
 msgstr "Aún no hay equipos."
+
+#: src/settings/event-source-activity.tsx
+msgid "No trigger matches this type. A test event starts no workflow."
+msgstr "Ningún disparador coincide con este tipo. Un evento de prueba no inicia ningún flujo de trabajo."
 
 #: src/brain/sources-page.tsx
 msgid "No uploads are shared with a team or everyone."
@@ -10791,6 +10891,14 @@ msgstr "En pausa: ningún enlace se abre y ninguno sale. Los enlaces pendientes 
 msgid "Pauses in {left} s"
 msgstr "Se pausa en {left} s"
 
+#: src/settings/event-source-activity.tsx
+msgid "Payload"
+msgstr "Contenido"
+
+#: src/settings/event-source-activity.tsx
+msgid "Payload no longer kept"
+msgstr "El contenido ya no se conserva"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Payment method"
 msgstr "Método de pago"
@@ -11337,6 +11445,10 @@ msgstr "Leer lo de la empresa"
 #: src/onboarding/hr-leads.tsx
 msgid "Read the leads from {name} again"
 msgstr "Volver a leer los responsables de {name}"
+
+#: src/activity/audit-words.ts
+msgid "Read the payload of a webhook event"
+msgstr "Leyó el contenido de un evento de webhook"
 
 #: src/settings/stephen-settings.tsx
 msgid "Read their own"
@@ -12726,6 +12838,10 @@ msgctxt "send the question"
 msgid "Send"
 msgstr "Enviar"
 
+#: src/settings/event-source-activity.tsx
+msgid "Send a test event"
+msgstr "Enviar un evento de prueba"
+
 #: src/chat/brain-questions.tsx
 msgid "Send answer"
 msgstr "Enviar respuesta"
@@ -12750,6 +12866,10 @@ msgstr "Enviado"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Enviado <0>{sent}</0>"
+
+#: src/activity/audit-words.ts
+msgid "Sent a webhook source a test event"
+msgstr "Envió un evento de prueba a una fuente de webhook"
 
 #: src/activity/audit-words.ts
 msgid "Sent an App's event to a webhook"
@@ -13008,6 +13128,10 @@ msgstr "Volver a mostrar"
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Mostrar las {count} líneas ({characters} caracteres)"
 
+#: src/settings/event-source-activity.tsx
+msgid "Show events"
+msgstr "Mostrar eventos"
+
 #: src/chat/held-writes.tsx
 msgid "Show exactly what was sent"
 msgstr "Mostrar exactamente lo que se envió"
@@ -13054,6 +13178,10 @@ msgstr "Mostrar más · quedan {left}"
 msgid "Show older"
 msgstr "Mostrar anteriores"
 
+#: src/settings/event-source-activity.tsx
+msgid "Show older events"
+msgstr "Mostrar eventos anteriores"
+
 #: src/drafts/draft-history.tsx
 msgid "Show older versions"
 msgstr "Mostrar versiones anteriores"
@@ -13067,6 +13195,10 @@ msgstr "Mostrar solo las ejecuciones fallidas."
 msgid "Show or hide the sidebar"
 msgstr "Mostrar u ocultar la barra lateral"
 
+#: src/settings/event-source-activity.tsx
+msgid "Show payload"
+msgstr "Mostrar contenido"
+
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
 msgstr "Mostrar personas una a una"
@@ -13074,6 +13206,14 @@ msgstr "Mostrar personas una a una"
 #: src/workflows/requests/request-detail.tsx
 msgid "Show the page for {title}"
 msgstr "Mostrar la página de {title}"
+
+#: src/settings/event-source-activity.tsx
+msgid "Show the payload of {type}"
+msgstr "Mostrar el contenido de {type}"
+
+#: src/settings/event-source-activity.tsx
+msgid "Show what {name} received"
+msgstr "Mostrar lo que recibió {name}"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "Show workflows"
@@ -14029,6 +14169,7 @@ msgid "Terms"
 msgstr "Condiciones"
 
 #: src/settings/ai-providers.tsx
+#: src/settings/event-source-activity.tsx
 msgid "Test"
 msgstr "Probar"
 
@@ -14494,6 +14635,10 @@ msgstr "La versión actual no los declara, así que no sirven nada hasta que una
 #: src/dashboard/widget-board.tsx
 msgid "The dashboard is back to how it began."
 msgstr "El panel vuelve a estar como empezó."
+
+#: src/settings/event-source-activity.tsx
+msgid "The data isn't JSON."
+msgstr "Los datos no son JSON."
 
 #: src/onboarding/send-plan-form.tsx
 msgid "The day after"
@@ -15297,6 +15442,10 @@ msgstr "Esta página se detuvo"
 #: src/pages/frame-failure.tsx
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "El código guardado de esta página ya no coincide con el código publicado, así que no se abrió. Avisa a un administrador."
+
+#: src/settings/event-source-activity.tsx
+msgid "This payload is no longer kept."
+msgstr "Este contenido ya no se conserva."
 
 #: src/settings/use-team-change.ts
 msgid "This team is on the staff list. Take it off there and confirm the list first."

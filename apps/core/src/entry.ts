@@ -397,7 +397,7 @@ const webhookResponse = async (
   const token = eventSourceTokenAt(pathname);
   return token === undefined
     ? undefined
-    : await sourceEventResponse(request, env, token, requestId);
+    : await sourceEventResponse(request, env, token, requestId, ctx);
 };
 
 /** Routes a request that has passed the router-secret check. */
