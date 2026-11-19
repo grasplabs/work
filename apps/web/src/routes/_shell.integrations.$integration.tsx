@@ -23,6 +23,7 @@ import {
   useWhyNoConnect,
 } from "../connections/integration-facts.ts";
 import { loadIntegrations } from "../connections/integrations-data.ts";
+import { IntegrationSkeleton } from "../connections/integrations-skeleton.tsx";
 import {
   integrationsOf,
   parseIntegrationKey,
@@ -44,7 +45,6 @@ import { formatDate, formatDayMonth } from "../format.ts";
 import {
   LoadingLines,
   NotFound,
-  PageLoading,
   PageNotLoaded,
 } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
@@ -566,6 +566,6 @@ export const Route = createFileRoute("/_shell/integrations/$integration")({
   // A tab, or a notice dropped, keeps what was read; a change reads it
   // again (use-change.ts invalidates it).
   shouldReload: false,
-  pendingComponent: PageLoading,
+  pendingComponent: IntegrationSkeleton,
   component: IntegrationRoute,
 });

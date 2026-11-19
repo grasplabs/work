@@ -588,6 +588,7 @@ const ComposioFlow = ({
             <ItemGroup aria-label={t`Tools to allow`} separated>
               {tools.map((tool) => (
                 <ToolChoice
+                  app={id}
                   choice={allowed.find((choice) => choice.name === tool.name)}
                   key={tool.name}
                   onAllow={(allow) => {

@@ -124,6 +124,14 @@ msgstr "{app} is connected again"
 msgid "{app} is off"
 msgstr "{app} is off"
 
+#: src/connections/integrations-header.tsx
+msgid "{app} needs someone to sign in again. Until then, what uses it waits."
+msgstr "{app} needs someone to sign in again. Until then, what uses it waits."
+
+#: src/connections/integrations-header.tsx
+msgid "{app} stopped working. Disconnect it and connect it again; until then, what uses it waits."
+msgstr "{app} stopped working. Disconnect it and connect it again; until then, what uses it waits."
+
 #: src/connections/revocations-by-hand.tsx
 msgid "{app}, {whose}'s own"
 msgstr "{app}, {whose}'s own"
@@ -460,6 +468,14 @@ msgstr "{count, plural, one {Asked you a question} other {Asked you # questions}
 msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
 msgstr "{count, plural, one {Back to the question} other {Back to the # questions}}"
 
+#: src/connections/integrations-header.tsx
+msgid "{count, plural, one {Grasp reaches # app} other {Grasp reaches # apps}}"
+msgstr "{count, plural, one {Grasp reaches # app} other {Grasp reaches # apps}}"
+
+#: src/connections/integration-tile.tsx
+msgid "{count, plural, one {In # workflow} other {In # workflows}}"
+msgstr "{count, plural, one {In # workflow} other {In # workflows}}"
+
 #: src/apps/publish.tsx
 msgid "{count, plural, one {It can't be published yet: # problem} other {It can't be published yet: # problems}}"
 msgstr "{count, plural, one {It can't be published yet: # problem} other {It can't be published yet: # problems}}"
@@ -467,6 +483,10 @@ msgstr "{count, plural, one {It can't be published yet: # problem} other {It can
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "{count, plural, one {Show the # app in {label}} other {Show all # in {label}}}"
+msgstr "{count, plural, one {Show the # app in {label}} other {Show all # in {label}}}"
 
 #: src/connections/tool-rows.tsx
 msgid "{count, plural, one {Show the # tool} other {Show all # tools}}"
@@ -1109,6 +1129,10 @@ msgstr "{origin} · {methods} under {paths} · sent in {header} · added {added}
 msgid "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
 msgstr "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
 
+#: src/connections/integrations-header.tsx
+msgid "{others, plural, one {{app} and # other app need someone to sign in again.} other {{app} and # other apps need someone to sign in again.}}"
+msgstr "{others, plural, one {{app} and # other app need someone to sign in again.} other {{app} and # other apps need someone to sign in again.}}"
+
 #: src/inbox/interviews-item.tsx
 msgid "{outCount, plural, one {# out, as a list} other {# out, as a list}}"
 msgstr "{outCount, plural, one {# out, as a list} other {# out, as a list}}"
@@ -1464,6 +1488,10 @@ msgstr "{title} failed"
 msgid "{title} on {connection}"
 msgstr "{title} on {connection}"
 
+#: src/connections/integration-tile.tsx
+msgid "{toolCount, plural, one {# tool} other {# tools}}"
+msgstr "{toolCount, plural, one {# tool} other {# tools}}"
+
 #: src/settings/ai-spend.tsx
 msgid "{top} spent the most this month."
 msgstr "{top} spent the most this month."
@@ -1475,6 +1503,10 @@ msgstr "{total, plural, one {{count} of # interview} other {{count} of # intervi
 #: src/connections/integration-facts.ts
 msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 msgstr "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
+
+#: src/connections/tool-permissions.tsx
+msgid "{total, plural, one {Show the # tool} other {Show all # tools}}"
+msgstr "{total, plural, one {Show the # tool} other {Show all # tools}}"
 
 #: src/inbox/report-view.tsx
 msgid "{total} runs from {from} to {to}."
@@ -1854,10 +1886,6 @@ msgstr "A project groups apps and workflows for a process, a team or a goal. Put
 msgid "A question"
 msgstr "A question"
 
-#: src/connections/tool-permissions.tsx
-msgid "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-
 #: src/apps/field-kinds.tsx
 msgid "A record of another table"
 msgstr "A record of another table"
@@ -2227,7 +2255,7 @@ msgstr "Add a time"
 msgid "Add a trigger"
 msgstr "Add a trigger"
 
-#: src/connections/overview-lists.tsx
+#: src/routes/_shell.integrations.index.tsx
 msgctxt "apps that can still be connected"
 msgid "Add an app"
 msgstr "Add an app"
@@ -2635,6 +2663,10 @@ msgstr "An admin decides. It holds in this chat only."
 msgid "An admin hasn't set up company memory yet."
 msgstr "An admin hasn't set up company memory yet."
 
+#: src/connections/integrations-header.tsx
+msgid "An admin needs to connect {app} again. Until then, what uses it waits."
+msgstr "An admin needs to connect {app} again. Until then, what uses it waits."
+
 #: src/workflows/workflow-triggers.tsx
 msgid "An admin refused or took back its reading of these events: it hears nothing."
 msgstr "An admin refused or took back its reading of these events: it hears nothing."
@@ -3038,6 +3070,7 @@ msgstr "Approving"
 #: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
+#: src/connections/integrations-skeleton.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
@@ -3195,6 +3228,10 @@ msgstr "Ask for changes"
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
 msgstr "Ask for it"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Ask for the app you need, and an admin can add it."
+msgstr "Ask for the app you need, and an admin can add it."
 
 #: src/chat/global-chat.tsx
 #: src/frame/shell-pending.tsx
@@ -3398,6 +3435,7 @@ msgstr "Available, via Composio"
 #: src/brain/brain-section.tsx
 #: src/chat/approval-words.ts
 #: src/chat/asked-questions.tsx
+#: src/connections/integrations-sidebar.tsx
 #: src/frame/part-words.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/item-detail.tsx
@@ -4360,6 +4398,7 @@ msgstr "Clear {0}"
 msgid "Clear filters"
 msgstr "Clear filters"
 
+#: src/connections/tool-permissions.tsx
 #: src/frame/part-words.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Clear search"
@@ -4679,7 +4718,6 @@ msgstr "Conflicts"
 #: src/chat/plan-card.tsx
 #: src/connections/integration-inspector.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/overview-lists.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/connect-steps.tsx
@@ -4696,12 +4734,12 @@ msgstr "Connect {app}"
 msgid "Connect {label}"
 msgstr "Connect {label}"
 
-#: src/connections/overview-lists.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/hr-leads.tsx
 msgid "Connect {name}"
 msgstr "Connect {name}"
 
+#: src/connections/integration-tile.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Connect again"
 msgstr "Connect again"
@@ -4722,12 +4760,17 @@ msgstr "Connect an AI provider to start asking"
 msgid "Connect another account"
 msgstr "Connect another account"
 
+#: src/connections/integrations-header.tsx
+msgid "Connect the apps your work runs on"
+msgstr "Connect the apps your work runs on"
+
+#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Connected"
 msgstr "Connected"
 
-#: src/connections/overview-lists.tsx
+#: src/routes/_shell.integrations.index.tsx
 msgctxt "apps that are connected"
 msgid "Connected"
 msgstr "Connected"
@@ -6436,6 +6479,10 @@ msgstr "Everyone with the {name} role"
 msgid "Everything around employees, from hiring to leaving."
 msgstr "Everything around employees, from hiring to leaving."
 
+#: src/connections/integrations-header.tsx
+msgid "Everything connected works."
+msgstr "Everything connected works."
+
 #: src/workflows/business-process.tsx
 msgid "Everything from a first client conversation until the money is in the bank."
 msgstr "Everything from a first client conversation until the money is in the bank."
@@ -6934,6 +6981,7 @@ msgstr "For each meeting today, say who is coming, what was last agreed with the
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
+#: src/connections/integration-tile.tsx
 msgid "For everyone"
 msgstr "For everyone"
 
@@ -8047,6 +8095,8 @@ msgid "Integration"
 msgstr "Integration"
 
 #: src/apps/app-integrations.tsx
+#: src/connections/integrations-sidebar.tsx
+#: src/connections/integrations-skeleton.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -8732,6 +8782,10 @@ msgstr "Kind"
 #: src/brain/brain-transcript.tsx
 msgid "Kind of statement"
 msgstr "Kind of statement"
+
+#: src/connections/integrations-sidebar.tsx
+msgid "Kinds of app"
+msgstr "Kinds of app"
 
 #: src/apps/field-editor.tsx
 msgid "Kinds of field"
@@ -9809,10 +9863,6 @@ msgstr "needs attention"
 msgid "Needs its own sign-in app"
 msgstr "Needs its own sign-in app"
 
-#: src/connections/overview-lists.tsx
-msgid "Needs sign-in. What uses it waits until then."
-msgstr "Needs sign-in. What uses it waits until then."
-
 #: src/connections/integration-item.tsx
 msgid "Needs signing in again"
 msgstr "Needs signing in again"
@@ -9826,10 +9876,6 @@ msgstr "Needs someone"
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Needs someone to sign in again"
-
-#: src/connections/overview-lists.tsx
-msgid "Needs you"
-msgstr "Needs you"
 
 #: src/workflows/requests/request-table.tsx
 msgctxt "Stephen's requests to fix"
@@ -10048,6 +10094,10 @@ msgstr "No App is called “{asked}”"
 msgid "No Apps in it yet."
 msgstr "No Apps in it yet."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "No apps match your search"
+msgstr "No apps match your search"
+
 #: src/apps/apps-overview.tsx
 msgid "No Apps yet"
 msgstr "No Apps yet"
@@ -10130,7 +10180,6 @@ msgid "No goals yet."
 msgstr "No goals yet."
 
 #: src/apps/app-integrations.tsx
-#: src/routes/_shell.integrations.index.tsx
 msgid "No integrations match your search."
 msgstr "No integrations match your search."
 
@@ -10287,6 +10336,10 @@ msgstr "No teams yet."
 #: src/routes/_shell.settings.workspace.tsx
 msgid "No time zone by that name"
 msgstr "No time zone by that name"
+
+#: src/connections/tool-permissions.tsx
+msgid "No tools match your search."
+msgstr "No tools match your search."
 
 #: src/workflows/files-and-apps.tsx
 msgid "No version uses it yet"
@@ -10584,7 +10637,7 @@ msgid "Not now"
 msgstr "Not now"
 
 #: src/connections/integration-item.tsx
-#: src/connections/overview-lists.tsx
+#: src/connections/integration-tile.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not offered"
 msgstr "Not offered"
@@ -10711,6 +10764,7 @@ msgstr "Not the same in {team}"
 msgid "Not used in the last 30 days"
 msgstr "Not used in the last 30 days"
 
+#: src/connections/integration-tile.tsx
 #: src/settings/ai-providers.tsx
 msgid "Not used yet"
 msgstr "Not used yet"
@@ -11241,7 +11295,7 @@ msgid "Only when asked"
 msgstr "Only when asked"
 
 #: src/connections/integration-inspector.tsx
-#: src/connections/overview-lists.tsx
+#: src/connections/integration-tile.tsx
 msgid "Only you"
 msgstr "Only you"
 
@@ -11275,7 +11329,6 @@ msgstr "Only you see this"
 
 #: src/apps/apps-overview.tsx
 #: src/chat/sidebar-chats.tsx
-#: src/connections/overview-lists.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
 #: src/settings/where-stephen.tsx
@@ -11309,7 +11362,10 @@ msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Open"
 
-#: src/connections/overview-lists.tsx
+#: src/connections/integrations-header.tsx
+msgid "Open {lapsedApp}"
+msgstr "Open {lapsedApp}"
+
 #: src/frame/part-words.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -12010,6 +12066,10 @@ msgstr "Phone"
 msgid "Pick a table"
 msgstr "Pick a table"
 
+#: src/connections/integrations-header.tsx
+msgid "Pick an app below to connect it. Grasp reaches only what you connect."
+msgstr "Pick an app below to connect it. Grasp reaches only what you connect."
+
 #: src/apps/data-model-changes.tsx
 msgid "Pick one"
 msgstr "Pick one"
@@ -12470,6 +12530,10 @@ msgstr "Read the new mail and sort each message into urgent, to do or to read, w
 #: src/settings/stephen-settings.tsx
 msgid "Read their own"
 msgstr "Read their own"
+
+#: src/connections/tool-permissions.tsx
+msgid "Read tools run without asking. Write tools wait for the person to confirm. Mark a tool Read only if it changes nothing."
+msgstr "Read tools run without asking. Write tools wait for the person to confirm. Mark a tool Read only if it changes nothing."
 
 #: src/activity/audit-words.ts
 msgid "Read what a guest wrote"
@@ -13796,13 +13860,13 @@ msgstr "Search {name}"
 msgid "Search agents"
 msgstr "Search agents"
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Search apps"
+msgstr "Search apps"
+
 #: src/chat/chat-window.tsx
 msgid "Search archived chats"
 msgstr "Search archived chats"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Search by name or kind"
-msgstr "Search by name or kind"
 
 #: src/chat/chat-window.tsx
 #: src/frame/shell-pending.tsx
@@ -13878,6 +13942,10 @@ msgstr "Search the transcript"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Search time zones"
 msgstr "Search time zones"
+
+#: src/connections/tool-permissions.tsx
+msgid "Search tools"
+msgstr "Search tools"
 
 #: src/apps/indexes-view.tsx
 msgid "Search, to find records by the words in them"
@@ -14450,8 +14518,9 @@ msgstr "Sign in"
 #: src/connections/connection-list.tsx
 #: src/connections/integration-inspector.tsx
 #: src/connections/integration-item.tsx
+#: src/connections/integration-tile.tsx
 #: src/connections/integrations-banner.tsx
-#: src/connections/overview-lists.tsx
+#: src/connections/integrations-header.tsx
 #: src/inbox/item-detail.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Sign in again"
@@ -14474,10 +14543,6 @@ msgstr "Sign in to {app} again"
 #: src/connections/connection-list.tsx
 msgid "Sign in to {label} again"
 msgstr "Sign in to {label} again"
-
-#: src/connections/overview-lists.tsx
-msgid "Sign in to {name} again"
-msgstr "Sign in to {name} again"
 
 #: src/routes/decisions.$decision.tsx
 msgid "Sign in to answer"
@@ -17591,6 +17656,7 @@ msgid "Waiting for a decision"
 msgstr "Waiting for a decision"
 
 #: src/apps/app-webhooks.tsx
+#: src/connections/integration-tile.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Waiting for an admin"
 msgstr "Waiting for an admin"
@@ -18385,10 +18451,6 @@ msgstr "Who’s who at your company?"
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
 msgstr "whoever added the row"
-
-#: src/connections/overview-lists.tsx
-msgid "Whole company"
-msgstr "Whole company"
 
 #: src/apps/release-controls.tsx
 #: src/knowledge/purge.tsx

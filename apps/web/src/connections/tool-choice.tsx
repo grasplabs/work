@@ -11,10 +11,12 @@ import {
   Item,
   ItemActions,
   ItemContent,
+  ItemDescription,
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
 import type { AllowedTool } from "./tool-choices.ts";
+import { toolWords } from "./tool-rows.tsx";
 
 /**
  * One tool of a toolkit, as a row of Grasp UI's Item: a switch to allow
@@ -31,8 +33,11 @@ export const ToolChoice = ({
   onRead,
   disabled = false,
   locked = false,
+  app,
 }: {
   tool: CatalogTool;
+  /** The app's id in the catalog, which a Composio tool's name starts with. */
+  app: string;
   choice: AllowedTool | undefined;
   onAllow: (allow: boolean) => void;
   onRead: (read: boolean) => void;
@@ -42,11 +47,14 @@ export const ToolChoice = ({
   locked?: boolean;
 }) => {
   const { t } = useLingui();
-  const { name } = tool;
+  const name = toolWords(tool.name, app);
   return (
-    <Item size="xs">
+    <Item size="sm">
       <ItemContent>
         <ItemTitle>{name}</ItemTitle>
+        {tool.description === null ? null : (
+          <ItemDescription>{tool.description}</ItemDescription>
+        )}
       </ItemContent>
       <ItemActions>
         {choice === undefined ? (

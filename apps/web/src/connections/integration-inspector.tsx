@@ -62,6 +62,8 @@ const styles = stylex.create({
     marginInline: grasp.inspectorInset,
     marginBlock: grasp.space2,
   },
+  // The one thing to do now, first under the app's name, across the panel.
+  main: { display: "grid", paddingInline: grasp.inspectorInset },
   foot: {
     display: "flex",
     flexWrap: "wrap",
@@ -194,7 +196,7 @@ const Account = ({
   );
 };
 
-/** The one thing to do about it now, in the panel's bar: sign in again, or connect. */
+/** The one thing to do about it now, first under the app's name: sign in again, or connect. */
 const MainAction = ({
   integration,
   identity,
@@ -211,12 +213,11 @@ const MainAction = ({
     return null;
   }
   return (
-    <>
+    <div {...stylex.props(styles.main)}>
       <Button
         onClick={() => {
           setOpen(true);
         }}
-        size="xs"
         variant="ink"
       >
         {again === undefined ? t`Connect` : t`Sign in again`}
@@ -228,7 +229,7 @@ const MainAction = ({
         onOpenChange={setOpen}
         open={open}
       />
-    </>
+    </div>
   );
 };
 
@@ -304,7 +305,6 @@ export const IntegrationInspector = ({
       {...(layout === undefined ? {} : { layout })}
     >
       <PanelHeader
-        actions={<MainAction identity={identity} integration={integration} />}
         words={{ close: t`Close` }}
         {...(about === undefined ? {} : { description: about })}
         icon={
@@ -320,6 +320,7 @@ export const IntegrationInspector = ({
         title={integration.name}
       />
       <PanelView>
+        <MainAction identity={identity} integration={integration} />
         {why === undefined ? null : <Alert title={why} />}
         <Account identity={identity} integration={integration} />
         <Tools

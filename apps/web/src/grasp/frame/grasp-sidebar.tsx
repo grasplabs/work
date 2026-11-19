@@ -16,6 +16,7 @@ import { useAppSection } from "../../apps/app-section.tsx";
 import { useBrainSection } from "../../brain/brain-section.tsx";
 import { chatsKey, useChatsWindow } from "../../chat/chat-switcher.tsx";
 import { useRecentChats } from "../../chat/sidebar-chats.tsx";
+import { useIntegrationsSection } from "../../connections/integrations-sidebar.tsx";
 import type { CoreConnection } from "../../core-connection.ts";
 import {
   organizationOf,
@@ -394,7 +395,13 @@ export const useGraspSidebar = ({
   const agentSection = useAgentSection();
   const brainSection = useBrainSection();
   const appSection = useAppSection(identity);
-  const section = settingsSection ?? agentSection ?? brainSection ?? appSection;
+  const integrationsSection = useIntegrationsSection();
+  const section =
+    settingsSection ??
+    agentSection ??
+    brainSection ??
+    appSection ??
+    integrationsSection;
   const searching = identity.onboardingOnly !== true;
   return {
     foldLabel: t`Show or hide the sidebar`,
