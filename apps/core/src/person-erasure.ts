@@ -1217,9 +1217,13 @@ export const releaseAddress = async (
     .from(personErasures)
     .where(erasedAddress(hash));
   if (erased === undefined) {
-    // Released already, or never an erased person's: the store lets it in
-    // too, should an earlier release have stopped before it did.
-    return { released: await onboardingStore(env).releaseAddress(hash) };
+    // Released already, an address only the staff list kept out (another
+    // of an erased person's, GRA-2111), or never an erased person's: the
+    // store lets it in, recorded there, should it hold it. So is a release
+    // finished whose store call failed after the one above.
+    return {
+      released: await onboardingStore(env).releaseAddress(hash, actorOf(by)),
+    };
   }
   const listedNow = sql`NOT EXISTS (
     SELECT 1 FROM ${personErasureAreas}
@@ -1262,7 +1266,7 @@ export const releaseAddress = async (
       ? roleErrors.create("role.forbidden")
       : memberErrors.create("member.release_erasing");
   }
-  await onboardingStore(env).releaseAddress(hash);
+  await onboardingStore(env).releaseAddress(hash, null);
   return { released: true };
 };
 

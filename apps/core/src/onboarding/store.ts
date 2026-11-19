@@ -5583,11 +5583,11 @@ export class Onboarding extends DurableObject<Env> {
    * (`#closeHeldBy`); its code, what it was asked about and every mail
    * about it, sent or not, go. An entry whose link another account opened
    * only loses the address: the interview is that account's (GRA-1790).
-   * With `hash`, mail to any address that hashes to it goes too, and any
-   * link's record of having gone to one, and the
-   * hash stays (`erasedAddresses`): no save writes the address again
-   * until an admin releases it (`releaseAddress`). How many entries it
-   * found.
+   * Every address of theirs (`hash`, and those of the entry and link
+   * their account holds) is erased the same way: mail to it and any
+   * link's record of having gone to it go, and its hash stays
+   * (`erasedAddresses`), so no save writes it again until an admin
+   * releases it (`releaseAddress`). How many entries it found.
    */
   async eraseEntries(account: string, hash: string | null): Promise<number> {
     return await this.#fallenFirst(
@@ -5604,8 +5604,10 @@ export class Onboarding extends DurableObject<Env> {
     // again when an address came into the store meanwhile, so the erasure
     // misses nothing written as it hashed.
     const hashes = await this.#hashesOf(this.#addressesHeld());
-    const theirs = (address: string): boolean =>
-      hash !== null && hashes.get(normalizedEmail(address)) === hash;
+    const hashOf = (address: string | null | undefined): string | undefined =>
+      address === null || address === undefined
+        ? undefined
+        : hashes.get(normalizedEmail(address));
     const now = new Date().toISOString();
     const done = this.ctx.storage.transactionSync(() => {
       if (
@@ -5615,19 +5617,41 @@ export class Onboarding extends DurableObject<Env> {
       ) {
         return null;
       }
-      if (hash !== null) {
+      // Every address of theirs: the one they signed in with, and those of
+      // the entry their account's link found, and that link went to (a
+      // directory's address for them, say). Each stays out as the first
+      // does, until an admin releases it.
+      const owned = this.personOfAccount(account);
+      const listed = this.#db
+        .select({ id: people.id, email: people.email })
+        .from(people)
+        .all();
+      const [ownedLink] = this.#db
+        .select({ sentTo: links.sentTo })
+        .from(links)
+        .where(eq(links.account, account))
+        .all();
+      const erasing = new Set(
+        [
+          hash ?? undefined,
+          hashOf(listed.find(({ id }) => id === owned)?.email),
+          hashOf(ownedLink?.sentTo),
+        ].filter((each) => each !== undefined)
+      );
+      for (const each of erasing) {
         this.#db
           .insert(erasedAddresses)
-          .values({ hash })
+          .values({ hash: each })
           .onConflictDoNothing()
           .run();
       }
-      const owned = this.personOfAccount(account);
-      const found = this.#db
-        .select({ id: people.id, email: people.email })
-        .from(people)
-        .all()
-        .filter(({ id, email }) => id === owned || theirs(email));
+      const theirs = (address: string): boolean => {
+        const each = hashOf(address);
+        return each !== undefined && erasing.has(each);
+      };
+      const found = listed.filter(
+        ({ id, email }) => id === owned || theirs(email)
+      );
       let closed = 0;
       for (const { id } of found) {
         this.#db
@@ -5695,16 +5719,27 @@ export class Onboarding extends DurableObject<Env> {
    * Lets the address that hashes to `hash` onto the list again, as core
    * asks once an admin released it (person-erasure.ts `releaseAddress`).
    * Entries an erasure marked stay marked until an admin takes them off
-   * the list. Whether the store kept it out.
+   * the list. Recorded as `by`'s when given: for an address only the store
+   * kept out, whose release core's own record doesn't cover. Whether the
+   * store kept it out.
    */
-  releaseAddress(hash: string): boolean {
-    return (
-      this.#db
-        .delete(erasedAddresses)
-        .where(eq(erasedAddresses.hash, hash))
-        .returning({ hash: erasedAddresses.hash })
-        .all().length > 0
-    );
+  releaseAddress(hash: string, by: AuditActor | null): boolean {
+    const held = this.ctx.storage.transactionSync(() => {
+      const gone =
+        this.#db
+          .delete(erasedAddresses)
+          .where(eq(erasedAddresses.hash, hash))
+          .returning({ hash: erasedAddresses.hash })
+          .all().length > 0;
+      if (gone && by !== null) {
+        this.#changed(by, "onboarding.address.released", {});
+      }
+      return gone;
+    });
+    if (held && by !== null) {
+      this.#deliverAudit();
+    }
+    return held;
   }
 
   /** Every address the store holds: on the list, on links and in mail. */

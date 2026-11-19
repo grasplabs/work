@@ -17,8 +17,7 @@ import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
 import { emailHashOf } from "../src/erased-people.ts";
 import { brainVersionRead } from "../src/history-access.ts";
-import type { Onboarding } from "../src/onboarding/store.ts";
-import { onboardingStore } from "../src/onboarding/store.ts";
+import { Onboarding, onboardingStore } from "../src/onboarding/store.ts";
 import {
   erasureAreas,
   erasureInventory,
@@ -1766,6 +1765,153 @@ describe("erasing a person", () => {
       sent: sent.some(({ person: id }) => id === theirs),
       path: pathOf(listed, theirs),
     }).toStrictEqual({ sent: false, path: null });
+  });
+
+  it("keeps every address of theirs off the list: the one the list had for them comes back on no new entry, until an admin releases it", async () => {
+    const { admin, person } = await removedPerson();
+    // The list has them under the directory's address, not the one they
+    // signed in with, and they opened their link with it.
+    const listed = `dir-${crypto.randomUUID().slice(0, 8)}@acme.test`;
+    const { theirs, theirSecret, roster } = await onTheList(listed);
+    const store = onboardingStore(env);
+    const by = { type: "system" } as const;
+    await store.openLink(await sha256Hex(theirSecret), {
+      account: person.userId,
+      address: listed,
+    });
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    // The admin takes their entry off (its mark goes with it), then
+    // uploads a staff file listing the address again, on a new entry.
+    const team = roster.teams[0]?.id ?? "";
+    const without = {
+      ...roster,
+      people: roster.people.filter(({ id }) => id !== theirs),
+    };
+    await store.saveRoster(without, by);
+    const newcomer = `person-${crypto.randomUUID().slice(0, 8)}`;
+    const again = {
+      ...without,
+      people: [
+        ...without.people,
+        { id: newcomer, name: "Them", team, email: listed, title: "" },
+      ].map((one) => ({ ...one, away: false })),
+    };
+    await store.saveRoster(again, by);
+    await store.releaseDue();
+    const entry = await onList(
+      "SELECT email FROM people WHERE id = ?",
+      newcomer
+    );
+    const mail = await onList(
+      "SELECT key FROM mail_outbox WHERE lower(to_address) = ?",
+      listed
+    );
+    const sent = await onList(
+      "SELECT person FROM links WHERE sent_to_email = ?",
+      listed
+    );
+    let released: unknown;
+    const audited = await auditedDuring(async () => {
+      released = await admin.api.members.releaseAddress(listed);
+    });
+    await store.saveRoster(again, by);
+    const after = await onList(
+      "SELECT email FROM people WHERE id = ?",
+      newcomer
+    );
+
+    expect({
+      kept: { entry, mail: mail.length, links: sent.length },
+      released,
+      recorded: audited
+        .filter(({ action }) => action === "onboarding.address.released")
+        .map(({ actor }) => actor),
+      after,
+    }).toStrictEqual({
+      kept: { entry: [{ email: "" }], mail: 0, links: 0 },
+      released: { released: true },
+      // Only the staff list kept it out, so the release is recorded there.
+      recorded: [{ type: "person", userId: admin.userId }],
+      after: [{ email: listed }],
+    });
+  });
+
+  it("finishes a release whose store call failed when the admin asks again", async () => {
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    const { roster } = await onTheList(email);
+    const store = onboardingStore(env);
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    const newcomer = `person-${crypto.randomUUID().slice(0, 8)}`;
+    const team = roster.teams[0]?.id ?? "";
+    const withNewcomer = {
+      ...roster,
+      people: [
+        ...roster.people,
+        { id: newcomer, name: "New", team, email, title: "", away: false },
+      ],
+    };
+    // The store's side of the release fails once, after core's own.
+    const storeCalls = vi
+      .spyOn(Onboarding.prototype, "releaseAddress")
+      .mockImplementationOnce(() => {
+        throw new Error("The store is out of reach");
+      });
+
+    const first = await outcome(admin.api.members.releaseAddress(email));
+    await store.saveRoster(withNewcomer, { type: "system" });
+    const between = await onList(
+      "SELECT email FROM people WHERE id = ?",
+      newcomer
+    );
+    const again = await admin.api.members.releaseAddress(email);
+    await store.saveRoster(withNewcomer, { type: "system" });
+    const after = await onList(
+      "SELECT email FROM people WHERE id = ?",
+      newcomer
+    );
+
+    expect({
+      failed: first !== "ok",
+      storeCalls: storeCalls.mock.calls.length,
+      between,
+      again,
+      after,
+    }).toStrictEqual({
+      failed: true,
+      storeCalls: 2,
+      // Kept out on the list while the release is unfinished.
+      between: [{ email: "" }],
+      again: { released: true },
+      after: [{ email }],
+    });
+  });
+
+  it("gives their entry an address again once an admin took it off the list and put it back after a release", async () => {
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    const { theirs, roster } = await onTheList(email);
+    const store = onboardingStore(env);
+    const by = { type: "system" } as const;
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    await admin.api.members.releaseAddress(email);
+    const entry = roster.people.find(({ id }) => id === theirs);
+    if (entry === undefined) {
+      throw new Error("Expected their entry");
+    }
+
+    await store.saveRoster(
+      { ...roster, people: roster.people.filter(({ id }) => id !== theirs) },
+      by
+    );
+    await store.saveRoster(roster, by);
+
+    await expect(
+      onList("SELECT email FROM people WHERE id = ?", theirs)
+    ).resolves.toStrictEqual([{ email: entry.email }]);
   });
 
   it("misses no address that came onto the list while the erasure hashed what the store holds", async () => {
