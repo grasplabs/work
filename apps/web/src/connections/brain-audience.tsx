@@ -502,6 +502,7 @@ export const BrainAudience = ({
         audience={audience}
         connection={connection}
         label={label}
+        onAudienceStale={onChanged}
         team={teamNameOf(audience, teams)}
       />
       {!erasing &&

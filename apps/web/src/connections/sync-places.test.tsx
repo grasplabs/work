@@ -60,6 +60,22 @@ const everyoneReads = `Everyone in the company will be able to read everything i
 let audienceNow: ConnectionBrainAudience = { kind: "everyone" };
 const audienceListeners = new Set<() => void>();
 
+/**
+ * The audience core holds, when another admin changed it behind the
+ * card: the card shows it once it reads the audiences again.
+ */
+let heldByCore: ConnectionBrainAudience | undefined;
+let audienceReads = 0;
+
+/** The card reads the audiences again: it shows what core holds. */
+const audienceReadAgain = (): void => {
+  audienceReads += 1;
+  audienceNow = heldByCore ?? audienceNow;
+  for (const listener of audienceListeners) {
+    listener();
+  }
+};
+
 /** Has core hold `audience` now, as the card beside the picker reads it. */
 const audienceChosen = async (
   audience: ConnectionBrainAudience
@@ -89,6 +105,7 @@ const Picker = ({ connection }: { connection: CatalogConnection }) => {
       audience={audience}
       connection={connection}
       label={label}
+      onAudienceStale={audienceReadAgain}
       team={
         audience.kind === "team" && audience.teamId === "sales"
           ? "Sales"
@@ -146,7 +163,8 @@ const shown = async (
         );
         if (
           picksMore &&
-          JSON.stringify(request.acknowledged) !== JSON.stringify(audienceNow)
+          JSON.stringify(request.acknowledged) !==
+            JSON.stringify(heldByCore ?? audienceNow)
         ) {
           throw syncErrors.create("sync.unacknowledged");
         }
@@ -265,6 +283,8 @@ describe("picking a shared connection's places to sync", () => {
     root = undefined;
     document.body.replaceChildren();
     audienceNow = { kind: "everyone" };
+    heldByCore = undefined;
+    audienceReads = 0;
   });
 
   it("names each place with its site, and asks nothing until a place is ticked", async () => {
@@ -332,6 +352,42 @@ describe("picking a shared connection's places to sync", () => {
           acknowledged: { kind: "team", teamId: "sales" },
         },
       ],
+    });
+  });
+
+  it("asks again, for the audience held now, when another admin changed it behind the page", async () => {
+    const fake: Core = { held: libraries() };
+    const asked = await shown(fake);
+    // Another admin narrows the audience to Sales; the page still shows everyone.
+    heldByCore = { kind: "team", teamId: "sales" };
+    await click(boxOf("Documents", "Legal"));
+    await click(boxOf(everyoneReads));
+    await click(button("Save the places"));
+    const salesReads = `Everyone in the team Sales will be able to read everything in the places you pick, whatever their permissions in ${label}.`;
+    await until(() => boxOf(salesReads) !== undefined);
+    const askedAgain = {
+      reads: audienceReads,
+      ticked: boxOf(salesReads)?.getAttribute("aria-checked"),
+      save: button("Save the places")?.disabled,
+      kept: boxOf("Documents", "Legal")?.getAttribute("aria-checked"),
+    };
+    await click(boxOf(salesReads));
+    await click(button("Save the places"));
+    await until(() => fake.held.picks.includes("b!legal"));
+    expect({
+      askedAgain,
+      saved: asked
+        .filter(([method]) => method === "pickSyncPlaces")
+        .map(([, request]) =>
+          typeof request === "object" &&
+          request !== null &&
+          "acknowledged" in request
+            ? request.acknowledged
+            : undefined
+        ),
+    }).toStrictEqual({
+      askedAgain: { reads: 1, ticked: "false", save: true, kept: "true" },
+      saved: [{ kind: "everyone" }, { kind: "team", teamId: "sales" }],
     });
   });
 

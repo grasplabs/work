@@ -116,7 +116,9 @@ const usePlaces = (
 
 /**
  * Saves `places` from `from`: `changed` when connect refused it as the
- * picks changed meanwhile (nothing changed). Any other refusal is thrown.
+ * picks changed meanwhile, `unconfirmed` when core refused it as the
+ * audience confirmed is no longer the one held (nothing changed either
+ * way). Any other refusal is thrown.
  * Outside the components, as the React Compiler can't compile `try`.
  */
 const pickedFrom = async (
@@ -128,13 +130,17 @@ const pickedFrom = async (
     places: string[];
     acknowledged?: ConnectionBrainAudience;
   }
-): Promise<"picked" | "changed"> => {
+): Promise<"picked" | "changed" | "unconfirmed"> => {
   try {
     await session.connections.pickSyncPlaces(request);
     return "picked";
   } catch (error) {
-    if (syncErrors.codeOf(error) === "sync.picks_changed") {
+    const code = syncErrors.codeOf(error);
+    if (code === "sync.picks_changed") {
       return "changed";
+    }
+    if (code === "sync.unacknowledged") {
+      return "unconfirmed";
     }
     throw error;
   }
@@ -202,6 +208,7 @@ const PlacesForm = ({
   team,
   places,
   onSaved,
+  onAudienceStale,
 }: {
   connection: ListedConnection;
   label: string;
@@ -210,6 +217,8 @@ const PlacesForm = ({
   /** The name of the audience's team, if it is one the page knows. */
   team: string | undefined;
   places: SharedSyncPlaces;
+  /** Core holds another audience than `audience`: read it again. */
+  onAudienceStale: () => void;
   /**
    * The picks were asked for, `changed` when another change landed
    * meanwhile: the places are read again.
@@ -312,6 +321,12 @@ const PlacesForm = ({
                 ...(picksMore ? { acknowledged: audience } : {}),
               });
               changed = outcome === "changed";
+              // Confirmed for an audience no longer held: asked again, for
+              // the one held now.
+              if (outcome === "unconfirmed") {
+                setConfirmedFor(undefined);
+                onAudienceStale();
+              }
             });
             await onSaved(changed);
             setRereading(false);
@@ -367,6 +382,7 @@ export const SyncPlaces = ({
   label,
   audience,
   team,
+  onAudienceStale,
 }: {
   connection: ListedConnection;
   label: string;
@@ -374,6 +390,8 @@ export const SyncPlaces = ({
   audience: ConnectionBrainAudience;
   /** The name of the audience's team, if it is one the page knows. */
   team: string | undefined;
+  /** Core holds another audience than `audience`: read it again. */
+  onAudienceStale: () => void;
 }) => {
   const { t } = useLingui();
   const { read, reload } = usePlaces(connection.id);
@@ -425,6 +443,7 @@ export const SyncPlaces = ({
         connection={connection}
         key={key}
         label={label}
+        onAudienceStale={onAudienceStale}
         onSaved={async (changed) => {
           // Said only beside what was read after it: never while the form
           // still shows the admin's own ticks.
