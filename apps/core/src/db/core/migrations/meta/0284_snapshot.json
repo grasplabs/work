@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "cd1c73e3-822f-43a4-a209-ded72f81a8b2",
+  "id": "94965993-c06d-419e-a218-c85d79638ab3",
   "prevId": "d88d3a86-8761-4c6d-93a2-a504ef2aea87",
   "tables": {
     "access_revocations": {
@@ -7108,8 +7108,9 @@
           "name": "deleted",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "user_id": {
           "name": "user_id",

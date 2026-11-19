@@ -92,16 +92,16 @@ export const suspensionStatements = (
   const liftable = sql`${members.suspendedBy} = ${byDirectory}
     AND ${members.suspendedAt} IS NOT NULL
     AND ${tiedTo(kind, user, true)}`;
-  // Another admin who may act, and whom this read isn't suspending: one
-  // kept active stays whatever the directory says.
+  // Another admin who may act, and whose own account the directory
+  // doesn't hold turned off or deleted. Kept active or not: an admin
+  // Microsoft won't sign in is no admin who stays, whatever Grasp keeps.
   const anotherAdminStays = sql`EXISTS (
     SELECT 1 FROM ${members} AS ${otherAdmin}
     WHERE ${otherAdmin.organizationId} = ${organizationId}
       AND ${otherAdmin.userId} <> ${members.userId}
       AND ${otherAdmin.role} = 'admin'
       AND ${mayAct(sql`${otherAdmin.userId}`)}
-      AND (${otherAdmin.keptActiveAt} IS NOT NULL
-        OR NOT ${tiedTo(kind, sql`${otherAdmin.userId}`, false)})
+      AND NOT ${tiedTo(kind, sql`${otherAdmin.userId}`, false)}
   )`;
   // A removal deletes the membership, so there is no removed row to skip;
   // a member an admin keeps active is neither suspended nor withheld.

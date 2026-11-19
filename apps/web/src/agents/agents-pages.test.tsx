@@ -384,7 +384,7 @@ describe("the company's agents, on pages of their own", () => {
           role: "user" as const,
           joinedAt: "2026-01-05T09:00:00.000Z",
           suspension: null,
-          keptActiveSince: null,
+          keptActive: null,
         },
       ];
       const asked = await mounted(
@@ -528,7 +528,7 @@ describe("the company's agents, on pages of their own", () => {
           role: "user" as const,
           joinedAt: "2026-01-05T09:00:00.000Z",
           suspension: null,
-          keptActiveSince: null,
+          keptActive: null,
         },
       ];
       const asked = await mounted(

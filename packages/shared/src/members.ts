@@ -12,18 +12,24 @@ export interface Member {
   /**
    * Their suspension, while they are suspended (they may not act or be
    * read as): since when (ISO 8601), and why, as the directory has their
-   * account now: turned off, deleted, or no longer in it.
+   * account now (`DirectoryAccount`).
    */
-  suspension: {
-    since: string;
-    reason: "disabled" | "deleted" | "unlisted";
-  } | null;
+  suspension: { since: string; reason: DirectoryAccount } | null;
   /**
    * Since when an admin keeps them active whatever the directory says
-   * (ISO 8601); null for the directory to decide.
+   * (ISO 8601), and what the directory holds for their account now: what
+   * letting it decide again would act on. Null for the directory to
+   * decide.
    */
-  keptActiveSince: string | null;
+  keptActive: { since: string; directory: DirectoryAccount } | null;
 }
+
+/**
+ * A member's account as the organization's directory holds it now: turned
+ * on, turned off, deleted (Entra keeps a deleted account 30 days), or not
+ * in it at all.
+ */
+export type DirectoryAccount = "enabled" | "disabled" | "deleted" | "unlisted";
 
 /**
  * One of the organization's teams, as admins manage them: who is in it,

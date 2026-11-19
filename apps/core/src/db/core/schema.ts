@@ -620,10 +620,9 @@ export const directoryPeople = sqliteTable(
     enabled: integer({ mode: "boolean" }).notNull(),
     /**
      * Whether their account is turned off because it was deleted (Entra
-     * keeps a deleted account 30 days), as the read found it; null as
-     * false, for rows of reads before it was kept.
+     * keeps a deleted account 30 days), as the read found it.
      */
-    deleted: integer({ mode: "boolean" }),
+    deleted: integer({ mode: "boolean" }).notNull().default(false),
     /**
      * The member whose sign-in account names the same ID in the same
      * tenant, while they are a member (`tieDirectoryPeople`); null for

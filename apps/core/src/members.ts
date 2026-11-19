@@ -9,6 +9,7 @@ import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
+  DirectoryAccount,
   Erasure,
   ErasurePreview,
   Invitation,
@@ -75,6 +76,7 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { directoryKinds } from "./directory-ties.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
@@ -221,15 +223,23 @@ export const membersOf = async (env: Pick<Env, "DB">): Promise<Member[]> => {
       joinedAt: members.createdAt,
       suspendedAt: members.suspendedAt,
       keptActiveAt: members.keptActiveAt,
-      // Why, as the directory has their account now: none for an account
-      // it no longer holds.
-      reason: sql<"disabled" | "deleted" | null>`(
+      // Their account as the directory read holds it now: none for one it
+      // no longer holds. One account each (accounts are never linked);
+      // ordered all the same, so the answer never depends on the scan.
+      directory: sql<Exclude<DirectoryAccount, "unlisted"> | null>`(
         SELECT CASE
           WHEN ${directoryPeople.deleted} THEN 'deleted'
-          WHEN NOT ${directoryPeople.enabled} THEN 'disabled'
+          WHEN ${directoryPeople.enabled} THEN 'enabled'
+          ELSE 'disabled'
         END
         FROM ${directoryPeople}
         WHERE ${directoryPeople.userId} = ${members.userId}
+          AND ${inList(
+            directoryPeople.provider,
+            directoryKinds.map(({ provider }) => provider)
+          )}
+        ORDER BY ${directoryPeople.provider}, ${directoryPeople.tenant},
+          ${directoryPeople.accountId}
         LIMIT 1
       )`,
     })
@@ -243,7 +253,7 @@ export const membersOf = async (env: Pick<Env, "DB">): Promise<Member[]> => {
     )
     .orderBy(asc(users.name), asc(users.id));
   return rows.flatMap(
-    ({ role, joinedAt, suspendedAt, keptActiveAt, reason, ...member }) => {
+    ({ role, joinedAt, suspendedAt, keptActiveAt, directory, ...member }) => {
       // A role that isn't ours gives no access, so it isn't listed as one.
       const parsed = roleSchema.safeParse(role);
       return parsed.success
@@ -257,9 +267,15 @@ export const membersOf = async (env: Pick<Env, "DB">): Promise<Member[]> => {
                   ? null
                   : {
                       since: suspendedAt.toISOString(),
-                      reason: reason ?? "unlisted",
+                      reason: directory ?? "unlisted",
                     },
-              keptActiveSince: keptActiveAt?.toISOString() ?? null,
+              keptActive:
+                keptActiveAt === null
+                  ? null
+                  : {
+                      since: keptActiveAt.toISOString(),
+                      directory: directory ?? "unlisted",
+                    },
             },
           ]
         : [];

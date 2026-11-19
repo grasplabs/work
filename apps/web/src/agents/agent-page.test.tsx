@@ -77,7 +77,7 @@ const anna: Member = {
   role: "user",
   joinedAt: "2026-01-05T09:00:00.000Z",
   suspension: null,
-  keptActiveSince: null,
+  keptActive: null,
 };
 const people = [anna];
 

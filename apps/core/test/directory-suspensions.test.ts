@@ -589,7 +589,7 @@ describe(
           role: "user",
           joinedAt: "string",
           suspension: { since: "string", reason: "disabled" },
-          keptActiveSince: null,
+          keptActive: null,
         },
         roleChanged: "ok",
         role: "builder",
@@ -1148,7 +1148,10 @@ describe("a suspension an admin lifts", () => {
         ...lifted,
         listed: {
           suspension: lifted.listed?.suspension,
-          kept: typeof lifted.listed?.keptActiveSince,
+          kept: lifted.listed?.keptActive && {
+            ...lifted.listed.keptActive,
+            since: typeof lifted.listed.keptActive.since,
+          },
         },
       },
       lifting: recordedAs("member.suspension_lifted", lifting),
@@ -1164,7 +1167,11 @@ describe("a suspension an admin lifts", () => {
         kept: 1,
         // No session is minted: they sign in again.
         sessions: 0,
-        listed: { suspension: null, kept: "string" },
+        // What letting the directory decide would act on: still off.
+        listed: {
+          suspension: null,
+          kept: { since: "string", directory: "disabled" },
+        },
       },
       lifting: [
         {
@@ -1256,11 +1263,12 @@ describe("a suspension an admin lifts", () => {
     };
 
     expect({
-      refused: Object.values(refused).every((code) => code !== "ok"),
+      refused,
       eli: await suspensionOf(eli.userId),
       gil: await suspensionOf(gil.userId),
     }).toStrictEqual({
-      refused: true,
+      // The read ended their sessions: their connection answers nothing.
+      refused: { self: "auth.unauthenticated", other: "auth.unauthenticated" },
       eli: { suspended: 1, suspendedBy: "directory" },
       gil: { suspended: 1, suspendedBy: "directory" },
     });
@@ -1408,7 +1416,7 @@ describe("a suspension an admin lifts", () => {
     });
   });
 
-  it("keeps an admin it keeps active counted as one who stays, so another admin turned off is suspended", async () => {
+  it("never counts an admin kept active whose own account is turned off as one who stays", async () => {
     const { admin } = await connectedDirectory(idp);
     const [kim, lou] = [
       await memberWith(crypto.randomUUID(), "admin"),
@@ -1422,49 +1430,99 @@ describe("a suspension an admin lifts", () => {
     await readAt(nextDay());
     await admin.api.members.liftSuspension(kim.userId);
     await onlyAdmins(kim.userId, lou.userId);
-    // Lou turned off too: Kim, kept active, is the admin who stays.
+    // Lou turned off too: Kim, though kept active, is turned off as well.
     await directoryHolds([
       user({ id: kim.oid, accountEnabled: false }),
       user({ id: lou.oid, accountEnabled: false }),
     ]);
 
-    await readAt(nextDay());
+    const events = await auditedDuring(async () => {
+      await readAt(nextDay());
+    });
 
     expect({
       kim: await suspensionOf(kim.userId),
       lou: await suspensionOf(lou.userId),
+      withheld: events
+        .filter(({ action }) => action === "member.suspension_withheld")
+        .map(({ detail }) => detail?.userId),
     }).toStrictEqual({
       kim: { suspended: 0, suspendedBy: null },
-      lou: { suspended: 1, suspendedBy: "directory" },
+      lou: { suspended: 0, suspendedBy: null },
+      withheld: [lou.userId],
     });
   });
 
-  it("lists why each member is suspended: turned off, deleted, or no longer in the directory", async () => {
+  it("never suspends the last admin Microsoft signs in because an admin kept active was deleted since", async () => {
+    await connectedDirectory(idp);
+    const [ada, ben] = [
+      await memberWith(crypto.randomUUID(), "admin"),
+      await memberWith(crypto.randomUUID(), "admin"),
+    ];
+    await onlyAdmins(ada.userId, ben.userId);
+    // Ada turned off by mistake, suspended, and lifted by Ben.
+    await directoryHolds([
+      user({ id: ada.oid, accountEnabled: false }),
+      user({ id: ben.oid }),
+    ]);
+    await readAt(nextDay());
+    const { core } = await openRpc(ben.session);
+    await core.authenticate().members.liftSuspension(ada.userId);
+    // Ada leaves and IT deletes her account; months later Ben is turned off.
+    await directoryHolds(
+      [user({ id: ben.oid, accountEnabled: false })],
+      [{ id: ada.oid }]
+    );
+
+    const events = await auditedDuring(async () => {
+      await readAt(nextDay());
+    });
+
+    expect({
+      ada: await keptActiveOf(ada.userId),
+      ben: await suspensionOf(ben.userId),
+      bensSessions: await sessionCount(ben.userId),
+      withheld: events
+        .filter(({ action }) => action === "member.suspension_withheld")
+        .map(({ detail }) => detail?.userId),
+    }).toStrictEqual({
+      ada: 1,
+      ben: { suspended: 0, suspendedBy: null },
+      bensSessions: 1,
+      withheld: [ben.userId],
+    });
+  });
+
+  it("lists why each member is suspended, and what the directory holds for one kept active", async () => {
     const { admin } = await connectedDirectory(idp);
-    const [mia, ned, oz] = [
+    const [mia, ned, oz, pia] = [
+      await memberWith(crypto.randomUUID()),
       await memberWith(crypto.randomUUID()),
       await memberWith(crypto.randomUUID()),
       await memberWith(crypto.randomUUID()),
     ];
     // Mia turned off; Ned turned off, then deleted; Oz turned off, then
     // gone from the directory altogether (purged): all still suspended.
+    // Pia turned off and kept active, then turned on again.
     await directoryHolds([
       user({ id: mia.oid, accountEnabled: false }),
       user({ id: ned.oid, accountEnabled: false }),
       user({ id: oz.oid, accountEnabled: false }),
+      user({ id: pia.oid, accountEnabled: false }),
     ]);
     await readAt(nextDay());
+    await admin.api.members.liftSuspension(pia.userId);
     await directoryHolds(
-      [user({ id: mia.oid, accountEnabled: false })],
+      [user({ id: mia.oid, accountEnabled: false }), user({ id: pia.oid })],
       [{ id: ned.oid }]
     );
     await readAt(nextDay());
 
     const everyone = await admin.api.members.list();
     const reasons = Object.fromEntries(
-      everyone.flatMap(({ userId, suspension }) =>
-        [mia, ned, oz].some((each) => each.userId === userId)
-          ? [[userId, suspension?.reason]]
+      everyone.flatMap(({ userId, suspension, keptActive }) =>
+        [mia, ned, oz, pia].some((each) => each.userId === userId)
+          ? [[userId, suspension?.reason ?? keptActive?.directory]]
           : []
       )
     );
@@ -1473,6 +1531,7 @@ describe("a suspension an admin lifts", () => {
       [mia.userId]: "disabled",
       [ned.userId]: "deleted",
       [oz.userId]: "unlisted",
+      [pia.userId]: "enabled",
     });
   });
 });
