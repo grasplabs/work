@@ -318,6 +318,18 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_resource_members": { company: "who has a role in a workflow" },
   "core.trigger_resources": { company: "triggers they own" },
   "core.event_sources": { company: "event sources an admin created" },
+  // What a source accepted, for its admins to see (workflows/source-
+  // deliveries.ts): company data from an outside system, which may name
+  // people under no key of ours, as a kept event may, so it isn't one
+  // person's to erase and goes on the clock: its payload within a day,
+  // its row (a time and a type by then) within seven.
+  "core.event_source_deliveries": {
+    expires:
+      "an outside system's events, which may name people; the payload deleted within 24 hours, its row within 7 days",
+  },
+  "core.event_source_counts": {
+    none: "counts of deliveries by source, outcome and hour",
+  },
   "core.event_waits": { none: "runs' waits, by run and hash" },
   // An outside system's events may name people anywhere in their data,
   // under no key of ours: erasing a person can't find them, so each is

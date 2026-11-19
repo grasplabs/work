@@ -56,6 +56,7 @@ import {
 import { sweepRunDetails } from "./workflows/retention.ts";
 import { sweepRunFiles } from "./workflows/run-files.ts";
 import { startDueScheduleTriggers } from "./workflows/schedule-triggers.ts";
+import { sweepSourceDeliveries } from "./workflows/source-deliveries.ts";
 import { repairWakes } from "./workflows/wakes.ts";
 
 // The client's clock for core (spec 43.5, @grasp-os/workerflow/clock):
@@ -257,6 +258,14 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "workflows.kept_events",
     period: "quarterHour",
     run: sweepEventWaits,
+  },
+  // What event sources kept of their deliveries: payloads past their day,
+  // deliveries and counts past their seven
+  // (src/workflows/source-deliveries.ts).
+  {
+    name: "workflows.source_deliveries",
+    period: "quarterHour",
+    run: sweepSourceDeliveries,
   },
   { name: "channels.links", period: "quarterHour", run: sweepChannelLinks },
   // Stephen's counts past their week (src/channels/signals.ts).

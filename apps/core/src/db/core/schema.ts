@@ -5037,6 +5037,65 @@ export const eventSources = sqliteTable("event_sources", {
 });
 
 /**
+ * What an event source accepted, for its admins to see
+ * (workflows/source-deliveries.ts): one row for each delivery it accepted
+ * (its ID the hash of the source and its `webhook-id`, so a sender's
+ * retry is the same row) and each test event an admin sent it (`test`), with the event's type,
+ * how many triggers it started (`triggers`; none for a test) and its data
+ * (`payload`, JSON), which is set to null a day after `received_at`; the
+ * row is deleted after seven days, or with its source. A source holds its
+ * newest `eventSourceRetention.perSource` at most. Never a refused
+ * delivery, and never a header, a signature or a sender's address.
+ */
+export const eventSourceDeliveries = sqliteTable(
+  "event_source_deliveries",
+  {
+    id: text().primaryKey(),
+    sourceId: text("source_id").notNull(),
+    receivedAt: timestamp("received_at").notNull(),
+    eventType: text("event_type").notNull(),
+    test: integer({ mode: "boolean" }).notNull(),
+    triggers: integer().notNull(),
+    payload: text(),
+  },
+  (table) => [
+    // A source's deliveries, newest first.
+    index("event_source_deliveries_source").on(
+      table.sourceId,
+      table.receivedAt,
+      table.id
+    ),
+    // What the clock clears and deletes by age.
+    index("event_source_deliveries_received").on(table.receivedAt),
+  ]
+);
+
+/**
+ * How many deliveries an event source accepted or refused, by the hour
+ * (workflows/source-deliveries.ts): one row for each source, outcome
+ * (`accepted`, or why it refused: `eventSourceRefusalReasons`) and hour
+ * (`hour`, when it began), with how many and when the last was. A flood
+ * of refused deliveries writes as many rows as there are reasons an hour,
+ * and nothing of any of them. Deleted after seven days, or with its
+ * source.
+ */
+export const eventSourceCounts = sqliteTable(
+  "event_source_counts",
+  {
+    sourceId: text("source_id").notNull(),
+    outcome: text().notNull(),
+    hour: timestamp("hour").notNull(),
+    count: integer().notNull(),
+    lastAt: timestamp("last_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sourceId, table.outcome, table.hour] }),
+    // What the clock deletes by age.
+    index("event_source_counts_hour").on(table.hour),
+  ]
+);
+
+/**
  * The runs waiting now for an event source's event by a match
  * (workflows/event-waits.ts): one row for each type an event wait at
  * engine step `step` of run `run_id` takes, through its binding, from
