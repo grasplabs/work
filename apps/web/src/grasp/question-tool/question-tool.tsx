@@ -6,6 +6,7 @@
 //     failedLabel="Could not send the answer" onSubmit={answer} onSkip={skip} />
 //   <QuestionTool kind="multi" ... />        several choices
 //   <QuestionTool kind="text" ... />         free text
+//   <QuestionTool loading ... />             before its question arrives: quiet lines in its boxes
 //
 // The choices are UI SDK's RadioGroup and CheckboxGroup, the text UI SDK's Input and Textarea, and
 // Send answer UI SDK's Button, so an agent can answer by name, and an answer that fails to send fails for
@@ -40,6 +41,7 @@ import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { scroll } from "../scroll/scroll";
+import { Skeleton } from "../skeleton";
 import { Textarea } from "../textarea";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
@@ -190,6 +192,15 @@ export interface QuestionToolProps {
   style?: QuestionToolLayoutStyle;
   /** Layout only: margins, alignment and width. The look belongs to the card. */
   layout?: QuestionToolLayoutStyle;
+  /**
+   * Before the question arrives (a page's first paint): the card stands in its place with the
+   * question and every choice as quiet lines in their own boxes (a `question` already known, the
+   * page's own words, stands as words, so it wraps where it will), one row per `options` entry (a
+   * second line where it has a `description`) and the Other row, or the text box for `text`; Back,
+   * Skip and Send stand still. Nothing in it can be pressed, and it says it is busy.
+   * @default false
+   */
+  loading?: boolean;
   /**
    * This instance's own words, over the catalogue's (GraspWords), key by key (`{ other: "In my own words", skip: "Type instead" }`). Any left out
    * are the catalogue's, else English. A flat text prop given beside it still wins until the
@@ -805,7 +816,7 @@ const QuestionFooter = ({
   onBack,
   backLabel,
 }: FooterProps) => (
-  <div {...stylex.props(styles.footer)}>
+  <div data-slot="question-tool-footer" {...stylex.props(styles.footer)}>
     {held && heldReason !== undefined && heldReason !== "" ? (
       <p
         id={heldId}
@@ -866,6 +877,122 @@ const QuestionFooter = ({
     />
   </div>
 );
+
+const waits = stylex.create({
+  // The question's line, as long as a short question, never past the card.
+  question: { width: "24rem", maxWidth: "100%" },
+  // A choice's words and its line under them, at their own text's line heights.
+  label: { width: "10rem", maxWidth: "100%" },
+  description: { width: "16rem", maxWidth: "100%", height: grasp.textXsLine },
+  // The mark, in its own square.
+  mark: { flexShrink: 0, width: grasp.kbdHeight, height: grasp.kbdHeight },
+});
+
+/** One choice waiting: its card, its mark's square, its words' line and, when it has one, its line under them. */
+const WaitingRow = ({ described }: { described: boolean }) => (
+  <span data-slot="question-tool-row" {...stylex.props(styles.row)}>
+    <span {...stylex.props(styles.markLine)}>
+      <Skeleton variant="block" layout={waits.mark} />
+    </span>
+    <span {...stylex.props(styles.words)}>
+      <Skeleton layout={waits.label} />
+      {described ? <Skeleton layout={waits.description} /> : null}
+    </span>
+  </span>
+);
+
+/** The body waiting: a row per choice (and Other) in the choices' own grid, or the text box. */
+const WaitingBody = ({
+  kind,
+  cards,
+  columns,
+}: {
+  kind: QuestionKind;
+  cards: QuestionOption[];
+  columns: 1 | 2;
+}) => {
+  if (kind === "text") {
+    return <Textarea aria-hidden="true" rows={2} />;
+  }
+  return (
+    <ChoiceList columns={columns}>
+      <div
+        {...stylex.props(styles.choices, columns === 2 && styles.twoColumns)}
+      >
+        {cards.map((option) => (
+          <WaitingRow
+            key={option.value}
+            described={
+              option.description !== undefined && option.description !== ""
+            }
+          />
+        ))}
+      </div>
+    </ChoiceList>
+  );
+};
+
+/** The card before its question arrives: the same boxes, quiet lines in them, nothing pressable. */
+const QuestionWaiting = (props: Resolved) => {
+  const { kind, options, embedded } = props;
+  const cards: QuestionOption[] =
+    kind !== "text" && props.other
+      ? [...options, { value: OTHER, label: props.otherLabel }]
+      : options;
+  return (
+    <div
+      inert
+      aria-busy="true"
+      data-slot="question-tool"
+      data-loading=""
+      {...stylex.props(
+        styles.root,
+        rootWidth(embedded),
+        props.layout ?? props.style
+      )}
+    >
+      <div {...stylex.props(styles.card, embedded && styles.bare)}>
+        <div {...stylex.props(styles.head)}>
+          <p {...stylex.props(styles.eyebrow, props.step && styles.eyebrowRow)}>
+            <span>{props.label}</span>
+            {props.step && (
+              <span {...stylex.props(styles.step)}>
+                {props.stepLabel(props.step.index + 1, props.step.count)}
+              </span>
+            )}
+          </p>
+          <p
+            data-slot="question-tool-question"
+            {...stylex.props(styles.question)}
+          >
+            {props.question === "" ? (
+              <Skeleton text="md" layout={waits.question} />
+            ) : (
+              props.question
+            )}
+          </p>
+        </div>
+        <WaitingBody kind={kind} cards={cards} columns={props.columns} />
+        <div data-slot="question-tool-footer" {...stylex.props(styles.footer)}>
+          {props.onBack !== undefined && (
+            <Button variant="ghost" size="sm" layout={styles.back}>
+              {props.backLabel}
+            </Button>
+          )}
+          {props.onSkip !== undefined && (
+            <Button variant="ghost" size="sm">
+              {props.skipLabel}
+            </Button>
+          )}
+          {/* Nothing is chosen when the question arrives, so Send waits as it will stand then: off. */}
+          <Button variant="ink" size="sm" disabled>
+            {props.submitLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 /** Every prop a QuestionToolSubmit takes. */
 export interface QuestionToolSubmitProps {
@@ -1143,6 +1270,7 @@ const QuestionCard = (props: Resolved) => {
     return (
       <label
         key={option.value}
+        data-slot="question-tool-row"
         data-chosen={on || undefined}
         {...stylex.props(rowMarker, styles.row, focus.within)}
       >
@@ -1190,7 +1318,11 @@ const QuestionCard = (props: Resolved) => {
               </span>
             )}
           </p>
-          <p id={questionId} {...stylex.props(styles.question)}>
+          <p
+            id={questionId}
+            data-slot="question-tool-question"
+            {...stylex.props(styles.question)}
+          >
             {question}
           </p>
         </div>
@@ -1238,6 +1370,9 @@ const QuestionCard = (props: Resolved) => {
 /** An assistant's question, answered by a choice, several choices or the person's own words. */
 export const QuestionTool = (props: QuestionToolProps) => {
   const words = useWords("questionTool", questionToolWords, props.words);
+  if (props.loading === true) {
+    return <QuestionWaiting {...props} {...withDefaults(props, words)} />;
+  }
   return <QuestionCard {...props} {...withDefaults(props, words)} />;
 };
 
