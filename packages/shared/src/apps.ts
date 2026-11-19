@@ -785,7 +785,7 @@ export const appErrors = defineErrorFamily({
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
   "app.preview_side_effect":
-    "A preview changes nothing and reaches nothing outside it: no connections, no other Apps, no workflows and no writes to Knowledge.",
+    "A preview changes nothing and reaches nothing outside it: no connections, no other Apps, no workflows and no writes to the Brain.",
 });
 
 /**

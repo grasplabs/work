@@ -1336,30 +1336,10 @@ describe("erasing a person", () => {
     });
   });
 
-  it("erases what core keeps of them for the Brain before it answers: who answered a gap, and the files they once uploaded into Knowledge", async () => {
+  it("erases what core keeps of them for the Brain before it answers: who answered a gap", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "builder");
     const marker = `planted${unique().replaceAll("-", "")}`;
-    // A file they once uploaded into Knowledge, its original in R2.
-    const uploadId = crypto.randomUUID();
-    const original = `knowledge/${crypto.randomUUID()}/${uploadId}`;
-    await env.FILES.put(original, `${marker} uploaded this.`);
-    await env.DB.prepare(
-      `INSERT INTO uploads (id, collection_id, path, media_type, bytes, sha256,
-         uploaded_by, actor, status, document_id, version, created_at, updated_at)
-       VALUES (?, ?, ?, 'text/vtt', 21, ?, ?, ?, 'ready', NULL, NULL, ?, ?)`
-    )
-      .bind(
-        uploadId,
-        original.split("/")[1],
-        "notes/mine.vtt",
-        "0".repeat(64),
-        person.userId,
-        JSON.stringify({ type: "person", userId: person.userId }),
-        Date.now(),
-        Date.now()
-      )
-      .run();
     // A gap they answered: the answer is the company's, who gave it theirs.
     const gap = `gap-${marker}`;
     await admin.api.brain.addRecords([
@@ -1395,14 +1375,10 @@ describe("erasing a person", () => {
     expect({
       done: typeof erased.completedAt,
       brain: erased.areas.find(({ area }) => area === "brain")?.state,
-      original: (await env.FILES.head(original)) !== null,
-      uploads: await rowsOf("uploads", "uploaded_by", person.userId),
       answered,
     }).toStrictEqual({
       done: "string",
       brain: "complete",
-      original: false,
-      uploads: 0,
       answered: { answer: "About two hundred.", answeredBy: null },
     });
   });
@@ -3569,7 +3545,7 @@ describe("erasing a person", () => {
     });
   });
 
-  it("forgets what App preferences kept of them and what their forms sent in every App's store, and their own Knowledge signals, and leaves everyone else's", async () => {
+  it("forgets what App preferences kept of them and what their forms sent in every App's store, and leaves everyone else's", async () => {
     const { admin, person } = await removedPerson();
     const other = await signedInApi(idp, "user");
     const { storeId } = await appWithStore();
@@ -3607,25 +3583,6 @@ describe("erasing a person", () => {
         );
       }
     });
-    const now = Date.now();
-
-    // The usage signals of a Knowledge collection of each, its searches'
-    // keys being what they asked.
-    const computation = crypto.randomUUID();
-    await env.DB.prepare(
-      "INSERT INTO knowledge_signal_computations (id, day, started_at, finished_at) VALUES (?, '2026-10-27', ?, ?)"
-    )
-      .bind(computation, now, now)
-      .run();
-    for (const who of [person.userId, other.userId]) {
-      // oxlint-disable-next-line no-await-in-loop -- one person at a time
-      await env.DB.prepare(
-        "INSERT INTO knowledge_signals (computation, id, kind, collection_id, subject, owner, value, evidence) VALUES (?, ?, 'unanswered_question', ?, 'what they asked', ?, 1, '{}')"
-      )
-        .bind(computation, crypto.randomUUID(), `collection-${who}`, who)
-        .run();
-    }
-
     await admin.api.members.erase(person.userId, String(person.person.name));
 
     const preferencesOf = async (who: string) =>
@@ -3655,15 +3612,11 @@ describe("erasing a person", () => {
       others: await preferencesOf(other.userId),
       theirForm: await formSentBy(person.userId),
       otherForm: await formSentBy(other.userId),
-      theirSignals: await rowsOf("knowledge_signals", "owner", person.userId),
-      otherSignals: await rowsOf("knowledge_signals", "owner", other.userId),
     }).toStrictEqual({
       theirs: 0,
       others: 1,
       theirForm: null,
       otherForm: JSON.stringify({ note: `from ${other.userId}` }),
-      theirSignals: 0,
-      otherSignals: 1,
     });
   });
 
