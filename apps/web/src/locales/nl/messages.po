@@ -3805,6 +3805,7 @@ msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new
 msgstr "Ga daar verder. Heb je dat apparaat niet meer? Vraag degene die je de link stuurde om een nieuwe start."
 
 #: src/agents/new-agent.tsx
+#: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Wijzigen"
 
@@ -4247,6 +4248,10 @@ msgstr "Kies er een"
 msgid "Choose or write an answer first"
 msgstr "Kies of schrijf eerst een antwoord"
 
+#: src/settings/ai-providers.tsx
+msgid "Choose the AI that Grasp's chat, agents and workflows run on."
+msgstr "Kies de AI waarop de chat, agents en workflows van Grasp draaien."
+
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
 msgstr "Kies door wie je geïnterviewd wilt worden."
@@ -4616,6 +4621,7 @@ msgstr "Bevestigd door de directie"
 #: src/connections/request-app-dialog.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/settings/ai-providers.tsx
 msgid "Connect"
 msgstr "Koppelen"
 
@@ -4623,6 +4629,10 @@ msgstr "Koppelen"
 #: src/connections/integration-item.tsx
 msgid "Connect {app}"
 msgstr "{app} koppelen"
+
+#: src/settings/ai-providers.tsx
+msgid "Connect {label}"
+msgstr "{label} koppelen"
 
 #: src/connections/overview-lists.tsx
 #: src/onboarding/connect-steps.tsx
@@ -4651,6 +4661,7 @@ msgid "Connect another account"
 msgstr "Nog een account koppelen"
 
 #: src/onboarding/connect-steps.tsx
+#: src/settings/ai-providers.tsx
 msgid "Connected"
 msgstr "Gekoppeld"
 
@@ -4706,6 +4717,10 @@ msgstr "Gekoppeld, via Composio"
 #: src/onboarding/ai-step.tsx
 msgid "Connected: {names}"
 msgstr "Gekoppeld: {names}"
+
+#: src/settings/ai-providers.tsx
+msgid "Connecting"
+msgstr "Koppelen"
 
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
@@ -10051,10 +10066,6 @@ msgid "No projects yet"
 msgstr "Nog geen projecten"
 
 #: src/settings/ai-providers.tsx
-msgid "No provider is connected, so Grasp's AI can't answer yet."
-msgstr "Er is geen provider gekoppeld, dus de AI van Grasp kan nog niet antwoorden."
-
-#: src/settings/ai-providers.tsx
 msgid "No provider of your own is connected: switching to your own keys leaves AI off until you add one."
 msgstr "Er is geen eigen aanbieder verbonden: als je overstapt op je eigen sleutels, blijft AI uit tot je er een toevoegt."
 
@@ -10306,6 +10317,7 @@ msgstr "Niet gewist"
 msgid "Not confirmed by the board yet"
 msgstr "Nog niet bevestigd door het bestuur"
 
+#: src/settings/ai-providers.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Not connected"
 msgstr "Niet verbonden"
@@ -15765,6 +15777,10 @@ msgstr "Het model dat de vraagsteller kiest"
 msgid "The organization has no teams yet."
 msgstr "De organisatie heeft nog geen teams."
 
+#: src/settings/ai-providers.tsx
+msgid "The organization's own admins connect its AI provider here."
+msgstr "De eigen beheerders van de organisatie koppelen hier haar AI-aanbieder."
+
 #: src/connections/http-connections.tsx
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 msgstr "De origin is https:// en een openbare hostnaam, zonder iets erachter: https://api.example.com."
@@ -16982,6 +16998,10 @@ msgstr "In plaats daarvan een personeelslijst gebruiken"
 #: src/connections/request-app-dialog.tsx
 msgid "Use an address that starts with http:// or https://."
 msgstr "Gebruik een adres dat begint met http:// of https://."
+
+#: src/settings/ai-providers.tsx
+msgid "Use an OpenAI-compatible endpoint"
+msgstr "Een OpenAI-compatibel endpoint gebruiken"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Use another list"
