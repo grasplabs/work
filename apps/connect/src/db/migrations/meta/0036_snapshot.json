@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f0057f5d-bc32-4952-a56e-0bea01536ffa",
+  "id": "e9ed2c1d-4f7b-4322-ab43-1e5cf1292322",
   "prevId": "9e192fda-1bb8-4460-8b15-32aa8e0a4f39",
   "tables": {
     "ai_provider_keys": {
@@ -456,13 +456,6 @@
         },
         "access_expires_at": {
           "name": "access_expires_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "generation": {
-          "name": "generation",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

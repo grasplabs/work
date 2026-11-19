@@ -722,6 +722,12 @@ const isNotConsented = (error: unknown): boolean =>
 export interface TenantCredential {
   host: string;
   credential: Credential;
+  /**
+   * Whether it was kept from an earlier call (`held`), with when it
+   * expires, which names the kept row; else minted for this call.
+   */
+  held: boolean;
+  expiresAt: number;
 }
 
 /**
@@ -744,6 +750,8 @@ const heldTenantCredential = async (
       credential: bearer(
         await vault.open(held.sealed, tenantSealContext(held.connectionId))
       ),
+      held: true,
+      expiresAt: held.accessExpiresAt.getTime(),
     };
   } catch (error) {
     // Sealed under a key no longer held: asked for again.
@@ -842,19 +850,44 @@ export const tenantCredentialFor = async (
     tenantSealContext(connectionId)
   );
   const now = Date.now();
-  // Only for the grant it was asked with, as it stands: a grant connected
-  // again, or renewed, meanwhile keeps none of this one's.
+  // Kept only while the grant's row is as it was read (its `generation`):
+  // a grant connected again meanwhile must never find this one's. A Graph
+  // renewal landing during the mint moves the generation too, so the write
+  // misses then, and the next call mints again: a renewal is hourly, a
+  // mint a few hundred milliseconds.
   await env.DB.prepare(
-    `INSERT INTO connection_tenant_tokens (connection_id, host, sealed, access_expires_at, generation, updated_at)
-    SELECT ?1, ?2, ?3, ?4, ?5, ?6
-    WHERE EXISTS (SELECT 1 FROM connection_tokens WHERE connection_id = ?1 AND generation = ?5)
+    `INSERT INTO connection_tenant_tokens (connection_id, host, sealed, access_expires_at, updated_at)
+    SELECT ?1, ?2, ?3, ?4, ?5
+    WHERE EXISTS (SELECT 1 FROM connection_tokens WHERE connection_id = ?1 AND generation = ?6)
     ON CONFLICT (connection_id) DO UPDATE SET host = excluded.host, sealed = excluded.sealed,
-      access_expires_at = excluded.access_expires_at, generation = excluded.generation,
-      updated_at = excluded.updated_at`
+      access_expires_at = excluded.access_expires_at, updated_at = excluded.updated_at`
   )
-    .bind(connectionId, host, sealed, minted.expiresAt, row.generation, now)
+    .bind(connectionId, host, sealed, minted.expiresAt, now, row.generation)
     .run();
-  return { host, credential: bearer(minted.accessToken) };
+  return {
+    host,
+    credential: bearer(minted.accessToken),
+    held: false,
+    expiresAt: minted.expiresAt,
+  };
+};
+
+/**
+ * Lets go of a connection's kept token for its own host that the host
+ * no longer takes (a 401 to a token kept from an earlier call): the next
+ * call mints another. Only that token, by when it expires, never one
+ * minted since.
+ */
+export const dropTenantToken = async (
+  env: Env,
+  connectionId: string,
+  expiresAt: number
+): Promise<void> => {
+  await env.DB.prepare(
+    "DELETE FROM connection_tenant_tokens WHERE connection_id = ? AND access_expires_at = ?"
+  )
+    .bind(connectionId, expiresAt)
+    .run();
 };
 
 /**

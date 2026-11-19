@@ -13,6 +13,8 @@ import { log } from "@grasp-os/shared/log";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
+import { dropTenantToken } from "./tokens.ts";
+
 // A native connector's only way out. Connect loads each call's connector
 // isolate with this as its `globalOutbound`, so every request the
 // connector's code sends, by `fetch` or by following a redirect, arrives
@@ -132,9 +134,18 @@ const egressPropsSchema = z.strictObject({
    * The connection's own host at its provider and its credential there,
    * for a sync whose routes name it (`tenantHost`); none when connect
    * holds none (the grant doesn't reach it): its requests are refused.
+   * Whether connect kept it from an earlier call (`held`, the kept one
+   * named by when it expires), for what a refusal of it means
+   * (`tenantRefused`).
    */
   tenant: z
-    .strictObject({ host: z.string().min(1), credential: credentialSchema })
+    .strictObject({
+      host: z.string().min(1),
+      credential: credentialSchema,
+      connectionId: z.string().min(1),
+      held: z.boolean(),
+      expiresAt: z.number().int(),
+    })
     .optional(),
   /** When this call's egress closes, in ms since the epoch. */
   expiresAt: z.number().int(),
@@ -341,6 +352,35 @@ const capped = (response: Response): Response => {
 };
 
 /**
+ * The connection's own host refusing its credential (401). One connect
+ * kept from an earlier call may have run out or been revoked: it is let
+ * go (`dropTenantToken`), and the refusal passes on, so the call fails
+ * and the next mints another. One minted for this very call that the
+ * host refuses all the same (an access policy of the host's) is as good
+ * as none: refused here, as a call with no credential for the host is,
+ * so what it reads is nobody's, and the sync goes on.
+ */
+const tenantRefused = async (
+  env: Env,
+  call: EgressProps,
+  route: Route,
+  response: Response
+): Promise<Response> => {
+  const { tenant } = call;
+  if (tenant?.held === true) {
+    await dropTenantToken(env, tenant.connectionId, tenant.expiresAt);
+    return capped(response);
+  }
+  await response.body?.cancel();
+  return refuse(
+    call,
+    "tenant_refused",
+    new URL(`https://${tenant?.host ?? "tenant.invalid"}`),
+    route.method
+  );
+};
+
+/**
  * The egress handler. Reached only as a connector isolate's
  * `globalOutbound`, with props connect sets for one call; without them
  * (another Worker naming this entrypoint), nothing goes out.
@@ -425,6 +465,9 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
     response = await throughDownload(call, route, url, response);
     if (ownAnswers.has(response)) {
       return response;
+    }
+    if (route.host === tenantHost && response.status === 401) {
+      return await tenantRefused(this.env, call, route, response);
     }
     // 304 Not Modified goes nowhere; every other 3xx would.
     if (

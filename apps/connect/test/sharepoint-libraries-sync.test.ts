@@ -141,6 +141,8 @@ interface SharePoint {
   rootStatus?: number;
   /** A status SharePoint's REST API answers everything with instead, when set. */
   restStatus?: number;
+  /** SharePoint tokens SharePoint no longer takes (401), as sent. */
+  refusedTokens: Set<string>;
   /** The sites, by path, whose permissions the account may read (an owner). */
   owners: Set<string>;
   /** Files, by ID, whose own permissions leave the account short of Full Control. */
@@ -197,6 +199,7 @@ const sharePoint: SharePoint = {
   sitePages: [],
   rootWebUrl: "",
   owners: new Set(),
+  refusedTokens: new Set(),
   notOwned: new Set(),
   permissions: {},
   permissionsStatus: {},
@@ -299,6 +302,7 @@ const reset = (): void => {
   sharePoint.rootWebUrl = `https://${storageHost}`;
   sharePoint.rootStatus = undefined;
   sharePoint.restStatus = undefined;
+  sharePoint.refusedTokens = new Set();
   // The account owns Sales; in Legal it is a member.
   sharePoint.owners = new Set(["/sites/sales"]);
   sharePoint.notOwned = new Set();
@@ -506,13 +510,25 @@ const fileAt = (listId: string, item: string): string | undefined =>
  * it out), and a site group's users, which a group that shows its
  * members to its members alone hides.
  */
-const restCall = (url: URL): Response => {
-  if (sharePoint.restStatus !== undefined) {
+/** How SharePoint refuses a request outright, if it does: none otherwise. */
+const restRefusal = (request: Request): Response | undefined => {
+  if (
+    sharePoint.refusedTokens.has(request.headers.get("authorization") ?? "")
+  ) {
     return Response.json(
-      { "odata.error": { code: "-2147024891" } },
-      { status: sharePoint.restStatus }
+      { error_description: "Invalid JWT token." },
+      { status: 401 }
     );
   }
+  return sharePoint.restStatus === undefined
+    ? undefined
+    : Response.json(
+        { "odata.error": { code: "-2147024891" } },
+        { status: sharePoint.restStatus }
+      );
+};
+
+const restCall = (url: URL): Response => {
   const match =
     /^(?<site>(?:\/(?:sites|teams)\/[^/]+)?)\/_api\/web\/(?<rest>.+)$/u.exec(
       decodeURIComponent(url.pathname)
@@ -542,9 +558,9 @@ const restCall = (url: URL): Response => {
   return itemNotFound();
 };
 
-const internet = fakeInternet((_request, url) => {
+const internet = fakeInternet((request, url) => {
   if (url.hostname === storageHost && url.pathname.includes("/_api/")) {
-    return restCall(url);
+    return restRefusal(request) ?? restCall(url);
   }
   if (url.hostname === graphHost && url.pathname === "/v1.0/sites/root") {
     return sharePoint.rootStatus === undefined
@@ -1159,25 +1175,54 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
     });
   });
 
-  it("fails the page, writing no file, when Graph throttles the root site or SharePoint no longer takes its token", async () => {
+  it("fails the page, writing no file, when Graph throttles the root site", async () => {
     const { admin, connectionId } = await sharedConnection();
     await pick(admin, connectionId, [salesDocs.id]);
     sharePoint.rootStatus = 429;
-    const throttled = await outcomeOf(
-      async () => await read(connectionId, salesDocs.id, null)
-    );
-    sharePoint.rootStatus = undefined;
-    // A SharePoint token revoked within its hour.
-    sharePoint.restStatus = 401;
-    const revoked = await outcomeOf(
-      async () => await read(connectionId, salesDocs.id, null)
-    );
 
-    expect({ throttled, revoked }).toStrictEqual({
-      throttled: "sync.provider_failed",
-      // The page waits: SharePoint's refusal says nothing of the grant.
-      revoked: "sync.throttled",
+    await expect(
+      outcomeOf(async () => await read(connectionId, salesDocs.id, null))
+    ).resolves.toBe("sync.provider_failed");
+  });
+
+  it("lets go of a kept SharePoint token SharePoint no longer takes, failing the page once, and goes on with a fresh one", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    const lastToken = () =>
+      internet.sent.findLast(
+        ({ host, path }) => host === storageHost && path.includes("/_api/")
+      )?.headers.authorization ?? "";
+
+    const first = await readersRead(connectionId, salesDocs.id);
+    // Revoked within its hour.
+    sharePoint.refusedTokens.add(lastToken());
+    const refused = await outcomeOf(
+      async () => await read(connectionId, salesDocs.id, null)
+    );
+    const again = await readersRead(connectionId, salesDocs.id);
+    const people = [
+      { kind: "account", id: ada },
+      { kind: "account", id: ben },
+    ];
+
+    expect({ first, refused, again }).toStrictEqual({
+      first: [people],
+      // The page waits: a kept token's refusal says nothing of the grant.
+      refused: "sync.throttled",
+      again: [people],
     });
+  });
+
+  it("gives nobody a file when SharePoint refuses a token minted that very call, and the page goes on", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    // An access policy of SharePoint's that refuses every token for this
+    // account, however fresh.
+    sharePoint.restStatus = 401;
+
+    await expect(
+      readersRead(connectionId, salesDocs.id)
+    ).resolves.toStrictEqual([null]);
   });
 
   it("keeps a grant's SharePoint token across Graph's renewals, and gives a grant connected again its own", async () => {
