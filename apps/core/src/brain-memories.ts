@@ -50,6 +50,12 @@ const fieldOf = (value: unknown, name: string): unknown =>
     ? Reflect.get(value, name)
     : undefined;
 
+/** How many memories `remembered` replaces, when it names any: never which. */
+const replacesOf = (remembered: unknown): Detail => {
+  const replaces = fieldOf(remembered, "replaces");
+  return Array.isArray(replaces) ? { replaces: replaces.length } : {};
+};
+
 /** `value` if it is a string, else null. */
 const stringOf = (value: unknown): string | null =>
   typeof value === "string" ? value : null;
@@ -69,6 +75,8 @@ export const rememberFor = async (
     "brain.memory.remembered",
     {
       change: stringOf(fieldOf(remembered, "change")),
+      // How many of their memories it replaces, never which.
+      ...replacesOf(remembered),
     },
     async () => await rememberAs(env, caller.person, remembered),
     ({ memory, entity }) => ({ memory, entity })

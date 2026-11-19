@@ -509,6 +509,14 @@ const lines = {
     fr: "Je retiendrai ceci à propos de {about} : {statement} (valeur : {value})",
     es: "Recordaré esto sobre {about}: {statement} (valor: {value})",
   },
+  /** Under a memory that replaced earlier ones: what those said, as a list. */
+  rememberedInPlaceOf: {
+    en: "In place of: {replaced}",
+    nl: "In plaats van: {replaced}",
+    de: "Anstelle von: {replaced}",
+    fr: "À la place de : {replaced}",
+    es: "En lugar de: {replaced}",
+  },
   /** Above a memory that says how he should work for them. */
   rememberedInstruction: {
     en: "Instruction",

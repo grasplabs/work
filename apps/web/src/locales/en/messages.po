@@ -7483,6 +7483,10 @@ msgstr "In my own words"
 msgid "In one chat only, for {requester}"
 msgstr "In one chat only, for {requester}"
 
+#: src/chat/saved-memory.tsx
+msgid "In place of: {replaced}"
+msgstr "In place of: {replaced}"
+
 #: src/settings/erasures.tsx
 msgid "In progress"
 msgstr "In progress"

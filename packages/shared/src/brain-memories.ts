@@ -24,6 +24,8 @@ export const chatSavedMemorySchema = z.strictObject({
   value: z.string().min(1).optional(),
   /** Who or what it is about, by name, when it isn't the person themselves. */
   about: z.string().min(1).optional(),
+  /** What each earlier memory of theirs it replaced says, when it replaced any. */
+  replaced: z.array(z.string().min(1)).min(1).optional(),
 });
 export type ChatSavedMemory = z.infer<typeof chatSavedMemorySchema>;
 

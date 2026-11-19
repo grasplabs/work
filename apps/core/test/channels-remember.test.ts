@@ -4,6 +4,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { rememberAs } from "../src/brain-next.ts";
 import { undoAction } from "../src/channels/cards.tsx";
 import { say } from "../src/channels/words.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
@@ -25,7 +26,7 @@ import { breakOwnStore } from "./brain-next-own-store.ts";
 import { chatIdsOf } from "./code-step-trace.ts";
 import { botConnectorEditsUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { connectModels } from "./model-provider.ts";
+import { answeringProvider, connectModels } from "./model-provider.ts";
 import type { FakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
@@ -185,6 +186,46 @@ const chatAgentReadsBrain = async () => {
 };
 
 describe("the agent remembering in a person's Teams direct message", () => {
+  it("names on the notice what the memory replaced", slow, async () => {
+    // The earlier memory's id is known once it is saved, below.
+    let pizza = "";
+    const replies = () => [
+      toolStep("remember", {
+        about: "me",
+        attribute: "preference",
+        value: "sushi",
+        type: "preference",
+        statement: "Loves sushi",
+        quote: "it's sushi now",
+        replaces: [pizza],
+      }),
+      checked(true),
+      says("Noted."),
+    ];
+    const ann = await memberAnsweredBy(
+      idp,
+      await answeringProvider(
+        (requests) => replies()[requests.length - 1] ?? says("Noted.")
+      )
+    );
+    ({ memory: pizza } = await rememberAs(env, ann.userId, {
+      change: `chat:${crypto.randomUUID()}:call`,
+      about: { kind: "person", own: true },
+      attribute: "preference",
+      value: "pizza",
+      type: "preference",
+      statement: "Loves pizza",
+      quote: "I love pizza",
+    }));
+
+    await post(messageFrom(ann.teams, { text: "Not pizza, it's sushi now." }));
+    const { card } = await noticeIn(ann.teams.conversation);
+
+    expect(card).toContain(
+      say("rememberedInPlaceOf", "en", { replaced: "Loves pizza" })
+    );
+  });
+
   it(
     "keeps what they say in their own store, shows the notice there, and recalls it in a later turn there and in their chat in Grasp",
     slow,

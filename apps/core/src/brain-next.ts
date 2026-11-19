@@ -24,6 +24,7 @@ import {
   identifierSchema,
   instructionsTextSchema,
   memoriesCursorSchema,
+  memoriesPerAddMax,
   memoryIdSchema,
   versionChangeCursorSchema,
   writtenCursorSchema,
@@ -4930,6 +4931,7 @@ export const memoryChoices = {
   valueMaxLength,
   statementMaxLength,
   quoteMaxLength,
+  replacesMax: memoriesPerAddMax,
 } as const;
 
 /** A text of a memory: some text, at most `max` characters (the Brain's bounds). */
@@ -4957,6 +4959,9 @@ const rememberedSchema = z.strictObject({
   type: z.enum(memoryTypes),
   statement: memoryText(statementMaxLength),
   quote: memoryText(quoteMaxLength),
+  // Their own earlier memories this one replaces (`ownWordAs`), as the
+  // Brain takes them (contract.ts `NewMemory.replaces`).
+  replaces: z.array(memoryIdSchema).min(1).max(memoriesPerAddMax).optional(),
 });
 
 /** A memory a person said, to save for them (`rememberAs`), as its schema takes it. */
@@ -5073,6 +5078,46 @@ export const rememberAs = async (
     entity,
     kept: { type, attribute, value, statement },
   };
+};
+
+/**
+ * The statements of the member `personId`'s memories `ids`, about
+ * `entity`, in their own store (theirs alone), current or history, in the
+ * order asked: what a save of theirs that replaces them is checked
+ * against (agent-remember.ts). Null when any isn't one: alike for none,
+ * one in another store and one an erasure hides. The Brain takes only
+ * those in their own word (contract.ts `NewMemory.replaces`). Every page
+ * of the entity's memories read at one moment. Refused once they are no
+ * longer a member.
+ */
+export const ownWordAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  entity: string,
+  ids: readonly string[]
+): Promise<string[] | null> => {
+  const reader = await personReaderOf(env, personId);
+  const store = ownBrain(env, reader.person);
+  const asked = new Set(ids);
+  const found = new Map<string, string>();
+  let after: MemoriesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readMemories({
+      entity: checked(entityIdSchema, entity),
+      reader,
+      history: true,
+      ...(after === undefined ? {} : { after }),
+    });
+    for (const memory of page.memories) {
+      if (asked.has(memory.id)) {
+        found.set(memory.id, memory.statement);
+      }
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined && found.size < asked.size);
+  const statements = ids.flatMap((id) => found.get(id) ?? []);
+  return statements.length === ids.length ? statements : null;
 };
 
 /** The names and identifiers of `entity` that `reader` may see in `store`, each page read. */
