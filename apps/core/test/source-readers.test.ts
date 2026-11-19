@@ -38,7 +38,7 @@ import {
   groupsControlUrl,
 } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { runMinuteTasks } from "./maintenance.ts";
+import { runClockTask, runMinuteTasks } from "./maintenance.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import {
@@ -471,6 +471,7 @@ const readGroupsOnce = async (): Promise<void> => {
   await env.CONNECT.readReaderGroups({
     requests: readerGroupRequestsPerTick,
     queries: readerGroupQueriesPerTick,
+    paused: [],
   });
 };
 
@@ -2411,6 +2412,7 @@ describe("groups copied from the source", () => {
         await env.CONNECT.readReaderGroups({
           requests: 3,
           queries: readerGroupQueriesPerTick,
+          paused: [],
         });
         const row = await connectDb()
           .prepare(
@@ -2618,6 +2620,7 @@ describe("groups copied from the source", () => {
       const first = await env.CONNECT.readReaderGroups({
         requests: readerGroupRequestsPerTick,
         queries: 30,
+        paused: [],
       });
       for (const id of connectionIds) {
         // oxlint-disable-next-line no-await-in-loop -- each in turn
@@ -2714,6 +2717,7 @@ describe("groups copied from the source", () => {
           await env.CONNECT.readReaderGroups({
             requests: 40,
             queries: readerGroupQueriesPerTick,
+            paused: [],
           });
           // oxlint-disable-next-line no-await-in-loop -- until hers is whole
           if (await aliceWhole()) {
@@ -2745,6 +2749,63 @@ describe("groups copied from the source", () => {
         hub: true,
         last: true,
         late: false,
+      });
+    }
+  );
+});
+
+// GRA-2143: connect reads nothing of a suspended member's own connections
+// in the background, their groups included, and reads them again once the
+// suspension lifts.
+describe("the groups of a suspended member", () => {
+  it(
+    "are read nothing of while the member is suspended, and are read again once it lifts",
+    setUpTime,
+    async () => {
+      const bob = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(bob);
+      const tried = async (): Promise<boolean> => {
+        const row = await connectDb()
+          .prepare(
+            "SELECT reader_groups_tried_at IS NOT NULL AS tried FROM connections WHERE id = ?"
+          )
+          .bind(connectionId)
+          .first<{ tried: number }>();
+        return row?.tried === 1;
+      };
+      const suspended = async (at: number | null): Promise<void> => {
+        await env.DB.prepare(
+          "UPDATE members SET suspended_at = ?, suspended_by = ? WHERE user_id = ?"
+        )
+          .bind(at, at === null ? null : "directory", bob.userId)
+          .run();
+      };
+      let minute = 0;
+      /** One run of the clock's task, a minute after the last. */
+      const readOnce = async (): Promise<void> => {
+        minute += 1;
+        await runClockTask(
+          "brain.reader_groups",
+          {},
+          new Date(Date.now() + minute * 60_000)
+        );
+      };
+      // Suspended as the directory's read suspends someone (GRA-2056).
+      await suspended(Date.now());
+      for (let run = 0; run < 5; run += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one run after another
+        await readOnce();
+      }
+      const whileSuspended = await tried();
+      await suspended(null);
+      const lifted = await eventually(async () => {
+        await readOnce();
+        return await tried();
+      });
+
+      expect({ whileSuspended, lifted }).toStrictEqual({
+        whileSuspended: false,
+        lifted: true,
       });
     }
   );
