@@ -5,6 +5,10 @@ import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { ChatFileType } from "@grasp-os/shared/chat";
 import type { DependencyFinding } from "@grasp-os/shared/dependencies";
 import { modelRoles } from "@grasp-os/shared/deployment-config";
+import {
+  directoryGroupKinds,
+  directoryGroupMembersFrom,
+} from "@grasp-os/shared/directory";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
 import type {
@@ -705,6 +709,42 @@ export const teamPins = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.userId, table.teamId] }),
     index("team_pins_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The directory's groups an admin mapped to a members' team (GRA-2056,
+ * directory-groups.ts): the daily read places each group's members in its
+ * team. One team per group, by the group's Entra object ID, so a rename
+ * changes only the name kept here. Goes with the team. Holds no person:
+ * who mapped it is in the audit log.
+ */
+export const directoryGroupTeams = sqliteTable(
+  "directory_group_teams",
+  {
+    /** The directory read (`microsoft-directory`). */
+    provider: text().notNull(),
+    /** The group's Entra object ID, lower case. */
+    groupId: text("group_id").notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    /** The group's name, kind and who decides its members, as Microsoft last answered. */
+    name: text().notNull(),
+    kind: text({ enum: directoryGroupKinds }).notNull(),
+    membersFrom: text("members_from", {
+      enum: directoryGroupMembersFrom,
+    }).notNull(),
+    mappedAt: timestamp("mapped_at").notNull(),
+    /**
+     * When the daily read last read the group whole: until it has, since
+     * the group was mapped to this team, the mapping places nobody.
+     */
+    readAt: timestamp("read_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.groupId] }),
+    index("directory_group_teams_team_id_idx").on(table.teamId),
   ]
 );
 

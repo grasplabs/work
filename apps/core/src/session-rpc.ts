@@ -12,6 +12,7 @@ import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DataPolicyRpc } from "./data-policy-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
+import { DirectoryGroupsRpc } from "./directory-groups.ts";
 import { DraftsRpc } from "./drafts-rpc.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
 import { InstructionsRpc } from "./instructions-rpc.ts";
@@ -77,6 +78,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #pages: PagesRpc;
   readonly #dataPolicy: DataPolicyRpc;
   readonly #members: MembersRpc;
+  readonly #directoryGroups: DirectoryGroupsRpc;
   readonly #organization: OrganizationRpc;
   readonly #orgSettings: OrgSettingsRpc;
   readonly #stephenRequests: StephenRequestsRpc;
@@ -125,6 +127,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#pages = new PagesRpc(env, full);
     this.#dataPolicy = new DataPolicyRpc(env, full);
     this.#members = new MembersRpc(env, full);
+    this.#directoryGroups = new DirectoryGroupsRpc(env, full);
     this.#organization = new OrganizationRpc(env, full);
     this.#orgSettings = new OrgSettingsRpc(env, full);
     this.#stephenRequests = new StephenRequestsRpc(env, full);
@@ -276,6 +279,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get members(): MembersRpc {
     return this.#members;
+  }
+
+  get directoryGroups(): DirectoryGroupsRpc {
+    return this.#directoryGroups;
   }
 
   get organization(): OrganizationRpc {
