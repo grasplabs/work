@@ -589,7 +589,7 @@ describe("a memory whose notice the person can't see in Teams", () => {
         // And the turn's next request, carrying the save, has reached the
         // provider, which holds it: the model is refused only after.
         const holding = ann.provider.requests.some(({ body }) =>
-          JSON.stringify(body).includes("Saved. It is about")
+          JSON.stringify(body).includes("Saved as the memory with id")
         );
         expect(holding).toBeTruthy();
       },
