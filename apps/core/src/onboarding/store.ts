@@ -161,6 +161,7 @@ import {
   documents,
   kickoff,
   links,
+  mailOutbox,
   onboarding,
   opinionBackers,
   opinionCandidates,
@@ -179,6 +180,7 @@ import {
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import {
+  emailHashOf,
   erasedEmailsAmong,
   isErasedEmail,
   normalizedEmail,
@@ -2001,7 +2003,7 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
-  /** Whoever core erased whose entry is still on the list (`#closeAndDeleteHeldBy`). */
+  /** Whoever core erased whose entry is still on the list (`eraseEntries`). */
   #erasedPeople(): Set<string> {
     return new Set(
       this.#db
@@ -5473,61 +5475,6 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Closes `person`'s link for good and deletes their interview, in one
-   * transaction, as core asks as it erases `account` (person-erasure.ts),
-   * but only while the link was sent by `sentBy`, isn't closed yet, and is
-   * held by `account` or by no account: checked by the same statement that
-   * closes it, so the next holder's link, after a new start, is never
-   * closed for someone else, and an erasure that finds the same link twice
-   * (by the account, then by the address) deletes it once. Its code goes,
-   * so it answers `interview.link_invalid`, it is marked erased, so no code
-   * is made for it again, and the account it belonged to and the address
-   * it went to are forgotten. Unlike a delete on their own request, no new
-   * interview can be saved under it. What they were asked about goes too
-   * (a referral naming them may have set it, `#referOne`): nobody asks them
-   * anything again. Their entry on the list stays, an admin's to remove;
-   * taken off the list, the mark goes with the link. Whether it did.
-   */
-  #closeAndDeleteHeldBy(
-    person: string,
-    account: string,
-    sentBy: string,
-    now: string
-  ): boolean {
-    return this.ctx.storage.transactionSync(() => {
-      const [link] = this.#db
-        .update(links)
-        .set({
-          // Their account and their address go: their interview leaves
-          // the new Brain (`owedErasures`), and nobody opens it again.
-          account: null,
-          sentTo: null,
-          erasedAt: now,
-        })
-        .where(
-          and(
-            eq(links.person, person),
-            lte(links.sentAt, sentBy),
-            isNull(links.erasedAt),
-            or(isNull(links.account), eq(links.account, account))
-          )
-        )
-        .returning({ person: links.person })
-        .all();
-      if (link === undefined) {
-        return false;
-      }
-      this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
-      this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
-      // Mail still to go about them (a reminder, say) goes nowhere now.
-      // Sent mail stays: the company's record, as the roster is.
-      dropMailAbout(this.ctx.storage.sql, person);
-      this.#deleteRows(person, { type: "system" }, now);
-      return true;
-    });
-  }
-
-  /**
    * Moves the interview that belongs to `from` to `to`: as `from` turned out
    * to be the member the directory made (`to`), at their first sign-in once
    * the gate opened (auth.ts `adoptDirectoryMember`), while their interview
@@ -5572,58 +5519,237 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Deletes `person`'s interview and closes their link for good, as core
-   * asks as it erases `account` (person-erasure.ts), but only a link that
-   * went out by `sentBy`, when the erasure was asked for (one sent after
-   * it went to someone the address was released to, whose interview
-   * stays), and that `account` or no account holds (after a new start,
-   * the next holder's interview stays: `#closeAndDeleteHeldBy`). Whether it
-   * deleted one.
+   * Takes whoever core erases as `account` (person-erasure.ts) off the
+   * list's addresses, in one transaction (GRA-2111): their entries, found
+   * by the account their link belongs to (GRA-1790) and, with `hash`, by
+   * every address that hashes to it (erased-people.ts `emailHashOf`),
+   * whatever the list has since. Every address of theirs (`hash`, and
+   * those of the entry and link their account holds) goes from the store:
+   * from their entries, from mail to it and from any link's record of
+   * having gone to it. Each entry stays, the company's (D5), without its
+   * address; its link is closed for good (`links.erased_at`, a closed one
+   * made where none went out), its interview goes, and so do its code,
+   * what it was asked about and every mail about it, sent or not. Only
+   * what went out by `sentBy`, when the erasure was asked for: a link sent
+   * to an entry since may be whoever the address was released to, and its
+   * entry is left as it is. An entry whose link another account opened
+   * only loses the address: the interview is that account's (GRA-1790).
+   * How many entries it found.
    */
-  async eraseInterviewOf(
-    person: string,
+  async eraseEntries(
     account: string,
+    hash: string | null,
     sentBy: string
-  ): Promise<boolean> {
+  ): Promise<number> {
     return await this.#fallenFirst(
-      async () => await this.#eraseInterviewOfOnce(person, account, sentBy)
+      async () => await this.#eraseEntriesOnce(account, hash, sentBy)
     );
   }
 
-  /** `eraseInterviewOf`, once: made again by `#fallenFirst` while claims fall. */
-  async #eraseInterviewOfOnce(
-    person: string,
+  /** `eraseEntries`, once: made again by `#fallenFirst` while claims fall. */
+  async #eraseEntriesOnce(
     account: string,
+    hash: string | null,
     sentBy: string
-  ): Promise<boolean> {
-    // Their link answers nothing any more and what they said is gone,
-    // before anything waits: no new interview is saved under the entry
-    // that stays, even while the Brain's and the voice's cleanup follow.
-    if (
-      !this.#closeAndDeleteHeldBy(
-        person,
-        account,
-        sentBy,
-        new Date().toISOString()
-      )
-    ) {
-      return false;
+  ): Promise<number> {
+    // A transaction can't wait on a hash: they are made first, and made
+    // again when an address came into the store meanwhile, so the erasure
+    // misses nothing written as it hashed.
+    const hashes = await this.#hashesOf(this.#addressesHeld());
+    const hashOf = (address: string | null | undefined): string | undefined =>
+      address === null || address === undefined
+        ? undefined
+        : hashes.get(normalizedEmail(address));
+    const now = new Date().toISOString();
+    const done = this.ctx.storage.transactionSync(() => {
+      if (
+        this.#addressesHeld().some(
+          (address) => !hashes.has(normalizedEmail(address))
+        )
+      ) {
+        return null;
+      }
+      const owned = this.personOfAccount(account);
+      const listed = this.#db
+        .select({ id: people.id, email: people.email })
+        .from(people)
+        .all();
+      const [ownedLink] = this.#db
+        .select({ sentTo: links.sentTo })
+        .from(links)
+        .where(eq(links.account, account))
+        .all();
+      const erasing = new Set(
+        [
+          hash ?? undefined,
+          hashOf(listed.find(({ id }) => id === owned)?.email),
+          hashOf(ownedLink?.sentTo),
+        ].filter((each) => each !== undefined)
+      );
+      const theirs = (address: string): boolean => {
+        const each = hashOf(address);
+        return each !== undefined && erasing.has(each);
+      };
+      let found = 0;
+      let closed = 0;
+      for (const { id, email } of listed) {
+        if (id === owned || theirs(email)) {
+          const erased = this.#eraseEntry(id, account, sentBy, now);
+          found += erased === "left" ? 0 : 1;
+          closed += erased === "closed" ? 1 : 0;
+        }
+      }
+      this.#forgetAddresses(theirs, sentBy);
+      return { found, closed };
+    });
+    if (done === null) {
+      return await this.#eraseEntriesOnce(account, hash, sentBy);
     }
-    this.#deliverAudit();
-    await this.#afterForget();
-    return true;
+    if (done.closed > 0) {
+      this.#deliverAudit();
+      await this.#afterForget();
+    }
+    return done.found;
   }
 
   /**
-   * Who is on the list, by their ID and email, for core to find someone it
-   * erases by the address that was theirs (person-erasure.ts): only core
-   * asks, and nothing of it leaves core.
+   * Erases entry `person` for `eraseEntries`, in its transaction: left as
+   * it is when its link went out after `sentBy` and isn't closed; else
+   * without its address, and, unless another account holds its link, that
+   * link closed for good (one made closed where none went out), its
+   * interview, code, what it was asked about and mail about it gone.
+   * Whether it was left, took only the address, or closed a link that
+   * held an interview.
    */
-  rosterEmails(): { id: string; email: string }[] {
-    return this.#db
-      .select({ id: people.id, email: people.email })
-      .from(people)
+  #eraseEntry(
+    person: string,
+    account: string,
+    sentBy: string,
+    now: string
+  ): "left" | "address" | "closed" {
+    const [link] = this.#db
+      .select()
+      .from(links)
+      .where(eq(links.person, person))
       .all();
+    // Sent since the erasure was asked for, and not closed: perhaps to
+    // whoever the address was released to, as this ran.
+    if (link !== undefined && link.erasedAt === null && link.sentAt > sentBy) {
+      return "left";
+    }
+    this.#db
+      .update(people)
+      .set({ email: "" })
+      .where(eq(people.id, person))
+      .run();
+    // A link someone else's account opened is theirs (GRA-1790), and so is
+    // its interview: only the address that was the erased person's goes.
+    if (
+      link !== undefined &&
+      link.account !== null &&
+      link.account !== account
+    ) {
+      return "address";
+    }
+    let erased: "address" | "closed" = "address";
+    if (link === undefined) {
+      // No link went out to them: one closed for good, as an erased link
+      // is (deleted and erased), so no link, reminder or mail goes.
+      this.#db
+        .insert(links)
+        .values({ person, sentAt: now, deletedAt: now, erasedAt: now })
+        .run();
+    } else if (link.erasedAt === null) {
+      this.#db
+        .update(links)
+        .set({ account: null, sentTo: null, erasedAt: now })
+        .where(eq(links.person, person))
+        .run();
+      this.#deleteRows(person, { type: "system" }, now);
+      erased = "closed";
+    }
+    this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
+    this.#db.delete(askedAbout).where(eq(askedAbout.person, person)).run();
+    this.#db.delete(mailOutbox).where(eq(mailOutbox.about, person)).run();
+    return erased;
+  }
+
+  /**
+   * For `eraseEntries`, in its transaction: mail to an address that is
+   * `theirs`, and any link's record of having gone to one, from before
+   * `sentBy`, when the erasure was asked for.
+   */
+  #forgetAddresses(theirs: (address: string) => boolean, sentBy: string): void {
+    for (const { key, to, queuedAt } of this.#db
+      .select({
+        key: mailOutbox.key,
+        to: mailOutbox.to,
+        queuedAt: mailOutbox.queuedAt,
+      })
+      .from(mailOutbox)
+      .all()) {
+      if (queuedAt <= sentBy && theirs(to)) {
+        this.#db.delete(mailOutbox).where(eq(mailOutbox.key, key)).run();
+      }
+    }
+    for (const { person, sentTo, sentAt } of this.#db
+      .select({
+        person: links.person,
+        sentTo: links.sentTo,
+        sentAt: links.sentAt,
+      })
+      .from(links)
+      .where(isNotNull(links.sentTo))
+      .all()) {
+      if (sentTo !== null && sentAt <= sentBy && theirs(sentTo)) {
+        this.#db
+          .update(links)
+          .set({ sentTo: null })
+          .where(eq(links.person, person))
+          .run();
+      }
+    }
+  }
+
+  /** Every address the store holds: on the list, on links and in mail. */
+  #addressesHeld(): string[] {
+    return [
+      ...this.#db
+        .select({ email: people.email })
+        .from(people)
+        .all()
+        .map(({ email }) => email),
+      ...this.#db
+        .select({ sentTo: links.sentTo })
+        .from(links)
+        .where(isNotNull(links.sentTo))
+        .all()
+        .flatMap(({ sentTo }) => (sentTo === null ? [] : [sentTo])),
+      ...this.#db
+        .selectDistinct({ to: mailOutbox.to })
+        .from(mailOutbox)
+        .all()
+        .map(({ to }) => to),
+    ].filter((address) => normalizedEmail(address) !== "");
+  }
+
+  /**
+   * The keyed hash erasure keeps of each address in `addresses`
+   * (erased-people.ts `emailHashOf`), by the address as it compares them
+   * (`normalizedEmail`): made before a transaction, which can't wait on one.
+   */
+  async #hashesOf(addresses: readonly string[]): Promise<Map<string, string>> {
+    const folded = new Set(
+      addresses.map(normalizedEmail).filter((address) => address !== "")
+    );
+    return new Map(
+      await Promise.all(
+        [...folded].map(
+          async (address) =>
+            [address, await emailHashOf(this.env, address)] as const
+        )
+      )
+    );
   }
 
   /**
@@ -5666,7 +5792,7 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Deletes `person`'s interview, in the caller's transaction, as `by`
-   * asked (`deleteOnRequest`, and core's erasure, `#closeAndDeleteHeldBy`):
+   * asked (`deleteOnRequest`, and core's erasure, `eraseEntries`):
    * what they said goes, a copy left open can't save it back (the link's
    * version moves on), and the audit log has that it was done, not for
    * whom.
@@ -9115,6 +9241,19 @@ export class Onboarding extends DurableObject<Env> {
       : { asked, others: pieces.filter(({ id }) => id !== asked.id) };
   }
 
+  /**
+   * Whether core erased `person`: it recorded the erasure of the address
+   * their entry has (erased-people.ts), or its interview area took the
+   * address off and closed their link already (`eraseEntries`), read
+   * last, after the wait.
+   */
+  async #erasedNow(person: string): Promise<boolean> {
+    const email = this.#roster()?.people.find(({ id }) => id === person)?.email;
+    const recorded =
+      email !== undefined && (await isErasedEmail(this.env, email));
+    return recorded || this.#erased(person);
+  }
+
   async #referOne(personId: string, at: string): Promise<void> {
     const done = () => {
       this.#db.delete(referrals).where(eq(referrals.person, personId)).run();
@@ -9138,11 +9277,14 @@ export class Onboarding extends DurableObject<Env> {
     const teamNames = new Map(roster.teams.map(({ id, name }) => [id, name]));
     // Someone erased stays on the list, the company's entry (D5), but is
     // never named again: found by the address that was theirs, as their
-    // erasure keeps it (erased-people.ts), until an admin releases it.
+    // erasure keeps it (erased-people.ts), until an admin releases it; and,
+    // once their erasure took the address off their entry, by its link,
+    // closed for good (`eraseEntries`). Both before the model is asked.
     const erased = await erasedEmailsAmong(
       this.env,
       roster.people.map(({ email }) => email)
     );
+    const closed = this.#erasedPeople();
     const found = await referralOf(
       this.env,
       {
@@ -9151,7 +9293,10 @@ export class Onboarding extends DurableObject<Env> {
         people: roster.people
           .filter(
             ({ id, away, email }) =>
-              id !== personId && !away && !erased.has(normalizedEmail(email))
+              id !== personId &&
+              !away &&
+              !erased.has(normalizedEmail(email)) &&
+              !closed.has(id)
           )
           .map(({ id, name, title, team }) => ({
             id,
@@ -9171,15 +9316,8 @@ export class Onboarding extends DurableObject<Env> {
     // found is dropped. The last read before the save, which is
     // synchronous from here on, so nothing of this object runs between
     // the two; an erasure core records after it comes after the save, and
-    // its interview area takes what the save wrote (`eraseInterviewOf`).
-    const namedEmail =
-      found.who === null
-        ? undefined
-        : this.#roster()?.people.find(({ id }) => id === found.who)?.email;
-    if (
-      namedEmail !== undefined &&
-      (await isErasedEmail(this.env, namedEmail))
-    ) {
+    // its interview area takes what the save wrote (`eraseEntries`).
+    if (found.who !== null && (await this.#erasedNow(found.who))) {
       done();
       return;
     }

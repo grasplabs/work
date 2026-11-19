@@ -751,7 +751,7 @@ describe("the directory's teams", () => {
     });
   });
 
-  it("leaves a mover whose first sign-in lands between the read's snapshot and its batch in the team their sign-in put them in, never in none, and moves them at the next read", async () => {
+  it("moves a member the directory made in the read their first sign-in lands in, between its snapshot and its batch, as the same member", async () => {
     const { admin } = await connectedDirectory(idp);
     const [before, after] = [
       await teamNamed(admin.session, `Before ${crypto.randomUUID()}`),
@@ -765,26 +765,29 @@ describe("the directory's teams", () => {
     const nameOf = (id: string) =>
       names.results.find((team) => team.id === id)?.name ?? "";
     const oid = crypto.randomUUID();
-    // Known to the directory in the first team, not signed in yet.
+    // Not signed in yet: the read makes them a member, in the first team.
     await directoryHolds([user({ id: oid, department: nameOf(before) })]);
     await readAt(nextDay());
+    const made = await env.DB.prepare(
+      "SELECT user_id FROM accounts WHERE provider_id = 'entra-directory' AND oid = ?"
+    )
+      .bind(oid)
+      .first<string>("user_id");
     await directoryHolds([user({ id: oid, department: nameOf(after) })]);
     let userId = "";
-    // Their first sign-in places them by the department saved so far,
-    // after the read took its snapshot and before its batch.
+    // Their first sign-in takes that member over after the read took its
+    // snapshot and before its batch.
     const { coreEnv, landed } = landingAt(readsBatch, "before", async () => {
       ({ userId } = await memberWith(oid));
     });
 
     await readAt(nextDay(), { DB: coreEnv.DB });
-    const thatRead = await teamsOf(userId);
-    await readAt(nextDay());
 
     expect({
       landed: landed(),
-      thatRead,
-      nextRead: await teamsOf(userId),
-    }).toStrictEqual({ landed: true, thatRead: [before], nextRead: [after] });
+      same: userId === made,
+      thatRead: await teamsOf(userId),
+    }).toStrictEqual({ landed: true, same: true, thatRead: [after] });
   });
 
   it("places thousands of signed-in people whose memberships, as one JSON value, are over what D1 takes in one", async () => {

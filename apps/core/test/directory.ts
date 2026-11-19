@@ -159,32 +159,47 @@ export const companyStep = "/setup?step=company";
 type Admin = Awaited<ReturnType<typeof signedInApi>>;
 
 /**
- * An admin who connected the directory from the company step (`by`, or a
- * new one): their API, and where the browser came back to.
+ * `admin` connecting the Microsoft directory from the page at `returnTo`,
+ * consenting as the Entra account `subject` of `tenant`: where the browser
+ * came back to.
  */
-export const connectedDirectory = async (idp: Idp, by?: Admin) => {
-  const admin = by ?? (await signedInApi(idp, "admin"));
+export const consentDirectory = async (
+  admin: Admin,
+  {
+    returnTo,
+    subject,
+    tenant = acmeTenant,
+  }: { returnTo: string; subject: string; tenant?: string }
+) => {
   const { url } = await admin.api.onboarding.connectDirectory(
     "microsoft",
-    companyStep
+    returnTo
   );
   const authorization = new URL(url);
   const response = await routed(
     `/api/connections/callback?${new URLSearchParams({
-      code: consentCode(
-        authorization,
-        acmeTenant,
-        `directory-${crypto.randomUUID()}`
-      ),
+      code: consentCode(authorization, tenant, subject),
       state: authorization.searchParams.get("state") ?? "",
     }).toString()}`,
     { headers: { cookie: admin.session } }
   );
   return {
-    admin,
     authorization,
     back: new URL(response.headers.get("location") ?? ""),
   };
+};
+
+/**
+ * An admin who connected the directory from the company step (`by`, or a
+ * new one): their API, and where the browser came back to.
+ */
+export const connectedDirectory = async (idp: Idp, by?: Admin) => {
+  const admin = by ?? (await signedInApi(idp, "admin"));
+  const { authorization, back } = await consentDirectory(admin, {
+    returnTo: companyStep,
+    subject: `directory-${crypto.randomUUID()}`,
+  });
+  return { admin, authorization, back };
 };
 
 /**

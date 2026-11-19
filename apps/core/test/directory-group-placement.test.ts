@@ -357,9 +357,11 @@ describe("teams that follow directory groups", () => {
     const { userId } = await whoami(session);
     const beforeRead = await teamsOf(userId);
     await readNext();
+    // The first read made them a member in the first team, before they
+    // signed in (GRA-2156); the team the group moved to waits for a read.
     expect({ beforeRead, after: await teamsOf(userId) }).toStrictEqual({
-      beforeRead: [],
-      after: [second],
+      beforeRead: [first],
+      after: sorted(first, second),
     });
   });
 

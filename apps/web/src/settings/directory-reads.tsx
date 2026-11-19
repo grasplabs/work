@@ -18,6 +18,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { adviceOf } from "./directory-read-advice.ts";
 import type { ReadAdvice } from "./directory-read-advice.ts";
+import { DirectoryReconnect } from "./directory-reconnect.tsx";
 import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 
 // Where the directory's daily read stands (GRA-2056, slice 4; GRA-2144),
@@ -27,9 +28,10 @@ import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 // one line. Nothing shows before a read was tried (with no directory, the
 // admin's own list is the source), nor when it can't be read.
 //
-// A directory connection can't be connected again outside the onboarding
-// yet (its company step offers the sign-ins only before there is a
-// roster): the advice says so rather than linking there.
+// Each directory can be connected again under its status
+// (directory-reconnect.tsx, GRA-2171): what mends a read that needs it,
+// and what grants a scope asked for since (its groups'), which no read
+// fails for.
 
 /** The directory's provider, by its product's name (not translated). */
 const providerNames: Record<DirectoryProvider, string> = {
@@ -42,9 +44,8 @@ const FailureAdvice = ({ advice }: { advice: ReadAdvice }) => {
   const said: Record<ReadAdvice, ReactElement> = {
     connect: (
       <Trans>
-        Grasp can’t read the directory with the connection it has: an
-        administrator of your organization has to connect it again. That can’t
-        be done from Settings yet, so ask Grasp’s support.
+        Grasp can’t read the directory with the connection it has. Connect it
+        again, signing in with an account that administers your directory.
       </Trans>
     ),
     tooLarge: (
@@ -140,6 +141,7 @@ const ReadStatus = ({ read }: { read: DirectoryRead }) => {
           </AlertDescription>
         </Alert>
       )}
+      <DirectoryReconnect name={name} provider={read.provider} />
     </div>
   );
 };

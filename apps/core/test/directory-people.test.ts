@@ -604,7 +604,7 @@ describe("the directory's daily read", () => {
     });
   });
 
-  it("after the erasure of a member a Teams message made, who never signed in, keeps nothing of them, though the directory still lists them", async () => {
+  it("ties a member a Teams message made, who never signed in, and after their erasure keeps nothing of them, though the directory still lists them", async () => {
     const oid = crypto.randomUUID();
     await directoryHolds([
       user({ id: oid, displayName: "Sanne de Vries", department: "Finance" }),
@@ -629,13 +629,13 @@ describe("the directory's daily read", () => {
 
     expect({
       accounts: made.results.map(({ provider }) => provider),
-      // Never tied: a tie is for a Microsoft sign-in alone.
+      // Tied by the account the directory made them, in its tenant.
       listed: listed?.userId,
       erased,
       after: await rowOf(oid),
     }).toStrictEqual({
       accounts: ["entra-directory"],
-      listed: null,
+      listed: userId,
       erased: undefined,
       after: undefined,
     });
