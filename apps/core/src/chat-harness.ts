@@ -1084,9 +1084,9 @@ export class ChatHarness {
     // turn asked again sets up and recalls again, a second recall run
     // audited as the first was. Who reads the answer decides what it may
     // hand over (turn-recall.ts).
-    const recall = request.readsBrain
-      ? await this.#recall(turn, request)
-      : undefined;
+    // Without the Brain grant, only the person's own profile, in their own
+    // chat (turn-recall.ts `findsOf`, GRA-2202).
+    const recall = await this.#recall(turn, request);
     try {
       return await this.#conversation.submit(
         {
@@ -1113,7 +1113,8 @@ export class ChatHarness {
               ...(request.question.built === undefined
                 ? {}
                 : { built: shownBuilt(request.question.built) }),
-              ...(recall === undefined
+              // A step for a search alone: a profile handed over is none.
+              ...(recall === undefined || !recall.searched
                 ? {}
                 : {
                     recall: {
@@ -1142,7 +1143,7 @@ export class ChatHarness {
    */
   async #recall(
     turn: CodeTurn,
-    { question: { text }, shared, audience, personal }: TurnRequest
+    { question: { text }, shared, audience, personal, readsBrain }: TurnRequest
   ) {
     const { messages } = await this.#conversation.context(context);
     return await recallForTurn(
@@ -1155,6 +1156,7 @@ export class ChatHarness {
         personal,
         history: messages,
         provenance: this.#sources,
+        grant: readsBrain,
       },
       text
     );
