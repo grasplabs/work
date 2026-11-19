@@ -78,8 +78,7 @@ export const ShellPending = () => {
             />
           )
         }
-        menuCloseLabel={t`Close the menu`}
-        menuLabel={t`Menu`}
+        words={{ closeMenu: t`Close the menu`, menu: t`Menu` }}
         page={chatPage ? "whole" : "padded"}
         sidebar={
           <Sidebar

@@ -973,7 +973,7 @@ const Models = ({
                   }
                 }}
                 placeholder={t`Search models`}
-                triggerLabel={t`Show the models`}
+                words={{ trigger: t`Show the models` }}
                 size="sm"
                 value={defaultModel}
               />
@@ -1011,7 +1011,7 @@ const Models = ({
                   }
                 }}
                 placeholder={t`Search models`}
-                triggerLabel={t`Show the models`}
+                words={{ trigger: t`Show the models` }}
                 size="sm"
                 value={null}
               />

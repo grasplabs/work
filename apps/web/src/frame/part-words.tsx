@@ -674,6 +674,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       },
       voice: {
         asking: t`Asking for the microphone`,
+        askingShort: t`Asking…`,
         listening: t`Listening`,
         speaking: t`Speaking`,
         thinking: t`Writing it down`,
@@ -743,6 +744,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       building: t`Being built`,
       failed: t`Didn't start`,
       empty: t`No preview yet`,
+      newApp: t`New app`,
     },
     appPreview: {
       region: t`App preview`,

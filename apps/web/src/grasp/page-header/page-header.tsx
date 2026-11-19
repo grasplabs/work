@@ -163,15 +163,45 @@ const styles = stylex.create({
     alignItems: { default: "flex-end", [PHONE]: "start" },
   },
   wordsFold: { display: { default: "grid", [PHONE]: "contents" } },
+  // With a title alone on its line, on a phone the actions hold the end of the title's first line
+  // only: an unseen copy of them floats there inside the h1, so the title's later lines run the
+  // whole width under them, and the actions themselves stand over that copy.
+  // The words and the actions share one cell, the actions at its top end over the room, so the row
+  // is as tall as the taller of them.
+  rowFloats: {
+    display: { default: "flex", [PHONE]: "grid" },
+    gridTemplateColumns: { default: null, [PHONE]: "minmax(0, 1fr)" },
+    alignItems: { default: "flex-end", [PHONE]: "start" },
+  },
+  oneCell: { gridColumn: 1, gridRow: 1 },
+  phoneFloats: { gridColumn: 1, gridRow: 1, justifySelf: "end" },
+  // Balanced lines are measured without the float, so beside it they run under the actions.
+  // It fills its line, so the room stands at the line's end even after a short title.
+  titleFlows: {
+    textWrap: { default: "balance", [PHONE]: "pretty" },
+    flexGrow: 1,
+  },
+  room: {
+    display: { default: "none", [PHONE]: "flex" },
+    float: "inline-end",
+    alignItems: "center",
+    gap: grasp.space2,
+    marginInlineStart: grasp.space4,
+    // Exactly one of the title's lines tall, at every size: only its width matters.
+    height: "1lh",
+    // Unseen by opacity: Button's own layers set their visibility, which a hidden parent cannot
+    // undo. It lies exactly under the actions themselves, aria-hidden and inert.
+    opacity: 0,
+    pointerEvents: "none",
+  },
   under: { gridColumn: { default: null, [PHONE]: "1 / -1" } },
   wide: { display: { default: "flex", [PHONE]: "none" } },
   phone: {
     display: { default: "none", [PHONE]: "flex" },
     flexWrap: "nowrap",
-    gridColumn: 2,
-    gridRow: 1,
     alignSelf: "start",
   },
+  phoneColumn: { gridColumn: 2, gridRow: 1 },
   // Each action of the wide row, as it is: a box that takes no room of its own.
   given: { display: "contents" },
   mainWords: { display: { default: "contents", [NARROWEST]: "none" } },
@@ -387,6 +417,40 @@ const FoldedItem = ({
 };
 
 /**
+ * The room the actions take at the end of the title's first line, on a phone: the same Buttons,
+ * unseen (opacity), out of the accessibility tree and inert, floated inside the h1 under the
+ * actions themselves, so its words flow round them and then run the whole width beneath. A page
+ * search can find the main action's words twice, both in the one place.
+ */
+const Room = ({ folding }: { folding: Folding }) => {
+  const { main, others } = folding;
+  return (
+    <span aria-hidden="true" inert {...stylex.props(styles.room)}>
+      {others.length > 0 && (
+        <Button
+          icon={More}
+          aria-label=""
+          variant="ghost"
+          size={main.props.size ?? "sm"}
+        />
+      )}
+      <span
+        {...stylex.props(
+          main.props.icon === undefined ? undefined : styles.mainWords
+        )}
+      >
+        {main}
+      </span>
+      {main.props.icon !== undefined && (
+        <span {...stylex.props(styles.mainIcon)}>
+          {createElement(Button, iconOnly(main.props, main.props.icon))}
+        </span>
+      )}
+    </span>
+  );
+};
+
+/**
  * The actions: as given on a wide row; on a phone the main one at the end and the others folded into
  * one More menu beside it, a danger one last and apart. A folded action, chosen, presses its own
  * Button, kept in the wide row, which is `display: none` there: out of the tab order, the
@@ -395,9 +459,11 @@ const FoldedItem = ({
 const Folded = ({
   folding,
   look,
+  floats,
 }: {
   folding: Folding;
   look: stylex.StyleXStyles;
+  floats: boolean;
 }) => {
   const wide = useRef<HTMLDivElement | null>(null);
   const { more } = useWords("dropdownMenu", dropdownMenuWords);
@@ -423,7 +489,14 @@ const Folded = ({
           </span>
         ))}
       </div>
-      <div {...stylex.props(styles.actions, look, styles.phone)}>
+      <div
+        {...stylex.props(
+          styles.actions,
+          look,
+          styles.phone,
+          floats ? styles.phoneFloats : styles.phoneColumn
+        )}
+      >
         {others.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -480,15 +553,25 @@ const Words = ({
   loading,
   look,
   folds,
+  room,
+  oneCell,
 }: Pick<PageHeaderProps, "title" | "description" | "aside" | "loadingLines"> & {
   descriptionLines: NonNullable<PageHeaderProps["descriptionLines"]>;
   loading: boolean;
   look: (typeof sizeLooks)[keyof typeof sizeLooks];
   folds: boolean;
+  room: ReactNode;
+  oneCell: boolean;
 }) => {
   const arrived = useArrived(loading);
   return (
-    <div {...stylex.props(styles.words, folds && styles.wordsFold)}>
+    <div
+      {...stylex.props(
+        styles.words,
+        folds && styles.wordsFold,
+        oneCell && styles.oneCell
+      )}
+    >
       {loading ? (
         <>
           <Skeleton
@@ -510,7 +593,16 @@ const Words = ({
       ) : (
         <>
           <div {...stylex.props(styles.titleRow, arrived && arrive.in)}>
-            <h1 {...stylex.props(styles.title, look.title)}>{title}</h1>
+            <h1
+              {...stylex.props(
+                styles.title,
+                look.title,
+                room !== false && room !== undefined && styles.titleFlows
+              )}
+            >
+              {room}
+              {title}
+            </h1>
             {aside}
           </div>
           {description !== undefined && (
@@ -555,6 +647,9 @@ export const PageHeader = ({
 }: PageHeaderProps) => {
   const look = sizeLooks[size];
   const folding = foldingOf(actions);
+  // The title's later lines run under the actions when the title stands alone on its line, words
+  // and not placeholders; with something beside it, the actions keep a column of their own.
+  const floats = folding !== undefined && !loading && aside === undefined;
   return (
     <header
       data-slot="page-header"
@@ -563,7 +658,10 @@ export const PageHeader = ({
     >
       {breadcrumb}
       <div
-        {...stylex.props(styles.row, folding !== undefined && styles.rowFolds)}
+        {...stylex.props(
+          styles.row,
+          folding !== undefined && (floats ? styles.rowFloats : styles.rowFolds)
+        )}
       >
         <Words
           title={title}
@@ -573,14 +671,16 @@ export const PageHeader = ({
           aside={aside}
           loading={loading}
           look={look}
-          folds={folding !== undefined}
+          folds={folding !== undefined && !floats}
+          room={floats && <Room folding={folding} />}
+          oneCell={floats}
         />
         {folding === undefined ? (
           actions !== undefined && (
             <div {...stylex.props(styles.actions, look.actions)}>{actions}</div>
           )
         ) : (
-          <Folded folding={folding} look={look.actions} />
+          <Folded folding={folding} look={look.actions} floats={floats} />
         )}
       </div>
       {tabs !== undefined && <div {...stylex.props(styles.tabs)}>{tabs}</div>}

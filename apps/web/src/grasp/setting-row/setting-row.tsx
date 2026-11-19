@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
 import { useWords, withGiven } from "../words/words";
 import { RowProblem } from "./line-context";
 import { settingRowWords } from "./words";
+import type { SettingRowWords } from "./words";
 
 /** What a caller may style: where the rows sit and how wide they are. Never their look. */
 export type SettingsRowsLayoutStyle = LayoutStyle;
@@ -66,6 +67,12 @@ export interface SettingRowProps {
   failedLabel?: string;
   /** The button that saves again. @default "Try again" */
   retryLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ failed: "Could not save. Your name is kept." }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SettingRowWords>;
 }
 
 /** Every prop a FactRow takes. */
@@ -80,6 +87,12 @@ export interface FactRowProps {
   infoLabel?: string;
   /** Its value, in the control's place: words, a Badge, a Copy field. */
   children: ReactNode;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ info: "More about this fact" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SettingRowWords>;
 }
 
 /** Every prop a RowAlert takes. */
@@ -329,6 +342,7 @@ export const SettingRow = ({
   savedLabel: savedLabelGiven,
   failedLabel: failedLabelGiven,
   retryLabel: retryLabelGiven,
+  words,
 }: SettingRowProps) => {
   const {
     info: infoLabel,
@@ -336,7 +350,7 @@ export const SettingRow = ({
     saved: savedLabel,
     failed: failedLabel,
     retry: retryLabel,
-  } = withGiven(useWords("settingRow", settingRowWords), {
+  } = withGiven(useWords("settingRow", settingRowWords, words), {
     info: infoLabelGiven,
     saving: savingLabelGiven,
     saved: savedLabelGiven,
@@ -429,10 +443,11 @@ export const FactRow = ({
   help,
   info,
   infoLabel: infoLabelGiven,
+  words,
   children,
 }: FactRowProps) => {
   const { info: infoLabel } = withGiven(
-    useWords("settingRow", settingRowWords),
+    useWords("settingRow", settingRowWords, words),
     { info: infoLabelGiven }
   );
   return (

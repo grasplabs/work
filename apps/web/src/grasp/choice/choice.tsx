@@ -28,7 +28,7 @@ import { FieldDescription, FieldError } from "../field";
 import type { FieldErrorWords } from "../field";
 import { noteStyles } from "../field/field";
 import { fieldMarker } from "../field/field.stylex";
-import { RequiredMark, labelStyles } from "../label/label";
+import { labelStyles } from "../label/label";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { wrap } from "../wrap/wrap";
@@ -93,7 +93,7 @@ interface GroupedRowProps extends Pick<
   | "children"
 > {
   end: boolean;
-  mark: ReactNode;
+  required: boolean;
   row: ReturnType<typeof stylex.props>;
 }
 
@@ -110,7 +110,7 @@ const GroupedRow = ({
   invalid,
   disabled,
   end,
-  mark,
+  required,
   row,
   children,
 }: GroupedRowProps) => {
@@ -135,10 +135,13 @@ const GroupedRow = ({
           id={name}
           htmlFor={box}
           data-disabled={off}
-          {...stylex.props(labelStyles.label, wrap.words)}
+          {...stylex.props(
+            labelStyles.label,
+            wrap.words,
+            required && labelStyles.required
+          )}
         >
           {label}
-          {mark}
         </LabelPrimitive>
         {description !== undefined && (
           <p
@@ -191,7 +194,6 @@ export const ChoiceRow = ({
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     ...((layout ?? style ?? []) as never[])
   );
-  const mark = required && <RequiredMark />;
 
   if (grouped) {
     return (
@@ -203,7 +205,7 @@ export const ChoiceRow = ({
         invalid={invalid}
         disabled={disabled}
         end={end}
-        mark={mark}
+        required={required}
         row={row}
       >
         {children}
@@ -219,10 +221,13 @@ export const ChoiceRow = ({
         <FieldLabelPrimitive
           id={name}
           htmlFor={box}
-          {...stylex.props(labelStyles.label, wrap.words)}
+          {...stylex.props(
+            labelStyles.label,
+            wrap.words,
+            required && labelStyles.required
+          )}
         >
           {label}
-          {mark}
         </FieldLabelPrimitive>
         {description !== undefined && (
           <FieldDescription>{description}</FieldDescription>

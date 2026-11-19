@@ -4,10 +4,12 @@ export interface AppCardLabels {
   more: string;
   /** The meta line while the app is first built. */
   building: string;
-  /** The meta line, and the window, when the app did not start. */
+  /** The window's line when the app did not start. */
   failed: string;
   /** The window when there is no preview yet. */
   empty: string;
+  /** The New app card's words: its title and its press. */
+  newApp: string;
 }
 
 export { englishLabels } from "./words";

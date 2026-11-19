@@ -185,7 +185,7 @@ const TimeZoneField = ({
           // Read-only while its own save runs, not disabled: a disabled field drops the keyboard's focus.
           readOnly={!canChange || busy}
           size="sm"
-          triggerLabel={t`Show the time zones`}
+          words={{ trigger: t`Show the time zones` }}
           value={saved}
         />
       )}

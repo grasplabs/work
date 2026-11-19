@@ -194,14 +194,16 @@ export const AppFrame = ({
           {...(dockShown ? {} : { roomBelow: "page" as const })}
           {...shellPanelsOf(panels)}
           {...pagePanel.shell}
-          menuCloseLabel={t`Close the menu`}
-          menuLabel={t`Menu`}
+          words={{
+            closeMenu: t`Close the menu`,
+            menu: t`Menu`,
+            resize: t`Resize the chat`,
+            closePanel: t`Close the chat`,
+            togglePanel: t`Show or hide the chat`,
+          }}
           menuOpen={menuOpen}
           onMenuOpenChange={setMenuOpen}
           page={chatPage || whole ? "whole" : "padded"}
-          panelResizeLabel={t`Resize the chat`}
-          panelsCloseLabel={t`Close the chat`}
-          panelsToggleLabel={t`Show or hide the chat`}
           // No tree lines on nested rows: Ruben saw them and took them out (18 Nov 2026).
           sidebar={<Sidebar {...sidebar} guides={false} />}
         >

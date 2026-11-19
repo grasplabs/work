@@ -3330,6 +3330,10 @@ msgstr "Pidiendo el micrófono"
 msgid "Asking to connect {binding}"
 msgstr "Pidiendo conectar {binding}"
 
+#: src/frame/part-words.tsx
+msgid "Asking…"
+msgstr "Pidiendo…"
+
 #: src/onboarding/send-plan-form.tsx
 msgctxt "at an hour of the day: on Tuesday at 9:00"
 msgid "at"
@@ -9699,6 +9703,10 @@ msgstr "Nuevo"
 #: src/routes/_shell.agents.new.tsx
 msgid "New agent"
 msgstr "Nuevo agente"
+
+#: src/frame/part-words.tsx
+msgid "New app"
+msgstr "Nueva app"
 
 #: src/apps/blueprints.tsx
 msgid "New Apps can start from version {version} of {name}, as a copy with none of its data. {name} itself stays as it is."

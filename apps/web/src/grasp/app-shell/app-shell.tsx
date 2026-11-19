@@ -37,6 +37,7 @@ import { escapeSetsAside } from "./focus-return";
 import { Panels, ShellCoverContext } from "./panels";
 import type { Cover } from "./panels";
 import { appShellWords } from "./words";
+import type { AppShellWords } from "./words";
 
 /** What a caller may style: the shell's size and where it sits. Never its look. */
 export type AppShellLayoutStyle = LayoutStyle;
@@ -293,6 +294,12 @@ export interface AppShellProps {
   onPagePanelOpenChange?: (open: boolean) => void;
   /** The page panel's name, for a screen reader and its sheet. @default "Details" */
   pagePanelLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key: the words of its place
+   * (`{ closePanel: "Close the chat", resize: "Resize the chat" }`). Any left out are the catalogue's,
+   * else English. A flat text prop given beside it still wins until the release's step 5.
+   */
+  words?: Partial<AppShellWords>;
   /**
    * A panel lies over the whole page: the panels, or one of your own. The page fades out and takes
    * no presses or keys.
@@ -1339,6 +1346,8 @@ type CardProps = Pick<
   | "pagePanel"
   | "onPagePanelOpenChange"
 > & {
+  /** The bar's More button's name, once its actions fold into it. */
+  moreLabel?: string;
   /** The page's panel stands beside the page: given, open and not given way to the docked chat. */
   pagePanelShown: boolean;
   /** On a narrow card its sheet is open: only when the host asked for it open. */
@@ -1791,6 +1800,7 @@ const ShellCard = ({
   page = "padded",
   roomBelow,
   breadcrumbLabel,
+  moreLabel,
   menuLabel,
   menuCloseLabel,
   dock,
@@ -1915,6 +1925,7 @@ const ShellCard = ({
             actions={actions}
             actionItems={actionItems}
             breadcrumbLabel={breadcrumbLabel}
+            moreLabel={moreLabel}
           />
         </div>
       ) : (
@@ -2115,13 +2126,20 @@ export const AppShell = ({
   onMenuOpenChange,
   pagePanelOpen,
   pagePanelLabel,
+  words,
   ...page
 }: AppShellProps) => {
   const sidebar = given;
-  const said = withGiven(useWords("appShell", appShellWords), {
+  // Every word the shell says, resolved once: English, the catalogue, this instance's `words`, then
+  // any flat prop; the parts below take them as given.
+  const said = withGiven(useWords("appShell", appShellWords, words), {
     closePanel: panelsCloseLabel,
     togglePanel: panelsToggleLabel,
     pagePanel: pagePanelLabel,
+    resize: panelResizeLabel,
+    breadcrumb: page.breadcrumbLabel,
+    menu: page.menuLabel,
+    closeMenu: page.menuCloseLabel,
   });
   const [sidebarOpen, setSidebarOpen] = useSidebarOpen(sidebar);
   const [sidebarPeeking, setSidebarPeeking] = useState(false);
@@ -2171,6 +2189,10 @@ export const AppShell = ({
   const card = (
     <ShellCard
       {...page}
+      breadcrumbLabel={said.breadcrumb}
+      menuLabel={said.menu}
+      menuCloseLabel={said.closeMenu}
+      moreLabel={said.more}
       sidebar={sidebar}
       bar={bar}
       shell={shell}
@@ -2244,7 +2266,7 @@ export const AppShell = ({
           max={maxPanelWidth}
           covered={over}
           aside={phone && aside}
-          resizeLabel={panelResizeLabel}
+          resizeLabel={said.resize}
           onWidthChange={onPanelWidthChange}
           onNarrowChange={setNarrow}
           onCrowdedChange={setCrowded}
