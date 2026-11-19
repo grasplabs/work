@@ -11,7 +11,7 @@ import type {
   ShareCandidates,
 } from "@grasp-os/shared/apps";
 import { i18n as pageI18n } from "@lingui/core";
-import type { I18n } from "@lingui/core";
+import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -22,6 +22,7 @@ import { useGlobalChat } from "../chat/global-chat.tsx";
 import { formatList } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Checkbox } from "../grasp/checkbox/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
@@ -31,7 +32,32 @@ import {
   FieldDescription,
   FieldLabel,
 } from "../grasp/field/index.ts";
-import { Database, Key, People, Sparkles } from "../grasp/icons/index.ts";
+import {
+  ChevronRight,
+  Database,
+  Done,
+  Edit,
+  Key,
+  Link as LinkIcon,
+  People,
+  Sparkles,
+  Upload,
+} from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import {
+  Popover,
+  PopoverContent,
+  PopoverFooter,
+  PopoverTitle,
+  PopoverTrigger,
+} from "../grasp/popover/index.ts";
 import {
   Sheet,
   SheetBody,
@@ -48,6 +74,8 @@ import { usePeopleApart } from "../people/people-apart.ts";
 import { useCore } from "../use-core.ts";
 import { ConfirmChange, useDraftChange } from "./app-history.tsx";
 import type { Asked } from "./app-history.tsx";
+import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
+import { userNames } from "./app-status.tsx";
 import { planLines } from "./data-model-changes.tsx";
 import {
   AccessChanges,
@@ -62,29 +90,33 @@ import { fixQuestion } from "./fix-with-grasp.ts";
 import { isConflict, publishFailureText, settled } from "./publish-errors.ts";
 import { hasChanges } from "./use-app-draft.ts";
 
-// Share with your team, in the App's workspace bar (app-workspace.tsx):
-// the page's one lime action, in place of a separate Publish and Share.
-// It opens a sheet that asks who gets the App (its teams and people, by
-// name, those it is shared with already ticked), says what they'll see,
-// names any access an admin approves first, and what in the App's
-// changes stops it from being shared, with Fix with Grasp. Share does
-// both in one step, with core's own calls: it publishes the changes only
-// the builders see (`apps.drafts.publish`, over the revision the sheet
-// read, so a draft someone changed meanwhile is refused with
-// `app.conflict` and read again rather than shared unseen), then shares
-// the App with whoever was ticked and has no share of it yet
-// (`apps.members.add`), so nobody's role changes. A toast says "Shared
-// with …", with Undo: whoever the share added is taken off again, the
-// version the team had before is theirs again (`apps.versions.publish`
-// over the one just made, so a colleague's since stays), and the changes
-// shared are the builders' draft again (`apps.drafts.restorePoint`), as
-// before the share; confirmed first when the App changed since. The
-// toasts outlive the workspace, so Undo works after leaving it.
+// The end of the App's workspace bar (app-workspace.tsx): Share, then
+// Publish, the page's one ink action.
 //
-// Once the App is shared, changes stay its builders' until they share
-// them: one slim line under the bar says how many and of what, with
-// Share changes, which publishes them as Share does, and Undo, which
-// discards them once the person confirms (app-history.tsx).
+// Share opens a sheet that asks who gets the App (its teams and people,
+// by name, those it is shared with already ticked) and shares it with
+// whoever was ticked and has no share of it yet (`apps.members.add`), so
+// nobody's role changes. A toast says "Shared with …", with Undo, which
+// takes them off again.
+//
+// Publish opens a popover that says where the App stands (live and at
+// which version, or not yet), its address, who can open it, and how the
+// check of its changes stands, with what an admin approves first and
+// what stops it, with Fix with Grasp. Publish makes the changes only the
+// builders see what everyone it is shared with opens, with core's own
+// call (`apps.drafts.publish`, over the revision the popover read, so a
+// draft someone changed meanwhile is refused with `app.conflict` and read
+// again rather than published unseen). A toast says it is live, with
+// Undo over a version the team had before: that version is theirs again
+// (`apps.versions.publish` over the one just made, so a colleague's since
+// stays), and the changes published are the builders' draft again
+// (`apps.drafts.restorePoint`); confirmed first when the App changed
+// since. The toasts outlive the workspace, so Undo works after leaving
+// it.
+//
+// Once the App is live, changes stay its builders' until they publish
+// them: one slim line under the bar says how many and of what, and Undo,
+// which discards them once the person confirms (app-history.tsx).
 
 /** What the panel read of the draft's changes, or why it couldn't. */
 type ChangesRead =
@@ -187,12 +219,13 @@ export const changeSummaries = (changes: AppDraftChanges): string[] =>
     return count === 0 ? [] : [groupCount(group, count)];
   });
 
-/** The problems that stop it from being shared, a few, and Fix with Grasp. */
 const styles = stylex.create({
-  // Share's words from a phone's width on, its icon alone below it.
+  // Share and Publish's words from a phone's width on; below it Publish's
+  // icon alone, and Share in its popover.
   wide: { display: { default: "contents", [media.belowPhone]: "none" } },
   narrow: { display: { default: "none", [media.belowPhone]: "contents" } },
   stack: { display: "grid", gap: grasp.space3, minWidth: 0 },
+  facts: { display: "grid", gap: grasp.space1, minWidth: 0 },
   tight: {
     display: "grid",
     gap: grasp.space1,
@@ -206,7 +239,7 @@ const styles = stylex.create({
   strip: { flexShrink: 0 },
 });
 
-/** What stops the changes being shared, the first few, and Fix with Grasp. */
+/** What stops the changes being published, the first few, and Fix with Grasp. */
 const Problems = ({
   problems,
   onFix,
@@ -221,8 +254,8 @@ const Problems = ({
   return (
     <Alert
       title={t`${plural(count, {
-        one: "It can't be shared yet: # problem",
-        other: "It can't be shared yet: # problems",
+        one: "It can't be published yet: # problem",
+        other: "It can't be published yet: # problems",
       })}`}
       tone="danger"
     >
@@ -275,7 +308,7 @@ const Summary = ({ changes }: { changes: AppDraftChanges }) => {
   );
 };
 
-/** What applies to the changes being shared: their data, an admin's approval, problems. */
+/** What applies to the changes being published: their data, an admin's approval, problems. */
 const ChangesNotes = ({
   changes,
   onFix,
@@ -323,15 +356,16 @@ const ChangesNotes = ({
 };
 
 /**
- * What Undo puts back: whom a share added, and, when it made a new
- * version current over one the team had (`before`) from the draft at
+ * What Undo puts back: whom a share added, and, when publishing made a
+ * new version current over one the team had (`before`) from the draft at
  * `revision`, that version again over the new one (`made`), with the
- * draft as it was shared.
+ * draft as it was published; `undone` says so once it is.
  */
 interface Undoable {
   app: string;
   added: readonly AppMemberRef[];
   back: { before: number; made: number; revision: number } | undefined;
+  undone: MessageDescriptor;
 }
 
 /**
@@ -352,14 +386,14 @@ const undoFailed = (error: unknown): void => {
 
 /**
  * The version the team had before, current again over the App's changes
- * at `revision`, while the one the share made still is: a colleague's
- * share since stays. Then the draft as it was shared is the draft again,
- * over that version (its undo point at the revision shared), so nothing
- * of the builders' work is left only in History.
+ * at `revision`, while the one publishing made still is: a colleague's
+ * since stays. Then the draft as it was published is the draft again,
+ * over that version (its undo point at the revision published), so
+ * nothing of the builders' work is left only in History.
  */
 const takeBack = async (
   { core, router, onDone }: UndoTools,
-  app: string,
+  { app, undone }: Undoable,
   back: NonNullable<Undoable["back"]>,
   revision: number
 ): Promise<void> => {
@@ -369,9 +403,13 @@ const takeBack = async (
       session.apps.drafts.points(app),
       session.apps.drafts.get(app),
     ]);
-    const shared = points.find((point) => point.revision === back.revision);
-    if (shared !== undefined) {
-      await session.apps.drafts.restorePoint(app, shared.number, now.revision);
+    const published = points.find((point) => point.revision === back.revision);
+    if (published !== undefined) {
+      await session.apps.drafts.restorePoint(
+        app,
+        published.number,
+        now.revision
+      );
     }
   });
   onDone();
@@ -380,20 +418,21 @@ const takeBack = async (
     undoFailed(done.error);
     return;
   }
-  toast.success(pageI18n._(msg`Sharing undone`));
+  toast.success(pageI18n._(undone));
 };
 
 /**
- * Undo, from the toast that says it was shared: takes off whoever was
- * added, then puts back the version the team had before, once the person
- * confirms in a toast of its own when the App changed since. Works from
- * the toast alone, after the workspace was left.
+ * Undo, from the toast that says it was shared or published: takes off
+ * whoever was added, then puts back the version the team had before, once
+ * the person confirms in a toast of its own when the App changed since.
+ * Works from the toast alone, after the workspace was left.
  */
-const undoShare = async (
+const undoChange = async (
   tools: UndoTools,
-  { app, added, back }: Undoable
+  undoable: Undoable
 ): Promise<void> => {
   const { core, router, onDone } = tools;
+  const { app, added, back, undone } = undoable;
   const removed = await settled(core, async (session) => {
     for (const member of added) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
@@ -407,7 +446,7 @@ const undoShare = async (
   if (back === undefined) {
     onDone();
     await router.invalidate();
-    toast.success(pageI18n._(msg`Sharing undone`));
+    toast.success(pageI18n._(undone));
     return;
   }
   const draft = await settled(
@@ -420,30 +459,31 @@ const undoShare = async (
   }
   const { revision } = draft.value;
   if (!hasChanges(draft.value)) {
-    await takeBack(tools, app, back, revision);
+    await takeBack(tools, undoable, back, revision);
     return;
   }
   toast.warning(pageI18n._(msg`Give your team the version they had before?`), {
     description: pageI18n._(
-      msg`The App changed since you shared it. Going back drops those changes, for everyone who builds this App.`
+      msg`The App changed since you published it. Going back drops those changes, for everyone who builds this App.`
     ),
     // It stays until it is answered: it asks something.
     duration: Number.POSITIVE_INFINITY,
     action: {
       label: pageI18n._(msg`Drop them and go back`),
       onAction: () => {
-        void takeBack(tools, app, back, revision);
+        void takeBack(tools, undoable, back, revision);
       },
     },
   });
 };
 
 /**
- * The version sharing makes current as it is, with nothing shared yet and
- * changes over it that change nothing (the first of an App made from a
- * blueprint); none otherwise, when the changes are what is shared.
+ * The version publishing makes current as it is, with nothing published
+ * yet and changes over it that change nothing (the first of an App made
+ * from a blueprint); none otherwise, when the changes are what is
+ * published.
  */
-const versionToShare = (
+const versionToPublish = (
   app: App,
   draft: AppDraft | undefined
 ): number | undefined =>
@@ -463,19 +503,19 @@ export interface Recipient extends AppMemberRef {
 }
 
 /**
- * Shares `app`: publishes its changes (`changes`, as read, when there are
- * any to share), then shares it with `recipients`; `onShared` and a toast
- * with Undo once done; why not otherwise, and `again` when the App moved,
- * so its changes are read again.
+ * Publishes `app`: its changes (`changes`, as read) or, with none, its
+ * first version as it is; `onPublished` and a toast once done, with Undo
+ * where the team had a version before; why not otherwise, and `again`
+ * when the App moved, so its changes are read again.
  */
-const useSharing = (
+const usePublishing = (
   app: App,
   draft: AppDraft | undefined,
   {
-    onShared,
+    onPublished,
     again,
   }: {
-    onShared: () => void;
+    onPublished: () => void;
     again: () => void;
   }
 ) => {
@@ -484,86 +524,138 @@ const useSharing = (
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
-  const version = versionToShare(app, draft);
-  const share = async (
-    changes: AppDraftChanges | undefined,
-    recipients: readonly Recipient[]
+  const version = versionToPublish(app, draft);
+  const { name } = app;
+  const publish = async (
+    changes: AppDraftChanges | undefined
   ): Promise<boolean> => {
     setBusy(true);
     setFailure(undefined);
     const message = t({
-      message: "Shared from the App's workspace",
+      message: "Published from the App's workspace",
       context: "a version's message",
     });
     const before = app.currentVersion;
+    const published = await settled(core, async (session) => {
+      if (version !== undefined) {
+        const made = await session.apps.versions.publish(
+          app.id,
+          version,
+          draft?.revision ?? 0,
+          null
+        );
+        return made.currentVersion;
+      }
+      if (changes !== undefined) {
+        const made = await session.apps.drafts.publish(
+          app.id,
+          changes.revision,
+          message
+        );
+        return made.currentVersion;
+      }
+      return before;
+    });
+    setBusy(false);
+    if (!published.ok) {
+      setFailure(publishFailureText(published.error));
+      // The App moved: what changes is read again, to look at.
+      if (isConflict(published.error)) {
+        again();
+      }
+      return false;
+    }
+    onPublished();
+    await router.invalidate();
+    const made = published.value;
+    // Nothing to go back to after a first version: Undo only over one.
+    const back =
+      before === null ||
+      made === null ||
+      made === before ||
+      changes === undefined
+        ? undefined
+        : { before, made, revision: changes.revision };
+    const tools = { core, router, onDone: onPublished };
+    toast.success(
+      t`${name} is live`,
+      back === undefined
+        ? {}
+        : {
+            action: {
+              label: t`Undo`,
+              onAction: () => {
+                void undoChange(tools, {
+                  app: app.id,
+                  added: [],
+                  back,
+                  undone: msg`Publishing undone`,
+                });
+              },
+            },
+          }
+    );
+    return true;
+  };
+  return {
+    busy,
+    failure,
+    publish,
+    clear: () => {
+      setFailure(undefined);
+    },
+  };
+};
+
+/**
+ * Shares `app` with `recipients`, those with no share of it yet, so
+ * nobody's role changes; `onShared` and a toast with Undo once done, why
+ * not otherwise.
+ */
+const useSharing = (app: App, onShared: () => void) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
+  const share = async (recipients: readonly Recipient[]): Promise<boolean> => {
+    setBusy(true);
+    setFailure(undefined);
     const shared = await settled(core, async (session) => {
-      let made = before;
       // Only who has no share yet: a builder ticked stays one.
       const sharedWith = await session.apps.members.list(app.id);
       const had = new Set(sharedWith.map((member) => keyOf(member)));
       const added = recipients.filter(
         (recipient) => !had.has(keyOf(recipient))
       );
-      if (version !== undefined) {
-        const published = await session.apps.versions.publish(
-          app.id,
-          version,
-          draft?.revision ?? 0,
-          null
-        );
-        made = published.currentVersion;
-      } else if (changes !== undefined) {
-        const published = await session.apps.drafts.publish(
-          app.id,
-          changes.revision,
-          message
-        );
-        made = published.currentVersion;
-      }
       for (const { type, id } of added) {
         // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
         await session.apps.members.add(app.id, { type, id, role: "user" });
       }
-      return { made, added };
+      return added;
     });
     setBusy(false);
     if (!shared.ok) {
       setFailure(publishFailureText(shared.error));
-      // The App moved: what changes is read again, to look at.
-      if (isConflict(shared.error)) {
-        again();
-      }
       return false;
     }
     onShared();
     await router.invalidate();
-    const { made, added } = shared.value;
     const tools = { core, router, onDone: onShared };
-    const undoable: Undoable = {
-      app: app.id,
-      added: added.map(({ type, id }) => ({ type, id })),
-      back:
-        before === null ||
-        made === null ||
-        made === before ||
-        changes === undefined
-          ? undefined
-          : { before, made, revision: changes.revision },
-    };
     const who = formatList(recipients.map(({ name }) => name));
-    toast.success(
-      recipients.length === 0
-        ? t`Your changes are shared`
-        : t`Shared with ${who}`,
-      {
-        action: {
-          label: t`Undo`,
-          onAction: () => {
-            void undoShare(tools, undoable);
-          },
+    toast.success(t`Shared with ${who}`, {
+      action: {
+        label: t`Undo`,
+        onAction: () => {
+          void undoChange(tools, {
+            app: app.id,
+            added: shared.value.map(({ type, id }) => ({ type, id })),
+            back: undefined,
+            undone: msg`Sharing undone`,
+          });
         },
-      }
-    );
+      },
+    });
     return true;
   };
   return {
@@ -577,11 +669,11 @@ const useSharing = (
 };
 
 /**
- * The changes to share, read while the App has some and Grasp isn't
- * working on it, with whether they may be shared now (`ready`) and Fix
- * with Grasp for what stops them.
+ * The changes to publish, read while the App has some and Grasp isn't
+ * working on it, with whether they may be published now (`ready`) and
+ * Fix with Grasp for what stops them.
  */
-const useShareable = (
+const usePublishable = (
   app: App,
   draft: AppDraft | undefined,
   running: boolean
@@ -599,7 +691,7 @@ const useShareable = (
   const fix = (problems: readonly AppDraftProblem[]): void => {
     void chat.ask(
       fixQuestion(
-        t`Fix these problems the check found, so the App can be shared:`,
+        t`Fix these problems the check found, so the App can be published:`,
         problems
       )
     );
@@ -610,7 +702,7 @@ const useShareable = (
     again,
     /** The changes as read at the draft's revision; none while they're read. */
     changes: current ? changes : undefined,
-    /** Whether the changes may be shared now: read, passing, Grasp done. */
+    /** Whether the changes may be published now: read, passing, Grasp done. */
     ready: !changing || (current && changes.check.passed && !running),
     fix,
   };
@@ -722,111 +814,79 @@ const WhoGetsIt = ({
 };
 
 /**
- * Share with your team, and its sheet: who gets it, what they'll see,
- * what an admin approves first and what stops it; Share does it all.
- * The page's one lime action, always labelled: "Share changes" once it
- * is shared and has changes only its builders see (`pending`, which the
- * line under the bar counts).
+ * Share's sheet: who gets the App, its teams and people by name, whom it
+ * is shared with already ticked. Share gives it to whoever was ticked and
+ * nothing else: what they open is what was published.
  */
-export const ShareWithTeam = ({
+const ShareSheet = ({
   app,
-  draft,
   members,
-  running,
-  pending = false,
+  open,
+  onOpenChange,
   onShared,
 }: {
   app: App;
-  /** The App's changes, as read last; none while they are read. */
-  draft: AppDraft | undefined;
   /** Whom it is shared with now. */
   members: readonly AppMember[];
-  /** Whether Grasp is working on it, or checking it. */
-  running: boolean;
-  pending?: boolean;
-  onShared?: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onShared: () => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
   const { name } = app;
-  const [open, setOpen] = useState(false);
   const [candidates, setCandidates] = useState<ShareCandidates>();
   const [chosen, setChosen] = useState<string[]>([]);
-  const shareable = useShareable(app, draft, running);
-  const { busy, failure, share, clear } = useSharing(app, draft, {
-    onShared: () => {
-      onShared?.();
-    },
-    again: shareable.again,
-  });
+  const { busy, failure, share, clear } = useSharing(app, onShared);
   const offered =
     candidates === undefined ? undefined : recipientsOf(candidates, app.owner);
   const recipients = (offered ?? []).filter((each) =>
     chosen.includes(keyOf(each))
   );
-  // Something to share: someone new, or changes for whom it is shared with.
-  const something =
-    recipients.length > 0 ||
-    (members.length > 0 &&
-      (shareable.changing || versionToShare(app, draft) !== undefined));
-  const canShare = something && shareable.ready && !busy && !running;
-  const readCandidates = async (): Promise<void> => {
-    if (candidates !== undefined) {
-      return;
-    }
-    const listed = await settled(
-      core,
-      async (session) => await session.apps.members.candidates(app.id)
-    );
-    setCandidates(
-      listed.ok ? listed.value : { people: [], teams: [], projects: [] }
-    );
-  };
-  const openOrClose = (opening: boolean): void => {
-    setOpen(opening);
-    if (opening) {
-      clear();
-      void readCandidates();
-    }
+  // Who may get it, read each time the sheet opens, from the bar or from
+  // Publish.
+  useEffect(() => {
+    let current = true;
+    const load = async (): Promise<void> => {
+      if (!open) {
+        return;
+      }
+      const listed = await settled(
+        core,
+        async (session) => await session.apps.members.candidates(app.id)
+      );
+      if (current) {
+        setCandidates(
+          listed.ok ? listed.value : { people: [], teams: [], projects: [] }
+        );
+      }
+    };
+    void load();
+    return () => {
+      current = false;
+    };
+  }, [core, app.id, open]);
+  const close = (): void => {
+    clear();
+    onOpenChange(false);
   };
   return (
-    <Sheet onOpenChange={openOrClose} open={open}>
-      {/* A Button, not the Sheet's trigger, for its `truncate`: on a
-          phone's bar the words end in an ellipsis, the whole in a tooltip,
-          so it never runs off the screen. BUILDER: SheetTrigger should take
-          Button's `truncate`. */}
-      {/* Its words from a phone's width on; on a phone its icon alone,
-          named, so the bar keeps one row and nothing runs off. */}
-      <span {...stylex.props(styles.wide)}>
-        <Button
-          disabled={draft === undefined}
-          icon={People}
-          onClick={() => {
-            openOrClose(true);
-          }}
-          size="sm"
-          truncate
-          variant="ink"
-        >
-          {pending ? t`Share changes` : t`Share with your team`}
-        </Button>
-      </span>
-      <span {...stylex.props(styles.narrow)}>
-        <Button
-          aria-label={pending ? t`Share changes` : t`Share with your team`}
-          disabled={draft === undefined}
-          icon={People}
-          onClick={() => {
-            openOrClose(true);
-          }}
-          size="sm"
-          variant="ink"
-        />
-      </span>
+    <Sheet
+      onOpenChange={(opening) => {
+        if (opening) {
+          onOpenChange(true);
+        } else {
+          close();
+        }
+      }}
+      open={open}
+    >
       <SheetContent closeLabel={t`Close`}>
         <SheetTitle>{t`Share ${name}`}</SheetTitle>
         <SheetDescription>
-          {t`They'll find it under Apps, and see it as it is now.`}
+          {app.currentVersion === null
+            ? t`They'll find it under Apps once it is published.`
+            : t`They'll find it under Apps, and see it as it is now.`}
         </SheetDescription>
         <SheetBody>
           <div {...stylex.props(styles.stack)}>
@@ -837,47 +897,21 @@ export const ShareWithTeam = ({
               offered={offered}
               onChosen={setChosen}
             />
-            {running ||
-            (shareable.changing && shareable.changes === undefined) ? (
-              <div {...stylex.props(styles.working)}>
-                <Spinner />
-                <Text element="span" size="sm" tone="muted">
-                  {running ? t`Grasp is still working on it…` : t`Checking it…`}
-                </Text>
-              </div>
-            ) : null}
-            {shareable.read?.state === "failed" ? (
-              <Alert tone="danger">{shareable.read.text}</Alert>
-            ) : null}
-            {shareable.changes === undefined ? null : (
-              <ChangesNotes
-                changes={shareable.changes}
-                onFix={(problems) => {
-                  setOpen(false);
-                  shareable.fix(problems);
-                }}
-              />
-            )}
             {failure === undefined ? null : (
               <Alert tone="danger">{failure}</Alert>
             )}
           </div>
         </SheetBody>
         <SheetFooter>
-          <Button
-            onClick={() => {
-              setOpen(false);
-            }}
-            variant="ghost"
-          >
+          <Button onClick={close} variant="ghost">
             {t`Not yet`}
           </Button>
           <Button
-            disabled={!canShare}
+            disabled={recipients.length === 0 || busy}
             onClick={() => {
               void (async () => {
-                if (await share(shareable.changes, recipients)) {
-                  setOpen(false);
+                if (await share(recipients)) {
+                  close();
                   setChosen([]);
                 }
               })();
@@ -892,6 +926,289 @@ export const ShareWithTeam = ({
   );
 };
 
+/** Where the App stands, in one line with a dot: live and at which version, or not yet. */
+const StateLine = ({ app, changing }: { app: App; changing: boolean }) => {
+  const { t } = useLingui();
+  const label = app.liveLabel ?? "";
+  if (app.currentVersion === null) {
+    return (
+      <Badge tone="attention" variant="dot">
+        {t`Not live`}
+      </Badge>
+    );
+  }
+  return (
+    <Badge tone="success" variant="dot">
+      {changing ? t`Live, ${label}; changes not live yet` : t`Live, ${label}`}
+    </Badge>
+  );
+};
+
+/** How the changes' check stands, as one row: running, passed, or nothing to publish. */
+const CheckLine = ({
+  publishable,
+  running,
+  first,
+}: {
+  publishable: ReturnType<typeof usePublishable>;
+  running: boolean;
+  /** Whether its first version is published as it is, with no changes to check. */
+  first: boolean;
+}) => {
+  const { t } = useLingui();
+  if (running || (publishable.changing && publishable.changes === undefined)) {
+    // Why the read failed stands under the rows.
+    return publishable.read?.state === "failed" && !running ? null : (
+      <Item size="sm">
+        <ItemMedia>
+          <Spinner />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>
+            {running ? t`Grasp is still working on it…` : t`Checking it…`}
+          </ItemTitle>
+        </ItemContent>
+      </Item>
+    );
+  }
+  if (publishable.changes?.check.passed === false) {
+    // What stops it stands under the rows, with Fix with Grasp.
+    return null;
+  }
+  return (
+    <Item size="sm">
+      <ItemMedia icon={Done} />
+      <ItemContent>
+        <ItemTitle>
+          {publishable.changing || first
+            ? t`Checks pass`
+            : t`Nothing new to publish`}
+        </ItemTitle>
+      </ItemContent>
+    </Item>
+  );
+};
+
+/**
+ * What Publish's popover holds: where the App stands, its address, who
+ * can open it and how its check stands, then what applies to the changes
+ * and Publish.
+ */
+const PublishPanel = ({
+  app,
+  members,
+  publishable,
+  running,
+  first,
+  failure,
+  canPublish,
+  onLink,
+  onShare,
+  onFix,
+  onPublish,
+}: {
+  app: App;
+  members: readonly AppMember[];
+  publishable: ReturnType<typeof usePublishable>;
+  running: boolean;
+  /** Whether its first version is published as it is, with no changes to check. */
+  first: boolean;
+  /** Why publishing didn't go through. */
+  failure: string | undefined;
+  canPublish: boolean;
+  onLink: () => void;
+  onShare: () => void;
+  onFix: (problems: readonly AppDraftProblem[]) => void;
+  onPublish: () => void;
+}) => {
+  const { t } = useLingui();
+  const who = userNames(members);
+  return (
+    <>
+      <PopoverTitle>
+        <StateLine app={app} changing={publishable.changing} />
+      </PopoverTitle>
+      <div {...stylex.props(styles.facts)}>
+        <Item size="sm">
+          <ItemMedia icon={LinkIcon} />
+          <ItemContent>
+            <ItemTitle>
+              {app.link === null ? t`No address yet` : linkAddress(app.link)}
+            </ItemTitle>
+            <ItemDescription>{t`Address`}</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Button
+              aria-label={t`Change the address`}
+              icon={Edit}
+              onClick={onLink}
+              size="xs"
+              variant="ghost"
+            />
+          </ItemActions>
+        </Item>
+        <Item size="sm">
+          <ItemMedia icon={People} />
+          <ItemContent>
+            <ItemTitle>
+              {who.length === 0 ? t`Only its builders` : formatList(who)}
+            </ItemTitle>
+            <ItemDescription>{t`Who can open it`}</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Button
+              aria-label={t`Share`}
+              icon={ChevronRight}
+              onClick={onShare}
+              size="xs"
+              variant="ghost"
+            />
+          </ItemActions>
+        </Item>
+        <CheckLine first={first} publishable={publishable} running={running} />
+      </div>
+      {publishable.read?.state === "failed" ? (
+        <Alert tone="danger">{publishable.read.text}</Alert>
+      ) : null}
+      {publishable.changes === undefined ? null : (
+        <ChangesNotes changes={publishable.changes} onFix={onFix} />
+      )}
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
+      <PopoverFooter>
+        <Button disabled={!canPublish} onClick={onPublish} variant="ink">
+          {t`Publish`}
+        </Button>
+      </PopoverFooter>
+    </>
+  );
+};
+
+/**
+ * The end of the App's bar: Share, then Publish, the page's one ink
+ * action. Share opens its sheet, who gets the App. Publish opens a
+ * popover that says where the App stands, its address, who can open it
+ * and whether its changes pass their check, and publishes them: the
+ * changes only its builders see become what everyone it is shared with
+ * opens. On a phone Share folds into Publish's popover (its "Who can open
+ * it" row), and Publish is its icon alone, so the bar keeps one row.
+ */
+export const ShareAndPublish = ({
+  app,
+  draft,
+  members,
+  running,
+  onShared,
+}: {
+  app: App;
+  /** The App's changes, as read last; none while they are read. */
+  draft: AppDraft | undefined;
+  /** Whom it is shared with now. */
+  members: readonly AppMember[];
+  /** Whether Grasp is working on it, or checking it. */
+  running: boolean;
+  /** Told once it was shared or published from here. */
+  onShared?: () => void;
+}) => {
+  const { t } = useLingui();
+  // Which of Publish's two triggers has its popover open: the worded one, or a phone's icon.
+  const [open, setOpen] = useState<"wide" | "narrow">();
+  const [sharing, setSharing] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const told = (): void => {
+    onShared?.();
+  };
+  const publishable = usePublishable(app, draft, running);
+  const { busy, failure, publish, clear } = usePublishing(app, draft, {
+    onPublished: told,
+    again: publishable.again,
+  });
+  const first = versionToPublish(app, draft) !== undefined;
+  const canPublish =
+    (publishable.changing || first) && publishable.ready && !busy && !running;
+  const panel = (
+    <PublishPanel
+      app={app}
+      canPublish={canPublish}
+      failure={failure}
+      first={first}
+      members={members}
+      onFix={(problems) => {
+        setOpen(undefined);
+        publishable.fix(problems);
+      }}
+      onLink={() => {
+        setOpen(undefined);
+        setLinking(true);
+      }}
+      onPublish={() => {
+        void (async () => {
+          if (await publish(publishable.changes)) {
+            setOpen(undefined);
+          }
+        })();
+      }}
+      onShare={() => {
+        setOpen(undefined);
+        setSharing(true);
+      }}
+      publishable={publishable}
+      running={running}
+    />
+  );
+  const opens = (width: "wide" | "narrow") => (opening: boolean) => {
+    if (opening) {
+      clear();
+    }
+    setOpen(opening ? width : undefined);
+  };
+  return (
+    <>
+      <span {...stylex.props(styles.wide)}>
+        <Button
+          icon={People}
+          onClick={() => {
+            setSharing(true);
+          }}
+          size="sm"
+          variant="quiet"
+        >
+          {t`Share`}
+        </Button>
+        <Popover onOpenChange={opens("wide")} open={open === "wide"}>
+          <PopoverTrigger
+            disabled={draft === undefined}
+            size="sm"
+            variant="ink"
+          >
+            {t`Publish`}
+          </PopoverTrigger>
+          <PopoverContent align="end">{panel}</PopoverContent>
+        </Popover>
+      </span>
+      <span {...stylex.props(styles.narrow)}>
+        <Popover onOpenChange={opens("narrow")} open={open === "narrow"}>
+          <PopoverTrigger
+            aria-label={t`Publish`}
+            disabled={draft === undefined}
+            icon={Upload}
+            size="sm"
+            variant="ink"
+          />
+          <PopoverContent align="end">{panel}</PopoverContent>
+        </Popover>
+      </span>
+      <ShareSheet
+        app={app}
+        members={members}
+        onOpenChange={setSharing}
+        onShared={told}
+        open={sharing}
+      />
+      <AppLinkDialog app={app} onOpenChange={setLinking} open={linking} />
+    </>
+  );
+};
+
 /** Whether the changes line shows: shared, with changes only its builders see. */
 export const showsChangesLine = (
   app: App,
@@ -903,8 +1220,8 @@ export const showsChangesLine = (
 /**
  * Under the bar, once the App is shared and has changes only its builders
  * see: how many and of what, that the workspace shows them, and Undo,
- * which discards them once the person confirms. Share changes is the
- * bar's (`ShareWithTeam`).
+ * which discards them once the person confirms. Publishing them is the
+ * bar's (`ShareAndPublish`).
  */
 export const ChangesLine = ({
   app,
@@ -919,7 +1236,7 @@ export const ChangesLine = ({
   onChanged: () => void;
 }) => {
   const { t } = useLingui();
-  const shareable = useShareable(app, draft, running);
+  const shareable = usePublishable(app, draft, running);
   const [asked, setAsked] = useState<Asked>();
   const undo = useDraftChange(app.id, draft.revision, onChanged);
   const { changes } = shareable;

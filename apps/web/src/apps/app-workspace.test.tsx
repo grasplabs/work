@@ -59,12 +59,13 @@ import { markMade } from "./made-tip.ts";
 // at the App's own address, where anyone else gets the live App with
 // nothing that builds it; its main area always shows the App, its draft
 // previewed, or, where the App has no page yet, what it should do, asked
-// in its place; Share with your team asks who gets it, says what applies
-// and whether its changes pass their checks, publishes them as the person
-// over the revision shown and shares it with whoever was ticked, the page
-// reads it again afterwards, and what core refuses is said in the page's
-// words; once shared, a line under the bar says what changes only its
-// builders see; an archived App is restored from it.
+// in its place; Share asks who gets it and shares it with whoever was
+// ticked; Publish says where it stands, what applies and whether its
+// changes pass their checks, and publishes them as the person over the
+// revision shown, the page reads it again afterwards, and what core
+// refuses is said in the page's words; once shared and live, a line under
+// the bar says what changes only its builders see; an archived App is
+// restored from it.
 // The draft is the App's own, shared by its builders: read from core, and
 // again as the chat beside it says its agent wrote.
 // Grasp's chat stands beside it, as in the shell, about the App: its chat
@@ -537,7 +538,7 @@ const callerGrant = (workflow: string, path: string): Permission => {
   };
 };
 
-/** The sheet Share with your team opens, once open. */
+/** The sheet Share opens, once open. */
 const sheet = (): HTMLElement | null =>
   document.querySelector('[data-slot="drawer-content"]');
 
@@ -583,13 +584,42 @@ const confirmation = (): HTMLElement => {
 const lime = (element: HTMLElement): boolean =>
   element.dataset.variant === "ink";
 
-/** Share with your team, in the bar. */
-const shareButton = (): HTMLButtonElement => button("Share with your team");
+/** Share, in the bar. */
+const shareButton = (): HTMLButtonElement => button("Share");
 
-/** Whether the workspace is gone from the page: no Share with your team in it. */
-const shareButtonGone = (): boolean =>
+/** Publish, in the bar. */
+const publishButton = (): HTMLButtonElement => button("Publish");
+
+/** The popover Publish opens, once open. */
+const panel = (): HTMLElement | null =>
+  document.querySelector('[data-slot="popover-content"]');
+
+/** The button in Publish's popover called `name`. */
+const panelButton = (name: string): HTMLButtonElement => {
+  const found = [...(panel()?.querySelectorAll("button") ?? [])].find(
+    (each) => nameOf(each) === name
+  );
+  if (found === undefined) {
+    throw new Error(`No button ${name} in the popover`);
+  }
+  return found;
+};
+
+/** What Publish's popover says of the App, row by row, without what each row is. */
+const facts = (): string[] =>
+  [...(panel()?.querySelectorAll('[data-slot="item"]') ?? [])].map((row) => {
+    const copy = row.cloneNode(true);
+    if (!(copy instanceof HTMLElement)) {
+      return "";
+    }
+    copy.querySelector('[data-slot="item-description"]')?.remove();
+    return copy.textContent.trim();
+  });
+
+/** Whether the workspace is gone from the page: no Publish in it. */
+const publishGone = (): boolean =>
   ![...document.querySelectorAll("button")].some(
-    (each) => nameOf(each) === "Share with your team"
+    (each) => nameOf(each) === "Publish"
   );
 
 /** Whether `element` is off, as a button kept focusable while off is. */
@@ -816,7 +846,7 @@ describe(AppWorkspace, () => {
         controls:
           document.querySelector('[aria-label="Preview width"]') !== null,
         share: [...document.querySelectorAll("button")].some(
-          (each) => nameOf(each) === "Share with your team"
+          (each) => nameOf(each) === "Publish"
         ),
         chat: askable(),
         app: document.querySelector('iframe[title="App"]') !== null,
@@ -1102,7 +1132,7 @@ describe(AppWorkspace, () => {
         (each) => nameOf(each) === "Chat"
       ),
       share: [...document.querySelectorAll("button")].some(
-        (each) => nameOf(each) === "Share with your team"
+        (each) => nameOf(each) === "Publish"
       ),
     };
 
@@ -1504,14 +1534,14 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("shares with whoever is ticked in one step: publishes the changes over the revision read, then shares the App with them, and says so", async () => {
+  it("publishes the changes over the revision read from Publish, which says where the App stands, and says it is live", async () => {
     const fake = fakeApps({ currentVersion: null });
     let drafted = true;
     const published: unknown[][] = [];
     await opened(
       fake.apps,
       identityOf(false),
-      "chat-sharing",
+      "chat-publishing",
       async () => await Promise.resolve(watching()),
       undefined,
       async () =>
@@ -1526,6 +1556,55 @@ describe(AppWorkspace, () => {
         return fake.published(1);
       },
       async () => await Promise.resolve(changesOf())
+    );
+    await settled();
+    const before = { status: status(), lime: lime(publishButton()) };
+
+    await press(publishButton());
+    const shown = {
+      stands: panel()?.querySelector("h2")?.textContent,
+      facts: facts(),
+    };
+    await press(panelButton("Publish"));
+
+    expect({
+      before,
+      shown,
+      published,
+      calls: fake.calls,
+      after: { panel: panel() !== null, toasts: toasts() },
+    }).toStrictEqual({
+      before: { status: "Only you see this", lime: true },
+      shown: {
+        stands: "Not live",
+        facts: ["No address yet", "Only its builders", "Checks pass"],
+      },
+      published: [["invoice-desk", 1, "Published from the App's workspace"]],
+      // Publishing shares it with nobody.
+      calls: [],
+      // A first version has none before it to go back to: no Undo.
+      after: { panel: false, toasts: ["Invoices is live"] },
+    });
+  });
+
+  it("shares the App with whoever is ticked from Share, publishing nothing, and says so", async () => {
+    const fake = fakeApps({ currentVersion: 1 });
+    const published: unknown[][] = [];
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-sharing",
+      async () => await Promise.resolve(watching()),
+      undefined,
+      async () => await Promise.resolve(draftOf("invoice-desk")),
+      async (app, revision) => {
+        published.push([app, revision]);
+        return await Promise.resolve(fake.published(2));
+      },
+      async () =>
+        await Promise.resolve(
+          changesOf({ live: 1, liveLabel: "26.11.1", next: "26.11.2" })
+        )
     );
     await settled();
     const before = { status: status(), lime: lime(shareButton()) };
@@ -1555,7 +1634,8 @@ describe(AppWorkspace, () => {
         toasts: toasts(),
       },
     }).toStrictEqual({
-      before: { status: "Only you see this", lime: true },
+      // Publish is the page's main action, never Share.
+      before: { status: "Only you see this", lime: false },
       shown: {
         title: "Share Invoices",
         // Its owner isn't offered: it is theirs.
@@ -1563,7 +1643,7 @@ describe(AppWorkspace, () => {
         sees: true,
         off: true,
       },
-      published: [["invoice-desk", 1, "Shared from the App's workspace"]],
+      published: [],
       calls: ["share team:t-fin as user"],
       after: {
         status: "Finance team uses it",
@@ -1573,7 +1653,27 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("shares the App's version as it is, with nothing shared yet and changes that change nothing, as an App made from a blueprint has", async () => {
+  it("says in Share that an App not live yet is found once it is published", async () => {
+    await opened(
+      fakeApps({ currentVersion: null }).apps,
+      identityOf(false),
+      "chat-sharing-early",
+      async () => await Promise.resolve(watching()),
+      undefined,
+      async () => await Promise.resolve(draftOf("invoice-desk")),
+      undefined,
+      async () => await Promise.resolve(changesOf())
+    );
+    await settled();
+
+    await press(shareButton());
+
+    expect(
+      says("They'll find it under Apps once it is published.")
+    ).toBeTruthy();
+  });
+
+  it("publishes the App's version as it is, with nothing live yet and changes that change nothing, as an App made from a blueprint has", async () => {
     const fake = fakeApps({ currentVersion: null });
     await opened(
       fake.apps,
@@ -1587,51 +1687,30 @@ describe(AppWorkspace, () => {
     );
     await settled();
 
-    await press(shareButton());
-    await tick("Bo");
-    await press(sheetButton("Share"));
+    await press(publishButton());
+    await press(panelButton("Publish"));
 
-    expect({ calls: fake.calls, status: status() }).toStrictEqual({
-      calls: [
-        "publish invoice-desk 1 over 0 from null",
-        "share person:p-bo as user",
-      ],
-      status: "Bo uses it",
-    });
+    expect(fake.calls).toStrictEqual([
+      "publish invoice-desk 1 over 0 from null",
+    ]);
   });
 
-  it("undoes a share from its toast: whoever was added is taken off, and the team has the version it had before again", async () => {
+  it("undoes a share from its toast: whoever was added is taken off, and only whom it had no share with was added", async () => {
     const fake = fakeApps({
       currentVersion: 1,
       sharedWith: [memberOf("person", "p-bo")],
     });
-    let drafted = true;
     await opened(
       fake.apps,
       identityOf(false),
       "chat-undoing",
       async () => await Promise.resolve(watching()),
       undefined,
-      async () =>
-        await Promise.resolve(
-          drafted ? draftOf("invoice-desk") : draftOf("invoice-desk", [])
-        ),
-      async () => {
-        await Promise.resolve();
-        drafted = false;
-        return fake.published(2);
-      },
-      async () =>
-        await Promise.resolve(
-          changesOf({ live: 1, liveLabel: "26.11.1", next: "26.11.2" })
-        )
+      async () => await Promise.resolve(draftOf("invoice-desk", []))
     );
     await settled();
 
-    // Shared, with changes only its builders see: the bar's lime action
-    // shares the changes, and whom else to give it to.
-    const main = lime(button("Share changes"));
-    await press(button("Share changes"));
+    await press(shareButton());
     const hasIt = sheet()?.textContent.includes("has it");
     await tick("Finance team");
     await press(sheetButton("Share"));
@@ -1639,32 +1718,46 @@ describe(AppWorkspace, () => {
     await press(button("Undo"));
 
     expect({
-      main,
       hasIt,
       shared,
       calls: fake.calls,
       status: status(),
     }).toStrictEqual({
-      main: true,
       hasIt: true,
       shared: {
         toasts: ["Shared with Finance teamUndo"],
         status: "Bo and Finance team use it",
       },
-      // Its changes emptied over version 2, at revision 0, and version 2
-      // still the team's: a colleague's share since would stay.
-      calls: [
-        "share team:t-fin as user",
-        "unshare team:t-fin",
-        "publish invoice-desk 1 over 0 from 2",
-      ],
+      calls: ["share team:t-fin as user", "unshare team:t-fin"],
       status: "Bo uses it",
     });
   });
 
-  it("shares only with whom it has no share yet, and Undo puts the shared changes back as the draft over the version before", async () => {
-    // The draft as shared, at revision 1, over version 1.
-    const sharedPoint: AppDraftHistoryPoint = {
+  it("shares only with whom it has no share yet, so nobody's role changes", async () => {
+    const fake = fakeApps({ currentVersion: 1 });
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-share-new",
+      async () => await Promise.resolve(watching()),
+      undefined,
+      async () => await Promise.resolve(draftOf("invoice-desk", []))
+    );
+    await settled();
+    await press(shareButton());
+    await tick("Finance team");
+    await tick("Bo");
+    // A colleague makes Bo a builder of it while the sheet is open.
+    fake.sharedMeanwhile({ ...memberOf("person", "p-bo"), role: "builder" });
+    await press(sheetButton("Share"));
+
+    // Bo stays a builder: only the team, which had no share, is added.
+    expect(fake.calls).toStrictEqual(["share team:t-fin as user"]);
+  });
+
+  it("undoes publishing from its toast: the team has the version it had before again, and the changes published are the draft again", async () => {
+    // The draft as published, at revision 1, over version 1.
+    const publishedPoint: AppDraftHistoryPoint = {
       number: 3,
       revision: 1,
       base: 1,
@@ -1677,7 +1770,11 @@ describe(AppWorkspace, () => {
       touched: ["src/routes/index.tsx"],
       changes: 1,
     };
-    const fake = fakeApps({ currentVersion: 1, points: [sharedPoint] });
+    const fake = fakeApps({
+      currentVersion: 1,
+      points: [publishedPoint],
+      sharedWith: [memberOf("person", "p-bo")],
+    });
     let drafted = true;
     await opened(
       fake.apps,
@@ -1700,28 +1797,31 @@ describe(AppWorkspace, () => {
         )
     );
     await settled();
-    await press(shareButton());
-    await tick("Finance team");
-    await tick("Bo");
-    // A colleague makes Bo a builder of it while the sheet is open.
-    fake.sharedMeanwhile({ ...memberOf("person", "p-bo"), role: "builder" });
-    await press(sheetButton("Share"));
+
+    // Live, with changes only its builders see.
+    await press(publishButton());
+    const stands = panel()?.querySelector("h2")?.textContent;
+    await press(panelButton("Publish"));
+    const said = toasts();
     await press(button("Undo"));
     await settled();
 
-    expect(fake.calls).toStrictEqual([
-      // Bo stays a builder: only the team, which had no share, is added.
-      "share team:t-fin as user",
-      "unshare team:t-fin",
-      "publish invoice-desk 1 over 0 from 2",
-      // The changes shared are the draft again, as before the share.
-      "restore point 3 over 0",
-    ]);
+    expect({ stands, said, calls: fake.calls }).toStrictEqual({
+      stands: "Live, 26.11.1; changes not live yet",
+      said: ["Invoices is liveUndo"],
+      calls: [
+        // Its changes emptied over version 2, at revision 0, and version 2
+        // still the team's: a colleague's since would stay.
+        "publish invoice-desk 1 over 0 from 2",
+        // The changes published are the draft again, as before.
+        "restore point 3 over 0",
+      ],
+    });
   });
 
-  it("asks before Undo drops changes taken since the share, even once the workspace was left", async () => {
+  it("asks before Undo drops changes taken since publishing, even once the workspace was left", async () => {
     const fake = fakeApps({ currentVersion: 1 });
-    let stage: "drafted" | "shared" | "changed again" = "drafted";
+    let stage: "drafted" | "published" | "changed again" = "drafted";
     const { router } = await opened(
       fake.apps,
       identityOf(false),
@@ -1730,13 +1830,13 @@ describe(AppWorkspace, () => {
       undefined,
       async () =>
         await Promise.resolve(
-          stage === "shared"
+          stage === "published"
             ? draftOf("invoice-desk", [])
             : draftOf("invoice-desk")
         ),
       async () => {
         await Promise.resolve();
-        stage = "shared";
+        stage = "published";
         return fake.published(2);
       },
       async () =>
@@ -1745,16 +1845,15 @@ describe(AppWorkspace, () => {
         )
     );
     await settled();
-    await press(shareButton());
-    await tick("Finance team");
-    await press(sheetButton("Share"));
+    await press(publishButton());
+    await press(panelButton("Publish"));
     // Someone changes it again before Undo, and the person left.
     stage = "changed again";
     await act(async () => {
       router.history.push("/elsewhere");
       await Promise.resolve();
     });
-    const left = shareButtonGone();
+    const left = publishGone();
 
     await press(button("Undo"));
     await settled();
@@ -1765,16 +1864,12 @@ describe(AppWorkspace, () => {
     expect({ left, asked, before, calls: fake.calls }).toStrictEqual({
       left: true,
       asked: true,
-      before: ["share team:t-fin as user", "unshare team:t-fin"],
-      calls: [
-        "share team:t-fin as user",
-        "unshare team:t-fin",
-        "publish invoice-desk 1 over 1 from 2",
-      ],
+      before: [],
+      calls: ["publish invoice-desk 1 over 1 from 2"],
     });
   });
 
-  it("keeps Share off while the changes fail their check, and sends what fails to the App's chat with Fix with Grasp", async () => {
+  it("keeps Publish off while the changes fail their check, and sends what fails to the App's chat with Fix with Grasp", async () => {
     const published: string[] = [];
     const { sent } = await opened(
       fakeApps().apps,
@@ -1808,14 +1903,13 @@ describe(AppWorkspace, () => {
     );
     await settled();
 
-    await press(shareButton());
-    await tick("Finance team");
-    const sheetOff = off(sheetButton("Share"));
+    await press(publishButton());
+    const publishOff = off(panelButton("Publish"));
     const problem = says("Use the Button's own variant.");
-    await press(sheetButton("Fix with Grasp"));
+    await press(panelButton("Fix with Grasp"));
 
     expect({
-      sheetOff,
+      publishOff,
       problem,
       published,
       sent: sent.map(({ chatId, question }) => ({
@@ -1825,7 +1919,7 @@ describe(AppWorkspace, () => {
         ),
       })),
     }).toStrictEqual({
-      sheetOff: true,
+      publishOff: true,
       problem: true,
       published: [],
       sent: [{ chatId: "chat-fixing", names: true }],
@@ -1833,8 +1927,8 @@ describe(AppWorkspace, () => {
   });
 
   /**
-   * What the open sheet says of the draft's access, once its changes are
-   * shown, as core reads the draft's changes as `changes` says.
+   * What Publish's popover says of the draft's access, once its changes
+   * are shown, as core reads the draft's changes as `changes` says.
    */
   const accessShown = async (
     changes: Partial<AppDraftChanges>
@@ -1858,15 +1952,15 @@ describe(AppWorkspace, () => {
         )
     );
     await settled();
-    await press(shareButton());
-    await press(sheetButton("What changes"));
-    const access = [...(sheet()?.querySelectorAll("section") ?? [])].find(
+    await press(publishButton());
+    await press(panelButton("What changes"));
+    const access = [...(panel()?.querySelectorAll("section") ?? [])].find(
       (section) => section.querySelector("h3")?.textContent === "Access"
     );
     return access?.textContent ?? "";
   };
 
-  it("names in the sheet only the workflows that call the App again once an admin grants it again", async () => {
+  it("names in Publish only the workflows that call the App again once an admin grants it again", async () => {
     const access = await accessShown({
       callers: [
         {
@@ -1895,7 +1989,7 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("says in the sheet who sees and changes which rows of the App's tables", async () => {
+  it("says in Publish who sees and changes which rows of the App's tables", async () => {
     const access = await accessShown({
       rowRules: [
         {
@@ -1932,7 +2026,7 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("says in the sheet what the App may do when its code can't be read, never that nothing is new", async () => {
+  it("says in Publish what the App may do when its code can't be read, never that nothing is new", async () => {
     const access = await accessShown({
       readsPeople: null,
       handsFilesToWorkflows: null,
@@ -1960,7 +2054,7 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("keeps Share with your team off while the App's changes are read", async () => {
+  it("keeps Publish off while the App's changes are read", async () => {
     await opened(
       fakeApps().apps,
       identityOf(false),
@@ -1972,10 +2066,10 @@ describe(AppWorkspace, () => {
     );
     await settled();
 
-    expect(off(shareButton())).toBeTruthy();
+    expect(off(publishButton())).toBeTruthy();
   });
 
-  it("keeps Share off while Grasp still works on the App, saying so", async () => {
+  it("keeps Publish off while Grasp still works on the App, saying so", async () => {
     const published: string[] = [];
     let send: ((update: ChatUpdate) => void) | undefined;
     await opened(
@@ -2010,12 +2104,11 @@ describe(AppWorkspace, () => {
       await Promise.resolve();
     });
     await settled();
-    await press(shareButton());
-    await tick("Finance team");
+    await press(publishButton());
 
     expect({
       working: says("Grasp is still working on it…"),
-      off: off(sheetButton("Share")),
+      off: off(panelButton("Publish")),
       published,
     }).toStrictEqual({ working: true, off: true, published: [] });
   });
@@ -2044,9 +2137,8 @@ describe(AppWorkspace, () => {
     );
     await settled();
 
-    await press(shareButton());
-    await tick("Finance team");
-    await press(sheetButton("Share"));
+    await press(publishButton());
+    await press(panelButton("Publish"));
 
     expect({
       said: says(
@@ -2057,7 +2149,7 @@ describe(AppWorkspace, () => {
       status: status(),
     }).toStrictEqual({
       said: true,
-      // Once as the sheet opened, and again after the refusal.
+      // Once as the workspace opened, and again after the refusal.
       reads: 2,
       calls: [],
       status: "Only you see this",
@@ -2107,7 +2199,7 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("says under the bar how many changes only you see and of what, and shares them with the bar's Share changes", async () => {
+  it("says under the bar how many changes only you see and of what, and publishes them with the bar's Publish", async () => {
     const fake = fakeApps({ sharedWith: [memberOf("team", "t-fin")] });
     let drafted = true;
     const published: unknown[][] = [];
@@ -2156,13 +2248,10 @@ describe(AppWorkspace, () => {
     );
     await settled();
     const line = changesLine()?.textContent ?? "";
-    const main = {
-      lime: lime(button("Share changes")),
-      with: shareButtonGone(),
-    };
+    const main = lime(publishButton());
 
-    await press(button("Share changes"));
-    await press(sheetButton("Share"));
+    await press(publishButton());
+    await press(panelButton("Publish"));
 
     expect({
       count: line.includes("2 changes only you see"),
@@ -2177,13 +2266,12 @@ describe(AppWorkspace, () => {
       count: true,
       what: true,
       showing: true,
-      // The bar's one lime action says what it shares now.
-      main: { lime: true, with: true },
+      main: true,
       published: [["invoice-desk", 1]],
-      // Nobody new: it is shared with the team already.
+      // Nobody new: publishing shares it with nobody.
       calls: [],
       gone: null,
-      toasts: ["Your changes are sharedUndo"],
+      toasts: ["Invoices is liveUndo"],
     });
   });
 

@@ -87,11 +87,11 @@ test("a builder makes an App from what they want done, shares it with their team
     frame.getByRole("list", { name: "Contacts" }).getByRole("listitem")
   ).toHaveText(["Ada Lovelace"], built);
 
-  // The chat never shares it: the builder does, with whom they pick, which
-  // checks the draft, makes it the App's first version and shares it, in
-  // one step. Everyone the stack signs in is called Person, and a builder
+  // The chat never shares or publishes it: the builder does, each on its own:
+  // Share gives it to whom they pick, Publish checks the draft and makes it
+  // the first version. Everyone the stack signs in is called Person, and a builder
   // sees names, not emails: they are told apart by the ID each goes by.
-  await page.getByRole("button", { name: "Share with your team" }).click(built);
+  await page.getByRole("button", { name: "Share", exact: true }).click(built);
   const sharing = page.getByRole("dialog");
   await sharing
     .getByRole("checkbox", {
@@ -100,6 +100,13 @@ test("a builder makes an App from what they want done, shares it with their team
     .check();
   await sharing.getByRole("button", { name: "Share", exact: true }).click();
   await expect(page.getByText("Shared with Person")).toBeVisible(built);
+  // Publish checks the draft and makes it the first version.
+  await page.getByRole("button", { name: "Publish", exact: true }).click(built);
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Publish", exact: true })
+    .click(built);
+  await expect(page.getByText("is live")).toBeVisible(built);
 
   // They use the live App: none of the preview's contacts, then theirs.
   const used = await pageOf(user);
