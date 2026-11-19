@@ -365,7 +365,7 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     await handOverNow();
     const read = await readOf(member.userId, words.team);
     const page = await member.api.brain.read();
-    const bakery = page.teams.find(({ id }) => id === "team-bakery");
+    const bakery = page.teams.find(({ id }) => id === "bakery");
     const events = JSON.stringify(await allEvents()).toLowerCase();
     const found = (text: string) =>
       kinds.filter((kind) => text.includes(words[kind]));

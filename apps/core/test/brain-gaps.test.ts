@@ -119,7 +119,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         kind: "interview",
         title: "Sales interview",
         date: "2026-10-20",
-        teamIds: ["team-finance"],
+        teamIds: ["finance"],
       },
       { type: "team", id: team, name: "Sales", sourceId: `src-${tag}` },
       {
@@ -143,7 +143,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       {
         type: "teamCount",
         id: `count-${tag}-2`,
-        teamId: "team-finance",
+        teamId: "finance",
         sourceId: `src-${tag}`,
         date: "2026-10-01",
         people: 2,
@@ -156,14 +156,14 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     expect({
       sales: asAdmin.teams.find(({ id }) => id === team),
       financeCounts: asAdmin.teams
-        .find(({ id }) => id === "team-finance")
+        .find(({ id }) => id === "finance")
         ?.counts.map(({ sourceId, people }) => ({ sourceId, people })),
       memberTeams: asMember.teams.map(({ id }) => id),
       roster: await outcome(
         admin.api.brain.addRecords([
           {
             type: "team",
-            id: "team-finance",
+            id: "finance",
             name: "Finance",
             sourceId: `src-${tag}`,
           },
@@ -195,7 +195,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       // The confirmed roster's teams are every member's (GRA-1748), with
       // the records' own; its roles and counts from the records stay the
       // admin's.
-      memberTeams: ["team-finance", team],
+      memberTeams: ["finance", team],
       // A roster team's id, now or later, is never a team record's.
       roster: "brain.record_invalid",
     });
@@ -220,7 +220,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
           {
             type: "teamCount",
             id: `${ids.source}-count`,
-            teamId: "team-nowhere",
+            teamId: "nowhere",
             sourceId: ids.source,
             date: "2026-10-20",
             people: 3,
@@ -235,7 +235,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
             kind: "goal",
             text: "Close the books in three days.",
             sourceId: ids.source,
-            teamIds: ["team-nowhere"],
+            teamIds: ["nowhere"],
           },
         ])
       ),
@@ -424,7 +424,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       {
         type: "teamCount",
         id: `count-${tag}-finance`,
-        teamId: "team-finance",
+        teamId: "finance",
         sourceId: source,
         date: "2020-01-01",
         people: 2,
@@ -440,7 +440,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       counts: sales?.counts.map(({ date, people }) => ({ date, people })),
       stakeholders: sales?.stakeholders.map(({ role }) => role),
       finance: asAdmin.teams
-        .find(({ id }) => id === "team-finance")
+        .find(({ id }) => id === "finance")
         ?.counts.map(({ sourceId }) => sourceId)
         .filter((id) => id === source || id === "src-roster"),
     }).toStrictEqual({

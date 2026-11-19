@@ -60,8 +60,12 @@ export const ownId = async (
 
 /** The Brain page's ids for what the onboarding shows on it. */
 export const intakeIds = {
-  /** A roster team, as the Brain page names it. */
-  team: (team: string): string => `team-${team}`,
+  /**
+   * A staff list's team, as the Brain names it: the members' team's own id
+   * (GRA-2055), the one id it has everywhere, on the map, in its regions and
+   * in what is shared with it. The one place that says so.
+   */
+  team: (team: string): string => team,
   /** The source that stands for all of a team's interviews. */
   interviews: async (team: string): Promise<string> => await ownId("src", team),
   statement: async (
