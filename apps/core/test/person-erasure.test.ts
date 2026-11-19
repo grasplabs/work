@@ -2077,6 +2077,41 @@ describe("erasing a person", () => {
     });
   });
 
+  it("refuses to release an address only the staff list keeps out while their erasure's step for the list failed after keeping it out, and waits for the clock", async () => {
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const { admin, person } = await removedPerson();
+    const listed = `dir-${crypto.randomUUID().slice(0, 8)}@acme.test`;
+    const { theirSecret } = await onTheList(listed);
+    await onboardingStore(env).openLink(await sha256Hex(theirSecret), {
+      account: person.userId,
+      address: listed,
+    });
+    // The store kept their addresses out, then the step failed after it
+    // (the Brain out of reach, say): the store's part, then the area's
+    // failure.
+    await onboardingStore(env).eraseEntries(
+      person.userId,
+      await emailHashOf(env, String(person.person.email))
+    );
+    vi.spyOn(Onboarding.prototype, "eraseEntries").mockImplementationOnce(
+      () => {
+        throw new Error("The Brain is out of reach");
+      }
+    );
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    const refused = await outcome(admin.api.members.releaseAddress(listed));
+    await runMinuteTasks();
+    const released = await admin.api.members.releaseAddress(listed);
+
+    expect({ refused, released }).toStrictEqual({
+      refused: "member.release_erasing",
+      released: { released: true },
+    });
+  });
+
   it("lets no admin demoted as they release an address only the staff list keeps out release it", async () => {
     const { admin, listed, roster, without } = await erasedUnderAnother();
     // Demoted just after core looked the address up, before the store's turn.

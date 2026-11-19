@@ -5778,6 +5778,23 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * Whom the address that hashes to `hash` is kept out for, by their ID
+   * (`erasedAddresses`): for core to hold a release of it while their
+   * erasure's step is still to finish (person-erasure.ts). Null when it
+   * isn't kept out.
+   */
+  keptOutFor(hash: string): string | null {
+    const [row] = this.#db
+      .select({ userId: erasedAddresses.userId })
+      .from(erasedAddresses)
+      .where(
+        and(eq(erasedAddresses.hash, hash), eq(erasedAddresses.released, false))
+      )
+      .all();
+    return row?.userId ?? null;
+  }
+
+  /**
    * Lets the address that hashes to `hash` onto the list again, as core
    * asks once an admin released it (person-erasure.ts `releaseAddress`):
    * kept as released, so an attempt of the erasure it was kept out for
@@ -5785,10 +5802,16 @@ export class Onboarding extends DurableObject<Env> {
    * that erasure's step, which keeps the hash, so the row is there for
    * every address core releases. Recorded as `by`'s when given: for an
    * address only the store kept out, whose release core's own record
-   * doesn't cover. Entries an erasure closed stay as they are until an
-   * admin takes them off the list. Whether the store kept it out.
+   * doesn't cover; then only while it is still kept out for `of`, the
+   * person core checked (`keptOutFor`). Entries an erasure closed stay as
+   * they are until an admin takes them off the list. Whether the store
+   * kept it out.
    */
-  releaseAddress(hash: string, by: AuditActor | null): boolean {
+  releaseAddress(
+    hash: string,
+    by: AuditActor | null,
+    of: string | null = null
+  ): boolean {
     const held = this.ctx.storage.transactionSync(() => {
       const released =
         this.#db
@@ -5797,7 +5820,8 @@ export class Onboarding extends DurableObject<Env> {
           .where(
             and(
               eq(erasedAddresses.hash, hash),
-              eq(erasedAddresses.released, false)
+              eq(erasedAddresses.released, false),
+              of === null ? undefined : eq(erasedAddresses.userId, of)
             )
           )
           .returning({ hash: erasedAddresses.hash })

@@ -1189,28 +1189,56 @@ export const erasePerson = async (
 };
 
 /**
+ * That `userId`'s erasure has its `interview` area pending, not yet run
+ * or failed and waiting for the clock, as SQL: no release of an address
+ * of theirs while it is, as that area takes their addresses off the list.
+ */
+const erasingFromTheList = (userId: string) =>
+  and(
+    eq(personErasureAreas.userId, userId),
+    eq(personErasureAreas.area, "interview"),
+    eq(personErasureAreas.state, "pending")
+  );
+
+/**
  * Lets in on the staff list an address core keeps no erasure under: one
  * only the onboarding keeps out (another address of an erased person's,
  * GRA-2165), or one whose release's store call failed after core's own.
- * Only while `by` still is an admin, read now, after every wait: the store
- * can't read core's database in its transaction, so one call remains
- * between this read and the store's transaction, as one remains between
- * the statement that releases in `releaseAddress` and its own call to the
- * store. Recorded by the store when it held the address. Whether it did.
+ * Not while the erasure it is kept out for has its step for the list
+ * pending, as `releaseAddress` holds for the address core keeps (that
+ * step can't be pending again once done). Only while `by` still is an
+ * admin, read now, after every wait: the store can't read core's database
+ * in its transaction, so one call remains between this read and the
+ * store's transaction, as one remains between the statement that releases
+ * in `releaseAddress` and its own call to the store. The store releases it
+ * only while it is still kept out for the person checked. Recorded by the
+ * store when it held the address. Whether it did.
  */
 const releaseOnTheList = async (
   env: Env,
   by: Identity,
   hash: string
 ): Promise<boolean> => {
-  const [admin] = await drizzle(env.DB)
-    .select({ userId: users.id })
-    .from(users)
-    .where(and(eq(users.id, by.userId), activeMember(by.userId, ["admin"])));
+  const store = onboardingStore(env);
+  const keptFor = await store.keptOutFor(hash);
+  const db = drizzle(env.DB);
+  const [[admin], [erasing]] = await db.batch([
+    db
+      .select({ userId: users.id })
+      .from(users)
+      .where(and(eq(users.id, by.userId), activeMember(by.userId, ["admin"]))),
+    db
+      .select({ userId: personErasureAreas.userId })
+      .from(personErasureAreas)
+      .where(erasingFromTheList(keptFor ?? "")),
+  ]);
   if (admin === undefined) {
     throw roleErrors.create("role.forbidden");
   }
-  return await onboardingStore(env).releaseAddress(hash, actorOf(by));
+  if (erasing !== undefined) {
+    throw memberErrors.create("member.release_erasing");
+  }
+  return await store.releaseAddress(hash, actorOf(by), keptFor);
 };
 
 /**
@@ -1275,13 +1303,7 @@ export const releaseAddress = async (
     const [pending] = await db
       .select({ userId: personErasureAreas.userId })
       .from(personErasureAreas)
-      .where(
-        and(
-          eq(personErasureAreas.userId, erased.userId),
-          eq(personErasureAreas.area, "interview"),
-          eq(personErasureAreas.state, "pending")
-        )
-      );
+      .where(erasingFromTheList(erased.userId));
     throw pending === undefined
       ? roleErrors.create("role.forbidden")
       : memberErrors.create("member.release_erasing");
