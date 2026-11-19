@@ -60,6 +60,7 @@ import type {
   Table as TableNode,
 } from "./types";
 import { markdownWords } from "./words";
+import type { MarkdownWords } from "./words";
 
 /** What a host may draw in a link's place: anything React draws at once (never a promise). */
 export type MarkdownDrawn = Exclude<ReactNode, Promise<unknown>>;
@@ -160,6 +161,12 @@ export interface MarkdownProps {
    * React draws at once, never a promise (the product's lint refuses a component that may return one).
    */
   renderLink?: (link: MarkdownLink) => MarkdownDrawn | undefined;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ table: "Figures" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<MarkdownWords>;
 }
 
 interface Context {
@@ -994,12 +1001,13 @@ export const Markdown = ({
   notDoneLabel,
   tableLabel,
   renderLink,
+  words,
 }: MarkdownProps) => {
   // Its words: the product's, by its catalogue, else English; a text prop given still wins.
   // Inside a Chat message, with no size given, it reads at the chat's size (chat-text).
   const chat = useContext(ArrivingContext) !== null && given === undefined;
   const size = given ?? "md";
-  const text = withGiven(useWords("markdown", markdownWords), {
+  const text = withGiven(useWords("markdown", markdownWords, words), {
     external: externalLabel,
     back: backLabel,
     footnote: footnoteLabel,

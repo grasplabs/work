@@ -18,6 +18,7 @@ import type { ComponentProps } from "react";
 
 import { CalendarMonths } from "./months";
 import { calendarStyles as styles } from "./styles";
+import type { CalendarWords } from "./words";
 
 type RootProps = ComponentProps<typeof CalendarPrimitive>;
 
@@ -79,6 +80,12 @@ export interface CalendarProps extends Omit<
    * @default true for one month, false for more
    */
   showOutsideDays?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ previous: "Earlier" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<CalendarWords>;
 }
 
 /** A month of days to choose from, with Previous and Next. */
@@ -87,6 +94,7 @@ export const Calendar = ({
   previousLabel,
   nextLabel,
   showOutsideDays,
+  words,
   ...rest
 }: CalendarProps) => {
   // One month shows the days round it; months side by side leave them to the next month.
@@ -102,6 +110,7 @@ export const Calendar = ({
         months={months}
         previousLabel={previousLabel}
         nextLabel={nextLabel}
+        words={words}
       />
     </CalendarPrimitive>
   );

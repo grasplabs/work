@@ -25,12 +25,14 @@ import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { RowListAction } from "../row-list";
+import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
 import { useWords, withGiven } from "../words/words";
 import { usePanel } from "./context";
 import { panelVars } from "./panel.stylex";
 import { PanelSeated } from "./seat";
+import type { PanelSeat } from "./seat";
 import { PanelTexture } from "./texture";
 import { panelWords } from "./words";
 import type { PanelWords } from "./words";
@@ -93,6 +95,12 @@ export interface PanelHeaderProps {
    * release's step 5.
    */
   words?: Partial<PanelWords>;
+  /**
+   * The object is not there yet (a page's first paint): the title, and the line under it when
+   * `description` is given (even empty), are quiet placeholders in their own lines, so the head
+   * keeps its height. @default false
+   */
+  loading?: boolean;
 }
 
 const HOVER = media.hover;
@@ -149,6 +157,11 @@ const styles = stylex.create({
     paddingInline: grasp.inspectorPad,
     minWidth: 0,
   },
+  // Beside a page in App shell, under its bar and with no views: the head reaches inspector-head
+  // from the panel's top to its line, as a page band beside it does, so the two lines are one.
+  headBeside: {
+    minHeight: `calc(${grasp.inspectorHead} - ${grasp.inspectorBar} - ${grasp.inspectorPad})`,
+  },
   // The texture (PanelTexture) reaches up behind the bar, so the light starts at the panel's top.
   texture: { insetBlockStart: `calc(-1 * ${grasp.inspectorBar})` },
   // With no bar above the head, the texture starts at the head's own top.
@@ -171,6 +184,15 @@ const styles = stylex.create({
     lineHeight: grasp.textSmLine,
     color: grasp.muted,
   },
+  // While loading: the title's line, one serif line tall, a placeholder its letters' height across it.
+  titleWaitLine: {
+    display: "flex",
+    alignItems: "center",
+    height: grasp.titleSmLine,
+  },
+  // Fixed widths: the head's lines size to their words, so a share of them would be nothing.
+  titleWait: { width: "10rem", maxWidth: "100%", height: grasp.titleSm },
+  descriptionWait: { width: "14rem", maxWidth: "100%" },
   meta: {
     position: "relative",
     display: "flex",
@@ -516,15 +538,46 @@ const Head = ({
   level,
   texture,
   topmost,
+  loading,
+  beside,
 }: Pick<PanelHeaderProps, "description" | "icon" | "meta"> & {
   title: string | undefined;
   level: 1 | 2;
   texture: boolean;
   topmost: boolean;
+  loading: boolean;
+  beside: boolean;
 }) => {
   const Heading = headings[level];
+  if (loading) {
+    return (
+      <div
+        data-slot="panel-head"
+        aria-busy="true"
+        {...stylex.props(styles.head, beside && styles.headBeside)}
+      >
+        {texture && (
+          <PanelTexture
+            layout={topmost ? styles.textureTopmost : styles.texture}
+          />
+        )}
+        {given(icon) && <span {...stylex.props(styles.tile)}>{icon}</span>}
+        <div {...stylex.props(styles.titleWaitLine)}>
+          <Skeleton variant="block" layout={styles.titleWait} />
+        </div>
+        {description !== undefined && (
+          <p {...stylex.props(styles.description)}>
+            <Skeleton text="sm" layout={styles.descriptionWait} />
+          </p>
+        )}
+      </div>
+    );
+  }
   return (
-    <div data-slot="panel-head" {...stylex.props(styles.head)}>
+    <div
+      data-slot="panel-head"
+      {...stylex.props(styles.head, beside && styles.headBeside)}
+    >
       {texture && (
         <PanelTexture
           layout={topmost ? styles.textureTopmost : styles.texture}
@@ -605,6 +658,10 @@ const hasHead = ({
   given(description) ||
   (meta !== undefined && meta.length > 0);
 
+/** Whether the head reaches inspector-head: beside a page in App shell, under its bar, with no views. */
+const reachesHead = (seat: PanelSeat, holds: boolean, hasViews: boolean) =>
+  seat === "beside" && holds && !hasViews;
+
 /** The folding header: bar, head and views. */
 export const PanelHeader = ({
   title,
@@ -620,13 +677,15 @@ export const PanelHeader = ({
   headingLevel: level = levelDeprecated ?? 2,
   texture = false,
   words,
+  loading = false,
 }: PanelHeaderProps) => {
   const { close: closeLabel, views: viewsLabel } = withGiven(
     useWords("panel", panelWords, words),
     { close: closeLabelGiven, views: viewsLabelGiven }
   );
   // In App shell's sheet the sheet's own close closes it: one close, not two.
-  const onClose = use(PanelSeated) === "sheet" ? undefined : onCloseGiven;
+  const seat = use(PanelSeated);
+  const onClose = seat === "sheet" ? undefined : onCloseGiven;
   const bar = useRef<HTMLDivElement>(null);
   const top = useRef<HTMLDivElement>(null);
   const fold = useRef<HTMLDivElement>(null);
@@ -669,6 +728,8 @@ export const PanelHeader = ({
           level={level}
           texture={texture}
           topmost={!holds}
+          loading={loading}
+          beside={reachesHead(seat, holds, hasViews)}
         />
       )}
       {!holds && hasViews && <Bar bar={bar} closeLabel={closeLabel} bare />}
@@ -678,6 +739,7 @@ export const PanelHeader = ({
       {hasViews && <Views views={views} label={viewsLabel} list={list} />}
       <div
         aria-hidden
+        data-slot="panel-head-line"
         {...stylex.props(styles.line, !hasViews && styles.lineAlone)}
       />
     </>

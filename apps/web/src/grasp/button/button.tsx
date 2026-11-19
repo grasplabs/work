@@ -158,6 +158,12 @@ interface ButtonBase {
    * @default { holdTo: (words) => `Hold to ${words}`, ask: (words) => `${words}?`, confirm: "Confirm", cancel: "Cancel" }
    */
   holdLabels?: Partial<ButtonHoldLabels>;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ cancel: "Keep it" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it (`holdLabels`) still wins until the
+   * release's step 5. Its life's words (`workingLabel`, `doneLabel`, `failedLabel`) stay its own props.
+   */
+  words?: Partial<ButtonOwnWords>;
 }
 
 /** A plain button: it does its work and the page shows the result. */
@@ -1187,6 +1193,7 @@ const Pressable = ({
     focusableWhenDisabled = false,
     pendingAnnouncement = "",
     onClick,
+    words: wordsGiven,
     ...rest
   } = read;
   const extra: Record<string, unknown> = rest;
@@ -1219,7 +1226,7 @@ const Pressable = ({
   // The result is said once, by the page's one polite voice (src/announce), when it changes.
   // Nothing is put beside the button, so it stays a single element in a row or a group.
   // workingLabel is said, not shown: the words on the button stay its own while it works.
-  const ownWords = useWords("button", buttonWords);
+  const ownWords = useWords("button", buttonWords, wordsGiven);
   useSaid(
     saidFor(state, {
       working: workingLabel,
@@ -1337,7 +1344,7 @@ const LazyHold = (allProps: ButtonProps) => {
   const early = useRef(false);
   const words =
     typeof allProps.children === "string" ? allProps.children : allProps.label;
-  const { holdTo } = useHoldLabels(allProps.holdLabels);
+  const { holdTo } = useHoldLabels(allProps.holdLabels, allProps.words);
   const name = words === undefined || words === "" ? undefined : holdTo(words);
   const waiting = { holding: false, ms: 0, name };
   const keep = (event: MouseEvent<HTMLElement>) => {

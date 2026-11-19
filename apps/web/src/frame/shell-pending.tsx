@@ -83,7 +83,12 @@ export const ShellPending = () => {
         sidebar={
           <Sidebar
             aria-label={t`Sidebar`}
-            foldLabel={t`Show or hide the sidebar`}
+            words={{
+              fold: t`Show or hide the sidebar`,
+              main: t`Main`,
+              search: t`Search chats`,
+              views: t`Views`,
+            }}
             groups={
               sectioned
                 ? []
@@ -142,17 +147,14 @@ export const ShellPending = () => {
                 <Icon icon={BrandGrasp} />
               </span>
             }
-            navLabel={t`Main`}
             onSearch={wait}
             onTabChange={wait}
             open={readFolded("sidebar") !== true}
-            searchLabel={t`Search chats`}
             tab="home"
             tabs={[
               { value: "home", label: t`Home`, icon: Home },
               { value: "inbox", label: t`Inbox`, icon: Bell },
             ]}
-            tabsLabel={t`Views`}
           />
         }
       >

@@ -13,6 +13,7 @@ import { DropdownMenu } from "./menu";
 import { DropdownMenuContent } from "./panel";
 import { DropdownMenuTrigger } from "./trigger";
 import { dropdownMenuWords } from "./words";
+import type { DropdownMenuWords } from "./words";
 
 /**
  * One action that folds into a "More" menu: the App card's "…" menu, the App shell bar's actions
@@ -52,6 +53,12 @@ export interface DropdownMenuMoreProps {
   label?: string;
   /** Its size. @default "sm" */
   size?: ButtonSize;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ more: "Other actions" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<DropdownMenuWords>;
 }
 
 /** A "More" button and its menu of actions. */
@@ -59,13 +66,14 @@ export const DropdownMenuMore = ({
   actions,
   label: labelGiven,
   size = "sm",
+  words,
 }: DropdownMenuMoreProps) => {
   const { more: label } = withGiven(
-    useWords("dropdownMenu", dropdownMenuWords),
+    useWords("dropdownMenu", dropdownMenuWords, words),
     { more: labelGiven }
   );
   return (
-    <DropdownMenu>
+    <DropdownMenu words={words}>
       <DropdownMenuTrigger
         icon={More}
         aria-label={label}

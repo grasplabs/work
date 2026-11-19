@@ -51,6 +51,7 @@ import { useWords, withGiven } from "../words/words";
 import { Current } from "./current";
 import { HiddenLevels } from "./hidden-levels";
 import { breadcrumbWords } from "./words";
+import type { BreadcrumbWords } from "./words";
 
 const PHONE = media.belowPhone;
 const COARSE = media.coarse;
@@ -95,6 +96,12 @@ export interface BreadcrumbProps {
   style?: BreadcrumbLayoutStyle;
   /** Layout only: margins and alignment. The look belongs to the breadcrumb. */
   layout?: BreadcrumbLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ name: "Folders" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<BreadcrumbWords>;
 }
 
 /**
@@ -716,9 +723,10 @@ export const Breadcrumb = ({
   hiddenLabel: hiddenLabelGiven,
   style: styleProp,
   layout,
+  words,
 }: BreadcrumbProps) => {
   const { name: label, hidden: hiddenLabel } = withGiven(
-    useWords("breadcrumb", breadcrumbWords),
+    useWords("breadcrumb", breadcrumbWords, words),
     { name: labelGiven, hidden: hiddenLabelGiven }
   );
   return (

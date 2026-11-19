@@ -826,6 +826,7 @@ export const grasp = stylex.defineConsts({
   inspectorWidth: "var(--grasp-inspector-width)",
   inspectorBar: "var(--grasp-inspector-bar)",
   inspectorPad: "var(--grasp-inspector-pad)",
+  inspectorHead: "var(--grasp-inspector-head)",
   inspectorPadEnd: "var(--grasp-inspector-pad-end)",
   inspectorGap: "var(--grasp-inspector-gap)",
   inspectorLabelGap: "var(--grasp-inspector-label-gap)",

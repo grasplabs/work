@@ -11,6 +11,7 @@ import { Button } from "../button";
 import { visuallyHidden } from "../hidden/hidden";
 import { Icon, Info, Tick } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
+import { Skeleton } from "../skeleton";
 import { Spinner } from "../spinner";
 import { grasp } from "../tokens/tokens.stylex";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
@@ -73,6 +74,13 @@ export interface SettingRowProps {
    * release's step 5.
    */
   words?: Partial<SettingRowWords>;
+  /**
+   * The setting is not there yet (a page's first paint): its name, and its help when `help` is
+   * given (even empty), are quiet lines in their own lines, so the row keeps its height; pass a
+   * placeholder as the control. Hidden from a reader: the page says it is loading.
+   * @default false
+   */
+  loading?: boolean;
 }
 
 /** Every prop a FactRow takes. */
@@ -213,6 +221,9 @@ const styles = stylex.create({
     color: grasp.muted,
   },
   failed: { color: grasp.danger },
+  // While it loads: the name's and the help's lines, quiet, each in its own line's box.
+  nameWait: { width: "9rem", maxWidth: "100%" },
+  helpWait: { width: "16rem", maxWidth: "100%" },
   control: {
     position: "relative",
     display: "flex",
@@ -274,6 +285,8 @@ interface LineProps {
   retryLabel: string;
   /** A problem the control put here (a file it refused): in the danger tone, in the help's place. */
   problem: string;
+  /** The row is not there yet: the help's line holds a quiet line. */
+  loading: boolean;
 }
 
 const Line = ({
@@ -286,7 +299,13 @@ const Line = ({
   failedLabel,
   retryLabel,
   problem,
+  loading,
 }: LineProps) => {
+  if (loading) {
+    return help === undefined ? null : (
+      <Skeleton text="sm" layout={styles.helpWait} />
+    );
+  }
   // Saving and saved are drawn beside the control (the row's mark); here they are only said, and
   // the help keeps its place, so nothing under the name changes.
   if (state === "saving" || state === "saved") {
@@ -343,6 +362,7 @@ export const SettingRow = ({
   failedLabel: failedLabelGiven,
   retryLabel: retryLabelGiven,
   words,
+  loading = false,
 }: SettingRowProps) => {
   const {
     info: infoLabel,
@@ -369,12 +389,13 @@ export const SettingRow = ({
     <div
       data-slot="setting-row"
       data-state={state}
+      aria-hidden={loading ? true : undefined}
       {...stylex.props(styles.box)}
     >
       <div {...stylex.props(styles.row)}>
         <div {...stylex.props(styles.words)}>
           <label htmlFor={id} {...stylex.props(styles.name)}>
-            {label}
+            {loading ? <Skeleton text="sm" layout={styles.nameWait} /> : label}
             {info !== undefined && (
               <span {...stylex.props(styles.info)}>
                 <Tooltip>
@@ -394,6 +415,7 @@ export const SettingRow = ({
             <Line
               id={helpId}
               help={help}
+              loading={loading}
               state={state}
               onRetry={onRetry}
               savingLabel={savingLabel}

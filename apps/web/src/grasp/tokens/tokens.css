@@ -2066,6 +2066,8 @@
   --grasp-inspector-bar: 48px;
   /* The room round an inspector's content: one left edge for its tile, its title and its cards. */
   --grasp-inspector-pad: var(--grasp-space-6);
+  /* How tall a page's head stands to its line, beside the page's own panel: a page band and the panel's head (its bar, its title) both, so their two foot lines are one line (the bar's 48px and space-20). */
+  --grasp-inspector-head: 128px;
   /* The room under an inspector's last section, so it never ends on the window's edge. */
   --grasp-inspector-pad-end: var(--grasp-space-20);
   /* Between the sections of an inspector, and between its head and its first section. */

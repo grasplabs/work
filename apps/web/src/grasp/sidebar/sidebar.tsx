@@ -26,7 +26,7 @@ import { layoutOf } from "../layout/layout";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { useWords } from "../words/words";
+import { useWords, withGiven } from "../words/words";
 import { useFoldKeys } from "./fold-keys";
 import { guideVars } from "./guide.stylex";
 import { LoadingNav } from "./loading";
@@ -48,9 +48,14 @@ import {
   useSwap,
 } from "./section";
 import type { SidebarBack, SidebarTab } from "./section";
-import { useSidebarInShell } from "./shell";
+import {
+  SidebarGivenWords,
+  useSidebarGivenWords,
+  useSidebarInShell,
+} from "./shell";
 import type { SidebarInShell } from "./shell";
 import { sidebarWords } from "./words";
+import type { SidebarWords } from "./words";
 
 /**
  * One of a row's own rows, under its name: a link to a page within it. With `actions` it has three
@@ -328,6 +333,12 @@ export interface SidebarProps {
    * @default "Views"
    */
   tabsLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ search: "Find a chat" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SidebarWords>;
   /** One quiet sentence where the rows would be, when the list has none ("Nothing needs you yet"). */
   empty?: string;
   /**
@@ -1278,7 +1289,7 @@ const RowWorking = ({
   label: string | undefined;
   slot: boolean;
 }) => {
-  const words = useWords("sidebar", sidebarWords);
+  const words = useWords("sidebar", sidebarWords, useSidebarGivenWords());
   if (working !== true) {
     return null;
   }
@@ -2029,6 +2040,7 @@ const SidebarDrawn = ({
   tab,
   onTabChange,
   tabsLabel: tabsGiven,
+  words: ownWords,
   empty,
   loading,
   style: styleProp,
@@ -2037,12 +2049,20 @@ const SidebarDrawn = ({
   onPeek,
   beside,
 }: SidebarProps & ShellExtras & { groups: readonly SidebarGroupEntry[] }) => {
-  const words = useWords("sidebar", sidebarWords);
+  // Its words: the instance's, else the product's by its catalogue, else English; the caller's props still win.
+  const words = withGiven(useWords("sidebar", sidebarWords, ownWords), {
+    search: searchGiven,
+    fold: foldGiven,
+    main: navGiven,
+    views: tabsGiven,
+  });
   const label = nameOf(named, labelDeprecated, words.name);
-  const searchLabel = searchGiven ?? words.search;
-  const foldLabel = foldGiven ?? words.fold;
-  const navLabel = navGiven ?? words.main;
-  const tabsLabel = tabsGiven ?? words.views;
+  const {
+    search: searchLabel,
+    fold: foldLabel,
+    main: navLabel,
+    views: tabsLabel,
+  } = words;
   const [own, setOwn] = useState(defaultOpen);
   const open = given ?? own;
   // Whether the person has folded or opened it on this page: only then does the reopen button fade
@@ -2343,7 +2363,13 @@ export const Sidebar = (props: SidebarProps) => {
   const groups = props.groups ?? groupsOf(props.children);
   return (
     <GuidesOn.Provider value={props.guides === true}>
-      <SidebarDrawn {...props} groups={groups} {...shellParts(props, shell)} />
+      <SidebarGivenWords value={props.words}>
+        <SidebarDrawn
+          {...props}
+          groups={groups}
+          {...shellParts(props, shell)}
+        />
+      </SidebarGivenWords>
     </GuidesOn.Provider>
   );
 };

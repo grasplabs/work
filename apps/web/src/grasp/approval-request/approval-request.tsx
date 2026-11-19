@@ -43,6 +43,7 @@ import { Textarea } from "../textarea";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
 import { approvalRequestWords } from "./words";
+import type { ApprovalRequestWords } from "./words";
 
 /** Where a request stands. */
 export type ApprovalStatus =
@@ -219,8 +220,12 @@ export interface ApprovalRequestProps {
   askedAt?: string;
   /** When it runs out, when that is near: it takes `askedAt`'s place ("Expires in 10 min"). */
   expiresIn?: string;
-  /** Every word the card shows, for a product that translates them. English by default. */
-  words?: Partial<ApprovalWords>;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ decline: "Not now" }`): every word the
+   * card shows. Any left out are the catalogue's, else English. A flat text prop given beside it (`approveLabel`,
+   * `changesPlaceholder`, `viewer`) still wins until the release's step 5.
+   */
+  words?: Partial<ApprovalWords & ApprovalRequestWords>;
   /** The level of its heading, so the page's outline stays in order. @default 3 */
   headingLevel?: 2 | 3 | 4;
   /** @deprecated Use `layout`. */
@@ -1520,12 +1525,15 @@ export const ApprovalRequest = (props: ApprovalRequestProps) => {
   const { approve, details } = partsOf(props.children);
   // Its words: the product's, by its catalogue, else English; the caller's words and text props win,
   // the part over the older prop.
-  const words = withGiven(useWords("approvalRequest", approvalRequestWords), {
-    ...givenWords,
-    approve: approve ?? props.approveLabel,
-    changesPlaceholder: props.changesPlaceholder,
-    viewer: props.viewer,
-  });
+  const approveLabel = approve ?? props.approveLabel;
+  const words = withGiven(
+    useWords("approvalRequest", approvalRequestWords, givenWords),
+    {
+      approve: approveLabel,
+      changesPlaceholder: props.changesPlaceholder,
+      viewer: props.viewer,
+    }
+  );
   const { viewer } = words;
   const titleId = useId();
   const card = useRef<HTMLElement>(null);

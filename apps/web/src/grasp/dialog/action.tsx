@@ -17,6 +17,7 @@ import type {
   ButtonWords,
 } from "../button";
 import { buttonWords } from "../button/words";
+import type { ButtonOwnWords } from "../button/words";
 import type { IconData } from "../icons";
 import { ms } from "../tokens/tokens.values";
 import { useWords } from "../words/words";
@@ -45,6 +46,12 @@ interface ActionBase extends Omit<
    * `danger` action asks with its own words when this is left out.
    */
   agentConfirm?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ actionFailed: "Could not save" }`): Button's
+   * (`button`), as the action is one. Any left out are the catalogue's, else English. Its
+   * `workingLabel` and `failedLabel` stay its own props and win.
+   */
+  words?: Partial<ButtonOwnWords>;
 }
 
 /** An action that only closes, such as Cancel. */
@@ -108,6 +115,8 @@ export interface ActionButtonProps {
   look: Pick<ActionBase, "children" | "variant" | "icon" | "agentConfirm"> & {
     workingLabel?: string;
     failedLabel?: string;
+    /** The action's own words (DialogAction's `words`), over the catalogue's. */
+    words?: Partial<ButtonOwnWords> | undefined;
   };
   /** Its place in a still drawing for the docs (still.styles.ts), in place of its own. */
   still?: ButtonLayoutStyle;
@@ -137,7 +146,7 @@ export const ActionButton = ({
   life,
 }: ActionButtonProps) => {
   const failed = useFailed(error);
-  const { actionFailed } = useWords("button", buttonWords);
+  const { actionFailed } = useWords("button", buttonWords, look.words);
   const {
     variant = "quiet",
     icon,
@@ -201,7 +210,7 @@ interface LiveActionProps {
 // person's failed press reaches the console as nothing.
 const LiveAction = ({ rest, action, look }: LiveActionProps) => {
   const running = useRef<Promise<unknown> | null>(null);
-  const { actionFailed } = useWords("button", buttonWords);
+  const { actionFailed } = useWords("button", buttonWords, look.words);
   if (action === undefined) {
     return (
       <ClosePrimitive
@@ -277,6 +286,7 @@ export const DialogAction = (props: DialogActionProps) => {
     workingLabel,
     failedLabel,
     agentConfirm,
+    words,
     ...rest
   } = props;
   const still = useStill();
@@ -287,6 +297,7 @@ export const DialogAction = (props: DialogActionProps) => {
     workingLabel,
     failedLabel,
     agentConfirm,
+    words,
   };
   if (still) {
     const busy = still.busy && action !== undefined;

@@ -390,6 +390,12 @@ export interface ComposerProps {
   style?: ComposerLayoutStyle;
   /** Layout only: margins, alignment and width. The look belongs to the composer. */
   layout?: ComposerLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords) `composer.composer` group, key by key
+   * (`{ send: "Send it" }`). Any left out are the catalogue's, else English. A flat text prop given beside it
+   * (`sendLabel`, `failedLabel` and the other text props) still wins until the release's step 5.
+   */
+  words?: Partial<ComposerWords["composer"]>;
 }
 
 // Where the mention menu stands: under the caret's line, or over it when the composer is low on
@@ -3134,7 +3140,7 @@ const ComposerForm = (props: Resolved) => {
 
 /** Where a person writes to an assistant: the text, its actions, and send. */
 export const Composer = ({ ref, ...props }: ComposerProps) => {
-  const words = useComposerWords("composer");
+  const words = useComposerWords("composer", props.words);
   // The host's ref on the text, handed on by a name of its own: the form reads its props in render.
   return (
     <ComposerForm

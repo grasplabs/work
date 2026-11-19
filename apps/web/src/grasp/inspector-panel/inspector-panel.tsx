@@ -78,7 +78,7 @@ const holds = (section: InspectorSection) =>
 const missing = (value: KeyValueItem["value"]) =>
   value === null || value === undefined || value === false || value === "";
 
-/** The section's facts, side by side, at the panel's inset; a missing value a quiet dash. */
+/** The section's facts, side by side, at the panel's inset; a missing value a quiet dash, a pending one Key value's line. */
 const Facts = ({
   facts,
   words,
@@ -91,7 +91,8 @@ const Facts = ({
       variant="inline"
       divided
       items={facts.map((fact) =>
-        missing(fact.value)
+        // A value still on its way is not missing: Key value draws its own short line for it.
+        missing(fact.value) && fact.pending !== true
           ? {
               ...fact,
               value: (
@@ -230,6 +231,7 @@ export const InspectorPanel = (props: InspectorPanelProps) => {
         }))}
         viewsLabel={words.views}
         texture={props.texture === true}
+        loading={props.loading === true}
       />
       {views === undefined ? (
         <PanelView>

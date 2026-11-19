@@ -21,8 +21,10 @@ import { tabStyles } from "../tabs/tabs";
 import { rowMarker } from "../tabs/tabs.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
-import { useWords } from "../words/words";
+import { useWords, withGiven } from "../words/words";
+import { useSidebarGivenWords } from "./shell";
 import { sidebarWords } from "./words";
+import type { SidebarWords } from "./words";
 
 const HOVER = media.hover;
 const COARSE = media.coarse;
@@ -290,6 +292,12 @@ export interface SectionHeadProps {
   backLabel?: string;
   /** Draws the Back row with the sidebar's own row part. */
   renderBack: (back: SidebarBack & { label: string }) => ReactElement;
+  /**
+   * This instance's own words, over its Sidebar's `words` and the catalogue's (GraspWords), key by key (`{ back: "All settings" }`). Any left out
+   * are the Sidebar's, else the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SidebarWords>;
 }
 
 /** Back, then the section's name: where the tabs would stand on the main list. */
@@ -300,9 +308,17 @@ export const SectionHead = ({
   back,
   backLabel: backGiven,
   renderBack,
+  words,
 }: SectionHeadProps) => {
-  const words = useWords("sidebar", sidebarWords);
-  const backLabel = backGiven ?? words.back;
+  const fromSidebar = useSidebarGivenWords();
+  const backLabel = withGiven(
+    useWords(
+      "sidebar",
+      sidebarWords,
+      words === undefined ? fromSidebar : { ...fromSidebar, ...words }
+    ),
+    { back: backGiven }
+  ).back;
   let lead: ReactNode = null;
   if (mark !== undefined) {
     lead = (

@@ -156,6 +156,14 @@ const styles = stylex.create({
  * How the words are drawn: small (a dense header's, or a group's sentence, text-sm right under the
  * title), the title's size, and whether a small header with no sentence stands centred on its line.
  */
+/** The text size a title's placeholder stands for, so the head is as tall loading as loaded. */
+const waitOf = (size: SectionHeaderProps["size"], group: boolean) => {
+  if (group) {
+    return "md" as const;
+  }
+  return size === "sm" ? ("sm" as const) : ("lg" as const);
+};
+
 const lookOf = (
   size: SectionHeaderProps["size"],
   variant: SectionHeaderProps["variant"],
@@ -170,6 +178,10 @@ const lookOf = (
       size === "sm" && styles.titleSm,
       group && styles.titleGroup,
     ],
+    // While loading, the placeholders take the lines the words will: a group's title is text-md,
+    // a small one text-sm, else text-lg; a small head's sentence text-sm, else text-md.
+    titleWait: waitOf(size, group),
+    descriptionWait: small ? ("sm" as const) : ("md" as const),
     centred: small && description === undefined,
     words: [
       styles.words,
@@ -204,6 +216,8 @@ export const SectionHeader = ({
   const {
     small,
     title: titleLook,
+    titleWait,
+    descriptionWait,
     centred,
     words,
   } = lookOf(size, variant, description);
@@ -220,9 +234,12 @@ export const SectionHeader = ({
       <div {...stylex.props(words)}>
         {loading ? (
           <>
-            <Skeleton text="lg" layout={styles.titleWait} />
+            <Skeleton text={titleWait} layout={styles.titleWait} />
             {description !== undefined && (
-              <Skeleton text="md" layout={styles.descriptionWait} />
+              <Skeleton
+                text={descriptionWait}
+                layout={styles.descriptionWait}
+              />
             )}
           </>
         ) : (

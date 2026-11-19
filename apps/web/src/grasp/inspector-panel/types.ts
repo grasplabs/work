@@ -129,6 +129,12 @@ export interface InspectorPanelProps {
   framed?: boolean;
   /** The faint dither behind the head. @default false */
   texture?: boolean;
+  /**
+   * The object is not there yet (a page's first paint): the head's title, and its line when
+   * `description` is given (even empty), are quiet placeholders in their own lines. Give the
+   * sections as they will stand, with placeholders as their values. @default false
+   */
+  loading?: boolean;
   /** The words it shows and says, to replace the English ones: any of them. */
   words?: Partial<InspectorPanelWords>;
   /** @deprecated Use `layout`. */

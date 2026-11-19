@@ -24,6 +24,7 @@ import type { KeyboardEvent, MouseEvent, PointerEvent, Ref } from "react";
 import { ms } from "../tokens/tokens.values";
 import { useWords } from "../words/words";
 import { buttonWords } from "./words";
+import type { ButtonOwnWords } from "./words";
 
 /** `true` for the hold-duration token, or `{ ms }` for a hold of another length. */
 export type HoldSetting = boolean | { ms: number };
@@ -48,11 +49,15 @@ export const englishHoldLabels: ButtonHoldLabels = {
   cancel: buttonWords.cancel,
 };
 
-/** A hold's words: the product's GraspWords for Button, else English; a caller's `holdLabels` win. */
+/**
+ * A hold's words: English, the product's GraspWords for Button, then the instance's own (Button's
+ * `words`); a caller's `holdLabels` win over all of them.
+ */
 export const useHoldLabels = (
-  given: Partial<ButtonHoldLabels> | undefined
+  given: Partial<ButtonHoldLabels> | undefined,
+  own?: Partial<ButtonOwnWords>
 ): ButtonHoldLabels => {
-  const words = useWords("button", buttonWords);
+  const words = useWords("button", buttonWords, own);
   return {
     holdTo: words.holdTo,
     ask: words.ask,

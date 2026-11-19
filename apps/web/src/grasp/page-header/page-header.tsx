@@ -24,9 +24,11 @@ import { dropdownMenuWords } from "../dropdown-menu/words";
 import { More, Spinner } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { arrive } from "../motion/arrive";
+import { PanelTexture } from "../panel/texture";
 import { Skeleton } from "../skeleton/skeleton";
-import { grasp } from "../tokens/tokens.stylex";
+import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
+import { pageBandVars } from "./band.stylex";
 
 /** What a caller may style: where the header sits, and how wide it is. Never its look. */
 export type PageHeaderLayoutStyle = LayoutStyle;
@@ -68,6 +70,15 @@ export interface PageHeaderProps {
    * @default "lg"
    */
   size?: "lg" | "md" | "sm";
+  /**
+   * `page`, the header on the page's ground. `band`, the head of a record's or a note's page: a
+   * horizontal section the page's whole width, flush under App shell's bar and edge to edge of its
+   * card, the library's dither faint behind the title, and one hairline along its foot that draws
+   * from the start to the end once, when the page arrives. Beside the page's own panel it ends at
+   * the panel's line. Its words start on the page column's line, as the bar's first crumb does.
+   * @default "page"
+   */
+  variant?: "page" | "band";
   /** Under the title: the page's Tabs, when it has views. */
   tabs?: ReactNode;
   /**
@@ -86,7 +97,57 @@ export interface PageHeaderProps {
 const PHONE = "@container page-header (width < 40rem)";
 const NARROWEST = "@container page-header (width < 20rem)";
 
+// The band's line, drawn from the start to the end.
+const draw = stylex.keyframes({
+  from: { transform: "scaleX(0)" },
+  to: { transform: "scaleX(1)" },
+});
+
 const styles = stylex.create({
+  // A band: the page's padding taken back (App shell tells it, pageBandVars), so it stands flush
+  // under the bar and edge to edge; its own padding the page's sides again, so its words start on
+  // the page column's line. Compact on a phone.
+  band: {
+    position: "relative",
+    isolation: "isolate",
+    marginBlockStart: `calc(-1 * ${pageBandVars.top})`,
+    marginInline: `calc(-1 * ${pageBandVars.inline})`,
+    paddingInline: `max(${pageBandVars.inline}, ${grasp.space5})`,
+    paddingBlockStart: {
+      default: grasp.space7,
+      [media.belowPhone]: grasp.space5,
+    },
+    paddingBlockEnd: {
+      default: grasp.space6,
+      [media.belowPhone]: grasp.space4,
+    },
+    // The page keeps its room under the band, as under a header on its ground.
+    marginBlockEnd: grasp.space6,
+    // As tall as the page panel's head beside it (inspector-head): its line, drawn just under it,
+    // meets the panel's line as one.
+    boxSizing: "border-box",
+    minHeight: grasp.inspectorHead,
+  },
+  // The dither under the words.
+  bandTexture: { zIndex: -1 },
+  // In a band the actions stand on the title's line at every width, never level with the line
+  // under it.
+  rowTop: { alignItems: "flex-start" },
+  // One hairline along the foot, start to end, drawn once as the page arrives; at once with
+  // reduced motion. A re-render or the panel opening never starts it again.
+  bandLine: {
+    position: "absolute",
+    insetInline: 0,
+    // Just under the band, where the panel's head line stands beside it.
+    top: "100%",
+    height: grasp.hairline,
+    backgroundColor: grasp.line,
+    transformOrigin: { default: "left", ":dir(rtl)": "right" },
+    animationName: { default: draw, [media.reduced]: "none" },
+    animationDuration: grasp.durationOpen,
+    animationTimingFunction: grasp.ease,
+    animationFillMode: "both",
+  },
   header: {
     containerType: "inline-size",
     containerName: "page-header",
@@ -642,6 +703,7 @@ export const PageHeader = ({
   tabs,
   loading = false,
   size = "lg",
+  variant = "page",
   style: styleProp,
   layout,
 }: PageHeaderProps) => {
@@ -653,14 +715,22 @@ export const PageHeader = ({
   return (
     <header
       data-slot="page-header"
+      data-variant={variant}
       aria-busy={loading ? true : undefined}
-      {...stylex.props(styles.header, layout ?? styleProp)}
+      {...stylex.props(
+        styles.header,
+        variant === "band" && styles.band,
+        layout ?? styleProp
+      )}
     >
+      {variant === "band" && <PanelTexture layout={styles.bandTexture} />}
       {breadcrumb}
       <div
         {...stylex.props(
           styles.row,
-          folding !== undefined && (floats ? styles.rowFloats : styles.rowFolds)
+          folding !== undefined &&
+            (floats ? styles.rowFloats : styles.rowFolds),
+          variant === "band" && styles.rowTop
         )}
       >
         <Words
@@ -684,6 +754,13 @@ export const PageHeader = ({
         )}
       </div>
       {tabs !== undefined && <div {...stylex.props(styles.tabs)}>{tabs}</div>}
+      {variant === "band" && (
+        <span
+          aria-hidden="true"
+          data-slot="page-band-line"
+          {...stylex.props(styles.bandLine)}
+        />
+      )}
     </header>
   );
 };

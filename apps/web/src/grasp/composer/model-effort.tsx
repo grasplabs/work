@@ -31,6 +31,7 @@ import type { ComposerReasoningOption } from "./reasoning";
 import { rowMarker } from "./row.stylex";
 import { tabOutTarget } from "./tab-out";
 import { useComposerWords } from "./words";
+import type { ComposerWords } from "./words";
 
 /** One model, with the levels of effort it offers. */
 export interface ComposerModelEffortOption extends ComposerModelOption {
@@ -113,6 +114,12 @@ export interface ComposerModelEffortProps {
    * @default false
    */
   showName?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords) `composer.modelEffort` group, key by key
+   * (`{ effort: "Thinking" }`). Any left out are the catalogue's, else English. A flat text prop given beside it
+   * (`aria-label`, `modelLabel`, `effortLabel`, `noEffortLabel`) still wins until the release's step 5.
+   */
+  words?: Partial<ComposerWords["modelEffort"]>;
 }
 
 const noMakers: ComposerModelMaker[] = [];
@@ -544,10 +551,11 @@ export const ComposerModelEffort = ({
   emptyLabel: emptyGiven,
   topLight = false,
   showName = false,
+  words: own,
 }: ComposerModelEffortProps) => {
   const disabled = useComposerDisabled();
   // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
-  const words = useComposerWords("modelEffort");
+  const words = useComposerWords("modelEffort", own);
   const modelWords = useComposerWords("model");
   const label = labelGiven ?? labelDeprecated ?? words.label;
   const thinkingLabel = thinkingGiven ?? effortDeprecated ?? words.thinking;

@@ -1,7 +1,7 @@
 // The Composer's own words, in English, for every part in this folder. The product gives them in
 // its languages through GraspWords (src/words): one `composer` entry, grouped by part. A text prop a
 // caller passes still wins, until the breaking release's step 5 removes it.
-import { useWords } from "../words/words";
+import { useWords, withGiven } from "../words/words";
 import type { ComposerAttachmentWords } from "./attachment";
 import type { ComposerVoiceWords } from "./voice";
 
@@ -208,16 +208,23 @@ declare module "../words/words" {
 
 /**
  * One part's group of words: the product's catalogue for it (GraspWords), each key over its English
- * on its own, so a catalogue written before a group gained a key still has it. (The catalogue's own
- * merge goes one level deep, to the groups; this goes into them.)
+ * on its own, so a catalogue written before a group gained a key still has it, then the instance's
+ * own (`own`, the part's `words` prop), key by key. (The catalogue's own merge goes one level deep,
+ * to the groups; this goes into them.)
  */
 export const useComposerWords = <G extends keyof ComposerWords>(
-  group: G
+  group: G,
+  own?: Partial<ComposerWords[G]>
 ): ComposerWords[G] => {
   const given: Partial<ComposerWords[G]> = useWords("composer", composerWords)[
     group
   ];
   // Object.assign, as each group's type is its own object, which a generic spread cannot know.
   // oxlint-disable-next-line unicorn/prefer-object-spread, prefer-object-spread -- see above
-  return Object.assign({}, composerWords[group], given);
+  const shared: ComposerWords[G] = Object.assign(
+    {},
+    composerWords[group],
+    given
+  );
+  return own === undefined ? shared : withGiven(shared, own);
 };

@@ -22,6 +22,7 @@ import { focus } from "../focus/focus";
 import { Cross, Icon, PanelToggle, SidebarToggle } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
+import { pageBandVars } from "../page-header/band.stylex";
 import { PanelSeated } from "../panel/seat";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "../sheet";
 import { SidebarShellProvider } from "../sidebar/shell";
@@ -594,11 +595,20 @@ const styles = stylex.create({
     paddingBlockEnd: grasp.shellPageRoomBelow,
     // The page's words stand this far in; the bar's first and last ink keep it too (bar.tsx).
     paddingInline: grasp.shellPageInline,
+    // Told to a page band (PageHeader variant="band"), which takes them back to stand edge to edge.
+    [pageBandVars.top]: grasp.space7,
+    [pageBandVars.inline]: grasp.shellPageInline,
   },
   // A page's own bar stands at its very top: the bar keeps the room under itself.
-  mainUnderOwnBar: { paddingBlockStart: 0 },
+  mainUnderOwnBar: { paddingBlockStart: 0, [pageBandVars.top]: "0px" },
   // No bar: the page has the whole card, edge to edge, such as a backdrop.
-  mainWhole: { paddingBlockStart: 0, paddingBlockEnd: 0, paddingInline: 0 },
+  mainWhole: {
+    paddingBlockStart: 0,
+    paddingBlockEnd: 0,
+    paddingInline: 0,
+    [pageBandVars.top]: "0px",
+    [pageBandVars.inline]: "0px",
+  },
   roomForChat: { paddingBlockEnd: grasp.shellPageRoomChat },
   // Once the dock is measured: its height, its inset from the card's foot and the gap above it, so the
   // last row scrolls clear of a dock of any height (a band over the bar, the bar's tall form), and

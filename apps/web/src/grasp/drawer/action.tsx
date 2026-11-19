@@ -13,6 +13,7 @@ import type { ComponentProps, MouseEvent } from "react";
 import { Button } from "../button";
 import type { ActionState, ButtonVariant, ButtonWords } from "../button";
 import { buttonWords } from "../button/words";
+import type { ButtonOwnWords } from "../button/words";
 import type { IconData } from "../icons";
 import { ms } from "../tokens/tokens.values";
 import { useWords } from "../words/words";
@@ -45,6 +46,12 @@ interface ActionBase extends Omit<
    * `danger` action asks with its own words when this is left out.
    */
   agentConfirm?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ actionFailed: "Could not save" }`): Button's
+   * (`button`), as the action is one. Any left out are the catalogue's, else English. Its
+   * `workingLabel` and `failedLabel` stay its own props and win.
+   */
+  words?: Partial<ButtonOwnWords>;
 }
 
 /** An action that only closes, such as Cancel. */
@@ -256,17 +263,19 @@ const LiveAction = ({ rest, action, look }: LiveActionProps) => {
  * closes: a step that keeps the panel open belongs in the body.
  */
 export const DrawerAction = (props: DrawerActionProps) => {
-  const { actionFailed } = useWords("button", buttonWords);
   const {
     children,
     variant,
     icon,
     action,
     workingLabel,
-    failedLabel = actionFailed,
+    failedLabel: failedGiven,
     agentConfirm,
+    words,
     ...rest
   } = props;
+  const { actionFailed } = useWords("button", buttonWords, words);
+  const failedLabel = failedGiven ?? actionFailed;
   const look = {
     children,
     variant,

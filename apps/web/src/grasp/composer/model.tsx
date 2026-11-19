@@ -40,6 +40,7 @@ import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
 import { stopEscape } from "./escape";
 import { useComposerWords } from "./words";
+import type { ComposerWords } from "./words";
 
 /** One model a person can choose. */
 export interface ComposerModelOption {
@@ -108,6 +109,12 @@ export interface ComposerModelProps {
   emptyLabel?: string;
   /** A row at the top of a maker's list, such as a Connect action for linking an account. */
   connect?: Record<string, ReactNode>;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords) `composer.model` group, key by key
+   * (`{ search: "Find a model" }`). Any left out are the catalogue's, else English. A flat text prop given beside it
+   * (`aria-label`, `searchLabel`, `makersLabel`, `favouritesLabel`, `emptyLabel`) still wins until the release's step 5.
+   */
+  words?: Partial<ComposerWords["model"]>;
 }
 
 const FAVOURITES = "\u0000favourites";
@@ -497,10 +504,11 @@ export const ComposerModel = ({
   favouritesLabel: favouritesGiven,
   emptyLabel: emptyGiven,
   connect,
+  words: own,
 }: ComposerModelProps) => {
   const disabled = useComposerDisabled();
   // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
-  const catalogue = useComposerWords("model");
+  const catalogue = useComposerWords("model", own);
   const words: ModelMenuWords = {
     label: labelGiven ?? labelDeprecated ?? catalogue.label,
     search: searchGiven ?? catalogue.search,
