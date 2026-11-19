@@ -1520,6 +1520,13 @@ const ShellDock = ({
 const hasPanels = (panels: ReactNode, open: boolean | undefined) =>
   panels !== undefined && panels !== null && open !== false;
 
+/** The panels' button stands: panels are shown, or given and the host opens and closes them. */
+const panelsButton = (
+  paneled: boolean,
+  panels: ReactNode,
+  onPanelsOpenChange: ((open: boolean) => void) | undefined
+) => paneled || (hasPanels(panels, true) && onPanelsOpenChange !== undefined);
+
 /** The card's rows: a banner's at the top when there is one, the frame's bar when it draws it, then the page. */
 const cardRowsOf = (framed: boolean, banner: ReactNode) => {
   if (banner === undefined || banner === null || banner === false) {
@@ -2255,13 +2262,10 @@ export const AppShell = ({
         data-sidebar-folded={look.folded}
         // While the sidebar peeks over the page: the bar fades what the peek covers (F76).
         data-sidebar-peeking={presence(sidebarPeeking)}
-        // Wherever the panels' button stands, closed panels' too (`onPanelsOpenChange`): a page's
-        // own bar leaves room for it at its end, so the button never covers the bar's actions.
+        // Wherever the panels' button stands, closed panels' too (`onPanelsOpenChange`): a page's own
+        // bar leaves room for it at its end, so the button never covers the bar's actions.
         data-shell-panels={
-          paneled ||
-          (hasPanels(panels, true) && onPanelsOpenChange !== undefined)
-            ? ""
-            : undefined
+          panelsButton(paneled, panels, onPanelsOpenChange) ? "" : undefined
         }
         // A sidebar to put in the phone's menu: where the shell is narrow the Menu button leads the
         // bar, and the bar leaves the brand to the menu's head (bar.tsx `brand`, F88).

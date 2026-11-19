@@ -360,13 +360,13 @@ const Items = ({
   nodes.map((node, index) => {
     const branch = node.children !== undefined;
     const guided = guides && nested;
-    // In a sidebar, a nested leaf with no icon and only leaves beside it needs no empty seat to line
-    // up with: its words stand in the seat, under its parent's words, and the elbow stays short.
+    // In a sidebar, a nested leaf with no icon and only leaves beside it needs no empty seat to line up
+    // with: its words stand in the seat, under its parent's words, and the elbow stays short.
     const seatless =
       seated &&
       nested &&
       node.icon === undefined &&
-      !nodes.some((n) => n.children !== undefined);
+      !nodes.some((each) => each.children !== undefined);
     return (
       <ItemPrimitive
         key={node.value}

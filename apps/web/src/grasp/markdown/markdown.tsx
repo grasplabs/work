@@ -27,8 +27,9 @@ import type { FC, ReactNode } from "react";
 
 import { announce } from "../announce/announce";
 import { CodeBlock } from "../code-block";
+import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
-import { Icon, Tick } from "../icons";
+import { ChevronRight, Icon, Tick } from "../icons";
 import { Link } from "../link";
 import { useArriving } from "../motion/use-arriving";
 import { ArrivingContext, usePaced } from "../motion/use-paced";
@@ -48,6 +49,9 @@ import { MarkdownLinks } from "./links";
 import type { MarkdownLinkDrawer } from "./links";
 import { parse, safeHref, schemeOf } from "./parse";
 import { openFence, repair, tidy } from "./repair";
+import { sectionStyles } from "./section.styles";
+import { groupSections } from "./sections";
+import type { Drawn } from "./sections";
 import { markdownStyles as styles } from "./styles";
 import type {
   FootnoteDefinition,
@@ -898,6 +902,18 @@ const useAnswer = (
   return { shown: text, live: true, kept };
 };
 
+/** What a section's opening or closing says as it arrives: its summary, or nothing; other HTML its text. */
+const sectionSaid = (value: string): string => {
+  const [drawn] = groupSections([
+    { node: { type: "html", value }, base: 0 },
+    { node: { type: "html", value: "</details>" }, base: 0 },
+  ]);
+  if (drawn?.kind === "section") {
+    return drawn.summaryText;
+  }
+  return /^<\/details>\s*$/u.test(value.trim()) ? "" : value;
+};
+
 /**
  * While an answer is written, a screen reader hears each block when it is finished (a paragraph,
  * a list, a heading), never each word. A table says its name; code says nothing here, as the Code
@@ -923,6 +939,9 @@ const useSaidBlocks = (
       .map((node) => {
         if (node.type === "code") {
           return "";
+        }
+        if (node.type === "html") {
+          return sectionSaid(node.value);
         }
         return node.type === "table"
           ? (names.get(node) ?? tableLabel)
@@ -983,6 +1002,96 @@ const useWrittenHere = (live: boolean) => {
     setWritten(true);
   }
   return { setRoot, written };
+};
+
+/**
+ * A section (sections.ts): the chevron before its summary, its blocks under the summary's first
+ * letter, closed until it is opened. The look is the one DocumentEditor writes (section.styles.ts).
+ * The toggle is named by the summary's words and says whether it is open.
+ */
+const Section = ({
+  drawn,
+  context,
+  children,
+}: {
+  drawn: Extract<Drawn, { kind: "section" }>;
+  context: Context;
+  children: ReactNode;
+}) => {
+  const [open, setOpen] = useState(false);
+  const id = useId().replaceAll(":", "");
+  const { base } = drawn.key;
+  return (
+    <div
+      data-slot="markdown-section"
+      data-open={open || undefined}
+      {...stylex.props(sectionStyles.section)}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={`${id}-body`}
+        aria-labelledby={`${id}-summary`}
+        onClick={() => {
+          setOpen(!open);
+        }}
+        {...stylex.props(sectionStyles.toggle, focus.ring)}
+      >
+        <span
+          aria-hidden="true"
+          {...stylex.props(
+            sectionStyles.chevron,
+            open && sectionStyles.chevronOpen
+          )}
+        >
+          <Icon icon={ChevronRight} />
+        </span>
+      </button>
+      <div id={`${id}-summary`} {...stylex.props(sectionStyles.summary)}>
+        <Phrasing
+          nodes={drawn.summary}
+          context={base === 0 ? context : { ...context, base }}
+        />
+      </div>
+      <div
+        id={`${id}-body`}
+        hidden={!open}
+        {...stylex.props(sectionStyles.body)}
+      >
+        {children}
+      </div>
+    </div>
+  );
+};
+
+/** One block, or a section holding its own. */
+const DrawnBlock = ({
+  drawn,
+  context,
+  live,
+}: {
+  drawn: Drawn;
+  context: Context;
+  live: boolean;
+}): ReactNode => {
+  if (drawn.kind === "section") {
+    return (
+      <Section drawn={drawn} context={context}>
+        {drawn.children.map((child, index) => (
+          <DrawnBlock key={index} drawn={child} context={context} live={live} />
+        ))}
+      </Section>
+    );
+  }
+  const { node, base } = drawn.placed;
+  return (
+    <div {...stylex.props(live && framed.has(node.type) && styles.arrives)}>
+      <Block
+        node={node}
+        context={base === 0 ? context : { ...context, base }}
+      />
+    </div>
+  );
 };
 
 /** An answer drawn from Markdown, safe while it streams. */
@@ -1075,17 +1184,10 @@ export const Markdown = ({
         size === "xs" && styles.xsmall
       )}
     >
-      {placed.map(({ node, base }, index) => (
+      {groupSections(placed).map((drawn, index) => (
         // A block keeps its place by its order, so one that is already shown never fades in again.
         <Fragment key={index}>
-          <div
-            {...stylex.props(live && framed.has(node.type) && styles.arrives)}
-          >
-            <Block
-              node={node}
-              context={base === 0 ? context : { ...context, base }}
-            />
-          </div>
+          <DrawnBlock drawn={drawn} context={context} live={live} />
         </Fragment>
       ))}
       {notes.length > 0 && (
