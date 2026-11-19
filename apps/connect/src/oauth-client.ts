@@ -218,23 +218,18 @@ export const exchangeCode = async (
   );
 };
 
-/**
- * Redeems a refresh token: for the scopes first asked for, or for `scope`
- * when given (RFC 6749 §6). A provider that doesn't rotate sends none back.
- */
+/** Redeems a refresh token. A provider that doesn't rotate sends none back. */
 export const refreshTokens = async (
   provider: OAuthProviderConfig,
   client: OAuthClientCredentials,
   tenant: string,
-  refreshToken: string,
-  scope?: string
+  refreshToken: string
 ): Promise<TokenSet> => {
   const requestedAt = Date.now();
   return tokenSet(
     await post(provider.tokenEndpoint(tenant), provider, client, {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
-      ...(scope === undefined ? {} : { scope }),
     }),
     requestedAt
   );
