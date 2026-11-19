@@ -282,8 +282,10 @@ export interface AppShellProps {
   /**
    * The page is not there yet (the first paint of a reload, before the data): the frame stands as it
    * will (the sidebar's column, the card with its bar), the frame bar's crumbs a placeholder and the
-   * page's room empty and said as busy, so nothing moves when the page arrives. Pair it with the
-   * Sidebar's own `loading` for its rows. The page's `children` are not drawn while it holds.
+   * page's room said as busy, so nothing moves when the page arrives. Pair it with the Sidebar's own
+   * `loading` for its rows. While it holds, `children` is the page kind's skeleton (a block from the
+   * registry: `page-skeleton-record`, `-table`, `-list`, `-settings`), drawn in the page's room as the
+   * page will stand; none leaves the room empty. Never a generic run of lines.
    * @default false
    */
   loading?: boolean;
@@ -1974,7 +1976,7 @@ const ShellCard = ({
           stylex.defaultMarker()
         )}
       >
-        {loading === true ? null : children}
+        {children}
       </main>
       <PagePanel
         panel={pagePanel}

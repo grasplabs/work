@@ -77,14 +77,6 @@ export const styles = stylex.create({
   sand: { backgroundImage: `${grasp.appCardGlow}, ${grasp.appCardSand}` },
   moss: { backgroundImage: `${grasp.appCardGlow}, ${grasp.appCardMoss}` },
   dusk: { backgroundImage: `${grasp.appCardGlow}, ${grasp.appCardDusk}` },
-  // A drawn ground (AppCard's `ground`): the Backdrop's canvas, filling the frame under the window.
-  ground: {
-    position: "absolute",
-    inset: 0,
-    zIndex: -1,
-    isolation: "isolate",
-    pointerEvents: "none",
-  },
   // The paper grain over the ground, under the window.
   grain: {
     position: "absolute",

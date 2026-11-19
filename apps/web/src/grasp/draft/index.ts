@@ -1,4 +1,5 @@
 export {
+  changeOf,
   Draft,
   draftEditable,
   DraftInput,

@@ -700,9 +700,9 @@
     oklch(0.173 0.028 169.36 / 0.32),
     oklch(0 0 none / 0.56)
   );
-  /* How small a dialog starts as it opens, and ends as it closes. Dropped with reduced motion. */
-  --grasp-dialog-from-scale: 0.96;
-  /* How far below its place a dialog starts as it opens. Dropped with reduced motion. */
+  /* How small a dialog starts as it opens, and ends as it closes, growing from the trigger that opened it (or its own centre with none): 0.92 reads as coming from the button and stays calm; 0.96 was right but unreadable, 0.90 felt thrown (19 Nov 2026). Dropped with reduced motion. */
+  --grasp-dialog-from-scale: 0.92;
+  /* How far below its place a dialog with no trigger starts as it opens; one opened from a trigger grows from it with no drop, which would fight its origin. Dropped with reduced motion. */
   --grasp-dialog-from-shift: 8px;
   /* A phone drawn in a stage: as wide as a common phone. */
   --grasp-stage-phone-width: 360px;
@@ -1175,6 +1175,14 @@
     0 12px 28px -14px var(--grasp-shade-soft);
   /* How far the frame rises under the pointer. */
   --grasp-app-card-rise: -2px;
+  /* A drawn ground's hue (rose): the light's ramp turned to it, each stop at the light's own lightness and chroma, kept to the few Ruben chose (19 Nov: "don't go overboard with colouring"): the green, rose, coral, olive and teal. */
+  --grasp-app-card-ground-hue-rose: 5;
+  /* A drawn ground's hue (coral): the light's ramp turned to it, each stop at the light's own lightness and chroma, kept to the few Ruben chose (19 Nov: "don't go overboard with colouring"): the green, rose, coral, olive and teal. */
+  --grasp-app-card-ground-hue-coral: 35;
+  /* A drawn ground's hue (olive): the light's ramp turned to it, each stop at the light's own lightness and chroma, kept to the few Ruben chose (19 Nov: "don't go overboard with colouring"): the green, rose, coral, olive and teal. */
+  --grasp-app-card-ground-hue-olive: 115;
+  /* A drawn ground's hue (teal): the light's ramp turned to it, each stop at the light's own lightness and chroma, kept to the few Ruben chose (19 Nov: "don't go overboard with colouring"): the green, rose, coral, olive and teal. */
+  --grasp-app-card-ground-hue-teal: 195;
   /* Text shimmer: text shimmer. */
   /* The light crossing a line of what an agent is doing, at its quietest: pine. */
   --grasp-text-shimmer-soft: var(--grasp-pine);

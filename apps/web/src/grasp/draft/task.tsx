@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 
 import { Checklist, Clock, Note, People } from "../icons";
 import {
+  changeOf,
   Draft,
   draftEditable,
   DraftInput,
@@ -17,6 +18,7 @@ import {
   DraftRow,
   DraftText,
   fieldOf,
+  filled,
   useDraftWords,
 } from "./draft";
 import type { DraftPerson, DraftStatus } from "./draft";
@@ -42,8 +44,15 @@ export interface TaskDraftProps {
   onRestore?: () => void;
   /** The task as it stands. */
   draft: TaskDraftValue;
-  /** Every change the person makes in place; left out, the draft is read only. */
+  /** Every change the person makes in place; left out, the draft is locked, as `readOnly`. */
   onDraftChange?: (draft: TaskDraftValue) => void;
+  /**
+   * Locked: shown to be made exactly as it is. No way to change it, no remove on a chip, no
+   * placeholder and no empty optional row; its values stand as text, and the foot keeps its main
+   * action and Discard. Leaving out `onDraftChange` locks it the same way.
+   * @default false
+   */
+  readOnly?: boolean;
   /** Add task: the task as it stands. Return a Promise and the button works until it settles. */
   onAdd: (draft: TaskDraftValue) => unknown;
   /** Discard, at the foot's start. */
@@ -58,6 +67,7 @@ export interface TaskDraftProps {
 export const TaskDraft = ({
   draft,
   onDraftChange,
+  readOnly,
   onAdd,
   onDismiss,
   mark,
@@ -68,8 +78,10 @@ export const TaskDraft = ({
   onRestore,
 }: TaskDraftProps) => {
   const words = useDraftWords("task");
+  const change = changeOf(readOnly, onDraftChange);
+  const locked = change === undefined;
   // Fields change only while it can still be changed: ready, or failed and to be sent again.
-  const field = fieldOf(draft, onDraftChange, status);
+  const field = fieldOf(draft, change, status);
   const people = field("people");
   const due = field("due");
   const shown =
@@ -81,10 +93,11 @@ export const TaskDraft = ({
       mark={mark}
       title={
         <DraftInput
+          readOnly={locked}
           title
           value={draft.title}
           label={words.title}
-          placeholder={words.title}
+          placeholder={locked ? undefined : words.title}
           onValueChange={field("title")}
         />
       }
@@ -98,37 +111,46 @@ export const TaskDraft = ({
       }
       onUndo={onUndo}
       onRestore={onRestore}
+      readOnly={locked}
     >
-      <DraftRow icon={Clock} label={words.due}>
-        {due !== undefined && draftEditable(status) ? (
-          <DraftDue at={draft.due} words={shown} onChange={due} />
-        ) : (
-          <span>{shown}</span>
-        )}
-      </DraftRow>
-      <DraftRow icon={People} label={words.people}>
-        {draft.people.map((person) => (
-          <DraftPersonChip
-            key={person.email ?? person.name}
-            person={person}
-            onRemove={
-              people === undefined || person.you === true
-                ? undefined
-                : () => {
-                    people(draft.people.filter((other) => other !== person));
-                  }
-            }
+      {locked && draft.due === undefined ? null : (
+        <DraftRow icon={Clock} label={words.due}>
+          {due !== undefined && draftEditable(status) ? (
+            <DraftDue at={draft.due} words={shown} onChange={due} />
+          ) : (
+            <span>{shown}</span>
+          )}
+        </DraftRow>
+      )}
+      {locked && draft.people.length === 0 ? null : (
+        <DraftRow icon={People} label={words.people}>
+          {draft.people.map((person) => (
+            <DraftPersonChip
+              whole={locked}
+              key={person.email ?? person.name}
+              person={person}
+              onRemove={
+                people === undefined || person.you === true
+                  ? undefined
+                  : () => {
+                      people(draft.people.filter((other) => other !== person));
+                    }
+              }
+            />
+          ))}
+        </DraftRow>
+      )}
+      {locked && !filled(draft.note) ? null : (
+        <DraftRow icon={Note} label={words.note}>
+          <DraftText
+            readOnly={locked}
+            value={draft.note ?? ""}
+            label={words.note}
+            placeholder={locked ? undefined : words.addNote}
+            onValueChange={field("note")}
           />
-        ))}
-      </DraftRow>
-      <DraftRow icon={Note} label={words.note}>
-        <DraftText
-          value={draft.note ?? ""}
-          label={words.note}
-          placeholder={words.addNote}
-          onValueChange={field("note")}
-        />
-      </DraftRow>
+        </DraftRow>
+      )}
     </Draft>
   );
 };

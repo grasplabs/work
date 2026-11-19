@@ -77,6 +77,8 @@ export interface DraftProps {
   onRestore?: () => void;
   /** The draft's name for a screen reader: the kind and the title ("Event: Ruben and Jerry"). */
   "aria-label": string;
+  /** The kind is locked (its `readOnly`): marked on the frame as `data-read-only`. @default false */
+  readOnly?: boolean;
 }
 
 /** Where a draft is. */
@@ -91,6 +93,20 @@ export type DraftStatus =
 /** Whether the person can still change the draft: ready, or failed and to be sent again. */
 export const draftEditable = (status: DraftStatus) =>
   status === "ready" || status === "failed";
+
+/**
+ * A kind's change handler once its lock is applied: none while `readOnly`, else the host's
+ * `onDraftChange`. A kind with none is locked: it shows no way to change it and no empty
+ * optional row, so `readOnly` and leaving out `onDraftChange` mean the same.
+ */
+export const changeOf = <T,>(
+  readOnly: boolean | undefined,
+  onDraftChange: ((draft: T) => void) | undefined
+) => (readOnly === true ? undefined : onDraftChange);
+
+/** Whether an optional value holds anything: a locked draft drops the rows that do not. */
+export const filled = (value: string | undefined) =>
+  value !== undefined && value.trim() !== "";
 
 /** The main action's life, from the draft's status. */
 const lifeOf = (status: DraftStatus) => {
@@ -253,6 +269,27 @@ const styles = stylex.create({
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
+  // Whole (a locked draft): a long name wraps inside the chip, never cut. One line is the pill as
+  // ever (half its height for a corner); more lines round the same corner, the face on the first.
+  personWhole: {
+    alignItems: "flex-start",
+    height: "auto",
+    minHeight: grasp.controlXs,
+    paddingBlock: `calc((${grasp.controlXs} - ${grasp.textXsLine}) / 2)`,
+    borderRadius: `calc(${grasp.controlXs} / 2)`,
+  },
+  personNameWhole: {
+    overflow: "visible",
+    textOverflow: "clip",
+    whiteSpace: "normal",
+    overflowWrap: "anywhere",
+  },
+  face: {
+    display: "inline-flex",
+    alignItems: "center",
+    flexShrink: 0,
+    height: grasp.textXsLine,
+  },
   remove: {
     display: "inline-flex",
     alignItems: "center",
@@ -300,6 +337,16 @@ const styles = stylex.create({
     fieldSizing: "content",
     minHeight: grasp.chatTextLine,
   },
+  // A locked value: words, not a field. Every line break kept, a long word broken at the edge,
+  // nothing cut; it grows as text does, in every engine.
+  value: {
+    flexGrow: 1,
+    minWidth: 0,
+    margin: 0,
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+    color: grasp.ink,
+  },
 });
 
 /**
@@ -341,13 +388,18 @@ export const DraftRow = ({
   </div>
 );
 
-/** A person as a chip: their face and name, and a remove when the draft can still lose them. */
+/**
+ * A person as a chip: their face and name, and a remove when the draft can still lose them. `whole`
+ * (a locked draft) wraps a long name rather than ending it in "…".
+ */
 export const DraftPersonChip = ({
   person,
   onRemove,
+  whole = false,
 }: {
   person: DraftPerson;
   onRemove?: () => void;
+  whole?: boolean;
 }) => {
   const words = useDraftWords("frame");
   return (
@@ -356,11 +408,18 @@ export const DraftPersonChip = ({
       title={person.email}
       {...stylex.props(
         styles.person,
-        onRemove !== undefined && styles.personRemovable
+        onRemove !== undefined && styles.personRemovable,
+        whole && styles.personWhole
       )}
     >
-      <DraftFace person={person} />
-      <span {...stylex.props(styles.personName)}>{person.name}</span>
+      <span {...stylex.props(styles.face)}>
+        <DraftFace person={person} />
+      </span>
+      <span
+        {...stylex.props(styles.personName, whole && styles.personNameWhole)}
+      >
+        {person.name}
+      </span>
       {onRemove === undefined ? null : (
         <button
           type="button"
@@ -375,21 +434,45 @@ export const DraftPersonChip = ({
   );
 };
 
-/** A quiet one-line field: the draft's title, an email's subject. */
+/** A locked value, whole: its words as text, every line break kept. */
+const DraftValue = ({
+  value,
+  title = false,
+}: {
+  value: string;
+  title?: boolean;
+}) => (
+  <p
+    data-slot="draft-value"
+    {...stylex.props(styles.value, title && styles.title)}
+  >
+    {value}
+  </p>
+);
+
+/**
+ * A quiet one-line field: the draft's title, an email's subject. `readOnly` (a locked draft) shows
+ * its value whole as text: wrapped, its line breaks kept, nothing cut.
+ */
 export const DraftInput = ({
   value,
   onValueChange,
   label,
   placeholder,
   title = false,
+  readOnly = false,
 }: {
   value: string;
   onValueChange?: (value: string) => void;
   label: string;
   placeholder?: string;
   title?: boolean;
-}) =>
-  title ? (
+  readOnly?: boolean;
+}) => {
+  if (readOnly) {
+    return <DraftValue value={value} title={title} />;
+  }
+  return title ? (
     // A title wraps when it is long, and stays one line of words: Enter does not break it.
     <textarea
       value={value}
@@ -418,29 +501,38 @@ export const DraftInput = ({
       {...stylex.props(styles.field)}
     />
   );
+};
 
-/** A quiet field that grows with its words: a description, an email's body. */
+/**
+ * A quiet field that grows with its words: a description, an email's body. `readOnly` (a locked
+ * draft) shows its value whole as text, which grows in every engine.
+ */
 export const DraftText = ({
   value,
   onValueChange,
   label,
   placeholder,
+  readOnly = false,
 }: {
   value: string;
   onValueChange?: (value: string) => void;
   label: string;
   placeholder?: string;
-}) => (
-  <textarea
-    value={value}
-    aria-label={label}
-    placeholder={placeholder}
-    readOnly={onValueChange === undefined}
-    rows={1}
-    onChange={(event) => onValueChange?.(event.currentTarget.value)}
-    {...stylex.props(styles.field, styles.grows)}
-  />
-);
+  readOnly?: boolean;
+}) =>
+  readOnly ? (
+    <DraftValue value={value} />
+  ) : (
+    <textarea
+      value={value}
+      aria-label={label}
+      placeholder={placeholder}
+      readOnly={onValueChange === undefined}
+      rows={1}
+      onChange={(event) => onValueChange?.(event.currentTarget.value)}
+      {...stylex.props(styles.field, styles.grows)}
+    />
+  );
 
 /** The frame: the head, the kind's fields, and the foot with its ways out. */
 export const Draft = ({
@@ -456,6 +548,7 @@ export const Draft = ({
   onUndo,
   onRestore,
   "aria-label": label,
+  readOnly = false,
 }: DraftProps) => {
   const words = useDraftWords("frame");
   if (status === "dismissed") {
@@ -483,6 +576,7 @@ export const Draft = ({
       aria-busy={busy || undefined}
       data-slot="draft"
       data-status={status}
+      data-read-only={readOnly ? "" : undefined}
       {...stylex.props(styles.root)}
     >
       <div data-slot="draft-head" {...stylex.props(styles.head)}>

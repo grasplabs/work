@@ -34,7 +34,7 @@ export interface ReplyDraftProps extends Omit<
 > {
   /** The reply as it stands, with the message it answers. */
   draft: ReplyDraftValue;
-  /** Every change the person makes in place; left out, the draft is read only. */
+  /** Every change the person makes in place; left out, the draft is locked, as `readOnly`. */
   onDraftChange?: (draft: ReplyDraftValue) => void;
   /** Send reply: the reply as it stands. */
   onSend: (draft: ReplyDraftValue) => unknown;

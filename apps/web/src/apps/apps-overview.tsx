@@ -8,9 +8,12 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
-import { AppCard, AppCardGrid } from "../grasp/app-card/index.ts";
+import {
+  AppCard,
+  AppCardGrid,
+  appCardGroundOf,
+} from "../grasp/app-card/index.ts";
 import type { AppCardAction } from "../grasp/app-card/index.ts";
-import type { BackdropLook } from "../grasp/backdrop/index.ts";
 import {
   Empty,
   EmptyContent,
@@ -44,7 +47,6 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { ProcessTile } from "../workflows/business-process.tsx";
-import { groundsOf } from "./app-grounds.ts";
 import { reachOf } from "./app-reach.ts";
 import type { AppReach } from "./app-reach.ts";
 import { buildsApp } from "./app-role.ts";
@@ -56,7 +58,7 @@ import type { Transition } from "./app-status.tsx";
 // and the company's. Each is one of Grasp UI's App cards, four to a row on
 // a desktop: its window, which is the App's own first page running in it
 // at a desktop's width while the card is in view (the card's own doing),
-// on a ground of its own (app-grounds.ts), its mark and name, what it is
+// on a ground of its own (the card's, kept by the App's ID), its mark and name, what it is
 // for and where it stands; the card opens the App (/apps/$app), and its
 // "…" opens it, opens it full page, leads to its settings and, for its
 // builders, archives or restores it. A search over their names, and Build
@@ -83,11 +85,9 @@ type Viewer = Pick<Identity, "role" | "staff" | "userId">;
 const OneApp = ({
   overview: { app, contents },
   viewer,
-  ground,
 }: {
   overview: AppOverview;
   viewer: Viewer;
-  ground: BackdropLook | undefined;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -95,6 +95,7 @@ const OneApp = ({
   const [archiving, setArchiving] = useState(false);
   const { name } = app;
   const status = statusOf(app);
+  const ground = appCardGroundOf(app.id);
   const metaOf = {
     live: t`Your team uses it`,
     draft: t`Only you see this`,
@@ -156,7 +157,11 @@ const OneApp = ({
     <>
       <AppCard
         actions={actions}
-        {...(ground === undefined ? {} : { ground })}
+        // A ground of its own, kept by its ID.
+        ground={ground.ground}
+        {...(ground.groundHue === undefined
+          ? {}
+          : { groundHue: ground.groundHue })}
         labels={{ more: t`More`, empty: t`No preview yet` }}
         mark={
           app.process === null ? (
@@ -212,13 +217,11 @@ const AppsTab = ({
   apps,
   asked,
   reach,
-  grounds,
   viewer,
 }: {
   apps: readonly AppOverview[];
   asked: string;
   reach: AppReach;
-  grounds: ReadonlyMap<string, BackdropLook>;
   viewer: Viewer;
 }) => {
   const { t } = useLingui();
@@ -251,12 +254,7 @@ const AppsTab = ({
       }
     >
       {apps.map((overview) => (
-        <OneApp
-          ground={grounds.get(overview.app.id)}
-          key={overview.app.id}
-          overview={overview}
-          viewer={viewer}
-        />
+        <OneApp key={overview.app.id} overview={overview} viewer={viewer} />
       ))}
     </AppCardGrid>
   );
@@ -279,7 +277,6 @@ export const AppsOverview = ({
   const [query, setQuery] = useState("");
   const builds = canBuild(viewer.role);
   const apps = newestFirst(listed);
-  const grounds = groundsOf(listed.map(({ app }) => app));
   const sharedWithThem = new Set(shared);
   const reached = (reach: AppReach) =>
     apps.filter(
@@ -359,7 +356,6 @@ export const AppsOverview = ({
               <AppsTab
                 apps={found(reach)}
                 asked={asked}
-                grounds={grounds}
                 reach={reach}
                 viewer={viewer}
               />

@@ -15,6 +15,7 @@ import { Button } from "../button";
 import { Attach, Mail } from "../icons";
 import { grasp } from "../tokens/tokens.stylex";
 import {
+  changeOf,
   Draft,
   draftEditable,
   DraftInput,
@@ -48,8 +49,15 @@ export interface EmailDraftProps {
   onRestore?: () => void;
   /** The email as it stands. */
   draft: EmailDraftValue;
-  /** Every change the person makes in place; left out, the draft is read only. */
+  /** Every change the person makes in place; left out, the draft is locked, as `readOnly`. */
   onDraftChange?: (draft: EmailDraftValue) => void;
+  /**
+   * Locked: shown to be sent exactly as it is. No Cc / Bcc, no attach, no remove on a chip, no
+   * empty Cc or Bcc row; its values stand as text, and the foot keeps Send and Discard. Leaving out
+   * `onDraftChange` locks it the same way.
+   * @default false
+   */
+  readOnly?: boolean;
   /** Send: the email as it stands. Return a Promise and the button works until it settles. */
   onSend: (draft: EmailDraftValue) => unknown;
   /** Discard, at the foot's start. */
@@ -77,6 +85,8 @@ const styles = stylex.create({
     borderBlockEndStyle: "solid",
     borderBlockEndColor: grasp.line,
   },
+  // Locked, a value may take several lines: each name stands on its value's first line.
+  fieldsLocked: { alignItems: "baseline" },
   name: { color: grasp.muted },
   // As tall as a small control in every state, so the draft keeps its height when Cc / Bcc goes.
   people: {
@@ -96,12 +106,15 @@ const styles = stylex.create({
 const People = ({
   people,
   change,
+  whole,
 }: {
   people: readonly DraftPerson[];
   change: ((people: readonly DraftPerson[]) => void) | undefined;
+  whole: boolean;
 }) =>
   people.map((person) => (
     <DraftPersonChip
+      whole={whole}
       key={person.email ?? person.name}
       person={person}
       onRemove={
@@ -113,6 +126,27 @@ const People = ({
       }
     />
   ));
+
+/** A Cc or Bcc row: its name and its people; locked, none while it has no one. */
+const Copies = ({
+  name,
+  people,
+  change,
+  locked,
+}: {
+  name: string;
+  people: readonly DraftPerson[];
+  change: ((people: readonly DraftPerson[]) => void) | undefined;
+  locked: boolean;
+}) =>
+  locked && people.length === 0 ? null : (
+    <>
+      <span {...stylex.props(styles.name)}>{name}</span>
+      <div {...stylex.props(styles.people)}>
+        <People people={people} change={change} whole={locked} />
+      </div>
+    </>
+  );
 
 /** What a kind on the email's frame changes: its name, its main action's words, and what stands under the message. */
 interface EmailKind {
@@ -127,6 +161,7 @@ interface EmailKind {
 export const EmailFrame = ({
   draft,
   onDraftChange,
+  readOnly,
   onSend,
   onDismiss,
   onAttach,
@@ -142,12 +177,15 @@ export const EmailFrame = ({
   after,
 }: EmailDraftProps & EmailKind) => {
   const words = useDraftWords("email");
-  // Cc and Bcc show once asked for, or when the draft already has them.
-  const [copies, setCopies] = useState(
-    (draft.cc?.length ?? 0) + (draft.bcc?.length ?? 0) > 0
-  );
+  const change = changeOf(readOnly, onDraftChange);
+  const locked = change === undefined;
+  const cc = draft.cc ?? [];
+  const bcc = draft.bcc ?? [];
+  // Cc and Bcc show once asked for, or when the draft already has them; locked, only the one that has people.
+  const [asked, setAsked] = useState(false);
+  const copies = asked || cc.length + bcc.length > 0;
   // Fields change only while it can still be changed: ready, or failed and to be sent again.
-  const field = fieldOf(draft, onDraftChange, status);
+  const field = fieldOf(draft, change, status);
   return (
     <Draft
       aria-label={`${kind}: ${draft.subject}`}
@@ -164,8 +202,11 @@ export const EmailFrame = ({
       }
       onUndo={onUndo}
       onRestore={onRestore}
+      readOnly={locked}
       secondary={
-        onAttach === undefined || !draftEditable(status) ? undefined : (
+        onAttach === undefined ||
+        locked ||
+        !draftEditable(status) ? undefined : (
           <Button
             variant="ghost"
             size="sm"
@@ -176,17 +217,17 @@ export const EmailFrame = ({
         )
       }
     >
-      <div {...stylex.props(styles.fields)}>
+      <div {...stylex.props(styles.fields, locked && styles.fieldsLocked)}>
         <span {...stylex.props(styles.name)}>{words.to}</span>
         <div {...stylex.props(styles.people)}>
-          <People people={draft.to} change={field("to")} />
-          {copies || !draftEditable(status) ? null : (
+          <People people={draft.to} change={field("to")} whole={locked} />
+          {copies || locked || !draftEditable(status) ? null : (
             <span {...stylex.props(styles.more)}>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setCopies(true);
+                  setAsked(true);
                 }}
               >
                 {words.addCc}
@@ -196,27 +237,33 @@ export const EmailFrame = ({
         </div>
         {copies ? (
           <>
-            <span {...stylex.props(styles.name)}>{words.cc}</span>
-            <div {...stylex.props(styles.people)}>
-              <People people={draft.cc ?? []} change={field("cc")} />
-            </div>
-            <span {...stylex.props(styles.name)}>{words.bcc}</span>
-            <div {...stylex.props(styles.people)}>
-              <People people={draft.bcc ?? []} change={field("bcc")} />
-            </div>
+            <Copies
+              name={words.cc}
+              people={cc}
+              change={field("cc")}
+              locked={locked}
+            />
+            <Copies
+              name={words.bcc}
+              people={bcc}
+              change={field("bcc")}
+              locked={locked}
+            />
           </>
         ) : null}
         <span {...stylex.props(styles.name)}>{words.subject}</span>
         <DraftInput
+          readOnly={locked}
           value={draft.subject}
           label={words.subject}
           onValueChange={field("subject")}
         />
       </div>
       <DraftText
+        readOnly={locked}
         value={draft.body}
         label={words.body}
-        placeholder={words.body}
+        placeholder={locked ? undefined : words.body}
         onValueChange={field("body")}
       />
       {draft.signature === undefined ? null : (

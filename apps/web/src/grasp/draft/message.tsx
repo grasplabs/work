@@ -11,7 +11,7 @@ import type { ReactNode } from "react";
 
 import { Conversation } from "../icons";
 import { grasp } from "../tokens/tokens.stylex";
-import { Draft, DraftText, fieldOf, useDraftWords } from "./draft";
+import { changeOf, Draft, DraftText, fieldOf, useDraftWords } from "./draft";
 import type { DraftStatus } from "./draft";
 
 /** Where a message goes: a channel or a person, by the name the service shows, with its mark. */
@@ -40,8 +40,15 @@ export interface MessageDraftProps {
   onRestore?: () => void;
   /** The message as it stands. */
   draft: MessageDraftValue;
-  /** Every change the person makes in place; left out, the draft is read only. */
+  /** Every change the person makes in place; left out, the draft is locked, as `readOnly`. */
   onDraftChange?: (draft: MessageDraftValue) => void;
+  /**
+   * Locked: shown to be made exactly as it is. No way to change it, no remove on a chip, no
+   * placeholder and no empty optional row; its values stand as text, and the foot keeps its main
+   * action and Discard. Leaving out `onDraftChange` locks it the same way.
+   * @default false
+   */
+  readOnly?: boolean;
   /** Send message: the message as it stands. Return a Promise and the button works until it settles. */
   onSend: (draft: MessageDraftValue) => unknown;
   /** Discard, at the foot's start. */
@@ -91,12 +98,28 @@ const styles = stylex.create({
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
+  // Locked: a long name wraps inside the chip, never cut (as a person's chip does).
+  placeWhole: {
+    alignItems: "flex-start",
+    height: "auto",
+    minHeight: grasp.controlXs,
+    paddingBlock: `calc((${grasp.controlXs} - ${grasp.textXsLine}) / 2)`,
+    borderRadius: `calc(${grasp.controlXs} / 2)`,
+  },
+  placeMarkWhole: { alignItems: "center", height: grasp.textXsLine },
+  placeNameWhole: {
+    overflow: "visible",
+    textOverflow: "clip",
+    whiteSpace: "normal",
+    overflowWrap: "anywhere",
+  },
 });
 
 /** A message drafted in an answer, ready to change and send. */
 export const MessageDraft = ({
   draft,
   onDraftChange,
+  readOnly,
   onSend,
   onDismiss,
   mark,
@@ -107,7 +130,9 @@ export const MessageDraft = ({
   onRestore,
 }: MessageDraftProps) => {
   const words = useDraftWords("message");
-  const field = fieldOf(draft, onDraftChange, status);
+  const change = changeOf(readOnly, onDraftChange);
+  const locked = change === undefined;
+  const field = fieldOf(draft, change, status);
   return (
     <Draft
       aria-label={`${words.kind}: ${draft.to.name}`}
@@ -124,22 +149,37 @@ export const MessageDraft = ({
       }
       onUndo={onUndo}
       onRestore={onRestore}
+      readOnly={locked}
     >
       <div {...stylex.props(styles.to)}>
         <span {...stylex.props(styles.name)}>{words.to}</span>
-        <span data-slot="draft-place" {...stylex.props(styles.place)}>
+        <span
+          data-slot="draft-place"
+          {...stylex.props(styles.place, locked && styles.placeWhole)}
+        >
           {draft.to.mark === undefined ? null : (
-            <span aria-hidden="true" {...stylex.props(styles.placeMark)}>
+            <span
+              aria-hidden="true"
+              {...stylex.props(
+                styles.placeMark,
+                locked && styles.placeMarkWhole
+              )}
+            >
               {draft.to.mark}
             </span>
           )}
-          <span {...stylex.props(styles.placeName)}>{draft.to.name}</span>
+          <span
+            {...stylex.props(styles.placeName, locked && styles.placeNameWhole)}
+          >
+            {draft.to.name}
+          </span>
         </span>
       </div>
       <DraftText
+        readOnly={locked}
         value={draft.text}
         label={words.text}
-        placeholder={words.text}
+        placeholder={locked ? undefined : words.text}
         onValueChange={field("text")}
       />
     </Draft>

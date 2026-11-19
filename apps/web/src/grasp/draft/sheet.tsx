@@ -15,6 +15,7 @@ import type { CellValue, DataGridKind } from "../data-grid";
 import { Spreadsheet } from "../icons";
 import { grasp } from "../tokens/tokens.stylex";
 import {
+  changeOf,
   Draft,
   draftEditable,
   DraftInput,
@@ -59,8 +60,15 @@ export interface SheetDraftProps {
   onRestore?: () => void;
   /** The sheet as it stands. */
   draft: SheetDraftValue;
-  /** Every change the person makes in place; left out, the sheet is read only. */
+  /** Every change the person makes in place; left out, the sheet is locked, as `readOnly`. */
   onDraftChange?: (draft: SheetDraftValue) => void;
+  /**
+   * Locked: shown to be made exactly as it is. No way to change it, no
+   * placeholder and no empty optional row; its values stand as text, and the foot keeps its main
+   * action and Discard. Leaving out `onDraftChange` locks it the same way.
+   * @default false
+   */
+  readOnly?: boolean;
   /** Create sheet: the sheet as it stands. */
   onCreate: (draft: SheetDraftValue) => unknown;
   /** Discard, at the foot's start. */
@@ -103,6 +111,21 @@ const styles = stylex.create({
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
+  // Locked: a long name wraps inside the chip, never cut (as a person's chip does).
+  chipWhole: {
+    alignItems: "flex-start",
+    height: "auto",
+    minHeight: grasp.controlXs,
+    paddingBlock: `calc((${grasp.controlXs} - ${grasp.textXsLine}) / 2)`,
+    borderRadius: `calc(${grasp.controlXs} / 2)`,
+  },
+  chipMarkWhole: { alignItems: "center", height: grasp.textXsLine },
+  chipNameWhole: {
+    overflow: "visible",
+    textOverflow: "clip",
+    whiteSpace: "normal",
+    overflowWrap: "anywhere",
+  },
   // The grid scrolls sideways by itself when it is wider (never the page); nothing here clips it,
   // so its edge, drawn outside it, closes all four sides.
   grid: { minWidth: 0 },
@@ -118,6 +141,7 @@ const styles = stylex.create({
 export const SheetDraft = ({
   draft,
   onDraftChange,
+  readOnly,
   onCreate,
   onDismiss,
   mark,
@@ -128,8 +152,10 @@ export const SheetDraft = ({
   onRestore,
 }: SheetDraftProps) => {
   const words = useDraftWords("sheet");
-  const field = fieldOf(draft, onDraftChange, status);
-  const editable = onDraftChange !== undefined && draftEditable(status);
+  const change = changeOf(readOnly, onDraftChange);
+  const locked = change === undefined;
+  const field = fieldOf(draft, change, status);
+  const editable = change !== undefined && draftEditable(status);
   return (
     <Draft
       aria-label={`${words.kind}: ${draft.title}`}
@@ -137,10 +163,11 @@ export const SheetDraft = ({
       mark={mark}
       title={
         <DraftInput
+          readOnly={locked}
           title
           value={draft.title}
           label={words.title}
-          placeholder={words.title}
+          placeholder={locked ? undefined : words.title}
           onValueChange={field("title")}
         />
       }
@@ -154,17 +181,31 @@ export const SheetDraft = ({
       }
       onUndo={onUndo}
       onRestore={onRestore}
+      readOnly={locked}
     >
       {draft.place === undefined ? null : (
         <div {...stylex.props(styles.place)}>
           <span {...stylex.props(styles.name)}>{words.saveTo}</span>
-          <span data-slot="draft-place" {...stylex.props(styles.chip)}>
+          <span
+            data-slot="draft-place"
+            {...stylex.props(styles.chip, locked && styles.chipWhole)}
+          >
             {draft.place.mark === undefined ? null : (
-              <span aria-hidden="true" {...stylex.props(styles.chipMark)}>
+              <span
+                aria-hidden="true"
+                {...stylex.props(
+                  styles.chipMark,
+                  locked && styles.chipMarkWhole
+                )}
+              >
                 {draft.place.mark}
               </span>
             )}
-            <span {...stylex.props(styles.chipName)}>{draft.place.name}</span>
+            <span
+              {...stylex.props(styles.chipName, locked && styles.chipNameWhole)}
+            >
+              {draft.place.name}
+            </span>
           </span>
         </div>
       )}
@@ -191,7 +232,7 @@ export const SheetDraft = ({
           onPatch={
             editable
               ? (patch) => {
-                  onDraftChange({
+                  change({
                     ...draft,
                     rows: applyPatch(draft.rows, patch, (row) => row.id),
                   });

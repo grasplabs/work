@@ -353,7 +353,8 @@ describe("the inbox in the shell", () => {
     );
     const atFirst = {
       draft: draft !== null,
-      subject: draft?.querySelector("input")?.value,
+      // A held draft is locked: its subject shows whole, as text.
+      subject: draft?.textContent.includes("Refunds"),
     };
     await act(async () => {
       [...document.querySelectorAll("button")]
@@ -370,7 +371,7 @@ describe("the inbox in the shell", () => {
       left: document.querySelector("section[aria-label='Email: Refunds']"),
       said: document.querySelector("output")?.textContent,
     }).toStrictEqual({
-      atFirst: { draft: true, subject: "Refunds" },
+      atFirst: { draft: true, subject: true },
       decided: [`confirm write-1 ${"b".repeat(64)}`],
       left: null,
       said: "Approved: Approve Send an email on Microsoft 365 (ada@acme.test)?",

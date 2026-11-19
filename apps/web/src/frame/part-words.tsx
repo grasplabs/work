@@ -626,6 +626,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     input: {
       showPassword: t`Show password`,
       hidePassword: t`Hide password`,
+      replace: t({ message: "Replace", context: "a secret key, typed again" }),
     },
     composer: {
       composer: {

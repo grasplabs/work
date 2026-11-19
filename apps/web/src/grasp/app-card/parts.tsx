@@ -77,8 +77,9 @@ export interface AppCardLive {
   poster?: AppCardImage;
   /**
    * When the app counts as loaded and its still fades: `load`, at its frame's load event; or
-   * `message`, once the app's own document posts `{ type: "app-card", state: "ready" }` to its
-   * parent, and `state: "failed"` turns the window to its quiet line at once. Use `message` for an
+   * `message`, once the app's own document posts `{ type: "app-card", state: "ready" }` to its parent
+   * (`window.parent.postMessage({ type: "app-card", state: "ready" }, "*")`); `state: "failed"` turns
+   * the window to its quiet line at once. Heard only from the card's own frame. Use `message` for an
    * app that draws after its document loads (a single-page app): the window never shows it blank.
    * @default "load"
    */
@@ -118,9 +119,6 @@ interface Fit {
   shiftY: number;
 }
 
-// The width the app is laid out at: a desktop's in every window, however small, so a card always
-// shows the app as it stands on a desktop and never its narrow layout; and the band a sharp scale
-// may move it within, never under a small laptop's.
 const DESKTOP = 1280;
 const NARROWEST = 1024;
 const WIDEST = 1600;
@@ -453,20 +451,8 @@ const Running = ({ live, title, onFailed }: RunningProps) => {
   const [room, setRoom] = useState<HTMLDivElement | null>(null);
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   const [loaded, setLoaded] = useState(false);
-  // The still is gone once it has faded out (with reduced motion it is cut, and simply stays clear).
-  const [gone, setGone] = useState(false);
-  const fit = useFit(room);
   const byMessage = live.ready === "message";
-  useEffect(() => {
-    if (loaded) {
-      return keep;
-    }
-    const limit = setTimeout(onFailed, LOAD_LIMIT);
-    return () => {
-      clearTimeout(limit);
-    };
-  }, [loaded, onFailed]);
-  // Told by the app itself, from its own frame alone, that it has drawn or failed.
+  // Told by the app itself, from its own frame alone, that it has drawn (or failed).
   useEffect(() => {
     if (!byMessage || frame === null) {
       return keep;
@@ -486,6 +472,18 @@ const Running = ({ live, title, onFailed }: RunningProps) => {
       window.removeEventListener("message", heard);
     };
   }, [byMessage, frame, onFailed]);
+  // The still is gone once it has faded out (with reduced motion it is cut, and simply stays clear).
+  const [gone, setGone] = useState(false);
+  const fit = useFit(room);
+  useEffect(() => {
+    if (loaded) {
+      return keep;
+    }
+    const limit = setTimeout(onFailed, LOAD_LIMIT);
+    return () => {
+      clearTimeout(limit);
+    };
+  }, [loaded, onFailed]);
   return (
     <div
       ref={setRoom}

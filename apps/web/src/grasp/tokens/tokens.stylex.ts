@@ -452,6 +452,10 @@ export const grasp = stylex.defineConsts({
   appCardFrameEdge: "var(--grasp-app-card-frame-edge)",
   appCardFrameLift: "var(--grasp-app-card-frame-lift)",
   appCardRise: "var(--grasp-app-card-rise)",
+  appCardGroundHueRose: "var(--grasp-app-card-ground-hue-rose)",
+  appCardGroundHueCoral: "var(--grasp-app-card-ground-hue-coral)",
+  appCardGroundHueOlive: "var(--grasp-app-card-ground-hue-olive)",
+  appCardGroundHueTeal: "var(--grasp-app-card-ground-hue-teal)",
   // Text shimmer: text shimmer.
   textShimmerSoft: "var(--grasp-text-shimmer-soft)",
   textShimmerClear: "var(--grasp-text-shimmer-clear)",

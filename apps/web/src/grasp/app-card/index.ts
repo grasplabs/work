@@ -16,5 +16,7 @@ export type {
   AppCardPreview,
   AppCardSignal,
 } from "./parts";
+export { appCardGroundHues, appCardGroundOf } from "./ground";
+export type { AppCardGroundHue } from "./ground";
 export type { AppCardLabels } from "./labels";
 export { englishLabels } from "./labels";

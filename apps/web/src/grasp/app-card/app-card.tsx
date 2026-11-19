@@ -27,13 +27,13 @@ import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
-import { defaultScenes } from "../backdrop/backdrop";
-import { BackdropField } from "../backdrop/field";
 import type { BackdropLook } from "../backdrop/look";
 import { Icon, Plus } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { useWords, withGiven } from "../words/words";
 import { cardMarker } from "./app-card.stylex";
+import { AppCardGround } from "./ground";
+import type { AppCardGroundHue } from "./ground";
 import type { AppCardLabels } from "./labels";
 import { MoreMenu, Window } from "./parts";
 import type { AppCardAction, AppCardPreview } from "./parts";
@@ -100,11 +100,19 @@ export interface AppCardProps {
    */
   tone?: AppCardTone;
   /**
-   * A drawn ground in place of the tone: one of the Backdrop's looks (a scene, a dither in its
-   * pattern and colour, or sand), small and still. Give each app its own, kept by the app's ID, so
-   * a row of cards never repeats one.
+   * A drawn ground in place of the tone: one of the Backdrop's looks (a scene, a dither, or sand),
+   * one still picture, drawn once when the card first comes into view and never again (the page's
+   * grounds draw one at a time, so they hold one WebGL context at most). Give each app its own,
+   * kept by its ID (`appCardGroundOf(id)`), so a row of cards never repeats one.
    */
   ground?: BackdropLook;
+  /** The drawn ground's hue: the light's ramp turned to it. Left out, the light's own green. */
+  groundHue?: AppCardGroundHue;
+  /**
+   * Where the scenes' pictures are served (Backdrop's `scenes`).
+   * @default "/backdrops/"
+   */
+  groundScenes?: string;
   /** The actions in the "…" menu. Without them there is no "…". */
   actions?: readonly AppCardAction[];
   /**
@@ -215,6 +223,26 @@ const CardLink = ({
   return renderElement("a", { href, ...props }, render);
 };
 
+/** The frame's tone, where no drawn ground stands in its place. */
+const toneOf = (ground: BackdropLook | undefined, tone: AppCardTone) =>
+  ground === undefined ? styles[tone] : null;
+
+/** Under the window: a drawn ground (AppCard's `ground`), or the paper grain over the tone. */
+const FrameGround = ({
+  ground,
+  hue,
+  scenes,
+}: {
+  ground: BackdropLook | undefined;
+  hue: AppCardGroundHue | undefined;
+  scenes: string | undefined;
+}) =>
+  ground === undefined ? (
+    <span aria-hidden="true" {...stylex.props(styles.grain)} />
+  ) : (
+    <AppCardGround look={ground} hue={hue} scenes={scenes} />
+  );
+
 /** The meta line's words in each state: the caller's meta (who and when), or that the app is being built. A failed app says so in its window, not again here. */
 const metaOf = (
   state: AppCardState,
@@ -226,33 +254,6 @@ const metaOf = (
   }
   return meta;
 };
-
-/** The frame's tone, where no drawn ground stands in its place. */
-const toneOf = (ground: BackdropLook | undefined, tone: AppCardTone) =>
-  ground === undefined ? styles[tone] : null;
-
-/**
- * Under the window: the drawn ground, one still picture (live, it redrew under the pointer and read
- * as the card refreshing), or the paper grain.
- */
-const Ground = ({ ground }: { ground: BackdropLook | undefined }) =>
-  ground === undefined ? (
-    <span aria-hidden="true" {...stylex.props(styles.grain)} />
-  ) : (
-    <span
-      aria-hidden="true"
-      data-slot="app-card-ground"
-      {...stylex.props(styles.ground)}
-    >
-      <BackdropField
-        clear={undefined}
-        look={ground}
-        scenes={defaultScenes}
-        small
-        still
-      />
-    </span>
-  );
 
 export const AppCard = ({
   title,
@@ -266,6 +267,8 @@ export const AppCard = ({
   meta,
   tone = "sea",
   ground,
+  groundHue,
+  groundScenes,
   actions,
   state: stateDeprecated,
   status: state = stateDeprecated ?? "ready",
@@ -302,7 +305,7 @@ export const AppCard = ({
         data-slot="app-card-frame"
         {...stylex.props(styles.frame, toneOf(ground, tone))}
       >
-        <Ground ground={ground} />
+        <FrameGround ground={ground} hue={groundHue} scenes={groundScenes} />
         <Window
           preview={preview}
           title={title}
@@ -364,7 +367,7 @@ export interface AppCardGridProps {
   /**
    * How many to a row, by the grid's own width (a container, not the window): `comfortable` two
    * from 40rem and three from 96rem; `compact` two from 36rem and three from 60rem (the Apps page
-   * beside a sidebar at a desktop's width); `dense` two from 28rem, three from 44rem, four from 64rem.
+   * beside a sidebar at a desktop's width); `dense` two from 28rem, three from 44rem, four from 64rem (the Apps page beside a sidebar at a laptop's width).
    * @default "comfortable"
    */
   density?: AppCardGridDensity;

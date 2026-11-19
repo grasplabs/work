@@ -12867,6 +12867,11 @@ msgstr "Renommé en {name}"
 msgid "Renames the table {from} to {to}; its records go with it."
 msgstr "Renomme la table {from} en {to} ; ses enregistrements la suivent."
 
+#: src/frame/part-words.tsx
+msgctxt "a secret key, typed again"
+msgid "Replace"
+msgstr "Remplacer"
+
 #: src/settings/ai-providers.tsx
 msgid "Replace key"
 msgstr "Remplacer la clé"

@@ -284,12 +284,9 @@ describe("a chat's held writes", () => {
     );
     const seen = {
       to: draft?.textContent.includes("cleo@acme.test"),
-      subject: document.querySelector<HTMLInputElement>(
-        "input[aria-label='Subject']"
-      )?.value,
-      body: document.querySelector<HTMLTextAreaElement>(
-        "textarea[aria-label='Message']"
-      )?.value,
+      // Locked, the subject and the message show whole, as text.
+      subject: draft?.textContent.includes("The October invoice"),
+      body: draft?.textContent.includes("The invoice is attached."),
       from: document.body.textContent.includes("Fromfinance@acme.test"),
       replyTo: document.body.textContent.includes("Reply tosanne@acme.test"),
       readOnly: fields.every((field) => field.readOnly),
@@ -303,8 +300,8 @@ describe("a chat's held writes", () => {
     expect({ seen, decided }).toStrictEqual({
       seen: {
         to: true,
-        subject: "The October invoice",
-        body: "The invoice is attached.",
+        subject: true,
+        body: true,
         from: true,
         replyTo: true,
         readOnly: true,

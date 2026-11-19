@@ -15,10 +15,12 @@ import { CalendarIcon, Clock, Note, People, Place, VideoCall } from "../icons";
 import { DraftDay } from "./day";
 import type { DraftBusy } from "./day";
 import {
+  changeOf,
   Draft,
   draftEditable,
   DraftInput,
   fieldOf,
+  filled,
   DraftPersonChip,
   DraftRow,
   DraftText,
@@ -56,8 +58,15 @@ export interface EventDraftProps {
   onRestore?: () => void;
   /** The event as it stands. */
   draft: EventDraftValue;
-  /** Every change the person makes in place; left out, the draft is read only. */
+  /** Every change the person makes in place; left out, the draft is locked, as `readOnly`. */
   onDraftChange?: (draft: EventDraftValue) => void;
+  /**
+   * Locked: shown to be made exactly as it is. No way to change it, no remove on a chip, no
+   * placeholder and no empty optional row; its values stand as text, and the foot keeps its main
+   * action and Discard. Leaving out `onDraftChange` locks it the same way.
+   * @default false
+   */
+  readOnly?: boolean;
   /** Create event: the draft as it stands. Return a Promise and the button works until it settles. */
   onCreate: (draft: EventDraftValue) => unknown;
   /** Discard, at the foot's start. */
@@ -74,6 +83,7 @@ export interface EventDraftProps {
 export const EventDraft = ({
   draft,
   onDraftChange,
+  readOnly,
   onCreate,
   onDismiss,
   onOpen,
@@ -85,8 +95,10 @@ export const EventDraft = ({
   onRestore,
 }: EventDraftProps) => {
   const words = useDraftWords("event");
+  const change = changeOf(readOnly, onDraftChange);
+  const locked = change === undefined;
   // Fields change only while it can still be changed: ready, or failed and to be sent again.
-  const field = fieldOf(draft, onDraftChange, status);
+  const field = fieldOf(draft, change, status);
   const people = field("people");
   return (
     <Draft
@@ -95,10 +107,11 @@ export const EventDraft = ({
       mark={mark}
       title={
         <DraftInput
+          readOnly={locked}
           title
           value={draft.title}
           label={words.title}
-          placeholder={words.title}
+          placeholder={locked ? undefined : words.title}
           onValueChange={field("title")}
         />
       }
@@ -112,6 +125,7 @@ export const EventDraft = ({
       }
       onUndo={onUndo}
       onRestore={onRestore}
+      readOnly={locked}
       secondary={
         onOpen === undefined ? undefined : (
           <Button variant="ghost" size="sm" onClick={onOpen}>
@@ -128,56 +142,65 @@ export const EventDraft = ({
         lanes={draft.people.map((person) => ({ person, busy: person.busy }))}
       />
       <DraftRow icon={Clock} label={words.when}>
-        {onDraftChange !== undefined && draftEditable(status) ? (
+        {change !== undefined && draftEditable(status) ? (
           <DraftWhen
             start={draft.start}
             end={draft.end}
             words={words.span(draft.start, draft.end, timeZone)}
             onChange={(start, end) => {
-              onDraftChange({ ...draft, start, end });
+              change({ ...draft, start, end });
             }}
           />
         ) : (
           <span>{words.span(draft.start, draft.end, timeZone)}</span>
         )}
       </DraftRow>
-      <DraftRow icon={People} label={words.people}>
-        {draft.people.map((person) => (
-          <DraftPersonChip
-            key={person.email ?? person.name}
-            person={person}
-            onRemove={
-              people === undefined || person.you === true
-                ? undefined
-                : () => {
-                    people(draft.people.filter((other) => other !== person));
-                  }
-            }
-          />
-        ))}
-      </DraftRow>
+      {locked && draft.people.length === 0 ? null : (
+        <DraftRow icon={People} label={words.people}>
+          {draft.people.map((person) => (
+            <DraftPersonChip
+              whole={locked}
+              key={person.email ?? person.name}
+              person={person}
+              onRemove={
+                people === undefined || person.you === true
+                  ? undefined
+                  : () => {
+                      people(draft.people.filter((other) => other !== person));
+                    }
+              }
+            />
+          ))}
+        </DraftRow>
+      )}
       {draft.call === undefined ? null : (
         <DraftRow icon={VideoCall} label={words.call}>
           {draft.call.mark}
           <span>{draft.call.label}</span>
         </DraftRow>
       )}
-      <DraftRow icon={Place} label={words.place}>
-        <DraftInput
-          value={draft.place ?? ""}
-          label={words.place}
-          placeholder={words.addPlace}
-          onValueChange={field("place")}
-        />
-      </DraftRow>
-      <DraftRow icon={Note} label={words.description}>
-        <DraftText
-          value={draft.description ?? ""}
-          label={words.description}
-          placeholder={words.addDescription}
-          onValueChange={field("description")}
-        />
-      </DraftRow>
+      {locked && !filled(draft.place) ? null : (
+        <DraftRow icon={Place} label={words.place}>
+          <DraftInput
+            readOnly={locked}
+            value={draft.place ?? ""}
+            label={words.place}
+            placeholder={locked ? undefined : words.addPlace}
+            onValueChange={field("place")}
+          />
+        </DraftRow>
+      )}
+      {locked && !filled(draft.description) ? null : (
+        <DraftRow icon={Note} label={words.description}>
+          <DraftText
+            readOnly={locked}
+            value={draft.description ?? ""}
+            label={words.description}
+            placeholder={locked ? undefined : words.addDescription}
+            onValueChange={field("description")}
+          />
+        </DraftRow>
+      )}
     </Draft>
   );
 };

@@ -52,6 +52,7 @@ import {
   targetStyles,
 } from "../input/input";
 import type { LayoutStyle } from "../layout/layout";
+import { originFrom, pressedJustNow } from "../motion/origin";
 import { simply } from "../motion/simply.stylex";
 import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
@@ -348,6 +349,11 @@ export const Combobox = ({
   onValueChange,
   ...options
 }: ComboboxProps) => {
+  const chevron = useRef<HTMLButtonElement>(null);
+  const pressedAt = useRef(0);
+  const fromChevron = originFrom(() =>
+    pressedJustNow(pressedAt.current) ? chevron.current : null
+  );
   const { empty, trigger: triggerLabel } = withGiven(
     useWords("combobox", comboboxWords, words),
     { empty: emptyGiven, trigger: triggerLabelGiven }
@@ -440,6 +446,11 @@ export const Combobox = ({
           )}
         />
         <ComboboxTrigger
+          ref={chevron}
+          onPointerDown={(event) => {
+            pressedAt.current =
+              Date.now() - (performance.now() - event.timeStamp);
+          }}
           aria-label={triggerLabel}
           className={(state: ComboboxTriggerState) =>
             className(
@@ -468,6 +479,7 @@ export const Combobox = ({
         </ComboboxTrigger>
       </div>
       <ComboboxContent
+        ref={fromChevron}
         sideOffset={popup.gap}
         collisionPadding={popup.gutter}
         {...stylex.props(
