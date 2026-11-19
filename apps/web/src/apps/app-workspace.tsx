@@ -331,6 +331,11 @@ const WorkspaceBar = ({
     <ItemBar
       actions={
         <>
+          {/* The preview's own controls stand with the actions, never on a
+              row of their own: they give way first where the bar narrows. */}
+          {view === "preview" && preview !== undefined ? (
+            <PreviewControls {...preview} />
+          ) : null}
           <MoreMenu
             app={app}
             changing={hasChanges(draft)}
@@ -355,14 +360,6 @@ const WorkspaceBar = ({
           <StatusBadge app={app} who={userNames(members ?? [])} />
         )
       }
-      // In the bar's middle, which goes to a row of its own where the bar
-      // is too narrow for it beside the rest; there the views fold to one
-      // button where even that row is too narrow (Grasp UI's TabsNav).
-      // The App's views are rows of the sidebar's section (app-section
-      // .tsx); the bar's middle holds the preview's own controls.
-      {...(view === "preview" && preview !== undefined
-        ? { views: <PreviewControls {...preview} /> }
-        : {})}
     />
   );
 };

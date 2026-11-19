@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../grasp/select/index.ts";
-import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
 // The preview's own controls while the App's preview shows: how wide it
@@ -115,7 +115,8 @@ export const useAppPages = (
 const styles = stylex.create({
   // Drawn inline from a phone's width on; one menu below it.
   inline: {
-    display: { default: "flex", [media.belowPhone]: "none" },
+    // Beside Share and Publish they give way first, where the bar (item-shell.tsx) narrows.
+    display: { default: "flex", "@container bar (width < 42rem)": "none" },
     alignItems: "center",
     gap: grasp.space1,
   },

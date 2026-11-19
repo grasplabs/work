@@ -2255,7 +2255,14 @@ export const AppShell = ({
         data-sidebar-folded={look.folded}
         // While the sidebar peeks over the page: the bar fades what the peek covers (F76).
         data-sidebar-peeking={presence(sidebarPeeking)}
-        data-shell-panels={paneled ? "" : undefined}
+        // Wherever the panels' button stands, closed panels' too (`onPanelsOpenChange`): a page's
+        // own bar leaves room for it at its end, so the button never covers the bar's actions.
+        data-shell-panels={
+          paneled ||
+          (hasPanels(panels, true) && onPanelsOpenChange !== undefined)
+            ? ""
+            : undefined
+        }
         // A sidebar to put in the phone's menu: where the shell is narrow the Menu button leads the
         // bar, and the bar leaves the brand to the menu's head (bar.tsx `brand`, F88).
         data-shell-menu={sidebar === false ? undefined : ""}

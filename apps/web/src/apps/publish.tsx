@@ -43,7 +43,7 @@ import type { KeyValueItem } from "../grasp/key-value/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { toast } from "../grasp/toast/index.ts";
-import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 import { ConfirmChange, useDraftChange } from "./app-history.tsx";
 import type { Asked } from "./app-history.tsx";
@@ -193,11 +193,15 @@ export const changeSummaries = (changes: AppDraftChanges): string[] =>
     return count === 0 ? [] : [groupCount(group, count)];
   });
 
+// The bar's width (item-shell.tsx names it) below which Share folds into Publish.
+const NARROW_BAR = "@container bar (width < 36rem)";
+
 const styles = stylex.create({
   // Share and Publish's words from a phone's width on; below it Publish's
   // icon alone, and Share in its popover.
-  wide: { display: { default: "contents", [media.belowPhone]: "none" } },
-  narrow: { display: { default: "none", [media.belowPhone]: "contents" } },
+  // Where the bar (item-shell.tsx) narrows, Share folds into Publish's dialog, so it keeps one row.
+  wide: { display: { default: "contents", [NARROW_BAR]: "none" } },
+  narrow: { display: { default: "none", [NARROW_BAR]: "contents" } },
   stack: { display: "grid", gap: grasp.space3, minWidth: 0 },
   // A fact's value with its own action after it.
   value: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
@@ -860,7 +864,7 @@ const ShareDialog = ({
  * opens its dialog, which says where the App stands, its address, who can
  * open it and whether its changes pass their check, and publishes them:
  * the changes only its builders see become what everyone it is shared
- * with opens. On a phone Share folds into Publish's dialog (its Who can
+ * with opens. Where the bar is narrow Share folds into Publish's dialog (its Who can
  * open it), and Publish is its icon alone, so the bar keeps one row.
  */
 export const ShareAndPublish = ({

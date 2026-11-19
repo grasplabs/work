@@ -237,11 +237,14 @@ const RowInside = ({
   current,
   query,
   seated,
+  seatless = false,
 }: {
   node: TreeNode;
   current: boolean;
   query: string;
   seated: boolean;
+  /** Its words stand in the icon's seat (a nested leaf with only leaves beside it, in a sidebar). */
+  seatless?: boolean;
 }) => {
   const inside = (
     <>
@@ -253,7 +256,10 @@ const RowInside = ({
           <Icon icon={node.icon} />
         </span>
       ) : (
-        seated && <span aria-hidden="true" {...stylex.props(styles.spacer)} />
+        seated &&
+        !seatless && (
+          <span aria-hidden="true" {...stylex.props(styles.spacer)} />
+        )
       )}
       <span {...stylex.props(styles.words)}>
         <Marked words={node.label} query={query} />
@@ -354,6 +360,13 @@ const Items = ({
   nodes.map((node, index) => {
     const branch = node.children !== undefined;
     const guided = guides && nested;
+    // In a sidebar, a nested leaf with no icon and only leaves beside it needs no empty seat to line
+    // up with: its words stand in the seat, under its parent's words, and the elbow stays short.
+    const seatless =
+      seated &&
+      nested &&
+      node.icon === undefined &&
+      !nodes.some((n) => n.children !== undefined);
     return (
       <ItemPrimitive
         key={node.value}
@@ -367,7 +380,7 @@ const Items = ({
           <Guide
             last={index === nodes.length - 1}
             short={seated}
-            toWords={seated && node.icon === undefined && !branch}
+            toWords={seated && node.icon === undefined && !branch && !seatless}
           />
         ) : null}
         <LabelPrimitive
@@ -413,6 +426,7 @@ const Items = ({
             current={current === node.value}
             query={query}
             seated={seated}
+            seatless={seatless}
           />
         </LabelPrimitive>
         {branch && (
