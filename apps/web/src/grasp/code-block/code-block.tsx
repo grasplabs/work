@@ -13,6 +13,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Button } from "../button";
 import { CopyButton } from "../button/copy";
@@ -60,6 +61,12 @@ export interface CodeBlockProps {
    * @default 18
    */
   maxLines?: number | false;
+  /**
+   * More in the head beside the copy button, such as Download: ghost icon buttons the copy button's
+   * size (`<Button variant="ghost" size="sm" icon={Download} aria-label="Download" />`), in the order
+   * given, before it. On a phone they stay in the head; the file name gives way first.
+   */
+  actions?: ReactNode;
   /** An agent is still writing it: the head says so in words, copying waits, and the code grows in place. */
   streaming?: boolean;
   /**
@@ -208,6 +215,7 @@ type HeadProps = Pick<
   CodeBlockProps,
   | "code"
   | "fileName"
+  | "actions"
   | "copyLabel"
   | "copiedLabel"
   | "copyFailedLabel"
@@ -222,6 +230,7 @@ type HeadProps = Pick<
 const Head = ({
   code,
   fileName,
+  actions,
   name,
   streaming,
   streamingMark = false,
@@ -258,6 +267,7 @@ const Head = ({
         {streaming && streamingMark && <Spinner size="sm" />}
         {streaming ? writingLabel : ""}
       </output>
+      {actions}
       <CopyButton
         text={code}
         label={copyLabel}
@@ -432,6 +442,7 @@ export const CodeBlock = ({
   wrap = false,
   marked,
   maxLines = 18,
+  actions,
   streaming = false,
   copyLabel,
   copiedLabel,
@@ -467,6 +478,7 @@ export const CodeBlock = ({
         words={words}
         code={code}
         fileName={fileName}
+        actions={actions}
         name={name}
         streaming={streaming}
         copyLabel={copyLabel}

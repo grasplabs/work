@@ -112,15 +112,12 @@ const styles = stylex.create({
     gap: grasp.space2,
     padding: grasp.space1,
   },
-  // Under the code: that it is read only, and a way to save it, in line
-  // with the code block's head above (its file name and its copy button).
+  // Under the code: that it is read only, in line with the code block's
+  // file name above.
   foot: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: grasp.space3,
     paddingInlineStart: `calc(${grasp.space3} + ${grasp.codeBlockBarWidth})`,
-    paddingInlineEnd: grasp.space1,
   },
   lines: { fontVariantNumeric: "tabular-nums" },
   fill: { display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0 },
@@ -195,9 +192,9 @@ const languageOf = (path: string): string =>
   languages[path.slice(path.lastIndexOf(".") + 1)] ?? "text";
 
 /**
- * The open file: the library's code block, headed by its path with a copy
- * button, whole (an editor never folds a file); under it, that it is read
- * only, and a way to save it.
+ * The open file: the library's code block, headed by its path with Download
+ * and Copy, whole (an editor never folds a file); under it, that it is read
+ * only.
  */
 const OpenFileCode = ({ path, text }: { path: string; text: string }) => {
   const { t } = useLingui();
@@ -206,6 +203,18 @@ const OpenFileCode = ({ path, text }: { path: string; text: string }) => {
   return (
     <div {...stylex.props(styles.page)}>
       <CodeBlock
+        // Save it, beside the head's copy, in the copy button's own form.
+        actions={
+          <Button
+            aria-label={t`Download the file`}
+            icon={Download}
+            onClick={() => {
+              downloadFile(path, text);
+            }}
+            size="sm"
+            variant="ghost"
+          />
+        }
         code={text}
         fileName={path}
         language={languageOf(path)}
@@ -221,15 +230,6 @@ const OpenFileCode = ({ path, text }: { path: string; text: string }) => {
             />
           </Text>
         </span>
-        <Button
-          aria-label={t`Download the file`}
-          icon={Download}
-          onClick={() => {
-            downloadFile(path, text);
-          }}
-          size="sm"
-          variant="ghost"
-        />
       </div>
     </div>
   );

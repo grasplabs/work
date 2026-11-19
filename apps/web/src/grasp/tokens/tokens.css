@@ -1739,7 +1739,7 @@
   --grasp-shell-icon-gap: 10px;
   /* A row's icon. */
   --grasp-shell-icon: 16px;
-  /* The width of the Sidebar's tree guide, the stem and branches of its nested rows. */
+  /* The width of the Sidebar's tree guide, the stem and branches of its nested rows, and a Tree's (tree-guide): a hairline, as the product drew it (Ruben, 19 November). */
   --grasp-shell-guide: var(--grasp-hairline);
   /* A button that is only an icon in the frame (the sidebar's toggle). */
   --grasp-shell-icon-button: 28px;
@@ -2034,8 +2034,11 @@
   /* A theme's crossfade of the whole page, when a product chooses it over the reveal. */
   --grasp-theme-fade: 280ms;
   /* Code block: code block. */
-  /* The ground of a block of code: one solid soft ground, no ring, as the docs' own code. */
-  --grasp-code-block-fill: var(--grasp-soft);
+  /* The ground of a block of code: a wash over whatever it stands on (night in light, light in dark), so it reads as one step off the page, a card or the App shell's card alike; with the edge round it. Solid soft stood 1.01:1 on the shell's card in dark. */
+  --grasp-code-block-fill: light-dark(
+    oklch(0.29 0.05 162 / 0.035),
+    oklch(0.96 0.02 150 / 0.04)
+  );
   /* The row over a block of code: its file name, its language and the copy button. */
   --grasp-code-block-head: 36px;
   /* The height of a line of code: 1.5rem (24px at the usual size), so code has room to breathe. */
