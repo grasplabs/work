@@ -1,6 +1,7 @@
 import { connectionErrors } from "@grasp-os/shared/connect";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { syncErrors } from "@grasp-os/shared/sync";
+import type { SyncPage } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -948,6 +949,62 @@ describe("syncing a shared connection's picked shared drives", () => {
     await expect(
       outcomeOf(async () => await read(connectionId, sales.id, null))
     ).resolves.toBe("sync.throttled");
+  });
+
+  it("moves on past a file whose folders and permissions take every request a read has left, and one more or one fewer", async () => {
+    // A read's room (50 requests): the drive, the change feed's start and
+    // the listing leave 47, for the file's folders and its one page of
+    // permissions.
+    const outcomes = [];
+    for (const depth of [45, 46, 47]) {
+      // oxlint-disable-next-line no-await-in-loop -- one drive after another
+      const { admin, connectionId } = await sharedConnection();
+      // oxlint-disable-next-line no-await-in-loop -- one drive after another
+      await pick(admin, connectionId, [sales.id]);
+      const chain = Array.from(
+        { length: depth },
+        (_, index) => `deep-${index}`
+      );
+      google.files = [
+        ...chain.map((id, index) =>
+          folderIn(sales.id, id, chain[index + 1] ?? sales.id, false)
+        ),
+        fileIn(sales.id, "deep", { parents: [chain[0] ?? sales.id] }),
+      ];
+      google.contents.deep = "deep";
+      google.permissions.deep = [member("user", "seller@acme.test", sales.id)];
+      const pages: (number | string)[] = [];
+      let cursor: string | null = null;
+      for (let at = 0; at < 4; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one read after another
+        const page: SyncPage | string = await read(
+          connectionId,
+          sales.id,
+          cursor
+        ).catch((error: unknown) => syncErrors.codeOf(error) ?? "failed");
+        pages.push(typeof page === "string" ? page : page.items.length);
+        if (typeof page === "string") {
+          break;
+        }
+        ({ cursor } = page);
+        if (page.items.length > 0) {
+          break;
+        }
+      }
+      // The file reached, and no read failed on the way. (This fake lists
+      // the drive's folders too, as entries with nothing in them.)
+      outcomes.push({
+        depth,
+        reached: pages.at(-1) === 1,
+        failed: pages.filter((page) => typeof page === "string"),
+      });
+    }
+
+    expect(outcomes).toStrictEqual([
+      { depth: 45, reached: true, failed: [] },
+      { depth: 46, reached: true, failed: [] },
+      { depth: 47, reached: true, failed: [] },
+    ]);
   });
 
   it("never reads the connected account's own Drive, nor a drive nobody picked", async () => {

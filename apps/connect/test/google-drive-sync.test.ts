@@ -1,5 +1,5 @@
 import { syncErrors } from "@grasp-os/shared/sync";
-import type { SyncPageRequest } from "@grasp-os/shared/sync";
+import type { SyncPage, SyncPageRequest } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -433,6 +433,49 @@ describe("syncing a person's own Drive", () => {
     expect(
       items.map((item) => (item.gone ? undefined : item.readers))
     ).toStrictEqual([null]);
+  });
+
+  it("moves on past a file whose folders take every request a read has left, and one more or one fewer", async () => {
+    // A read's room (50 requests): the change feed's start and the
+    // listing, then the top of My Drive, leave 47 for the file's folders.
+    const outcomes = [];
+    for (const depth of [46, 47, 48]) {
+      // oxlint-disable-next-line no-await-in-loop -- one Drive after another
+      const connectionId = await connected();
+      const chain = Array.from(
+        { length: depth },
+        (_, index) => `deep-${index}`
+      );
+      for (const [index, id] of chain.entries()) {
+        drive.folders[id] = { parent: chain[index + 1] ?? myDrive };
+      }
+      drive.owned = [ownedFile("deep", { parents: [chain[0] ?? myDrive] })];
+      drive.contents.deep = "deep";
+      const pages: (number | string)[] = [];
+      let cursor: string | null = null;
+      // Two reads at most: the second passes over a file late on the first.
+      for (let at = 0; at < 3; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one read after another
+        const page: SyncPage | string = await exports.default
+          .readSyncPage(request(connectionId, cursor))
+          .catch((error: unknown) => syncErrors.codeOf(error) ?? "failed");
+        pages.push(typeof page === "string" ? page : page.items.length);
+        if (typeof page === "string") {
+          break;
+        }
+        ({ cursor } = page);
+        if (page.items.length > 0) {
+          break;
+        }
+      }
+      outcomes.push({ depth, pages });
+    }
+
+    expect(outcomes).toStrictEqual([
+      { depth: 46, pages: [0, 1] },
+      { depth: 47, pages: [0, 1] },
+      { depth: 48, pages: [0, 1] },
+    ]);
   });
 
   it("reads the top of My Drive once a read, whatever the files", async () => {
