@@ -230,7 +230,7 @@ describe("teams that follow directory groups", () => {
     });
   });
 
-  it("change nothing for a group that is gone, lists nobody or anyone can join now, and say why", async () => {
+  it("change nothing for a group that is gone, refused, lists nobody or anyone can join now, and say why", async () => {
     const { admin } = await connectedDirectory(idp);
     const jo = await member();
     await directoryHolds([inDirectory({ id: jo.oid })]);
@@ -259,13 +259,129 @@ describe("teams that follow directory groups", () => {
     const open = await heldAs();
     await directoryGroupsHold([]);
     const gone = await heldAs();
+    // Microsoft refuses this one group: the rest of the read is applied.
+    await directoryGroupsHold([lawyers], { [id]: listing(jo) });
+    await directoryGroupFails(id, 403);
+    const refused = await heldAs();
     await directoryGroupsHold([lawyers], { [id]: listing(jo) });
     const back = await heldAs();
-    expect({ empty, open, gone, back }).toStrictEqual({
+    expect({ empty, open, gone, refused, back }).toStrictEqual({
       empty: { held: "empty", teams: [team] },
       open: { held: "not_mappable", teams: [team] },
       gone: { held: "gone", teams: [team] },
+      refused: { held: "refused", teams: [team] },
       back: { held: null, teams: [team] },
+    });
+  });
+
+  it("keep a team its department fills while its newly mapped group is held at its first read", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const ops = unique("Ops");
+    const team = await teamNamed(admin.session, ops);
+    const ray = await member();
+    await directoryHolds([inDirectory({ id: ray.oid, department: ops })]);
+    await directoryGroupsHold([]);
+    await readNext();
+    const byDepartment = await teamsOf(ray.userId);
+    const empty = group();
+    await directoryGroupsHold([empty], { [String(empty.id)]: [] });
+    await admin.api.directoryGroups.mapToTeam(String(empty.id), team);
+    await readNext();
+    const listed = await admin.api.directoryGroups.list();
+    expect({
+      byDepartment,
+      after: await teamsOf(ray.userId),
+      mapping: listed
+        .filter(({ groupId }) => groupId === empty.id)
+        .map(({ held, readAt }) => ({ held, readAt })),
+    }).toStrictEqual({
+      byDepartment: [team],
+      after: [team],
+      mapping: [{ held: "empty", readAt: null }],
+    });
+  });
+
+  it("keep what a newer read placed when an older read, started first, lands after it", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const sam = await member();
+    await directoryHolds([inDirectory({ id: sam.oid })]);
+    const team = await teamNamed(admin.session, unique("Research"));
+    const research = group();
+    const id = String(research.id);
+    await directoryGroupsHold([research], { [id]: listing(sam) });
+    await admin.api.directoryGroups.mapToTeam(id, team);
+    await readNext();
+    days += 2;
+    const at = new Date(Date.now() + days * dayMs);
+    // The older read has read every page; before its batch lands, a read
+    // started after it reads the group and applies it.
+    const { coreEnv, landed } = landingAt(
+      /insert into "directory_reads"/u,
+      "before",
+      async () => {
+        await runClockTask("directory.people", {}, at);
+      }
+    );
+    await runClockTask("directory.people", { DB: coreEnv.DB }, at);
+    expect({
+      landed: landed(),
+      rows: await rowsOf(sam.oid),
+      sam: await teamsOf(sam.userId),
+    }).toStrictEqual({ landed: true, rows: 1, sam: [team] });
+  });
+
+  it("place nobody in the team a group moved to until a read reads it for that team", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const [first, second] = [
+      await teamNamed(admin.session, unique("First")),
+      await teamNamed(admin.session, unique("Second")),
+    ];
+    const oid = crypto.randomUUID();
+    await directoryHolds([inDirectory({ id: oid })]);
+    const moving = group();
+    const id = String(moving.id);
+    await directoryGroupsHold([moving], { [id]: listing({ oid }) });
+    await admin.api.directoryGroups.mapToTeam(id, first);
+    await readNext();
+    await admin.api.directoryGroups.mapToTeam(id, second);
+    // They sign in after the move, before a read.
+    const signer = entraPerson(acmeTenant, "acme.test", { oid });
+    const session = await signedIn(idp, "microsoft", signer, {
+      coreEnv: withSignIn({
+        entra: { tenantId: acmeTenant, clientId: entraClient.id },
+      }),
+    });
+    const { userId } = await whoami(session);
+    const beforeRead = await teamsOf(userId);
+    await readNext();
+    expect({ beforeRead, after: await teamsOf(userId) }).toStrictEqual({
+      beforeRead: [],
+      after: [second],
+    });
+  });
+
+  it("keep nothing of an erased person's group membership, though the directory and the group still list them", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const ted = await member();
+    await directoryHolds([inDirectory({ id: ted.oid })]);
+    const team = await teamNamed(admin.session, unique("Payroll"));
+    const payroll = group();
+    const id = String(payroll.id);
+    await directoryGroupsHold([payroll], { [id]: listing(ted) });
+    await admin.api.directoryGroups.mapToTeam(id, team);
+    await readNext();
+    const placed = {
+      rows: await rowsOf(ted.oid),
+      teams: await teamsOf(ted.userId),
+    };
+    await admin.api.members.remove(ted.userId);
+    await admin.api.members.erase(ted.userId, String(ted.person.name));
+    const erased = await rowsOf(ted.oid);
+    await readNext();
+    expect({ placed, erased, after: await rowsOf(ted.oid) }).toStrictEqual({
+      placed: { rows: 1, teams: [team] },
+      erased: 0,
+      after: 0,
     });
   });
 

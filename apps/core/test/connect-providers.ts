@@ -63,7 +63,8 @@ export const directoryClient = clients.microsoftDirectory;
  * offset of a page whose next link points back at itself (null for none).
  * Its groups: `{ groups }` as Graph answers a group, and `{ members }`,
  * each group's transitive members by its lower-case ID; `{ groupFail }`,
- * a group's ID whose members Graph then fails to list (null for none).
+ * a group's ID whose members Graph then fails to list (null for none),
+ * with HTTP `{ groupFailStatus }` (500 unless told).
  * `{ granted }` is what Entra says the directory's app was granted, at
  * connecting and at each renewal (null for `directoryGranted`).
  * Its deleted users likewise: `{ deleted }` (`/directory/deletedItems`),
@@ -624,7 +625,7 @@ const groupsGraph = (url) => {
   const id = parts[3]?.toLowerCase();
   if (parts.length === 5 && parts[4] === "transitiveMembers") {
     if (directory.groupFail === id) {
-      return Response.json({ error: { code: "generalException" } }, { status: 500 });
+      return Response.json({ error: { code: "generalException" } }, { status: directory.groupFailStatus ?? 500 });
     }
     const known = directory.groups.some((each) => each.id.toLowerCase() === id);
     const members = directory.members[id] ?? (known ? [] : undefined);
