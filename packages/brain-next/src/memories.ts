@@ -1199,8 +1199,10 @@ export const confirmMemory = (
  * read it, it is not retired, and it is in its world time now: current, or
  * ended by a newer memory of its lineage, which a writer forgets as well,
  * so it never becomes current again when the newer one is retired too.
- * An undo of its save (`undo`) no longer replaces what it named from then
- * on (`memory_replacements.undone_at`), which is current again, whatever
+ * An undo of its save (`undo`) retires it whatever its world time (one
+ * valid from tomorrow, or expired, still ends what it replaced), and it no
+ * longer replaces what it named from then on
+ * (`memory_replacements.undone_at`), which is current again, whatever
  * happened since; any other retirement keeps them ended: forgetting never
  * brings anything back.
  * Answers when it was retired and by which change (`change`, kept with
@@ -1209,7 +1211,7 @@ export const confirmMemory = (
  * so a retry answers what the first try did and another call learns it
  * wasn't the one (contract.ts `retireMemory`). Null alike
  * for no such memory, another writer's (retired or not), one the reader
- * may not read and one that expired before it was retired.
+ * may not read and, unless it is an undo, one outside its world time.
  */
 export const retireMemory = (
   sql: SqlStorage,
@@ -1240,13 +1242,16 @@ export const retireMemory = (
       `WITH ${readableSql}
       UPDATE memories AS m SET retired_at = ?6, retired_change = ?7
       WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
-        AND (m.valid_from IS NULL OR m.valid_from <= ?5)
-        AND (m.valid_until IS NULL OR m.valid_until > ?5)
+        AND (?8 = 1 OR (
+          (m.valid_from IS NULL OR m.valid_from <= ?5)
+          AND (m.valid_until IS NULL OR m.valid_until > ?5)
+        ))
         AND ${visibleSql("m")}
       RETURNING row, retired_at, retired_change`,
       ...asked,
       stamp,
-      change
+      change,
+      undo ? 1 : 0
     )
     .toArray();
   if (retired !== undefined) {

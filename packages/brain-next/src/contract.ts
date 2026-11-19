@@ -2725,7 +2725,8 @@ export const retireRequestSchema = z.strictObject({
   change: changeKeySchema,
   /**
    * An undo of the memory's own save, as a host that offers one sets it
-   * (the notice of a save, with its Undo): what the memory replaced
+   * (the notice of a save, with its Undo): retired whatever its dates (one
+   * valid only from tomorrow, or expired), and what it replaced
    * (`NewMemory.replaces`) is current again, whatever happened since (a
    * late undo, after something newer replaced the memory, brings it back
    * beside that). Without it, a retirement never brings anything back:
@@ -3727,7 +3728,9 @@ export interface Brain {
    * change.
    * Null alike when there is no such memory, when it is another writer's
    * (retired or not), when the reader may not read it, and when it
-   * expired before it was retired: nothing tells another writer's memory
+   * expired before it was retired, unless the call is an undo of its save
+   * (`RetireRequest.undo`), which retires it whatever its dates: nothing
+   * tells another writer's memory
    * from one there isn't. One this writer retired that expired afterwards
    * still answers its time on a repeat.
    */
