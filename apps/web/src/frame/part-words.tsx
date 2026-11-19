@@ -258,6 +258,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       },
       columnInfo: (header) => t`More about ${header}`,
       groupAttention: t`needs attention`,
+      noDate: t`No date`,
       rowPending: t({
         message: "pending",
         context: "a table row not yet in effect",
@@ -851,6 +852,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
     inspectorPanel: {
       add: t({ message: "Add", context: "add to an inspector's list" }),
+      none: t({ message: "Not set", context: "a fact with no value" }),
       addTo: (label) => {
         const what = label.toLowerCase();
         return t`Add ${what}`;
@@ -973,6 +975,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
     sidebar: {
       name: t`Sidebar`,
+      loading: t`Loading`,
       main: t({ message: "Main", context: "the sidebar's main list" }),
       search: t`Search`,
       fold: t`Show or hide the sidebar`,

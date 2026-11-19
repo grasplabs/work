@@ -69,6 +69,7 @@ import { ComposerGlow } from "./glow";
 import type { ComposerAccent, ComposerEdge } from "./glow";
 import { MentionMenu, caretPoint, mentionRows } from "./mention";
 import type { ComposerMentionItem, MentionRow } from "./mention";
+import { Kept, PendingText } from "./pending";
 import {
   COMPOSER_CLIPBOARD,
   PictureChip,
@@ -269,6 +270,14 @@ export interface ComposerProps {
    * @default false
    */
   mentionsLoading?: boolean;
+  /**
+   * The page's data is not there yet (a frame's first paint): the bar stands still in its own box,
+   * the same size it will be, with the plus, a quiet line where the text goes, and Send off. The
+   * rest keeps its room but is not drawn, and the card is inert and hidden from a reader: nothing to
+   * focus, nothing read out. No light. When it turns false the bar stands in the same box.
+   * @default false
+   */
+  loading?: boolean;
   /** Called with each thing picked from the mention menu. */
   onMention?: (item: ComposerMentionItem) => void;
   /**
@@ -2680,6 +2689,33 @@ const dictationParts = (props: Resolved, text: string) => ({
   dismiss: props.onTakeoverDismiss ?? props.dictation?.onCancel,
 });
 
+/** What the card draws while it is still (`loading`): each live part kept in its room, the text a quiet line, Send off. */
+const stillOf = (
+  pending: boolean,
+  disabled: boolean,
+  parts: {
+    editor: ReactNode;
+    voice: ReactNode;
+    controls: ReactNode;
+    end: ReactNode;
+    empty: boolean;
+    row: boolean;
+  }
+) =>
+  pending
+    ? {
+        editor: <PendingText row={parts.row}>{parts.editor}</PendingText>,
+        voice: <Kept>{parts.voice}</Kept>,
+        controls: <Kept>{parts.controls}</Kept>,
+        end: <Kept>{parts.end}</Kept>,
+        empty: true,
+        // Nothing to focus and nothing read out: the page's own busy state speaks.
+        card: { inert: true, "aria-hidden": true } as const,
+        // No light while it is still.
+        light: false,
+      }
+    : { ...parts, card: {}, light: !disabled };
+
 /** The composer, with every default in place. */
 const ComposerForm = (props: Resolved) => {
   const { activity, value, onValueChange, attachments, validation, compact } =
@@ -2939,6 +2975,14 @@ const ComposerForm = (props: Resolved) => {
       pictureTime={props.pictureTime}
     />
   );
+  const still = stillOf(props.loading === true, disabled, {
+    editor,
+    voice,
+    controls: props.controls,
+    end: props.end,
+    empty,
+    row: compact,
+  });
   const last = (
     <>
       <ComposerCount
@@ -2948,8 +2992,8 @@ const ComposerForm = (props: Resolved) => {
         row={row}
       />
       <ComposerEnd
-        voice={voice}
-        empty={empty}
+        voice={still.voice}
+        empty={still.empty}
         working={working}
         disabled={disabled}
         onSend={sendHere}
@@ -2986,7 +3030,7 @@ const ComposerForm = (props: Resolved) => {
           <div {...stylex.props(styles.top)}>{props.top}</div>
         )}
         <div data-slot="composer-card-room" {...stylex.props(styles.cardRoom)}>
-          {!disabled && (
+          {still.light && (
             <ComposerGlow
               edge={props.edge}
               working={working}
@@ -2998,6 +3042,7 @@ const ComposerForm = (props: Resolved) => {
           <fieldset
             ref={card}
             disabled={disabled}
+            {...still.card}
             data-tall={row ? tall : undefined}
             data-fold={row && fold ? "" : undefined}
             onPointerDown={focusText}
@@ -3029,12 +3074,12 @@ const ComposerForm = (props: Resolved) => {
                         compact={compact}
                         tall={tall}
                         start={props.start}
-                        end={props.end}
+                        end={still.end}
                         last={last}
                         after={props.after}
                         footer={props.footer}
-                        editor={editor}
-                        controls={props.controls}
+                        editor={still.editor}
+                        controls={still.controls}
                         above={props.above}
                         chosenAgent={chosenAgent}
                         attachments={attachments.filter(

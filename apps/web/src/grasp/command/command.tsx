@@ -81,6 +81,7 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
 import { commandMarking, commandRow } from "./markers.stylex";
 import { commandWords } from "./words";
+import type { CommandWords } from "./words";
 
 /** One command. */
 export interface CommandEntry {
@@ -235,6 +236,12 @@ export interface CommandProps {
    * @default false
    */
   bare?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ loading: "Reading people and teams…" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<CommandWords>;
 }
 
 // ---- The look --------------------------------------------------------------------------------------
@@ -1069,6 +1076,7 @@ export const CommandView = ({
   onRowAction,
   moreLabel: moreLabelGiven,
   moreHint: moreHintGiven,
+  words,
   style: styleProp,
   layout,
   bare = false,
@@ -1080,7 +1088,7 @@ export const CommandView = ({
     loading: loadingLabel,
     more: moreLabel,
     moreHint,
-  } = withGiven(useWords("command", commandWords), {
+  } = withGiven(useWords("command", commandWords, words), {
     placeholder: placeholderGiven,
     empty: emptyGiven,
     failed: failedLabelGiven,
@@ -1108,10 +1116,10 @@ export const CommandView = ({
   // A failed action shows its failedLabel on the command, and the status line says it aloud.
   const [said, setSaid] = useState("");
   const run = (value: string, details: CommandActionDetails) => {
-    const words = find(value)?.failedLabel ?? failedLabel;
+    const failure = find(value)?.failedLabel ?? failedLabel;
     const fail = () => {
-      setSaid(words);
-      throw new CommandFailedError(words);
+      setSaid(failure);
+      throw new CommandFailedError(failure);
     };
     setSaid("");
     const outcome = callAction(() => onAction?.(value, details));

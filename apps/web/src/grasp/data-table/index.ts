@@ -1,4 +1,6 @@
 export { DataTable } from "./data-table";
+export { DataTableDateCell, dateColumn } from "./date";
+export type { DataTableDate, DataTableDateColumn } from "./date";
 export { DataTablePerson, dataTableCompactControl } from "./person";
 export type { DataTablePersonProps } from "./person";
 export type {

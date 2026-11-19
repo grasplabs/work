@@ -37,6 +37,7 @@ type Passed = Pick<
   | "moreLabel"
   | "moreHint"
   | "failedLabel"
+  | "words"
 >;
 
 /** Every prop a CommandDialog takes. */
@@ -193,7 +194,7 @@ export const CommandDialog = ({
   onOpenChange,
   ...passed
 }: CommandDialogProps) => {
-  const words = useWords("command", commandWords);
+  const words = useWords("command", commandWords, passed.words);
   const [openHere, setOpenHere] = useState(false);
   const open = openGiven ?? openHere;
   const setOpen = (next: boolean) => {

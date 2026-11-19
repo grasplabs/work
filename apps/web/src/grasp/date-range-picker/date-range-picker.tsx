@@ -40,6 +40,7 @@ import { popup, px } from "../tokens/tokens.values";
 import { useWords, withGiven } from "../words/words";
 import { addDays, monthOf } from "./dates";
 import { dateRangePickerWords } from "./words";
+import type { DateRangePickerWords } from "./words";
 
 type RootProps = ComponentProps<typeof RootPrimitive>;
 
@@ -130,6 +131,12 @@ export interface DateRangePickerProps extends Omit<
    * @default "Next month"
    */
   nextLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ presets: "Quick ranges" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<DateRangePickerWords>;
 }
 
 const styles = stylex.create({
@@ -367,6 +374,7 @@ export const DateRangePicker = ({
   triggerLabel,
   presetLabels: presetLabelsGiven,
   presetsLabel: presetsLabelGiven,
+  words,
   previousLabel,
   nextLabel,
   showOutsideDays,
@@ -379,7 +387,7 @@ export const DateRangePicker = ({
     last7,
     last30,
     thisMonth,
-  } = withGiven(useWords("dateRangePicker", dateRangePickerWords), {
+  } = withGiven(useWords("dateRangePicker", dateRangePickerWords, words), {
     presets: presetsLabelGiven,
   });
   const presetLabels = presetLabelsGiven ?? [

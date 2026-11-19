@@ -220,7 +220,7 @@ export const PeopleTeamsPicker = ({
           filter={false}
           items={items}
           loading={candidates === null}
-          loadingLabel={t`Reading people and teams…`}
+          words={{ loading: t`Reading people and teams…` }}
           onAction={(value) => {
             setOpen(false);
             const subject = offered.get(value);

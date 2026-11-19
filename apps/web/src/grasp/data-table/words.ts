@@ -177,6 +177,11 @@ export interface DataTableWords {
    */
   groupAttention: string;
   /**
+   * A date column's cell with no date, said where its dash shows.
+   * @default No date
+   */
+  noDate: string;
+  /**
    * Said after a pending row's name (`rowStatus`): ", pending".
    * @default pending
    */
@@ -269,6 +274,7 @@ export const englishWords: DataTableWords = {
   open: (name) => `Open ${name}`,
   close: (name) => `Close ${name}`,
   groupAttention: "needs attention",
+  noDate: "No date",
   rowPending: "pending",
   rowRemoved: "removed",
   noneYet: (many) => `No ${many} yet.`,

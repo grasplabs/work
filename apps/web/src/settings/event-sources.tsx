@@ -202,7 +202,7 @@ const Recipe = ({ url, secret }: { url: string; secret?: string }) => {
   return (
     <CodeBlock
       code={recipeOf(url, secret)}
-      copyLabel={t`Copy the example`}
+      words={{ copy: t`Copy the example` }}
       language="bash"
       languageLabel={t`Send one event`}
       lineNumbers={false}

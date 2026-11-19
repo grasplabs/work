@@ -26,6 +26,7 @@ import { grammarOrNull, languageNames, linesOf } from "./prism";
 import type { Line } from "./prism";
 import { codeStyles as styles, tones } from "./styles";
 import { codeBlockWords } from "./words";
+import type { CodeBlockWords } from "./words";
 
 /** Every prop a CodeBlock takes. */
 export interface CodeBlockProps {
@@ -96,6 +97,12 @@ export interface CodeBlockProps {
    * @default "Show less"
    */
   lessLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ copy: "Copy the definition" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<CodeBlockWords>;
 }
 
 const dynamic = stylex.create({
@@ -206,6 +213,7 @@ type HeadProps = Pick<
   | "copyFailedLabel"
   | "writingLabel"
   | "streamingMark"
+  | "words"
 > & {
   name: string;
   streaming: boolean;
@@ -221,13 +229,14 @@ const Head = ({
   copiedLabel: copiedLabelGiven,
   copyFailedLabel: copyFailedLabelGiven,
   writingLabel: writingLabelGiven,
+  words,
 }: HeadProps) => {
   const {
     copy: copyLabel,
     copied: copiedLabel,
     copyFailed: copyFailedLabel,
     writing: writingLabel,
-  } = withGiven(useWords("codeBlock", codeBlockWords), {
+  } = withGiven(useWords("codeBlock", codeBlockWords, words), {
     copy: copyLabelGiven,
     copied: copiedLabelGiven,
     copyFailed: copyFailedLabelGiven,
@@ -379,7 +388,7 @@ const Lines = ({
   );
 };
 
-type FootProps = Pick<CodeBlockProps, "moreLabel" | "lessLabel"> & {
+type FootProps = Pick<CodeBlockProps, "moreLabel" | "lessLabel" | "words"> & {
   open: boolean;
   /** The id of what it folds. */
   controls: string;
@@ -392,11 +401,12 @@ const Foot = ({
   onToggle,
   moreLabel: moreGiven,
   lessLabel: lessGiven,
+  words,
 }: FootProps) => {
-  const { more, less } = withGiven(useWords("codeBlock", codeBlockWords), {
-    more: moreGiven,
-    less: lessGiven,
-  });
+  const { more, less } = withGiven(
+    useWords("codeBlock", codeBlockWords, words),
+    { more: moreGiven, less: lessGiven }
+  );
   return (
     <div {...stylex.props(styles.foot)}>
       <Button
@@ -430,6 +440,7 @@ export const CodeBlock = ({
   streamingMark,
   moreLabel,
   lessLabel,
+  words,
 }: CodeBlockProps) => {
   // Plain until Prism and the language have loaded; then highlighted.
   const highlight = useHighlight(language);
@@ -453,6 +464,7 @@ export const CodeBlock = ({
       {...stylex.props(styles.box)}
     >
       <Head
+        words={words}
         code={code}
         fileName={fileName}
         name={name}
@@ -475,6 +487,7 @@ export const CodeBlock = ({
       />
       {folds && (
         <Foot
+          words={words}
           open={open}
           controls={scrollerId}
           moreLabel={moreLabel}

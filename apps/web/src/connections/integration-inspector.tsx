@@ -305,7 +305,7 @@ export const IntegrationInspector = ({
     >
       <PanelHeader
         actions={<MainAction identity={identity} integration={integration} />}
-        closeLabel={t`Close`}
+        words={{ close: t`Close` }}
         {...(about === undefined ? {} : { description: about })}
         icon={
           <ProviderMark

@@ -187,6 +187,12 @@ export interface QuestionToolProps {
   style?: QuestionToolLayoutStyle;
   /** Layout only: margins, alignment and width. The look belongs to the card. */
   layout?: QuestionToolLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ other: "In my own words", skip: "Type instead" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<QuestionToolWords>;
 }
 
 // Runs a task, then `after` whether it worked or failed. The React Compiler cannot compile a
@@ -1227,7 +1233,7 @@ const QuestionCard = (props: Resolved) => {
 
 /** An assistant's question, answered by a choice, several choices or the person's own words. */
 export const QuestionTool = (props: QuestionToolProps) => {
-  const words = useWords("questionTool", questionToolWords);
+  const words = useWords("questionTool", questionToolWords, props.words);
   return <QuestionCard {...props} {...withDefaults(props, words)} />;
 };
 

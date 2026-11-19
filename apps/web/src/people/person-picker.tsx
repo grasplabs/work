@@ -197,7 +197,7 @@ export const PersonPicker = ({
           filter={false}
           items={entriesTyped(entries, query)}
           loading={people === null}
-          loadingLabel={t`Reading who can own it…`}
+          words={{ loading: t`Reading who can own it…` }}
           onAction={(value) => {
             setOpen(false);
             const person = people?.find(

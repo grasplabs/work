@@ -12,6 +12,7 @@ import { RowListAction } from "../row-list";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
 import { panelWords } from "./words";
+import type { PanelWords } from "./words";
 
 /** Every prop a PanelText takes. */
 export interface PanelTextProps {
@@ -28,6 +29,12 @@ export interface PanelTextProps {
    * @default false
    */
   defaultOpen?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ showAll: "Read the whole note" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<PanelWords>;
 }
 
 const styles = stylex.create({
@@ -67,10 +74,12 @@ export const PanelText = ({
   children,
   openLabel: openLabelGiven,
   defaultOpen = false,
+  words,
 }: PanelTextProps) => {
-  const { showAll: openLabel } = withGiven(useWords("panel", panelWords), {
-    showAll: openLabelGiven,
-  });
+  const { showAll: openLabel } = withGiven(
+    useWords("panel", panelWords, words),
+    { showAll: openLabelGiven }
+  );
   const [open, setOpen] = useState(defaultOpen);
   const id = useId();
   const body = useRef<HTMLDivElement>(null);

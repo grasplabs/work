@@ -215,10 +215,14 @@ const ManagePeople = ({
     <>
       <ShareAccess
         candidates={found}
-        failedInviteLabel={t`Not added`}
+        words={{
+          failedInvite: t`Not added`,
+          // With candidates to pick from, the field is named by `pick`.
+          pick: t`Search people and teams`,
+          inviteLevel: t`Role in the project`,
+          owner: t({ message: "Owner", context: "a project's owner" }),
+        }}
         filter={false}
-        findLabel={t`Search people and teams`}
-        inviteLevelLabel={t`Role in the project`}
         levels={roles.map((role) => ({ value: role, label: roleLabel(role) }))}
         loading={offered === undefined}
         members={[
@@ -264,7 +268,6 @@ const ManagePeople = ({
         onRemove={(id) => {
           setRemoving(members.find((member) => keyOf(member) === id));
         }}
-        ownerLabel={t({ message: "Owner", context: "a project's owner" })}
         query={query}
       />
       {offered !== undefined && offered.state !== "ready" ? (

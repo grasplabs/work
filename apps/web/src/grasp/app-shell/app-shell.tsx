@@ -22,6 +22,7 @@ import { focus } from "../focus/focus";
 import { Cross, Icon, PanelToggle, SidebarToggle } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
+import { PanelSeated } from "../panel/seat";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "../sheet";
 import { SidebarShellProvider } from "../sidebar/shell";
 import { grasp, media } from "../tokens/tokens.stylex";
@@ -277,6 +278,14 @@ export interface AppShellProps {
    * @default "center"
    */
   dockAlign?: "center" | "end";
+  /**
+   * The page is not there yet (the first paint of a reload, before the data): the frame stands as it
+   * will (the sidebar's column, the card with its bar), the frame bar's crumbs a placeholder and the
+   * page's room empty and said as busy, so nothing moves when the page arrives. Pair it with the
+   * Sidebar's own `loading` for its rows. The page's `children` are not drawn while it holds.
+   * @default false
+   */
+  loading?: boolean;
   /**
    * The page's own panel (an inspector, a note's details): inside the page's card at its end, under
    * the bar, flush with the card's end and foot. The page and the dock keep to the column beside it, so
@@ -1345,6 +1354,7 @@ type CardProps = Pick<
   | "banner"
   | "pagePanel"
   | "onPagePanelOpenChange"
+  | "loading"
 > & {
   /** The bar's More button's name, once its actions fold into it. */
   moreLabel?: string;
@@ -1677,7 +1687,7 @@ const PagePanel = ({
         inert={inert}
         {...stylex.props(styles.pagePanel, fading)}
       >
-        {panel}
+        <PanelSeated value="beside">{panel}</PanelSeated>
       </aside>
     );
   }
@@ -1690,7 +1700,7 @@ const PagePanel = ({
     >
       <SheetContent corner="shell" bounds="shell">
         <SheetTitle>{name}</SheetTitle>
-        {panel}
+        <PanelSeated value="sheet">{panel}</PanelSeated>
       </SheetContent>
     </Sheet>
   );
@@ -1814,6 +1824,7 @@ const ShellCard = ({
   pagePanelSheet,
   pagePanelName,
   onPagePanelOpenChange,
+  loading,
 }: CardProps) => {
   const menuWords = withGiven(useWords("appShell", appShellWords), {
     menu: menuLabel,
@@ -1926,6 +1937,7 @@ const ShellCard = ({
             actionItems={actionItems}
             breadcrumbLabel={breadcrumbLabel}
             moreLabel={moreLabel}
+            loading={loading === true}
           />
         </div>
       ) : (
@@ -1939,6 +1951,7 @@ const ShellCard = ({
       <main
         data-slot="app-shell-page"
         data-page-whole={whole ? "" : undefined}
+        aria-busy={loading === true ? true : undefined}
         inert={pageInert}
         onScroll={handlePageScroll}
         {...stylex.props(
@@ -1951,7 +1964,7 @@ const ShellCard = ({
           stylex.defaultMarker()
         )}
       >
-        {children}
+        {loading === true ? null : children}
       </main>
       <PagePanel
         panel={pagePanel}

@@ -996,18 +996,18 @@ const AnswerRow = ({
             />
           )
         }
-        actionsLabel={t`Answer actions`}
+        words={{
+          actions: t`Answer actions`,
+          failed: ending.keyFailedForAdmin
+            ? t`Your AI provider is refusing your key.`
+            : failureMessage(last?.failure, i18n),
+        }}
         copyLabels={{
           copy: t`Copy the answer`,
           copied: t`Copied`,
           failed: t`Not copied`,
         }}
         copyText={copyText === "" ? undefined : copyText}
-        failedLabel={
-          ending.keyFailedForAdmin
-            ? t`Your AI provider is refusing your key.`
-            : failureMessage(last?.failure, i18n)
-        }
         from="agent"
         name="Grasp"
         nameHidden

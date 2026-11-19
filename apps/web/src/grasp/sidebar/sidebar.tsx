@@ -29,6 +29,7 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
 import { useFoldKeys } from "./fold-keys";
 import { guideVars } from "./guide.stylex";
+import { LoadingNav } from "./loading";
 import { SidebarNav, pathOf } from "./nav";
 import type { GuidePlace, SidebarFilter } from "./nav";
 import { groupsOf } from "./parts";
@@ -329,6 +330,13 @@ export interface SidebarProps {
   tabsLabel?: string;
   /** One quiet sentence where the rows would be, when the list has none ("Nothing needs you yet"). */
   empty?: string;
+  /**
+   * The rows are not there yet (the first paint of a reload, before the data): the list draws quiet
+   * bars in the rows' own boxes, the same shapes every time, and is said as busy. The head, the
+   * width and the foot stay as they are, so nothing moves when the rows arrive.
+   * @default false
+   */
+  loading?: boolean;
   /**
    * The tree guide on nested rows (a row's own rows, and a folding group's): a stem from the head
    * with a rounded branch into each row. Opt-in: off unless `true` (Ruben, 18 November).
@@ -1824,7 +1832,13 @@ interface ListAreaProps {
   storageKey: string | undefined;
   keys: "tab" | "list" | undefined;
   empty: string | undefined;
+  /** The rows are not there yet: their placeholders, said as "Loading". */
+  loading: string | undefined;
 }
+
+/** What the list says while its rows are not there yet, or nothing when they are. */
+const loadingSaid = (loading: boolean | undefined, said: string) =>
+  loading === true ? said : undefined;
 
 /** The list between the head and the foot: the main list (under its tabs), or a section's. */
 const ListArea = ({
@@ -1843,6 +1857,7 @@ const ListArea = ({
   storageKey,
   keys,
   empty,
+  loading,
 }: ListAreaProps) => {
   const [ownTab, setOwnTab] = useState<string>();
   const tabbed = section === undefined && tabs !== undefined && tabs.length > 0;
@@ -1880,6 +1895,13 @@ const ListArea = ({
       />
     </>
   );
+  if (loading !== undefined) {
+    return (
+      <SwapArea key={list} ref={area}>
+        <LoadingNav row={styles.row} label={navLabel} said={loading} />
+      </SwapArea>
+    );
+  }
   return (
     <SwapArea key={list} ref={area}>
       {section !== undefined && (
@@ -2008,6 +2030,7 @@ const SidebarDrawn = ({
   onTabChange,
   tabsLabel: tabsGiven,
   empty,
+  loading,
   style: styleProp,
   layout,
   onOpen,
@@ -2265,6 +2288,7 @@ const SidebarDrawn = ({
             storageKey={storageKey}
             keys={keys}
             empty={empty}
+            loading={loadingSaid(loading, words.loading)}
           />
           {profile !== undefined && (
             <div data-slot="sidebar-foot" {...stylex.props(styles.foot)}>

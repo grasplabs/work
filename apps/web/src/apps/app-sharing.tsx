@@ -244,9 +244,8 @@ const ShareWith = ({
             ? candidatesOf(offered.data, app.owner, apart, words)
             : []
         }
-        failedInviteLabel={t`Couldn't share`}
+        words={{ failedInvite: t`Couldn't share`, list: t`Shared with` }}
         levels={roles.map((role) => ({ value: role, label: roleLabel(role) }))}
-        listLabel={t`Shared with`}
         members={members.map((member) => ({
           id: keyOf(member),
           name: named(member),

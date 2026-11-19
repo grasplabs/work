@@ -8952,6 +8952,7 @@ msgid "Loaded"
 msgstr "Geladen"
 
 #: src/brain/forget.tsx
+#: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
 msgstr "Wird geladen"
@@ -9927,6 +9928,10 @@ msgstr "Noch kein Code"
 msgid "No connector yet"
 msgstr "Noch kein Connector"
 
+#: src/frame/part-words.tsx
+msgid "No date"
+msgstr "Kein Datum"
+
 #: src/settings/event-sources.tsx
 msgid "No event from this source starts anything until you make it a new secret."
 msgstr "Kein Ereignis aus dieser Quelle startet etwas, bis Sie ihr ein neues Geheimnis erzeugen."
@@ -10489,6 +10494,11 @@ msgstr "Nicht gesendet"
 #: src/apps/resource-bindings.tsx
 msgid "Not served"
 msgstr "Nicht bedient"
+
+#: src/frame/part-words.tsx
+msgctxt "a fact with no value"
+msgid "Not set"
+msgstr "Nicht festgelegt"
 
 #: src/brain/share-record.tsx
 msgid "Not shared"

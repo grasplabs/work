@@ -189,6 +189,12 @@ export interface ChatMessageProps {
   style?: ChatMessageLayoutStyle;
   /** Layout only: margins and alignment. The look belongs to the message. */
   layout?: ChatMessageLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ actions: "Answer
+   * actions" }`). Any left out are the catalogue's, else English. A flat text prop given beside it still
+   * wins until the release's step 5.
+   */
+  words?: Partial<ChatMessageWords>;
 }
 
 // The foot coming into its kept room at the end of a message.
@@ -1055,13 +1061,14 @@ export const ChatMessage = ({
   thoughtSeconds,
   thoughtsLook,
   pace,
+  words: given,
   style: styleProp,
   layout,
 }: ChatMessageProps) => {
   const root = useRef<HTMLElement | null>(null);
   // Its own words: the product's, by its catalogue, else English; a text prop given still wins.
   const text = withGiven(
-    useCatalogue("chatMessage", chatMessageWords),
+    useCatalogue("chatMessage", chatMessageWords, given),
     givenOf({
       personLabel,
       failedLabel,

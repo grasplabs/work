@@ -240,8 +240,7 @@ const Integrity = ({ record }: { record: AuditRecord }) => {
   const copy = (value: string, name: string) => (
     <CopyField
       aria-label={t`Copy ${name}`}
-      copiedLabel={t`Copied`}
-      failedLabel={t`Not copied`}
+      words={{ copied: t`Copied`, failed: t`Not copied` }}
       size="sm"
       value={value}
     />

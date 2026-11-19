@@ -250,7 +250,16 @@ const AskedQuestions = ({
   return (
     <ChoiceFocus key={step} picked={answer.picked[0]} own={answer.own}>
       <QuestionTool
-        backLabel={t`Back`}
+        words={{
+          back: t`Back`,
+          other: t`In my own words`,
+          recommended: t({
+            message: "Recommended",
+            context: "the option the assistant would pick",
+          }),
+          skip: t`Type instead`,
+          step: (number, count) => t`${number} of ${count}`,
+        }}
         embedded
         failedLabel={
           lacksModel(model)
@@ -293,15 +302,8 @@ const AskedQuestions = ({
           description: option.description,
           recommended: index === item.recommended,
         }))}
-        otherLabel={t`In my own words`}
         question={item.question}
-        recommendedLabel={t({
-          message: "Recommended",
-          context: "the option the assistant would pick",
-        })}
-        skipLabel={t`Type instead`}
         step={{ index: step, count: total }}
-        stepLabel={(number, count) => t`${number} of ${count}`}
         value={cardValueOf(answer)}
       >
         <QuestionToolSubmit>{last ? t`Send` : t`Next`}</QuestionToolSubmit>

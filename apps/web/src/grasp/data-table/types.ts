@@ -260,6 +260,16 @@ export interface DataTableProps<Row> {
   /** With the `grouping` piece: the column whose values gather the rows, each group counted. */
   groupBy?: string;
   /**
+   * With the `grouping` piece: the groups closed, by their value, when you keep them in state.
+   * Every other group is open, a new value too. Pair it with `onClosedGroupsChange`; `location`
+   * keeps the same in a link.
+   */
+  closedGroups?: readonly string[];
+  /** With the `grouping` piece: the groups closed at first, by their value, when you do not keep them in state. */
+  defaultClosedGroups?: readonly string[];
+  /** With the `grouping` piece: called with the groups closed, by their value, each time one opens or closes. */
+  onClosedGroupsChange?: (closed: string[]) => void;
+  /**
    * A row's state, drawn over the whole row and said in words in its first cell: `pending` (someone
    * invited, not yet here) fades from the row's start to its end; `removed` greys it, pictures
    * included. The row's actions stay fully seen and usable in both.

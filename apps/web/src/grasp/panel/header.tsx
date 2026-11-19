@@ -15,7 +15,7 @@ import {
   TabsTab as TabsTabPrimitive,
 } from "@ui-sdk/react/tabs";
 import type { TabsTabState } from "@ui-sdk/react/tabs";
-import { Fragment, useEffect, useLayoutEffect, useRef } from "react";
+import { Fragment, use, useEffect, useLayoutEffect, useRef } from "react";
 import type { ReactNode, RefObject } from "react";
 
 import { focus } from "../focus/focus";
@@ -29,8 +29,11 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
 import { useWords, withGiven } from "../words/words";
 import { usePanel } from "./context";
+import { panelVars } from "./panel.stylex";
+import { PanelSeated } from "./seat";
 import { PanelTexture } from "./texture";
 import { panelWords } from "./words";
+import type { PanelWords } from "./words";
 
 /** One view of the object: a tab with an icon and a word. */
 export interface PanelHeaderView {
@@ -58,7 +61,7 @@ export interface PanelHeaderProps {
   meta?: ReactNode[];
   /** In the bar: the panel's own buttons, `xs`, the main one first ("Run agent", "Share", more). */
   actions?: ReactNode;
-  /** Shows a close button at the bar's end, after a short line. Runs when it is pressed. */
+  /** Shows a close button at the bar's end, after a short line. Runs when it is pressed. Left out in App shell's page-panel sheet, whose own close closes it. */
   onClose?: () => void;
   /**
    * The close button's name.
@@ -84,6 +87,12 @@ export interface PanelHeaderProps {
    * @default false
    */
   texture?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ close: "Close the details" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<PanelWords>;
 }
 
 const HOVER = media.hover;
@@ -101,7 +110,7 @@ const styles = stylex.create({
     boxSizing: "border-box",
     height: grasp.inspectorBar,
     paddingInline: grasp.space2,
-    backgroundColor: grasp.raised,
+    backgroundColor: panelVars.ground,
     // The hairline is there from the start, unseen; it shows once something scrolls under the bar.
     borderBlockEndWidth: grasp.hairline,
     borderBlockEndStyle: "solid",
@@ -296,7 +305,7 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     flexShrink: 0,
-    backgroundColor: grasp.raised,
+    backgroundColor: panelVars.ground,
   },
   viewsStripRow: {
     display: "flex",
@@ -603,18 +612,21 @@ export const PanelHeader = ({
   icon,
   meta,
   actions,
-  onClose,
+  onClose: onCloseGiven,
   closeLabel: closeLabelGiven,
   views,
   viewsLabel: viewsLabelGiven,
   level: levelDeprecated,
   headingLevel: level = levelDeprecated ?? 2,
   texture = false,
+  words,
 }: PanelHeaderProps) => {
   const { close: closeLabel, views: viewsLabel } = withGiven(
-    useWords("panel", panelWords),
+    useWords("panel", panelWords, words),
     { close: closeLabelGiven, views: viewsLabelGiven }
   );
+  // In App shell's sheet the sheet's own close closes it: one close, not two.
+  const onClose = use(PanelSeated) === "sheet" ? undefined : onCloseGiven;
   const bar = useRef<HTMLDivElement>(null);
   const top = useRef<HTMLDivElement>(null);
   const fold = useRef<HTMLDivElement>(null);
