@@ -5326,10 +5326,10 @@ export const profileAs = async (
 
 /**
  * Undoes the save of one of the member `personId`'s own memories
- * (`rememberAs`), current or ended by a newer one of theirs: it never
- * becomes current again, and stays as history; what the save replaced is
- * current again, unless something newer ends the memory by then (the
- * Brain's `RetireRequest.undo`). Only a save's own Undo calls it: the
+ * (`rememberAs`), current, ended by a newer one of theirs, or retired
+ * before: it never becomes current again, and stays as history; what the
+ * save replaced is current again, whatever happened since (the Brain's
+ * `RetireRequest.undo`). Only a save's own Undo calls it: the
  * notice's in Grasp and on a chat app, and the retirement of a save whose
  * notice nobody saw (unseen-memories.ts). `done` again for one they
  * retired before, so a retry never reads as not found. `nothing` alike
