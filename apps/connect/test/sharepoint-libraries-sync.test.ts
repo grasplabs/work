@@ -459,18 +459,22 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
             place: salesDocs.id,
             title: "Documents",
             within: "Sales",
+            // Not read until the next slice of GRA-2145: nobody reads them.
+            sharingRead: false,
             picked: false,
           },
           {
             place: salesContracts.id,
             title: "Contracts",
             within: "Sales",
+            sharingRead: false,
             picked: true,
           },
           {
             place: legalDocs.id,
             title: "Documents",
             within: "Legal",
+            sharingRead: false,
             picked: true,
           },
         ],

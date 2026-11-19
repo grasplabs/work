@@ -166,6 +166,7 @@ export default defineConnector({
             place: id,
             title: name,
             within: null,
+            sharingRead: true,
           })),
           cursor: next ?? null,
         };

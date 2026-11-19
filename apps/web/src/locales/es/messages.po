@@ -5423,6 +5423,10 @@ msgstr "Cada área se borra por separado. Si una falla, se vuelve a intentar has
 msgid "Each event of this type from the source starts a run, with its data as the input."
 msgstr "Cada evento de este tipo de la fuente inicia una ejecución, con sus datos como entrada."
 
+#: src/connections/sync-places.tsx
+msgid "Each file is read in the Brain only by those {label} lets open it, of those you let read {label} here. The account you connected must be able to share files in each drive you pick: nobody reads the files it can't share."
+msgstr "Cada archivo solo lo leen en el Brain quienes {label} deja abrirlo, de entre quienes dejes leer {label} aquí. La cuenta que conectaste debe poder compartir archivos en cada unidad que elijas: nadie lee los archivos que no puede compartir."
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Cada factura en PDF, en cuanto se emite."
@@ -9569,6 +9573,10 @@ msgstr "Nadie espera que decidas sobre una solicitud."
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
 msgstr "No coincide nadie."
+
+#: src/connections/sync-places.tsx
+msgid "Nobody reads its files"
+msgstr "Nadie lee sus archivos"
 
 #: src/apps/access-view.tsx
 msgid "Nobody sees the records in {table}, Sam included."

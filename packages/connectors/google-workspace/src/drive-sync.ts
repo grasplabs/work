@@ -38,7 +38,8 @@ import { apisHost, googleFailure, googleUrl } from "./google.ts";
 // reader list only an owner sees (Google gives readers and commenters no
 // detailed permissions). Shared drives come only through a shared
 // connection's picked places (shared-drive-sync.ts), which read one shared
-// drive each through the same steps, scoped to that drive (`Scope`).
+// drive each through the same steps, scoped to that drive (`Scope`), and
+// each file's readers with a request of its own (`readersRead`).
 //
 // How it reads (Google's "Manage changes"): first the change feed's start
 // token, then the listing of every owned file, then the change feed from
@@ -111,6 +112,7 @@ const fileSchema = z.object({
   driveId: z.string().nullish(),
   lastModifyingUser: z.object({ emailAddress: z.string().nullish() }).nullish(),
   permissions: z.array(permissionSchema).nullish(),
+  capabilities: z.object({ canShare: z.boolean().nullish() }).nullish(),
 });
 export type DriveFile = z.infer<typeof fileSchema>;
 
@@ -118,16 +120,12 @@ export type DriveFile = z.infer<typeof fileSchema>;
 const baseFields =
   "id,name,mimeType,size,modifiedTime,version,trashed,ownedByMe,driveId,lastModifyingUser(emailAddress)";
 
-/** The permissions a read that names readers asks Drive for, too. */
-const permissionFields =
-  "permissions(type,emailAddress,domain,allowFileDiscovery,deleted)";
+/** A permission's fields that say who it lets open a file (`readersOf`). */
+export const permissionFields =
+  "type,emailAddress,domain,allowFileDiscovery,deleted";
 
-/**
- * A file's fields as `scope` reads them: its permissions only when the
- * scope names readers from them, nothing it doesn't use.
- */
-const fileFieldsOf = (scope: Scope): string =>
-  scope.readers === null ? baseFields : `${baseFields},${permissionFields}`;
+/** A file's fields as `scope` reads them: nothing it doesn't use. */
+const fileFieldsOf = (scope: Scope): string => `${baseFields},${scope.fields}`;
 
 const startSchema = z.object({ startPageToken: z.string().min(1) });
 
@@ -167,13 +165,24 @@ export interface Scope {
   file: Readonly<Record<string, string>>;
   /** Whether a file is one this read syncs; else it comes as gone. */
   holds: (file: DriveFile) => boolean;
+  /** The fields of a file it asks for besides every read's (`baseFields`). */
+  fields: string;
   /**
-   * Who may open a file, from its permissions; null when this read names
-   * no readers (its items' readers are null, and no permissions are
-   * asked for), as for a shared connection's picked drive, which its
-   * Brain audience reads.
+   * Who may open a file, from its own fields, with no request: what an
+   * item passed over without its content says (the kit's `passOver`).
+   * Null when they aren't known: nobody reads it.
    */
-  readers: ((file: DriveFile) => SyncReader[] | null) | null;
+  readers: (file: DriveFile) => SyncReader[] | null;
+  /**
+   * Who may open a file, read with requests of its own, before its
+   * content, in place of `readers`: null when they can't be read whole,
+   * "late" when the read had no room or time left for them. Only a scope
+   * whose files don't carry their permissions has it (a shared drive's).
+   */
+  readersRead?: (
+    room: SyncRoom,
+    file: DriveFile
+  ) => Promise<SyncReader[] | null | "late">;
 }
 
 /**
@@ -239,12 +248,16 @@ const getJson = async <Schema extends z.ZodType>(
   return schema.parse(await response.json());
 };
 
-/** Who may open a file, as its permissions say; null without them. */
-const readersOf = (file: DriveFile): SyncReader[] | null => {
-  if (file.permissions === null || file.permissions === undefined) {
-    return null;
-  }
-  return file.permissions.flatMap((permission): SyncReader[] => {
+/**
+ * Who `permissions` let open a file: a user or a group by address; a
+ * domain as the tenant only when its people can find the file in their
+ * own search, else as a link, like "anyone with the link": a link counts
+ * for nobody.
+ */
+export const readersOfPermissions = (
+  permissions: readonly z.infer<typeof permissionSchema>[]
+): SyncReader[] =>
+  permissions.flatMap((permission): SyncReader[] => {
     if (permission.deleted === true) {
       return [];
     }
@@ -269,7 +282,18 @@ const readersOf = (file: DriveFile): SyncReader[] | null => {
     }
     return [];
   });
-};
+
+/** Who may open a file, as its permissions say; null without them. */
+const readersOf = (file: DriveFile): SyncReader[] | null =>
+  file.permissions === null || file.permissions === undefined
+    ? null
+    : readersOfPermissions(file.permissions);
+
+/** A page of a file's permissions (`permissions.list`). */
+export const permissionListSchema = z.object({
+  permissions: z.array(permissionSchema).nullish(),
+  nextPageToken: z.string().nullish(),
+});
 
 /** Whether a file is one this connection syncs: owned, in My Drive, not in the bin. */
 const isOwned = (file: DriveFile): boolean =>
@@ -287,6 +311,7 @@ const ownDrive: Scope = {
   changes: {},
   file: {},
   holds: isOwned,
+  fields: `permissions(${permissionFields})`,
   readers: readersOf,
 };
 
@@ -473,12 +498,13 @@ const contentOf = async (
   return takeContent(room, content) ?? { full: true };
 };
 
-/** A file that is there, as an item, with `content`. */
+/** A file that is there, as an item, with `content`, read by `readers`. */
 const itemOf = (
   scope: Scope,
   file: DriveFile,
   changedAt: string,
-  content: SyncContent | null
+  content: SyncContent | null,
+  readers: SyncReader[] | null = scope.readers(file)
 ): SyncItem => ({
   gone: false,
   id: file.id,
@@ -487,7 +513,7 @@ const itemOf = (
   changedAt,
   title: file.name,
   content,
-  readers: scope.readers === null ? null : scope.readers(file),
+  readers,
   changedBy: file.lastModifyingUser?.emailAddress?.toLowerCase() ?? null,
   partOf: null,
 });
@@ -523,6 +549,15 @@ const fileItem = async (
   if (known.length === 0 || known[0]?.gone === true) {
     return known;
   }
+  // Its readers first, when they take requests: an entry left for the
+  // next read loses only those, never content it read.
+  const readers =
+    scope.readersRead === undefined
+      ? scope.readers(file)
+      : await scope.readersRead(room, file);
+  if (readers === "late") {
+    return "late";
+  }
   const read = await contentOf(room, scope, file);
   if ("full" in read) {
     return "full";
@@ -535,7 +570,7 @@ const fileItem = async (
   }
   return "gone" in read
     ? [goneOf(file.id)]
-    : [itemOf(scope, file, changedAt, read.content)];
+    : [itemOf(scope, file, changedAt, read.content, readers)];
 };
 
 /** One page of the listing of every file the scope holds. */

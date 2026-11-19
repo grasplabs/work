@@ -5423,6 +5423,10 @@ msgstr "Elk onderdeel wordt apart gewist. Mislukt er een, dan wordt het opnieuw 
 msgid "Each event of this type from the source starts a run, with its data as the input."
 msgstr "Elke gebeurtenis van dit type uit de bron start een run, met de gegevens ervan als invoer."
 
+#: src/connections/sync-places.tsx
+msgid "Each file is read in the Brain only by those {label} lets open it, of those you let read {label} here. The account you connected must be able to share files in each drive you pick: nobody reads the files it can't share."
+msgstr "Elk bestand wordt in het Brain alleen gelezen door wie {label} het laat openen, van wie je {label} hier laat lezen. Het account dat je hebt verbonden moet bestanden kunnen delen in elke drive die je kiest: bestanden die het niet kan delen, leest niemand."
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Elke factuur als pdf, zodra hij is uitgegeven."
@@ -9569,6 +9573,10 @@ msgstr "Niemand wacht op jouw beslissing over een deelverzoek."
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
 msgstr "Niemand komt overeen."
+
+#: src/connections/sync-places.tsx
+msgid "Nobody reads its files"
+msgstr "Niemand leest de bestanden"
 
 #: src/apps/access-view.tsx
 msgid "Nobody sees the records in {table}, Sam included."
