@@ -1010,15 +1010,22 @@ export const rememberedCard = ({
       ? rememberedKind[saved.type]
       : undefined;
   const pieces = piecesOf(rememberedLine(locale, saved), locale, platform);
-  // What it replaced, as the Brain kept it, in the person's language.
+  // What it replaced, as the Brain kept it, in the person's language: in
+  // pieces as the statement is, so nothing of it is cut off.
   const replaced =
     saved.replaced === undefined
-      ? undefined
-      : say("rememberedInPlaceOf", locale, {
-          replaced: new Intl.ListFormat(locale, { type: "conjunction" }).format(
-            saved.replaced.map((statement) => shownVisibly(statement))
-          ),
-        });
+      ? []
+      : piecesOf(
+          say("rememberedInPlaceOf", locale, {
+            replaced: new Intl.ListFormat(locale, {
+              type: "conjunction",
+            }).format(
+              saved.replaced.map((statement) => shownVisibly(statement))
+            ),
+          }),
+          locale,
+          platform
+        );
   const card = (
     <Card>
       {kind === undefined ? null : (
@@ -1029,8 +1036,14 @@ export const rememberedCard = ({
           ? []
           : [<CardText key={index}>{inert(piece)}</CardText>]
       )}
-      {replaced === undefined ? null : (
-        <CardText style="muted">{inert(replaced)}</CardText>
+      {replaced.flatMap((piece, index) =>
+        onlyWhiteSpace.test(piece)
+          ? []
+          : [
+              <CardText key={`replaced-${index}`} style="muted">
+                {inert(piece)}
+              </CardText>,
+            ]
       )}
       <Actions>
         <Button id={undoAction} value={saved.memory}>
