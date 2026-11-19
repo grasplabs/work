@@ -124,6 +124,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // What an admin pinned of a member's teams: deleted with their removal,
   // and again by the erasure's channels step.
   "core.team_pins": { erased: "removal" },
+  // The directory's groups admins mapped to teams (directory-groups.ts):
+  // a group and a team, no person; who mapped it is in the audit log.
+  "core.directory_group_teams": {
+    none: "a directory group's id and name and a team's id, no person",
+  },
   // Where the daily read stands: a connection, a tenant and counts.
   "core.directory_reads": {
     none: "a connection, its tenant and counts, no person",

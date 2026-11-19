@@ -10,6 +10,7 @@ import { landingAt } from "./d1-landing.ts";
 import {
   connectedDirectory,
   directoryFailsAt,
+  directoryGrants,
   directoryHolds,
   directoryLoopsAt,
   directoryUser as user,
@@ -27,6 +28,7 @@ import {
   withSignIn,
 } from "./sign-in.ts";
 import { messageFrom, post, teamsPerson, watched } from "./teams-door.ts";
+import { connectDb } from "./test-env.ts";
 
 // The directory read once a day (GRA-2056, slice 1): everyone Entra lists,
 // by their object ID, tied to the member whose Microsoft sign-in named the
@@ -241,6 +243,50 @@ describe("the directory's daily read", () => {
         untiedRow(disabled, "", 0),
         untiedRow(joins, "Finance"),
       ]),
+    });
+  });
+
+  it("goes on reading a directory connected before Grasp asked for its groups, as Entra renews it with the access it granted then", async () => {
+    await connectedDirectory(idp);
+    const connection = await connectDb()
+      .prepare(
+        "SELECT id FROM connections WHERE provider = 'microsoft-directory' AND status = 'active' ORDER BY created_at DESC LIMIT 1"
+      )
+      .first<{ id: string }>();
+    const connectionId = connection?.id ?? "";
+    const before = "openid profile email User.Read User.Read.All";
+    // As connect kept a connection made then, its token run out, and as
+    // Entra renews it: with what was granted then.
+    await connectDb()
+      .prepare(
+        "UPDATE connection_tokens SET granted_scopes = ?, access_expires_at = 0 WHERE connection_id = ?"
+      )
+      .bind(before, connectionId)
+      .run();
+    await directoryGrants(before);
+    const ann = await memberWith(crypto.randomUUID());
+    await directoryHolds([user({ id: ann.oid, department: "Finance" })]);
+    try {
+      await readAt(nextDay());
+    } finally {
+      await directoryGrants(null);
+    }
+    const connected = await connectDb()
+      .prepare("SELECT status FROM connections WHERE id = ?")
+      .bind(connectionId)
+      .first<{ status: string }>();
+    const kept = await rows();
+    const read = await env.DB.prepare(
+      "SELECT connection_id AS connectionId, failure FROM directory_reads WHERE provider = 'microsoft-directory'"
+    ).first<{ connectionId: string; failure: string | null }>();
+    expect({
+      status: connected?.status,
+      read,
+      tied: kept.find(({ id }) => id === ann.oid)?.userId,
+    }).toStrictEqual({
+      status: "active",
+      read: { connectionId, failure: null },
+      tied: ann.userId,
     });
   });
 
