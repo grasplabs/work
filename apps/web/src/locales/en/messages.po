@@ -12004,6 +12004,10 @@ msgstr "Responsibility"
 msgid "Restore"
 msgstr "Restore"
 
+#: src/settings/member-suspension.tsx
+msgid "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "Restore this earlier state?"
@@ -14330,6 +14334,10 @@ msgstr "That’s the tour. Ask me anything, on any page. You’ll find me right 
 msgid "The {top} that spent most; more spent less."
 msgstr "The {top} that spent most; more spent less."
 
+#: src/settings/member-suspension.tsx
+msgid "The account can't be restored any more. To end their access for good, remove them."
+msgstr "The account can't be restored any more. To end their access for good, remove them."
+
 #: src/connections/sync-places.tsx
 msgid "The account connected as {label} can't open any shared drives."
 msgstr "The account connected as {label} can't open any shared drives."
@@ -15800,8 +15808,8 @@ msgid "Turn sound on"
 msgstr "Turn sound on"
 
 #: src/settings/member-suspension.tsx
-msgid "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
-msgstr "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."

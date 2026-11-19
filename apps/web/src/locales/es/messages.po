@@ -12004,6 +12004,10 @@ msgstr "Responsabilidad"
 msgid "Restore"
 msgstr "Restaurar"
 
+#: src/settings/member-suspension.tsx
+msgid "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Restaura la cuenta en el directorio y Grasp levantará la suspensión en su próxima lectura diaria. Para retirarle el acceso definitivamente, quítale de los miembros."
+
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "¿Restaurar este estado anterior?"
@@ -14330,6 +14334,10 @@ msgstr "Y eso es todo. Pregúntame lo que quieras, en cualquier página. Me tien
 msgid "The {top} that spent most; more spent less."
 msgstr "Los {top} que más gastaron; otros gastaron menos."
 
+#: src/settings/member-suspension.tsx
+msgid "The account can't be restored any more. To end their access for good, remove them."
+msgstr "La cuenta ya no se puede restaurar. Para retirarle el acceso definitivamente, quítale de los miembros."
+
 #: src/connections/sync-places.tsx
 msgid "The account connected as {label} can't open any shared drives."
 msgstr "La cuenta conectada como {label} no puede abrir ninguna unidad compartida."
@@ -15800,8 +15808,8 @@ msgid "Turn sound on"
 msgstr "Activar el sonido"
 
 #: src/settings/member-suspension.tsx
-msgid "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
-msgstr "Vuelve a activar o restaura la cuenta en el directorio y Grasp levantará la suspensión en su próxima lectura diaria. Para retirarle el acceso definitivamente, quítale de los miembros."
+msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Vuelve a activar la cuenta en el directorio y Grasp levantará la suspensión en su próxima lectura diaria. Para retirarle el acceso definitivamente, quítale de los miembros."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."

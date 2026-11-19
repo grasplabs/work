@@ -12004,6 +12004,10 @@ msgstr "Verantwortung"
 msgid "Restore"
 msgstr "Wiederherstellen"
 
+#: src/settings/member-suspension.tsx
+msgid "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Stellen Sie das Konto im Verzeichnis wieder her, dann hebt Grasp die Sperre beim nächsten täglichen Abgleich auf. Um den Zugang endgültig zu beenden, entfernen Sie die Person."
+
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "Diesen früheren Stand wiederherstellen?"
@@ -14330,6 +14334,10 @@ msgstr "Das war der Rundgang. Fragen Sie mich gern, auf jeder Seite. Sie finden 
 msgid "The {top} that spent most; more spent less."
 msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 
+#: src/settings/member-suspension.tsx
+msgid "The account can't be restored any more. To end their access for good, remove them."
+msgstr "Das Konto lässt sich nicht mehr wiederherstellen. Um den Zugang endgültig zu beenden, entfernen Sie die Person."
+
 #: src/connections/sync-places.tsx
 msgid "The account connected as {label} can't open any shared drives."
 msgstr "Das als {label} verbundene Konto kann keine geteilten Ablagen öffnen."
@@ -15800,8 +15808,8 @@ msgid "Turn sound on"
 msgstr "Ton einschalten"
 
 #: src/settings/member-suspension.tsx
-msgid "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
-msgstr "Aktivieren oder stellen Sie das Konto im Verzeichnis wieder her, dann hebt Grasp die Sperre beim nächsten täglichen Abgleich auf. Um den Zugang endgültig zu beenden, entfernen Sie die Person."
+msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Aktivieren Sie das Konto im Verzeichnis wieder, dann hebt Grasp die Sperre beim nächsten täglichen Abgleich auf. Um den Zugang endgültig zu beenden, entfernen Sie die Person."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."

@@ -12004,6 +12004,10 @@ msgstr "Responsabilité"
 msgid "Restore"
 msgstr "Restaurer"
 
+#: src/settings/member-suspension.tsx
+msgid "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Restaurez le compte dans l’annuaire, et Grasp lève la suspension à sa prochaine lecture quotidienne. Pour mettre fin à son accès définitivement, retirez cette personne."
+
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "Restaurer cet état antérieur ?"
@@ -14330,6 +14334,10 @@ msgstr "Voilà pour la visite. Posez-moi vos questions, sur n’importe quelle p
 msgid "The {top} that spent most; more spent less."
 msgstr "Les {top} qui ont le plus dépensé ; d’autres ont dépensé moins."
 
+#: src/settings/member-suspension.tsx
+msgid "The account can't be restored any more. To end their access for good, remove them."
+msgstr "Le compte ne peut plus être restauré. Pour mettre fin à son accès définitivement, retirez cette personne."
+
 #: src/connections/sync-places.tsx
 msgid "The account connected as {label} can't open any shared drives."
 msgstr "Le compte connecté en tant que {label} ne peut ouvrir aucun drive partagé."
@@ -15800,8 +15808,8 @@ msgid "Turn sound on"
 msgstr "Activer le son"
 
 #: src/settings/member-suspension.tsx
-msgid "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
-msgstr "Réactivez ou restaurez le compte dans l’annuaire, et Grasp lève la suspension à sa prochaine lecture quotidienne. Pour mettre fin à son accès définitivement, retirez cette personne."
+msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Réactivez le compte dans l’annuaire, et Grasp lève la suspension à sa prochaine lecture quotidienne. Pour mettre fin à son accès définitivement, retirez cette personne."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."

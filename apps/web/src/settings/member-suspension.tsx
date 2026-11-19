@@ -44,6 +44,40 @@ const SuspensionReason = ({
   return said[reason];
 };
 
+/**
+ * Where the way out of a suspension is, true for its reason: the directory
+ * for an account it still holds, removal for one it purged. An account the
+ * directory turned on again needs none: its next read lifts the suspension.
+ */
+const WayOut = ({
+  reason,
+}: {
+  reason: Exclude<DirectoryAccount, "enabled">;
+}) => {
+  const said: Record<Exclude<DirectoryAccount, "enabled">, ReactElement> = {
+    disabled: (
+      <Trans>
+        Turn the account back on in the directory, and Grasp lifts the
+        suspension at its next daily read. To end their access for good, remove
+        them.
+      </Trans>
+    ),
+    deleted: (
+      <Trans>
+        Restore the account in the directory, and Grasp lifts the suspension at
+        its next daily read. To end their access for good, remove them.
+      </Trans>
+    ),
+    unlisted: (
+      <Trans>
+        The account can&apos;t be restored any more. To end their access for
+        good, remove them.
+      </Trans>
+    ),
+  };
+  return said[reason];
+};
+
 /** That `member` is suspended, since when, why, and where the way out is; nothing while they aren't. */
 export const MemberSuspension = ({ member }: { member: Member }) => {
   const { suspension } = member;
@@ -62,11 +96,7 @@ export const MemberSuspension = ({ member }: { member: Member }) => {
       </span>
       {suspension.reason === "enabled" ? null : (
         <span className="text-muted-foreground">
-          <Trans>
-            Turn the account back on, or restore it, in the directory, and Grasp
-            lifts the suspension at its next daily read. To end their access for
-            good, remove them.
-          </Trans>
+          <WayOut reason={suspension.reason} />
         </span>
       )}
     </div>

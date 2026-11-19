@@ -12004,6 +12004,10 @@ msgstr "Verantwoordelijkheid"
 msgid "Restore"
 msgstr "Herstellen"
 
+#: src/settings/member-suspension.tsx
+msgid "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Zet het account in de directory terug, dan heft Grasp de schorsing op bij de volgende dagelijkse uitlezing. Wil je hun toegang voorgoed beëindigen, verwijder hen dan."
+
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "Deze eerdere stand herstellen?"
@@ -14330,6 +14334,10 @@ msgstr "Dat was de rondleiding. Je kunt me alles vragen, op elke pagina. Ik zit 
 msgid "The {top} that spent most; more spent less."
 msgstr "De {top} die het meest uitgaven; andere gaven minder uit."
 
+#: src/settings/member-suspension.tsx
+msgid "The account can't be restored any more. To end their access for good, remove them."
+msgstr "Het account kan niet meer worden teruggezet. Wil je hun toegang voorgoed beëindigen, verwijder hen dan."
+
 #: src/connections/sync-places.tsx
 msgid "The account connected as {label} can't open any shared drives."
 msgstr "Het account dat als {label} is verbonden, kan geen gedeelde drives openen."
@@ -15800,8 +15808,8 @@ msgid "Turn sound on"
 msgstr "Geluid aanzetten"
 
 #: src/settings/member-suspension.tsx
-msgid "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
-msgstr "Schakel het account in de directory weer in of zet het terug, dan heft Grasp de schorsing op bij de volgende dagelijkse uitlezing. Wil je hun toegang voorgoed beëindigen, verwijder hen dan."
+msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Schakel het account in de directory weer in, dan heft Grasp de schorsing op bij de volgende dagelijkse uitlezing. Wil je hun toegang voorgoed beëindigen, verwijder hen dan."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."

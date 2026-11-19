@@ -52,8 +52,16 @@ const shown = (member: Member): { text: string; buttons: number } => {
   return seen;
 };
 
-const wayOut =
-  "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them.";
+/** Each reason's way out, true for it; none once the directory turned the account on again. */
+const waysOut: Record<DirectoryAccount, string | null> = {
+  disabled:
+    "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them.",
+  deleted:
+    "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them.",
+  unlisted:
+    "The account can't be restored any more. To end their access for good, remove them.",
+  enabled: null,
+};
 
 describe("Settings › Members › a member's suspension", () => {
   afterEach(() => {
@@ -87,7 +95,13 @@ describe("Settings › Members › a member's suspension", () => {
               (each) => text.includes(each) === (each === reasons[state])
             ),
             suspended: text.startsWith("Suspended"),
-            wayOut: text.includes(wayOut),
+            // Its own way out, and none of the others'.
+            wayOut: Object.values(waysOut).every(
+              (each) =>
+                each === null ||
+                text.includes(each) === (each === waysOut[state])
+            ),
+            lifting: text.includes("lifts the suspension"),
             buttons,
           },
         ];
@@ -95,11 +109,36 @@ describe("Settings › Members › a member's suspension", () => {
     );
 
     expect(seen).toStrictEqual({
-      disabled: { reason: true, suspended: true, wayOut: true, buttons: 0 },
-      deleted: { reason: true, suspended: true, wayOut: true, buttons: 0 },
-      unlisted: { reason: true, suspended: true, wayOut: true, buttons: 0 },
-      // Turned on again: the next read lifts it, so there is no way out to name.
-      enabled: { reason: true, suspended: true, wayOut: false, buttons: 0 },
+      disabled: {
+        reason: true,
+        suspended: true,
+        wayOut: true,
+        lifting: true,
+        buttons: 0,
+      },
+      deleted: {
+        reason: true,
+        suspended: true,
+        wayOut: true,
+        lifting: true,
+        buttons: 0,
+      },
+      // Purged: it can't be restored, so nothing is said of lifting.
+      unlisted: {
+        reason: true,
+        suspended: true,
+        wayOut: true,
+        lifting: false,
+        buttons: 0,
+      },
+      // Turned on again: the next read lifts it, so no way out is named.
+      enabled: {
+        reason: true,
+        suspended: true,
+        wayOut: true,
+        lifting: false,
+        buttons: 0,
+      },
     });
   });
 
