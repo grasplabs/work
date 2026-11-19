@@ -991,6 +991,44 @@ const withPlaces = async (
 };
 
 /**
+ * `groups`, with the group of each shared connection whose Brain audience
+ * is one of them (GRA-1831): `company` for everyone, a team's for that
+ * team. So what agents read through it reaches exactly as far as a
+ * document shared with that audience would at the same reach: code's
+ * included, and a shared thread's (the company alone) only for everyone.
+ * Beside them, apart (`places`), the pairs the reader holds of each place
+ * picked on such a connection now (GRA-2145, `memberGroupsOf`): never
+ * without the connection's own. An
+ * audience whose team is gone is in no one's groups: nobody's. A row that
+ * can't be read is nobody's too.
+ */
+const withConnections = (
+  groups: readonly string[],
+  audiences: readonly HeldAudience[]
+): { groups: string[]; places: string[] } => {
+  const held = new Set(groups);
+  const audienced = audiences.filter(({ connectionId, teamId }) => {
+    const connection = connectionIdSchema.safeParse(connectionId);
+    const team = teamId === null ? undefined : idSchema.safeParse(teamId);
+    if (!connection.success || team?.success === false) {
+      return false;
+    }
+    return held.has(
+      team === undefined ? companyGroup : `${teamPrefix}${team.data}`
+    );
+  });
+  return {
+    groups: [
+      ...groups,
+      ...audienced.map(
+        ({ connectionId }) => `${connectionPrefix}${connectionId}`
+      ),
+    ],
+    places: audienced.flatMap(({ places }) => places),
+  };
+};
+
+/**
  * The member `personId`'s own groups: their teams as core counts them
  * now, the company, and the members reading as themselves
  * (`membersGroup`), with the shared connections' Brain audiences as core
@@ -1032,23 +1070,39 @@ const memberGroupsOf = async (
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
+  const groups = [
+    ...member.teams.map(({ id: teamId }) => teamGroup(teamId)),
+    companyGroup,
+    membersGroup,
+  ];
   const withPlaceGroups = await withPlaces(audiences, places);
+  // Each place's pairs the reader holds (GRA-2145), never the place's own
+  // group: an item of a place is kept for its readers' pairs alone
+  // (`accessFor`), so only someone who holds the place and one of its
+  // readers reads it; a reader with none of their accounts or groups (as
+  // their teams, as code reads) holds none. Only of the places their
+  // audiences hold, in the order a reader holds them (`withConnections`),
+  // and only as many as the bound of groups leaves room for
+  // (`readerGroupsOf`): no pair past it is read or named.
+  const reached = withConnections(groups, withPlaceGroups);
   const held = asThemselves
     ? await heldPrincipalsOf(
         env,
         member.userId,
         signIns,
         connected,
-        withPlaceGroups.flatMap(({ places: ofConnection }) => ofConnection)
+        reached.places,
+        readerGroupsMax - new Set(reached.groups).size
       )
     : { accounts: [], groups: [], pairs: [] };
-  // Each place's pairs the reader holds (GRA-2145), never the place's own
-  // group: an item of a place is kept for its readers' pairs alone
-  // (`accessFor`), so only someone who holds the place and one of its
-  // readers reads it; a reader with none of their accounts or groups (as
-  // their teams, as code reads) holds none.
+  const room =
+    readerGroupsMax -
+    new Set([...reached.groups, ...held.accounts]).size -
+    held.groups.length;
   const pairsOf = new Map<string, string[]>();
-  for (const { place, group } of held.pairs) {
+  for (const { place, principal } of held.pairs.slice(0, Math.max(0, room))) {
+    // oxlint-disable-next-line no-await-in-loop -- a hash, no call
+    const group = await pairPrincipalOf(place, principal);
     const ofPlace = pairsOf.get(place);
     if (ofPlace === undefined) {
       pairsOf.set(place, [group]);
@@ -1058,55 +1112,13 @@ const memberGroupsOf = async (
   }
   return {
     person: member.userId,
-    groups: [
-      ...member.teams.map(({ id: teamId }) => teamGroup(teamId)),
-      companyGroup,
-      membersGroup,
-    ],
+    groups,
     audiences: withPlaceGroups.map((audience) => ({
       ...audience,
       places: audience.places.flatMap((place) => pairsOf.get(place) ?? []),
     })),
     accountGroups: held.accounts,
     sourceGroups: held.groups,
-  };
-};
-
-/**
- * `groups`, with the group of each shared connection whose Brain audience
- * is one of them (GRA-1831): `company` for everyone, a team's for that
- * team. So what agents read through it reaches exactly as far as a
- * document shared with that audience would at the same reach: code's
- * included, and a shared thread's (the company alone) only for everyone.
- * Beside them, apart (`places`), the pairs the reader holds of each place
- * picked on such a connection now (GRA-2145, `memberGroupsOf`): never
- * without the connection's own. An
- * audience whose team is gone is in no one's groups: nobody's. A row that
- * can't be read is nobody's too.
- */
-const withConnections = (
-  groups: readonly string[],
-  audiences: readonly HeldAudience[]
-): { groups: string[]; places: string[] } => {
-  const held = new Set(groups);
-  const audienced = audiences.filter(({ connectionId, teamId }) => {
-    const connection = connectionIdSchema.safeParse(connectionId);
-    const team = teamId === null ? undefined : idSchema.safeParse(teamId);
-    if (!connection.success || team?.success === false) {
-      return false;
-    }
-    return held.has(
-      team === undefined ? companyGroup : `${teamPrefix}${team.data}`
-    );
-  });
-  return {
-    groups: [
-      ...groups,
-      ...audienced.map(
-        ({ connectionId }) => `${connectionPrefix}${connectionId}`
-      ),
-    ],
-    places: audienced.flatMap(({ places }) => places),
   };
 };
 

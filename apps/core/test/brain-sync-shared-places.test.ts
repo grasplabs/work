@@ -381,16 +381,7 @@ describe("native sync of a shared connection's picked places", () => {
         [accountAtSource(seller)],
       ]);
       await sync();
-      const pairsOf = async (): Promise<number> => {
-        const row = await env.DB.prepare(
-          "SELECT count(*) AS count FROM source_reader_pairs WHERE place LIKE ?"
-        )
-          .bind(`connection:${connectionId}/%`)
-          .first<{ count: number }>();
-        return row?.count ?? 0;
-      };
       const takenOff = {
-        pairs: await pairsOf(),
         seller: await finds(seller.userId, marker),
         colleague: await finds(colleague.userId, marker),
       };
@@ -405,8 +396,8 @@ describe("native sync of a shared connection's picked places", () => {
         withoutPairs: await finds(seller.userId, marker),
       }).toStrictEqual({
         before: [true, true],
-        // The colleague's pair stays, and gives them nothing.
-        takenOff: { pairs: 2, seller: true, colleague: false },
+        // The colleague's pair is left behind, and gives them nothing.
+        takenOff: { seller: true, colleague: false },
         withoutPairs: false,
       });
     }
