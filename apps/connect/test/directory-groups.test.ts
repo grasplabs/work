@@ -194,6 +194,52 @@ const codeOf = async (promise: Promise<unknown>): Promise<string> => {
 
 const guid = (): string => crypto.randomUUID();
 
+/** What connect kept of `connectionId`'s grant. */
+const storedGrantOf = async (connectionId: string): Promise<string | null> => {
+  const row = await drizzle(env.DB)
+    .select({ granted: connectionTokens.grantedScopes })
+    .from(connectionTokens)
+    .where(eq(connectionTokens.connectionId, connectionId))
+    .get();
+  return row?.granted ?? null;
+};
+
+/** Keeps `connectionId` as a connection made before groups were asked for, its token run out or not. */
+const madeBeforeGroups = async (
+  connectionId: string,
+  { expired }: { expired: boolean }
+): Promise<void> => {
+  await drizzle(env.DB)
+    .update(connectionTokens)
+    .set({
+      grantedScopes: beforeGroups,
+      ...(expired ? { accessExpiresAt: new Date(0) } : {}),
+    })
+    .where(eq(connectionTokens.connectionId, connectionId));
+};
+
+/** The `scope` each renewal this test sent asked for; null for one that named none. */
+const renewalsAsked = (): (string | null)[] =>
+  providers.state.requests
+    .filter(({ form }) => form.get("grant_type") === "refresh_token")
+    .map(({ form }) => form.get("scope"));
+
+/** What a call was refused with: its code and details. */
+const refusalOf = async (
+  promise: Promise<unknown>
+): Promise<{ code: string | undefined; details: unknown }> => {
+  try {
+    await promise;
+    return { code: "ok", details: undefined };
+  } catch (error) {
+    return {
+      code: directoryErrors.codeOf(error),
+      details:
+        error instanceof Error ? Reflect.get(error, "details") : undefined,
+    };
+  }
+};
+
 /** A directory connection's status, as core lists it; "gone" when it isn't listed. */
 const statusOf = async (connectionId: string): Promise<string> => {
   const listed = await exports.default.directoryConnections();
@@ -486,48 +532,143 @@ describe("the directory's groups", () => {
     });
   });
 
-  it("aren't read for a connection made before Grasp asked for them, which renews with its grant and goes on reading people, until an admin connects the directory again", async () => {
-    const admin = someone("admin");
+  it("aren't read for a connection made before Grasp asked for them, which renews with its grant and goes on reading people; its group calls ask once for the scope, then give the admin the consent link, and leave the connection as it is", async () => {
     const group = graphGroup();
     const groupId = String(group.id);
     graph.groups = [group];
     graph.members[groupId] = [user()];
-    const older = await connectDirectory(admin);
-    // Kept as a connection made before the scope was asked for, its token
-    // run out: Entra renews it with what it was granted then.
-    await drizzle(env.DB)
-      .update(connectionTokens)
-      .set({ grantedScopes: beforeGroups, accessExpiresAt: new Date(0) })
-      .where(eq(connectionTokens.connectionId, older));
+    const older = await connectDirectory();
+    await madeBeforeGroups(older, { expired: true });
+    // Nobody consented: Entra renews it with what it was granted then.
     providers.state.refreshGranted = beforeGroups;
     const renewed = await codeOf(readPeople(older));
-    providers.state.refreshGranted = undefined;
     const before = sent.length;
-    const groups = {
-      search: await codeOf(search(older, "Finance")),
-      read: await codeOf(readGroup(older, groupId)),
-      sentToGraph: sent.length - before,
-    };
-    const after = {
-      status: await statusOf(older),
-      people: await codeOf(readPeople(older)),
-    };
-    await exports.default.disconnect({ person: admin, connectionId: older });
-    const again = await connectDirectory(admin);
+    const refused = await refusalOf(search(older, "Finance"));
+    const read = await codeOf(readGroup(older, groupId));
+    const sentToGraph = sent.length - before;
+    providers.state.refreshGranted = undefined;
     expect({
       renewed,
-      groups,
-      after,
-      again: await codeOf(readGroup(again, groupId)),
+      refused,
+      read,
+      sentToGraph,
+      askedForGroups: renewalsAsked().some(
+        (scope) => scope?.split(" ").includes("Group.ReadBasic.All") === true
+      ),
+      status: await statusOf(older),
+      people: await codeOf(readPeople(older)),
     }).toStrictEqual({
       renewed: "ok",
-      groups: {
-        search: "directory.groups_not_granted",
-        read: "directory.groups_not_granted",
-        sentToGraph: 0,
+      refused: {
+        code: "directory.groups_not_granted",
+        details: {
+          consentUrl: `https://login.microsoftonline.com/${acmeTenant}/adminconsent?client_id=${clients.microsoftDirectory.id}`,
+        },
       },
-      after: { status: "active", people: "ok" },
-      again: "ok",
+      read: "directory.groups_not_granted",
+      sentToGraph: 0,
+      askedForGroups: true,
+      status: "active",
+      people: "ok",
+    });
+  });
+
+  it("are read for a connection made before Grasp asked for them once an admin consented, at its next group call, with nothing to reconnect", async () => {
+    const group = graphGroup({
+      displayName: `Consented ${crypto.randomUUID()}`,
+    });
+    graph.groups = [group];
+    const older = await connectDirectory();
+    await madeBeforeGroups(older, { expired: false });
+    // An admin consented since: Entra grants the scope when asked for it.
+    providers.state.refreshGranted = asAsked;
+    const found = await search(older, String(group.displayName));
+    providers.state.refreshGranted = undefined;
+    expect({
+      found: found.groups.map(({ id }) => id),
+      status: await statusOf(older),
+      grant: await storedGrantOf(older),
+    }).toStrictEqual({
+      found: [group.id],
+      status: "active",
+      grant: asAsked,
+    });
+  });
+
+  it("are read when the renewal a call is due for brings the scope, and asked for no more", async () => {
+    const group = graphGroup();
+    const groupId = String(group.id);
+    graph.groups = [group];
+    graph.members[groupId] = [user()];
+    const older = await connectDirectory();
+    await madeBeforeGroups(older, { expired: true });
+    providers.state.refreshGranted = asAsked;
+    const read = await codeOf(readGroup(older, groupId));
+    providers.state.refreshGranted = undefined;
+    expect({ read, renewals: renewalsAsked().length }).toStrictEqual({
+      read: "ok",
+      renewals: 1,
+    });
+  });
+
+  it("answer the instruction, not the moment's failure, when the renewal of a connection made before groups fails, or Entra refuses the scope, and leave the connection as it is", async () => {
+    const older = await connectDirectory();
+    await madeBeforeGroups(older, { expired: true });
+    providers.state.refresh = () =>
+      Response.json({ error: "temporarily_unavailable" }, { status: 503 });
+    const failed = await codeOf(search(older, "Finance"));
+    providers.state.refresh = undefined;
+    const fresh = await connectDirectory();
+    await madeBeforeGroups(fresh, { expired: false });
+    // Asked for the scope nobody consented to: Entra refuses the grant.
+    providers.state.refresh = () =>
+      Response.json({ error: "invalid_grant" }, { status: 400 });
+    const refused = await codeOf(search(fresh, "Finance"));
+    providers.state.refresh = undefined;
+    expect({
+      failed,
+      refused,
+      older: await statusOf(older),
+      fresh: await statusOf(fresh),
+      people: await codeOf(readPeople(fresh)),
+    }).toStrictEqual({
+      failed: "directory.groups_not_granted",
+      refused: "directory.groups_not_granted",
+      older: "active",
+      fresh: "active",
+      people: "ok",
+    });
+  });
+
+  it("are kept on renewal only as granted before: a renewal that gains a scope, loses one, or says nothing of them needs an admin to connect it again; one that leaves out the sign-in scopes is fine", async () => {
+    const renewedWith = async (granted: string | null) => {
+      const connectionId = await connectDirectory();
+      await drizzle(env.DB)
+        .update(connectionTokens)
+        .set({ accessExpiresAt: new Date(0) })
+        .where(eq(connectionTokens.connectionId, connectionId));
+      providers.state.refreshGranted = granted;
+      const people = await codeOf(readPeople(connectionId));
+      providers.state.refreshGranted = undefined;
+      return { people, status: await statusOf(connectionId) };
+    };
+    const refused = { people: "directory.inactive", status: "needs_reauth" };
+    expect({
+      gained: await renewedWith(
+        `${asAsked} https://graph.microsoft.com/Mail.Read`
+      ),
+      lost: await renewedWith(
+        asAsked.replace(" https://graph.microsoft.com/User.Read.All", "")
+      ),
+      unsaid: await renewedWith(null),
+      signInLeftOut: await renewedWith(
+        asAsked.replace("openid profile email ", "")
+      ),
+    }).toStrictEqual({
+      gained: refused,
+      lost: refused,
+      unsaid: refused,
+      signInLeftOut: { people: "ok", status: "active" },
     });
   });
 
