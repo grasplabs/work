@@ -596,6 +596,25 @@ export const erasedAddresses = sqliteTable("erased_addresses", {
   released: integer({ mode: "boolean" }).notNull().default(false),
 });
 
+/**
+ * The addresses of an entry that left the list, whose link an account had
+ * opened (GRA-2194): as the keyed hash core keeps of one (erased-people.ts
+ * `emailHashOf`), never the address, under that account. Leaving the list
+ * deletes the entry's link, the one tie between the account and the
+ * addresses it went to; this keeps that tie for an erasure of the account
+ * later, which moves them into `erasedAddresses` and deletes these rows.
+ * A removal keeps them, as removals keep history; nothing else deletes
+ * them.
+ */
+export const leftAddresses = sqliteTable(
+  "left_addresses",
+  {
+    userId: text("user_id").notNull(),
+    hash: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.hash] })]
+);
+
 export const drawFailures = sqliteTable("draw_failures", {
   item: text().primaryKey(),
   tries: integer().notNull(),

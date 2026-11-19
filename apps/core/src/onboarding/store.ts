@@ -153,6 +153,7 @@ import {
   drawnWorks,
   erasedAddresses,
   events,
+  leftAddresses,
   interviewStates,
   interviewSettings,
   interviews,
@@ -1526,11 +1527,23 @@ export class Onboarding extends DurableObject<Env> {
     by: AuditActor,
     { confirmed, minted }: { confirmed: boolean; minted: ReadonlySet<string> }
   ): Promise<OnboardingView> {
+    // Hashed first (a transaction can't wait on one): the addresses it
+    // brings, and those the store holds, for an entry leaving the list
+    // (`#writeRoster`). One that came into the store meanwhile has it
+    // made again.
+    const hashes = await this.#hashesOf([
+      ...roster.people.map(({ email }) => email),
+      ...this.#addressesHeld(),
+    ]);
     const fresh = await this.#freshCodes(roster);
-    const hashes = await this.#hashesOf(
-      roster.people.map(({ email }) => email)
-    );
     const said = this.ctx.storage.transactionSync(() => {
+      if (
+        this.#addressesHeld().some(
+          (address) => !hashes.has(normalizedEmail(address))
+        )
+      ) {
+        return null;
+      }
       const before = this.#roster();
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
@@ -1556,6 +1569,9 @@ export class Onboarding extends DurableObject<Env> {
       this.#arrangeOwed();
       return erased;
     });
+    if (said === null) {
+      return await this.#saveRosterOnce(roster, by, { confirmed, minted });
+    }
     this.#deliverAudit();
     this.ctx.waitUntil(this.#armLinks());
     // Arranging the Brain's teams waits for the alarm (`arrangeNext`).
@@ -1777,6 +1793,11 @@ export class Onboarding extends DurableObject<Env> {
     }
     const erased: string[] = [...closedNow];
     for (const person of new Set([...gone, ...stale])) {
+      this.#keepLeftAddresses(
+        person,
+        before?.people.find(({ id }) => id === person)?.email,
+        hashes
+      );
       this.#erase(person);
       erased.push(person);
       // Off the list, they take part in nothing: no mark of theirs stays,
@@ -5532,6 +5553,19 @@ export class Onboarding extends DurableObject<Env> {
    */
   accountMoved(from: string, to: string): void {
     this.ctx.storage.transactionSync(() => {
+      // The addresses kept for `from` from entries that left the list
+      // (`leftAddresses`) are `to`'s: whoever erases `to` finds them.
+      this.#db
+        .insert(leftAddresses)
+        .select(
+          sql`SELECT ${to}, ${leftAddresses.hash} FROM ${leftAddresses} WHERE ${leftAddresses.userId} = ${from}`
+        )
+        .onConflictDoNothing()
+        .run();
+      this.#db
+        .delete(leftAddresses)
+        .where(eq(leftAddresses.userId, from))
+        .run();
       const [held] = this.#db
         .select({ person: links.person })
         .from(links)
@@ -5623,11 +5657,21 @@ export class Onboarding extends DurableObject<Env> {
         .from(links)
         .where(eq(links.account, account))
         .all();
+      // With those of entries that left the list after its link was
+      // opened (`#keepLeftAddresses`): moved into the ones kept out, and
+      // gone from where they waited.
+      const left = this.#db
+        .delete(leftAddresses)
+        .where(eq(leftAddresses.userId, account))
+        .returning({ hash: leftAddresses.hash })
+        .all()
+        .map(({ hash: each }) => each);
       const erasing = this.#keepOut(
         [
           hash ?? undefined,
           hashOf(listed.find(({ id }) => id === owned)?.email),
           hashOf(ownedLink?.sentTo),
+          ...left,
         ].filter((each) => each !== undefined),
         account
       );
@@ -5739,6 +5783,47 @@ export class Onboarding extends DurableObject<Env> {
           .where(eq(links.person, person))
           .run();
       }
+    }
+  }
+
+  /**
+   * Keeps the addresses of `person`, an entry leaving the list, under the
+   * account that opened its link (`leftAddresses`, GRA-2194), in the
+   * caller's transaction, by the hashes made before it: the entry's
+   * (`email`, as the list had it) and the one its link went to. Leaving
+   * deletes the link, the one tie between them and the account, so an
+   * erasure of the account later still finds them (`eraseEntries`). None
+   * for a link no account opened: nothing shows whose address it was.
+   */
+  #keepLeftAddresses(
+    person: string,
+    email: string | undefined,
+    hashes: ReadonlyMap<string, string>
+  ): void {
+    const [link] = this.#db
+      .select({ account: links.account, sentTo: links.sentTo })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    if (link === undefined || link.account === null) {
+      return;
+    }
+    for (const address of [email, link.sentTo]) {
+      const folded = normalizedEmail(address ?? "");
+      if (folded === "") {
+        continue;
+      }
+      const hash = hashes.get(folded);
+      if (hash === undefined) {
+        throw new Error(
+          "An address of an entry leaving the list was not hashed"
+        );
+      }
+      this.#db
+        .insert(leftAddresses)
+        .values({ userId: link.account, hash })
+        .onConflictDoNothing()
+        .run();
     }
   }
 
