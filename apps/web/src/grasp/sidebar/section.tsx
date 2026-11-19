@@ -1,6 +1,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { mergeProps } from "@ui-sdk/react/primitive";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type {
   KeyboardEvent,
@@ -21,6 +22,7 @@ import { tabStyles } from "../tabs/tabs";
 import { rowMarker } from "../tabs/tabs.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
+import { WithTip } from "../tooltip/lazy-tip";
 import { useWords, withGiven } from "../words/words";
 import { useSidebarGivenWords } from "./shell";
 import { sidebarWords } from "./words";
@@ -87,13 +89,6 @@ const styles = stylex.create({
     gap: grasp.shellRowGap,
     paddingInline: grasp.shellGutter,
     paddingBlockStart: grasp.space1,
-  },
-  // Controls under the section's name: one row as wide as the rows, with room under it.
-  sectionControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space1,
-    paddingBlockEnd: grasp.space2,
   },
 
   // The section's name: a heading in a row's box (it leads nowhere, so not a link), in the shell's ink.
@@ -300,8 +295,6 @@ export interface SectionHeadProps {
   backLabel?: string;
   /** Draws the Back row with the sidebar's own row part. */
   renderBack: (back: SidebarBack & { label: string }) => ReactElement;
-  /** Controls under the section's name (SidebarSection's `controls`). */
-  controls?: ReactNode;
   /**
    * This instance's own words, over its Sidebar's `words` and the catalogue's (GraspWords), key by key (`{ back: "All settings" }`). Any left out
    * are the Sidebar's, else the catalogue's, else English. A flat text prop given beside it still wins until the
@@ -318,7 +311,6 @@ export const SectionHead = ({
   back,
   backLabel: backGiven,
   renderBack,
-  controls,
   words,
 }: SectionHeadProps) => {
   const fromSidebar = useSidebarGivenWords();
@@ -347,14 +339,6 @@ export const SectionHead = ({
         {lead}
         <span {...stylex.props(styles.titleWords)}>{title}</span>
       </h2>
-      {controls === undefined ? null : (
-        <div
-          data-slot="sidebar-section-controls"
-          {...stylex.props(styles.sectionControls)}
-        >
-          {controls}
-        </div>
-      )}
     </div>
   );
 };
@@ -430,41 +414,52 @@ const Tab = ({
   tab,
   chosen,
   onChoose,
+  panel,
+  iconOnly,
 }: {
   id: string;
   tab: SidebarTab;
   chosen: boolean;
   onChoose: (value: string) => void;
+  /** Ties it to the tab panel round the rows; views of the page have none. */
+  panel: boolean;
+  /** Its icon alone, its words its name and its tooltip: for three or more tabs in the row. */
+  iconOnly: boolean;
 }) => {
   const counted = tab.count !== undefined && tab.count > 0;
-  return (
-    <button
-      type="button"
-      role="tab"
-      id={tabId(id, tab.value)}
-      aria-selected={chosen}
-      aria-controls={tabPanelId(id)}
-      tabIndex={chosen ? 0 : -1}
-      data-sidebar-tab={tab.value}
-      onKeyDown={(event) => {
-        const next = tabFor(event);
-        if (next !== null) {
-          event.preventDefault();
-          next.focus();
-          next.click();
-        }
-      }}
-      onClick={() => {
-        onChoose(tab.value);
-      }}
-      {...stylex.props(
-        tabStyles.tab,
-        tabStyles.segment,
-        styles.tab,
-        chosen ? styles.tabChosen : tabStyles.segmentLive,
-        focus.inside
-      )}
-    >
+  const words = (
+    <span data-slot="sidebar-tab-words" {...stylex.props(styles.tabWords)}>
+      {tab.label}
+    </span>
+  );
+  const own = {
+    role: "tab",
+    id: tabId(id, tab.value),
+    "aria-selected": chosen,
+    "aria-controls": panel ? tabPanelId(id) : undefined,
+    tabIndex: chosen ? 0 : -1,
+    "data-sidebar-tab": tab.value,
+    onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => {
+      const next = tabFor(event);
+      if (next !== null) {
+        event.preventDefault();
+        next.focus();
+        next.click();
+      }
+    },
+    onClick: () => {
+      onChoose(tab.value);
+    },
+    ...stylex.props(
+      tabStyles.tab,
+      tabStyles.segment,
+      styles.tab,
+      chosen ? styles.tabChosen : tabStyles.segmentLive,
+      focus.inside
+    ),
+  };
+  const drawn = (trigger: Record<string, unknown>) => (
+    <button type="button" {...mergeProps(trigger, own)}>
       <span
         aria-hidden="true"
         {...stylex.props(
@@ -479,14 +474,21 @@ const Tab = ({
           {counted && <TabCount />}
         </span>
       )}
-      <span {...stylex.props(styles.hold)}>
-        <span data-slot="sidebar-tab-words" {...stylex.props(styles.tabWords)}>
-          {tab.label}
+      {iconOnly ? (
+        <Unseen>{tab.label}</Unseen>
+      ) : (
+        <span {...stylex.props(styles.hold)}>
+          {words}
+          {counted && tab.icon === undefined && <TabCount atWords />}
         </span>
-        {counted && tab.icon === undefined && <TabCount atWords />}
-      </span>
+      )}
       {counted && <Unseen>{` ${tab.countLabel ?? String(tab.count)}`}</Unseen>}
     </button>
+  );
+  return iconOnly ? (
+    <WithTip name render={drawn} tooltip={tab.label} />
+  ) : (
+    drawn({})
   );
 };
 
@@ -621,12 +623,22 @@ export const SidebarTabs = ({
   value,
   label,
   onChoose,
+  panel = true,
+  iconOnly = false,
 }: {
   id: string;
   tabs: readonly SidebarTab[];
   value: string;
   label: string;
   onChoose: (value: string) => void;
+  /**
+   * The tabs switch the rows under them, in a tab panel; false for a section's views, which switch
+   * what its page shows.
+   * @default true
+   */
+  panel?: boolean;
+  /** Each tab its icon alone, its words its name and its tooltip. @default false */
+  iconOnly?: boolean;
 }) => {
   useCountVoice(tabs);
   return (
@@ -654,8 +666,10 @@ export const SidebarTabs = ({
             id={id}
             tab={tab}
             chosen={tab.value === value}
+            panel={panel}
+            iconOnly={iconOnly}
             onChoose={(next) => {
-              if (next !== value) {
+              if (panel && next !== value) {
                 crossfade(
                   document.querySelector<HTMLElement>(
                     `#${CSS.escape(tabPanelId(id))}`

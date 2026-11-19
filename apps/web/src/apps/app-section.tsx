@@ -1,6 +1,6 @@
 import type { Identity } from "@grasp-os/shared/rpc";
 import { useLingui } from "@lingui/react/macro";
-import { Link, useMatch } from "@tanstack/react-router";
+import { Link, useMatch, useNavigate } from "@tanstack/react-router";
 
 import {
   AppWindow,
@@ -8,13 +8,19 @@ import {
   Clock,
   Code,
   Database,
+  Desktop,
   Link as LinkIcon,
   People,
+  Phone,
   Settings,
   Sliders,
+  Tablet,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
-import type { SidebarSection } from "../grasp/sidebar/index.ts";
+import type {
+  SidebarSection,
+  SidebarSectionViews,
+} from "../grasp/sidebar/index.ts";
 import { ProcessTile } from "../workflows/business-process.tsx";
 import { buildsApp } from "./app-role.ts";
 import {
@@ -25,7 +31,7 @@ import {
 } from "./app-settings.tsx";
 import type { AppSettingsSection } from "./app-settings.tsx";
 import type { WorkspaceView } from "./app-workspace.tsx";
-import { PreviewWidthToggle } from "./preview-controls.tsx";
+import { previewWidthOrder, usePreviewWidth } from "./preview-controls.tsx";
 import { useCoreRead } from "./use-core-read.ts";
 
 // An App's workspace as the sidebar's section, while one who builds it has
@@ -54,6 +60,8 @@ export const useAppSection = (
 ): SidebarSection | undefined => {
   const { t, i18n } = useLingui();
   const match = useMatch({ from: "/_shell/apps/$app", shouldThrow: false });
+  const width = usePreviewWidth();
+  const navigate = useNavigate({ from: "/apps/$app" });
   const page = match?.loaderData;
   const app = page?.state === "ready" ? page.data.app : undefined;
   const builds = app !== undefined && buildsApp(app, identity);
@@ -88,6 +96,25 @@ export const useAppSection = (
     ),
     current: view === each,
   });
+  const widthViews: SidebarSectionViews = {
+    label: t`Preview width`,
+    value: width,
+    tabs: [
+      { value: "desktop", label: t`Desktop`, icon: Desktop },
+      { value: "tablet", label: t`Tablet`, icon: Tablet },
+      { value: "phone", label: t`Phone`, icon: Phone },
+    ],
+    onChange: (chosen) => {
+      const picked = previewWidthOrder.find((each) => each === chosen);
+      void navigate({
+        replace: true,
+        search: (before) => ({
+          ...before,
+          width: picked === "desktop" ? undefined : picked,
+        }),
+      });
+    },
+  };
   const sections = shownSections(app, identity, {
     options: optionsOf(surfaces) !== undefined,
   });
@@ -99,8 +126,9 @@ export const useAppSection = (
       : { mark: <ProcessTile process={app.process} /> }),
     navLabel: t`${name}'s workspace`,
     // How wide the preview is drawn, under the App's name while the preview
-    // shows: out of the App's bar, which keeps Reload, the page and Open.
-    ...(view === "preview" ? { controls: <PreviewWidthToggle /> } : {}),
+    // shows, as the main list's Home and Inbox: out of the App's bar, which
+    // keeps Reload, the page and Open.
+    ...(view === "preview" ? { views: widthViews } : {}),
     back: {
       label: t`Apps`,
       render: <Link to="/apps" />,

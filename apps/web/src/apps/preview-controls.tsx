@@ -1,23 +1,16 @@
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Button } from "../grasp/button/index.ts";
-import {
-  Desktop,
-  External,
-  Phone,
-  Retry,
-  Tablet,
-} from "../grasp/icons/index.ts";
+import { External, Retry } from "../grasp/icons/index.ts";
 import {
   Select,
   SelectContent,
   SelectTrigger,
   SelectValue,
 } from "../grasp/select/index.ts";
-import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
@@ -40,7 +33,12 @@ import { useCoreRead } from "./use-core-read.ts";
 /** How wide the preview is drawn. */
 export type PreviewWidth = "desktop" | "tablet" | "phone";
 
-const widths: readonly PreviewWidth[] = ["desktop", "tablet", "phone"];
+/** The widths, in their order. */
+export const previewWidthOrder: readonly PreviewWidth[] = [
+  "desktop",
+  "tablet",
+  "phone",
+];
 
 const routeFile = /^src\/routes\/(?<route>.+)\.(?:tsx|ts|jsx|js)$/u;
 
@@ -122,9 +120,6 @@ const styles = stylex.create({
     gap: grasp.space1,
   },
   page: { minWidth: grasp.space24 },
-  // In the sidebar: as wide as its rows, the three sharing it.
-  widths: { width: "100%" },
-  width: { flexGrow: 1 },
 });
 
 /** How wide the App's preview is drawn, as its address says. */
@@ -134,49 +129,6 @@ export const usePreviewWidth = (): PreviewWidth =>
     shouldThrow: false,
     select: (search) => search.width,
   }) ?? "desktop";
-
-/** Desktop, Tablet and Phone: how wide the App's preview is drawn, kept in its address. */
-export const PreviewWidthToggle = () => {
-  const { t } = useLingui();
-  const width = usePreviewWidth();
-  const navigate = useNavigate({ from: "/apps/$app" });
-  const widthLabels: Record<PreviewWidth, string> = {
-    desktop: t`Desktop`,
-    tablet: t`Tablet`,
-    phone: t`Phone`,
-  };
-  const icons = { desktop: Desktop, tablet: Tablet, phone: Phone };
-  return (
-    <ToggleGroup
-      aria-label={t`Preview width`}
-      layout={styles.widths}
-      onValueChange={(chosen: unknown[]) => {
-        const picked = widths.find((each) => each === chosen[0]);
-        if (picked !== undefined) {
-          void navigate({
-            replace: true,
-            search: (before) => ({
-              ...before,
-              width: picked === "desktop" ? undefined : picked,
-            }),
-          });
-        }
-      }}
-      size="sm"
-      value={[width]}
-    >
-      {widths.map((each) => (
-        <Toggle
-          aria-label={widthLabels[each]}
-          icon={icons[each]}
-          key={each}
-          layout={styles.width}
-          value={each}
-        />
-      ))}
-    </ToggleGroup>
-  );
-};
 
 /**
  * The preview's controls as the workspace holds them: how wide it is

@@ -185,10 +185,10 @@ export interface SidebarSection {
   /** The Back row at the top: a link to the parent or the last main page. */
   back: SidebarBack;
   /**
-   * Controls for what the section's page shows, under its name (an App's preview widths): one row
-   * as wide as the rows, kept out of a crowded bar.
+   * Views of the section's page, under its name, in the same switch as the main list's tabs (an
+   * App's preview: Desktop, Tablet, Phone). They switch what the page shows, not the rows.
    */
-  controls?: ReactNode;
+  views?: SidebarSectionViews;
   /** Its rows, in runs, top to bottom, as the main list's `groups`. */
   groups: readonly SidebarGroupEntry[];
   /** Where its groups' folds are kept in localStorage, apart from the main list's. */
@@ -198,6 +198,18 @@ export interface SidebarSection {
 }
 
 export type { SidebarBack, SidebarTab } from "./section";
+
+/** A section's views (SidebarSection's `views`). */
+export interface SidebarSectionViews {
+  /** What the views are of ("Preview width"), as a screen reader says it. */
+  label: string;
+  /** The views, as the main list's tabs: each its icon alone from three on, its words its tooltip. */
+  tabs: readonly SidebarTab[];
+  /** The view shown. */
+  value: string;
+  /** Runs with the view chosen. */
+  onChange: (value: string) => void;
+}
 
 /** What a caller may style: where the sidebar sits and how tall it is. Never its look or width. */
 export type SidebarLayoutStyle = LayoutStyle;
@@ -1856,6 +1868,30 @@ interface ListAreaProps {
 const loadingSaid = (loading: boolean | undefined, said: string) =>
   loading === true ? said : undefined;
 
+/** A section's views, under its name, in the main list's tabs' switch. */
+const SectionViews = ({
+  id,
+  section,
+}: {
+  id: string;
+  section: SidebarSection | undefined;
+}) => {
+  const views = section?.views;
+  return views === undefined ? null : (
+    <SidebarTabs
+      id={`${id}-views`}
+      tabs={views.tabs}
+      value={views.value}
+      label={views.label}
+      onChoose={(value) => {
+        views.onChange(value);
+      }}
+      panel={false}
+      iconOnly={views.tabs.length > 2}
+    />
+  );
+};
+
 /** The list between the head and the foot: the main list (under its tabs), or a section's. */
 const ListArea = ({
   id,
@@ -1928,9 +1964,9 @@ const ListArea = ({
           back={section.back}
           backLabel={section.back.label}
           renderBack={(back) => <BackRow back={back} />}
-          controls={section.controls}
         />
       )}
+      <SectionViews id={id} section={section} />
       {tabbed && (
         <SidebarTabs
           id={id}
