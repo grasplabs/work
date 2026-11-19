@@ -268,7 +268,8 @@ const openInvitation = async (
  * What joining gives someone signing in with `email` at `now`: admin for
  * a configured admin; otherwise the role of their open invitation, only
  * while it is still open as the statement that gives it runs (`role`, as
- * SQL), or `user`. `taken` is the role the invitation is taken up with.
+ * SQL), or `user`. `taken` is the role the invitation is taken up with;
+ * `configuredAdmin` whether they are one.
  * The one rule for a new member (`ensureMember`) and for a member the
  * directory made before they signed in (`adoptDirectoryMember`).
  */
@@ -280,12 +281,14 @@ const joiningOf = async (
 ): Promise<{
   role: SQL;
   invitation: { id: string; taken: string } | undefined;
+  configuredAdmin: boolean;
 }> => {
   const configuredAdmin = email !== undefined && admins.includes(email);
   const invitation =
     email === undefined ? undefined : await openInvitation(env, email, now);
   if (configuredAdmin) {
     return {
+      configuredAdmin,
       role: sql`'admin'`,
       invitation:
         invitation === undefined
@@ -294,8 +297,9 @@ const joiningOf = async (
     };
   }
   return invitation === undefined
-    ? { role: sql`'user'`, invitation: undefined }
+    ? { configuredAdmin, role: sql`'user'`, invitation: undefined }
     : {
+        configuredAdmin,
         role: sql`CASE WHEN ${isOpenInvitation(invitation.id, now)} THEN ${invitation.role} ELSE 'user' END`,
         invitation: { id: invitation.id, taken: invitation.role },
       };
@@ -384,7 +388,7 @@ const ensureMember = async (
     return false;
   }
   const now = new Date();
-  const { role, invitation } = await joiningOf(
+  const { role, invitation, configuredAdmin } = await joiningOf(
     env,
     config.admins,
     email,
@@ -419,7 +423,7 @@ const ensureMember = async (
           sql`EXISTS (SELECT 1 FROM ${members} WHERE ${members.id} = ${memberId})`
         ),
       ]));
-  if (email !== undefined && config.admins.includes(email)) {
+  if (configuredAdmin) {
     await restoreAdmin(env, userId);
   }
   return !(await mayNotAct(env, userId));
@@ -542,6 +546,15 @@ export const adoptDirectoryMember = async (
     fresh.email.toLowerCase(),
     now.getTime()
   );
+  const [membership] = await db
+    .select({ id: members.id })
+    .from(members)
+    .where(
+      and(
+        eq(members.organizationId, organizationId),
+        eq(members.userId, memberId)
+      )
+    );
   await moving(userId, memberId);
   const notYetMember = sql`NOT EXISTS (
     SELECT 1 FROM ${members} WHERE ${members.userId} = ${userId}
@@ -610,7 +623,9 @@ export const adoptDirectoryMember = async (
       target: { type: "user", id: memberId },
     }),
     // Only while they have the role the directory made them with: one an
-    // admin gave them since is kept, and nothing is ever lowered.
+    // admin gave them since is kept, and nothing is ever lowered. Never for
+    // someone suspended, whose sign-in is refused after this (`ensureMember`):
+    // they haven't joined.
     db
       .update(members)
       .set({ role: joining.role })
@@ -619,9 +634,24 @@ export const adoptDirectoryMember = async (
           eq(members.organizationId, organizationId),
           eq(members.userId, memberId),
           eq(members.role, "user"),
+          mayAct(memberId),
           moved
         )
       ),
+    // A configured admin made admin with no invitation: recorded here, as
+    // the invitation's take-up records the role it gives.
+    ...(joining.configuredAdmin &&
+    joining.invitation === undefined &&
+    membership !== undefined
+      ? [
+          outboxedIfChanged(db, {
+            actor: { type: "system" },
+            action: "member.role.updated",
+            target: { type: "member", id: membership.id },
+            detail: { userId: memberId, role: "admin", reason: "joined" },
+          }),
+        ]
+      : []),
     // Taken up only where the role it gives is theirs now: with another an
     // admin gave them, it stays open for an admin to withdraw.
     ...(joining.invitation === undefined
@@ -631,7 +661,7 @@ export const adoptDirectoryMember = async (
           joining.invitation,
           memberId,
           now.getTime(),
-          sql`${moved} AND EXISTS (
+          sql`${moved} AND ${mayAct(memberId)} AND EXISTS (
             SELECT 1 FROM ${members}
             WHERE ${members.organizationId} = ${organizationId}
               AND ${members.userId} = ${memberId}

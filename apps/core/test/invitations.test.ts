@@ -389,17 +389,107 @@ describe("inviting someone the directory made a member before they signed in", (
     ]);
   });
 
-  it("makes a configured admin admin, while another admin is one", async () => {
+  it("makes a configured admin admin, while another admin is one, and records the change as the system's", async () => {
     await signedInApi(idp, "admin");
     const person = newcomer();
     const member = await madeByDirectory(person);
-    const session = await signedIn(idp, "microsoft", person, {
-      coreEnv: withSignIn({ admins: [String(person.email)] }),
+    const membership = await env.DB.prepare(
+      "SELECT id FROM members WHERE user_id = ?"
+    )
+      .bind(member)
+      .first<string>("id");
+    let session = "";
+    const events = await auditedDuring(async () => {
+      session = await signedIn(idp, "microsoft", person, {
+        coreEnv: withSignIn({ admins: [String(person.email)] }),
+      });
     });
 
     await expect(whoami(session)).resolves.toMatchObject({
       userId: member,
       role: "admin",
+    });
+    expect(
+      events
+        .filter(({ action }) => action === "member.role.updated")
+        .map(({ actor, target, detail }) => ({ actor, target, detail }))
+    ).toStrictEqual([
+      {
+        actor: { type: "system" },
+        target: { type: "member", id: membership },
+        detail: { userId: member, role: "admin", reason: "joined" },
+      },
+    ]);
+  });
+
+  it("takes up a configured admin's invitation as admin, and records it once, by the take-up", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const member = await madeByDirectory(person);
+    const { id } = await admin.api.members.invite(
+      String(person.email),
+      "builder"
+    );
+    let session = "";
+    const events = await auditedDuring(async () => {
+      session = await signedIn(idp, "microsoft", person, {
+        coreEnv: withSignIn({ admins: [String(person.email)] }),
+      });
+    });
+
+    await expect(whoami(session)).resolves.toMatchObject({
+      userId: member,
+      role: "admin",
+    });
+    await expect(isPending(id)).resolves.toBeFalsy();
+    expect(
+      events
+        .filter(({ action }) =>
+          ["member.invitation.accepted", "member.role.updated"].includes(action)
+        )
+        .map(({ action, target, detail }) => ({ action, target, detail }))
+    ).toStrictEqual([
+      {
+        action: "member.invitation.accepted",
+        target: { type: "invitation", id },
+        detail: { userId: member, role: "admin" },
+      },
+    ]);
+  });
+
+  it("gives a suspended member no role and takes up nothing at a sign-in that is refused", async () => {
+    const admin = await signedInApi(idp, "admin");
+    /** Someone the directory made and suspended, invited as `role`, signing in: their role, and whether the invitation is open. */
+    const suspendedSignsIn = async (role: Role) => {
+      const person = newcomer();
+      const member = await madeByDirectory(person);
+      await env.DB.prepare(
+        "UPDATE members SET suspended_at = ?, suspended_by = 'directory' WHERE user_id = ?"
+      )
+        .bind(Date.now(), member)
+        .run();
+      const { id } = await admin.api.members.invite(String(person.email), role);
+      const session = await signedIn(idp, "microsoft", person).catch(
+        () => null
+      );
+      return {
+        session,
+        role: await roleOf(member),
+        pending: await isPending(id),
+      };
+    };
+
+    // Invited as builder (a role the fold would give) and as user (the
+    // role they have, so only their suspension stops the take-up).
+    await expect(suspendedSignsIn("builder")).resolves.toStrictEqual({
+      session: null,
+      role: "user",
+      pending: true,
+    });
+    await expect(suspendedSignsIn("user")).resolves.toStrictEqual({
+      session: null,
+      role: "user",
+      pending: true,
     });
   });
 
