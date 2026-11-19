@@ -15,7 +15,7 @@ import type { AnyRouter } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppsOverview } from "./apps-overview.tsx";
 
@@ -30,33 +30,36 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 
-/** The browser's IntersectionObserver, as the test moves cards on and off screen. */
-const watched = new Map<Element, (onScreen: boolean) => void>();
+/** What the browser's IntersectionObserver tells of an element. */
+type Seen = (entries: { target: Element; isIntersecting: boolean }[]) => void;
+
+/** The browser's IntersectionObserver, as the test brings a card on screen. */
+const observers: Seen[] = [];
 
 class FakeObserver {
-  readonly #seen: (entries: { isIntersecting: boolean }[]) => void;
-  readonly #elements = new Set<Element>();
+  readonly #watched = new Set<Element>();
 
-  constructor(seen: (entries: { isIntersecting: boolean }[]) => void) {
-    this.#seen = seen;
-  }
-
-  observe(element: Element): void {
-    this.#elements.add(element);
-    watched.set(element, (isIntersecting) => {
-      this.#seen([{ isIntersecting }]);
+  constructor(seen: Seen) {
+    observers.push((entries) => {
+      seen(entries.filter(({ target }) => this.#watched.has(target)));
     });
   }
 
+  observe(element: Element): void {
+    this.#watched.add(element);
+  }
+
+  unobserve(element: Element): void {
+    this.#watched.delete(element);
+  }
+
   disconnect(): void {
-    for (const element of this.#elements) {
-      watched.delete(element);
-    }
-    this.#elements.clear();
+    this.#watched.clear();
   }
 }
 
-const realObserver: unknown = Reflect.get(globalThis, "IntersectionObserver");
+// The page keeps one observer for all its cards, made on first use.
+Reflect.set(globalThis, "IntersectionObserver", FakeObserver);
 
 /** An App made at `createdAt`, live with pages or not yet, archived or not. */
 const overview = (
@@ -176,9 +179,11 @@ const shown = async (
   return calls;
 };
 
-/** Every App on the page: its card and where it stands. */
+/** Every App on the page: its card. */
 const places = (): Element[] => [
-  ...document.querySelectorAll('section[aria-label="Apps"] > div'),
+  ...document.querySelectorAll(
+    'section[aria-label="Apps"] [data-slot="app-card"]'
+  ),
 ];
 
 /** Each card's name, where it leads and the status it shows. */
@@ -186,7 +191,7 @@ const cards = () =>
   places().map((place) => ({
     name: place.querySelector("a")?.textContent,
     href: place.querySelector("a")?.getAttribute("href"),
-    status: place.querySelector('[data-slot="badge"]')?.textContent,
+    status: place.querySelector('[data-slot="app-card-meta"]')?.textContent,
   }));
 
 /** The place of the App called `name`. */
@@ -200,10 +205,15 @@ const placeOf = (name: string): Element => {
   return found;
 };
 
-/** Scrolls the card of `name` on or off the screen. */
-const scroll = async (name: string, onScreen: boolean): Promise<void> => {
+/** Brings the card of `name` on screen. */
+const scroll = async (name: string): Promise<void> => {
+  const target = placeOf(name).querySelector('[data-slot="app-card-live"]');
   await act(async () => {
-    watched.get(placeOf(name))?.(onScreen);
+    if (target !== null) {
+      for (const seen of observers) {
+        seen([{ target, isIntersecting: true }]);
+      }
+    }
     await Promise.resolve();
   });
 };
@@ -290,18 +300,12 @@ const makeLink = (): string | null | undefined =>
     ?.getAttribute("href");
 
 describe(AppsOverview, () => {
-  beforeEach(() => {
-    Reflect.set(globalThis, "IntersectionObserver", FakeObserver);
-  });
-
   afterEach(() => {
     act(() => {
       root?.unmount();
     });
     root = undefined;
     document.body.replaceChildren();
-    watched.clear();
-    Reflect.set(globalThis, "IntersectionObserver", realObserver);
   });
 
   it("lists each App once, the newest first, with where it stands, each opening the App", async () => {
@@ -335,33 +339,26 @@ describe(AppsOverview, () => {
     const holidays = overview("Holidays", "2026-10-20T08:00:00.000Z", true);
     await shown([invoices, holidays]);
     const before = windowOf("Invoices");
-    await scroll("Invoices", true);
-    const onScreen = {
+    await scroll("Invoices");
+
+    expect({
+      before,
       invoices: windowOf("Invoices"),
       holidays: windowOf("Holidays"),
-    };
-    await scroll("Invoices", false);
-
-    expect({ before, onScreen, left: windowOf("Invoices") }).toStrictEqual({
+    }).toStrictEqual({
       before: { runs: null, says: null },
-      onScreen: {
-        invoices: { runs: `/apps/${invoices.app.id}/full`, says: null },
-        holidays: { runs: null, says: null },
-      },
-      left: { runs: null, says: null },
+      invoices: { runs: `/apps/${invoices.app.id}/full`, says: null },
+      holidays: { runs: null, says: null },
     });
   });
 
-  it("keeps the window quiet for an App with no page to run or put away, on screen too", async () => {
+  it("keeps the window quiet for an App with no page to run or put away", async () => {
     await shown([
       overview("Holidays", "2026-10-20T08:00:00.000Z", false),
       overview("Old desk", "2026-09-01T08:00:00.000Z", true, {
         archived: true,
       }),
     ]);
-    await scroll("Holidays", true);
-    await scroll("Old desk", true);
-
     expect({
       draft: windowOf("Holidays"),
       archived: windowOf("Old desk"),

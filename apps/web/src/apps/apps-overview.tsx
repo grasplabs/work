@@ -3,12 +3,12 @@ import { canBuild } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { changeThenRefresh } from "../change-then-refresh.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
-import { Alert } from "../grasp/alert/index.ts";
-import { AppCard } from "../grasp/app-card/index.ts";
+import { AppCard, AppCardGrid } from "../grasp/app-card/index.ts";
 import type { AppCardAction } from "../grasp/app-card/index.ts";
 import {
   Empty,
@@ -18,6 +18,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
+import { IconTile } from "../grasp/icon-tile/index.ts";
 import {
   AppWindow,
   Archive,
@@ -31,58 +32,31 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
-import { Skeleton } from "../grasp/skeleton/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { toast } from "../grasp/toast/index.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
+import { useCoreAction } from "../use-core-action.ts";
+import { ProcessTile } from "../workflows/business-process.tsx";
 import { buildsApp } from "./app-role.ts";
-import {
-  ArchiveDialog,
-  StatusBadge,
-  statusOf,
-  useStatusMove,
-} from "./app-status.tsx";
-import { useInView } from "./in-view.ts";
+import { ArchiveDialog, statusOf } from "./app-status.tsx";
+import type { Transition } from "./app-status.tsx";
 
 // The Apps page: every App the person can open, newest first, as Grasp
 // UI's App cards, three to a row on a desktop: its window, which is the
-// App's own first page running in it while the card is on screen
-// (in-view.ts), its name, what it is for and where it stands; the card
-// opens the App (/apps/$app), and its "…" opens it, opens it full page,
-// leads to its settings and, for its builders, archives or restores it. A
-// search over their names, and Make something for who builds, which
-// starts a chat to make an App (make/make-link.tsx).
-
-// The narrowest a card stands: three fit a desktop's page beside the
-// sidebar, one a phone. Grasp UI's own grid goes to three only from 96rem
-// of room.
-const CARD_MIN = "18rem";
+// App's own first page running in it while the card is in view (the
+// card's own doing), its mark and name, what it is for and where it
+// stands; the card opens the App (/apps/$app), and its "…" opens it,
+// opens it full page, leads to its settings and, for its builders,
+// archives or restores it. A search over their names, and Make something
+// for who builds, which starts a chat to make an App (make/make-link.tsx).
 
 const styles = stylex.create({
   search: { maxWidth: "18rem" },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: `repeat(auto-fill, minmax(min(${CARD_MIN}, 100%), 1fr))`,
-    columnGap: grasp.space6,
-    rowGap: grasp.space8,
-  },
-  // A card, and under it where it stands, starting where the card's words do.
-  card: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-start",
-    gap: grasp.space2,
-    minWidth: 0,
-  },
-  whole: { width: "100%" },
-  state: { paddingInline: grasp.space1 },
-  // Fills the window, as the App's page will.
-  waiting: { width: "100%", height: "100%" },
 });
 
 /** Who looks at the Apps: what they may make and change follows from it. */
 type Viewer = Pick<Identity, "role" | "staff">;
 
-/** One App: its card, and where it stands. */
+/** One App: its card. */
 const OneApp = ({
   overview: { app, contents },
   viewer,
@@ -91,12 +65,34 @@ const OneApp = ({
   viewer: Viewer;
 }) => {
   const { t } = useLingui();
-  const { watch, inView } = useInView();
-  const { busy, failure, move } = useStatusMove(app.id);
+  const router = useRouter();
+  const { busy, run } = useCoreAction();
   const [archiving, setArchiving] = useState(false);
   const { name } = app;
+  const status = statusOf(app);
+  const metaOf = {
+    live: t`Your team uses it`,
+    draft: t`Only you see this`,
+    archived: t({ message: "Archived", context: "an App put away" }),
+  };
+  // Archives or restores it, then reads the Apps again; why not, in a toast.
+  const move = (transition: Transition): void => {
+    void run(
+      async (session) => {
+        await changeThenRefresh(
+          async () => await session.apps[transition](app.id),
+          async () => {
+            await router.invalidate({ sync: true });
+          }
+        );
+      },
+      (reason) => {
+        toast.error(reason);
+      }
+    );
+  };
   // Only a live App with a page has one to run in its window.
-  const runs = statusOf(app) === "live" && contents.pages;
+  const runs = status === "live" && contents.pages;
   const full = `/apps/${app.id}/full`;
   const putAway: AppCardAction = app.archived
     ? {
@@ -131,31 +127,35 @@ const OneApp = ({
     },
     ...(buildsApp(app, viewer) ? [putAway] : []),
   ];
-  // Its window: the App running while the card is on screen, a skeleton
-  // before and after; an App with no page to run keeps a quiet window.
-  const running = {
-    kind: "live" as const,
-    src: full,
-    // The App's pages are our own site's: in the page's process, so sharp.
-    sandbox: "allow-scripts allow-same-origin",
-  };
-  const waiting = <Skeleton layout={styles.waiting} variant="block" />;
-  const window = inView ? running : waiting;
   return (
-    <div ref={watch} {...stylex.props(styles.card)}>
+    <>
       <AppCard
         actions={actions}
         labels={{ more: t`More`, empty: t`No preview yet` }}
-        layout={styles.whole}
+        mark={
+          app.process === null ? (
+            <IconTile icon={AppWindow} size="sm" />
+          ) : (
+            <ProcessTile process={app.process} />
+          )
+        }
+        meta={metaOf[status]}
         render={<Link params={{ app: app.id }} to="/apps/$app" />}
         title={name}
-        {...(runs ? { preview: window } : {})}
+        // Its window: the App itself, running while the card is in view. An
+        // App with no page to run keeps a quiet window.
+        {...(runs
+          ? {
+              preview: {
+                kind: "live" as const,
+                src: full,
+                // Our own site's pages: in the page's process, so sharp.
+                sandbox: "allow-scripts allow-same-origin",
+              },
+            }
+          : {})}
         {...(app.description === "" ? {} : { description: app.description })}
       />
-      <span {...stylex.props(styles.state)}>
-        <StatusBadge app={app} />
-      </span>
-      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
       <ArchiveDialog
         name={name}
         onArchive={() => {
@@ -165,7 +165,7 @@ const OneApp = ({
         onOpenChange={setArchiving}
         open={archiving}
       />
-    </div>
+    </>
   );
 };
 
@@ -234,17 +234,20 @@ export const AppsOverview = ({
               value={query}
             />
           </InputGroup>
-          {shown.length === 0 ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyMedia picture="search" />
-                <EmptyDescription>
-                  <Trans>No App is called “{asked}”</Trans>
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <section aria-label={t`Apps`} {...stylex.props(styles.grid)}>
+          <section aria-label={t`Apps`}>
+            <AppCardGrid
+              density="compact"
+              empty={
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyMedia picture="search" />
+                    <EmptyDescription>
+                      <Trans>No App is called “{asked}”</Trans>
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              }
+            >
               {shown.map((overview) => (
                 <OneApp
                   key={overview.app.id}
@@ -252,8 +255,8 @@ export const AppsOverview = ({
                   viewer={viewer}
                 />
               ))}
-            </section>
-          )}
+            </AppCardGrid>
+          </section>
         </>
       )}
     </Page>
