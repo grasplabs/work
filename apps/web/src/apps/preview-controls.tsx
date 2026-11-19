@@ -114,6 +114,19 @@ export const useAppPages = (
   return read?.state === "ready" ? pagesOf(read.data) : [];
 };
 
+const styles = stylex.create({
+  // Drawn inline from a phone's width on; one menu below it.
+  inline: {
+    display: { default: "flex", [media.belowPhone]: "none" },
+    alignItems: "center",
+    gap: grasp.space1,
+  },
+  page: { minWidth: grasp.space24 },
+  // In the sidebar: as wide as its rows, the three sharing it.
+  widths: { width: "100%" },
+  width: { flexGrow: 1 },
+});
+
 /** How wide the App's preview is drawn, as its address says. */
 export const usePreviewWidth = (): PreviewWidth =>
   useSearch({
@@ -136,6 +149,7 @@ export const PreviewWidthToggle = () => {
   return (
     <ToggleGroup
       aria-label={t`Preview width`}
+      layout={styles.widths}
       onValueChange={(chosen: unknown[]) => {
         const picked = widths.find((each) => each === chosen[0]);
         if (picked !== undefined) {
@@ -156,6 +170,7 @@ export const PreviewWidthToggle = () => {
           aria-label={widthLabels[each]}
           icon={icons[each]}
           key={each}
+          layout={styles.width}
           value={each}
         />
       ))}
@@ -193,16 +208,6 @@ export const usePreviewControls = (
   };
   return { controls, width, page, reloads };
 };
-
-const styles = stylex.create({
-  // Drawn inline from a phone's width on; one menu below it.
-  inline: {
-    display: { default: "flex", [media.belowPhone]: "none" },
-    alignItems: "center",
-    gap: grasp.space1,
-  },
-  page: { minWidth: grasp.space24 },
-});
 
 /** The width a preview is drawn at: the token Grasp UI's App preview uses. */
 export const previewWidths = stylex.create({
