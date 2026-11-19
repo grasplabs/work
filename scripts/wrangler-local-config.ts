@@ -13,10 +13,16 @@
  * jurisdiction is set only by the admin's rendering (unset is the EU), so
  * the local config carries it instead.
  *
+ * For the same reason connect saw none of its optional secrets: a key in
+ * its `.dev.vars` that the config doesn't require (COMPOSIO_API_KEY, the
+ * AI providers' keys) never reached it, so Composio was never offered
+ * locally. The local config requires every secret its `.dev.vars` sets.
+ *
  * Usage: `node scripts/wrangler-local-config.ts <config> NAME:value...`
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { parseEnv } from "node:util";
 
 import { parseJsonc } from "./jsonc.ts";
 
@@ -40,9 +46,28 @@ const added = Object.fromEntries(
   })
 );
 const vars: unknown = Reflect.get(parsed, "vars");
+
+/** The secrets the config requires, and those `.dev.vars` beside it sets. */
+const requiredSecrets = (): string[] => {
+  const secrets: unknown = Reflect.get(parsed, "secrets");
+  const required: unknown =
+    typeof secrets === "object" && secrets !== null
+      ? Reflect.get(secrets, "required")
+      : undefined;
+  const named = Array.isArray(required)
+    ? required.filter((name) => typeof name === "string")
+    : [];
+  const devVars = path.join(path.dirname(config), ".dev.vars");
+  const set = existsSync(devVars)
+    ? Object.keys(parseEnv(readFileSync(devVars, "utf-8")))
+    : [];
+  return [...new Set([...named, ...set])];
+};
+
 const local = {
   ...parsed,
   vars: { ...(typeof vars === "object" ? vars : {}), ...added },
+  secrets: { required: requiredSecrets() },
 };
 
 // Next to the config, so every path in it still resolves the same.
