@@ -23,7 +23,7 @@ import type {
   RetiredMemory,
   SourceVersionRef,
 } from "./contract.ts";
-import { byWordsFound } from "./order.ts";
+import { backedAtOf, byWordsFound } from "./order.ts";
 import type { MemoryOrder } from "./order.ts";
 import { readableSql } from "./reader-sets.ts";
 import { termsOf } from "./words.ts";
@@ -1328,31 +1328,33 @@ export const usedAtOf = (used: RecallRequest["used"] = []): UsedAt => {
  * them by besides.
  */
 export const candidatesOuter = (score = ""): string => `
-SELECT row, id, confirmation IS NOT NULL AS confirmed,
-  ifnull(writer = ?2, 0) AS own, learned_at${score}
+SELECT row, id, writer, confirmation, learned_at${score}
 FROM rows`;
 
 /** A candidate as `candidatesOuter` returns it. */
 export interface CandidateRow extends Record<string, SqlStorageValue> {
   row: number;
   id: string;
-  confirmed: number;
-  /** Whether it is the reader's own word (order.ts `MemoryOrder.own`). */
-  own: number;
+  writer: string | null;
+  confirmation: string | null;
   learned_at: number;
 }
 
-/** `candidate` as `byFreshness` (order.ts) orders it, with the reader's use. */
+/** `candidate` as `byFreshness` (order.ts) orders it for the reader `person`, with their use. */
 export const orderOf = (
-  { id, confirmed, own, learned_at: learnedAt }: CandidateRow,
-  used: UsedAt
-): MemoryOrder => ({
-  confirmed: confirmed === 1,
-  own: own === 1,
-  learnedAt,
-  usedAt: used.get(id) ?? null,
-  id,
-});
+  { id, writer, confirmation, learned_at: learnedAt }: CandidateRow,
+  used: UsedAt,
+  person: string | null
+): MemoryOrder => {
+  const confirmed = confirmationOf(confirmation);
+  return {
+    confirmed: confirmed !== null,
+    backedAt: backedAtOf(person, writer, learnedAt, confirmed),
+    learnedAt,
+    usedAt: used.get(id) ?? null,
+    id,
+  };
+};
 
 /**
  * `?1` the rows of memories a cut chose (JSON): those of them the reader
@@ -1479,7 +1481,7 @@ export const memoriesByWords = (
     )
     .toArray()
     .map((candidate) => ({
-      ...orderOf(candidate, used),
+      ...orderOf(candidate, used, reader.person),
       row: candidate.row,
       words: candidate.words,
       exact: candidate.exact,

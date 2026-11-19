@@ -164,6 +164,12 @@ const recalledStatusesOf = async (personId: string): Promise<string[]> => {
     .filter((said) => ["Renewing", "Paused", "Churned"].includes(said));
 };
 
+/** The status `personId`'s own chat recalls first (`recalledStatusesOf`). */
+const firstStatusOf = async (personId: string): Promise<string | undefined> => {
+  const [first] = await recalledStatusesOf(personId);
+  return first;
+};
+
 /** Adds `memories` about the customer `customer` (an entity), readable by team `teamId`; the ids. */
 const remember = async (
   teamId: string,
@@ -816,6 +822,96 @@ describe("the Brain's memories, as a person reads them", () => {
       // Her own word, taken as correct as saved, before the side settled.
       anna: ["Churned", "Renewing", "Paused"],
       ben: ["Renewing", "Paused"],
+    });
+
+    // She then says that side is right after all: her latest act wins.
+    await expect(
+      anna.api.brainMemories.confirm({
+        store: "shared",
+        memory: renewing?.id ?? "",
+      })
+    ).resolves.toBe("done");
+    const confirmedLast = await firstStatusOf(anna.userId);
+    // And corrects it once more: again her latest act.
+    await anna.api.brainMemories.correct({
+      wrong: { store: "shared", entity, memory: renewing?.id ?? "" },
+      right: "The customer is Churned",
+      change: crypto.randomUUID(),
+    });
+    expect({
+      confirmedLast,
+      correctedLast: await firstStatusOf(anna.userId),
+    }).toStrictEqual({ confirmedLast: "Renewing", correctedLast: "Churned" });
+  });
+
+  it("recalls the side a person confirmed first for them, over a status of their own they shared", async () => {
+    const [anna, ben, cleo] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    // A team of three: one she may share with.
+    const sales = await teamOf(anna.userId, ben.userId, cleo.userId);
+    const name = `Initech ${crypto.randomUUID()}`;
+    const renews = await sourceOf(sales, "Initech renews");
+    const { entities } = await remember(
+      sales,
+      { kind: "customer", names: [name] },
+      [statusFrom(renews.cited, "Renewing")]
+    );
+    const entity = entities.c ?? "";
+    // Anna said it churned, and shared that with her team.
+    const said = await rememberAs(env, anna.userId, {
+      change: crypto.randomUUID(),
+      about: { kind: "customer", names: [name] },
+      attribute: "status",
+      value: "Churned",
+      type: "fact",
+      statement: "The customer is Churned",
+      quote: "The customer is Churned",
+    });
+    const [own] = await memoriesAbout(anna.api, {
+      store: "own",
+      id: said.entity,
+    });
+    if (own === undefined) {
+      throw new Error("Saved nothing of her own");
+    }
+    const copy = await anna.api.brainMemories.publish({
+      memory: { entity: own.about, memory: own.id },
+      shown: {
+        about: name,
+        attribute: own.attribute,
+        type: own.type,
+        value: own.value,
+        statement: own.statement,
+        validFrom: own.validFrom,
+        validUntil: own.validUntil,
+      },
+      audience: { team: sales },
+      change: crypto.randomUUID(),
+    });
+    const sides = await memoriesAbout(anna.api, {
+      store: "shared",
+      id: entity,
+    });
+    const renewing = sides.find(({ value }) => value === "Renewing");
+    // Then she says the source is right after all.
+    const confirmed = await anna.api.brainMemories.confirm({
+      store: "shared",
+      memory: renewing?.id ?? "",
+    });
+
+    expect({
+      copy: copy?.entity,
+      contested: sides.map(({ contested }) => contested),
+      confirmed,
+      anna: await firstStatusOf(anna.userId),
+    }).toStrictEqual({
+      copy: entity,
+      contested: [true, true],
+      confirmed: "done",
+      anna: "Renewing",
     });
   });
 

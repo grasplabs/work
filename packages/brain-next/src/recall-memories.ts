@@ -405,7 +405,10 @@ const byEntities = (
       at,
       -1
     )
-      .map((candidate) => ({ ...orderOf(candidate, used), row: candidate.row }))
+      .map((candidate) => ({
+        ...orderOf(candidate, used, reader.person),
+        row: candidate.row,
+      }))
       .toSorted(byFreshness)
       .slice(0, recallLimit - found.length)
       .map(({ row }) => row);

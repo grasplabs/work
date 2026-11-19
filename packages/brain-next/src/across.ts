@@ -10,7 +10,13 @@ import type {
   SourceList,
 } from "./contract.ts";
 import { exactsOf, foundIn } from "./exact.ts";
-import { byBytes, byFreshness, byNearness, byWordsFound } from "./order.ts";
+import {
+  backedAtOf,
+  byBytes,
+  byFreshness,
+  byNearness,
+  byWordsFound,
+} from "./order.ts";
 import type { MemoryOrder } from "./order.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Entry } from "./pack.ts";
@@ -199,7 +205,12 @@ const orderOf = (
   person: string | null
 ): MemoryOrder => ({
   confirmed: confirmed !== null,
-  own: person !== null && writer === person,
+  backedAt: backedAtOf(
+    person,
+    writer,
+    learnedAt.getTime(),
+    confirmed === null ? null : { by: confirmed.by, at: confirmed.at.getTime() }
+  ),
   learnedAt: learnedAt.getTime(),
   usedAt: usedAt?.getTime() ?? null,
   id,

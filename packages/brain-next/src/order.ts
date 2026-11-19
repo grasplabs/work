@@ -57,13 +57,13 @@ export const byNearness = (a: NearPassage, b: NearPassage): number =>
 
 /**
  * A memory as recall orders it after a way's own score: whether the reader
- * may count a confirmation of it, whether it is the reader's own word (its
- * writer is the reader's person), when it was learned, when the reader
+ * may count a confirmation of it, when the reader themselves last stood
+ * behind it (`backedAtOf`, or null), when it was learned, when the reader
  * last used it (the request's `used`, or null), its id.
  */
 export interface MemoryOrder {
   confirmed: boolean;
-  own: boolean;
+  backedAt: number | null;
   learnedAt: number;
   usedAt: number | null;
   id: string;
@@ -71,20 +71,48 @@ export interface MemoryOrder {
 
 /**
  * A memory's freshness for the reader: when it was learned, or when they
- * last used it if later. A memory nobody uses keeps the moment it was
- * learned while used ones move ahead: it fades, and is never dropped.
+ * last used it or stood behind it (`backedAt`) if later. A memory nobody
+ * uses keeps the moment it was learned while used ones move ahead: it
+ * fades, and is never dropped.
  */
-const freshnessOf = ({ learnedAt, usedAt }: MemoryOrder): number =>
-  Math.max(learnedAt, usedAt ?? learnedAt);
+const freshnessOf = ({ learnedAt, usedAt, backedAt }: MemoryOrder): number =>
+  Math.max(learnedAt, usedAt ?? learnedAt, backedAt ?? learnedAt);
 
 /**
- * Where a memory stands for the reader: their own word first, as a saved
- * memory is taken as correct, with no confirmation stored; level with a
- * confirmed one, it is the newer word of the person asking, so it comes
- * before it. Then a confirmed memory, then the rest.
+ * When the reader `person` last stood behind a memory, from what is
+ * stored, or null if they never did: its learning, when it is their own
+ * word (its writer is them: a saved memory is taken as correct), and the
+ * moment of the confirmation that counts (`confirmed`), when it is theirs.
+ * With their use, it is their latest act on it (`freshnessOf`), and the
+ * latest wins: a correction after their confirmation of the side it
+ * corrects, or a confirmation after their own word on another side. Their
+ * own word and their confirmation can be in two stores, which a
+ * confirmation can't name, so only the moments tell them apart.
  */
-const standingOf = ({ own, confirmed }: MemoryOrder): number => {
-  if (own) {
+export const backedAtOf = (
+  person: string | null,
+  writer: string | null,
+  learnedAt: number,
+  confirmed: { by: string; at: number } | null
+): number | null => {
+  if (person === null) {
+    return null;
+  }
+  const said = writer === person ? learnedAt : null;
+  const chose = confirmed?.by === person ? confirmed.at : null;
+  if (said === null || chose === null) {
+    return said ?? chose;
+  }
+  return Math.max(said, chose);
+};
+
+/**
+ * Where a memory stands for the reader: what they stood behind first, as
+ * a saved memory is taken as correct, with no confirmation stored, before
+ * one others confirmed; then a confirmed memory, then the rest.
+ */
+const standingOf = ({ backedAt, confirmed }: MemoryOrder): number => {
+  if (backedAt !== null) {
     return 0;
   }
   return confirmed ? 1 : 2;
@@ -93,9 +121,9 @@ const standingOf = ({ own, confirmed }: MemoryOrder): number => {
 /**
  * The one order of memories after a way's own score, wherever they are
  * cut or merged (recall-memories.ts, memories.ts `memoriesByWords`,
- * across.ts): the reader's own word, then confirmed (`standingOf`), so
- * neither ever fades below one that is neither; then fresher for the
- * reader; then newer; then by id, as SQLite orders text, the last first.
+ * across.ts): by standing (`standingOf`), so none fades below one that
+ * stands lower; then fresher for the reader; then newer; then by id, as
+ * SQLite orders text, the last first.
  */
 export const byFreshness = (a: MemoryOrder, b: MemoryOrder): number =>
   standingOf(a) - standingOf(b) ||
