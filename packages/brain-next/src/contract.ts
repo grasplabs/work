@@ -2800,10 +2800,15 @@ export const retireWrittenRequestSchema = z.strictObject({
 });
 export type RetireWrittenRequest = z.infer<typeof retireWrittenRequestSchema>;
 
-/** A contested memory the reader confirms, as their own word, over its rivals. */
+/**
+ * A memory the reader confirms, as their own word: a side of a fact sources
+ * disagree on, or, as a `correction`, their own word as it is saved (the
+ * host's correction of a memory), whatever contests it.
+ */
 export const confirmRequestSchema = z.strictObject({
   memory: memoryIdSchema,
   reader: personReaderSchema,
+  correction: z.literal(true).optional(),
 });
 export type ConfirmRequest = z.infer<typeof confirmRequestSchema>;
 
@@ -3767,8 +3772,9 @@ export interface Brain {
    * them by a reader who may read the memory and each one it was
    * confirmed over, and no current rival besides. A repeat by the same
    * person over the same rivals records nothing new. `nothing` for a
-   * memory no current memory they may read contests: a saved memory is
-   * taken as correct, so there is nothing to confirm.
+   * memory no current memory they may read contests (a saved memory is
+   * taken as correct, so there is nothing to confirm), unless it is a
+   * `correction` of theirs: their own word, confirmed as it is saved.
    */
   confirmMemory: (request: ConfirmRequest) => Promise<MemoryChangeOutcome>;
   /**

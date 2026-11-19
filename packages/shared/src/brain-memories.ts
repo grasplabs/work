@@ -191,7 +191,7 @@ export interface BrainMemoryShown {
   learnedAt: string;
   /** When it stopped being believed, as they see it; null while current. */
   endedAt: string | null;
-  /** A confirmation that settled the fact it is a side of, as they may see it: when, and whether it was theirs. */
+  /** A confirmation they may see (one that settled a disagreement, or their own correction's): when, and whether it was theirs. */
   confirmed: { at: string; byYou: boolean } | null;
   /** When it starts and stops being true, when it says (ISO 8601); null for no such bound. */
   validFrom: string | null;
@@ -360,7 +360,7 @@ export interface BrainMemoriesApi {
   contested: (next?: BrainMemoryPageNext | null) => Promise<BrainContestedPage>;
   /** Settles a fact sources disagree on: confirms a current side they may read over the sides they may read that say otherwise; `nothing` for a memory nothing contests. */
   confirm: (memory: BrainMemoryPlace) => Promise<BrainMemoryOutcome>;
-  /** Says a memory is wrong, with what is right: saved as their own word, for them alone. */
+  /** Says a memory is wrong, with what is right: saved as their own word, for them alone, and confirmed. */
   correct: (correction: BrainCorrection) => Promise<BrainCorrected>;
   /**
    * The id of the entity that is the person themselves, in their own

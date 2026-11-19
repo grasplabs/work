@@ -23,7 +23,7 @@ import type {
   RetiredMemory,
   SourceVersionRef,
 } from "./contract.ts";
-import { backedAtOf, byWordsFound } from "./order.ts";
+import { byWordsFound } from "./order.ts";
 import type { MemoryOrder } from "./order.ts";
 import { readableSql } from "./reader-sets.ts";
 import { termsOf } from "./words.ts";
@@ -1132,36 +1132,44 @@ const currentOneSql = memoriesSql({
 });
 
 /**
- * The reader settles a fact sources disagree on: confirms the memory `id`,
- * current, readable to them and contested for them, over the current
- * memories they may read that say something else of its entity and
- * one-value attribute (contract.ts `confirmMemory`). A memory nobody
- * contests is taken as correct once saved, so there is nothing to confirm.
- * Run in one transaction: what it reads and writes is one snapshot.
+ * The reader confirms the memory `id`, current and readable to them, over
+ * the current memories they may read that say something else of its
+ * entity and one-value attribute (contract.ts `confirmMemory`): a side of
+ * a fact they may read sources disagree on, or, as a `correction`, their
+ * own word whatever contests it. A saved memory is taken as correct, so
+ * any other is `nothing`. Run in one transaction: what it reads and writes
+ * is one snapshot.
  */
 export const confirmMemory = (
   sql: SqlStorage,
-  { id, reader }: { id: string; reader: PersonReader }
+  {
+    id,
+    reader,
+    correction = false,
+  }: { id: string; reader: PersonReader; correction?: boolean }
 ): MemoryChangeOutcome => {
   const at = readMoment(sql);
   const [target] = memoryRows(sql, currentOneSql, id, reader, at, 1);
-  // A contested memory has an attribute: `rivalSql` asks for one.
-  if (
-    target === undefined ||
-    target.contested === 0 ||
-    target.attribute === null
-  ) {
+  if (target === undefined) {
     return "nothing";
   }
-  const over = memoryRows(
-    sql,
-    currentOfAttributeSql,
-    target.entity_row,
-    reader,
-    at,
-    -1,
-    target.attribute
-  ).filter(({ value_key: key }) => key !== target.value_key);
+  // A contested memory has an attribute: `rivalSql` asks for one.
+  const settles = target.attribute !== null && target.contested === 1;
+  if (!settles && !(correction && target.writer === reader.person)) {
+    return "nothing";
+  }
+  const over =
+    target.attribute === null || !settles
+      ? []
+      : memoryRows(
+          sql,
+          currentOfAttributeSql,
+          target.entity_row,
+          reader,
+          at,
+          -1,
+          target.attribute
+        ).filter(({ value_key: key }) => key !== target.value_key);
   const overRows = JSON.stringify(over.map((memory) => memory.row));
   // The same person over the same rivals again: already recorded.
   const [again] = sql
@@ -1328,33 +1336,27 @@ export const usedAtOf = (used: RecallRequest["used"] = []): UsedAt => {
  * them by besides.
  */
 export const candidatesOuter = (score = ""): string => `
-SELECT row, id, writer, confirmation, learned_at${score}
+SELECT row, id, confirmation IS NOT NULL AS confirmed, learned_at${score}
 FROM rows`;
 
 /** A candidate as `candidatesOuter` returns it. */
 export interface CandidateRow extends Record<string, SqlStorageValue> {
   row: number;
   id: string;
-  writer: string | null;
-  confirmation: string | null;
+  confirmed: number;
   learned_at: number;
 }
 
-/** `candidate` as `byFreshness` (order.ts) orders it for the reader `person`, with their use. */
+/** `candidate` as `byFreshness` (order.ts) orders it, with the reader's use. */
 export const orderOf = (
-  { id, writer, confirmation, learned_at: learnedAt }: CandidateRow,
-  used: UsedAt,
-  person: string | null
-): MemoryOrder => {
-  const confirmed = confirmationOf(confirmation);
-  return {
-    confirmed: confirmed !== null,
-    backedAt: backedAtOf(person, writer, learnedAt, confirmed),
-    learnedAt,
-    usedAt: used.get(id) ?? null,
-    id,
-  };
-};
+  { id, confirmed, learned_at: learnedAt }: CandidateRow,
+  used: UsedAt
+): MemoryOrder => ({
+  confirmed: confirmed === 1,
+  learnedAt,
+  usedAt: used.get(id) ?? null,
+  id,
+});
 
 /**
  * `?1` the rows of memories a cut chose (JSON): those of them the reader
@@ -1481,7 +1483,7 @@ export const memoriesByWords = (
     )
     .toArray()
     .map((candidate) => ({
-      ...orderOf(candidate, used, reader.person),
+      ...orderOf(candidate, used),
       row: candidate.row,
       words: candidate.words,
       exact: candidate.exact,

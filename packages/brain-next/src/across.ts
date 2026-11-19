@@ -10,13 +10,7 @@ import type {
   SourceList,
 } from "./contract.ts";
 import { exactsOf, foundIn } from "./exact.ts";
-import {
-  backedAtOf,
-  byBytes,
-  byFreshness,
-  byNearness,
-  byWordsFound,
-} from "./order.ts";
+import { byBytes, byFreshness, byNearness, byWordsFound } from "./order.ts";
 import type { MemoryOrder } from "./order.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Entry } from "./pack.ts";
@@ -199,18 +193,14 @@ const byMeaning = (findings: readonly Finding[]): Entry[] =>
 /** A memory of the store `store`, as merged. */
 type MemoryOf = FoundMemory & { store: number };
 
-/** `memory` as order.ts `byFreshness` orders it for the reader `person`. */
-const orderOf = (
-  { confirmed, writer, learnedAt, usedAt, id }: FoundMemory,
-  person: string | null
-): MemoryOrder => ({
+/** `memory` as order.ts `byFreshness` orders it. */
+const orderOf = ({
+  confirmed,
+  learnedAt,
+  usedAt,
+  id,
+}: FoundMemory): MemoryOrder => ({
   confirmed: confirmed !== null,
-  backedAt: backedAtOf(
-    person,
-    writer,
-    learnedAt.getTime(),
-    confirmed === null ? null : { by: confirmed.by, at: confirmed.at.getTime() }
-  ),
   learnedAt: learnedAt.getTime(),
   usedAt: usedAt?.getTime() ?? null,
   id,
@@ -221,11 +211,11 @@ const memoryKeyOf = ({ store, id }: MemoryOf): string =>
   `memory ${store} ${id}`;
 
 /**
- * After a way's own order: order.ts `byFreshness` for the reader `person`,
- * the order each store cut its own lists in, then by store.
+ * After a way's own order: order.ts `byFreshness`, the order each store
+ * cut its own lists in, then by store.
  */
-const byMemory = (a: MemoryOf, b: MemoryOf, person: string | null): number =>
-  byFreshness(orderOf(a, person), orderOf(b, person)) || a.store - b.store;
+const byMemory = (a: MemoryOf, b: MemoryOf): number =>
+  byFreshness(orderOf(a), orderOf(b)) || a.store - b.store;
 
 /**
  * The memory ways' lists, merged over the stores as one store's
@@ -237,8 +227,7 @@ const byMemory = (a: MemoryOf, b: MemoryOf, person: string | null): number =>
  * store's: sides are never across stores).
  */
 const memoriesOf = (
-  findings: readonly Finding[],
-  person: string | null
+  findings: readonly Finding[]
 ): { words: Entry[]; entities: Entry[] } => {
   const tagged = (
     pick: (memories: Finding["memories"]) => FoundMemory[]
@@ -280,14 +269,14 @@ const memoriesOf = (
       .toSorted(
         (a, b) =>
           byWordsFound(
-            { ...orderOf(a, person), words: a.words, exact: a.exact },
-            { ...orderOf(b, person), words: b.words, exact: b.exact }
+            { ...orderOf(a), words: a.words, exact: a.exact },
+            { ...orderOf(b), words: b.words, exact: b.exact }
           ) || a.store - b.store
       )
       .slice(0, recallLimit)
       .map((memory) => entryOf(memory, "words")),
     entities: tagged(({ entities }) => entities)
-      .toSorted((a, b) => a.step - b.step || byMemory(a, b, person))
+      .toSorted((a, b) => a.step - b.step || byMemory(a, b))
       .slice(0, recallLimit)
       .map((memory) => entryOf(memory, "entities")),
   };
@@ -309,8 +298,7 @@ const memoriesOf = (
 export const packAcross = (
   question: string,
   budget: number,
-  findings: readonly Finding[],
-  person: string | null
+  findings: readonly Finding[]
 ): Pack => {
   const exacts = exactsOf(question);
   const terms = termsOf(question);
@@ -324,7 +312,7 @@ export const packAcross = (
       )
     )
   );
-  const memories = memoriesOf(findings, person);
+  const memories = memoriesOf(findings);
   const dated = (index: number) => exacts[index]?.kind === "date";
   const pack = packOf(
     fuse([

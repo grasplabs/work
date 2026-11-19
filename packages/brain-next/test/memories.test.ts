@@ -1796,6 +1796,45 @@ describe("what hidden memories never decide, and when a fact ends", () => {
     ).resolves.toStrictEqual(["is CEO from next year"]);
   });
 
+  it("confirms nothing of a memory whose only rival an erasure hides, before its tick deletes it", async () => {
+    const group = unique("g");
+    const made = await remember(
+      audience(group),
+      [customer()],
+      [
+        fact(
+          { kind: "writer", writer: unique("w") },
+          { attribute: "status", value: "Active", statement: "Active" }
+        ),
+      ]
+    );
+    const entity = made.entities.c ?? "";
+    const source = await addSource("Acme churned", audience(group));
+    await remember(
+      audience(group),
+      [customer({ id: entity })],
+      [
+        fact(
+          { kind: "source", ...source, quote: "Acme churned" },
+          { attribute: "status", value: "Churned", statement: "Churned" }
+        ),
+      ]
+    );
+    // Erased, its tick not yet run: the rival is hidden, not yet deleted.
+    await shared().eraseSource({ source: source.source, reason: "deleted" });
+    const reader = readerOf(unique("p"), group);
+    const outcome = await shared().confirmMemory({
+      memory: made.memories[0] ?? "",
+      reader,
+    });
+    const { memories } = await shared().readMemories({ entity, reader });
+
+    expect({
+      outcome,
+      read: memories.map(({ value, confirmed }) => [value, confirmed]),
+    }).toStrictEqual({ outcome: "nothing", read: [["Active", null]] });
+  });
+
   it("records a person's repeated confirmation once", async () => {
     const group = unique("g");
     const made = await remember(

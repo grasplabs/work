@@ -2,7 +2,6 @@ import {
   brainOf,
   memoriesPerAddMax,
   personalBrainOf,
-  recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
 import type {
   NewEntity,
@@ -23,7 +22,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
 import { correctFor } from "../src/brain-memories.ts";
-import { addSource, recallAs, rememberAs } from "../src/brain-next.ts";
+import { addSource, correctAs, rememberAs } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
@@ -39,7 +38,7 @@ type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
 // answers as one there isn't, in lists, pages and whether more follow; a
 // contested fact shows its sides to someone who can read them, who can
 // confirm one; marking a memory wrong saves their own word, theirs alone,
-// current as saved, and audited. The permission harness
+// confirmed, and audited. The permission harness
 // (brain-next-surfaces.ts) probes every method with markers.
 
 const idp = mockIdp();
@@ -69,7 +68,7 @@ const boundOf = (holder: object, member: string | symbol): unknown => {
  * `failed` once, after which they answer as ever: a store that fails
  * part-way through a correction.
  */
-const withFailingOnce = (failed: "addMemories"): Env => {
+const withFailingOnce = (failed: "confirmMemory" | "retireMemory"): Env => {
   let failing = true;
   const stores = inJurisdiction(env, env.BRAIN_STORE);
   const namespace = new Proxy(stores, {
@@ -148,27 +147,6 @@ const statusFrom = (
   speaker: { kind: "system" },
   basis: { kind: "source", ...cited, quote: value },
 });
-
-/**
- * The customer's statuses `personId`'s own chat recalls, in the pack's
- * order: each statement holds as many of the question's words, as written.
- */
-const recalledStatusesOf = async (personId: string): Promise<string[]> => {
-  const pack = await recallAs(env, personId, {
-    question: "Is the customer Renewing, Paused or Churned?",
-    budget: { tokens: recallBudgetMax },
-    personal: true,
-  });
-  return pack.memories
-    .map(({ statement }) => statement.replace("The customer is ", ""))
-    .filter((said) => ["Renewing", "Paused", "Churned"].includes(said));
-};
-
-/** The status `personId`'s own chat recalls first (`recalledStatusesOf`). */
-const firstStatusOf = async (personId: string): Promise<string | undefined> => {
-  const [first] = await recalledStatusesOf(personId);
-  return first;
-};
 
 /** Adds `memories` about the customer `customer` (an entity), readable by team `teamId`; the ids. */
 const remember = async (
@@ -595,7 +573,7 @@ describe("the Brain's memories, as a person reads them", () => {
     });
   });
 
-  it("saves a correction as the person's own word, theirs alone and current, and answers a memory they may not read as one there isn't", async () => {
+  it("saves a correction as the person's own word, theirs alone and confirmed, and answers a memory they may not read as one there isn't", async () => {
     const [anna, ben] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
@@ -636,10 +614,11 @@ describe("the Brain's memories, as a person reads them", () => {
     const own = { store: "own" as const, id: saved.entity };
     const kept = await memoriesAbout(anna.api, own);
     expect({
-      kept: kept.map(({ id, value, yours, endedAt }) => ({
+      kept: kept.map(({ id, value, yours, confirmed, endedAt }) => ({
         id,
         value,
         yours,
+        confirmed: confirmed?.byYou ?? null,
         ended: endedAt !== null,
       })),
       entity: await listedAs(anna.api, own),
@@ -655,6 +634,7 @@ describe("the Brain's memories, as a person reads them", () => {
           id: saved.memory,
           value: "Churned",
           yours: true,
+          confirmed: true,
           ended: false,
         },
       ],
@@ -777,145 +757,7 @@ describe("the Brain's memories, as a person reads them", () => {
     ]);
   });
 
-  it("recalls a person's correction of a fact colleagues settled first for them, and the settled side first for the colleagues", async () => {
-    const [anna, ben] = await Promise.all([
-      signedInApi(idp, "user"),
-      signedInApi(idp, "user"),
-    ]);
-    const sales = await teamOf(anna.userId, ben.userId);
-    const [renews, pauses] = await Promise.all([
-      sourceOf(sales, "Globex renews"),
-      sourceOf(sales, "Globex pauses"),
-    ]);
-    const { entities } = await remember(
-      sales,
-      { kind: "customer", names: ["Globex"] },
-      [statusFrom(renews.cited, "Renewing")]
-    );
-    const entity = entities.c ?? "";
-    const paused = await remember(sales, { kind: "customer", id: entity }, [
-      statusFrom(pauses.cited, "Paused"),
-    ]);
-    const { memories } = await shared().readMemories({
-      entity,
-      reader: { person: ben.userId, groups: [`team:${sales}`] },
-    });
-    const renewing = memories.find(({ value }) => value === "Renewing");
-    // Ben settles it; then Anna says that side is wrong.
-    await expect(
-      ben.api.brainMemories.confirm({
-        store: "shared",
-        memory: renewing?.id ?? "",
-      })
-    ).resolves.toBe("done");
-    await anna.api.brainMemories.correct({
-      wrong: { store: "shared", entity, memory: renewing?.id ?? "" },
-      right: "The customer is Churned",
-      change: crypto.randomUUID(),
-    });
-    expect({
-      paused: paused.memories.length,
-      anna: await recalledStatusesOf(anna.userId),
-      ben: await recalledStatusesOf(ben.userId),
-    }).toStrictEqual({
-      paused: 1,
-      // Her own word, taken as correct as saved, before the side settled.
-      anna: ["Churned", "Renewing", "Paused"],
-      ben: ["Renewing", "Paused"],
-    });
-
-    // She then says that side is right after all: her latest act wins.
-    await expect(
-      anna.api.brainMemories.confirm({
-        store: "shared",
-        memory: renewing?.id ?? "",
-      })
-    ).resolves.toBe("done");
-    const confirmedLast = await firstStatusOf(anna.userId);
-    // And corrects it once more: again her latest act.
-    await anna.api.brainMemories.correct({
-      wrong: { store: "shared", entity, memory: renewing?.id ?? "" },
-      right: "The customer is Churned",
-      change: crypto.randomUUID(),
-    });
-    expect({
-      confirmedLast,
-      correctedLast: await firstStatusOf(anna.userId),
-    }).toStrictEqual({ confirmedLast: "Renewing", correctedLast: "Churned" });
-  });
-
-  it("recalls the side a person confirmed first for them, over a status of their own they shared", async () => {
-    const [anna, ben, cleo] = await Promise.all([
-      signedInApi(idp, "user"),
-      signedInApi(idp, "user"),
-      signedInApi(idp, "user"),
-    ]);
-    // A team of three: one she may share with.
-    const sales = await teamOf(anna.userId, ben.userId, cleo.userId);
-    const name = `Initech ${crypto.randomUUID()}`;
-    const renews = await sourceOf(sales, "Initech renews");
-    const { entities } = await remember(
-      sales,
-      { kind: "customer", names: [name] },
-      [statusFrom(renews.cited, "Renewing")]
-    );
-    const entity = entities.c ?? "";
-    // Anna said it churned, and shared that with her team.
-    const said = await rememberAs(env, anna.userId, {
-      change: crypto.randomUUID(),
-      about: { kind: "customer", names: [name] },
-      attribute: "status",
-      value: "Churned",
-      type: "fact",
-      statement: "The customer is Churned",
-      quote: "The customer is Churned",
-    });
-    const [own] = await memoriesAbout(anna.api, {
-      store: "own",
-      id: said.entity,
-    });
-    if (own === undefined) {
-      throw new Error("Saved nothing of her own");
-    }
-    const copy = await anna.api.brainMemories.publish({
-      memory: { entity: own.about, memory: own.id },
-      shown: {
-        about: name,
-        attribute: own.attribute,
-        type: own.type,
-        value: own.value,
-        statement: own.statement,
-        validFrom: own.validFrom,
-        validUntil: own.validUntil,
-      },
-      audience: { team: sales },
-      change: crypto.randomUUID(),
-    });
-    const sides = await memoriesAbout(anna.api, {
-      store: "shared",
-      id: entity,
-    });
-    const renewing = sides.find(({ value }) => value === "Renewing");
-    // Then she says the source is right after all.
-    const confirmed = await anna.api.brainMemories.confirm({
-      store: "shared",
-      memory: renewing?.id ?? "",
-    });
-
-    expect({
-      copy: copy?.entity,
-      contested: sides.map(({ contested }) => contested),
-      confirmed,
-      anna: await firstStatusOf(anna.userId),
-    }).toStrictEqual({
-      copy: entity,
-      contested: [true, true],
-      confirmed: "done",
-      anna: "Renewing",
-    });
-  });
-
-  it("answers a retry of a correction with what it saved, and refuses its id with other words", async () => {
+  it("answers a retry of a correction with what it saved, confirms it then if it failed before, and refuses its id with other words", async () => {
     const anna = await signedInApi(idp, "user");
     const sales = await teamOf(anna.userId);
     const { cited } = await sourceOf(sales, "Hooli renews");
@@ -929,8 +771,13 @@ describe("the Brain's memories, as a person reads them", () => {
       entity: added.entities.c ?? "",
       memory: added.memories[0] ?? "",
     };
+    // The first time, the confirmation fails after the correction is saved.
+    const failing = withFailingOnce("confirmMemory");
     const change = crypto.randomUUID();
-    const saved = await anna.api.brainMemories.correct({
+    await expect(
+      correctAs(failing, anna.userId, { wrong, right: "Churned", change })
+    ).rejects.toThrow(failedCall);
+    const retried = await anna.api.brainMemories.correct({
       wrong,
       right: "Churned",
       change,
@@ -942,14 +789,18 @@ describe("the Brain's memories, as a person reads them", () => {
     });
     const kept = await memoriesAbout(anna.api, {
       store: "own",
-      id: saved?.entity ?? "",
+      id: retried?.entity ?? "",
     });
     expect({
       again: again?.memory,
-      kept: kept.map(({ id, endedAt }) => ({ id, ended: endedAt !== null })),
+      kept: kept.map(({ id, confirmed, endedAt }) => ({
+        id,
+        confirmed: confirmed?.byYou ?? null,
+        ended: endedAt !== null,
+      })),
     }).toStrictEqual({
-      again: saved?.memory,
-      kept: [{ id: saved?.memory, ended: false }],
+      again: retried?.memory,
+      kept: [{ id: retried?.memory, confirmed: true, ended: false }],
     });
     await expect(
       anna.api.brainMemories.correct({ wrong, right: "Paused", change })
@@ -1120,7 +971,7 @@ describe("the Brain's memories, as a person reads them", () => {
     ]).toStrictEqual([null, null]);
   });
 
-  it("ends the person's own wrong word with the correction's save, whole on a retry after a save that failed, one audit outcome per attempt", async () => {
+  it("ends the person's own wrong word in the correction's own save, before a step that fails, and confirms it on a retry, one audit outcome per attempt", async () => {
     const anna = await signedInApi(idp, "user");
     const said = await rememberAs(env, anna.userId, {
       change: crypto.randomUUID(),
@@ -1139,7 +990,7 @@ describe("the Brain's memories, as a person reads them", () => {
     const change = crypto.randomUUID();
     await expect(
       correctFor(
-        withFailingOnce("addMemories"),
+        withFailingOnce("confirmMemory"),
         {
           person: anna.userId,
           actor: { type: "person", userId: anna.userId },
@@ -1147,7 +998,7 @@ describe("the Brain's memories, as a person reads them", () => {
         { wrong, right: "Needs SOC 2", change }
       )
     ).rejects.toThrow(failedCall);
-    // A save that failed changed nothing.
+    // Ended with the save, though the confirmation after it failed.
     const failed = await memoriesAbout(anna.api, {
       store: "own",
       id: said.entity,
@@ -1166,7 +1017,7 @@ describe("the Brain's memories, as a person reads them", () => {
       kept: kept.map(({ id, endedAt }) => ({ id, ended: endedAt !== null })),
       audited: await auditedOf(anna.userId, "brain.memory.corrected"),
     }).toStrictEqual({
-      failed: false,
+      failed: true,
       kept: [
         { id: saved?.memory, ended: false },
         { id: said.memory, ended: true },

@@ -570,9 +570,6 @@ export const recall = (
   request: RecallRequest,
   way: WayRunner
 ): Pack =>
-  packAcross(
-    request.question,
-    request.budget.tokens,
-    [find(sql, request, way)],
-    request.reader.person
-  );
+  packAcross(request.question, request.budget.tokens, [
+    find(sql, request, way),
+  ]);

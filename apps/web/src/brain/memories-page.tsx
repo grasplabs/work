@@ -393,7 +393,7 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
 
 /**
  * Says `memory` is wrong, with what is right: the person's own word,
- * theirs alone. One opening of it (`opening`, the page keys it
+ * theirs alone, confirmed. One opening of it (`opening`, the page keys it
  * by that) is one correction, its id first the opening's, so a retry
  * saves it once, and the key its answer is tied to: a reply for an
  * earlier opening lands nowhere. The page holds it apart from the row

@@ -1154,8 +1154,7 @@ const scenario = (people: readonly string[], seed: number) => {
       await Promise.all([
         brainStore().find(request),
         ownStore(personId(person)).find(request),
-      ]),
-      request.reader.person
+      ])
     );
     return {
       ...pack,
