@@ -30,7 +30,7 @@ const AiProvidersPage = () => {
   const { t } = useLingui();
   const { page, spend, settings } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { concept } = Route.useSearch();
+  const { concept, empty } = Route.useSearch();
   if (page.state !== "ready") {
     return (
       <SectionCard variant="grouped" density="compact" title={t`AI and spend`}>
@@ -38,13 +38,15 @@ const AiProvidersPage = () => {
       </SectionCard>
     );
   }
-  const { providers, source } = page.data;
+  // Concept branch only: `&empty` shows the page as if nothing were connected.
+  const listing = empty === true ? { ...page.data, providers: [] } : page.data;
+  const { providers, source } = listing;
   const unanswered = providers.length === 0 && source !== "grasp";
   return (
     <>
       <AiProvidersSettings
         editable={isMemberAdmin(identity)}
-        listing={page.data}
+        listing={listing}
         {...(concept === undefined
           ? {}
           : {
@@ -64,9 +66,14 @@ export const Route = createFileRoute("/_shell/settings/ai-providers")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: AiProvidersPage,
-  validateSearch: (search: Record<string, unknown>): { concept?: Concept } => {
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { concept?: Concept; empty?: boolean } => {
     const chosen = concepts.find((each) => each === search.concept);
-    return chosen === undefined ? {} : { concept: chosen };
+    return {
+      ...(chosen === undefined ? {} : { concept: chosen }),
+      ...(search.empty === undefined ? {} : { empty: true }),
+    };
   },
   loader: async ({ context: { core } }) => {
     const [page, spend, settings] = await Promise.all([
