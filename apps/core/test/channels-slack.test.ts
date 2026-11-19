@@ -668,6 +668,35 @@ const sectionTextsOf = (blocks: unknown): string[] => {
   );
 };
 
+/**
+ * Every text `blocks` shows, as Slack's API got them, in order: each
+ * section's, and each element of a muted line's (a context block), each
+ * of which Slack takes to 3,000 characters.
+ */
+const shownTextsOf = (blocks: unknown): string[] => {
+  const parsed = z
+    .array(
+      z
+        .object({
+          type: z.string(),
+          text: z.object({ text: z.string() }).optional(),
+          elements: z.array(z.object({ text: z.unknown() }).loose()).optional(),
+        })
+        .loose()
+    )
+    .safeParse(typeof blocks === "string" ? JSON.parse(blocks) : blocks);
+  return (parsed.data ?? []).flatMap(({ type, text, elements }) => {
+    if (type === "section") {
+      return text === undefined ? [] : [text.text];
+    }
+    return type === "context"
+      ? (elements ?? []).flatMap((element) =>
+          typeof element.text === "string" ? [element.text] : []
+        )
+      : [];
+  });
+};
+
 describe("a linked person's answer in Slack", () => {
   it("is posted whole over several messages when too long for one, Slack's own syntax escaped in each, no section cut", async () => {
     const sentence =
@@ -1234,6 +1263,52 @@ describe("a linked person's direct message in Slack", () => {
 });
 
 describe("a linked person's memory in Slack", () => {
+  it("names on its notice everything it replaced, however long, in sections Slack takes whole", async () => {
+    const { slackUser, userId } = await linkedPerson();
+    /** A statement of the Brain's most characters, its own words throughout. */
+    const long = (at: number) =>
+      `Loves dish ${at} ${marker()} `.repeat(60).slice(0, 1000).trim();
+    const statements = [1, 2, 3, 4].map((at) => long(at));
+    const earlier = [];
+    for (const statement of statements) {
+      // oxlint-disable-next-line no-await-in-loop -- one save after another
+      const saved = await rememberAs(env, userId, {
+        change: `chat:${crypto.randomUUID()}:call`,
+        about: { kind: "person", own: true },
+        type: "fact",
+        statement,
+        quote: "I love it",
+      });
+      earlier.push(saved.memory);
+    }
+    await fakeProvider(
+      toolStep("remember", {
+        about: "me",
+        type: "fact",
+        statement: "Loves sushi now",
+        quote: "sushi now",
+        replaces: earlier,
+      }),
+      says(JSON.stringify({ theirs: true })),
+      says("Noted.")
+    );
+    const message = messageFrom(slackUser);
+    message.event.text = "None of those any more, it's sushi now.";
+    await post(message, { caught: false });
+    const seen = await slackSawIn(message.event.channel);
+    const notice = seen.find(({ fields }) =>
+      JSON.stringify(fields).includes(undoAction)
+    );
+    const shown = shownTextsOf(notice?.fields.blocks);
+
+    expect({
+      eachWithin: shown.every((text) => text.length <= 3000),
+      whole: statements.map((statement) =>
+        ink(shown.join("")).includes(ink(statement))
+      ),
+    }).toStrictEqual({ eachWithin: true, whole: [true, true, true, true] });
+  });
+
   it("is kept in their own store, shown in their direct message with Slack's own syntax escaped, and retired by their Undo, once", async () => {
     // As in Teams (channels-remember.test.ts): the person's own chat
     // (GRA-1920), with the notice and Undo where they wrote.

@@ -1251,6 +1251,7 @@ type CorePersonMember =
   | "memoryChoices"
   | "ownEntityAs"
   | "ownEntityIdAs"
+  | "ownWordAs"
   | "profileAs"
   | "entitiesAs"
   | "memoriesAs"
@@ -7985,6 +7986,62 @@ const corePersonMemories = {
         stranger()
       ),
       await read("an id of the markers", markers.join("")),
+    ];
+  },
+  // What the reader's own memories say, to check a save that replaces
+  // them (GRA-2184): one in the shared store, one in someone else's own
+  // store and one no one added answer alike, null.
+  ownWordAs: async (probing) => {
+    const { personId, markers } = probing;
+    const [fixture, others] = await Promise.all([
+      memoryFixture(probing),
+      othersOwnMemory(markers),
+    ]);
+    const read = async (
+      name: string,
+      entity: string,
+      memory: string,
+      about?: Answer["about"],
+      as = personId
+    ) =>
+      await answer(
+        name,
+        async () => await coreBrain.ownWordAs(env, as, entity, [memory]),
+        about
+      );
+    return [
+      await read(
+        "a memory no one added",
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+        "nothing"
+      ),
+      await read(
+        "a hidden memory of the shared store",
+        fixture.hidden,
+        fixture.hiddenMemory,
+        "hidden"
+      ),
+      await read(
+        "one drawn from a hidden source",
+        fixture.drawn,
+        fixture.drawnMemory,
+        "hidden"
+      ),
+      await read(
+        "one in someone else's own store",
+        others.entity,
+        others.memory,
+        "hidden"
+      ),
+      await read(
+        "as someone who isn't a member",
+        others.entity,
+        others.memory,
+        undefined,
+        stranger()
+      ),
+      await read("an id of the markers", markers.join(""), markers.join("")),
     ];
   },
   // The reader's profile (GRA-1745): theirs alone, whatever someone

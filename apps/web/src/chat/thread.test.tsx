@@ -259,6 +259,47 @@ describe(ChatThread, () => {
     );
   });
 
+  it("says under a call of remember what the memory replaced", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Loves sushi" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "preference",
+          statement: "Loves sushi",
+          replaced: ["Loves pizza", "Loves pasta"],
+        },
+      },
+    ]);
+
+    expect(document.body.textContent).toContain(
+      "In place of: Loves pizza and Loves pasta"
+    );
+  });
+
   it("says when an undo found nothing to undo, never that it was forgotten", async () => {
     forgetAnswer = "nothing";
     const at = "2026-10-27T09:00:05.000Z";

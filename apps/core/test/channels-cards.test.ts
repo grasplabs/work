@@ -514,6 +514,7 @@ const values = {
   statement: "Wants answers in Dutch",
   about: "Acme",
   value: "Dutch",
+  replaced: "Wants answers in English",
 };
 
 /** Block Kit's limits, as Slack documents them for a message's blocks. */

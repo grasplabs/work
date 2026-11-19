@@ -14,6 +14,7 @@ import { Trans } from "@lingui/react/macro";
 import { BrainIcon } from "lucide-react";
 import { useState } from "react";
 
+import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 /**
@@ -46,6 +47,12 @@ const SavedText = ({
   );
 };
 
+/** What the earlier memories it replaced said, as one sentence. */
+const ReplacedText = ({ statements }: { statements: readonly string[] }) => {
+  const replaced = formatList(statements);
+  return <Trans>In place of: {replaced}</Trans>;
+};
+
 /** Whether it says how Grasp should act for the person, and which way. */
 const SavedKind = ({ type }: Pick<ChatSavedMemory, "type">) => {
   if (type === "instruction") {
@@ -68,8 +75,9 @@ const SavedKind = ({ type }: Pick<ChatSavedMemory, "type">) => {
 /**
  * Under a call of `remember`: what Grasp saved of what the person said,
  * as the store keeps it (its statement, who or what it is about when it
- * isn't them, its value, and whether it says how Grasp should act for
- * them), and a way to undo it, which retires the memory (core's
+ * isn't them, its value, whether it says how Grasp should act for them,
+ * and what it replaced), and a way to undo it, which brings back what it
+ * replaced, which retires the memory (core's
  * `session.brainMemories.forget`): it never becomes current again, even
  * once a later save replaced it. Said forgotten only when core answers
  * `done` (one undone before, here or elsewhere, too); `nothing` means
@@ -115,6 +123,11 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
           </>
         ) : null}
       </TraceTitle>
+      {outcome === undefined && saved.replaced !== undefined ? (
+        <TraceDescription>
+          <ReplacedText statements={saved.replaced} />
+        </TraceDescription>
+      ) : null}
       {failure === undefined ? null : (
         <TraceDescription>{failure}</TraceDescription>
       )}
