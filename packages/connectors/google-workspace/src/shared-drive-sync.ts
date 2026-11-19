@@ -14,13 +14,7 @@ import { syncPlaceSchema } from "@grasp-os/shared/sync";
 import type { SyncChoice } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
-import {
-  fileRoutes,
-  permissionFields,
-  permissionListSchema,
-  readFiles,
-  readersInChain,
-} from "./drive-sync.ts";
+import { fileRoutes, readFiles } from "./drive-sync.ts";
 import type { DriveFile, Scope } from "./drive-sync.ts";
 import { apisHost, googleFailure, googleUrl } from "./google.ts";
 
@@ -44,24 +38,9 @@ import { apisHost, googleFailure, googleUrl } from "./google.ts";
 // Everything else (content, versions, the bin, `removed`, where a read
 // stops) is the person's own Drive sync's (drive-sync.ts), on this scope.
 //
-// Who may read what it brings (GRA-2145): those Google lets open each
-// file, of whom core lets read only those the connection's Brain audience
-// holds. A file in a shared drive carries no permissions of its own
-// ("Not populated for items in shared drives"), so each file's are read
-// with `permissions.list`, every page of it (at most 100 a page for a
-// shared drive's), which lists those it inherits from the drive's
-// membership and its folders too (`permissionDetails`, "all inherited and
-// direct file permissions"), and turned into readers by the personal
-// Drive's rules (`readersOfPermissions`). Only for a file the account can
-// share (`capabilities.canShare`: a shared drive's organizer,
-// fileOrganizer or writer): one it can't is read by nobody, and no
-// permission of it is asked for. A list that can't be read whole is
-// nobody's too; one the read has no room left for waits for the next
-// read, which the kit passes over with no readers (nobody) when it is
-// late twice in a row (`fillPage`). Sharing changed on a file moves its
-// `version`, so the change feed brings it; a change of the drive's
-// members or a folder's sharing reaches the file at core's daily relist
-// (brain-sync.ts `relistMs`).
+// Who may read what it brings is the connection's Brain audience, which an
+// admin chooses inside Grasp (GRA-1831): the drive's own permissions are
+// not mirrored, so none are read, and every item's readers are null.
 //
 // Each page first reads the drive itself (`drives.get`): a drive the
 // account can no longer see, or an ID that is no shared drive at all,
@@ -71,15 +50,11 @@ import { apisHost, googleFailure, googleUrl } from "./google.ts";
 //
 // The places to pick are the shared drives the account is a member of
 // (`drives.list`, https://developers.google.com/workspace/drive/api/reference/rest/v3/drives/list),
-// a page of Google's at a time, at most 100 a page, Google's own largest,
-// each with whether the account can share files in it
-// (`capabilities.canShare`), so the admin sees a drive whose files nobody
-// would read before picking it.
+// a page of Google's at a time, at most 100 a page, Google's own largest.
 // A listing too long for one read goes on from Google's own page token:
 // each read takes whole pages, so it never stops inside one.
 
 const drives = "/drive/v3/drives";
-const files = "/drive/v3/files";
 
 /** Shared drives Google lists per page: its largest ("The maximum value is 100"). */
 const drivesPageSize = 100;
@@ -88,89 +63,13 @@ const driveSchema = z.object({ id: z.string() });
 
 const drivesSchema = z.object({
   drives: z
-    .array(
-      z.object({
-        id: z.string(),
-        name: z.string().nullish(),
-        capabilities: z.object({ canShare: z.boolean().nullish() }).nullish(),
-      })
-    )
+    .array(z.object({ id: z.string(), name: z.string().nullish() }))
     .nullish(),
   nextPageToken: z.string().nullish(),
 });
 
 /** The parameters every Drive call of a shared drive sends. */
 const ofAllDrives = { supportsAllDrives: "true" } as const;
-
-/** Permissions Google lists per page: its largest ("The maximum value is 100"). */
-const permissionsPageSize = 100;
-
-/** Whether a read failed for lack of time: Google is slow, and the read waits. */
-const tooSlow = (): ToolError =>
-  new ToolError("Google didn't answer in time", { code: "unavailable" });
-
-type Permission = NonNullable<
-  z.infer<typeof permissionListSchema>["permissions"]
->[number];
-
-/**
- * Every page of `file`'s permissions
- * (https://developers.google.com/workspace/drive/api/reference/rest/v3/permissions/list):
- * null when the list can't be read whole; "late" when the read has no
- * room or time left for it. Throttled or failed at Google, the page waits.
- */
-const permissionsOf = async (
-  room: SyncRoom,
-  file: DriveFile
-): Promise<Permission[] | null | "late"> => {
-  const permissions: Permission[] = [];
-  let token: string | undefined = undefined;
-  for (;;) {
-    if (!mayRequest(room)) {
-      return "late";
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const response = await fetchInRoom(
-      room,
-      googleUrl(
-        apisHost,
-        `${files}/${segment(file.id)}/permissions`,
-        {
-          ...ofAllDrives,
-          pageSize: String(permissionsPageSize),
-          fields: `nextPageToken,permissions(${permissionFields})`,
-        },
-        token
-      )
-    );
-    if (response === "late") {
-      return "late";
-    }
-    // The file gone, a page token refused, or the list refused to the
-    // account: not read whole. A rate limit, which Google also answers
-    // 403, waits.
-    if ([400, 403, 404].includes(response.status)) {
-      // oxlint-disable-next-line no-await-in-loop -- the one failure
-      const failure = await googleFailure(response);
-      if (failure.details?.code === "throttled") {
-        throw failure;
-      }
-      return null;
-    }
-    if (!response.ok) {
-      // oxlint-disable-next-line no-await-in-loop -- the one failure
-      throw await googleFailure(response);
-    }
-    // oxlint-disable-next-line no-await-in-loop -- this page's answer
-    const page = permissionListSchema.parse(await response.json());
-    permissions.push(...(page.permissions ?? []));
-    const next = page.nextPageToken ?? "";
-    if (next === "") {
-      return permissions;
-    }
-    token = next;
-  }
-};
 
 /** One picked shared drive, as a read's scope. */
 const sharedDrive = (driveId: string): Scope => ({
@@ -188,22 +87,13 @@ const sharedDrive = (driveId: string): Scope => ({
   file: ofAllDrives,
   // In this drive, and not in the bin: anything else went away from it.
   holds: (file: DriveFile) => file.driveId === driveId && file.trashed !== true,
-  fields: "capabilities(canShare)",
-  // Its chain of folders ends at the drive's own root.
-  root: () => ({ id: driveId }),
-  // Only for a file the account can share: anyone else's list may be
-  // their own access alone, so it is nobody's, and none is asked for.
-  readersRead: async (room, file, folders) =>
-    file.capabilities?.canShare === true
-      ? await readersInChain(
-          room,
-          sharedDrive(driveId),
-          file,
-          folders,
-          async () => await permissionsOf(room, file)
-        )
-      : null,
+  // The connection's Brain audience reads it, not the drive's members:
+  // no permissions are asked for, so no readers are read (GRA-2207).
 });
+
+/** Whether a read failed for lack of time: Google is slow, and the read waits. */
+const tooSlow = (): ToolError =>
+  new ToolError("Google didn't answer in time", { code: "unavailable" });
 
 /**
  * That `driveId` is a shared drive the account sees: Drive answers 404 for
@@ -258,7 +148,7 @@ const choicesOf = async ({
             drives,
             {
               pageSize: String(drivesPageSize),
-              fields: "nextPageToken,drives(id,name,capabilities(canShare))",
+              fields: "nextPageToken,drives(id,name)",
             },
             token ?? undefined
           )
@@ -286,12 +176,7 @@ const choicesOf = async ({
     const page = drivesSchema.parse(await read.json());
     for (const each of page.drives ?? []) {
       if (syncPlaceSchema.safeParse(each.id).success) {
-        choices.push({
-          place: each.id,
-          title: each.name ?? "",
-          within: null,
-          sharingRead: each.capabilities?.canShare === true,
-        });
+        choices.push({ place: each.id, title: each.name ?? "", within: null });
       }
     }
     const next = page.nextPageToken ?? "";
@@ -310,7 +195,6 @@ export const sharedDriveSync = defineSync({
     { method: "GET", host: apisHost, path: drives },
     { method: "GET", host: apisHost, path: `${drives}/{place}` },
     ...fileRoutes,
-    { method: "GET", host: apisHost, path: `${files}/{item}/permissions` },
   ],
   choices: choicesOf,
   read: async ({ place, cursor, deadline }) => {

@@ -251,13 +251,15 @@ const WidenDialog = ({
             {next.kind === "everyone" ? (
               <Trans>
                 Everyone in the company will be able to find what agents read
-                through {label}, including what was kept before. Choose a team
-                if not everyone should see it.
+                through {label} and what is copied from it, including what was
+                kept before, whatever their permissions in {label}. Choose a
+                team if not everyone should see it.
               </Trans>
             ) : (
               <Trans>
                 Everyone in {team} will be able to find what agents read through{" "}
-                {label}, including what was kept before.
+                {label} and what is copied from it, including what was kept
+                before, whatever their permissions in {label}.
               </Trans>
             )}
           </DialogDescription>
@@ -431,10 +433,8 @@ export const BrainAudience = ({
       </Field>
       <p className="text-muted-foreground">
         <Trans>
-          Files copied from the places picked below are read only by those who
-          can open them in {label}, and the audience chosen here narrows that
-          further; what agents read through {label} is decided by this audience
-          alone.
+          Who may read it is decided inside Grasp, not by the permissions in{" "}
+          {label}: choose a team if not everyone should see it.
         </Trans>
       </p>
       {erasing ? (
@@ -469,7 +469,16 @@ export const BrainAudience = ({
           teams={teams}
         />
       )}
-      <SyncPlaces connection={connection} label={label} />
+      <SyncPlaces
+        audience={audience}
+        connection={connection}
+        label={label}
+        team={
+          audience.kind === "team"
+            ? (teams.find(({ id }) => id === audience.teamId)?.name ?? "")
+            : ""
+        }
+      />
       {!erasing &&
       (audience.kind !== "nobody" || connection.keepsReads === true) ? (
         <EraseKept connection={connection} label={label} onErased={onChanged} />

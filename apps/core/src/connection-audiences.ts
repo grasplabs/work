@@ -239,6 +239,21 @@ const heldBy = async (
 };
 
 /**
+ * The Brain audience the shared connection `connectionId` holds now:
+ * nobody when it has none.
+ */
+export const connectionAudienceOf = async (
+  env: Env,
+  connectionId: string
+): Promise<ConnectionBrainAudience> => {
+  const held = await heldBy(drizzle(env.DB), connectionId);
+  if (held === undefined) {
+    return { kind: "nobody" };
+  }
+  return held === null ? { kind: "everyone" } : { kind: "team", teamId: held };
+};
+
+/**
  * Refuses `chosen` for `connectionId` unless it is a shared connection
  * connect holds and hasn't disconnected, never a person's own, whose
  * reads are theirs alone, and a team it names is the company's. Only for

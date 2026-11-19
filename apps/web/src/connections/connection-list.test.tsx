@@ -351,7 +351,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
 
     expect({
       asking: asking.includes(
-        "Everyone in the company will be able to find what agents read through Notes, including what was kept before. Choose a team if not everyone should see it."
+        "Everyone in the company will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Choose a team if not everyone should see it."
       ),
       afterCancel,
       asked,
@@ -389,7 +389,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       asked,
       erasing: erasing.includes("This can't be undone."),
       toTeam: toTeam.includes(
-        "Everyone in Sales will be able to find what agents read through Notes, including what was kept before."
+        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes."
       ),
       fromNobody,
     }).toStrictEqual({
@@ -448,7 +448,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     expect({
       whileErasing,
       asking: dialogText().includes(
-        "Everyone in Sales will be able to find what agents read through Notes, including what was kept before."
+        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes."
       ),
       asked,
     }).toStrictEqual({
@@ -536,7 +536,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     expect({
       after,
       asking: dialogText().includes(
-        "Everyone in Sales will be able to find what agents read through Notes, including what was kept before."
+        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes."
       ),
     }).toStrictEqual({
       after: { says: true, shown: "nobody", held: { kind: "nobody" } },

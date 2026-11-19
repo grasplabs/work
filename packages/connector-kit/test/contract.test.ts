@@ -11,7 +11,6 @@ import {
   outcomeUnknownMetaKey,
   pathMatches,
   redirectHostMatches,
-  tenantHost,
 } from "../src/manifest.ts";
 import type { Route } from "../src/manifest.ts";
 import { defineSync } from "../src/sync.ts";
@@ -481,50 +480,6 @@ describe("a connector", () => {
         ],
       })
     ).toThrow("Every route's host must be one of the connector's hosts");
-  });
-
-  it("names the connection's own host only for a sync's request, and follows no redirect from it", () => {
-    const syncFrom = (redirects?: string[]) => () =>
-      connectorWith({
-        syncs: [
-          defineSync({
-            name: "items",
-            kind: "file",
-            routes: [
-              {
-                ...route,
-                host: tenantHost,
-                ...(redirects === undefined ? {} : { redirects }),
-              },
-            ],
-            read: async () =>
-              await Promise.resolve({ items: [], cursor: "1", more: false }),
-          }),
-        ],
-      });
-    const tool = () =>
-      connectorWith({
-        tools: [
-          defineTool({
-            name: "items.list",
-            description: "Lists items",
-            input: z.strictObject({}),
-            output: z.strictObject({}),
-            readOnly: true,
-            reach: "own",
-            routes: [{ ...route, host: tenantHost }],
-            run: async () => await Promise.resolve({ output: {} }),
-          }),
-        ],
-      });
-
-    expect(syncFrom()).not.toThrow();
-    expect(tool).toThrow(
-      "Every route's host must be one of the connector's hosts"
-    );
-    expect(syncFrom(["*.example.test"])).toThrow(
-      "A request to the connection's own host follows no redirect"
-    );
   });
 
   it("lists only exact DNS names as hosts", () => {

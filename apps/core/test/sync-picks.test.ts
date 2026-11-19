@@ -1,9 +1,11 @@
+import type { ConnectionBrainAudience } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { personOf } from "../src/connections.ts";
 import { readSyncPlaces } from "../src/sync-picks.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { consentCode, stephenGoogleUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { signInConfig } from "./sign-in-config.ts";
@@ -114,6 +116,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
       feed: "shared-drives",
       from: before?.picks ?? [],
       places: [ours[0] ?? "", ours[59] ?? ""],
+      acknowledged: { kind: "nobody" },
     });
     const after = await admin.api.connections.syncPlaces(connectionId);
 
@@ -155,6 +158,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
       feed: "shared-drives",
       from: held?.picks ?? [],
       places: [first],
+      acknowledged: { kind: "nobody" },
     });
     // Another admin moves the pick to the last drive once the listing's
     // first read has answered.
@@ -170,6 +174,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
           feed: "shared-drives",
           from: [first],
           places: [last],
+          acknowledged: { kind: "nobody" },
         });
       }
       return answer;
@@ -229,6 +234,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
       feed: "shared-drives",
       from: [],
       places: ["sales"],
+      acknowledged: { kind: "nobody" } as const,
     };
 
     // Refused in core, before connect: recorded here, one event each.
@@ -280,6 +286,82 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
     });
   });
 
+  it("picks a place only once the admin confirmed who will read everything in it now, and records each refusal", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const connectionId = await sharedGoogle(admin);
+    const prefix = `drive-${unique()}`;
+    const zero = `${prefix}-0`;
+    const one = `${prefix}-1`;
+    await driveHeld(zero);
+    await driveHeld(one);
+    await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+    const save = async (
+      places: string[],
+      acknowledged?: ConnectionBrainAudience
+    ): Promise<string> => {
+      const page = await admin.api.connections.syncPlaces(connectionId);
+      return await outcome(
+        admin.api.connections.pickSyncPlaces({
+          connectionId,
+          feed: "shared-drives",
+          from: page?.picks ?? [],
+          places,
+          ...(acknowledged === undefined ? {} : { acknowledged }),
+        })
+      );
+    };
+    const picksNow = async () => {
+      const page = await admin.api.connections.syncPlaces(connectionId);
+      return page?.picks ?? [];
+    };
+
+    const outcomes: Record<string, string> = {};
+    const picks: Record<string, string[]> = {};
+    const refusals = await auditedDuring(async () => {
+      outcomes.unconfirmed = await save([zero]);
+      // Confirmed for the audience the page showed before it was widened.
+      outcomes.stale = await save([zero], { kind: "nobody" });
+      picks.refused = await picksNow();
+      outcomes.confirmed = await save([zero], { kind: "everyone" });
+      // Another place needs confirming again; un-picking needs none.
+      outcomes.another = await save([zero, one]);
+      outcomes.both = await save([zero, one], { kind: "everyone" });
+      outcomes.unpicked = await save([one]);
+      picks.after = await picksNow();
+    });
+
+    expect({
+      outcomes,
+      picks,
+      recorded: refusals
+        .filter(({ action }) => action === "connection.sync_places")
+        .map(({ actor, target, detail }) => ({
+          actor: "userId" in actor ? actor.userId : actor.type,
+          target: target?.id,
+          detail,
+        })),
+    }).toStrictEqual({
+      outcomes: {
+        unconfirmed: "sync.unacknowledged",
+        stale: "sync.unacknowledged",
+        confirmed: "ok",
+        another: "sync.unacknowledged",
+        both: "ok",
+        unpicked: "ok",
+      },
+      picks: { refused: [], after: [one] },
+      recorded: Array.from({ length: 3 }, () => ({
+        actor: admin.userId,
+        target: connectionId,
+        detail: {
+          feed: "shared-drives",
+          outcome: "refused",
+          reason: "sync.unacknowledged",
+        },
+      })),
+    });
+  });
+
   it("refuses a save from a page another admin's pick made stale, and keeps that pick", async () => {
     const [first, second] = await Promise.all([
       signedInApi(idp, "admin"),
@@ -300,6 +382,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
       feed: "shared-drives",
       from: secondPage?.picks ?? [],
       places: [one],
+      acknowledged: { kind: "nobody" },
     });
     // The first, on the page from before, ticks drive 0 and saves.
     const stale = await outcome(
@@ -308,6 +391,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
         feed: "shared-drives",
         from: firstPage?.picks ?? [],
         places: [zero],
+        acknowledged: { kind: "nobody" },
       })
     );
     const now = await first.api.connections.syncPlaces(connectionId);

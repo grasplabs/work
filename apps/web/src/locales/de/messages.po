@@ -5466,14 +5466,6 @@ msgstr "Jeder Bereich wird für sich gelöscht. Schlägt einer fehl, wird er ern
 msgid "Each event of this type from the source starts a run, with its data as the input."
 msgstr "Jedes Ereignis dieses Typs aus der Quelle startet einen Lauf, mit seinen Daten als Eingabe."
 
-#: src/connections/sync-places.tsx
-msgid "Each file is read in the Brain only by those {label} lets open it, of those you let read {label} here. The account you connected must be able to share files in each drive you pick: nobody reads the files it can't share."
-msgstr "Jede Datei lesen im Brain nur die, denen {label} das Öffnen erlaubt, unter denen, die Sie {label} hier lesen lassen. Das verbundene Konto muss in jeder ausgewählten Ablage Dateien freigeben können: Dateien, die es nicht freigeben kann, liest niemand."
-
-#: src/connections/sync-places.tsx
-msgid "Each file is read in the Brain only by those {label} lets open it, of those you let read {label} here. The account you connected must own each site you pick: nobody reads the files of a library marked below. If every library is marked, disconnect {label} and connect it again."
-msgstr "Jede Datei lesen im Brain nur die, denen {label} das Öffnen erlaubt, unter denen, die Sie {label} hier lesen lassen. Das verbundene Konto muss jede ausgewählte Website besitzen: Die Dateien einer unten markierten Bibliothek liest niemand. Wenn jede Bibliothek markiert ist, trennen Sie {label} und verbinden Sie es erneut."
-
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Jede Rechnung als PDF, sobald sie ausgestellt ist."
@@ -5818,8 +5810,8 @@ msgid "Everyone in {project}"
 msgstr "Alle in {project}"
 
 #: src/connections/brain-audience.tsx
-msgid "Everyone in {team} will be able to find what agents read through {label}, including what was kept before."
-msgstr "Alle in {team} können finden, was Agenten über {label} lesen, auch das, was vorher gespeichert wurde."
+msgid "Everyone in {team} will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}."
+msgstr "Alle in {team} können finden, was Agenten über {label} lesen und was daraus kopiert wird, auch das, was vorher gespeichert wurde, unabhängig von ihren Berechtigungen in {label}."
 
 #: src/drafts/sharing.tsx
 msgid "Everyone in a project you aren’t in"
@@ -5835,12 +5827,20 @@ msgid "Everyone in the company"
 msgstr "Alle in der Firma"
 
 #: src/connections/brain-audience.tsx
-msgid "Everyone in the company will be able to find what agents read through {label}, including what was kept before. Choose a team if not everyone should see it."
-msgstr "Alle in der Firma können finden, was Agenten über {label} lesen, auch das, was vorher gespeichert wurde. Wählen Sie ein Team, wenn nicht alle es sehen sollen."
+msgid "Everyone in the company will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Choose a team if not everyone should see it."
+msgstr "Alle in der Firma können finden, was Agenten über {label} lesen und was daraus kopiert wird, auch das, was vorher gespeichert wurde, unabhängig von ihren Berechtigungen in {label}. Wählen Sie ein Team, wenn nicht alle es sehen sollen."
+
+#: src/connections/sync-places.tsx
+msgid "Everyone in the company will be able to read everything in the places you pick, whatever their permissions in {label}."
+msgstr "Alle in der Firma können alles in den ausgewählten Orten lesen, unabhängig von ihren Berechtigungen in {label}."
 
 #: src/settings/team-members-dialog.tsx
 msgid "Everyone in the organization is in this team."
 msgstr "Alle in der Organisation sind in diesem Team."
+
+#: src/connections/sync-places.tsx
+msgid "Everyone in the team {team} will be able to read everything in the places you pick, whatever their permissions in {label}."
+msgstr "Alle im Team {team} können alles in den ausgewählten Orten lesen, unabhängig von ihren Berechtigungen in {label}."
 
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
@@ -6151,10 +6151,6 @@ msgstr "Dateien und Apps"
 msgctxt "kind of app"
 msgid "Files and documents"
 msgstr "Dateien und Dokumente"
-
-#: src/connections/brain-audience.tsx
-msgid "Files copied from the places picked below are read only by those who can open them in {label}, and the audience chosen here narrows that further; what agents read through {label} is decided by this audience alone."
-msgstr "Dateien aus den unten ausgewählten Orten lesen nur die, die sie in {label} öffnen können, und die hier gewählte Zielgruppe schränkt das weiter ein; was Agenten über {label} lesen, bestimmt allein diese Zielgruppe."
 
 #: src/workflows/run-files.tsx
 msgid "Files it wrote"
@@ -9656,10 +9652,6 @@ msgstr "Niemand wartet darauf, dass du über eine Freigabe entscheidest."
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
 msgstr "Niemand passt."
-
-#: src/connections/sync-places.tsx
-msgid "Nobody reads its files"
-msgstr "Niemand liest die Dateien"
 
 #: src/apps/access-view.tsx
 msgid "Nobody sees the records in {table}, Sam included."
@@ -17436,6 +17428,10 @@ msgid "Who may read it"
 msgstr "Wer es lesen darf"
 
 #: src/connections/brain-audience.tsx
+msgid "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
+msgstr "Wer es lesen darf, wird in Grasp entschieden, nicht durch die Berechtigungen in {label}: Wählen Sie ein Team, wenn nicht alle es sehen sollen."
+
+#: src/connections/brain-audience.tsx
 msgid "Who may read what agents read through {label} was changed in the meantime. This is who may read it now: choose again if you still want to change it."
 msgstr "Wer lesen darf, was Agenten über {label} lesen, wurde inzwischen geändert. So ist es jetzt: Wählen Sie erneut, wenn Sie es noch ändern möchten."
 
@@ -17482,6 +17478,10 @@ msgstr "Wer ist wer in Ihrem Unternehmen?"
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
 msgstr "der Person, die die Zeile hinzugefügt hat"
+
+#: src/connections/sync-places.tsx
+msgid "Whoever you let read {label} in the Brain will be able to read everything in the places you pick, whatever their permissions in {label}."
+msgstr "Wen Sie {label} im Brain lesen lassen, kann alles in den ausgewählten Orten lesen, unabhängig von seinen Berechtigungen in {label}."
 
 #: src/chat/agent-draft-card.tsx
 msgid "Whose it is"
