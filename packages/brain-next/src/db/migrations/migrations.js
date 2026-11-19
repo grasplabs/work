@@ -32,6 +32,7 @@ import m0029 from './0029_skill_proposals.sql';
 import m0030 from './0030_events.sql';
 import m0031 from './0031_person_erasure_events.sql';
 import m0032 from './0032_events_system.sql';
+import m0033 from './0033_readers_within.sql';
 
   export default {
     journal,
@@ -68,7 +69,8 @@ m0028,
 m0029,
 m0030,
 m0031,
-m0032
+m0032,
+m0033
     }
   }
   

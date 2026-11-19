@@ -3,11 +3,14 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import type { Access } from "./contract.ts";
-import { readerSetMembers, readerSets } from "./db/schema.ts";
+import { readerSetMembers, readerSetReaders, readerSets } from "./db/schema.ts";
 
-/** One principal of a set of readers: a person or a group. */
+/**
+ * One principal of a set of readers: a person or a group, or the group a
+ * reader must also hold (`within`, of readers within a group).
+ */
 interface Principal {
-  kind: "person" | "group";
+  kind: "person" | "group" | "within";
   principal: string;
 }
 
@@ -25,6 +28,15 @@ const principalsOf = (access: Access): Principal[] => {
         kind: "group",
         principal: group,
       }));
+    }
+    case "readersWithin": {
+      return [
+        { kind: "within", principal: access.within },
+        ...access.groups.map((group): Principal => ({
+          kind: "group",
+          principal: group,
+        })),
+      ];
     }
     case "none": {
       return [];
@@ -59,17 +71,33 @@ export const readerSetKeyOf = (access: Access): string =>
 
 /** A key's principals as {@link keyOf} writes them, before they are checked to be one. */
 const keyPrincipalsSchema = z.array(
-  z.tuple([z.enum(["person", "group"]), z.string()])
+  z.tuple([z.enum(["person", "group", "within"]), z.string()])
 );
 
 /**
  * The access `principals` names, as `principalsOf` makes them: none, one
- * person, or groups alone (one group's audience, or readers of several).
- * Undefined for any other mix, which no access names.
+ * person, groups alone (one group's audience, or readers of several), or
+ * one `within` and groups (readers within a group). Undefined for any
+ * other mix, which no access names.
  */
 const accessOfPrincipals = (
-  principals: readonly (readonly ["person" | "group", string])[]
+  principals: readonly (readonly ["person" | "group" | "within", string])[]
 ): Access | undefined => {
+  const within = principals.flatMap(([kind, principal]) =>
+    kind === "within" ? [principal] : []
+  );
+  if (within.length > 0) {
+    const [group] = within;
+    const groups = principals.flatMap(([kind, principal]) =>
+      kind === "group" ? [principal] : []
+    );
+    return within.length === 1 &&
+      group !== undefined &&
+      groups.length > 0 &&
+      groups.length + 1 === principals.length
+      ? { kind: "readersWithin", within: group, groups }
+      : undefined;
+  }
   const [first, ...rest] = principals;
   if (first === undefined) {
     return { kind: "none" };
@@ -139,7 +167,9 @@ export const accessOfKey = (key: string): Access | undefined => {
  * (JSON). Principals are matched with their kind, so a person never
  * matches a group of the same name, and a set with no principals matches
  * no one. No person (`?2` null) matches no person's set: SQL's `=` is
- * never true of null. Each set once.
+ * never true of null. A set of readers within a group (`within`) only
+ * when the reader holds that group too, besides one of its readers
+ * (`reader_set_readers`). Each set once.
  *
  * One lookup of the members' index per principal, whatever SQLite's
  * statistics say: the groups come first (`CROSS JOIN` keeps SQLite to
@@ -154,6 +184,12 @@ export const readableSql = `readable AS (
   CROSS JOIN reader_set_members
     ON reader_set_members.kind = 'group'
     AND reader_set_members.principal = asked.value
+  UNION
+  SELECT reader_set_readers.reader_set FROM json_each(?3) AS asked
+  CROSS JOIN reader_set_readers
+    ON reader_set_readers.principal = asked.value
+  JOIN reader_sets ON reader_sets.id = reader_set_readers.reader_set
+  WHERE reader_sets.within IN (SELECT value FROM json_each(?3))
 )`;
 
 /**
@@ -165,6 +201,9 @@ const boundParametersMax = 100;
 
 /** Most members one insert writes: each binds its set, kind and principal. */
 const membersPerInsert = Math.floor(boundParametersMax / 3);
+
+/** Most readers of a set within a group one insert writes: each binds its set and principal. */
+const readersPerInsert = Math.floor(boundParametersMax / 2);
 
 /**
  * The set of readers `access` names, made the first time it is needed and
@@ -186,6 +225,25 @@ export const readerSetOf = (
   if (known !== undefined) {
     return known.id;
   }
+  if (access.kind === "readersWithin") {
+    const { id } = db
+      .insert(readerSets)
+      .values({ key, within: access.within })
+      .returning({ id: readerSets.id })
+      .get();
+    // Never as members: a release before this one reads a set with none
+    // as nobody's (`reader_sets.within`).
+    for (let at = 0; at < access.groups.length; at += readersPerInsert) {
+      db.insert(readerSetReaders)
+        .values(
+          access.groups
+            .slice(at, at + readersPerInsert)
+            .map((principal) => ({ readerSet: id, principal }))
+        )
+        .run();
+    }
+    return id;
+  }
   const { id } = db
     .insert(readerSets)
     .values({ key })
@@ -200,7 +258,10 @@ export const readerSetOf = (
       .values(
         principals
           .slice(at, at + membersPerInsert)
-          .map((principal) => ({ readerSet: id, ...principal }))
+          .flatMap(({ kind, principal }) =>
+            // A set within a group never comes here (above).
+            kind === "within" ? [] : [{ readerSet: id, kind, principal }]
+          )
       )
       .run();
   }
@@ -208,7 +269,9 @@ export const readerSetOf = (
 };
 
 /** A set's key, as `keyOf` writes it: its principals, `[kind, id]` each. */
-const keySchema = z.array(z.tuple([z.enum(["person", "group"]), z.string()]));
+const keySchema = z.array(
+  z.tuple([z.enum(["person", "group", "within"]), z.string()])
+);
 
 /**
  * Makes again each set of readers that memories or extraction marks name
@@ -245,19 +308,32 @@ export const rebuildMissingSets = (sql: SqlStorage): void => {
     .toArray();
   for (const { readers } of missing) {
     const principals = keySchema.parse(JSON.parse(readers));
+    const within = principals.find(([kind]) => kind === "within")?.[1] ?? null;
     const { id } = sql
       .exec<{ id: number }>(
-        "INSERT INTO reader_sets (key) VALUES (?) RETURNING id",
-        readers
+        "INSERT INTO reader_sets (key, within) VALUES (?, ?) RETURNING id",
+        readers,
+        within
       )
       .one();
     for (const [kind, principal] of principals) {
-      sql.exec(
-        "INSERT INTO reader_set_members (reader_set, kind, principal) VALUES (?, ?, ?)",
-        id,
-        kind,
-        principal
-      );
+      if (kind === "within") {
+        continue;
+      }
+      if (within === null) {
+        sql.exec(
+          "INSERT INTO reader_set_members (reader_set, kind, principal) VALUES (?, ?, ?)",
+          id,
+          kind,
+          principal
+        );
+      } else {
+        sql.exec(
+          "INSERT INTO reader_set_readers (reader_set, principal) VALUES (?, ?)",
+          id,
+          principal
+        );
+      }
     }
   }
 };

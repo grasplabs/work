@@ -589,6 +589,7 @@ const unreadableSql: Record<ExportScope["kind"], string> = {
   UNION
   SELECT id FROM reader_sets
   WHERE id NOT IN (SELECT reader_set FROM reader_set_members)
+    AND id NOT IN (SELECT reader_set FROM reader_set_readers)
 )`,
   // `?4` the key of the set that is the person alone: every other set.
   person: `unreadable AS (
@@ -844,7 +845,9 @@ const exportedAccessOf = (
   const access = accessOfKey(textOf(key));
   const exported =
     scope.kind === "company"
-      ? access?.kind === "audience" || access?.kind === "readers"
+      ? access?.kind === "audience" ||
+        access?.kind === "readers" ||
+        access?.kind === "readersWithin"
       : access?.kind === "owner" && access.person === scope.person;
   if (access === undefined || !exported) {
     throw new Error("The Brain selected readers it doesn't export");

@@ -14,6 +14,12 @@ describe("reading a set of readers' key", () => {
       { kind: "audience", group: "team:sales" },
       { kind: "owner", person: 'a "quoted", [bracketed] person' },
       { kind: "readers", groups: ["account:a", "group:b", "tenant:c"] },
+      {
+        kind: "readersWithin",
+        within: "connection:c/p",
+        groups: ["account:a", "group:b"],
+      },
+      { kind: "readersWithin", within: "connection:c/p", groups: ["group:b"] },
     ];
 
     expect(
@@ -44,6 +50,10 @@ describe("reading a set of readers' key", () => {
       '[["group","b"],["group","a"]]',
       '[ ["person","a"] ]',
       '[["person","a"]] ',
+      // A group to hold besides, with no readers, with a person, or twice.
+      '[["within","a"]]',
+      '[["person","b"],["within","a"]]',
+      '[["group","b"],["within","a"],["within","c"]]',
     ];
 
     expect(keys.filter((key) => accessOfKey(key) !== undefined)).toStrictEqual(
