@@ -42,7 +42,7 @@ import { z } from "zod";
 import { apisFor } from "./agent-apis.ts";
 import { turnCheck } from "./agent-builds.ts";
 import { isMessage, showThinkingName } from "./agent-messages.ts";
-import { rememberTool } from "./agent-remember.ts";
+import { lastWordsOf, rememberTool } from "./agent-remember.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { showThinking } from "./agent-thinking.ts";
@@ -1410,7 +1410,12 @@ export class ChatHarness {
       // is the only word of theirs it may keep. Never a chat others share,
       // nor a turn nobody started (a wake), which has no word of theirs.
       ...(request.personal
-        ? { remember: rememberTool(env, scope, request.question.text) }
+        ? {
+            remember: rememberTool(env, scope, {
+              said: request.question.text,
+              answering: lastWordsOf(transcript.messages),
+            }),
+          }
         : {}),
       // Only in a person's own chat, by an agent that may read the brain.
       ...(request.readsBrain && !request.shared

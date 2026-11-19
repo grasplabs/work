@@ -124,7 +124,7 @@ import { builtNoteText, resultRunId, withheldResult } from "./agent.ts";
 import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
-import { memberRole } from "./auth/identity.ts";
+import { accountNameOf, memberRole } from "./auth/identity.ts";
 import { loneNotesPerDrain } from "./brain-hand-overs.ts";
 import { chatTurnSource, eraseChat } from "./brain-next-origins.ts";
 import { skillsFor, skillsReachOf } from "./brain-skills.ts";
@@ -774,6 +774,22 @@ const traceKeyPrefix = "trace:";
  * proposed them (`takePlan`), so each is made once.
  */
 const builtKeyPrefix = "built:";
+
+/**
+ * The person a turn talks with, by their account's name, when it has one:
+ * only where the answer reaches them alone (`personal`).
+ */
+const namedPerson = async (
+  env: Env,
+  personId: string,
+  personal: boolean
+): Promise<Pick<TurnContext, "person">> => {
+  if (!personal) {
+    return {};
+  }
+  const name = await accountNameOf(env.DB, personId);
+  return name === undefined ? {} : { person: { name } };
+};
 
 /**
  * Which agents a turn may draft for its person (`TurnContext.drafts`):
@@ -3121,6 +3137,7 @@ export class Workspace extends DurableObject<Env> {
       agent === undefined ? [] : await documentsOf(this.env, agent.id);
     const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
     return {
+      ...(await namedPerson(this.env, scope.personId, personal)),
       instructions: instructions.map(({ file, text }) => ({ file, text })),
       skills,
       channel,
