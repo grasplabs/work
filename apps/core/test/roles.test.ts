@@ -163,13 +163,13 @@ describe("member and team changes", () => {
         actor,
         action: "team.member.added",
         target: { type: "team", id: teamId },
-        detail: { userId: person.userId },
+        detail: { userId: person.userId, pinned: "in" },
       }),
       expect.objectContaining({
         actor,
         action: "team.member.removed",
         target: { type: "team", id: teamId },
-        detail: { userId: person.userId },
+        detail: { userId: person.userId, pinned: "out" },
       }),
       expect.objectContaining({
         actor,

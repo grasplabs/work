@@ -27,7 +27,11 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { teamAccessMayHaveDropped, teamGone } from "../access-revocations.ts";
+import {
+  teamAccessMayHaveDropped,
+  teamGone,
+  tellKept,
+} from "../access-revocations.ts";
 import {
   auditedBatch,
   keepAuditEvent,
@@ -45,7 +49,8 @@ import {
   users,
   verifications,
 } from "../db/core/schema.ts";
-import { tieSignedIn } from "../directory-ties.ts";
+import { pinTeamMember, placeMember } from "../directory-teams.ts";
+import { directoryKinds, tieSignedIn } from "../directory-ties.ts";
 import {
   isErasedEmail,
   isErasedSubject,
@@ -585,6 +590,11 @@ const isErasedSignIn = async (
 const tieAtSignIn = async (env: Env, userId: string): Promise<void> => {
   try {
     await tieSignedIn(env, userId);
+    // And placed in the teams their departments fill, by the same rule.
+    for (const kind of directoryKinds) {
+      // oxlint-disable-next-line no-await-in-loop -- one provider at a time
+      await tellKept(env, await placeMember(env, kind, userId));
+    }
   } catch (error) {
     log.error("directory.tie_failed", errorFields(error));
   }
@@ -776,15 +786,17 @@ const auditedChanges: Record<
     action: "team.deleted",
     target: { type: "team", id: change.teamId ?? "unknown" },
   }),
+  // A hand add or removal pins the pair (`pinTeamMember`): the directory's
+  // read leaves it as the admin set it until an admin lets it.
   "/organization/add-team-member": (change) => ({
     action: "team.member.added",
     target: { type: "team", id: change.teamId ?? "unknown" },
-    detail: { userId: change.userId ?? null },
+    detail: { userId: change.userId ?? null, pinned: "in" },
   }),
   "/organization/remove-team-member": (change) => ({
     action: "team.member.removed",
     target: { type: "team", id: change.teamId ?? "unknown" },
-    detail: { userId: change.userId ?? null },
+    detail: { userId: change.userId ?? null, pinned: "out" },
   }),
 };
 
@@ -1036,6 +1048,26 @@ const createAuth = (
         // App shared with it away: their hosts tell the open pages to
         // look again (access-revocations.ts).
         organizationHooks: {
+          // An admin's hand change of a membership, pinned ahead of Better
+          // Auth's own write (directory-teams.ts): the directory's read
+          // never undoes it. These two routes alone change a membership
+          // by hand (routes.ts keeps the others off).
+          beforeAddTeamMember: async ({ teamMember }) => {
+            await pinTeamMember(
+              env,
+              teamMember.teamId,
+              teamMember.userId,
+              true
+            );
+          },
+          beforeRemoveTeamMember: async ({ teamMember }) => {
+            await pinTeamMember(
+              env,
+              teamMember.teamId,
+              teamMember.userId,
+              false
+            );
+          },
           afterRemoveTeamMember: async ({ teamMember }) => {
             await teamAccessMayHaveDropped(env, teamMember.teamId, [
               teamMember.userId,

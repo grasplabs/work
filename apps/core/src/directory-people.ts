@@ -4,8 +4,10 @@ import type { DirectoryConnection } from "@grasp-os/shared/directory";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { clockLeaseMs } from "@grasp-os/workerflow/clock";
 import { and, eq, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
+import { tellKept } from "./access-revocations.ts";
 import { auditedBatch, outboxedEventWithDetailWhere } from "./audit-outbox.ts";
 import { signInConfig } from "./auth/config.ts";
 import {
@@ -13,6 +15,12 @@ import {
   directoryReads,
   erasedSubjects,
 } from "./db/core/schema.ts";
+import {
+  keptIn,
+  placementStatements,
+  readPlacementOf,
+} from "./directory-teams.ts";
+import type { Placement } from "./directory-teams.ts";
 import { directoryKinds, tieDirectoryPeople } from "./directory-ties.ts";
 import type { DirectoryKind } from "./directory-ties.ts";
 import { subjectHashOf, subjectKeyVersion } from "./erased-people.ts";
@@ -175,6 +183,7 @@ const apply = async (
   connection: DirectoryConnection,
   listed: Listed,
   json: string,
+  placement: Placement,
   startedAt: Date
 ): Promise<void> => {
   const db = drizzle(env.DB);
@@ -204,26 +213,28 @@ const apply = async (
     },
     "core"
   );
-  await auditedBatch(env, db, [
-    db
-      .insert(directoryReads)
-      .values({
-        provider: kind.provider,
-        connectionId: connection.id,
-        tenant: listed.tenant,
+  const placing = placementStatements(db, kind, placement, sql`1`, claimed);
+  // The read's own statements, then its placement's, then its outcome's.
+  const claim = db
+    .insert(directoryReads)
+    .values({
+      provider: kind.provider,
+      connectionId: connection.id,
+      tenant: listed.tenant,
+      run,
+      startedAt,
+    })
+    .onConflictDoUpdate({
+      target: directoryReads.provider,
+      set: {
         run,
         startedAt,
-      })
-      .onConflictDoUpdate({
-        target: directoryReads.provider,
-        set: {
-          run,
-          startedAt,
-          connectionId: connection.id,
-          tenant: listed.tenant,
-        },
-        setWhere: sql`${directoryReads.startedAt} IS NULL OR ${directoryReads.startedAt} < ${startedAt.getTime()}`,
-      }),
+        connectionId: connection.id,
+        tenant: listed.tenant,
+      },
+      setWhere: sql`${directoryReads.startedAt} IS NULL OR ${directoryReads.startedAt} < ${startedAt.getTime()}`,
+    });
+  const own: BatchItem<"sqlite">[] = [
     db
       .delete(directoryPeople)
       .where(
@@ -252,6 +263,11 @@ const apply = async (
         },
       }),
     tieDirectoryPeople(db, kind, claimed),
+  ];
+  const results: unknown[] = await auditedBatch(env, db, [
+    claim,
+    ...own,
+    ...placing.statements,
     db
       .update(directoryReads)
       .set({
@@ -276,6 +292,7 @@ const apply = async (
       claimed
     ),
   ]);
+  await tellKept(env, keptIn(results[1 + own.length + placing.revocation]));
 };
 
 /**
@@ -383,10 +400,11 @@ const readKind = async (
   try {
     const listed = await listedIn(env, connection, tenant, deadline);
     const json = await entriesOf(env, kind, listed);
+    const placement = await readPlacementOf(env, kind, listed.people);
     if (Date.now() >= deadline) {
       throw directoryErrors.create("directory.read_too_long");
     }
-    await apply(env, kind, connection, listed, json, startedAt);
+    await apply(env, kind, connection, listed, json, placement, startedAt);
   } catch (error) {
     await failedWith(env, kind, connection, tenant, startedAt, error);
   }
@@ -394,8 +412,9 @@ const readKind = async (
 
 /**
  * The clock's daily read of the organization's directories (clock.ts): run
- * every quarter hour, it reads each once a day, and again at the next
- * quarter hour after one failed.
+ * every quarter hour, it reads each once a day. A read that failed before
+ * its batch was applied left the last applied one as it was, so the next
+ * quarter hour reads again; once applied, nothing of it is owed later.
  */
 export const readDirectories = async (env: Env, at: Date): Promise<void> => {
   for (const kind of directoryKinds) {
