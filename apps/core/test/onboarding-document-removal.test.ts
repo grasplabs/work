@@ -570,7 +570,7 @@ describe(
       const work = async (): Promise<string[]> => {
         const { workflows } = await admin.brain.read();
         return workflows
-          .filter(({ teamId }) => teamId === `team-${ids.team}`)
+          .filter(({ teamId }) => teamId === ids.team)
           .map(({ name }) => name);
       };
       const before = { standing: await standing(), page: await work() };

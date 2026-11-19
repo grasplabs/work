@@ -52,6 +52,7 @@ import { allEvents } from "./audit-events.ts";
 import { platformAnthropicKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
+import { teamsMade } from "./members-teams.ts";
 import type { Answer } from "./model-provider.ts";
 import { recordedUsage } from "./model-usage.ts";
 import { agree, fact, mapped, team } from "./onboarding-team.ts";
@@ -873,22 +874,24 @@ describe("AI providers", { timeout: 60_000 }, () => {
       // Arranged here, as the store's alarm would, never by itself.
       await holdAlarm();
       const tag = unique();
-      await by.api.onboarding.saveRoster({
-        teams: [
-          { id: `sales-${tag}`, name: "Sales", lead: null },
-          { id: `support-${tag}`, name: "Support", lead: null },
-        ],
-        people: [
-          {
-            id: `ann-${tag}`,
-            name: "Ann Example",
-            team: `sales-${tag}`,
-            title: "Account manager",
-          },
-        ],
-      });
-      const sales = `team-sales-${tag}`;
-      const support = `team-support-${tag}`;
+      await by.api.onboarding.saveRoster(
+        await teamsMade({
+          teams: [
+            { id: `sales-${tag}`, name: "Sales", lead: null },
+            { id: `support-${tag}`, name: "Support", lead: null },
+          ],
+          people: [
+            {
+              id: `ann-${tag}`,
+              name: "Ann Example",
+              team: `sales-${tag}`,
+              title: "Account manager",
+            },
+          ],
+        })
+      );
+      const sales = `sales-${tag}`;
+      const support = `support-${tag}`;
       await plan(key, [
         answered(
           openaiCase.api,

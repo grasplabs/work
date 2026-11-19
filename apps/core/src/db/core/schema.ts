@@ -542,6 +542,33 @@ export const teamMembers = sqliteTable(
 );
 
 /**
+ * The confirmed staff list whose teams were last made in Settings ›
+ * Members (GRA-2055), by the onboarding store's version of them: one row
+ * for the company. Each sync claims its version here, only when it is
+ * newer, in the same batch as its writes, and each write holds only while
+ * the row names that version (staff-list-teams.ts `syncTeams`): an older
+ * confirm never makes a team after a newer one.
+ */
+export const staffListSynced = sqliteTable("staff_list_synced", {
+  organizationId: text("organization_id").primaryKey(),
+  version: integer().notNull(),
+});
+
+/**
+ * The ids of every team deleted (GRA-2055), kept for good: written by the
+ * trigger `teams_delete_retires` (migration 0278, staff_list_teams) in the statement that
+ * deletes the row, so no code of any release, before this one or after a
+ * rollback, deletes a team without it. The staff list makes a members'
+ * team only under an id not here, checked in the statement that makes it
+ * (staff-list-teams.ts `syncTeams`), so a deleted team's id never
+ * comes back with what was shared with it, whatever the onboarding's
+ * store holds.
+ */
+export const retiredTeamIds = sqliteTable("retired_team_ids", {
+  id: text().primaryKey(),
+});
+
+/**
  * Part of the SSO plugin's model, and stays empty: sign-in providers come
  * only from deployment config, and registering one in-product is refused.
  */

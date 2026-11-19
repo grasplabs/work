@@ -235,11 +235,13 @@ const onboardingHeld = async (
   records: readonly BrainRecord[],
   read: () => Promise<OnboardingHeld>
 ): Promise<OnboardingHeld> => {
-  const named = records.some((record) =>
-    referencesOf(record).some(
-      ({ type, id }) =>
-        type === "team" || (type === "source" && onboardingSourceIds.has(id))
-    )
+  const named = records.some(
+    (record) =>
+      record.type === "team" ||
+      referencesOf(record).some(
+        ({ type, id }) =>
+          type === "team" || (type === "source" && onboardingSourceIds.has(id))
+      )
   );
   return named ? await read() : nothingOnboarded;
 };
@@ -510,12 +512,18 @@ export const addBrainRecords = async (
   requireAdmin(person);
   const records = recordsOf(input);
   await requireLinkedWorkflows(env, records);
-  return await keepRecords(
-    env,
-    actorOf(person),
-    records,
-    await onboardingHeld(records, onboarding)
+  const held = await onboardingHeld(records, onboarding);
+  // A staff-list team is named by its members' team's own id (GRA-2055):
+  // a team record under it would take the onboarding's team, so none may.
+  const taken = records.filter(
+    ({ type, id }) => type === "team" && held.teams.has(id)
   );
+  if (taken.length > 0) {
+    throw brainRecordErrors.create("brain.record_invalid", {
+      issues: taken.map(({ id }) => `${id}: the onboarding's team`),
+    });
+  }
+  return await keepRecords(env, actorOf(person), records, held);
 };
 
 /** A stored body as JSON; `undefined` when it isn't. */

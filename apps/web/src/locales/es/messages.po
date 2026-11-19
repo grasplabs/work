@@ -1757,6 +1757,10 @@ msgstr "Un equipo puede leer este archivo subido."
 msgid "A team it is no longer shared with"
 msgstr "Un equipo con el que ya no se comparte"
 
+#: src/settings/use-team-change.ts
+msgid "A team on the staff list has this name. It appears here once the staff list is confirmed."
+msgstr "Un equipo de la lista de personal tiene este nombre. Aparece aquí en cuanto se confirme la lista de personal."
+
 #: src/onboarding/setup-steps.tsx
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "Un equipo sin responsable recibe sus enlaces el primer día, y pregunto a cada persona qué hace."
@@ -15293,6 +15297,10 @@ msgstr "Esta página se detuvo"
 #: src/pages/frame-failure.tsx
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "El código guardado de esta página ya no coincide con el código publicado, así que no se abrió. Avisa a un administrador."
+
+#: src/settings/use-team-change.ts
+msgid "This team is on the staff list. Take it off there and confirm the list first."
+msgstr "Este equipo está en la lista de personal. Quítalo de ahí y confirma primero la lista."
 
 #: src/brain/sources-page.tsx
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."

@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // Changes to the organization's teams, as an admin makes them: through
 // Better Auth's organization routes, which core serves under `/api/auth`
 // (auth/routes.ts), checks the role on (only admins may) and audits
@@ -7,13 +9,28 @@
 /** A team change that didn't go through: `status` is the HTTP status. */
 export class TeamChangeError extends Error {
   readonly status: number;
+  /** Better Auth's error code, when its answer names one. */
+  readonly code: string | undefined;
 
-  constructor(path: string, status: number) {
+  constructor(path: string, status: number, code?: string) {
     super(`${path} failed (${status})`);
     this.name = "TeamChangeError";
     this.status = status;
+    this.code = code;
   }
 }
+
+/** The `code` of a refusal Better Auth answers, if it names one. */
+const codeOf = async (response: Response): Promise<string | undefined> => {
+  try {
+    const parsed = z
+      .object({ code: z.string() })
+      .safeParse(await response.json());
+    return parsed.success ? parsed.data.code : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /** Sends one change to Better Auth; throws when it didn't go through. */
 const change = async (path: string, body: unknown): Promise<void> => {
@@ -23,7 +40,7 @@ const change = async (path: string, body: unknown): Promise<void> => {
     body: JSON.stringify(body),
   });
   if (!response.ok) {
-    throw new TeamChangeError(path, response.status);
+    throw new TeamChangeError(path, response.status, await codeOf(response));
   }
 };
 

@@ -91,6 +91,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.invitations": { erased: "channels" },
   "core.teams": { none: "member_count is a count" },
   "core.team_members": { erased: "removal" },
+  "core.staff_list_synced": { none: "a version number, no person" },
+  "core.retired_team_ids": {
+    none: "team ids never to be made again, no person",
+  },
   "core.sso_providers": { none: "stays empty: providers come from config" },
   "core.permissions": { company: "grants they asked for or gave" },
   "core.apps": { company: "Apps they own or changed" },

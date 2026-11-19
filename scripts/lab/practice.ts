@@ -129,7 +129,7 @@ export class PracticeError extends Error {
   override name = "PracticeError";
 }
 
-/** Every team id of a practice company starts so: the roster is the lab's to replace. */
+/** The id the lab gives a practice company's team: core gives it the members' team's (GRA-2055). */
 const teamPrefix = "practice-";
 
 const fileOf = (practice: Pick<Practice, "id" | "key">): string =>
@@ -238,8 +238,10 @@ const rosterOf = (
 /** Refuses to replace an onboarding on the local core that isn't the lab's. */
 const ownsOnboarding = async (core: Core): Promise<void> => {
   const { roster } = await core.session.api.onboarding.view();
-  const theirs = (roster?.teams ?? []).filter(
-    (team) => !team.id.startsWith(teamPrefix)
+  // Every practice person signs in at the address the lab makes of their
+  // id: anyone else is someone else's.
+  const theirs = (roster?.people ?? []).filter(
+    (person) => person.email !== practiceEmail(person.id)
   );
   if (theirs.length > 0) {
     throw new PracticeError(

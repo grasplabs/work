@@ -11,6 +11,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { teamsMade } from "./members-teams.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
@@ -282,7 +283,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     // The sponsor answers what the kickoff already said something about:
     // the brain keeps both.
     await bringInKickoff({ pain: "Clients wait weeks for their numbers." });
-    await admin.api.onboarding.confirmRoster(roster);
+    await admin.api.onboarding.confirmRoster(await teamsMade(roster));
     await mailConnection();
 
     const workspace = await admin.api.brain.read();
@@ -311,7 +312,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         ambition: "Every client gets their numbers within a week.",
         whyNow:
           "Copying invoices by hand.\nClients wait weeks for their numbers.",
-        inviteTeamIds: ["team-finance"],
+        inviteTeamIds: ["finance"],
         budget: [],
         toolApproval: [],
         sourceId: "src-kickoff",
@@ -319,7 +320,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       },
       teams: [
         {
-          id: "team-finance",
+          id: "finance",
           name: "Finance",
           sourceId: "src-kickoff",
           counts: [
@@ -339,7 +340,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           ],
         },
         {
-          id: "team-ops",
+          id: "ops",
           name: "Operations",
           sourceId: "src-roster",
           counts: [
@@ -406,7 +407,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       vision: { ...workspace.vision, inviteTeamIds: [] },
       teams: [
         {
-          id: "team-finance",
+          id: "finance",
           name: "Finance",
           sourceId: "src-kickoff",
           counts: [
@@ -425,7 +426,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("shows each team lead's interview by its week and the documents shared, with their tools, to admins alone", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.saveRoster(twoLeads);
+    await admin.api.onboarding.saveRoster(await teamsMade(twoLeads));
     const day = 24 * 60 * 60 * 1000;
     const daysAgo = (count: number) =>
       new Date(Date.now() - count * day).toISOString();
@@ -442,7 +443,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     // Hal, HR's lead when the links went out, moves to lead Sales before
     // he talks: his lead's interview is for Sales, and neither team counts
     // it as its lead's.
-    await admin.api.onboarding.saveRoster(halMoved);
+    await admin.api.onboarding.saveRoster(await teamsMade(halMoved));
     // Finance's lead finished two weeks ago, in a week that is over;
     // Legal's lead today, in this week; Ben, an employee, two weeks ago;
     // Olu, Ops's lead when the links went out, two weeks ago, but as an
@@ -465,13 +466,15 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     }
     // Then the admin makes Ben the only member and lead of a team of his
     // own: it tells them nothing about his interview.
-    await admin.api.onboarding.saveRoster({
-      ...halMoved,
-      teams: [...halMoved.teams, { id: "solo", name: "Solo", lead: "ben" }],
-      people: halMoved.people.map((one) =>
-        one.id === "ben" ? { ...one, team: "solo" } : one
-      ),
-    });
+    await admin.api.onboarding.saveRoster(
+      await teamsMade({
+        ...halMoved,
+        teams: [...halMoved.teams, { id: "solo", name: "Solo", lead: "ben" }],
+        people: halMoved.people.map((one) =>
+          one.id === "ben" ? { ...one, team: "solo" } : one
+        ),
+      })
+    );
     const first = await shareDocument(
       admin,
       `booking-${crypto.randomUUID()}.docx`,
@@ -518,7 +521,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           // The lead's role alone would point at them: never sent.
           step: 2,
           interviewee: "stakeholder",
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
         },
         {
           id: `src.document-${first.id}`,
@@ -539,26 +542,26 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         {
           id: "tool.document-exact-online",
           name: "Exact Online",
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
           sourceId: `src.document-${first.id}`,
         },
         {
           id: "tool.document-claimspro",
           name: "ClaimsPro",
-          teamIds: ["team-finance", "team-legal"],
+          teamIds: ["finance", "legal"],
           sourceId: `src.document-${first.id}`,
         },
         // Two names whose letters read alike stay two tools.
         {
           id: "tool.document-microsoft-project",
           name: "Microsoft Project",
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
           sourceId: `src.document-${first.id}`,
         },
         {
           id: "tool.document-microsoft-project-2",
           name: "Microsoft.Project",
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
           sourceId: `src.document-${first.id}`,
         },
       ],
@@ -569,13 +572,13 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("shows a tool a document and a brain record both name once, as the record, used by the teams of both", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const tag = crypto.randomUUID().slice(0, 8);
     const record: Extract<BrainRecordInput, { type: "tool" }> = {
       type: "tool",
       id: `tool-${tag}`,
       name: `ledger ${tag}`,
-      teamIds: ["team-ops"],
+      teamIds: ["ops"],
       sourceId: `src-${tag}`,
       ai: "none",
     };
@@ -606,14 +609,14 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         {
           id: `tool.document-claims-${tag}`,
           name: `Claims ${tag}`,
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
           sourceId: `src.document-${document.id}`,
         },
         // The record keeps its id, name and source.
         {
           id: record.id,
           name: record.name,
-          teamIds: ["team-ops", "team-finance"],
+          teamIds: ["ops", "finance"],
           sourceId: record.sourceId,
           ai: "none",
         },
@@ -623,7 +626,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         {
           id: record.id,
           name: record.name,
-          teamIds: ["team-ops"],
+          teamIds: ["ops"],
           sourceId: record.sourceId,
           ai: "none",
         },
@@ -1034,7 +1037,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("shows no team of the kickoff once the admin deletes it, the roster's teams alone", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.confirmRoster(roster);
+    await admin.api.onboarding.confirmRoster(await teamsMade(roster));
     await bringInKickoff();
     const before = await member.api.brain.read();
 
@@ -1078,7 +1081,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     // The kickoff names Legal, as its transcript does; the roster doesn't
     // yet.
     const name = "Legal";
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     await bringInKickoff(
       {},
       { ...kickoffReading, teams: [{ name, does: "Contracts", people: 3 }] }
@@ -1104,10 +1107,12 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       },
     ]);
     // The roster names the team too: the kickoff's joins it.
-    await admin.api.onboarding.saveRoster({
-      teams: [{ id: "legal-team", name, lead: "lex" }],
-      people: [{ id: "lex", name: "Lex", team: "legal-team", title: "" }],
-    });
+    await admin.api.onboarding.saveRoster(
+      await teamsMade({
+        teams: [{ id: "legal-team", name, lead: "lex" }],
+        people: [{ id: "lex", name: "Lex", team: "legal-team", title: "" }],
+      })
+    );
     const after = await admin.api.brain.read();
     const joined = after.teams.filter((team) => team.name === name);
     const statement = after.statements.find(({ id }) => id === `${source}-st`);

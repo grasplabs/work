@@ -64,9 +64,7 @@ const ticketsDrawingFor = async (
   const brain = await api.brain.read();
   // The team's one piece of work in the brain: the rota, its lead's own,
   // stays out. Found by its team, as staff read no name.
-  const workflow = brain.workflows.find(
-    ({ teamId }) => teamId === `team-${ids.team}`
-  );
+  const workflow = brain.workflows.find(({ teamId }) => teamId === ids.team);
   const drawing = workflow?.drawings?.at(-1);
   return {
     baseline: workflow?.baseline.steps.map(({ text }) => text),
@@ -277,7 +275,7 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     const brain = await member.api.brain.read();
     const drawing = brain.workflows
-      .find(({ teamId }) => teamId === `team-${ids.team}`)
+      .find(({ teamId }) => teamId === ids.team)
       ?.drawings?.at(-1);
     expect({
       minutes: drawing?.steps.map(({ minutes }) => minutes?.normal ?? null),
@@ -376,7 +374,7 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     const brain = await member.api.brain.read();
     const takes = brain.workflows
-      .find(({ teamId }) => teamId === `team-${ids.team}`)
+      .find(({ teamId }) => teamId === ids.team)
       ?.drawings?.at(-1)?.takes;
     expect({
       unit: takes?.unit,
@@ -447,7 +445,7 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     const brain = await member.api.brain.read();
     const drawing = brain.workflows
-      .find(({ teamId }) => teamId === `team-${ids.team}`)
+      .find(({ teamId }) => teamId === ids.team)
       ?.drawings?.at(-1);
     expect(
       drawing?.differently.map(({ when, after }) => [when, after])

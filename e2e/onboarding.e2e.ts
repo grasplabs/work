@@ -50,6 +50,23 @@ const dayMs = 24 * 60 * 60 * 1000;
 const daysFromToday = (days: number): string =>
   new Date(Date.now() + days * dayMs).toISOString().slice(0, 10);
 
+/**
+ * The id core gave the list's team named `name`: a list's own team ids
+ * only tie its people to their teams, and core names each team by its
+ * members' team's id (GRA-2055), so what a test does with a team after
+ * the save goes by the id core read back, as the screens do.
+ */
+const teamIdOf = (
+  roster: { teams: readonly { id: string; name: string }[] } | null,
+  name: string
+): string => {
+  const id = roster?.teams.find((team) => team.name === name)?.id;
+  if (id === undefined) {
+    throw new Error(`No team ${name} on the list`);
+  }
+  return id;
+};
+
 test("staff put the agreements in place, and the links that waited go out", async ({
   cspViolations,
 }) => {
@@ -339,10 +356,12 @@ test("staff ask a team in late, its lead first", async ({ cspViolations }) => {
   };
   expect(await support()).toStrictEqual({ sol: false, sid: false });
 
-  // Support is asked in late: Sol's link goes out now, Sid's waits for Sol.
+  // Support is asked in late, as the admin's button asks it, by the id the
+  // snapshot holds: Sol's link goes out now, Sid's waits for Sol.
+  const { roster } = await adminSnapshot();
   await adminCommand({
     type: "onboarding.ask_in",
-    payload: { team: `support-${run}` },
+    payload: { team: teamIdOf(roster, "Support") },
   });
   expect(await support()).toStrictEqual({ sol: true, sid: false });
   expect(cspViolations).toStrictEqual([]);
@@ -647,7 +666,14 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
   }
   // Seeded interviews: the plan began six days ago, and by yesterday Sales
   // had heard from five of its six, Service from none of its five, and
-  // Ops from its three; Lea and Ona talked, Lisa didn't.
+  // Ops from its three; Lea and Ona talked, Lisa didn't. Counted under the
+  // ids core gave the teams.
+  const { roster } = await adminSnapshot();
+  const teams = {
+    sales: teamIdOf(roster, "Sales"),
+    service: teamIdOf(roster, "Service"),
+    ops: teamIdOf(roster, "Ops"),
+  };
   const yesterday = daysFromToday(-1);
   onboardingSql((db) => {
     db.prepare("UPDATE onboarding SET plan = ? WHERE id = 1").run(
@@ -656,17 +682,17 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
     const count = db.prepare(
       "INSERT OR REPLACE INTO team_counts (team, day, asked, talked) VALUES (?, ?, ?, ?)"
     );
-    count.run(sales, yesterday, 6, 5);
-    count.run(service, yesterday, 5, 0);
-    count.run(ops, yesterday, 3, 3);
+    count.run(teams.sales, yesterday, 6, 5);
+    count.run(teams.service, yesterday, 5, 0);
+    count.run(teams.ops, yesterday, 3, 3);
     const talked = db.prepare(
       "INSERT OR REPLACE INTO interview_states (person, kind, lead_of, started_at, completed_at, updated_at) VALUES (?, 'lead', ?, ?, ?, ?)"
     );
     const at = `${yesterday}T10:00:00.000Z`;
     // Each as the lead of the team they led when their link went out.
     for (const [lead, team] of [
-      [`lea-${run}`, sales],
-      [`ona-${run}`, ops],
+      [`lea-${run}`, teams.sales],
+      [`ona-${run}`, teams.ops],
     ] as const) {
       talked.run(lead, team, at, at, at);
     }

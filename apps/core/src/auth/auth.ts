@@ -6,6 +6,10 @@ import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { relayRedirectUri } from "@grasp-os/shared/oauth-relay";
+import {
+  staffListTeamRefusals,
+  teamNameKey,
+} from "@grasp-os/shared/onboarding";
 import { roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import type { SignInRefusal } from "@grasp-os/shared/sign-in";
@@ -49,6 +53,7 @@ import {
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
+import { namedOnListUnmade } from "../staff-list-teams.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -777,6 +782,21 @@ const loadSso = async (): Promise<typeof sso> => {
   return plugin;
 };
 
+/**
+ * Refuses a team made or renamed in Settings › Members under a name the
+ * staff list gives a team it hasn't made yet (GRA-2055): the confirm keeps
+ * the list's team by its id, so it would be a second of the name.
+ */
+const refuseNameOnListUnmade = async (env: Env, name: string) => {
+  if (await namedOnListUnmade(env, name)) {
+    throw new APIError("CONFLICT", {
+      code: staffListTeamRefusals.notMadeYet,
+      message:
+        "A team on the staff list has this name. It appears here once the staff list is confirmed.",
+    });
+  }
+};
+
 const createAuth = (
   env: Env,
   config: SignInConfig,
@@ -1006,6 +1026,48 @@ const createAuth = (
           },
           afterDeleteTeam: async ({ team }) => {
             await teamGone(env, team.id);
+          },
+          // The onboarding's staff list names these same teams (GRA-2055,
+          // staff-list-teams.ts), whose names change here alone: a rename
+          // shows on the list at once. The rename is kept whatever comes of
+          // that, so a failure is logged, not answered: the list's next
+          // save takes the name from here again (`intoMembersTeams`). A
+          // team on the list, saved or confirmed, is taken off there
+          // first, so it never names one gone.
+          afterUpdateTeam: async ({ team }) => {
+            if (team === null) {
+              return;
+            }
+            try {
+              await onboardingStore(env).renameTeam(team.id, team.name);
+            } catch (error) {
+              log.error("onboarding.team_rename_unfollowed", {
+                teamId: team.id,
+                error: error instanceof Error ? error.name : "unknown",
+              });
+            }
+          },
+          beforeDeleteTeam: async ({ team }) => {
+            if (await onboardingStore(env).listsTeam(team.id)) {
+              throw new APIError("CONFLICT", {
+                code: staffListTeamRefusals.onList,
+                message: "The team is on the staff list.",
+              });
+            }
+          },
+          // A name the staff list gives a team it hasn't made yet stays its
+          // own (GRA-2055, `refuseNameOnListUnmade`).
+          beforeCreateTeam: async ({ team }) => {
+            await refuseNameOnListUnmade(env, team.name);
+          },
+          // Renamed to it too: the same second team at the confirm.
+          beforeUpdateTeam: async ({ team, updates }) => {
+            if (
+              updates.name !== undefined &&
+              teamNameKey(updates.name) !== teamNameKey(team.name)
+            ) {
+              await refuseNameOnListUnmade(env, updates.name);
+            }
           },
         },
       }),

@@ -92,6 +92,21 @@ export const teams = sqliteTable("teams", {
   mappedDoes: text("mapped_does"),
   off: integer({ mode: "boolean" }).notNull(),
   /**
+   * Whether core made its id for the list (GRA-2055, staff-list-teams.ts
+   * `intoMembersTeams`): only under such an id does a confirm make a
+   * members' team, so a team deleted in Settings never comes back under
+   * its old id, with what was shared with it. Every row this code writes
+   * sets it (true only for an id core made, false for a members' team's).
+   * The default, minted, is for rows written before this column (or by an
+   * older release after a rollback): they keep their ids and what hangs on
+   * them, and an id the list has made a team of before is still refused, in
+   * the statement that makes one (`retired_team_ids`). Such a release
+   * stored whatever team id the admin's request sent: its web only ever
+   * sent the list's own (`t-<name>`), never a members' team's, but a
+   * request made by hand could have (GRA-2055).
+   */
+  minted: integer({ mode: "boolean" }).notNull().default(true),
+  /**
    * When its lead's map of the team's work was drawn (ISO 8601): its links
    * wait for that, or for `leadWaitWorkingDays`.
    */
