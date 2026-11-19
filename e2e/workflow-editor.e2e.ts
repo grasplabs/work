@@ -406,7 +406,8 @@ test("a builder makes something that runs on its own by saying what they want do
   await expect(page).toHaveURL(/\/workflows\/[^/?]+$/u);
   const workflow = new URL(page.url()).pathname.split("/").at(-1) ?? "";
   const chat = page.getByRole("region", { name: "Chat" });
-  await expect(chat.getByText(opener)).toBeVisible();
+  // Exactly: the recall's step ("Searched the brain for …") holds it too.
+  await expect(chat.getByText(opener, { exact: true })).toBeVisible();
   await expect(chat.getByText(reply.text)).toBeVisible(pageRead);
   await expect(
     page.getByText(`${workflowPlanned} isn't ready yet`)

@@ -2028,8 +2028,15 @@
     {
       "idx": 289,
       "version": "6",
-      "when": 1795119845136,
-      "tag": "0289_brain_grant_pins_removed",
+      "when": 1795125151845,
+      "tag": "0289_knowledge_leftovers_dropped",
+      "breakpoints": true
+    },
+    {
+      "idx": 290,
+      "version": "6",
+      "when": 1795127335374,
+      "tag": "0290_brain_grant_pins_removed",
       "breakpoints": true
     }
   ]
