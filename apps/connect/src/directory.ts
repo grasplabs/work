@@ -476,6 +476,32 @@ const readFailure = (error: unknown): unknown => {
   return directoryErrors.create("directory.provider_failed");
 };
 
+/**
+ * Why Entra's deleted users couldn't be read, as the directory's error.
+ * The line core goes by (directory-people.ts `deletedOf`): a refusal of
+ * the list itself, or an answer that isn't one, is the endpoint or its
+ * permission, not the moment, and doesn't pass by retrying in a quarter
+ * hour: `directory.deleted_refused` (401 or 403 on this call: its
+ * permission, `User.Read.All` without an Entra role, is still unproved on
+ * a real tenant) and `directory.deleted_unsupported` (400, 404, or a body
+ * of another shape). Anything else, throttling and server errors among
+ * it, is the moment: the read's own failures (`readFailure`).
+ */
+const deletedReadFailure = (error: unknown): unknown => {
+  if (error instanceof z.ZodError) {
+    return directoryErrors.create("directory.deleted_unsupported");
+  }
+  if (error instanceof SourceError) {
+    if (error.status === 401 || error.status === 403) {
+      return directoryErrors.create("directory.deleted_refused");
+    }
+    if (error.status === 400 || error.status === 404) {
+      return directoryErrors.create("directory.deleted_unsupported");
+    }
+  }
+  return readFailure(error);
+};
+
 /** Whether `cursor` is a link `request` would go on from. */
 const isCursorFor = (
   request: (cursor: string) => URL,
@@ -581,7 +607,7 @@ export const readDeletedDirectoryUsers = async (
   try {
     page = graphDeletedPageSchema.parse(await graph(access, url.href));
   } catch (error) {
-    throw readFailure(error);
+    throw deletedReadFailure(error);
   }
   const next = page["@odata.nextLink"] ?? null;
   // A next link elsewhere is never kept, nor taken for the end. Its size

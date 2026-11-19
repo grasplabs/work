@@ -93,6 +93,8 @@ interface Listed {
    * nor off: kept as turned off, for 3a's rules to suspend and lift.
    */
   deleted: string[];
+  /** Why the deleted accounts couldn't be read (`deletedOf`); null when they were. */
+  deletedFailure: string | null;
 }
 
 /**
@@ -129,6 +131,57 @@ const everyPage = async <Page extends { tenant: string; next: string | null }>(
   } while (cursor !== null);
 };
 
+/** The failures of the deleted list's first page the read goes on without it for. */
+const deletedUnreadable = new Set<string | undefined>([
+  "directory.deleted_refused",
+  "directory.deleted_unsupported",
+]);
+
+/**
+ * Every deleted account of `connection`, or why the list can't be read at
+ * all. Where the line is, and why: added to a read that worked without
+ * it, the list must never take that read away. So a first page refused,
+ * or not a list (connect's `deletedReadFailure`), which no retry in a
+ * quarter hour mends, leaves the read as it was before: applied, with no
+ * proof of anyone having left, and the reason recorded. Anything else
+ * fails the whole read, to be tried again in a quarter hour: throttling
+ * or a server error, which pass, and any failure past the first page, so
+ * a part of the list is never taken for all of it.
+ */
+const deletedOf = async (
+  env: Env,
+  connection: DirectoryConnection,
+  tenant: string,
+  deadline: number
+): Promise<{ ids: string[] } | { failure: string }> => {
+  const ids = new Set<string>();
+  let pages = 0;
+  try {
+    await everyPage(
+      tenant,
+      deadline,
+      async (cursor) =>
+        await env.CONNECT.readDeletedDirectoryUsers({
+          connectionId: connection.id,
+          cursor,
+        }),
+      (read) => {
+        pages += 1;
+        for (const id of read.deleted) {
+          ids.add(id);
+        }
+      }
+    );
+  } catch (error) {
+    const code = directoryErrors.codeOf(error);
+    if (pages === 0 && code !== undefined && deletedUnreadable.has(code)) {
+      return { failure: code };
+    }
+    throw error;
+  }
+  return { ids: [...ids] };
+};
+
 /**
  * Every page of `connection`, read through connect: the whole directory
  * of `tenant`, the deployment's own sign-in tenant, then its deleted
@@ -150,6 +203,7 @@ const listedIn = async (
     people: [],
     disabled: [],
     deleted: [],
+    deletedFailure: null,
   };
   await everyPage(
     tenant,
@@ -170,24 +224,16 @@ const listedIn = async (
     ...listed.people.map(({ id }) => id),
     ...listed.disabled,
   ]);
-  const deleted = new Set<string>();
-  await everyPage(
-    tenant,
-    deadline,
-    async (cursor) =>
-      await env.CONNECT.readDeletedDirectoryUsers({
-        connectionId: connection.id,
-        cursor,
-      }),
-    (read) => {
-      for (const id of read.deleted) {
-        if (!listedIds.has(id)) {
-          deleted.add(id);
-        }
-      }
-    }
-  );
-  listed.deleted = [...deleted];
+  const deleted = await deletedOf(env, connection, tenant, deadline);
+  if ("failure" in deleted) {
+    listed.deletedFailure = deleted.failure;
+    log.warn("directory.deleted_unread", {
+      provider: connection.provider,
+      code: deleted.failure,
+    });
+  } else {
+    listed.deleted = deleted.ids.filter((id) => !listedIds.has(id));
+  }
   return listed;
 };
 
@@ -333,6 +379,7 @@ const apply = async (
         disabled: listed.disabled.length,
         failure: null,
         failedAt: null,
+        deletedFailure: listed.deletedFailure,
       })
       .where(
         and(

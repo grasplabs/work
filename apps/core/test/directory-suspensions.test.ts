@@ -752,11 +752,11 @@ describe(
   }
 );
 
-/** The read's own failure, if its last read failed. */
-const readFailure = async () =>
+/** The read's own failure, if its last read failed, and why its last applied one went without the deleted users. */
+const readStatus = async () =>
   await env.DB.prepare(
-    "SELECT failure FROM directory_reads WHERE provider = 'microsoft-directory'"
-  ).first<string | null>("failure");
+    "SELECT failure, deleted_failure AS deletedFailure FROM directory_reads WHERE provider = 'microsoft-directory'"
+  ).first<{ failure: string | null; deletedFailure: string | null }>();
 
 /** Whether the directory keeps a row for `oid`, and whether it is on. */
 const rowOf = async (oid: string) =>
@@ -798,6 +798,7 @@ describe("a member whose directory account was deleted", () => {
       cy: await suspensionOf(cy.userId),
       dee: await suspensionOf(dee.userId),
       adaSession: await nowSignedIn(ada.session),
+      status: await readStatus(),
       read: events.find(({ action }) => action === "directory.people_read")
         ?.detail,
     };
@@ -815,6 +816,7 @@ describe("a member whose directory account was deleted", () => {
         cy: { suspended: 0, suspendedBy: null },
         dee: { suspended: 0, suspendedBy: null },
         adaSession: "auth.unauthenticated",
+        status: { failure: null, deletedFailure: null },
         read: {
           provider: "microsoft-directory",
           people: 1,
@@ -853,38 +855,107 @@ describe("a member whose directory account was deleted", () => {
     });
   });
 
-  it("applies nothing when a page of the deleted users fails, or links elsewhere", async () => {
+  it("applies nothing, people included, when a later page of the deleted users fails, even refused, or links elsewhere", async () => {
     await connectedDirectory(idp);
     const gus = await memberWith(crypto.randomUUID());
+    // Someone the read would list, to show its people part isn't kept either.
+    const ivo = crypto.randomUUID();
     const deleted = [
       { id: gus.oid },
       ...Array.from({ length: 120 }, () => ({ id: crypto.randomUUID() })),
     ];
-    await directoryHolds([], deleted);
-    await deletedFailAt(100);
-    await readAt(nextDay());
-    const failed = {
-      failure: await readFailure(),
-      gus: await suspensionOf(gus.userId),
+    const attempt = async (fail: () => Promise<void>) => {
+      await directoryHolds([user({ id: ivo })], deleted);
+      await fail();
+      await readAt(nextDay());
+      return {
+        status: await readStatus(),
+        gus: await suspensionOf(gus.userId),
+        ivo: await rowOf(ivo),
+      };
     };
-    await directoryHolds([], deleted);
-    await deletedLinksTo("https://graph.example.test/v1.0/users?$skiptoken=1");
+
+    expect({
+      serverError: await attempt(async () => {
+        await deletedFailAt(100);
+      }),
+      refusedLater: await attempt(async () => {
+        await deletedFailAt(100, 403);
+      }),
+      elsewhere: await attempt(async () => {
+        await deletedLinksTo(
+          "https://graph.example.test/v1.0/users?$skiptoken=1"
+        );
+      }),
+    }).toStrictEqual({
+      serverError: {
+        status: { failure: "directory.provider_failed", deletedFailure: null },
+        gus: { suspended: 0, suspendedBy: null },
+        ivo: null,
+      },
+      refusedLater: {
+        status: { failure: "directory.deleted_refused", deletedFailure: null },
+        gus: { suspended: 0, suspendedBy: null },
+        ivo: null,
+      },
+      elsewhere: {
+        status: { failure: "directory.provider_failed", deletedFailure: null },
+        gus: { suspended: 0, suspendedBy: null },
+        ivo: null,
+      },
+    });
+  });
+
+  it("goes on without them when the deleted users are refused outright, says so, and reads them again next day", async () => {
+    await connectedDirectory(idp);
+    const [jan, kai, lee] = [
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+    ];
+    // Jan turned off, Kai deleted (and so missing), Lee listed.
+    const holds = async () => {
+      await directoryHolds(
+        [user({ id: jan.oid, accountEnabled: false }), user({ id: lee.oid })],
+        [{ id: kai.oid }]
+      );
+    };
+    await holds();
+    await deletedFailAt(0, 403);
+
+    const events = await auditedDuring(async () => {
+      await readAt(nextDay());
+    });
+    const refused = {
+      status: await readStatus(),
+      jan: await suspensionOf(jan.userId),
+      kai: await suspensionOf(kai.userId),
+      lee: await rowOf(lee.oid),
+      deleted: events.find(({ action }) => action === "directory.people_read")
+        ?.detail?.deleted,
+    };
+    // The next day's read is answered: Kai's deletion is read then.
+    await holds();
     await readAt(nextDay());
 
     expect({
-      failed,
-      elsewhere: {
-        failure: await readFailure(),
-        gus: await suspensionOf(gus.userId),
+      refused,
+      nextDay: {
+        status: await readStatus(),
+        kai: await suspensionOf(kai.userId),
       },
     }).toStrictEqual({
-      failed: {
-        failure: "directory.provider_failed",
-        gus: { suspended: 0, suspendedBy: null },
+      refused: {
+        // The read as before 3b: people, ties and 3a's suspensions.
+        status: { failure: null, deletedFailure: "directory.deleted_refused" },
+        jan: { suspended: 1, suspendedBy: "directory" },
+        kai: { suspended: 0, suspendedBy: null },
+        lee: 1,
+        deleted: 0,
       },
-      elsewhere: {
-        failure: "directory.provider_failed",
-        gus: { suspended: 0, suspendedBy: null },
+      nextDay: {
+        status: { failure: null, deletedFailure: null },
+        kai: { suspended: 1, suspendedBy: "directory" },
       },
     });
   });
@@ -899,8 +970,11 @@ describe("a member whose directory account was deleted", () => {
     await readAt(nextDay());
 
     expect({
-      failure: await readFailure(),
+      status: await readStatus(),
       row: await rowOf(hal.oid),
-    }).toStrictEqual({ failure: null, row: null });
+    }).toStrictEqual({
+      status: { failure: null, deletedFailure: null },
+      row: null,
+    });
   });
 });

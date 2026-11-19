@@ -199,6 +199,10 @@ const connectDirectory = async (
 const read = async (connectionId: string, cursor: string | null = null) =>
   await exports.default.readDirectory({ connectionId, cursor });
 
+/** An answer of HTTP `code`, as a provider's error. */
+const answeredWith = (code: number) => () =>
+  Response.json({ error: { code: "x" } }, { status: code });
+
 const readDeleted = async (connectionId: string) =>
   await exports.default.readDeletedDirectoryUsers({
     connectionId,
@@ -569,6 +573,36 @@ describe("a directory read", () => {
       select: "id,userType",
       ofGoogle: "directory.not_found",
       sentForGoogle: 0,
+    });
+  });
+
+  it("of Entra's deleted users tells a refusal or an endpoint that isn't one from a failure of the moment", async () => {
+    const connectionId = await connectDirectory(someone("admin"));
+    const answered = async (answer: () => Response) => {
+      directories.answer = answer;
+      try {
+        return await codeOf(readDeleted(connectionId));
+      } finally {
+        delete directories.answer;
+      }
+    };
+
+    expect({
+      unauthorized: await answered(answeredWith(401)),
+      forbidden: await answered(answeredWith(403)),
+      badRequest: await answered(answeredWith(400)),
+      notFound: await answered(answeredWith(404)),
+      notAList: await answered(() => Response.json({ value: "none" })),
+      throttled: await answered(answeredWith(429)),
+      serverError: await answered(answeredWith(500)),
+    }).toStrictEqual({
+      unauthorized: "directory.deleted_refused",
+      forbidden: "directory.deleted_refused",
+      badRequest: "directory.deleted_unsupported",
+      notFound: "directory.deleted_unsupported",
+      notAList: "directory.deleted_unsupported",
+      throttled: "directory.throttled",
+      serverError: "directory.provider_failed",
     });
   });
 

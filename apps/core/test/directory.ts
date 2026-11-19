@@ -36,16 +36,21 @@ export const directoryHolds = async (
     loopAt: null,
     deleted,
     deletedFailAt: null,
+    deletedFailStatus: 500,
     deletedNext: null,
   });
 };
 
 /**
- * Has Graph fail the page of its deleted users that starts at offset
- * `from`, until `directoryHolds` is called again.
+ * Has Graph answer the page of its deleted users that starts at offset
+ * `from` with HTTP `status` (a server error by default), until
+ * `directoryHolds` is called again.
  */
-export const deletedFailAt = async (from: number): Promise<void> => {
-  await setDirectory({ deletedFailAt: from });
+export const deletedFailAt = async (
+  from: number,
+  status = 500
+): Promise<void> => {
+  await setDirectory({ deletedFailAt: from, deletedFailStatus: status });
 };
 
 /**

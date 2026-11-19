@@ -184,4 +184,8 @@ export const directoryErrors = defineErrorFamily({
     "The directory's daily read took longer than the clock gives it: nothing it read was kept.",
   "directory.read_failed":
     "The directory's daily read failed: nothing it read was kept.",
+  "directory.deleted_refused":
+    "Microsoft refused to list the directory's deleted accounts, so nobody was suspended for having left. The rest of the read was kept.",
+  "directory.deleted_unsupported":
+    "Microsoft's list of deleted accounts didn't answer as expected, so nobody was suspended for having left. The rest of the read was kept.",
 });

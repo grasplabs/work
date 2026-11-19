@@ -1982,6 +1982,13 @@
       "when": 1795076915727,
       "tag": "0282_member_suspensions",
       "breakpoints": true
+    },
+    {
+      "idx": 283,
+      "version": "6",
+      "when": 1795079603533,
+      "tag": "0283_directory_deleted_failure",
+      "breakpoints": true
     }
   ]
 }
