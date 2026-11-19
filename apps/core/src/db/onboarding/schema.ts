@@ -579,6 +579,22 @@ export const referrals = sqliteTable("referrals", {
   at: text().notNull(),
 });
 
+/**
+ * Every address of someone core erased (person-erasure.ts), as the keyed
+ * hash core keeps of one (erased-people.ts `emailHashOf`), never the
+ * address (GRA-2189): what the store's own transactions decide by, which
+ * can't wait on core's database. A save writes such an address blank
+ * while it isn't released. Who it was kept out for (`userId`) and whether
+ * an admin released it since order a release and an erasure of one
+ * address: an attempt of that erasure finding it released writes nothing
+ * by it.
+ */
+export const erasedAddresses = sqliteTable("erased_addresses", {
+  hash: text().primaryKey(),
+  userId: text("user_id").notNull(),
+  released: integer({ mode: "boolean" }).notNull().default(false),
+});
+
 export const drawFailures = sqliteTable("draw_failures", {
   item: text().primaryKey(),
   tries: integer().notNull(),
