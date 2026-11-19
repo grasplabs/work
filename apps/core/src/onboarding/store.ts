@@ -5802,16 +5802,12 @@ export class Onboarding extends DurableObject<Env> {
    * that erasure's step, which keeps the hash, so the row is there for
    * every address core releases. Recorded as `by`'s when given: for an
    * address only the store kept out, whose release core's own record
-   * doesn't cover; then only while it is still kept out for `of`, the
-   * person core checked (`keptOutFor`). Entries an erasure closed stay as
-   * they are until an admin takes them off the list. Whether the store
-   * kept it out.
+   * doesn't cover. Only while it is still kept out for `of`, the erased
+   * person core checked the release against, never for anyone else.
+   * Entries an erasure closed stay as they are until an admin takes them
+   * off the list. Whether the store kept it out.
    */
-  releaseAddress(
-    hash: string,
-    by: AuditActor | null,
-    of: string | null = null
-  ): boolean {
+  releaseAddress(hash: string, of: string, by: AuditActor | null): boolean {
     const held = this.ctx.storage.transactionSync(() => {
       const released =
         this.#db
@@ -5821,7 +5817,7 @@ export class Onboarding extends DurableObject<Env> {
             and(
               eq(erasedAddresses.hash, hash),
               eq(erasedAddresses.released, false),
-              of === null ? undefined : eq(erasedAddresses.userId, of)
+              eq(erasedAddresses.userId, of)
             )
           )
           .returning({ hash: erasedAddresses.hash })

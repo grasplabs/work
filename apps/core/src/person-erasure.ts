@@ -1210,8 +1210,11 @@ const erasingFromTheList = (userId: string) =>
  * admin, read now, after every wait: the store can't read core's database
  * in its transaction, so one call remains between this read and the
  * store's transaction, as one remains between the statement that releases
- * in `releaseAddress` and its own call to the store. The store releases it
- * only while it is still kept out for the person checked. Recorded by the
+ * in `releaseAddress` and its own call to the store. Kept out for nobody
+ * when asked, there is nothing to release and the store isn't asked
+ * again: an erasure that keeps it out after that answer is one this
+ * release doesn't cover, and its block stands. The store releases it only
+ * while it is still kept out for the person checked. Recorded by the
  * store when it held the address. Whether it did.
  */
 const releaseOnTheList = async (
@@ -1221,6 +1224,9 @@ const releaseOnTheList = async (
 ): Promise<boolean> => {
   const store = onboardingStore(env);
   const keptFor = await store.keptOutFor(hash);
+  if (keptFor === null) {
+    return false;
+  }
   const db = drizzle(env.DB);
   const [[admin], [erasing]] = await db.batch([
     db
@@ -1230,7 +1236,7 @@ const releaseOnTheList = async (
     db
       .select({ userId: personErasureAreas.userId })
       .from(personErasureAreas)
-      .where(erasingFromTheList(keptFor ?? "")),
+      .where(erasingFromTheList(keptFor)),
   ]);
   if (admin === undefined) {
     throw roleErrors.create("role.forbidden");
@@ -1238,7 +1244,7 @@ const releaseOnTheList = async (
   if (erasing !== undefined) {
     throw memberErrors.create("member.release_erasing");
   }
-  return await store.releaseAddress(hash, actorOf(by), keptFor);
+  return await store.releaseAddress(hash, keptFor, actorOf(by));
 };
 
 /**
@@ -1308,7 +1314,7 @@ export const releaseAddress = async (
       ? roleErrors.create("role.forbidden")
       : memberErrors.create("member.release_erasing");
   }
-  await onboardingStore(env).releaseAddress(hash, null);
+  await onboardingStore(env).releaseAddress(hash, erased.userId, null);
   return { released: true };
 };
 

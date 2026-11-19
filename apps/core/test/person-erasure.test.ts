@@ -2112,6 +2112,71 @@ describe("erasing a person", () => {
     });
   });
 
+  it("releases nothing an erasure keeps out only after the release looked, and asking again waits for that erasure", async () => {
+    const { admin, person } = await removedPerson();
+    const listed = `dir-${crypto.randomUUID().slice(0, 8)}@acme.test`;
+    const { theirSecret, roster } = await onTheList(listed);
+    const store = onboardingStore(env);
+    await store.openLink(await sha256Hex(theirSecret), {
+      account: person.userId,
+      address: listed,
+    });
+    // Their erasure recorded, its step for the list still to run: nothing
+    // keeps the directory's address out yet.
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO person_erasures (user_id, name, email_hash, email_key_version, requested_by, requested_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).bind(
+        person.userId,
+        String(person.person.name),
+        await emailHashOf(env, String(person.person.email)),
+        emailKeyVersion,
+        admin.userId,
+        now
+      ),
+      env.DB.prepare(
+        "INSERT INTO person_erasure_areas (user_id, area, state, attempts, updated_at) VALUES (?, 'interview', 'pending', 0, ?)"
+      ).bind(person.userId, now),
+    ]);
+    // The step's store part lands after the release asked the store whom
+    // the address is kept out for: before the release reads core's
+    // database again, should it; else just after it answered.
+    const keepOut = async () =>
+      await store.eraseEntries(
+        person.userId,
+        await emailHashOf(env, String(person.person.email))
+      );
+    const { coreEnv, landed } = landingAt(
+      /from "person_erasure_areas"/iu,
+      "before",
+      keepOut
+    );
+    const { core } = await openRpc(admin.session, { coreEnv });
+    using api = core.authenticate();
+
+    const first = await api.members.releaseAddress(listed);
+    if (!landed()) {
+      await keepOut();
+    }
+    const again = await outcome(admin.api.members.releaseAddress(listed));
+    const back = newEntry(roster, listed);
+    await store.saveRoster(
+      { ...roster, people: [...roster.people, back] },
+      { type: "system" }
+    );
+
+    expect({
+      first,
+      again,
+      kept: await listedAs(back.id),
+    }).toStrictEqual({
+      first: { released: false },
+      again: "member.release_erasing",
+      kept: "",
+    });
+  });
+
   it("lets no admin demoted as they release an address only the staff list keeps out release it", async () => {
     const { admin, listed, roster, without } = await erasedUnderAnother();
     // Demoted just after core looked the address up, before the store's turn.
