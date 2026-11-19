@@ -4451,6 +4451,19 @@ export const coreProbes = {
       async () => await Promise.resolve(coreBrain.eventsPerAddMax)
     ),
   ],
+  // A group's name made from a picked place's own IDs (GRA-2145): the same
+  // for everyone, naming nothing a place holds.
+  placeGroupOf: async () => [
+    await answer(
+      "a picked place's group name",
+      async () =>
+        await coreBrain.placeGroupOf(
+          `connection-${crypto.randomUUID()}`,
+          "sites",
+          "site"
+        )
+    ),
+  ],
   // A number, the longest group name the Brain takes: the same for everyone.
   principalMaxLength: async () => [
     await answer(

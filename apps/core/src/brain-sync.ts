@@ -443,20 +443,29 @@ const readerKeyOf = (reader: SourceReader): string | undefined => {
   }
 };
 
+/** `readers` as core compares them, sorted, as JSON: a link reaches nobody. */
+const readersKeyOf = (readers: readonly SourceReader[]): string[] =>
+  [
+    ...new Set(readers.flatMap((reader) => readerKeyOf(reader) ?? [])),
+  ].toSorted();
+
 /**
  * Where `item` goes and who reads it. Of a place picked on a shared
- * connection, the shared store, for the place's group. Else the owner's
- * own store for mail, events and attachments, and for a file whose
- * readers name nobody but the connection's own account (or couldn't be
- * read whole); else the shared store, read by its readers.
+ * connection, the shared store, read by those of the item's own readers
+ * the place's group holds (GRA-2145): nobody's when the source named none
+ * or couldn't be read whole. Else the owner's own store for mail, events
+ * and attachments, and for a file whose readers name nobody but the
+ * connection's own account (or couldn't be read whole); else the shared
+ * store, read by its readers.
  */
 const planOf = (
   source: Source,
   item: Extract<SyncItem, { gone: false }>
 ): Plan => {
-  // A place picked on a shared connection: its group, never an owner's,
-  // whatever the item's own readers say.
+  // A place picked on a shared connection: never an owner's, whatever the
+  // item's own readers say, and never wider than they are.
   if (source.personId === null) {
+    const readers = readersOf(source, item.readers ?? []);
     return {
       store: "shared",
       readers: {
@@ -464,8 +473,13 @@ const planOf = (
         connectionId: source.connectionId,
         feed: source.feed,
         place: source.place,
+        readers,
       },
-      readersKey: JSON.stringify(["place", source.place]),
+      readersKey: JSON.stringify([
+        "place",
+        source.place,
+        readersKeyOf(readers),
+      ]),
     };
   }
   const own: Plan = { store: "own", readersKey: null };
@@ -478,9 +492,7 @@ const planOf = (
     source.account === null
       ? undefined
       : `account:${comparable(source.account)}`;
-  const keys = [
-    ...new Set(readers.flatMap((reader) => readerKeyOf(reader) ?? [])),
-  ].toSorted();
+  const keys = readersKeyOf(readers);
   if (keys.every((key) => key === owner)) {
     return own;
   }
