@@ -43,7 +43,8 @@ const undescribed = (trigger: Record<string, unknown>) =>
 
 /** Whether the layer this trigger opens is open now. */
 const layerOpen = (element: HTMLElement | null) =>
-  element?.getAttribute("aria-expanded") === "true";
+  element?.getAttribute("aria-expanded") === "true" &&
+  element.hasAttribute("aria-haspopup");
 
 export const Tip = ({
   tooltip,

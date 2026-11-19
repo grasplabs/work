@@ -1385,6 +1385,10 @@ const LazyCut = (allProps: ButtonProps) => (
 const drawnByPart = (props: Record<string, unknown>) =>
   typeof props["data-slot"] === "string";
 
+/** Whether a merged prop is a press handler: the tooltip trigger's comes untyped. */
+const isPress = (value: unknown): value is (...args: unknown[]) => unknown =>
+  typeof value === "function";
+
 /**
  * The name an icon-only button shows in its tooltip: its `aria-label`, unless it has words of its
  * own or a tooltip already drives it (a TooltipTrigger, a layer's `tooltip`, a cut button).
@@ -1430,7 +1434,23 @@ export const Button = (allProps: ButtonProps) => {
               ref: allProps.ref,
             }
           );
-          return <Pressable {...allProps} {...merged} held={held} />;
+          // The press: the tip's first, then the control's, whose result it returns: a pending
+          // action's promise keeps the button working, and an agent's press reads how it went.
+          const tipPress = trigger.onClick;
+          const ownPress = allProps.onClick;
+          return (
+            <Pressable
+              {...allProps}
+              {...merged}
+              held={held}
+              onClick={(...args: Parameters<NonNullable<typeof ownPress>>) => {
+                if (isPress(tipPress)) {
+                  tipPress(...args);
+                }
+                return ownPress?.(...args);
+              }}
+            />
+          );
         }}
         tooltip={name}
       />
