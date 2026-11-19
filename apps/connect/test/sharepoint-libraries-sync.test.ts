@@ -1037,6 +1037,56 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
     ]);
   });
 
+  it("moves on past a file whose readers take every request a read has left, and one more or one fewer", async () => {
+    // A read's room (50 requests): the library and its delta leave 48, for
+    // the file's own permissions, its list of them and its site groups.
+    const outcomes = [];
+    for (const groups of [45, 46, 47]) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection after another
+      const { admin, connectionId } = await sharedConnection();
+      // oxlint-disable-next-line no-await-in-loop -- one connection after another
+      await pick(admin, connectionId, [salesDocs.id]);
+      const ids = Array.from({ length: groups }, (_, index) =>
+        String(100 + index)
+      );
+      sharePoint.permissions[`${salesDocs.id}-file`] = ids.map((id) =>
+        siteGroupGrant(id)
+      );
+      for (const id of ids) {
+        sharePoint.groups[`/sites/sales|${id}`] = [spUser(10, "ada", ada)];
+      }
+      const pages: (number | string)[] = [];
+      let cursor: string | null = null;
+      for (let at = 0; at < 4; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one read after another
+        const page: SyncPage | string = await read(
+          connectionId,
+          salesDocs.id,
+          cursor
+        ).catch((error: unknown) => syncErrors.codeOf(error) ?? "failed");
+        pages.push(typeof page === "string" ? page : page.items.length);
+        if (typeof page === "string") {
+          break;
+        }
+        ({ cursor } = page);
+        if (page.items.length > 0) {
+          break;
+        }
+      }
+      outcomes.push({
+        groups,
+        reached: pages.at(-1) === 1,
+        failed: pages.filter((page) => typeof page === "string"),
+      });
+    }
+
+    expect(outcomes).toStrictEqual([
+      { groups: 45, reached: true, failed: [] },
+      { groups: 46, reached: true, failed: [] },
+      { groups: 47, reached: true, failed: [] },
+    ]);
+  });
+
   it("waits when Graph throttles a file's permissions, rather than giving it nobody", async () => {
     const { admin, connectionId } = await sharedConnection();
     await pick(admin, connectionId, [salesDocs.id]);

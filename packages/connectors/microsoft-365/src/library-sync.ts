@@ -715,7 +715,14 @@ const itemsOf = async (
     return [fileOf(entry, null, readers)];
   }
   // Base64 is a third larger than the bytes.
-  if (!mayRequest(room) || (!room.empty && (size * 4) / 3 > room.bytes)) {
+  // Out of requests, its readers having taken what was left: late, so a
+  // file whose readers always take a whole read is passed over on the
+  // next (the kit's `fillPage`), never a page that stops before it again
+  // and again.
+  if (!mayRequest(room)) {
+    return "late";
+  }
+  if (!room.empty && (size * 4) / 3 > room.bytes) {
     return "full";
   }
   const response = await fetchInRoom(
