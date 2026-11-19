@@ -282,6 +282,14 @@ const idSchema = wellFormedString()
   .min(1)
   .max(principalMaxLength - teamPrefix.length);
 
+/** A reader list copied from where an item lives, each short enough to name. */
+const copiedReadersSchema = z.array(
+  sourceReaderSchema.refine(
+    (reader) => (plainPrincipalOf(reader)?.length ?? 0) <= principalMaxLength,
+    { message: "Too long a reader's ID" }
+  )
+);
+
 const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
@@ -294,27 +302,24 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
     kind: z.literal("connection"),
     connectionId: connectionIdSchema,
   }),
-  // Whoever the shared connection's Brain audience holds now, while the
-  // place an admin picked on it is still picked (GRA-1719): only for what
-  // native sync copies from that place (`sync`).
+  // Those of an item's readers where it lives (`readers`, as below) whom
+  // the shared connection's Brain audience holds now, while the place an
+  // admin picked on it is still picked (GRA-2145): the source decides who
+  // may read, the audience only narrows it. Only for what native sync
+  // copies from that place (`sync`).
   z.strictObject({
     kind: z.literal("place"),
     connectionId: connectionIdSchema,
     feed: syncFeedSchema,
     place: syncPlaceSchema,
+    readers: copiedReadersSchema,
   }),
   // Those the system an item lives in lists as its readers (GRA-1761),
   // each named as a group no other reader's name can be, an account by
   // its token (source-readers.ts), short enough for one.
   z.strictObject({
     kind: z.literal("readers"),
-    readers: z.array(
-      sourceReaderSchema.refine(
-        (reader) =>
-          (plainPrincipalOf(reader)?.length ?? 0) <= principalMaxLength,
-        { message: "Too long a reader's ID" }
-      )
-    ),
+    readers: copiedReadersSchema,
   }),
 ]);
 
@@ -915,14 +920,20 @@ const accessFor = async (
     return accessOf(readers, await readerPrincipalsOf(env, readers.readers));
   }
   if (readers.kind === "place") {
-    return {
-      kind: "audience",
-      group: await placeGroupOf(
-        readers.connectionId,
-        readers.feed,
-        readers.place
-      ),
-    };
+    // The item's own readers, held by those the place's group holds too:
+    // an empty or unknown list is nobody's, never the audience's.
+    const groups = await readerPrincipalsOf(env, readers.readers);
+    return groups.length === 0
+      ? { kind: "none" }
+      : {
+          kind: "readersWithin",
+          within: await placeGroupOf(
+            readers.connectionId,
+            readers.feed,
+            readers.place
+          ),
+          groups,
+        };
   }
   return accessOf(readers);
 };

@@ -177,15 +177,28 @@ export const versionSchema = z.int().positive();
  * Who may read a source: one person (`owner`: theirs alone, admins
  * included), a named group (`audience`), anyone in any of several groups
  * (`readers`: a list the host copied from where the source lives, each
- * once), or nobody, when who may read it isn't known (`none`). Readers of
- * one group are that group's audience: the same set, read back as
- * `audience`.
+ * once), anyone in any of several groups who is also in one more
+ * (`readersWithin`: such a list, read only by those of its readers the
+ * group `within` holds, as a host's audience narrows what a source lets
+ * people read), or nobody, when who may read it isn't known (`none`).
+ * Readers of one group are that group's audience: the same set, read
+ * back as `audience`.
  */
 export const accessSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), person: principalSchema }),
   z.strictObject({ kind: z.literal("audience"), group: principalSchema }),
   z.strictObject({
     kind: z.literal("readers"),
+    groups: z
+      .array(principalSchema)
+      .min(1)
+      .refine((groups) => new Set(groups).size === groups.length, {
+        message: "Names a group twice",
+      }),
+  }),
+  z.strictObject({
+    kind: z.literal("readersWithin"),
+    within: principalSchema,
     groups: z
       .array(principalSchema)
       .min(1)

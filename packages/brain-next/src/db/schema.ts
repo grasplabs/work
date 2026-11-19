@@ -24,6 +24,14 @@ export const readerSets = sqliteTable("reader_sets", {
   id: integer().primaryKey(),
   /** The set's principals, sorted, as JSON: one row per distinct set. */
   key: text().notNull().unique(),
+  /**
+   * For readers within a group (`readersWithin`): the group a reader must
+   * hold besides one of the set's readers, which are kept apart
+   * (`reader_set_readers`), never as members: a release before this one
+   * reads such a set as one with no members, nobody's, never as any of its
+   * readers'. Null for every other set.
+   */
+  within: text(),
 });
 
 /** A principal of a set: a person or a group, never compared across kinds. */
@@ -45,6 +53,29 @@ export const readerSetMembers = sqliteTable(
       table.readerSet
     ),
     check("reader_set_members_kind", sql`${table.kind} IN ('person', 'group')`),
+  ]
+);
+
+/**
+ * The readers of a set of readers within a group (`reader_sets.within`):
+ * groups, any of which a reader holds besides `within`. Written with the
+ * set, never changed.
+ */
+export const readerSetReaders = sqliteTable(
+  "reader_set_readers",
+  {
+    readerSet: integer("reader_set")
+      .notNull()
+      .references(() => readerSets.id),
+    principal: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.readerSet, table.principal] }),
+    // A recall finds a reader's sets by their groups.
+    index("reader_set_readers_principal_idx").on(
+      table.principal,
+      table.readerSet
+    ),
   ]
 );
 

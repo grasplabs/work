@@ -932,6 +932,9 @@ describe("a writer's erasure", () => {
                 "closed_event_tags",
                 "event_key",
                 "person_erasure_events",
+                // The readers of sets within a group (migration 0033,
+                // reader-sets.ts).
+                "reader_set_readers",
               ].includes(name)
           )
           .map((table) => {
@@ -999,6 +1002,13 @@ describe("a writer's erasure", () => {
                   rows: table.rows.map((row) => without(row, "thread")),
                 };
               }
+              case "reader_sets": {
+                return {
+                  ...table,
+                  created: table.created.replace(/,\s*`within` text/u, ""),
+                  rows: table.rows.map((row) => without(row, "within")),
+                };
+              }
               case "erased_versions": {
                 return {
                   ...table,
@@ -1025,29 +1035,32 @@ describe("a writer's erasure", () => {
               }
             }
           }),
+        // Made by a migration after the release before's, as those are.
         others: now.others.filter(
           (made) =>
-            !made.includes("memories_writer_idx") &&
-            !made.includes("erasures_writer_idx") &&
-            !made.includes("memory_erase_failures") &&
-            !made.includes("removed_sources") &&
-            // Made by a migration after the release before's, as those are.
-            !made.includes("unembeddable_hash_idx") &&
-            !made.includes("work_items_key_idx") &&
-            !made.includes("memory_outs") &&
-            !made.includes("memory_ins") &&
-            !made.includes("current_versions_unjudged_idx") &&
-            !made.includes("chunk_days_chunk_idx") &&
-            !made.includes("chunk_days_day_chunk_idx") &&
-            !made.includes("chunk_blocks") &&
-            !made.includes("person_erasure_subjects") &&
-            !made.includes("restore_cards") &&
-            !made.includes("memories_speaker_idx") &&
-            !made.includes("memory_confirmations_person_idx") &&
-            !made.includes("extractors_calls_unique") &&
-            !made.includes("proposal_sources") &&
-            !made.includes("ON `events`") &&
-            !made.includes("ON `closed_event_tags`")
+            ![
+              "memories_writer_idx",
+              "erasures_writer_idx",
+              "memory_erase_failures",
+              "removed_sources",
+              "unembeddable_hash_idx",
+              "work_items_key_idx",
+              "memory_outs",
+              "memory_ins",
+              "current_versions_unjudged_idx",
+              "chunk_days_chunk_idx",
+              "chunk_days_day_chunk_idx",
+              "chunk_blocks",
+              "person_erasure_subjects",
+              "restore_cards",
+              "memories_speaker_idx",
+              "memory_confirmations_person_idx",
+              "extractors_calls_unique",
+              "proposal_sources",
+              "ON `events`",
+              "ON `closed_event_tags`",
+              "reader_set_readers",
+            ].some((name) => made.includes(name))
         ),
       };
       expect(

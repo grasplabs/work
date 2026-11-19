@@ -400,13 +400,22 @@ const readingAccountsOf = (
 };
 
 /**
- * The Brain's groups of the groups the suite accounts the member connected
- * as their own (`connected`) are in: of each connection still connected,
- * the groups its last whole read found (connect's reader-groups.ts), while
- * that read is recent (`readerProofMaxAgeMs`), in its own tenant.
+ * The Brain's groups of the groups a member provably holds, the one place
+ * a group is proved for a person, whatever proves it. Each source of
+ * proof is one field of `proofs`, and counts only while it is recent
+ * (`readerProofMaxAgeMs`):
+ *
+ * - `connected`: the suite accounts they connected as their own: of each
+ *   connection still connected, the groups its last whole read with
+ *   their own token found (connect's reader-groups.ts), in its own tenant.
+ *
+ * The company's directory read of a group's members, tied by Entra object
+ * ID, is to be one more (GRA-2146).
  */
-const groupsHeldBy = (connected: readonly PersonalAccount[]): string[] =>
-  connected.flatMap(
+const provedGroupsOf = (proofs: {
+  connected: readonly PersonalAccount[];
+}): string[] =>
+  proofs.connected.flatMap(
     ({ provider, tenant, groups, groupsReadAt, connected: live }) =>
       live && recent(groupsReadAt)
         ? groups.map((group) => groupPrincipal(provider, tenant, group))
@@ -429,7 +438,7 @@ const namedGroupsRead = (db: DrizzleD1Database, groups: readonly string[]) =>
  * The Brain's groups the member `userId` holds, reading as themselves, by
  * the accounts they proved are theirs (`signIns`, `connected`): each
  * account's token and its tenant's name (`accounts`), and those of the
- * groups their connected accounts are in (`groupsHeldBy`) that a list
+ * groups they provably hold (`provedGroupsOf`) that a list
  * named, read in the same batch, sorted (`groups`). One batch: they claim the tokens of those
  * accounts (`person`, written only where it changes), and their tokens
  * and named groups are read. Nothing is minted: an account no list named
@@ -442,7 +451,7 @@ export const heldPrincipalsOf = async (
   connected: readonly PersonalAccount[]
 ): Promise<{ accounts: string[]; groups: string[] }> => {
   const reading = readingAccountsOf(env, signIns, connected);
-  const groups = [...new Set(groupsHeldBy(connected))];
+  const groups = [...new Set(provedGroupsOf({ connected }))];
   const db = drizzle(env.DB);
   if (reading.length === 0) {
     if (groups.length === 0) {

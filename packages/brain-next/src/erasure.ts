@@ -596,6 +596,7 @@ const dropUnusedReaderSet = (sql: SqlStorage, readerSet: number): void => {
     return;
   }
   sql.exec("DELETE FROM reader_set_members WHERE reader_set = ?", readerSet);
+  sql.exec("DELETE FROM reader_set_readers WHERE reader_set = ?", readerSet);
   // Its blocks hold none of its chunks now (chunk-blocks.ts).
   sql.exec("DELETE FROM chunk_blocks WHERE reader_set = ?", readerSet);
   sql.exec("DELETE FROM reader_sets WHERE id = ?", readerSet);

@@ -1,3 +1,4 @@
+import { recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
@@ -13,7 +14,7 @@ import {
 import { z } from "zod";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
-import { addSource } from "../src/brain-next.ts";
+import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { syncForStaff } from "../src/brain-sync.ts";
 import { personOf } from "../src/connections.ts";
@@ -63,6 +64,21 @@ mockIdpWith(idp);
 
 /** The sample connector's sync of picked places (its `sites`). */
 const feed = "sites";
+
+/** Everyone in the company's tenant, as core names a source's readers. */
+const everyoneInTenant = [
+  {
+    kind: "tenant" as const,
+    provider: "microsoft" as const,
+    tenant: acmeTenant,
+  },
+];
+
+/** `person`'s own Microsoft account, as a synced item's readers name it. */
+const accountAtSource = (person: Person) => ({
+  kind: "account",
+  id: String(person.person.oid),
+});
 
 /** An un-pick's hide taking the sync's places listing (brain-sync.ts `droppedExcept`). */
 const takeListingStatement =
@@ -181,6 +197,76 @@ describe("native sync of a shared connection's picked places", () => {
         admin: false,
         outsider: false,
         unpicked: false,
+      });
+    }
+  );
+
+  it(
+    "gives a picked place's file only to those its source lets read it, within the audience, and never to code reading for a team",
+    setUpTime,
+    async () => {
+      const [admin, seller, colleague, outsider] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      const sales = await newTeam(seller.userId, colleague.userId);
+      const [shared, unread] = [markerOf(), markerOf()];
+      const [site, other] = [`site-${unique()}`, `site-${unique()}`];
+      // At the source, the seller and the outsider may open the file;
+      // the colleague may not.
+      const { connectionId } = await connectSharedSites(
+        admin,
+        { [site]: shared },
+        [accountAtSource(seller), accountAtSource(outsider)]
+      );
+      // A file whose readers couldn't be read.
+      const { connectionId: unreadId } = await connectSharedSites(
+        admin,
+        { [other]: unread },
+        null
+      );
+      for (const [id, place] of [
+        [connectionId, site],
+        [unreadId, other],
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+        await chooseAudience(admin.api, id, { kind: "team", teamId: sales });
+        // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+        await pick(admin, id, [place]);
+      }
+      await syncAll();
+      const { items } = await recallAs(env, seller.userId, {
+        personal: false,
+        question: shared,
+        budget: { tokens: recallBudgetMax },
+      });
+
+      expect({
+        kept: [await heldBy(connectionId), await heldBy(unreadId)],
+        // In the audience and a reader at the source.
+        seller: await finds(seller.userId, shared),
+        // In the audience, not a reader at the source.
+        colleague: await finds(colleague.userId, shared),
+        // A reader at the source, not in the audience.
+        outsider: await finds(outsider.userId, shared),
+        admin: await finds(admin.userId, shared),
+        // Read as the seller's teams, as code acting for them does.
+        forTheTeam: items.some(({ text }) => text.includes(shared)),
+        // Its readers unread: nobody's, the audience's neither.
+        unread: [
+          await finds(seller.userId, unread),
+          await finds(colleague.userId, unread),
+        ],
+      }).toStrictEqual({
+        kept: [{ [site]: 1 }, { [other]: 1 }],
+        seller: true,
+        colleague: false,
+        outsider: false,
+        admin: false,
+        forTheTeam: false,
+        unread: [false, false],
       });
     }
   );
@@ -771,7 +857,13 @@ describe("native sync of a shared connection's picked places", () => {
       ) => {
         await add(
           { producer: "sync", id: `${connectionId}/1/${unique()}` },
-          { kind: "place", connectionId, feed, place },
+          {
+            kind: "place",
+            connectionId,
+            feed,
+            place,
+            readers: everyoneInTenant,
+          },
           marker
         );
       };
@@ -888,6 +980,7 @@ describe("native sync of a shared connection's picked places", () => {
       connectionId,
       feed,
       place: "site-1",
+      readers: everyoneInTenant,
     };
     const added = async (source: SourceRef): Promise<string> => {
       const answer = await outcome(
