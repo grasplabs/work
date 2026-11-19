@@ -9,25 +9,28 @@ import { ReportItem } from "../inbox/report-row.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // The Inbox at its address: what waits on the person, each item with its
-// actions (inbox-page.tsx), and the weekly report as an item once it is
-// ready. The sidebar's Inbox view links each of its rows here (`?item=`)
+// actions (inbox-page.tsx), and the weekly report: an item at the head once
+// it is ready, a quiet row at the foot on every other day. The sidebar's Inbox view links each of its rows here (`?item=`)
 // and opens a group (`?group=`).
 
 const Inbox = () => {
   const { waiting, readAt, programme, report } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { item, group } = Route.useSearch();
+  const reportItem =
+    programme === null || report === undefined ? undefined : (
+      <ReportItem programme={programme} report={report} />
+    );
+  // Ready: the item at the head of the list; on other days, quiet at its foot.
+  const ready = programme?.nextReport.inDays === 0;
   return (
     <InboxPage
       chosen={item}
-      foot={
-        programme === null || report === undefined ? undefined : (
-          <ReportItem programme={programme} report={report} />
-        )
-      }
+      foot={ready ? reportItem : undefined}
       group={group}
       items={inboxItems(waiting, identity, readAt)}
       notLoaded={unread(waiting)}
+      tail={ready ? undefined : reportItem}
     />
   );
 };
@@ -51,15 +54,15 @@ export const Route = createFileRoute("/_shell/inbox")({
       ),
     ]);
     const programme = read.state === "ready" ? read.data : null;
-    // The report is an item only on the day it is ready; read then, not
+    // The report on the week, ready or so far, read every day and not
     // awaited: the report's page waits for it.
     const report =
-      programme?.nextReport.inDays === 0
-        ? loadFromCore(
+      programme === null
+        ? undefined
+        : loadFromCore(
             core,
             async (session) => await session.dashboard.report()
-          )
-        : undefined;
+          );
     return {
       waiting,
       readAt: new Date().toISOString(),

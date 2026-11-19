@@ -1,5 +1,6 @@
 import type { BoardReport } from "@grasp-os/shared/dashboard";
 import type { Programme } from "@grasp-os/shared/onboarding";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Await, useRouter } from "@tanstack/react-router";
@@ -31,7 +32,8 @@ import { useCore } from "../use-core.ts";
 import { ReportView } from "./report-view.tsx";
 
 // The weekly report as an item in the Inbox: it stands at the head of the
-// list on the day the report on the week that closed is ready. Opening it
+// list on the day the report on the week that closed is ready, and on every
+// other day as a quiet row at the list's foot, opening the week so far. Opening it
 // shows the report in the library's artifact viewer, as the file it is: the
 // report's page (report-view.tsx) is drawn out of sight, read into one HTML
 // file with its styles and fonts carried in it, and that file is what the
@@ -363,9 +365,17 @@ export const ReportItem = ({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const { nextReport: next, today } = programme;
-  const { week } = next;
+  const { week, inDays } = next;
   const day = formatDayMonth(today);
-  const title = t`Your report on week ${week} is ready`;
+  // On the day a week closes, its report is ready; on any other day the
+  // row opens the week so far, and says when the report is ready.
+  const ready = inDays === 0;
+  const title = ready
+    ? t`Your report on week ${week} is ready`
+    : t`Week ${week} so far`;
+  const detail = ready
+    ? t`Report · ${day}`
+    : t`Next report ${plural(inDays, { one: "tomorrow", other: "in # days" })}`;
   return (
     <>
       <ItemGroup aria-label={t`Your weekly report`}>
@@ -388,7 +398,7 @@ export const ReportItem = ({
           <ItemMedia icon={File} iconLook="inline" />
           <ItemContent>
             <ItemTitle>{title}</ItemTitle>
-            <ItemDescription>{t`Report · ${day}`}</ItemDescription>
+            <ItemDescription>{detail}</ItemDescription>
           </ItemContent>
         </Item>
       </ItemGroup>
