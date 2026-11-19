@@ -2445,6 +2445,7 @@ msgstr "Agente no encontrado"
 
 #: src/agents/agent-section.tsx
 #: src/agents/agents-overview.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.agents.$agent.tsx
 #: src/routes/_shell.agents.index.tsx
@@ -3021,6 +3022,7 @@ msgstr "Aprobando"
 #: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-view.tsx
@@ -3178,6 +3180,7 @@ msgid "Ask for it"
 msgstr "Solicitar"
 
 #: src/chat/global-chat.tsx
+#: src/frame/shell-pending.tsx
 #: src/settings/composer-settings.tsx
 msgid "Ask Grasp"
 msgstr "Pregunta a Grasp"
@@ -3567,6 +3570,7 @@ msgstr "Vinculado a"
 
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain-section.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
@@ -4070,6 +4074,7 @@ msgid "Chases unpaid invoices and drafts the reminders."
 msgstr "Persigue las facturas impagadas y redacta los recordatorios."
 
 #: src/agents/agent-page.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/settings/ai-spend.tsx
 msgid "Chat"
@@ -4418,6 +4423,7 @@ msgstr "Cerrar el chat"
 
 #: src/frame/app-frame.tsx
 #: src/frame/part-words.tsx
+#: src/frame/shell-pending.tsx
 msgid "Close the menu"
 msgstr "Cerrar el menú"
 
@@ -7554,6 +7560,7 @@ msgstr "Mantén pulsado para confirmar: {words}"
 msgid "Hold to delete the key"
 msgstr "Mantén pulsado para eliminar la clave"
 
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Home"
 msgstr "Inicio"
@@ -7845,6 +7852,7 @@ msgstr "En Flujos de trabajo"
 msgid "In your documents I saw {tools}."
 msgstr "En tus documentos vi {tools}."
 
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
@@ -7910,6 +7918,7 @@ msgid "Integration"
 msgstr "Integración"
 
 #: src/apps/app-integrations.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
@@ -9093,6 +9102,7 @@ msgstr "Buzón"
 msgid "Mailbox or drive, if not the account's own"
 msgstr "Buzón o unidad, si no es la propia de la cuenta"
 
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Main"
 msgstr "Principal"
@@ -9260,6 +9270,7 @@ msgstr "Mencionadas"
 
 #: src/frame/app-frame.tsx
 #: src/frame/part-words.tsx
+#: src/frame/shell-pending.tsx
 msgid "Menu"
 msgstr "Menú"
 
@@ -11986,6 +11997,7 @@ msgstr "Perfil"
 msgid "Project"
 msgstr "Proyecto"
 
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -13554,6 +13566,7 @@ msgid "Search by name or kind"
 msgstr "Buscar por nombre o tipo"
 
 #: src/chat/chat-window.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Search chats"
 msgstr "Buscar chats"
@@ -14115,6 +14128,7 @@ msgid "Show or hide the panel"
 msgstr "Mostrar u ocultar el panel"
 
 #: src/frame/part-words.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Show or hide the sidebar"
 msgstr "Mostrar u ocultar la barra lateral"
@@ -14192,6 +14206,7 @@ msgid "Shown with the App. It opens the App to nobody: who may use it is who it 
 msgstr "Se muestra con la aplicación. No la abre a nadie: quien puede usarla es con quien se comparte."
 
 #: src/frame/part-words.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Sidebar"
 msgstr "Barra lateral"
@@ -17198,6 +17213,7 @@ msgstr "Ver cambios"
 
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Views"
 msgstr "Vistas"
@@ -18237,6 +18253,7 @@ msgstr "workflow.json"
 #: src/chat/mentions.tsx
 #: src/connections/integration-inspector.tsx
 #: src/connections/workflows-using.tsx
+#: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/report-view.tsx
 #: src/projects/file-item-dialog.tsx

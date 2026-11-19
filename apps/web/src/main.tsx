@@ -7,10 +7,11 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { CoreConnection } from "./core-connection.ts";
+import { CoreConnection, shellStatus } from "./core-connection.ts";
 import { reportError, reportUncaughtErrors } from "./error-reports.ts";
 import { NotFound } from "./frame/page-states.tsx";
 import { PartWords } from "./frame/part-words.tsx";
+import { wasSignedIn } from "./frame/signed-in-here.ts";
 import { Button } from "./grasp/button/index.ts";
 import { Text } from "./grasp/text/index.ts";
 import { grasp } from "./grasp/tokens/tokens.stylex.ts";
@@ -39,6 +40,14 @@ const router = createRouter({
   // The page's card scrolls on its own (frame/app-frame.tsx), so a new
   // page starts at the top of it, not only of the window.
   scrollToTopSelectors: ['[data-slot="app-shell-page"]'],
+  // A press answers in the frame it lands in: a page that reads shows its
+  // skeleton at once (its `pendingComponent`), not after the router's
+  // default second with the last page still up, and the skeleton goes as
+  // soon as the page is read, kept no longer than that. A page visited
+  // before shows what it read then, at once, while the router reads it
+  // again behind it (its `staleTime` of 0, reloaded in the background).
+  defaultPendingMs: 0,
+  defaultPendingMinMs: 0,
   defaultErrorComponent: RouteError,
   defaultNotFoundComponent: () => <NotFound />,
 });
@@ -114,6 +123,12 @@ const NoWords = () => (
  * and the build split into hundreds of tiny files.
  */
 const start = async (): Promise<void> => {
+  // Who is signed in, asked of core while the language loads rather than
+  // after it, where someone was signed in here last (the shell asks
+  // anyway, and shares this ask: core-connection.ts).
+  if (wasSignedIn()) {
+    void shellStatus(core);
+  }
   let worded = true;
   try {
     await startI18n();

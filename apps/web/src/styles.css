@@ -18,6 +18,48 @@
 @source "../../../packages/ui/catalog";
 
 /*
+ * The frame's ground in the first paint, from the HTML itself (index.html),
+ * before any module runs: the window's ground with the sidebar's column
+ * and the page's card on it, in App shell's places and from its tokens
+ * (grasp/app-shell), so the frame the app draws next stands exactly over
+ * it. Only where theme.js found someone signed in here last.
+ */
+.frame-ground {
+  display: none;
+}
+
+:root[data-frame-ground] .frame-ground {
+  display: grid;
+  grid-template-columns: var(--grasp-shell-sidebar) minmax(0, 1fr);
+  height: 100svh;
+  background-color: var(--grasp-shell-ground);
+}
+
+:root[data-frame-ground="folded"] .frame-ground {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.frame-ground > :last-child {
+  margin: var(--grasp-shell-inset);
+  border-radius: var(--grasp-shell-card-corner);
+  background-color: var(--grasp-shell-card);
+  box-shadow: inset 0 0 0 var(--grasp-hairline) var(--grasp-shell-card-line);
+}
+
+/* On a phone the card is the whole window, the sidebar in its menu. */
+@media (width < 40rem) {
+  :root[data-frame-ground] .frame-ground {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+
+  .frame-ground > :last-child {
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+/*
  * No scrollbars anywhere in the product. Every area still scrolls with the
  * wheel, touchpad, touch or keyboard; only the bar is gone. The
  * grasp/no-scrollbars lint rule keeps code from bringing one back. App
