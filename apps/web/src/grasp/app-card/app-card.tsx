@@ -27,6 +27,9 @@ import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
+import { defaultScenes } from "../backdrop/backdrop";
+import { BackdropField } from "../backdrop/field";
+import type { BackdropLook } from "../backdrop/look";
 import { Icon, Plus } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { useWords, withGiven } from "../words/words";
@@ -96,6 +99,12 @@ export interface AppCardProps {
    * @default "sea"
    */
   tone?: AppCardTone;
+  /**
+   * A drawn ground in place of the tone: one of the Backdrop's looks (a scene, a dither in its
+   * pattern and colour, or sand), small and still, drawing live while the card is hovered or holds
+   * the focus. Give each app its own, kept by the app's ID, so a row of cards never repeats one.
+   */
+  ground?: BackdropLook;
   /** The actions in the "…" menu. Without them there is no "…". */
   actions?: readonly AppCardAction[];
   /**
@@ -218,6 +227,36 @@ const metaOf = (
   return meta;
 };
 
+/** The frame's tone, where no drawn ground stands in its place. */
+const toneOf = (ground: BackdropLook | undefined, tone: AppCardTone) =>
+  ground === undefined ? styles[tone] : null;
+
+/** Under the window: the drawn ground, still until the card has attention, or the paper grain. */
+const Ground = ({
+  ground,
+  attention,
+}: {
+  ground: BackdropLook | undefined;
+  attention: boolean;
+}) =>
+  ground === undefined ? (
+    <span aria-hidden="true" {...stylex.props(styles.grain)} />
+  ) : (
+    <span
+      aria-hidden="true"
+      data-slot="app-card-ground"
+      {...stylex.props(styles.ground)}
+    >
+      <BackdropField
+        clear={undefined}
+        look={ground}
+        scenes={defaultScenes}
+        small
+        still={!attention}
+      />
+    </span>
+  );
+
 export const AppCard = ({
   title,
   mark,
@@ -229,6 +268,7 @@ export const AppCard = ({
   owner,
   meta,
   tone = "sea",
+  ground,
   actions,
   state: stateDeprecated,
   status: state = stateDeprecated ?? "ready",
@@ -263,9 +303,9 @@ export const AppCard = ({
       <div
         id={`${id}-frame`}
         data-slot="app-card-frame"
-        {...stylex.props(styles.frame, styles[tone])}
+        {...stylex.props(styles.frame, toneOf(ground, tone))}
       >
-        <span aria-hidden="true" {...stylex.props(styles.grain)} />
+        <Ground ground={ground} attention={attention} />
         <Window
           preview={preview}
           title={title}
@@ -327,7 +367,7 @@ export interface AppCardGridProps {
   /**
    * How many to a row, by the grid's own width (a container, not the window): `comfortable` two
    * from 40rem and three from 96rem; `compact` two from 36rem and three from 60rem (the Apps page
-   * beside a sidebar at a desktop's width); `dense` two from 32rem, three from 52rem, four from 80rem.
+   * beside a sidebar at a desktop's width); `dense` two from 28rem, three from 44rem, four from 64rem.
    * @default "comfortable"
    */
   density?: AppCardGridDensity;

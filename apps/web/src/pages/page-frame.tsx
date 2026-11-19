@@ -720,6 +720,8 @@ interface PageFrameProps {
   onReload?: () => void;
   /** Called once the pages failed or their person signed out. */
   onEnded?: PageEnded;
+  /** Called each time the pages started and run. */
+  onRunning?: () => void;
 }
 
 /** How a frame ended: it failed, and why, or its person signed out. */
@@ -743,6 +745,7 @@ export const PageFrame = ({
   bare = false,
   onReload,
   onEnded,
+  onRunning,
 }: PageFrameProps) => {
   const { t } = useLingui();
   return (
@@ -756,6 +759,7 @@ export const PageFrame = ({
       {...(ownPath === undefined ? {} : { ownPath })}
       {...(onReload === undefined ? {} : { onReload })}
       {...(onEnded === undefined ? {} : { onEnded })}
+      {...(onRunning === undefined ? {} : { onRunning })}
     />
   );
 };

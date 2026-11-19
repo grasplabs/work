@@ -3062,6 +3062,10 @@ msgstr "Aplicaciones y agentes con un permiso"
 msgid "Apps it works in"
 msgstr "Apps en las que trabaja"
 
+#: src/apps/apps-overview.tsx
+msgid "Apps you build or answer for stand here."
+msgstr "Aquí están las aplicaciones que creas o de las que eres responsable."
+
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
 #: src/apps/apps-overview.tsx
@@ -3635,6 +3639,10 @@ msgstr "Presupuesto para IA fijado"
 #: src/chat/build-progress.tsx
 msgid "Build it"
 msgstr "Constrúyelo"
+
+#: src/apps/apps-overview.tsx
+msgid "Build new app"
+msgstr "Crear nueva aplicación"
 
 #: src/labels.ts
 msgid "Builder"
@@ -4606,6 +4614,10 @@ msgstr "Empresa"
 msgctxt "memory record scope"
 msgid "Company"
 msgstr "Empresa"
+
+#: src/apps/apps-overview.tsx
+msgid "Company apps"
+msgstr "Aplicaciones de la empresa"
 
 #: src/activity/pending.tsx
 msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
@@ -9678,6 +9690,10 @@ msgctxt "your microphone is off for a moment"
 msgid "Muted"
 msgstr "En silencio"
 
+#: src/apps/apps-overview.tsx
+msgid "My apps"
+msgstr "Mis aplicaciones"
+
 #: src/apps/app-workspace.tsx
 msgid "My version of the App didn't start. Find out why and fix it:"
 msgstr "Mi versión de la App no arrancó. Averigua por qué y arréglalo:"
@@ -10147,6 +10163,10 @@ msgstr "No se encontraron modelos"
 #: src/settings/team-members-dialog.tsx
 msgid "No one by that name"
 msgstr "Nadie con ese nombre"
+
+#: src/apps/apps-overview.tsx
+msgid "No one has shared an App with you yet."
+msgstr "Nadie ha compartido todavía una aplicación contigo."
 
 #: src/frame/part-words.tsx
 msgid "No one has that name"
@@ -14162,6 +14182,10 @@ msgstr "Compartir con tu equipo"
 #: src/onboarding/setup-steps.tsx
 msgid "Share your staff list"
 msgstr "Comparte tu lista de personal"
+
+#: src/apps/apps-overview.tsx
+msgid "Shared apps"
+msgstr "Aplicaciones compartidas"
 
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
@@ -18904,6 +18928,10 @@ msgstr "Tus chats"
 #: src/interview/before.tsx
 msgid "Your choice"
 msgstr "Tu decisión"
+
+#: src/apps/apps-overview.tsx
+msgid "Your company has no other Apps yet."
+msgstr "Tu empresa aún no tiene otras aplicaciones."
 
 #: src/interview/words.ts
 msgid "Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team."

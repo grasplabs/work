@@ -14,6 +14,7 @@ export type {
   AppCardImage,
   AppCardLive,
   AppCardPreview,
+  AppCardSignal,
 } from "./parts";
 export type { AppCardLabels } from "./labels";
 export { englishLabels } from "./labels";

@@ -75,7 +75,29 @@ export interface AppCardLive {
    * window holds its Skeleton there.
    */
   poster?: AppCardImage;
+  /**
+   * When the app counts as loaded and its still fades: `load`, at its frame's load event; or
+   * `message`, once the app's own document posts `{ type: "app-card", state: "ready" }` to its
+   * parent, and `state: "failed"` turns the window to its quiet line at once. Use `message` for an
+   * app that draws after its document loads (a single-page app): the window never shows it blank.
+   * @default "load"
+   */
+  ready?: "load" | "message";
 }
+
+/** What an app in a card's window posts to its parent (AppCardLive's `ready: "message"`). */
+export interface AppCardSignal {
+  type: "app-card";
+  state: "ready" | "failed";
+}
+
+const isSignal = (data: unknown): data is AppCardSignal =>
+  typeof data === "object" &&
+  data !== null &&
+  "type" in data &&
+  data.type === "app-card" &&
+  "state" in data &&
+  (data.state === "ready" || data.state === "failed");
 
 /** What the window shows: a screenshot of the app (the default kind), or the app running. */
 export type AppCardPreview = AppCardImage | AppCardLive;
@@ -96,12 +118,11 @@ interface Fit {
   shiftY: number;
 }
 
-// The width the app is laid out at: a desktop's, down to a tablet's in a small window (as the
-// app-card-app-width token says before the window is measured), and the band a sharp scale may
-// move it within.
+// The width the app is laid out at: a desktop's in every window, however small, so a card always
+// shows the app as it stands on a desktop and never its narrow layout; and the band a sharp scale
+// may move it within, never under a small laptop's.
 const DESKTOP = 1280;
-const TABLET = 768;
-const NARROWEST = 560;
+const NARROWEST = 1024;
 const WIDEST = 1600;
 
 /**
@@ -117,7 +138,7 @@ const fitOf = (room: HTMLElement): Fit | undefined => {
     return undefined;
   }
   const ratio = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
-  const wanted = Math.min(DESKTOP, Math.max(TABLET, box.width * 2.4));
+  const wanted = DESKTOP;
   const steps = [1, 2, 3, 4, 5, 6]
     .map((k) => 1 / (k * ratio))
     .filter((step) => step <= 1);
@@ -430,10 +451,12 @@ interface RunningProps {
  */
 const Running = ({ live, title, onFailed }: RunningProps) => {
   const [room, setRoom] = useState<HTMLDivElement | null>(null);
+  const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   const [loaded, setLoaded] = useState(false);
   // The still is gone once it has faded out (with reduced motion it is cut, and simply stays clear).
   const [gone, setGone] = useState(false);
   const fit = useFit(room);
+  const byMessage = live.ready === "message";
   useEffect(() => {
     if (loaded) {
       return keep;
@@ -443,6 +466,26 @@ const Running = ({ live, title, onFailed }: RunningProps) => {
       clearTimeout(limit);
     };
   }, [loaded, onFailed]);
+  // Told by the app itself, from its own frame alone, that it has drawn or failed.
+  useEffect(() => {
+    if (!byMessage || frame === null) {
+      return keep;
+    }
+    const heard = (event: MessageEvent) => {
+      if (event.source !== frame.contentWindow || !isSignal(event.data)) {
+        return;
+      }
+      if (event.data.state === "ready") {
+        setLoaded(true);
+      } else {
+        onFailed();
+      }
+    };
+    window.addEventListener("message", heard);
+    return () => {
+      window.removeEventListener("message", heard);
+    };
+  }, [byMessage, frame, onFailed]);
   return (
     <div
       ref={setRoom}
@@ -461,6 +504,7 @@ const Running = ({ live, title, onFailed }: RunningProps) => {
         )}
       >
         <iframe
+          ref={setFrame}
           src={live.src}
           title={live.title ?? title}
           sandbox={live.sandbox ?? "allow-scripts"}
@@ -470,7 +514,9 @@ const Running = ({ live, title, onFailed }: RunningProps) => {
           aria-hidden="true"
           tabIndex={-1}
           onLoad={() => {
-            setLoaded(true);
+            if (!byMessage) {
+              setLoaded(true);
+            }
           }}
           data-slot="app-card-app"
           {...stylex.props(styles.iframe)}

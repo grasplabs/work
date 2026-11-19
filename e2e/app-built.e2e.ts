@@ -41,12 +41,12 @@ test("a builder makes an App from what they want done, shares it with their team
   const { opener } = modelScripts.buildsApp;
   const page = await pageOf(builder);
 
-  // Make something: Chat's page, what they want done, and Grasp's plan
+  // Build new app: Chat's page, what they want done, and Grasp's plan
   // for it in the chat. Nothing is made until Build it; then Grasp builds
   // it in the chat, ticking off what it does, and offers to open the App,
   // where the same chat docks beside it.
   await page.goto("/apps");
-  await page.getByRole("link", { name: "Make something" }).click();
+  await page.getByRole("link", { name: "Build new app" }).click();
   await expect(page).toHaveURL(/\/\?make=app$/u);
   await expect(
     page.getByRole("heading", { name: "What do you want to get done?" })

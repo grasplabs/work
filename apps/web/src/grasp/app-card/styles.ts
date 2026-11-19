@@ -77,6 +77,14 @@ export const styles = stylex.create({
   sand: { backgroundImage: `${grasp.appCardGlow}, ${grasp.appCardSand}` },
   moss: { backgroundImage: `${grasp.appCardGlow}, ${grasp.appCardMoss}` },
   dusk: { backgroundImage: `${grasp.appCardGlow}, ${grasp.appCardDusk}` },
+  // A drawn ground (AppCard's `ground`): the Backdrop's canvas, filling the frame under the window.
+  ground: {
+    position: "absolute",
+    inset: 0,
+    zIndex: -1,
+    isolation: "isolate",
+    pointerEvents: "none",
+  },
   // The paper grain over the ground, under the window.
   grain: {
     position: "absolute",
@@ -358,15 +366,16 @@ export const styles = stylex.create({
     },
     "--app-card-side": { default: "0", "@container (width >= 36rem)": "1" },
   },
-  // Dense: two from 32rem, three from 52rem, four from 80rem: a wide canvas of many apps.
+  // Dense: two from 28rem, three from 44rem, four from 64rem: the Apps page beside a sidebar at a
+  // laptop's width holds four, each app shown at a desktop's width, scaled.
   dense: {
     gridTemplateColumns: {
       default: "minmax(0, 1fr)",
-      "@container (width >= 32rem)": "repeat(2, minmax(0, 1fr))",
-      "@container (width >= 52rem)": "repeat(3, minmax(0, 1fr))",
-      "@container (width >= 80rem)": "repeat(4, minmax(0, 1fr))",
+      "@container (width >= 28rem)": "repeat(2, minmax(0, 1fr))",
+      "@container (width >= 44rem)": "repeat(3, minmax(0, 1fr))",
+      "@container (width >= 64rem)": "repeat(4, minmax(0, 1fr))",
     },
-    "--app-card-side": { default: "0", "@container (width >= 32rem)": "1" },
+    "--app-card-side": { default: "0", "@container (width >= 28rem)": "1" },
     columnGap: grasp.space5,
     rowGap: grasp.space6,
   },

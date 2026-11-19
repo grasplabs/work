@@ -24,7 +24,8 @@ import { AppsOverview } from "./apps-overview.tsx";
 // opens the App, the newest first, with where it stands; its window runs
 // the App's first page only while the card is on screen; its menu opens
 // it, leads to its settings and lets its builders archive and restore it;
-// a search over their names; Make something for who builds.
+// the Apps in three tabs, the person's own, shared with them by name and
+// the company's; a search over their names; Build new app for who builds.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -69,14 +70,15 @@ const overview = (
   {
     archived = false,
     role = "builder",
-  }: { archived?: boolean; role?: "user" | "builder" } = {}
+    owner = "user-1",
+  }: { archived?: boolean; role?: "user" | "builder"; owner?: string } = {}
 ): AppOverview => ({
   app: {
     id: appIdSchema.parse(crypto.randomUUID()),
     name,
     description: "",
-    owner: "user-1",
-    responsible: "user-1",
+    owner,
+    responsible: owner,
     audience: null,
     process: null,
     blueprint: null,
@@ -95,9 +97,10 @@ const overview = (
 
 const viewerOf = (
   role: Identity["role"]
-): Pick<Identity, "role" | "staff"> => ({
+): Pick<Identity, "role" | "staff" | "userId"> => ({
   role,
   staff: false,
+  userId: "user-1",
 });
 
 const isListed = (data: unknown): data is AppOverview[] => Array.isArray(data);
@@ -113,10 +116,14 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The Apps page for someone with `role`, listing `listed` as core keeps them; what core was asked. */
+/**
+ * The Apps page for someone with `role`, listing `listed` as core keeps
+ * them, those of `shared` shared with them by name; what core was asked.
+ */
 const shown = async (
   listed: AppOverview[],
-  role: Identity["role"] = "builder"
+  role: Identity["role"] = "builder",
+  shared: readonly string[] = []
 ): Promise<string[]> => {
   const calls: string[] = [];
   let apps = listed;
@@ -155,7 +162,7 @@ const shown = async (
       select: ({ matches }) => matches.at(0)?.loaderData,
     });
     return isListed(loaded) ? (
-      <AppsOverview listed={loaded} viewer={viewerOf(role)} />
+      <AppsOverview listed={loaded} shared={shared} viewer={viewerOf(role)} />
     ) : null;
   };
   rootRoute.update({ component: Page });
@@ -179,12 +186,31 @@ const shown = async (
   return calls;
 };
 
-/** Every App on the page: its card. */
+/** Every App in the tab shown: its card. */
 const places = (): Element[] => [
-  ...document.querySelectorAll(
-    'section[aria-label="Apps"] [data-slot="app-card"]'
-  ),
+  ...document.querySelectorAll('[role="tabpanel"] [data-slot="app-card"]'),
 ];
+
+/** The tabs: what each says, and whether it is the one shown. */
+const tabs = () =>
+  [...document.querySelectorAll<HTMLElement>('[role="tab"]')].map((tab) => ({
+    says: tab.textContent.trim(),
+    shown: tab.getAttribute("aria-selected") === "true",
+  }));
+
+/** Shows the tab that says `label`. */
+const showTab = async (label: string): Promise<void> => {
+  const tab = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(
+    (each) => each.textContent.trim() === label
+  );
+  if (tab === undefined) {
+    throw new Error(`No tab ${label}`);
+  }
+  await act(async () => {
+    tab.click();
+    await Promise.resolve();
+  });
+};
 
 /** Each card's name, where it leads and the status it shows. */
 const cards = () =>
@@ -294,9 +320,22 @@ const search = async (value: string): Promise<void> => {
   });
 };
 
+/** The App in a window says it has drawn, as heard from `source`. */
+const tell = async (source: MessageEventSource | null) => {
+  await act(async () => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "app-card", state: "ready" },
+        source,
+      })
+    );
+    await Promise.resolve();
+  });
+};
+
 const makeLink = (): string | null | undefined =>
   [...document.querySelectorAll("a")]
-    .find((link) => link.textContent === "Make something")
+    .find((link) => link.textContent === "Build new app")
     ?.getAttribute("href");
 
 describe(AppsOverview, () => {
@@ -413,6 +452,68 @@ describe(AppsOverview, () => {
     });
   });
 
+  it("sorts the Apps into the person's own, those shared with them by name and the company's, opening on the first that has any", async () => {
+    const shared = overview("Expenses", "2026-10-01T08:00:00.000Z", true, {
+      owner: "user-2",
+      role: "user",
+    });
+    const company = overview("Desk", "2026-10-02T08:00:00.000Z", true, {
+      owner: "user-3",
+      role: "user",
+    });
+    await shown([shared, company], "builder", [shared.app.id]);
+    const opened = { tabs: tabs(), cards: cards().map(({ name }) => name) };
+    await showTab("Company apps");
+    const companyCards = cards().map(({ name }) => name);
+    await showTab("My apps");
+
+    expect({
+      opened,
+      company: companyCards,
+      mine: cards(),
+      said: document.body.textContent.includes(
+        "Apps you build or answer for stand here."
+      ),
+    }).toStrictEqual({
+      opened: {
+        tabs: [
+          { says: "My apps", shown: false },
+          { says: "Shared apps", shown: true },
+          { says: "Company apps", shown: false },
+        ],
+        cards: ["Expenses"],
+      },
+      company: ["Desk"],
+      mine: [],
+      said: true,
+    });
+  });
+
+  it("keeps an App's window waiting until the App says it has drawn, from its own frame alone", async () => {
+    const invoices = overview("Invoices", "2026-10-01T08:00:00.000Z", true);
+    await shown([invoices]);
+    await scroll("Invoices");
+    const running = () =>
+      placeOf("Invoices").querySelector<HTMLElement>(
+        '[data-slot="app-card-running"]'
+      )?.dataset.loaded !== undefined;
+    const frame = placeOf("Invoices").querySelector("iframe");
+    await act(async () => {
+      frame?.dispatchEvent(new Event("load"));
+      await Promise.resolve();
+    });
+    const loadedAlone = running();
+    await tell(window);
+    const fromElsewhere = running();
+    await tell(frame?.contentWindow ?? null);
+
+    expect({ loadedAlone, fromElsewhere, told: running() }).toStrictEqual({
+      loadedAlone: false,
+      fromElsewhere: false,
+      told: true,
+    });
+  });
+
   it("narrows the Apps to those whose name has what is searched, and says when none has", async () => {
     await shown([
       overview("Invoices", "2026-10-01T08:00:00.000Z", true),
@@ -435,7 +536,7 @@ describe(AppsOverview, () => {
     });
   });
 
-  it("offers Make something to who builds alone, also before there is any App, and tells only who builds what to do", async () => {
+  it("offers Build new app to who builds alone, also before there is any App, and tells only who builds what to do", async () => {
     await shown([], "builder");
     const builder = {
       makeLink: makeLink(),

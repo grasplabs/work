@@ -10,6 +10,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { AppCard, AppCardGrid } from "../grasp/app-card/index.ts";
 import type { AppCardAction } from "../grasp/app-card/index.ts";
+import type { BackdropLook } from "../grasp/backdrop/index.ts";
 import {
   Empty,
   EmptyContent,
@@ -32,37 +33,61 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
 import { toast } from "../grasp/toast/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { ProcessTile } from "../workflows/business-process.tsx";
+import { groundsOf } from "./app-grounds.ts";
+import { reachOf } from "./app-reach.ts";
+import type { AppReach } from "./app-reach.ts";
 import { buildsApp } from "./app-role.ts";
 import { ArchiveDialog, statusOf } from "./app-status.tsx";
 import type { Transition } from "./app-status.tsx";
 
-// The Apps page: every App the person can open, newest first, as Grasp
-// UI's App cards, three to a row on a desktop: its window, which is the
-// App's own first page running in it while the card is in view (the
-// card's own doing), its mark and name, what it is for and where it
-// stands; the card opens the App (/apps/$app), and its "…" opens it,
-// opens it full page, leads to its settings and, for its builders,
-// archives or restores it. A search over their names, and Make something
-// for who builds, which starts a chat to make an App (make/make-link.tsx).
+// The Apps page: every App the person can open, newest first, in three
+// tabs by how they reach it (app-reach.ts): their own, shared with them,
+// and the company's. Each is one of Grasp UI's App cards, four to a row on
+// a desktop: its window, which is the App's own first page running in it
+// at a desktop's width while the card is in view (the card's own doing),
+// on a ground of its own (app-grounds.ts), its mark and name, what it is
+// for and where it stands; the card opens the App (/apps/$app), and its
+// "…" opens it, opens it full page, leads to its settings and, for its
+// builders, archives or restores it. A search over their names, and Build
+// new app for who builds, which starts a chat to make one
+// (make/make-link.tsx).
 
 const styles = stylex.create({
+  // The tabs, with the search at the row's end.
+  bar: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space4,
+    marginBlockEnd: grasp.space6,
+  },
   search: { maxWidth: "18rem" },
 });
 
 /** Who looks at the Apps: what they may make and change follows from it. */
-type Viewer = Pick<Identity, "role" | "staff">;
+type Viewer = Pick<Identity, "role" | "staff" | "userId">;
 
 /** One App: its card. */
 const OneApp = ({
   overview: { app, contents },
   viewer,
+  ground,
 }: {
   overview: AppOverview;
   viewer: Viewer;
+  ground: BackdropLook | undefined;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -131,6 +156,7 @@ const OneApp = ({
     <>
       <AppCard
         actions={actions}
+        {...(ground === undefined ? {} : { ground })}
         labels={{ more: t`More`, empty: t`No preview yet` }}
         mark={
           app.process === null ? (
@@ -151,6 +177,9 @@ const OneApp = ({
                 src: full,
                 // Our own site's pages: in the page's process, so sharp.
                 sandbox: "allow-scripts allow-same-origin",
+                // Grasp's page loads before the App draws in it: the
+                // window waits for the App's own word (apps.$app.full.tsx).
+                ready: "message" as const,
               },
             }
           : {})}
@@ -175,32 +204,110 @@ const newestFirst = (apps: readonly AppOverview[]): AppOverview[] =>
     other.app.createdAt.localeCompare(one.app.createdAt)
   );
 
-/** The Apps page's body: `listed`, as core lists them, for `viewer`; Make something for who builds. */
+/** The tabs, in order: the first with Apps in it is shown first. */
+const REACHES: readonly AppReach[] = ["mine", "shared", "company"];
+
+/** One tab's Apps, or why it has none. */
+const AppsTab = ({
+  apps,
+  asked,
+  reach,
+  grounds,
+  viewer,
+}: {
+  apps: readonly AppOverview[];
+  asked: string;
+  reach: AppReach;
+  grounds: ReadonlyMap<string, BackdropLook>;
+  viewer: Viewer;
+}) => {
+  const { t } = useLingui();
+  const none = {
+    mine: t`Apps you build or answer for stand here.`,
+    shared: t`No one has shared an App with you yet.`,
+    company: t`Your company has no other Apps yet.`,
+  };
+  return (
+    <AppCardGrid
+      density="dense"
+      empty={
+        asked === "" ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia picture="nothing" />
+              <EmptyDescription>{none[reach]}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia picture="search" />
+              <EmptyDescription>
+                <Trans>No App is called “{asked}”</Trans>
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        )
+      }
+    >
+      {apps.map((overview) => (
+        <OneApp
+          ground={grounds.get(overview.app.id)}
+          key={overview.app.id}
+          overview={overview}
+          viewer={viewer}
+        />
+      ))}
+    </AppCardGrid>
+  );
+};
+
+/**
+ * The Apps page's body: `listed`, as core lists them, for `viewer`, with
+ * the Apps shared with them by name (`shared`); Build new app for who builds.
+ */
 export const AppsOverview = ({
   listed,
+  shared,
   viewer,
 }: {
   listed: readonly AppOverview[];
+  shared: readonly string[];
   viewer: Viewer;
 }) => {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
   const builds = canBuild(viewer.role);
   const apps = newestFirst(listed);
+  const grounds = groundsOf(listed.map(({ app }) => app));
+  const sharedWithThem = new Set(shared);
+  const reached = (reach: AppReach) =>
+    apps.filter(
+      ({ app }) => reachOf(app, viewer.userId, sharedWithThem) === reach
+    );
+  const [tab, setTab] = useState<AppReach>(
+    () => REACHES.find((reach) => reached(reach).length > 0) ?? "mine"
+  );
   const asked = query.trim();
   const needle = asked.toLocaleLowerCase();
-  const shown = apps.filter(
-    ({ app }) => needle === "" || app.name.toLocaleLowerCase().includes(needle)
+  const found = (reach: AppReach) =>
+    reached(reach).filter(
+      ({ app }) =>
+        needle === "" || app.name.toLocaleLowerCase().includes(needle)
+    );
+  const tabName = {
+    mine: t`My apps`,
+    shared: t`Shared apps`,
+    company: t`Company apps`,
+  };
+  const build = (
+    <MakeSomethingLink kind="app" label={t`Build new app`} variant="ink" />
   );
   return (
     <Page>
       <PageHeading
-        // One Make something a page: with no Apps yet, the empty state's.
-        action={
-          builds && apps.length > 0 ? (
-            <MakeSomethingLink kind="app" variant="ink" />
-          ) : undefined
-        }
+        // One Build new app a page: with no Apps yet, the empty state's.
+        action={builds && apps.length > 0 ? build : undefined}
         title={<Trans>Apps</Trans>}
       />
       {apps.length === 0 ? (
@@ -215,49 +322,50 @@ export const AppsOverview = ({
               </EmptyDescription>
             ) : null}
           </EmptyHeader>
-          {builds ? (
-            <EmptyContent>
-              <MakeSomethingLink kind="app" variant="ink" />
-            </EmptyContent>
-          ) : null}
+          {builds ? <EmptyContent>{build}</EmptyContent> : null}
         </Empty>
       ) : (
-        <>
-          <InputGroup layout={styles.search}>
-            <InputGroupText icon={Search} />
-            <InputGroupInput
-              aria-label={t`Search the Apps`}
-              onValueChange={(value: string) => {
-                setQuery(value);
-              }}
-              placeholder={t`Search`}
-              value={query}
-            />
-          </InputGroup>
-          <section aria-label={t`Apps`}>
-            <AppCardGrid
-              density="compact"
-              empty={
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyMedia picture="search" />
-                    <EmptyDescription>
-                      <Trans>No App is called “{asked}”</Trans>
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              }
-            >
-              {shown.map((overview) => (
-                <OneApp
-                  key={overview.app.id}
-                  overview={overview}
-                  viewer={viewer}
-                />
+        <Tabs
+          onValueChange={(value) => {
+            const chosen = REACHES.find((reach) => reach === value);
+            if (chosen !== undefined) {
+              setTab(chosen);
+            }
+          }}
+          value={tab}
+        >
+          <div {...stylex.props(styles.bar)}>
+            <TabsList aria-label={t`Apps`}>
+              {REACHES.map((reach) => (
+                <TabsTrigger key={reach} value={reach}>
+                  {tabName[reach]}
+                </TabsTrigger>
               ))}
-            </AppCardGrid>
-          </section>
-        </>
+            </TabsList>
+            <InputGroup layout={styles.search}>
+              <InputGroupText icon={Search} />
+              <InputGroupInput
+                aria-label={t`Search the Apps`}
+                onValueChange={(value: string) => {
+                  setQuery(value);
+                }}
+                placeholder={t`Search`}
+                value={query}
+              />
+            </InputGroup>
+          </div>
+          {REACHES.map((reach) => (
+            <TabsContent key={reach} value={reach}>
+              <AppsTab
+                apps={found(reach)}
+                asked={asked}
+                grounds={grounds}
+                reach={reach}
+                viewer={viewer}
+              />
+            </TabsContent>
+          ))}
+        </Tabs>
       )}
     </Page>
   );
