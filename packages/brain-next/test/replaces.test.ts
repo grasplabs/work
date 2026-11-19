@@ -379,6 +379,115 @@ describe("a memory that replaces earlier ones of its writer", () => {
     await expect(currentOf(old.entity, at.reader)).resolves.toStrictEqual([]);
   });
 
+  it("takes back what a chain ends when its writer takes back the last of it, also one that ends the next by its attribute", async () => {
+    const at = setUp();
+    const first = await add(at, requirement("first", at.writer));
+    const options = { entity: first.entity, reader: at.reader };
+    const second = await add(
+      at,
+      requirement("second", at.writer, [first.memory]),
+      options
+    );
+    const third = await add(
+      at,
+      requirement("third", at.writer, [second.memory]),
+      options
+    );
+    // A status twice, the second ending the first by its attribute alone,
+    // then a requirement that replaces the second.
+    const status = (statement: string): NewMemory => ({
+      ...requirement(statement, at.writer),
+      attribute: "status",
+    });
+    await add(at, status("older"), options);
+    const newer = await add(at, status("newer"), options);
+    const last = await add(
+      at,
+      requirement("last", at.writer, [newer.memory]),
+      options
+    );
+    const before = await currentOf(first.entity, at.reader);
+    for (const memory of [third.memory, last.memory]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await shared().retireWritten({
+        memory,
+        writer: at.writer,
+        change: `taken back ${memory}`,
+      });
+    }
+
+    expect({
+      before,
+      after: await currentOf(first.entity, at.reader),
+    }).toStrictEqual({ before: ["last", "third"], after: [] });
+  });
+
+  it("keeps what a memory replaced ended when that memory is forgotten after it was itself replaced, for a reader of what replaced it", async () => {
+    const at = setUp();
+    const narrow = unique("g");
+    const both = readerOf(unique("p"), at.group, narrow);
+    const first = await add(at, requirement("first", at.writer));
+    const second = await add(
+      at,
+      requirement("second", at.writer, [first.memory]),
+      { entity: first.entity, reader: at.reader }
+    );
+    // Only readers of `narrow` may read what replaced the second.
+    await add(
+      { ...at, access: audience(narrow) },
+      requirement("third", at.writer, [second.memory]),
+      { entity: first.entity, reader: both }
+    );
+    // Forgotten as history, from the Memories page.
+    await shared().retireMemory({
+      memory: second.memory,
+      reader: both,
+      writer: at.writer,
+      change: "forget second",
+    });
+
+    expect({
+      both: await currentOf(first.entity, both),
+      // Without the third, the second was forgotten while current.
+      outside: await currentOf(first.entity, at.reader),
+    }).toStrictEqual({ both: ["third"], outside: ["first"] });
+  });
+
+  it("keeps a chain ended when each memory of it is forgotten after the next replaced it", async () => {
+    const at = setUp();
+    const options = (entity: string) => ({ entity, reader: at.reader });
+    const first = await add(at, requirement("first", at.writer));
+    const second = await add(
+      at,
+      requirement("second", at.writer, [first.memory]),
+      options(first.entity)
+    );
+    const third = await add(
+      at,
+      requirement("third", at.writer, [second.memory]),
+      options(first.entity)
+    );
+    await add(
+      at,
+      requirement("fourth", at.writer, [third.memory]),
+      options(first.entity)
+    );
+    // The third, then the second, forgotten as history.
+    for (const memory of [third.memory, second.memory]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await shared().retireMemory({
+        memory,
+        reader: at.reader,
+        writer: at.writer,
+        change: `forget ${memory}`,
+      });
+    }
+
+    await expect(currentOf(first.entity, at.reader)).resolves.toStrictEqual([
+      "fourth",
+    ]);
+  });
+
   describe("through an export", () => {
     it("is restored with what it replaces, and still brings it back once retired", async () => {
       const at = setUp();
