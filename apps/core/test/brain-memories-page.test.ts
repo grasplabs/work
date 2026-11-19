@@ -971,7 +971,7 @@ describe("the Brain's memories, as a person reads them", () => {
     ]).toStrictEqual([null, null]);
   });
 
-  it("retires the person's own wrong word on a retry when retiring failed, one audit outcome per attempt", async () => {
+  it("ends the person's own wrong word in the correction's own save, before a step that fails, and confirms it on a retry, one audit outcome per attempt", async () => {
     const anna = await signedInApi(idp, "user");
     const said = await rememberAs(env, anna.userId, {
       change: crypto.randomUUID(),
@@ -990,7 +990,7 @@ describe("the Brain's memories, as a person reads them", () => {
     const change = crypto.randomUUID();
     await expect(
       correctFor(
-        withFailingOnce("retireMemory"),
+        withFailingOnce("confirmMemory"),
         {
           person: anna.userId,
           actor: { type: "person", userId: anna.userId },
@@ -998,6 +998,11 @@ describe("the Brain's memories, as a person reads them", () => {
         { wrong, right: "Needs SOC 2", change }
       )
     ).rejects.toThrow(failedCall);
+    // Ended with the save, though the confirmation after it failed.
+    const failed = await memoriesAbout(anna.api, {
+      store: "own",
+      id: said.entity,
+    });
     const saved = await anna.api.brainMemories.correct({
       wrong,
       right: "Needs SOC 2",
@@ -1008,9 +1013,11 @@ describe("the Brain's memories, as a person reads them", () => {
       id: said.entity,
     });
     expect({
+      failed: failed.find(({ id }) => id === said.memory)?.endedAt !== null,
       kept: kept.map(({ id, endedAt }) => ({ id, ended: endedAt !== null })),
       audited: await auditedOf(anna.userId, "brain.memory.corrected"),
     }).toStrictEqual({
+      failed: true,
       kept: [
         { id: saved?.memory, ended: false },
         { id: said.memory, ended: true },

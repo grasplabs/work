@@ -24,6 +24,8 @@ export const chatSavedMemorySchema = z.strictObject({
   value: z.string().min(1).optional(),
   /** Who or what it is about, by name, when it isn't the person themselves. */
   about: z.string().min(1).optional(),
+  /** What each earlier memory of theirs it replaced says, when it replaced any. */
+  replaced: z.array(z.string().min(1)).min(1).optional(),
 });
 export type ChatSavedMemory = z.infer<typeof chatSavedMemorySchema>;
 
@@ -342,7 +344,7 @@ export interface BrainSharedPage {
 
 /** The person's memories, over `/rpc` as `session.brainMemories`. */
 export interface BrainMemoriesApi {
-  /** Undoes a memory saved for them in their own word: it stops being current, and stays as history. */
+  /** Undoes a memory saved for them in their own word: it stops being current, and stays as history; what its save replaced is current again. */
   forget: (memory: string) => Promise<BrainMemoryOutcome>;
   /** A page of the entities of `kind` they may see: their own store's first, then the shared one's. */
   entities: (

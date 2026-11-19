@@ -24,6 +24,7 @@ import {
   identifierSchema,
   instructionsTextSchema,
   memoriesCursorSchema,
+  memoriesPerAddMax,
   memoryIdSchema,
   versionChangeCursorSchema,
   writtenCursorSchema,
@@ -4989,6 +4990,7 @@ export const memoryChoices = {
   valueMaxLength,
   statementMaxLength,
   quoteMaxLength,
+  replacesMax: memoriesPerAddMax,
 } as const;
 
 /** A text of a memory: some text, at most `max` characters (the Brain's bounds). */
@@ -5016,6 +5018,9 @@ const rememberedSchema = z.strictObject({
   type: z.enum(memoryTypes),
   statement: memoryText(statementMaxLength),
   quote: memoryText(quoteMaxLength),
+  // Their own earlier memories this one replaces (`ownWordAs`), as the
+  // Brain takes them (contract.ts `NewMemory.replaces`).
+  replaces: z.array(memoryIdSchema).min(1).max(memoriesPerAddMax).optional(),
 });
 
 /** A memory a person said, to save for them (`rememberAs`), as its schema takes it. */
@@ -5132,6 +5137,49 @@ export const rememberAs = async (
     entity,
     kept: { type, attribute, value, statement },
   };
+};
+
+/**
+ * The statements of the member `personId`'s own memories `ids` (distinct)
+ * about `entity`, in their own store, in their own word (written by them,
+ * never drawn from a source), current or history (a replay of a save
+ * still finds what its first try ended), in the order asked: what a save
+ * of theirs that replaces them is checked against (agent-remember.ts).
+ * Null when any isn't one: alike for none, one in another store, one
+ * drawn from a source and one an erasure hides. Every page of the
+ * entity's memories read at one moment, until each is found. Refused once
+ * they are no longer a member.
+ */
+export const ownWordAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  entity: string,
+  ids: readonly string[]
+): Promise<string[] | null> => {
+  const reader = await personReaderOf(env, personId);
+  const store = ownBrain(env, reader.person);
+  const asked = new Set(ids);
+  const found = new Map<string, string>();
+  let after: MemoriesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readMemories({
+      entity: checked(entityIdSchema, entity),
+      reader,
+      history: true,
+      ...(after === undefined ? {} : { after }),
+    });
+    for (const memory of page.memories) {
+      // Their own word alone: written by them (one drawn from a source
+      // has no writer).
+      if (asked.has(memory.id) && memory.writer === reader.person) {
+        found.set(memory.id, memory.statement);
+      }
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined && found.size < asked.size);
+  const statements = ids.flatMap((id) => found.get(id) ?? []);
+  return statements.length === ids.length ? statements : null;
 };
 
 /** The names and identifiers of `entity` that `reader` may see in `store`, each page read. */
@@ -5277,12 +5325,17 @@ export const profileAs = async (
 };
 
 /**
- * Retires one of the member `personId`'s own memories (`rememberAs`),
- * current or ended by a newer one of theirs: it never becomes current
- * again, and stays as history; `done` again for one they retired before,
- * so a retry never reads as not found. `nothing` alike when there is no
- * such memory (an erased one included), when it isn't theirs, and when it
- * has expired. Refused once they are no longer a member.
+ * Undoes the save of one of the member `personId`'s own memories
+ * (`rememberAs`), current, ended by a newer one of theirs, or retired
+ * before: it never becomes current again, and stays as history; what the
+ * save replaced is current again, whatever happened since (the Brain's
+ * `RetireRequest.undo`). Only a save's own Undo calls it: the
+ * notice's in Grasp and on a chat app, and the retirement of a save whose
+ * notice nobody saw (unseen-memories.ts). `done` again for one they
+ * retired before, so a retry never reads as not found. `nothing` alike
+ * when there is no such memory (an erased one included), when it isn't
+ * theirs, and when it has expired. Refused once they are no longer a
+ * member.
  */
 export const forgetAs = async (
   env: BrainEnv & ReaderEnv,
@@ -5299,6 +5352,7 @@ export const forgetAs = async (
       // Their own store holds only their own word, so one forget of a
       // memory is theirs: a retry is the same change.
       change: `forget:${id}`,
+      undo: true,
     });
     return retired === null ? "nothing" : "done";
   } catch (error) {
@@ -5804,8 +5858,10 @@ export type Correction = z.input<typeof correctionSchema>;
  * correction with no name of its own (`liveNamed` names it). Under the same
  * attribute when it holds a value, so a newer correction of a one-value
  * attribute ends the one before. A wrong memory that is their own word is
- * retired too, as `forgetAs` retires it: on a many-value attribute the
- * correction would otherwise stand beside it.
+ * one the correction replaces (`NewMemory.replaces`): ended, kept as
+ * history, whatever its attribute (on a many-value one the correction
+ * would otherwise stand beside it), and current again once the
+ * correction's own save is undone, never what it replaced in turn.
  *
  * The shared store is left as it is: a correction others may read would
  * widen what the person read, theirs to publish, not this. What is saved
@@ -5813,8 +5869,7 @@ export type Correction = z.input<typeof correctionSchema>;
  * and kind, the memory's attribute and type, the text), so the same
  * `change` again answers what it saved while the wrong memory is one they
  * may still read, whatever else has happened to it since (ended by it, or
- * retired), and confirms and retires again, each a repeat that records
- * nothing new. Once they may no longer read it (its source narrowed or
+ * retired), and confirms again, a repeat that records nothing new. Once they may no longer read it (its source narrowed or
  * erased), a retry answers null, as for any memory they may not read: a
  * correction an earlier try saved stays in their own store, where the
  * page shows it and they can confirm it themselves. The same `change`
@@ -5848,6 +5903,9 @@ export const correctAs = async (
       ? { id: entity.id, kind: entity.kind }
       : { kind: entity.kind, identifiers: [sharedEntityRefOf(entity.id)] };
   const attribute = read.attribute ?? undefined;
+  // Their own word it replaces (`NewMemory.replaces`): ended, kept as
+  // history, and current again once the correction's save is undone.
+  const theirs = wrong.store === "own" && read.writer === reader.person;
   let saved: RememberedMemory;
   try {
     saved = await rememberAs(env, personId, {
@@ -5857,6 +5915,7 @@ export const correctAs = async (
       type: read.type,
       statement: right,
       quote: right,
+      ...(theirs ? { replaces: [read.id] } : {}),
     });
   } catch (error) {
     if (error instanceof Error && error.message === changeReused) {
@@ -5864,17 +5923,11 @@ export const correctAs = async (
     }
     throw error;
   }
-  const own = ownBrain(env, reader.person);
   try {
-    await own.confirmMemory({ memory: saved.memory, reader });
-    if (wrong.store === "own" && read.writer === reader.person) {
-      await own.retireMemory({
-        memory: read.id,
-        reader,
-        writer: reader.person,
-        change: `correct:${change}`,
-      });
-    }
+    await ownBrain(env, reader.person).confirmMemory({
+      memory: saved.memory,
+      reader,
+    });
   } catch (error) {
     throw erasedAs(error);
   }
