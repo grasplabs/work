@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { connectionTokens } from "../src/db/schema.ts";
+import { connections, connectionTokens } from "../src/db/schema.ts";
 import {
   addConnection,
   agentFor,
@@ -442,6 +442,50 @@ describe("a directory read", () => {
     const renewed = await codeOf(read(connectionId));
     providers.state.refreshGranted = undefined;
     expect(renewed).toBe("ok");
+  });
+
+  it("of a Google directory is kept on renewal only as granted before: one that gains a scope, loses its read, or says nothing of it needs an admin to connect it again; one that leaves out the sign-in scopes is fine", async () => {
+    const renewedWith = async (granted: string | null) => {
+      const connectionId = await connectDirectory(
+        someone("admin"),
+        "google-directory"
+      );
+      await drizzle(env.DB)
+        .update(connectionTokens)
+        .set({ accessExpiresAt: new Date(0) })
+        .where(eq(connectionTokens.connectionId, connectionId));
+      providers.state.refreshGranted = granted;
+      const people = await codeOf(read(connectionId));
+      providers.state.refreshGranted = undefined;
+      const [row] = await drizzle(env.DB)
+        .select({ status: connections.status })
+        .from(connections)
+        .where(eq(connections.id, connectionId));
+      return { people, status: row?.status };
+    };
+    const asked = asAsked["google-directory"];
+    const refused = { people: "directory.inactive", status: "needs_reauth" };
+    expect({
+      asAsked: await renewedWith(asked),
+      gained: await renewedWith(`${asked} ${mailToo["google-directory"]}`),
+      lost: await renewedWith(
+        asked.replace(
+          " https://www.googleapis.com/auth/admin.directory.user.readonly",
+          ""
+        )
+      ),
+      unsaid: await renewedWith(null),
+      // Google names email and profile by their full URIs.
+      signInLeftOut: await renewedWith(
+        "https://www.googleapis.com/auth/admin.directory.user.readonly"
+      ),
+    }).toStrictEqual({
+      asAsked: { people: "ok", status: "active" },
+      gained: refused,
+      lost: refused,
+      unsaid: refused,
+      signInLeftOut: { people: "ok", status: "active" },
+    });
   });
 
   it("of Graph answers people as a roster needs them, and nothing more: planted names cut, guests, disabled accounts and IDs that aren't Entra's left out", async () => {
