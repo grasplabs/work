@@ -1,19 +1,15 @@
 import type { FileDiff } from "@grasp-os/shared/apps";
 import { registerCustomCSSVariableTheme } from "@pierre/diffs";
-import { File, MultiFileDiff, Virtualizer } from "@pierre/diffs/react";
-import type { FileDiffOptions, FileOptions } from "@pierre/diffs/react";
-import * as stylex from "@stylexjs/stylex";
-import type { ReactNode } from "react";
+import { MultiFileDiff } from "@pierre/diffs/react";
+import type { FileDiffOptions } from "@pierre/diffs/react";
 
 import { Code, Doc, File as FileIcon, Image } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 
-// How the Code view (app-code.tsx) shows code, and Publish
-// (publish.tsx) a file's change: @pierre/diffs draws a file, and a
-// change, as a code editor does, in a shadow root of its own,
-// with line numbers, a gutter, scrolling sideways for long lines, and only
-// the lines in sight (its virtualizer), so a file of thousands of lines
-// scrolls smoothly. It highlights with its own highlighter, Highlights
+// How Publish (publish.tsx) shows a file's change, and the Code view
+// (app-code.tsx) a file's icon: @pierre/diffs draws a change as a code
+// editor does, in a shadow root of its own, with line numbers, a gutter
+// and scrolling sideways for long lines. It highlights with its own highlighter, Highlights
 // (`preferredHighlighter`), lexers compiled to WebAssembly, rather than
 // Shiki: it is quicker and, with Shiki's grammars and the WebAssembly
 // regex engine left out, ships less. Its colours are a theme of CSS
@@ -25,14 +21,6 @@ import type { IconData } from "../grasp/icons/index.ts";
 /** The theme of CSS variables the view is drawn in (styles.css sets them). */
 const theme = "grasp";
 registerCustomCSSVariableTheme(theme, {});
-
-/** A file, read-only: no header (the view has its own), Highlights. */
-const fileOptions: FileOptions<undefined, undefined> = {
-  theme,
-  preferredHighlighter: "highlights",
-  disableFileHeader: true,
-  overflow: "scroll",
-};
 
 /**
  * A file's change, read-only, in one column, for the narrow room of a
@@ -88,45 +76,6 @@ export const CodeDiff = ({ diff }: { diff: FileDiff }) => {
     />
   );
 };
-
-const look = stylex.create({
-  // The files one under the other.
-  content: { display: "flex", flexDirection: "column" },
-});
-
-/**
- * Where code scrolls: the virtualizer draws only the lines of its files
- * in sight of it.
- */
-export const CodeScroller = ({
-  className,
-  children,
-}: {
-  className?: string;
-  children: ReactNode;
-}) => (
-  <Virtualizer
-    className={className}
-    // The diffs library takes a class name, not StyleX's props.
-    contentClassName={stylex.props(look.content).className}
-  >
-    {children}
-  </Virtualizer>
-);
-
-const finalNewline = /\n$/u;
-
-/**
- * A file's text, highlighted, numbered line by line. Its last newline ends
- * its last line: the view draws no empty line after it, so its numbers end
- * where the file's lines do.
- */
-export const CodeFile = ({ path, text }: { path: string; text: string }) => (
-  <File
-    file={{ name: path, contents: text.replace(finalNewline, "") }}
-    options={fileOptions}
-  />
-);
 
 /** The icon of a file's type, by its extension. */
 const iconsByExtension: Readonly<Record<string, IconData>> = {
