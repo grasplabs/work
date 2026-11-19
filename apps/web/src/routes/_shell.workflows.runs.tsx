@@ -17,6 +17,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { PageSkeletonTable } from "../grasp/blocks/page-skeleton-table/page-skeleton-table.tsx";
 import {
   Select,
   SelectContent,
@@ -252,12 +253,58 @@ const WorkflowRuns = () => {
   );
 };
 
+/** Nothing to show in a cell while the runs are read. */
+const none = (): string => "";
+
+/**
+ * The runs before they are read: the bar, the header, and the log's
+ * table waiting with its columns (workflows/runs.tsx).
+ */
+const RunsPending = () => {
+  const { t } = useLingui();
+  const title = t`Runs`;
+  return (
+    <>
+      <SiteHeader
+        crumbs={[{ label: t`Workflows`, to: "/workflows" }, { label: title }]}
+      />
+      <PageSkeletonTable<RunsPage["runs"][number]>
+        descriptionLines={0}
+        table={{
+          label: title,
+          columns: [
+            {
+              key: "when",
+              header: t({
+                message: "When",
+                context: "column: when a run happened",
+              }),
+              value: none,
+            },
+            { key: "workflow", header: t`Workflow`, value: none },
+            { key: "by", header: t`Started by`, value: none },
+            {
+              key: "result",
+              header: t({
+                message: "Result",
+                context: "column: what happened in a run",
+              }),
+              value: none,
+            },
+          ],
+        }}
+      />
+    </>
+  );
+};
+
 /** What the address says the page shows, as far as it is valid. */
 const searchOf = (search: Record<string, unknown>): RunsSearch =>
   isStatus(search.status) ? { status: search.status } : {};
 
 export const Route = createFileRoute("/_shell/workflows/runs")({
   validateSearch: searchOf,
+  pendingComponent: RunsPending,
   // Nothing of the address: a filter changed on the page reads the log on
   // its own (RunsLogRead), never today's lanes again. A refresh runs the
   // loader, which reads the log for the address's filter again too.

@@ -12,7 +12,7 @@ import { visuallyHidden } from "../hidden/hidden";
 import { Alert, Icon } from "../icons";
 import { grasp, media } from "../tokens/tokens.stylex";
 import type { DraftPerson } from "./draft";
-import { DraftFace, useDraftWords } from "./draft";
+import { DraftFace, draftKeys, useDraftWords } from "./draft";
 
 /** A stretch of busy time, ISO start and end. */
 export interface DraftBusy {
@@ -181,6 +181,27 @@ const styles = stylex.create({
     color: grasp.muted,
     fontVariantNumeric: "tabular-nums",
   },
+  // The event's old slot (a change, EventChangeDraft): a dashed outline under the new block, its
+  // time quiet and struck. The new block, opaque, covers it where they meet.
+  ghost: {
+    position: "absolute",
+    insetInlineStart: `calc(${grasp.draftScale} + ${grasp.space1})`,
+    insetInlineEnd: grasp.space1,
+    boxSizing: "border-box",
+    paddingBlock: grasp.space1,
+    paddingInline: grasp.space3,
+    borderRadius: grasp.cornerMark,
+    borderWidth: grasp.hairline,
+    borderStyle: "dashed",
+    borderColor: grasp.muted,
+    overflow: "hidden",
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    color: grasp.muted,
+    textDecorationLine: "line-through",
+    fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap",
+  },
   conflicts: {
     display: "inline-flex",
     flexShrink: 0,
@@ -196,28 +217,75 @@ const styles = stylex.create({
 const hoursFrom = (from: number, iso: string) =>
   (Date.parse(iso) - from) / HOUR;
 
-/** The event's day, around it: from the whole hour before it to the whole hour half an hour after. */
+/** The most hours the day shows to hold an old slot beside the new: past it, the when row says it. */
+const GHOST_HOURS = 8;
+
+/** The calendar day an ISO time falls on, in the zone given ("2026-11-20"). */
+const dayOf = (iso: string, timeZone: string | undefined) =>
+  new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  }).format(new Date(iso));
+
+/** The old slot, kept beside the new when it is the same day and the two fit a short day. */
+const ghostOf = (
+  start: string,
+  end: string,
+  was: DraftBusy | undefined,
+  timeZone: string | undefined
+) => {
+  const span =
+    was === undefined
+      ? 0
+      : Math.max(Date.parse(end), Date.parse(was.end)) -
+        Math.min(Date.parse(start), Date.parse(was.start));
+  const kept =
+    was !== undefined &&
+    dayOf(was.start, timeZone) === dayOf(start, timeZone) &&
+    span / HOUR <= GHOST_HOURS;
+  return kept ? was : undefined;
+};
+
+/**
+ * The event's day, around it: from the whole hour before it to the whole hour half an hour after.
+ * With `was` (a change), the old slot too, as a dashed ghost, when it is the same day.
+ */
 export const DraftDay = ({
   title,
   start,
   end,
   lanes,
   timeZone,
+  was,
 }: {
   title: string;
   start: string;
   end: string;
   lanes: readonly DraftLane[];
   timeZone?: string;
+  was?: DraftBusy;
 }) => {
   const words = useDraftWords("event");
   const frame = useDraftWords("frame");
-  const from = Math.floor(Date.parse(start) / HOUR) * HOUR - HOUR;
-  const to = Math.ceil((Date.parse(end) + HOUR / 2) / HOUR) * HOUR;
+  const change = useDraftWords("eventChange");
+  const ghost = ghostOf(start, end, was, timeZone);
+  const first =
+    ghost === undefined
+      ? Date.parse(start)
+      : Math.min(Date.parse(start), Date.parse(ghost.start));
+  const last =
+    ghost === undefined
+      ? Date.parse(end)
+      : Math.max(Date.parse(end), Date.parse(ghost.end));
+  const from = Math.floor(first / HOUR) * HOUR - HOUR;
+  const to = Math.ceil((last + HOUR / 2) / HOUR) * HOUR;
   const hours = Math.round((to - from) / HOUR);
   const top = hoursFrom(from, start);
   const height = hoursFrom(from, end) - top;
   const minutes = Math.round((Date.parse(end) - Date.parse(start)) / 60_000);
+  const keys = draftKeys(lanes.map((lane) => lane.person));
   const meets = lanes.some((lane) =>
     (lane.busy ?? []).some(
       (busy) =>
@@ -233,11 +301,8 @@ export const DraftDay = ({
     >
       <div {...stylex.props(styles.grid, styles.lanes(lanes.length))}>
         <span aria-hidden="true" {...stylex.props(styles.corner)} />
-        {lanes.map((lane) => (
-          <span
-            key={lane.person.email ?? lane.person.name}
-            {...stylex.props(styles.laneHead)}
-          >
+        {lanes.map((lane, index) => (
+          <span key={keys[index]} {...stylex.props(styles.laneHead)}>
             <DraftFace person={lane.person} />
             <span {...stylex.props(styles.laneName)}>
               {lane.person.you === true ? frame.you : lane.person.name}
@@ -263,14 +328,11 @@ export const DraftDay = ({
               </p>
             ))}
           </div>
-          {lanes.map((lane) => {
+          {lanes.map((lane, laneIndex) => {
             const name =
               lane.person.you === true ? frame.you : lane.person.name;
             return (
-              <div
-                key={lane.person.email ?? lane.person.name}
-                {...stylex.props(styles.lane)}
-              >
+              <div key={keys[laneIndex]} {...stylex.props(styles.lane)}>
                 {Array.from({ length: hours - 1 }, (_, index) => (
                   <span
                     key={index}
@@ -278,12 +340,12 @@ export const DraftDay = ({
                     {...stylex.props(styles.rule, styles.at(index + 1))}
                   />
                 ))}
-                {(lane.busy ?? []).map((busy) => {
+                {(lane.busy ?? []).map((busy, busyIndex) => {
                   const at = Math.max(0, hoursFrom(from, busy.start));
                   const until = Math.min(hours, hoursFrom(from, busy.end));
                   return until <= at ? null : (
                     <span
-                      key={busy.start}
+                      key={`${busy.start}#${busyIndex}`}
                       {...stylex.props(
                         styles.busy,
                         styles.span(at, until - at)
@@ -302,6 +364,27 @@ export const DraftDay = ({
               </div>
             );
           })}
+          {ghost === undefined ? null : (
+            <div
+              data-slot="draft-day-was"
+              {...stylex.props(
+                styles.ghost,
+                styles.span(
+                  hoursFrom(from, ghost.start),
+                  hoursFrom(from, ghost.end) - hoursFrom(from, ghost.start)
+                )
+              )}
+            >
+              <span {...stylex.props(visuallyHidden)}>{`${change.was}: `}</span>
+              {words.lasts(
+                ghost.start,
+                Math.round(
+                  (Date.parse(ghost.end) - Date.parse(ghost.start)) / 60_000
+                ),
+                timeZone
+              )}
+            </div>
+          )}
           <div
             data-slot="draft-day-event"
             {...stylex.props(styles.event, styles.span(top, height))}

@@ -26,6 +26,7 @@ import {
   backdropPreviewWords,
 } from "../grasp/backdrop/words.ts";
 import { badgeWords } from "../grasp/badge/words.ts";
+import { connectServiceWords } from "../grasp/blocks/connect-service/connect-service.tsx";
 import { breadcrumbWords } from "../grasp/breadcrumb/words.ts";
 import { buttonWords } from "../grasp/button/words.ts";
 import { calendarWords } from "../grasp/calendar/words.ts";
@@ -197,6 +198,7 @@ export const englishPartWords: GraspWordsCatalog = {
   toaster: toasterWords,
   carousel: carouselWords,
   connectionRow: connectionRowWords,
+  connectService: connectServiceWords,
   signIn: signInWords,
 };
 
@@ -1044,6 +1046,19 @@ export const usePartWords = (): GraspWordsCatalog => {
         time: (iso, timeZone) => clockIn(i18n.locale, iso, timeZone),
         // A day alone: the tasks Grasp makes are due on a day (englishDraftWords).
         at: (iso, timeZone) => dayIn(i18n.locale, iso, timeZone),
+        // A due date alone ("2026-11-20"): that day, wherever it is read.
+        on: (date) => dayIn(i18n.locale, `${date}T00:00:00Z`, "UTC"),
+      },
+      eventChange: {
+        kind: t({ message: "Event change", context: "a draft's kind" }),
+        save: t`Save changes`,
+        saved: t`Event updated`,
+        was: t({ message: "Was", context: "a value before a change" }),
+        added: t({ message: "New", context: "a guest a change adds" }),
+        removed: t({
+          message: "Removed",
+          context: "a guest a change takes off",
+        }),
       },
     },
     dropdownMenu: {
@@ -1126,6 +1141,31 @@ export const usePartWords = (): GraspWordsCatalog => {
     connectionRow: {
       whoCanFix: t`Who can fix this`,
       notWorking: t`Not working`,
+    },
+    connectService: {
+      change: t`Change`,
+      key: t`Key`,
+      keyNote: t`Only its last four characters are shown again.`,
+      keyMissing: t`Paste the key.`,
+      address: t`Address`,
+      // An address, the same in every language.
+      addressPlaceholder: "https://models.example.com/v1",
+      addressMissing: t`Enter your endpoint's address.`,
+      addressWrong: t`Enter an address that starts with https://.`,
+      connect: t`Connect`,
+      connecting: t`Connecting`,
+      connected: t`Connected`,
+      notConnected: t`Not connected`,
+      replaceKey: t`Replace key`,
+      disconnect: t`Disconnect`,
+      disconnectTitle: (label) => t`Disconnect ${label}?`,
+      disconnectDetail: t`Grasp's chat, agents and workflows stop using it, and its key is removed. Connecting again takes a new key.`,
+      keep: t`Keep it`,
+      disconnecting: t`Disconnecting`,
+      notDisconnected: t`Could not disconnect`,
+      keyLine: (last, region) =>
+        region === undefined ? t`Key …${last}` : t`Key …${last} · ${region}`,
+      connectName: (label) => t`Connect ${label}`,
     },
     signIn: {
       // The product's name: never translated.

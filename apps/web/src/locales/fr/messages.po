@@ -2113,6 +2113,7 @@ msgstr "Active, uniquement pour vous"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain-section.tsx
+#: src/frame/page-skeletons-b.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the brain's log"
 msgid "Activity"
@@ -3578,6 +3579,7 @@ msgstr "Lié à"
 
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain-section.tsx
+#: src/frame/page-skeletons-b.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.brain.tsx
@@ -3594,6 +3596,7 @@ msgctxt "inbox item kind"
 msgid "Brain question"
 msgstr "Question du Brain"
 
+#: src/frame/page-skeletons-b.tsx
 #: src/frame/part-words.tsx
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
@@ -3855,7 +3858,7 @@ msgstr "Cc / Cci"
 
 #: src/agents/new-agent.tsx
 #: src/apps/publish.tsx
-#: src/settings/ai-providers.tsx
+#: src/frame/part-words.tsx
 msgid "Change"
 msgstr "Modifier"
 
@@ -4678,9 +4681,9 @@ msgstr "Conflit"
 #: src/connections/integration-item.tsx
 #: src/connections/overview-lists.tsx
 #: src/connections/request-app-dialog.tsx
+#: src/frame/part-words.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.integrations.$integration.tsx
-#: src/settings/ai-providers.tsx
 msgid "Connect"
 msgstr "Connecter"
 
@@ -4689,7 +4692,7 @@ msgstr "Connecter"
 msgid "Connect {app}"
 msgstr "Connecter {app}"
 
-#: src/settings/ai-providers.tsx
+#: src/frame/part-words.tsx
 msgid "Connect {label}"
 msgstr "Connecter {label}"
 
@@ -4719,8 +4722,8 @@ msgstr "Connectez un fournisseur d'IA pour commencer à poser des questions"
 msgid "Connect another account"
 msgstr "Connecter un autre compte"
 
+#: src/frame/part-words.tsx
 #: src/onboarding/connect-steps.tsx
-#: src/settings/ai-providers.tsx
 msgid "Connected"
 msgstr "Connecté"
 
@@ -4777,7 +4780,7 @@ msgstr "Connecté, via Composio"
 msgid "Connected: {names}"
 msgstr "Connecté : {names}"
 
-#: src/settings/ai-providers.tsx
+#: src/frame/part-words.tsx
 msgid "Connecting"
 msgstr "Connexion"
 
@@ -5063,6 +5066,10 @@ msgstr "Refus impossible"
 #: src/apps/app-remove.tsx
 msgid "Could not delete"
 msgstr "Impossible de supprimer"
+
+#: src/frame/part-words.tsx
+msgid "Could not disconnect"
+msgstr "Impossible de déconnecter"
 
 #: src/apps/app-definition.tsx
 msgid "Could not export"
@@ -5689,6 +5696,7 @@ msgid "Discard"
 msgstr "Abandonner"
 
 #: src/connections/connection-list.tsx
+#: src/frame/part-words.tsx
 msgid "Disconnect"
 msgstr "Déconnecter"
 
@@ -5697,6 +5705,7 @@ msgid "Disconnect {label}"
 msgstr "Déconnecter {label}"
 
 #: src/connections/connection-list.tsx
+#: src/frame/part-words.tsx
 msgid "Disconnect {label}?"
 msgstr "Déconnecter {label} ?"
 
@@ -5711,6 +5720,10 @@ msgstr "A déconnecté un compte"
 #: src/connections/revocations-by-hand.tsx
 msgid "Disconnected on {since}."
 msgstr "Déconnecté le {since}."
+
+#: src/frame/part-words.tsx
+msgid "Disconnecting"
+msgstr "Déconnexion"
 
 #: src/frame/part-words.tsx
 #: src/settings/chat-accounts.tsx
@@ -6158,6 +6171,7 @@ msgstr "Termine le workflow"
 msgid "Enter a name for the team."
 msgstr "Saisissez un nom pour l'équipe."
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Enter an address that starts with https://."
 msgstr "Saisissez une adresse qui commence par https://."
@@ -6170,6 +6184,7 @@ msgstr "Saisissez l'adresse à autoriser de nouveau."
 msgid "Enter the email of at least one person to invite."
 msgstr "Saisissez l’e-mail d’au moins une personne à inviter."
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Enter your endpoint's address."
 msgstr "Saisissez l'adresse de votre endpoint."
@@ -6226,6 +6241,11 @@ msgctxt "a calendar event"
 msgid "Event"
 msgstr "Événement"
 
+#: src/frame/part-words.tsx
+msgctxt "a draft's kind"
+msgid "Event change"
+msgstr "Modification d’événement"
+
 #: src/activity/audit-event.tsx
 #: src/routes/_shell.settings.audit.tsx
 msgid "Event details"
@@ -6242,6 +6262,10 @@ msgstr "Nom de l'événement"
 #: src/workflows/workflow-triggers.tsx
 msgid "Event type"
 msgstr "Type d’événement"
+
+#: src/frame/part-words.tsx
+msgid "Event updated"
+msgstr "Événement mis à jour"
 
 #: src/activity/audit-log.tsx
 #: src/routes/_shell.settings.audit.tsx
@@ -7451,6 +7475,10 @@ msgstr "L'IA de Grasp fonctionne avec la propre clé d'un fournisseur d'IA de vo
 msgid "Grasp's chat"
 msgstr "Le chat de Grasp"
 
+#: src/frame/part-words.tsx
+msgid "Grasp's chat, agents and workflows stop using it, and its key is removed. Connecting again takes a new key."
+msgstr "Le chat, les agents et les workflows de Grasp cessent de l’utiliser, et sa clé est supprimée. Pour le reconnecter, il faut une nouvelle clé."
+
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
 msgid "Grasp's own rules always hold over these."
@@ -7955,6 +7983,7 @@ msgstr "Dans vos documents, j’ai vu {tools}."
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/inbox-page.tsx
+#: src/routes/_shell.inbox.tsx
 msgid "Inbox"
 msgstr "Boîte de réception"
 
@@ -8620,6 +8649,7 @@ msgstr "Maintenez appuyé"
 #: src/brain/forget.tsx
 #: src/brain/lessons-view.tsx
 #: src/brain/memory-page.tsx
+#: src/frame/part-words.tsx
 msgid "Keep it"
 msgstr "Le garder"
 
@@ -8672,11 +8702,20 @@ msgstr "Conservé entre les exécutions"
 msgid "Kept something the chat can no longer read from the model"
 msgstr "A caché au modèle quelque chose que le chat ne peut plus lire"
 
+#: src/frame/part-words.tsx
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
 #: src/workflows/kept-state.tsx
 msgid "Key"
 msgstr "Clé"
+
+#: src/frame/part-words.tsx
+msgid "Key …{last}"
+msgstr "Clé …{last}"
+
+#: src/frame/part-words.tsx
+msgid "Key …{last} · {region}"
+msgstr "Clé …{last} · {region}"
 
 #: src/export/figure-tiles.tsx
 msgid "Key figures"
@@ -9365,6 +9404,7 @@ msgstr "les membres de l’équipe dans {field}"
 
 #: src/brain/brain-section.tsx
 #: src/brain/memory-page.tsx
+#: src/frame/page-skeletons-b.tsx
 #: src/labels.ts
 #: src/routes/_shell.brain.tsx
 #: src/routes/_shell.knowledge.index.tsx
@@ -9809,6 +9849,11 @@ msgstr "Jamais"
 #: src/workflows/item-test.tsx
 msgid "Never started: {refusal}"
 msgstr "Jamais démarré : {refusal}"
+
+#: src/frame/part-words.tsx
+msgctxt "a guest a change adds"
+msgid "New"
+msgstr "Nouveau"
 
 #: src/workflows/requests/request-parts.tsx
 msgctxt "asked for the first time this span"
@@ -10431,7 +10476,7 @@ msgstr "Non effacé"
 msgid "Not confirmed by the board yet"
 msgstr "Pas encore confirmée par la direction"
 
-#: src/settings/ai-providers.tsx
+#: src/frame/part-words.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Not connected"
 msgstr "Non connectée"
@@ -11139,6 +11184,7 @@ msgstr "Seuls ses créateurs modifient ces réglages."
 msgid "Only its builders open it, and its triggers don't fire, until it is shared with the team."
 msgstr "Seuls ses créateurs l’ouvrent, et ses déclencheurs ne se lancent pas, tant qu’il n’est pas partagé avec l’équipe."
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Only its last four characters are shown again."
 msgstr "Seuls ses quatre derniers caractères seront à nouveau affichés."
@@ -11590,6 +11636,7 @@ msgctxt "a project's owner"
 msgid "Owner"
 msgstr "Propriétaire"
 
+#: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgctxt "column: who owns a workflow"
 msgid "Owner"
@@ -11732,6 +11779,7 @@ msgstr "Les mots de passe et la connexion en deux étapes relèvent du compte de
 msgid "Paste several at once, split by commas or lines."
 msgstr "Collez-en plusieurs à la fois, séparées par des virgules ou des lignes."
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Paste the key."
 msgstr "Collez la clé."
@@ -12778,6 +12826,11 @@ msgctxt "a file a change removes"
 msgid "Removed"
 msgstr "Supprimé"
 
+#: src/frame/part-words.tsx
+msgctxt "a guest a change takes off"
+msgid "Removed"
+msgstr "Retiré"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Removed {date}"
 msgstr "Retiré le {date}"
@@ -12855,6 +12908,7 @@ msgctxt "a secret key, typed again"
 msgid "Replace"
 msgstr "Remplacer"
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Replace key"
 msgstr "Remplacer la clé"
@@ -13056,6 +13110,7 @@ msgstr "Repose sur"
 msgid "Result"
 msgstr "Résultat"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
 msgctxt "column: what happened in a run"
 msgid "Result"
@@ -13442,6 +13497,7 @@ msgctxt "activity of a workflow: what ran"
 msgid "Runs"
 msgstr "Exécutions"
 
+#: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Runs a week"
 msgstr "Exécutions par semaine"
@@ -13598,6 +13654,7 @@ msgstr "Enregistrer comme blueprint"
 msgid "Save as PDF"
 msgstr "Enregistrer en PDF"
 
+#: src/frame/part-words.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "Save changes"
 msgstr "Enregistrer les modifications"
@@ -14728,6 +14785,7 @@ msgstr "Sources"
 
 #: src/brain/brain-section.tsx
 #: src/brain/sources-page.tsx
+#: src/frame/page-skeletons-b.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the Brain's sources page"
 msgid "Sources"
@@ -14842,6 +14900,7 @@ msgstr "Démarrées"
 msgid "Started a chat"
 msgstr "A commencé une discussion"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
@@ -16800,6 +16859,7 @@ msgid "Tool"
 msgstr "Outil"
 
 #: src/brain/brain.ts
+#: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Tools"
 msgstr "Outils"
@@ -17599,6 +17659,11 @@ msgstr "Avertissement"
 msgid "Warsaw"
 msgstr "Varsovie"
 
+#: src/frame/part-words.tsx
+msgctxt "a value before a change"
+msgid "Was"
+msgstr "Avant"
+
 #: src/brain/brain.ts
 msgid "Was {people}"
 msgstr "Auparavant : {people}"
@@ -18059,6 +18124,7 @@ msgctxt "an event's time"
 msgid "When"
 msgstr "Quand"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
 msgctxt "column: when a run happened"
 msgid "When"
@@ -18445,6 +18511,8 @@ msgstr "workflow"
 #: src/apps/app-workflows.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.workflows.$workflow.tsx
+#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Workflow"

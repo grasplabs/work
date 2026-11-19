@@ -20,7 +20,8 @@ import {
 import type { Folder, Note } from "../brain/brain.ts";
 import { NoteReveal } from "../brain/note-reveal.tsx";
 import { readBrain } from "../brain/read-brain.ts";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { BrainPending } from "../frame/page-skeletons-b.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -195,6 +196,8 @@ export const Route = createFileRoute("/_shell/brain")({
   // Going from note to note keeps what was read: each read is a page of
   // the brain's records per type, every one in the audit log.
   shouldReload: false,
-  pendingComponent: PageLoading,
+  // Every page of the brain waits for this read on the way in: the
+  // skeleton is the page the address names, under its bar.
+  pendingComponent: BrainPending,
   component: BrainLayout,
 });

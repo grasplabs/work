@@ -105,7 +105,10 @@ const useGroups = (
   if (identity.onboardingOnly === true) {
     return [];
   }
-  const at = (to: string, fuzzy = true) => matchRoute({ to, fuzzy }) !== false;
+  // The address being loaded, not the last one loaded: a page's pending state
+  // already marks its own row (main.tsx shows it at once).
+  const at = (to: string, fuzzy = true) =>
+    matchRoute({ to, fuzzy, pending: true }) !== false;
   const inWorkflows = at("/workflows");
   const onRequests = at("/workflows/requests");
   const sections: SidebarGroupEntry = {
@@ -181,6 +184,7 @@ const useGroups = (
                   to: "/apps/$app",
                   params: { app: app.app },
                   fuzzy: true,
+                  pending: true,
                 }) !== false,
               rows: app.entries.map((entry) => {
                 const splat = appSplat(entry.path);

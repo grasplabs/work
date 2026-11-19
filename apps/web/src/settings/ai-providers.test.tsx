@@ -241,10 +241,22 @@ const press = async (element: HTMLElement): Promise<void> => {
   await settled();
 };
 
-/** The button named `name`, by its label or its text. */
+/** The words an element is labelled by (`aria-labelledby`), if any. */
+const labelledBy = (element: Element): string | null =>
+  element
+    .getAttribute("aria-labelledby")
+    ?.split(" ")
+    .map((id) => document.querySelector(`[id="${id}"]`))
+    .map((part) => (part === null ? "" : wordsOf(part)))
+    .join(" ") ?? null;
+
+/** The button named `name`, by its label, what labels it, or its text. */
 const button = (name: string): HTMLButtonElement => {
   const found = [...document.querySelectorAll("button")].find(
-    (each) => each.getAttribute("aria-label") === name || wordsOf(each) === name
+    (each) =>
+      each.getAttribute("aria-label") === name ||
+      labelledBy(each) === name ||
+      wordsOf(each) === name
   );
   if (found === undefined) {
     throw new TypeError(`No button ${name}`);
@@ -470,7 +482,8 @@ describe("Settings › AI providers", () => {
     await enter(textField("Key"), pastedKey);
     await press(button("Connect"));
 
-    // Why, as the key field's own error: the field said wrong, the reason tied to it.
+    // Why, as the key field's own error: the field said wrong, the reason
+    // tied to it, and the key cleared.
     const key = textField("Key");
     const described = (key.getAttribute("aria-describedby") ?? "")
       .split(" ")
@@ -480,6 +493,8 @@ describe("Settings › AI providers", () => {
       asked,
       invalid: key.getAttribute("aria-invalid"),
       why: described.includes("It refused the key."),
+      // A key that did not work is not kept in the page.
+      cleared: key.value,
       connected: document.querySelector('ul[aria-label="Connected providers"]'),
     }).toStrictEqual({
       asked: [
@@ -489,6 +504,7 @@ describe("Settings › AI providers", () => {
       ],
       invalid: "true",
       why: true,
+      cleared: "",
       connected: null,
     });
   });

@@ -80,7 +80,7 @@ const ShellFrame = () => {
   const { stage } = useGlobalChat();
   const { failing } = Route.useLoaderData();
   // Chat's start has no bar: its backdrop takes the whole card.
-  const chatStart = useMatchRoute()({ to: "/" }) !== false;
+  const chatStart = useMatchRoute()({ to: "/", pending: true }) !== false;
   useSidebarPagesFetched();
   return (
     <AppFrame

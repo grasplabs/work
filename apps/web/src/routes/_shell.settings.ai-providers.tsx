@@ -2,15 +2,12 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { SettingsSkeleton } from "../frame/page-skeletons-a.tsx";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { AiProvidersSettings } from "../settings/ai-providers.tsx";
 import { SpendCard } from "../settings/ai-spend.tsx";
-import {
-  SectionNotLoaded,
-  SettingsError,
-  SettingsLoading,
-} from "../settings/section.tsx";
+import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 
 // Settings › AI and spend, for admins: the organization's own AI provider
 // keys, the models its calls use (settings/ai-providers.tsx), and what they
@@ -45,8 +42,11 @@ const AiProvidersPage = () => {
   );
 };
 
+/** The providers, the models (default, fallbacks, add), then the month's spend. */
+const AiProvidersPending = () => <SettingsSkeleton sections={[1, 3, 8]} />;
+
 export const Route = createFileRoute("/_shell/settings/ai-providers")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: AiProvidersPending,
   errorComponent: SettingsError,
   component: AiProvidersPage,
   loader: async ({ context: { core } }) => {

@@ -4,7 +4,11 @@ import { loadThread } from "../chat/chat-body.tsx";
 import { ChatPage } from "../chat/chat-page.tsx";
 import { chatPresence } from "../chat/chat-presence.ts";
 import { loadChat } from "../chat/chat-watch.ts";
-import { NotFound, PageLoading } from "../frame/page-states.tsx";
+import { useGlobalChat } from "../chat/global-chat.tsx";
+import { Fill, LoadingBar } from "../frame/page-skeletons-b.tsx";
+import { NotFound } from "../frame/page-states.tsx";
+import { PageSkeletonChat } from "../grasp/blocks/page-skeleton-chat/page-skeleton-chat.tsx";
+import { Composer, ComposerAdd } from "../grasp/composer/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // A chat's own page (chat/chat-page.tsx), at its own address: linked,
@@ -19,6 +23,38 @@ const Chat = () => {
   const { title } = Route.useLoaderData();
   // Another chat is another page: nothing typed in one stays for the next.
   return <ChatPage chatId={chatId} key={chatId} title={title} />;
+};
+
+/** Does nothing: the box takes nothing until the chat is there. */
+const wait = (): void => undefined;
+
+/**
+ * The chat before its first update: the bar, its name to come, the
+ * thread's waiting pairs, and the chat's box still, with its add and
+ * dictate, in the box it will have (chat/chat-composer.tsx).
+ */
+const ChatPending = () => {
+  const { words } = useGlobalChat();
+  return (
+    <>
+      <LoadingBar />
+      <Fill>
+        <PageSkeletonChat
+          aria-label={words.title}
+          composer={
+            <Composer
+              aria-label={words.title}
+              loading
+              onDictate={wait}
+              onSend={wait}
+              placeholder={words.placeholder}
+              start={<ComposerAdd onAttach={wait} />}
+            />
+          }
+        />
+      </Fill>
+    </>
+  );
 };
 
 export const Route = createFileRoute("/_shell/chats/$chatId")({
@@ -42,7 +78,7 @@ export const Route = createFileRoute("/_shell/chats/$chatId")({
       title: summary.state === "ready" ? summary.data.title : undefined,
     };
   },
-  pendingComponent: PageLoading,
+  pendingComponent: ChatPending,
   notFoundComponent: () => <NotFound />,
   component: () => <Chat />,
 });

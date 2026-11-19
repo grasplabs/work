@@ -7,17 +7,14 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { SettingsSkeleton } from "../frame/page-skeletons-a.tsx";
 import { Combobox } from "../grasp/combobox/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { OrgCard } from "../settings/org-card.tsx";
-import {
-  SectionNotLoaded,
-  SettingsError,
-  SettingsLoading,
-} from "../settings/section.tsx";
+import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 import { SignInRow } from "../settings/sign-in-settings.tsx";
 import { StaffAccessSection } from "../settings/staff-access.tsx";
 import {
@@ -265,8 +262,15 @@ const Workspace = () => {
   );
 };
 
+/** The organization's card, the time zone and sign-in, then staff access. */
+const WorkspacePending = () => (
+  <SettingsSkeleton
+    sections={[{ rows: 5, titled: false }, { rows: 2, titled: false }, 1]}
+  />
+);
+
 export const Route = createFileRoute("/_shell/settings/workspace")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: WorkspacePending,
   errorComponent: SettingsError,
   component: Workspace,
   loader: async ({ context: { core, identity } }) => {

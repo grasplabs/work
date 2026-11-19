@@ -32,7 +32,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { renderElement } from "@ui-sdk/react/primitive";
 import type { RenderProp } from "@ui-sdk/react/primitive";
-import { createContext, isValidElement, useContext } from "react";
+import { createContext, isValidElement, useContext, useId } from "react";
 import type { ReactNode } from "react";
 
 import { focus } from "../focus/focus";
@@ -102,6 +102,20 @@ interface WithActions {
   actions?: ReactNode;
   href?: never;
   render?: never;
+  onPress?: never;
+}
+
+/**
+ * An item that is one choice: the whole row is a button, as a provider's tile is ("Anthropic,
+ * European Union"). Its name is the title alone; its description is said after it. No chevron: it
+ * goes nowhere, it chooses.
+ */
+interface AsButton {
+  /** Runs when the row is pressed, by pointer, Enter or Space. It holds no buttons of its own. */
+  onPress: () => void;
+  href?: never;
+  render?: never;
+  actions?: never;
 }
 
 /**
@@ -117,10 +131,11 @@ type AsLink = {
    */
   render?: RenderProp;
   actions?: never;
+  onPress?: never;
 } & ({ href: string } | { render: RenderProp });
 
 /** Every prop an Item takes. */
-export type ItemProps = ItemBase & (WithActions | AsLink);
+export type ItemProps = ItemBase & (WithActions | AsLink | AsButton);
 
 const HOVER = media.hover;
 const FORCED = media.forced;
@@ -172,6 +187,13 @@ const styles = stylex.create({
     backgroundColor: grasp.ghostFillPress,
     outlineStyle: { default: "none", [FORCED]: "solid" },
     outlineWidth: { default: null, [FORCED]: grasp.hairline },
+  },
+  // A row that is a button: no button's own box, the row's words and font.
+  button: {
+    appearance: "none",
+    borderWidth: 0,
+    fontSize: "inherit",
+    lineHeight: "inherit",
   },
   link: {
     cursor: "pointer",
@@ -396,6 +418,12 @@ export interface ItemPartProps {
 
 // The row's size, for a mark's box and the words' gap.
 const RowSize = createContext<ItemSize>("md");
+// In a row that is a button: the ids its title and description take, so the button is named by the
+// title alone and described by the description.
+const PressIds = createContext<string | undefined>(undefined);
+/** A part's id in a row that is a button, from the row's own: none in any other row. */
+const pressId = (base: string | undefined, part: "title" | "description") =>
+  base === undefined ? undefined : `${base}-${part}`;
 
 /** What stands before the words: an icon in its square, the bare icon in line, or a mark. */
 export const ItemMedia = ({
@@ -447,7 +475,12 @@ export const ItemContent = ({ children }: ItemPartProps) => {
 
 /** Its name, in a few words ("Spring launch"). */
 export const ItemTitle = ({ children }: ItemPartProps) => (
-  <span {...stylex.props(styles.title)}>{children}</span>
+  <span
+    id={pressId(useContext(PressIds), "title")}
+    {...stylex.props(styles.title)}
+  >
+    {children}
+  </span>
 );
 
 /**
@@ -464,14 +497,21 @@ export const ItemDetail = ({ children }: ItemPartProps) =>
     </>
   );
 
+/** The description's line, with the id a row that is a button describes itself by. */
+const Described = ({ children }: { children: ReactNode }) => (
+  <span
+    id={pressId(useContext(PressIds), "description")}
+    data-slot="item-description"
+    {...stylex.props(styles.description)}
+  >
+    {children}
+  </span>
+);
+
 /** One line about it: a date, a state, a count ("Updated 2 hours ago"). It wraps; never cut off. */
 export const ItemDescription = ({ children }: ItemPartProps) =>
   // With no words, nothing: the row then centres its mark on the title alone.
-  isBlank(children) ? null : (
-    <span data-slot="item-description" {...stylex.props(styles.description)}>
-      {children}
-    </span>
-  );
+  isBlank(children) ? null : <Described>{children}</Described>;
 
 /** Buttons at the end of the row, most used last ("Manage"). Not in an Item with `href`. */
 export const ItemActions = ({ children }: ItemPartProps) =>
@@ -524,6 +564,46 @@ const RowLink = ({
     render
   );
 
+/** A row in the parts shape that is one button: named by its title, described by its description. */
+const PressRow = ({
+  children,
+  variant = "plain",
+  size = "md",
+  onPress,
+  current = false,
+  layout,
+}: Pick<ItemProps, "children" | "variant" | "size" | "current" | "layout"> & {
+  onPress: () => void;
+}) => {
+  const id = useId();
+  return (
+    <button
+      type="button"
+      data-slot="item"
+      aria-labelledby={pressId(id, "title")}
+      aria-describedby={pressId(id, "description")}
+      aria-current={current ? "true" : undefined}
+      onClick={onPress}
+      {...stylex.props(
+        itemMarker,
+        styles.item,
+        styles.button,
+        styles[size],
+        styles[variant],
+        styles.link,
+        linkLook[variant],
+        current && styles.current,
+        focus.ring,
+        layout
+      )}
+    >
+      <PressIds value={id}>
+        <RowSize value={size}>{children}</RowSize>
+      </PressIds>
+    </button>
+  );
+};
+
 /** A row in the parts shape: its parts, and a link's chevron at the end. */
 const PartsRow = ({
   children,
@@ -533,10 +613,31 @@ const PartsRow = ({
   render,
   current = false,
   layout,
+  onPress,
 }: Pick<
   ItemProps,
-  "children" | "variant" | "size" | "href" | "render" | "current" | "layout"
+  | "children"
+  | "variant"
+  | "size"
+  | "href"
+  | "render"
+  | "current"
+  | "layout"
+  | "onPress"
 >) => {
+  if (onPress !== undefined) {
+    return (
+      <PressRow
+        variant={variant}
+        size={size}
+        onPress={onPress}
+        current={current}
+        layout={layout}
+      >
+        {children}
+      </PressRow>
+    );
+  }
   const linked = isLinked(href, render);
   const inside = (
     <RowSize value={size}>

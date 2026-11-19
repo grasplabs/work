@@ -112,6 +112,8 @@ export const draftWords = {
     /** The due row ("Thu 19 Nov · 17:00"). */
     at: (iso: string, timeZone: string | undefined) =>
       `${day(iso, timeZone)} · ${clock(iso, timeZone)}`,
+    /** The due row of a day with no time ("Fri 20 Nov"), from its date ("2026-11-20"): the same day in every zone. */
+    on: (date: string) => day(`${date}T00:00:00Z`, "UTC"),
   },
   /** EmailDraft. */
   email: {
@@ -153,6 +155,21 @@ export const draftWords = {
     remove: (name: string) => `Remove ${name}`,
     /** The person looking, in a lane or a chip. */
     you: "You",
+  },
+  /** EventChangeDraft: the event's words, and these. */
+  eventChange: {
+    /** The kind, said with the draft's name. */
+    kind: "Event change",
+    /** The main action. */
+    save: "Save changes",
+    /** Said once it was saved, before the time. */
+    saved: "Event updated",
+    /** Said before a value as it was, struck under the new one. */
+    was: "Was",
+    /** Beside a guest the change adds. */
+    added: "New",
+    /** Said before a guest the change takes off, struck. */
+    removed: "Removed",
   },
   /** EventDraft. */
   event: {

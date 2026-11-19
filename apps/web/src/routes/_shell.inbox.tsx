@@ -1,7 +1,13 @@
+import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
-import { PageLoading } from "../frame/page-states.tsx";
+import { PagePanel } from "../frame/page-panel.tsx";
+import { SiteHeader } from "../frame/site-header.tsx";
+import {
+  PageSkeletonDetail,
+  PageSkeletonListDetail,
+} from "../grasp/blocks/page-skeleton-list-detail/page-skeleton-list-detail.tsx";
 import { InboxPage, groupOrder } from "../inbox/inbox-page.tsx";
 import { inboxItems, unread } from "../inbox/items.ts";
 import { readWaiting } from "../inbox/read-waiting.ts";
@@ -35,13 +41,32 @@ const Inbox = () => {
   );
 };
 
+/**
+ * The Inbox before what waits is read: the library's page-skeleton-list-detail,
+ * the list under the page's bar and the chosen item waiting in the shell's
+ * page panel, which the shell shows beside a wide page and keeps as a closed
+ * sheet on a phone, as it does the loaded one.
+ */
+const InboxPending = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <SiteHeader crumbs={[{ label: t`Inbox` }]} />
+      <PageSkeletonListDetail descriptionLines={0} rows={8} />
+      <PagePanel label={t`Inbox`}>
+        <PageSkeletonDetail />
+      </PagePanel>
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/inbox")({
   validateSearch: z.object({
     item: z.string().optional(),
     // The group in view, as the sidebar's Inbox view sets it.
     group: z.enum(groupOrder).optional(),
   }),
-  pendingComponent: PageLoading,
+  pendingComponent: InboxPending,
   loader: async ({ context: { core, identity } }) => {
     // Everyone's unknown outcomes too, once a visit: only this page lists
     // them (core records each list in the audit trail).

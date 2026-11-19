@@ -42,8 +42,9 @@ const wait = (): void => undefined;
  * when the frame itself takes over. It shows nothing of the person: no
  * name, chat, App or count, which only come once core has said who is in
  * (signed-in-here.ts). Where the sidebar becomes a section of its own
- * (Settings, an agent, the Brain, an App) it waits empty instead of
- * showing sections it is about to replace. Nothing at all for a browser
+ * (Settings, an agent, the Brain, an App) its rows wait as the library's
+ * quiet bars instead of showing sections it is about to replace. The
+ * frame, the sidebar and the chat's bar are in their own `loading`. Nothing at all for a browser
  * where nobody was signed in, whom core sends to sign in.
  */
 export const ShellPending = () => {
@@ -52,7 +53,8 @@ export const ShellPending = () => {
   if (!wasSignedIn()) {
     return null;
   }
-  const at = (to: string, fuzzy = true) => matchRoute({ to, fuzzy }) !== false;
+  const at = (to: string, fuzzy = true) =>
+    matchRoute({ to, fuzzy, pending: true }) !== false;
   const sectioned =
     at("/settings") || at("/brain") || at("/apps/$app") || at("/agents/$agent");
   // Chat's start and a chat's own page have no bar (app-frame.tsx).
@@ -67,6 +69,7 @@ export const ShellPending = () => {
             <Composer
               activity="disabled"
               compact
+              loading
               aria-label={ask}
               // The real bar's add and dictate, still, so its foot keeps
               // its shape as it takes over (chat/chat-composer.tsx).
@@ -77,6 +80,7 @@ export const ShellPending = () => {
             />
           )
         }
+        loading
         words={{ closeMenu: t`Close the menu`, menu: t`Menu` }}
         page={chatPage ? "whole" : "padded"}
         sidebar={
@@ -135,6 +139,9 @@ export const ShellPending = () => {
                   ]
             }
             guides={false}
+            // A section's rows (Settings, the Brain, an App, an agent) come with
+            // its page: the library's quiet bars hold their place.
+            loading={sectioned}
             head={
               <span {...stylex.props(styles.mark)}>
                 <Icon icon={BrandGrasp} />

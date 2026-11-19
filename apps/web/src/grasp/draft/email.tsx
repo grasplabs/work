@@ -18,8 +18,10 @@ import {
   changeOf,
   Draft,
   draftEditable,
+  draftKeys,
   DraftInput,
   fieldOf,
+  withoutAt,
   DraftPersonChip,
   DraftText,
   useDraftWords,
@@ -58,6 +60,12 @@ export interface EmailDraftProps {
    * @default false
    */
   readOnly?: boolean;
+  /**
+   * Holds the main action back until the host clears it, with the reason ("Read the whole email
+   * first"), as ApprovalRequest's `approveHeld`: out of use but still reached by Tab, the reason
+   * beside it and said with it. Discard stays usable.
+   */
+  mainHeld?: string;
   /** Send: the email as it stands. Return a Promise and the button works until it settles. */
   onSend: (draft: EmailDraftValue) => unknown;
   /** Discard, at the foot's start. */
@@ -111,21 +119,23 @@ const People = ({
   people: readonly DraftPerson[];
   change: ((people: readonly DraftPerson[]) => void) | undefined;
   whole: boolean;
-}) =>
-  people.map((person) => (
+}) => {
+  const keys = draftKeys(people);
+  return people.map((person, index) => (
     <DraftPersonChip
       whole={whole}
-      key={person.email ?? person.name}
+      key={keys[index]}
       person={person}
       onRemove={
         change === undefined
           ? undefined
           : () => {
-              change(people.filter((other) => other !== person));
+              change(withoutAt(people, index));
             }
       }
     />
   ));
+};
 
 /** A Cc or Bcc row: its name and its people; locked, none while it has no one. */
 const Copies = ({
@@ -162,6 +172,7 @@ export const EmailFrame = ({
   draft,
   onDraftChange,
   readOnly,
+  mainHeld,
   onSend,
   onDismiss,
   onAttach,
@@ -192,6 +203,7 @@ export const EmailFrame = ({
       icon={Mail}
       mark={mark}
       title={<span {...stylex.props(styles.kind)}>{kind}</span>}
+      mainHeld={mainHeld}
       main={{ label: send, onPress: () => onSend(draft) }}
       onDismiss={onDismiss}
       status={status}

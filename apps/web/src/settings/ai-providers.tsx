@@ -28,6 +28,7 @@ import { formatDollars } from "../format.ts";
 import { tellProvidersChanged } from "../frame/ai-key-banner.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { ConnectService } from "../grasp/blocks/connect-service/connect-service.tsx";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Button, useAction } from "../grasp/button/index.ts";
@@ -49,8 +50,7 @@ import {
   FieldLabel,
 } from "../grasp/field/index.ts";
 import { EU, Flag, US } from "../grasp/flags/index.ts";
-import { Form, FormActions } from "../grasp/form/index.ts";
-import { Heading } from "../grasp/heading/index.ts";
+import { Form } from "../grasp/form/index.ts";
 import {
   Cable,
   ChevronDown,
@@ -97,9 +97,10 @@ import { ReadOnlyRow } from "./read-only-row.tsx";
 // and its fallbacks, the providers' main models first. The organization's
 // own admins change it; Grasp staff only read it. While nothing is
 // connected and nothing answers, the Providers card is where the first
-// provider is connected: the providers as tiles, an OpenAI-compatible
-// endpoint on one quiet line under them, and the key in the same card,
-// added and tested in one step (Ruben, 19 Nov 2026).
+// provider is connected: the library's Connect a service block, the
+// providers as tiles, an OpenAI-compatible endpoint on one quiet line under
+// them, and the key in the same card, added and tested in one step (Ruben,
+// 19 Nov 2026).
 
 /** The most fallbacks a choice may have, as core takes it. */
 const fallbacksMax = 5;
@@ -146,11 +147,6 @@ const testFailures: Readonly<Record<string, MessageDescriptor>> = {
   "model.rate_limited": msg`It was too busy and asked to wait.`,
 };
 
-/** Under this width of the card, the providers' tiles stand in one column. */
-const tilesNarrow = "@container (width < 26rem)";
-/** From this width of the card, the providers' tiles stand in one row. */
-const tilesWide = "@container (width >= 48rem)";
-
 const styles = stylex.create({
   // A flag, then the place it stands for.
   place: {
@@ -178,24 +174,6 @@ const styles = stylex.create({
     listStyle: "none",
   },
   fallback: { display: "flex", alignItems: "center", gap: grasp.space1 },
-  stack: { display: "grid", gap: grasp.space4, minWidth: 0 },
-  // The tiles measure the card, not the window.
-  tilesFrame: { containerType: "inline-size", minWidth: 0 },
-  // Equal tiles: one row where it holds them all, two by two under it,
-  // one column on a phone; with the four named providers core offers,
-  // never one left alone on a row.
-  tiles: {
-    display: "grid",
-    gap: grasp.space2,
-    gridTemplateColumns: {
-      default: "repeat(2, minmax(0, 1fr))",
-      [tilesNarrow]: "minmax(0, 1fr)",
-      [tilesWide]: "none",
-    },
-    gridAutoFlow: { default: "row", [tilesWide]: "column" },
-    gridAutoColumns: { default: "auto", [tilesWide]: "minmax(0, 1fr)" },
-  },
-  start: { justifySelf: "start" },
 });
 
 type Change = (session: Session) => Promise<unknown>;
@@ -296,16 +274,13 @@ const KeyInput = ({
   provider,
   value,
   onValueChange,
-  autoFocus = false,
 }: {
   provider: OrganizationProviderId;
   value: string;
   onValueChange: (value: string) => void;
-  autoFocus?: boolean;
 }) => (
   <Input
     autoComplete="off"
-    autoFocus={autoFocus}
     onValueChange={onValueChange}
     placeholder={keyStarts[provider]}
     required
@@ -318,6 +293,15 @@ const KeyInput = ({
 
 /** Why a change failed, in the person's words. */
 const reasonOf = (error: unknown): string => failureText(error);
+
+/** `work`, refused with why in the person's words: core's refusal, or the provider's. */
+const withReason = async (work: Promise<void>): Promise<void> => {
+  try {
+    await work;
+  } catch (error) {
+    throw new Error(reasonOf(error), { cause: error });
+  }
+};
 
 /** Why a test failed, by core's code: this page's short words, else the chat's own. */
 const testFailureText = (code: string, i18n: I18n): string => {
@@ -580,22 +564,19 @@ const WhereItRuns = ({ provider }: { provider: OrganizationProviderId }) => {
   );
 };
 
-/** A custom endpoint's address; `autoFocus` where it is the first field. */
+/** A custom endpoint's address. */
 const AddressField = ({
   value,
   onValueChange,
-  autoFocus = false,
 }: {
   value: string;
   onValueChange: (value: string) => void;
-  autoFocus?: boolean;
 }) => {
   const { t } = useLingui();
   return (
     <Field>
       <FieldLabel>{t`Address`}</FieldLabel>
       <Input
-        autoFocus={autoFocus}
         inputMode="url"
         onValueChange={onValueChange}
         placeholder="https://models.example.com/v1"
@@ -609,31 +590,21 @@ const AddressField = ({
   );
 };
 
-/**
- * A new provider's key, with what becomes of it; `refused`, why the
- * provider refused it, under the field until the key is changed.
- */
+/** A new provider's key, with what becomes of it. */
 const KeyField = ({
   provider,
   value,
   onValueChange,
-  refused,
-  autoFocus = false,
 }: {
   provider: OrganizationProviderId;
   value: string;
   onValueChange: (value: string) => void;
-  refused?: string;
-  autoFocus?: boolean;
 }) => {
   const { t } = useLingui();
   return (
-    // Left out, not false, while nothing is refused: false would hide the
-    // browser's own check (a key not pasted).
-    <Field {...(refused === undefined ? {} : { invalid: true })}>
+    <Field>
       <FieldLabel>{t`Key`}</FieldLabel>
       <KeyInput
-        autoFocus={autoFocus}
         onValueChange={onValueChange}
         provider={provider}
         value={value}
@@ -642,7 +613,6 @@ const KeyField = ({
         {t`Only its last four characters are shown again.`}
       </FieldDescription>
       <FieldError match="valueMissing">{t`Paste the key.`}</FieldError>
-      {refused === undefined ? null : <FieldError match>{refused}</FieldError>}
     </Field>
   );
 };
@@ -1212,120 +1182,14 @@ const addProvider = async (
     : session.aiProviders.add({ provider, key }));
 };
 
-/** A provider's mark at a tile's size: its brand's tile, or a plug for a custom endpoint. */
-const TileMark = ({ provider }: { provider: OrganizationProviderId }) => {
-  const brand = marks[provider];
-  return brand === undefined ? (
-    <ItemMedia icon={Cable} />
-  ) : (
-    <ItemMedia>
-      <BrandIcon brand={brand} decorative size="md" />
-    </ItemMedia>
-  );
-};
-
 /**
- * The provider chosen, its key and Connect, in the card: Connecting while
- * the key is added and tested, then the connected row once the page reads
- * again, or why the provider refused it under the key.
+ * Connecting the first provider: the library's Connect a service block, one
+ * card of the named providers as tiles, an OpenAI-compatible endpoint on
+ * one quiet line under them, and the chosen one's key. `connect` adds and
+ * tests it, and throws with the provider's reason, which the block says
+ * under the key.
  */
-const ConnectForm = ({
-  provider,
-  label,
-  connect,
-  onChange,
-}: {
-  provider: OrganizationProviderId;
-  label: string;
-  connect: Connect;
-  /** Back to the choice of provider. */
-  onChange: () => void;
-}) => {
-  const { t } = useLingui();
-  const [key, setKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  // Why the last try failed, until the key or the address changes.
-  const [refused, setRefused] = useState<string>();
-  const connecting = useAction(
-    async () => {
-      await connect(provider, key, baseUrl);
-    },
-    {
-      working: t`Connecting`,
-      done: t`Connected`,
-      failed: t`Not connected`,
-      onError: (error) => {
-        setRefused(reasonOf(error));
-      },
-    }
-  );
-  const custom = provider === "openai-compatible";
-  return (
-    <Form
-      aria-label={t`Connect ${label}`}
-      onSubmit={(event) => {
-        // Sent only once every field is right; sent here, not by the browser.
-        event.preventDefault();
-        setRefused(undefined);
-        void connecting.run();
-      }}
-    >
-      <Item size="sm" variant="outline">
-        <TileMark provider={provider} />
-        <ItemContent>
-          <ItemTitle>{label}</ItemTitle>
-          <ItemDescription>
-            <WhereItRuns provider={provider} />
-          </ItemDescription>
-        </ItemContent>
-        <ItemActions>
-          <Button
-            disabled={connecting.state === "working"}
-            onClick={onChange}
-            size="sm"
-            variant="ghost"
-          >
-            {t`Change`}
-          </Button>
-        </ItemActions>
-      </Item>
-      {/* The first field takes the focus the pressed tile had. */}
-      {custom ? (
-        <AddressField
-          autoFocus
-          onValueChange={(value) => {
-            setBaseUrl(value);
-            setRefused(undefined);
-          }}
-          value={baseUrl}
-        />
-      ) : null}
-      <KeyField
-        autoFocus={!custom}
-        onValueChange={(value) => {
-          setKey(value);
-          setRefused(undefined);
-        }}
-        provider={provider}
-        value={key}
-        {...(refused === undefined ? {} : { refused })}
-      />
-      <FormActions>
-        <Button type="submit" variant="ink" {...connecting.status}>
-          {t`Connect`}
-        </Button>
-      </FormActions>
-    </Form>
-  );
-};
-
-/**
- * Connecting the first provider, in the Providers card: one line of what it
- * is for, the named providers as tiles, and under them one quiet line for
- * an OpenAI-compatible endpoint, which is no brand to choose among them. A
- * choice opens its key in the same card.
- */
-const ConnectProvider = ({
+const FirstProvider = ({
   offered,
   connect,
 }: {
@@ -1333,80 +1197,51 @@ const ConnectProvider = ({
   connect: Connect;
 }) => {
   const { t } = useLingui();
-  const [chosen, setChosen] = useState<OrganizationProviderId>();
-  const provider = offered.find((each) => each.provider === chosen);
-  if (provider !== undefined) {
-    return (
-      <ConnectForm
-        connect={connect}
-        // A new choice is a new form: no key typed for another stays.
-        key={provider.provider}
-        label={providerName(provider.provider, provider.label)}
-        onChange={() => {
-          setChosen(undefined);
-        }}
-        provider={provider.provider}
-      />
-    );
-  }
-  const named = offered.filter(
-    ({ provider: each }) => each !== "openai-compatible"
-  );
+  const services = offered
+    .filter(({ provider }) => provider !== "openai-compatible")
+    .map(({ provider, label }) => {
+      const brand = marks[provider];
+      const placeholder = keyStarts[provider];
+      const { region } = aiProviders[provider];
+      return {
+        id: provider,
+        name: providerName(provider, label),
+        ...(brand === undefined ? {} : { brand }),
+        ...(placeholder === undefined ? {} : { placeholder }),
+        ...(region === "custom"
+          ? {}
+          : {
+              region:
+                region === "eu"
+                  ? { flag: EU, label: t`European Union` }
+                  : { flag: US, label: t`United States` },
+            }),
+      };
+    });
   const endpoint = offered.some(
-    ({ provider: each }) => each === "openai-compatible"
+    ({ provider }) => provider === "openai-compatible"
   );
   return (
-    <div {...stylex.props(styles.stack)}>
-      <Heading level={3} size="sm">
-        {t`Choose the AI that Grasp's chat, agents and workflows run on.`}
-      </Heading>
-      <div {...stylex.props(styles.tilesFrame)}>
-        <div {...stylex.props(styles.tiles)}>
-          {named.map((each) => {
-            const label = providerName(each.provider, each.label);
-            return (
-              <Item
-                key={each.provider}
-                render={
-                  <button
-                    aria-label={label}
-                    onClick={() => {
-                      setChosen(each.provider);
-                    }}
-                    type="button"
-                  />
-                }
-                size="sm"
-                variant="outline"
-              >
-                <TileMark provider={each.provider} />
-                <ItemContent>
-                  <ItemTitle>{label}</ItemTitle>
-                  <ItemDescription>
-                    <WhereItRuns provider={each.provider} />
-                  </ItemDescription>
-                </ItemContent>
-              </Item>
-            );
-          })}
-        </div>
-      </div>
-      {endpoint ? (
-        // The quietest button: an action here, not a place to go, so not a
-        // link; under the tiles, never one of them.
-        <Button
-          icon={Cable}
-          layout={styles.start}
-          onClick={() => {
-            setChosen("openai-compatible");
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          {t`Use an OpenAI-compatible endpoint`}
-        </Button>
-      ) : null}
-    </div>
+    <ConnectService
+      lead={t`Choose the AI that Grasp's chat, agents and workflows run on.`}
+      onConnect={async ({ service, key, address }) => {
+        // The block names an endpoint of your own by its own id, none of the providers'.
+        const provider =
+          offered.find((each) => each.provider === service)?.provider ??
+          "openai-compatible";
+        await withReason(connect(provider, key, address ?? ""));
+      }}
+      services={services}
+      title={t`Providers`}
+      {...(endpoint
+        ? {
+            custom: {
+              label: t`Use an OpenAI-compatible endpoint`,
+              name: providerName("openai-compatible", ""),
+            },
+          }
+        : {})}
+    />
   );
 };
 
@@ -1496,24 +1331,22 @@ export const AiProvidersSettings = ({
           });
         }}
       />
-      {unanswered ? (
+      {unanswered && failure !== undefined ? (
+        <Alert tone="danger">{failure}</Alert>
+      ) : null}
+      {unanswered && editable ? (
         // Nothing answers yet: the card is where the first provider is
         // connected, for the organization's own admins.
+        <FirstProvider connect={connect} offered={addable} />
+      ) : null}
+      {unanswered && !editable ? (
         <SectionCard variant="grouped" density="compact" title={t`Providers`}>
-          <div {...stylex.props(styles.stack)}>
-            {failure === undefined ? null : (
-              <Alert tone="danger">{failure}</Alert>
-            )}
-            {editable ? (
-              <ConnectProvider connect={connect} offered={addable} />
-            ) : (
-              <Text size="sm" tone="muted">
-                {t`The organization's own admins connect its AI provider here.`}
-              </Text>
-            )}
-          </div>
+          <Text size="sm" tone="muted">
+            {t`The organization's own admins connect its AI provider here.`}
+          </Text>
         </SectionCard>
-      ) : (
+      ) : null}
+      {unanswered ? null : (
         <SectionCard
           variant="grouped"
           {...(editable && addable.length > 0

@@ -133,7 +133,7 @@ export const useRecentChats = ({
       // In the regular weight, as "All chats" under them is.
       quiet: true,
       render: <Link {...chatLink(chat.id)} />,
-      current: matchRoute(chatLink(chat.id)) !== false,
+      current: matchRoute({ ...chatLink(chat.id), pending: true }) !== false,
       // Its agent is still answering: the Working mark at the row's end.
       working: chat.running,
       workingLabel: t`Answering`,

@@ -11,7 +11,13 @@ import {
   projectSearchOf,
   readItemProject,
 } from "../frame/item-shell.tsx";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import {
+  APP_GENERAL,
+  Fill,
+  LoadingBar,
+  SettingsPending,
+} from "../frame/page-skeletons-b.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { AppWindow as AppWindowMark } from "../grasp/icons/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
@@ -63,6 +69,25 @@ const AppRoute = () => {
       shown={shownOf(search)}
       view={search.view ?? "preview"}
     />
+  );
+};
+
+/**
+ * The App before it is read: the bar, its name still to come, and the
+ * view the address names. Its settings wait as cards; the preview, the
+ * code and the data draw themselves in, as no skeleton has their shape.
+ */
+const AppPending = () => {
+  const { view } = Route.useSearch();
+  return (
+    <>
+      <LoadingBar />
+      <Fill>
+        {view === "settings" ? (
+          <SettingsPending sections={APP_GENERAL} />
+        ) : null}
+      </Fill>
+    </>
   );
 };
 
@@ -123,7 +148,7 @@ export const Route = createFileRoute("/_shell/apps/$app")({
   // Grasp's chat is no part of the live App; for its builders, the App's
   // chat docks beside the workspace, about it (chat/chat-subject.ts).
   staticData: { chat: chatPresence.hidden, page: "fill" },
-  pendingComponent: PageLoading,
+  pendingComponent: AppPending,
   component: AppRoute,
   validateSearch,
   loaderDeps: ({ search: { project } }) => ({ project }),

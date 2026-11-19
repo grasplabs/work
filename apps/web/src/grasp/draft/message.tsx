@@ -49,6 +49,12 @@ export interface MessageDraftProps {
    * @default false
    */
   readOnly?: boolean;
+  /**
+   * Holds the main action back until the host clears it, with the reason ("Read the whole email
+   * first"), as ApprovalRequest's `approveHeld`: out of use but still reached by Tab, the reason
+   * beside it and said with it. Discard stays usable.
+   */
+  mainHeld?: string;
   /** Send message: the message as it stands. Return a Promise and the button works until it settles. */
   onSend: (draft: MessageDraftValue) => unknown;
   /** Discard, at the foot's start. */
@@ -120,6 +126,7 @@ export const MessageDraft = ({
   draft,
   onDraftChange,
   readOnly,
+  mainHeld,
   onSend,
   onDismiss,
   mark,
@@ -139,6 +146,7 @@ export const MessageDraft = ({
       icon={Conversation}
       mark={mark}
       title={<span {...stylex.props(styles.kind)}>{words.kind}</span>}
+      mainHeld={mainHeld}
       main={{ label: words.send, onPress: () => onSend(draft) }}
       onDismiss={onDismiss}
       status={status}

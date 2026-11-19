@@ -3,8 +3,9 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { isMine, sharedWith } from "../apps/app-reach.ts";
 import { AppsOverview } from "../apps/apps-overview.tsx";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { PageSkeletonCards } from "../grasp/blocks/page-skeleton-cards/page-skeleton-cards.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { noneIfRefused } from "../workflows/reads.ts";
 
@@ -32,8 +33,22 @@ const AppsPage = () => {
   );
 };
 
+/**
+ * The Apps before they are read: the bar as it will be, then the header
+ * and two rows of waiting cards in the page's dense grid.
+ */
+const AppsPending = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <SiteHeader crumbs={[{ label: t`Apps` }]} />
+      <PageSkeletonCards cards={8} density="dense" descriptionLines={0} />
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/apps/")({
-  pendingComponent: PageLoading,
+  pendingComponent: AppsPending,
   component: AppsPage,
   loader: async ({ context: { core, identity } }) =>
     await loadFromCore(core, async (session) => {

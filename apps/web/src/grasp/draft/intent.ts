@@ -12,6 +12,10 @@ export const intent = {
   ],
   notWhen: [
     {
+      when: "A spreadsheet or a table of data to save in a sheets service.",
+      instead: ["draft-sheet"],
+    },
+    {
       when: "The agent asks for a yes before it acts, with nothing to change.",
       instead: ["approval-request"],
     },
@@ -27,6 +31,11 @@ export const intent = {
       proposed: true,
     },
     {
+      name: "EventChangeDraft",
+      when: "A change to an event already in a calendar: what changes against what it was.",
+      proposed: true,
+    },
+    {
       name: "EmailDraft",
       when: "An email to one or several people.",
       proposed: true,
@@ -39,11 +48,6 @@ export const intent = {
     {
       name: "ReplyDraft",
       when: "A reply inside an email thread, the message it answers folded under it.",
-      proposed: true,
-    },
-    {
-      name: "SheetDraft",
-      when: "A spreadsheet or a table of data to save in a sheets service.",
       proposed: true,
     },
     {

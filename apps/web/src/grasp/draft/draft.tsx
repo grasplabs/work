@@ -13,6 +13,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { useId } from "react";
 import type { ReactNode } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "../avatar";
@@ -56,6 +57,13 @@ export interface DraftProps {
   children: ReactNode;
   /** The one main action, at the foot's end (Create event, Send). */
   main: DraftMain;
+  /**
+   * Holds the main action back until the host clears it, with the reason ("Read the whole email
+   * first"), as ApprovalRequest's `approveHeld`: the main action is drawn out of use but stays in
+   * the Tab order, the reason stands beside it and is its description (said with it), and Discard
+   * stays usable. Shown while the draft is ready or failed.
+   */
+  mainHeld?: string;
   /** Quiet actions after Discard, at the foot's start (Open in calendar). */
   secondary?: ReactNode;
   /** Discard, the quiet way out at the foot's start (a cross at a phone's width, the same name). Left out, none. */
@@ -103,6 +111,25 @@ export const changeOf = <T,>(
   readOnly: boolean | undefined,
   onDraftChange: ((draft: T) => void) | undefined
 ) => (readOnly === true ? undefined : onDraftChange);
+
+/**
+ * Each person's React key in a list: their address, else their name, and for the same address (or
+ * name) again, its place among those that share it ("jerry@example.com", "jerry@example.com#2"). A
+ * person keeps their key when someone before them with another address is taken off.
+ */
+export const draftKeys = (people: readonly DraftPerson[]) => {
+  const seen = new Map<string, number>();
+  return people.map((person) => {
+    const base = person.email ?? person.name;
+    const count = (seen.get(base) ?? 0) + 1;
+    seen.set(base, count);
+    return count === 1 ? base : `${base}#${count}`;
+  });
+};
+
+/** The people without the one at `index`: the one pressed, even when the same person is listed twice. */
+export const withoutAt = <T,>(people: readonly T[], index: number) =>
+  people.filter((_, at) => at !== index);
 
 /** Whether an optional value holds anything: a locked draft drops the rows that do not. */
 export const filled = (value: string | undefined) =>
@@ -192,6 +219,20 @@ const styles = stylex.create({
   },
   // The main action never gives way: its words stay on one line; the quiet ones beside it give way first.
   main: { flexShrink: 0, marginInlineStart: "auto" },
+  // Held: the reason takes the room before the main action, its words against it; it wraps first.
+  held: {
+    flexGrow: 1,
+    minWidth: 0,
+    margin: 0,
+    marginInlineStart: "auto",
+    paddingInlineStart: grasp.space2,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    color: grasp.muted,
+    textAlign: "end",
+    textWrap: "pretty",
+  },
+  mainHeld: { marginInlineStart: 0 },
   mainButton: { minWidth: "fit-content" },
   // Discard in words where there is room; in a narrow draft (a phone) a small cross, its name kept.
   wide: { display: { default: "inline-flex", [NARROW]: "none" } },
@@ -278,11 +319,21 @@ const styles = stylex.create({
     paddingBlock: `calc((${grasp.controlXs} - ${grasp.textXsLine}) / 2)`,
     borderRadius: `calc(${grasp.controlXs} / 2)`,
   },
+  personStruck: { textDecorationLine: "line-through", color: grasp.muted },
   personNameWhole: {
     overflow: "visible",
     textOverflow: "clip",
     whiteSpace: "normal",
     overflowWrap: "anywhere",
+  },
+  // Whole, the address it goes to, quiet after the name: it moves to the next line whole, and only
+  // an address longer than a line breaks (after its "@" first).
+  address: { display: "inline-block", maxWidth: "100%", color: grasp.muted },
+  badge: {
+    display: "inline-flex",
+    alignItems: "center",
+    flexShrink: 0,
+    height: grasp.textXsLine,
   },
   face: {
     display: "inline-flex",
@@ -388,18 +439,55 @@ export const DraftRow = ({
   </div>
 );
 
+/** An address after a name, quiet; an address longer than a line breaks after its "@" first. */
+const DraftAddress = ({
+  email,
+  struck,
+}: {
+  email: string;
+  struck: boolean;
+}) => {
+  const at = email.indexOf("@");
+  return (
+    <>
+      {" · "}
+      <span
+        data-slot="draft-person-address"
+        {...stylex.props(styles.address, struck && styles.personStruck)}
+      >
+        {at === -1 ? (
+          email
+        ) : (
+          <>
+            {email.slice(0, at + 1)}
+            <wbr />
+            {email.slice(at + 1)}
+          </>
+        )}
+      </span>
+    </>
+  );
+};
+
 /**
  * A person as a chip: their face and name, and a remove when the draft can still lose them. `whole`
- * (a locked draft) wraps a long name rather than ending it in "…".
+ * (a locked draft) wraps a long name rather than ending it in "…", and shows the address it goes
+ * to, quiet after the name; otherwise the address is on hover. `struck` (a guest a change takes
+ * off) strikes the name and the address, never the face. `badge` stands at the chip's end, before
+ * the remove (a guest a change adds: "New").
  */
 export const DraftPersonChip = ({
   person,
   onRemove,
   whole = false,
+  struck = false,
+  badge,
 }: {
   person: DraftPerson;
   onRemove?: () => void;
   whole?: boolean;
+  struck?: boolean;
+  badge?: ReactNode;
 }) => {
   const words = useDraftWords("frame");
   return (
@@ -416,10 +504,20 @@ export const DraftPersonChip = ({
         <DraftFace person={person} />
       </span>
       <span
-        {...stylex.props(styles.personName, whole && styles.personNameWhole)}
+        {...stylex.props(
+          styles.personName,
+          whole && styles.personNameWhole,
+          struck && styles.personStruck
+        )}
       >
         {person.name}
+        {whole && person.email !== undefined ? (
+          <DraftAddress email={person.email} struck={struck} />
+        ) : null}
       </span>
+      {badge === undefined ? null : (
+        <span {...stylex.props(styles.badge)}>{badge}</span>
+      )}
       {onRemove === undefined ? null : (
         <button
           type="button"
@@ -541,6 +639,7 @@ export const Draft = ({
   title,
   children,
   main,
+  mainHeld,
   secondary,
   onDismiss,
   status = "ready",
@@ -551,6 +650,7 @@ export const Draft = ({
   readOnly = false,
 }: DraftProps) => {
   const words = useDraftWords("frame");
+  const heldId = useId();
   if (status === "dismissed") {
     // Folded to one quiet line, with Restore while the host can bring it back.
     return (
@@ -570,6 +670,8 @@ export const Draft = ({
     );
   }
   const busy = status === "drafting" || status === "sending";
+  // Held only where the main action could be pressed: ready, or failed and to be sent again.
+  const held = draftEditable(status) ? mainHeld : undefined;
   return (
     <section
       aria-label={label}
@@ -632,12 +734,30 @@ export const Draft = ({
             </>
           )}
           {secondary}
-          <span {...stylex.props(styles.main)}>
+          {held === undefined ? null : (
+            <p
+              id={heldId}
+              data-slot="draft-held"
+              {...stylex.props(styles.held)}
+            >
+              {held}
+            </p>
+          )}
+          <span
+            {...stylex.props(
+              styles.main,
+              held !== undefined && styles.mainHeld
+            )}
+          >
             <Button
               variant="ink"
               size="sm"
               layout={styles.mainButton}
-              disabled={status === "drafting"}
+              disabled={status === "drafting" || held !== undefined}
+              // Held: out of use but still reached by Tab, so its reason can be heard from it.
+              focusableWhenDisabled={held !== undefined}
+              aria-describedby={held === undefined ? undefined : heldId}
+              data-held={held === undefined ? undefined : ""}
               status={lifeOf(status)}
               workingLabel={words.working}
               // The sent line takes the whole foot's place, so the button never shows a done word of

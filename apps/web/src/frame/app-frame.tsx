@@ -159,7 +159,9 @@ export const AppFrame = ({
   // A chat's own page has the whole card, edge to edge, its box at the foot
   // with no room under it (App shell's page for an open chat), and no dock
   // over its foot: the chat is the page.
-  const chatPage = useMatchRoute()({ to: "/chats/$chatId" }) !== false;
+  // The address being loaded, so a chat's pending state already has its frame.
+  const chatPage =
+    useMatchRoute()({ to: "/chats/$chatId", pending: true }) !== false;
   const whole = usePageWhole();
   // A page's own side panel, which the shell seats (frame/page-panel.tsx).
   const pagePanel = usePagePanelSlot();

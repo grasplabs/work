@@ -13,7 +13,9 @@ import {
   changeOf,
   Draft,
   draftEditable,
+  draftKeys,
   DraftInput,
+  withoutAt,
   DraftPersonChip,
   DraftRow,
   DraftText,
@@ -22,11 +24,17 @@ import {
   useDraftWords,
 } from "./draft";
 import type { DraftPerson, DraftStatus } from "./draft";
-import { DraftDue } from "./when";
+import { DraftDue, isDay } from "./when";
+import type { DraftWords } from "./words";
 
-/** The task as drafted. `due` is an ISO time with its offset; left out, it has no date. */
+/** The task as drafted. */
 export interface TaskDraftValue {
   title: string;
+  /**
+   * When it is due: a moment, as an ISO time with its offset ("2026-11-20T17:00:00+01:00"), or a day
+   * with no time, as its date alone ("2026-11-20"), shown and read as that day in every zone. Left
+   * out, it has no date.
+   */
   due?: string;
   people: readonly DraftPerson[];
   note?: string;
@@ -53,6 +61,12 @@ export interface TaskDraftProps {
    * @default false
    */
   readOnly?: boolean;
+  /**
+   * Holds the main action back until the host clears it, with the reason ("Read the whole email
+   * first"), as ApprovalRequest's `approveHeld`: out of use but still reached by Tab, the reason
+   * beside it and said with it. Discard stays usable.
+   */
+  mainHeld?: string;
   /** Add task: the task as it stands. Return a Promise and the button works until it settles. */
   onAdd: (draft: TaskDraftValue) => unknown;
   /** Discard, at the foot's start. */
@@ -63,11 +77,24 @@ export interface TaskDraftProps {
   timeZone?: string;
 }
 
+/** The due row's words: a day alone, a day and its time, or the way to add one. */
+const dueWords = (
+  words: DraftWords["task"],
+  due: string | undefined,
+  timeZone: string | undefined
+) => {
+  if (due === undefined) {
+    return words.addDue;
+  }
+  return isDay(due) ? words.on(due) : words.at(due, timeZone);
+};
+
 /** A task drafted in an answer, ready to change and add. */
 export const TaskDraft = ({
   draft,
   onDraftChange,
   readOnly,
+  mainHeld,
   onAdd,
   onDismiss,
   mark,
@@ -84,8 +111,8 @@ export const TaskDraft = ({
   const field = fieldOf(draft, change, status);
   const people = field("people");
   const due = field("due");
-  const shown =
-    draft.due === undefined ? words.addDue : words.at(draft.due, timeZone);
+  const keys = draftKeys(draft.people);
+  const shown = dueWords(words, draft.due, timeZone);
   return (
     <Draft
       aria-label={`${words.kind}: ${draft.title}`}
@@ -101,6 +128,7 @@ export const TaskDraft = ({
           onValueChange={field("title")}
         />
       }
+      mainHeld={mainHeld}
       main={{ label: words.add, onPress: () => onAdd(draft) }}
       onDismiss={onDismiss}
       status={status}
@@ -118,22 +146,22 @@ export const TaskDraft = ({
           {due !== undefined && draftEditable(status) ? (
             <DraftDue at={draft.due} words={shown} onChange={due} />
           ) : (
-            <span>{shown}</span>
+            <time dateTime={draft.due}>{shown}</time>
           )}
         </DraftRow>
       )}
       {locked && draft.people.length === 0 ? null : (
         <DraftRow icon={People} label={words.people}>
-          {draft.people.map((person) => (
+          {draft.people.map((person, index) => (
             <DraftPersonChip
               whole={locked}
-              key={person.email ?? person.name}
+              key={keys[index]}
               person={person}
               onRemove={
                 people === undefined || person.you === true
                   ? undefined
                   : () => {
-                      people(draft.people.filter((other) => other !== person));
+                      people(withoutAt(draft.people, index));
                     }
               }
             />

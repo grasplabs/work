@@ -38,6 +38,10 @@ const styles = stylex.create({
   },
 });
 
+/** Whether a due is a day with no time ("2026-11-20"), not a moment. */
+export const isDay = (due: string | undefined): due is string =>
+  due !== undefined && /^\d{4}-\d{2}-\d{2}$/u.test(due);
+
 /**
  * The offset an ISO time was written with ("+01:00", or UTC's letter), kept as it was written; a time
  * written with none has none, and is read in the browser's own time.
@@ -166,7 +170,10 @@ export const DraftWhen = ({
   );
 };
 
-/** A task's due moment, changed in place: the row's words open the day and one time. */
+/**
+ * A task's due, changed in place: the row's words open the day and one time; a day with no time
+ * ("2026-11-20") opens the day alone, and stays a day.
+ */
 export const DraftDue = ({
   at: due,
   words: shown,
@@ -177,6 +184,26 @@ export const DraftDue = ({
   onChange: (at: string) => void;
 }) => {
   const words = useDraftWords("task");
+  if (isDay(due)) {
+    return (
+      <Popover>
+        <PopoverTrigger variant="ghost" size="xs" layout={styles.trigger}>
+          <time dateTime={due}>{shown}</time>
+        </PopoverTrigger>
+        <PopoverContent align="start">
+          <PopoverTitle>{words.due}</PopoverTitle>
+          <Calendar
+            value={due}
+            onValueChange={(value) => {
+              if (typeof value === "string") {
+                onChange(value);
+              }
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+    );
+  }
   // With no due date yet, the picker starts on today at 09:00, in the browser's own offset.
   const start = due ?? localNine();
   const offset = offsetOf(start);

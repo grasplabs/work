@@ -16,6 +16,7 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatDate } from "../format.ts";
+import { SettingsCardSkeleton } from "../frame/page-skeletons-a.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -73,11 +74,7 @@ import {
   InviteButton,
 } from "../settings/invitations.tsx";
 import { roleItems, roleLines } from "../settings/roles.ts";
-import {
-  SectionNotLoaded,
-  SettingsError,
-  SettingsLoading,
-} from "../settings/section.tsx";
+import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 import { TeamsPanel } from "../settings/teams.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -423,6 +420,22 @@ const roleOf = (row: PersonRow): string => {
   return role === undefined ? "" : roleLabel(role);
 };
 
+/** The people's columns' words, in the reader's language. */
+const usePeopleWords = (): PeopleWords => {
+  const { t } = useLingui();
+  return {
+    name: t`Name`,
+    since: t`Since`,
+    role: t`Role`,
+    invited: t`Invited`,
+    yourRole: t`Your role`,
+    roleOf: (name) => t`Role of ${name}`,
+    invitedShort: (date) => t`Invited ${date}`,
+    invitedOn: (date, by) => t`${date} by ${by}`,
+    removedOn: (date) => t`Removed ${date}`,
+  };
+};
+
 /** The people's columns: who, since when, and their role with what can be done. */
 const peopleColumns = ({
   words,
@@ -583,6 +596,7 @@ const PeopleTable = ({
   const [search, setSearch] = useState("");
   const gone = useRemovedPeople(removed);
   const narrow = useNarrow();
+  const words = usePeopleWords();
   const rows: PersonRow[] = [
     ...members.map((member) => ({
       key: member.userId,
@@ -665,17 +679,7 @@ const PeopleTable = ({
       <DataTable
         key={narrow ? "narrow" : "wide"}
         columns={peopleColumns({
-          words: {
-            name: t`Name`,
-            since: t`Since`,
-            role: t`Role`,
-            invited: t`Invited`,
-            yourRole: t`Your role`,
-            roleOf: (name) => t`Role of ${name}`,
-            invitedShort: (date) => t`Invited ${date}`,
-            invitedOn: (date, by) => t`${date} by ${by}`,
-            removedOn: (date) => t`Removed ${date}`,
-          },
+          words,
           me,
           narrow,
           onNotice: setNotice,
@@ -738,8 +742,42 @@ const MembersPage = () => {
   );
 };
 
+const noPeople: readonly PersonRow[] = [];
+
+const ignoreNotice = (): void => undefined;
+
+/**
+ * The people's card while they are read: the library's page-skeleton-table
+ * as Settings stands it (frame/page-skeletons-a.tsx), the table waiting in
+ * its own `loading` with the columns, label and page size it will have, so
+ * its head and rows stand where they will.
+ */
+const MembersPending = () => {
+  const { t } = useLingui();
+  const words = usePeopleWords();
+  const narrow = useNarrow();
+  return (
+    <SettingsCardSkeleton>
+      <DataTable
+        columns={peopleColumns({
+          words,
+          me: "",
+          narrow,
+          onNotice: ignoreNotice,
+        })}
+        label={t`Members`}
+        loading
+        pageSize={pageSize}
+        rowKey={(row) => row.key}
+        rows={noPeople}
+        unit={{ one: t`person`, other: t`people` }}
+      />
+    </SettingsCardSkeleton>
+  );
+};
+
 export const Route = createFileRoute("/_shell/settings/members")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: MembersPending,
   errorComponent: SettingsError,
   component: MembersPage,
   loader: async ({ context: { core } }) =>

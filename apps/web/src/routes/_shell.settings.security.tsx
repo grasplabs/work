@@ -8,6 +8,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { deadline, unlessAborted } from "../core.ts";
 import { formatDateTime } from "../format.ts";
+import { SettingsSkeleton } from "../frame/page-skeletons-a.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,7 +45,6 @@ import { ReadOnlyRow } from "../settings/read-only-row.tsx";
 import {
   SectionNotLoaded,
   SettingsError,
-  SettingsLoading,
   TitleLine,
 } from "../settings/section.tsx";
 import { useCore } from "../use-core.ts";
@@ -320,8 +320,11 @@ const chatAccounts = async (
     };
   });
 
+/** How the person signs in, then their devices, as many as fill the first screen. */
+const SecurityPending = () => <SettingsSkeleton sections={[1, 12]} />;
+
 export const Route = createFileRoute("/_shell/settings/security")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: SecurityPending,
   errorComponent: SettingsError,
   component: Security,
   loader: async ({ context: { core, identity } }) => {

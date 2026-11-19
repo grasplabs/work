@@ -2,6 +2,7 @@ import { noBilling } from "@grasp-os/shared/org-settings";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { SettingsSkeleton } from "../frame/page-skeletons-a.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
@@ -14,11 +15,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import { BillingCard } from "../settings/billing-card.tsx";
 import { useQueuedSave } from "../settings/queued-save.ts";
 import { ReadOnlyRow } from "../settings/read-only-row.tsx";
-import {
-  SectionNotLoaded,
-  SettingsError,
-  SettingsLoading,
-} from "../settings/section.tsx";
+import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 
 // Settings → Billing, for admins: the billing details as a card at its
 // head (settings/billing-card.tsx), their form in a dialog from its one
@@ -115,8 +112,13 @@ const BillingPage = () => {
   );
 };
 
+/** The billing details' card, the plan, then the billing emails. */
+const BillingPending = () => (
+  <SettingsSkeleton sections={[{ rows: 2, titled: false }, 2, 2]} />
+);
+
 export const Route = createFileRoute("/_shell/settings/billing")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: BillingPending,
   errorComponent: SettingsError,
   component: BillingPage,
   loader: async ({ context: { core } }) =>

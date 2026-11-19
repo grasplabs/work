@@ -6,10 +6,12 @@ import { useEffect, useState } from "react";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { PageSkeletonTable } from "../grasp/blocks/page-skeleton-table/page-skeleton-table.tsx";
 import { Button } from "../grasp/button/index.ts";
+import { grouping, view } from "../grasp/data-table/index.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import { readOverview, readTools } from "../workflows/overview.ts";
-import type { ToolsByWorkflow } from "../workflows/overview.ts";
+import type { OverviewRow, ToolsByWorkflow } from "../workflows/overview.ts";
 import { WorkflowsByPhase } from "../workflows/workflows-table.tsx";
 
 // Everything that runs on its own, in one place: every workflow the
@@ -75,7 +77,56 @@ const Workflows = () => {
   );
 };
 
+/** Nothing to show in a cell while the rows are read. */
+const none = (): string => "";
+
+/**
+ * The workflows before they are read: the bar, the header, and the
+ * table waiting in its own form, its toolbar and head as the page's
+ * (workflows/workflows-table.tsx).
+ */
+const WorkflowsPending = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <SiteHeader crumbs={[{ label: t`Workflows` }]} />
+      <PageSkeletonTable<OverviewRow>
+        descriptionLines={0}
+        table={{
+          label: t`Workflows`,
+          pieces: [grouping, view],
+          columns: [
+            { key: "workflow", header: t`Workflow`, value: none },
+            {
+              key: "owner",
+              header: t({
+                message: "Owner",
+                context: "column: who owns a workflow",
+              }),
+              value: none,
+            },
+            {
+              key: "tools",
+              header: t`Tools`,
+              value: none,
+              hideBelow: "phone",
+            },
+            {
+              key: "runs",
+              header: t`Runs a week`,
+              value: none,
+              align: "end",
+              hideBelow: "phone",
+            },
+          ],
+        }}
+      />
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/workflows/")({
+  pendingComponent: WorkflowsPending,
   loader: async ({ context: { core } }) => {
     // Not awaited: the tools stand beside a workflow, and arrive after.
     const tools = readTools(core);
