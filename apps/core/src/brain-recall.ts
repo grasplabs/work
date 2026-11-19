@@ -48,7 +48,7 @@ import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
 import type { HeldNow, SkillsReach } from "./brain-skills.ts";
 import { uploadersOf } from "./brain-uploads.ts";
 import { permissions } from "./db/core/schema.ts";
-import { authorize, requireActivePerson } from "./permissions.ts";
+import { authorize } from "./permissions.ts";
 import { heldNothing } from "./skill-needs.ts";
 
 // The Brain's recall for code: an App's action (resource-brain.ts), a
@@ -63,8 +63,8 @@ import { heldNothing } from "./skill-needs.ts";
 //   (`permission.invalid_args`).
 // - The caller's grant: the App or run must hold the permission to read
 //   the Brain it names, active, now, as `authorize` checks every grant
-//   (the person still a member). A chat's agent needs none, only its
-//   person still a member (`requireBrainReader`). Filtering a pack afterwards would make `notFound` and
+//   (the person still a member). A chat's agent needs none: each read
+//   checks its person (`requireBrainReader`). Filtering a pack afterwards would make `notFound` and
 //   `truncated` untrue, so nothing is: whom it reads as is the scope.
 // - Whom it reads as. An App's or a workflow's recall reads what everyone
 //   in the company may read (`company`), as no person. An App's grant may
@@ -132,17 +132,18 @@ export interface RecallCaller {
 
 /**
  * Refuses `caller` when it may not read the Brain now: an App or a
- * workflow without its grant to read it, active (`authorize`), and any
- * caller whose person is no longer a member. A chat's agent needs no
- * grant: every agent reads the Brain, as far as where its turn reads
- * lets it (`reach`; Nick's decision on GRA-2203).
+ * workflow without its grant to read it, active, its person still a
+ * member (`authorize`). A chat's agent needs no grant: every agent reads
+ * the Brain, as far as where its turn reads lets it (`reach`; Nick's
+ * decision on GRA-2203). Its person is checked by each read itself, as
+ * every reader of the Brain is (brain-next.ts reads them through
+ * `currentMembership`): one suspended or removed reads nothing.
  */
 const requireBrainReader = async (
   env: Env,
   caller: Pick<RecallCaller, "authority" | "context" | "permissionId">
 ): Promise<void> => {
   if (caller.authority.subject.type === "agent") {
-    await requireActivePerson(env, caller.authority);
     return;
   }
   if (caller.permissionId === null) {

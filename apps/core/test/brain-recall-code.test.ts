@@ -40,7 +40,12 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
-import { recallFor } from "../src/brain-recall.ts";
+import {
+  entitiesCallFor,
+  recallFor,
+  skillsCallFor,
+  whoKnowsFor,
+} from "../src/brain-recall.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { uploadToBrain } from "../src/brain-uploads.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -279,6 +284,14 @@ const teamOf = async (...members: Member[]): Promise<string> => {
  * `word`, which nothing else does. An App's or a workflow's recall reads
  * the note for everyone alone; a chat's code its person's teams' notes.
  */
+/** "read" when `read` answers, else the code it was refused with. */
+const readOutcome = async (read: Promise<unknown>) =>
+  await read.then(
+    () => "read",
+    (error: unknown) =>
+      error instanceof Error && "code" in error ? error.code : "thrown"
+  );
+
 const company = async () => {
   const word = `leave${unique().replaceAll(/\W/gu, "")}`;
   const admin = await person("admin");
@@ -1151,29 +1164,42 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     expect(answered).toBe("refused");
   });
 
-  it("asks a chat's agent no grant, only that its person may still act: refused while they are suspended", async () => {
+  it("asks a chat's agent no grant, only that its person may still act: each read refused while they are suspended", async () => {
     const { word, ada } = await company();
-    /** What a recall answers a chat's agent acting for `userId`, with no grant. */
+    /** How each read a chat's code makes answers its agent acting for `userId`, with no grant. */
     const answeredFor = async (userId: string) => {
       const { agent, chat, id } = await chatOf(userId);
-      return await recallFor(
-        env,
-        {
-          authority: authoritySchema.parse({
-            subject: agent,
-            onBehalfOf: userId,
-            mode: "interactive",
-          }),
-          context: { type: "chat", workspaceId: id, chatId: chat.id },
-          permissionId: null,
-          actor: { type: "system" },
-        },
-        requestOf(word)
-      ).then(
-        (pack) => (pack.items.length > 0 ? "answered" : "empty"),
-        (error: unknown) =>
-          error instanceof Error && "code" in error ? error.code : "thrown"
-      );
+      const caller = {
+        authority: authoritySchema.parse({
+          subject: agent,
+          onBehalfOf: userId,
+          mode: "interactive",
+        }),
+        context: { type: "chat", workspaceId: id, chatId: chat.id },
+        permissionId: null,
+        actor: { type: "system" },
+      } as const;
+      return {
+        recall: await readOutcome(recallFor(env, caller, requestOf(word))),
+        whoKnows: await readOutcome(
+          whoKnowsFor(
+            env,
+            {
+              ...caller,
+              keep: async () => {
+                await Promise.resolve();
+              },
+            },
+            requestOf(word)
+          )
+        ),
+        entities: await readOutcome(
+          entitiesCallFor(env, caller, "entities.find", { name: word })
+        ),
+        skills: await readOutcome(
+          skillsCallFor(env, caller, "skills.select", { task: word })
+        ),
+      };
     };
     const suspended = await person("user");
     await env.DB.prepare(
@@ -1186,8 +1212,18 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       active: await answeredFor(ada.userId),
       suspended: await answeredFor(suspended.userId),
     }).toStrictEqual({
-      active: "answered",
-      suspended: "permission.unavailable",
+      active: {
+        recall: "read",
+        whoKnows: "read",
+        entities: "read",
+        skills: "read",
+      },
+      suspended: {
+        recall: "permission.unavailable",
+        whoKnows: "permission.unavailable",
+        entities: "permission.unavailable",
+        skills: "permission.unavailable",
+      },
     });
   });
 
