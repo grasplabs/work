@@ -1066,7 +1066,6 @@ const createAuth = (
             additionalFields: {
               suspendedAt: { type: "date", required: false, input: false },
               suspendedBy: { type: "string", required: false, input: false },
-              keptActiveAt: { type: "date", required: false, input: false },
             },
           },
         },
