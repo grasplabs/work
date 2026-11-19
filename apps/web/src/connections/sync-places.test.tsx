@@ -219,12 +219,12 @@ describe("picking a shared connection's places to sync", () => {
     document.body.replaceChildren();
   });
 
-  it("says before anything is picked that the audience reads everything in a picked place, and names each place with its site", async () => {
+  it("says before anything is picked who reads a picked library's files, and to connect again if every library is marked, and names each place with its site", async () => {
     await shown({ held: libraries() });
     const boxes = [...document.querySelectorAll('[role="checkbox"]')];
     expect({
       consequence: text().includes(
-        `Everyone you let read ${label} in the Brain will be able to read everything in the places you pick, because the permissions in ${label} are not copied.`
+        `Each file is read in the Brain only by those ${label} lets open it, of those you let read ${label} here. The account you connected must own each site you pick: nobody reads the files of a library marked below. If every library is marked, disconnect ${label} and connect it again.`
       ),
       // A screen reader tells the two "Documents" apart by their site.
       names: boxes.map(nameOf),

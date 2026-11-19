@@ -28,6 +28,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     keeps: "a shared connection they made keeps them as `connected_by`",
   },
   connection_tokens: { erased: "connect" },
+  // Goes with its grant's `connection_tokens` row (ON DELETE CASCADE).
+  connection_tenant_tokens: { erased: "connect" },
   connector_events: { erased: "connect" },
   event_sources: { erased: "connect" },
   idempotent_calls: { erased: "connect" },

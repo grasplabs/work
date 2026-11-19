@@ -1,5 +1,6 @@
 import { ToolError } from "@grasp-os/connector-kit/connector";
 import { maxReadBytes, toBase64 } from "@grasp-os/connector-kit/content";
+import { tenantHost } from "@grasp-os/connector-kit/manifest";
 import { segment } from "@grasp-os/connector-kit/provider";
 import {
   RestartSyncError,
@@ -27,6 +28,7 @@ import type {
   SyncContent,
   SyncItem,
   SyncPage,
+  SyncReader,
 } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
@@ -39,7 +41,13 @@ import {
   nextPageOf,
   v1,
 } from "./graph.ts";
-import { timeOf, tokenOf } from "./onedrive-sync.ts";
+import {
+  permissionReaders,
+  permissionSchema,
+  settled,
+  timeOf,
+  tokenOf,
+} from "./onedrive-sync.ts";
 
 // Native sync of a shared connection's picked SharePoint document libraries
 // (GRA-1759): each library an admin picked, as a place of its own, read
@@ -69,10 +77,25 @@ import { timeOf, tokenOf } from "./onedrive-sync.ts";
 // shortcut to another drive's item (`remoteItem`) or of another drive,
 // and a file whose content Graph refuses (403) or no longer has (404).
 //
-// Who may read what it brings is the connection's Brain audience, which an
-// admin chooses inside Grasp (GRA-1831): the library's permissions are not
-// mirrored, so none are read (saving SharePoint's 5 resource units a
-// permissions call costs), and every item's readers are null.
+// Who may read what it brings (GRA-2145; the design and its sources on
+// the issue): those SharePoint lets open each file, of whom core lets
+// read only those the connection's Brain audience holds. Each file's
+// effective permissions come from Graph's list of them (`GET
+// /drives/{id}/items/{id}/permissions`, on the read rights the
+// connection has), whole only for an owner ("For a non-owner caller, only
+// the sharing permissions that apply to the caller are returned", with no
+// marker). So the account's own permissions on the file are read first,
+// from SharePoint's REST API on the company's host with connect's token
+// for it (`tenantHost`), and anything short of Full Control is nobody's,
+// with no permissions asked for. A site group Graph names only by its ID
+// in the site (`siteGroup`), and its members only SharePoint's REST API
+// gives (`sitegroups/getbyid(<id>)/users`), on the file's own site. A
+// refusal, a group whose members it hides, a list it pages, a role that
+// opens nothing, or a host connect holds no token for (a connection made
+// before the right was asked for) is nobody's; people are told by stable
+// IDs alone, never an address. Sharing changed on a file comes with it; a
+// change of a group's members or of a library's sharing reaches the file
+// at core's daily relist (brain-sync.ts `relistMs`).
 //
 // Where a read stops, and where the next goes on: the kit's paging
 // (`fillPage`), keyed by an entry's ID and eTag, so an entry that changed
@@ -94,6 +117,17 @@ import { timeOf, tokenOf } from "./onedrive-sync.ts";
 
 const drives = "/drives";
 const libraryType = "documentLibrary";
+
+/** SharePoint REST's JSON without its metadata. */
+const restJson = { accept: "application/json;odata=nometadata" };
+
+/**
+ * Full Control, every right of SharePoint's mask (`FullMask`,
+ * 0x7FFFFFFFFFFFFFFF,
+ * https://learn.microsoft.com/en-us/openspecs/sharepoint_protocols/ms-wssfo3/1f5e3322-920f-431c-bbc4-7f65c477e698),
+ * as REST gives it: its two 32-bit halves.
+ */
+const fullControl = { High: 0x7f_ff_ff_ff, Low: 0xff_ff_ff_ff };
 
 /** The requests a page sends besides its entries': the drive, the feed. */
 const requestsPerPage = 2;
@@ -130,11 +164,20 @@ const entrySchema = z.object({
   lastModifiedBy: z
     .object({ user: z.object({ id: z.string().nullish() }).nullish() })
     .nullish(),
+  /** Where SharePoint keeps the file: its site, list, list item and tenant. */
+  sharepointIds: z
+    .object({
+      siteUrl: z.string().nullish(),
+      listId: z.string().nullish(),
+      listItemId: z.string().nullish(),
+      tenantId: z.string().nullish(),
+    })
+    .nullish(),
 });
 type Entry = z.infer<typeof entrySchema>;
 
 const entryFields =
-  "id,name,eTag,lastModifiedDateTime,size,file,deleted,remoteItem,parentReference,lastModifiedBy";
+  "id,name,eTag,lastModifiedDateTime,size,file,deleted,remoteItem,parentReference,lastModifiedBy,sharepointIds";
 
 const feedSchema = z.object({
   value: z.array(entrySchema),
@@ -245,6 +288,360 @@ const feedPage = async (
   };
 };
 
+/**
+ * A user or group a SharePoint group holds, as its users name them
+ * (`SP.User`, `SP.Principal`): its claim (`LoginName`) and, for a user,
+ * their Entra object ID (`AadObjectId`).
+ */
+const memberSchema = z.object({
+  LoginName: z.string(),
+  AadObjectId: z.object({ NameId: z.string().nullish() }).nullish(),
+});
+type Member = z.infer<typeof memberSchema>;
+
+/** `SP.BasePermissions`: two 32-bit masks, as numbers or strings. */
+const basePermissionsSchema = z.object({
+  Low: z.coerce.number().int(),
+  High: z.coerce.number().int(),
+});
+
+const usersSchema = z.object({
+  value: z.array(memberSchema),
+  "odata.nextLink": z.string().optional(),
+});
+
+/**
+ * One permission of an item as Graph lists it
+ * (https://learn.microsoft.com/en-us/graph/api/resources/permission?view=graph-rest-1.0):
+ * personal sync's (onedrive-sync.ts), with its roles and the SharePoint
+ * groups it may be granted to.
+ */
+const libraryPermissionSchema = permissionSchema.extend({
+  roles: z.array(z.string()).nullish(),
+  grantedToV2: z
+    .object({
+      user: z.object({ id: z.string().min(1).nullish() }).nullish(),
+      group: z.object({ id: z.string().min(1).nullish() }).nullish(),
+      siteGroup: z.object({ id: z.string().min(1).nullish() }).nullish(),
+      sharePointGroup: z.unknown().optional(),
+    })
+    .nullish(),
+});
+type LibraryPermission = z.infer<typeof libraryPermissionSchema>;
+
+const libraryPermissionsSchema = z.object({
+  value: z.array(libraryPermissionSchema),
+  "@odata.nextLink": z.string().optional(),
+});
+
+/**
+ * The roles that let someone open a file ("read", "write", and "owner",
+ * which "For SharePoint and OneDrive for Business… represents the owner
+ * role"): a permission of any other is nobody's.
+ */
+const openingRoles: ReadonlySet<string> = new Set(["read", "write", "owner"]);
+
+const guid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const guidPattern = new RegExp(`^${guid}$`, "iu");
+/** "Everyone except external users": the company's tenant. */
+const everyoneButGuests = new RegExp(
+  `^c:0-\\.f\\|rolemanager\\|spo-grid-all-users/(${guid})$`,
+  "iu"
+);
+/** An Entra security group, by its object ID. */
+const securityGroup = new RegExp(`^c:0t\\.c\\|tenant\\|(${guid})$`, "iu");
+/**
+ * A Microsoft 365 group's members: "This guid corresponds with the object
+ * Id of the Microsoft 365 Group" (its owners end in `_o`: nobody here).
+ */
+const groupMembers = new RegExp(
+  `^c:0o\\.c\\|federateddirectoryclaimprovider\\|(${guid})$`,
+  "iu"
+);
+const userClaimPrefix = "i:0#.f|membership|";
+const listItemIdPattern = /^\d+$/u;
+
+/**
+ * The readers a member of a SharePoint group stands for, by stable IDs
+ * alone, never an address: a user by their Entra object ID, when SharePoint
+ * gives one; an Entra group or a Microsoft 365 group's members by its
+ * object ID; everyone but guests of the item's own tenant (`tenant`) as
+ * the tenant; anyone else nobody ("Everyone", which holds guests; a
+ * group's owners; a user without an Entra object ID).
+ */
+const memberReaders = (
+  { LoginName, AadObjectId }: Member,
+  tenant: string
+): SyncReader[] => {
+  if (LoginName.startsWith(userClaimPrefix)) {
+    const user = AadObjectId?.NameId ?? "";
+    return guidPattern.test(user)
+      ? [{ kind: "account", id: user.toLowerCase() }]
+      : [];
+  }
+  const everyone = everyoneButGuests.exec(LoginName)?.[1];
+  if (everyone !== undefined) {
+    return everyone.toLowerCase() === tenant.toLowerCase()
+      ? [{ kind: "tenant", id: tenant.toLowerCase() }]
+      : [];
+  }
+  const group =
+    securityGroup.exec(LoginName)?.[1] ?? groupMembers.exec(LoginName)?.[1];
+  return group === undefined
+    ? []
+    : [{ kind: "group", id: group.toLowerCase() }];
+};
+
+/** The REST API's URL for `path` under `site`'s web. */
+const restUrl = (site: URL, path: string): URL =>
+  new URL(`${site.pathname.replace(/\/$/u, "")}/_api/web/${path}`, site.origin);
+
+/**
+ * One GET of SharePoint's REST API on the company's host: its answer, or
+ * null when it was refused (by SharePoint, or by connect's egress, which
+ * holds no token for the host or another host) or isn't what `schema`
+ * reads, or "late". A token SharePoint no longer takes (401, revoked
+ * within its hour), or a throttled or failing SharePoint, fails the page,
+ * which waits: never nobody's for a day.
+ */
+const restGet = async <Schema extends z.ZodType>(
+  room: SyncRoom,
+  url: URL,
+  schema: Schema
+): Promise<z.output<Schema> | null | "late"> => {
+  if (!mayRequest(room)) {
+    return "late";
+  }
+  const response = await fetchInRoom(room, url, { headers: restJson });
+  if (response === "late") {
+    return "late";
+  }
+  // A token SharePoint no longer takes says nothing of the grant: the
+  // page fails, and the grant stays as it is.
+  if (response.status === 401) {
+    await response.body?.cancel();
+    throw new ToolError("SharePoint didn't take the connection's token", {
+      code: "unavailable",
+    });
+  }
+  if (response.status === 429 || response.status >= 500) {
+    throw await graphFailure(response);
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    return null;
+  }
+  return schema.safeParse(await response.json()).data ?? null;
+};
+
+/**
+ * Whether the account holds Full Control (the whole mask) where `path`
+ * leads, as SharePoint reports "the effective permissions… that are
+ * assigned to the current user": only an owner's Graph list is whole
+ * ("For a non-owner caller, only the sharing permissions that apply to
+ * the caller are returned"). "late" when the page has no room left.
+ */
+const ownedAt = async (
+  room: SyncRoom,
+  site: URL,
+  path: string
+): Promise<boolean | "late"> => {
+  const held = await restGet(
+    room,
+    restUrl(site, `${path}/EffectiveBasePermissions`),
+    basePermissionsSchema
+  );
+  if (held === "late") {
+    return "late";
+  }
+  return (
+    held !== null &&
+    held.High === fullControl.High &&
+    held.Low === fullControl.Low
+  );
+};
+
+/** Where SharePoint keeps a file or a library: its site, list and tenant. */
+interface Kept {
+  site: URL;
+  list: string;
+  tenant: string;
+}
+
+/** `ids` as a site, list and tenant, or none when any of them isn't one. */
+const keptOf = (
+  ids:
+    | {
+        siteUrl?: string | null;
+        listId?: string | null;
+        tenantId?: string | null;
+      }
+    | null
+    | undefined
+): Kept | undefined => {
+  const site = URL.parse(ids?.siteUrl ?? "");
+  const list = ids?.listId ?? "";
+  const tenant = ids?.tenantId ?? "";
+  return site?.protocol === "https:" &&
+    guidPattern.test(list) &&
+    guidPattern.test(tenant)
+    ? { site, list, tenant }
+    : undefined;
+};
+
+/**
+ * A site group's readers (`sitegroups/getbyid(<id>)/users`), read once a
+ * page on the file's own site, as its ID is "unique only within the
+ * site" (`groups`, by site and ID): null when SharePoint refuses, hides
+ * or pages them.
+ */
+const siteGroupReaders = async (
+  room: SyncRoom,
+  kept: Kept,
+  id: string,
+  groups: Map<string, SyncReader[] | null>
+): Promise<SyncReader[] | null | "late"> => {
+  if (!listItemIdPattern.test(id)) {
+    return null;
+  }
+  const key = JSON.stringify([kept.site.origin, kept.site.pathname, id]);
+  const known = groups.get(key);
+  if (known !== undefined) {
+    return known;
+  }
+  const users = await restGet(
+    room,
+    restUrl(kept.site, `sitegroups/getbyid(${id})/users`),
+    usersSchema
+  );
+  if (users === "late") {
+    return "late";
+  }
+  const readers =
+    users === null || users["odata.nextLink"] !== undefined
+      ? null
+      : users.value.flatMap((member) => memberReaders(member, kept.tenant));
+  groups.set(key, readers);
+  return readers;
+};
+
+/**
+ * The readers one permission stands for: nobody for a role that doesn't
+ * open a file; a site group's members; null for a SharePoint group named
+ * only globally (whose members Graph reads only in SharePoint Embedded);
+ * else personal sync's rules (`permissionReaders`): links, users and
+ * Entra groups by ID, a SharePoint user without an Entra ID nobody.
+ */
+const libraryPermissionReaders = async (
+  room: SyncRoom,
+  kept: Kept,
+  permission: LibraryPermission,
+  groups: Map<string, SyncReader[] | null>
+): Promise<SyncReader[] | null | "late"> => {
+  if (!(permission.roles ?? []).some((role) => openingRoles.has(role))) {
+    return [];
+  }
+  const granted = permission.grantedToV2;
+  const siteGroup = granted?.siteGroup?.id;
+  if (siteGroup !== undefined && siteGroup !== null) {
+    return await siteGroupReaders(room, kept, siteGroup, groups);
+  }
+  if (
+    granted?.sharePointGroup !== undefined &&
+    granted.sharePointGroup !== null
+  ) {
+    return null;
+  }
+  return permissionReaders(permission);
+};
+
+/**
+ * Who may open `entry`: first whether the account owns it (Full Control),
+ * else nobody and its permissions are never asked for; then Graph's whole
+ * list of its permissions, and each site group's members: null when any
+ * of it can't be read whole; "late" when the page has no room left.
+ * https://learn.microsoft.com/en-us/graph/api/driveitem-list-permissions?view=graph-rest-1.0
+ */
+const readersOf = async (
+  room: SyncRoom,
+  place: string,
+  entry: Entry,
+  groups: Map<string, SyncReader[] | null>
+): Promise<SyncReader[] | null | "late"> => {
+  const kept = keptOf(entry.sharepointIds);
+  const item = entry.sharepointIds?.listItemId ?? "";
+  if (kept === undefined || !listItemIdPattern.test(item)) {
+    return null;
+  }
+  const owned = await ownedAt(
+    room,
+    kept.site,
+    `lists(guid'${kept.list}')/items(${item})`
+  );
+  if (owned !== true) {
+    return owned === "late" ? "late" : null;
+  }
+  if (!mayRequest(room)) {
+    return "late";
+  }
+  const response = await fetchInRoom(
+    room,
+    graphUrl(
+      `${drives}/${segment(place)}/items/${segment(entry.id)}/permissions`
+    )
+  );
+  if (response === "late") {
+    return "late";
+  }
+  if (response.status === 429 || response.status >= 500) {
+    throw await graphFailure(response);
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    return null;
+  }
+  const permissions = libraryPermissionsSchema.safeParse(
+    await response.json()
+  ).data;
+  if (
+    permissions === undefined ||
+    permissions["@odata.nextLink"] !== undefined
+  ) {
+    return null;
+  }
+  const readers: SyncReader[] = [];
+  for (const permission of permissions.value) {
+    // oxlint-disable-next-line no-await-in-loop -- within the page's room, one group at a time
+    const found = await libraryPermissionReaders(
+      room,
+      kept,
+      permission,
+      groups
+    );
+    if (found === "late" || found === null) {
+      return found;
+    }
+    readers.push(...found);
+  }
+  return settled(readers);
+};
+
+/**
+ * Whether the account may read who may open the files of the library kept
+ * as `ids` (Full Control of its list): false when SharePoint or connect's
+ * egress refuses; "late" when the read has no room left.
+ * https://learn.microsoft.com/en-us/previous-versions/office/sharepoint-csom/ee544616(v=office.15)
+ */
+const sharingReadOf = async (
+  room: SyncRoom,
+  ids: z.infer<typeof driveIdsSchema>
+): Promise<boolean | "late"> => {
+  const kept = keptOf(ids);
+  return kept === undefined
+    ? false
+    : await ownedAt(room, kept.site, `lists(guid'${kept.list}')`);
+};
+
 const goneOf = (id: string): SyncItem => ({ gone: true, id, kind: "file" });
 
 /** Whether an entry went away from the library: deleted, a shortcut, or another drive's. */
@@ -254,8 +651,12 @@ const isGone = (place: string, entry: Entry): boolean =>
   (entry.parentReference?.driveId ?? place).toLowerCase() !==
     place.toLowerCase();
 
-/** A file as an item, with `content`. */
-const fileOf = (entry: Entry, content: SyncContent | null): SyncItem => {
+/** A file as an item, with `content`, read by `readers` (null: nobody). */
+const fileOf = (
+  entry: Entry,
+  content: SyncContent | null,
+  readers: SyncReader[] | null = null
+): SyncItem => {
   const eTag = entry.eTag ?? "";
   const changedAt = entry.lastModifiedDateTime ?? "";
   if (eTag === "" || changedAt === "") {
@@ -271,8 +672,7 @@ const fileOf = (entry: Entry, content: SyncContent | null): SyncItem => {
     changedAt,
     title: entry.name ?? "",
     content,
-    // The connection's Brain audience reads it (GRA-1831).
-    readers: null,
+    readers,
     changedBy: entry.lastModifiedBy?.user?.id?.toLowerCase() ?? null,
     partOf: null,
   };
@@ -298,15 +698,31 @@ const withoutContent = (place: string, entry: Entry): SyncItem[] => {
 const itemsOf = async (
   room: SyncRoom,
   place: string,
-  entry: Entry
+  entry: Entry,
+  groups: Map<string, SyncReader[] | null>
 ): Promise<EntryItems> => {
   const known = withoutContent(place, entry);
-  const size = entry.size ?? 0;
-  if (known[0]?.gone !== false || size === 0 || size > maxReadBytes) {
+  if (known[0]?.gone !== false) {
     return known;
   }
+  // Its readers first: an entry left for the next read loses only those.
+  const readers = await readersOf(room, place, entry, groups);
+  if (readers === "late") {
+    return "late";
+  }
+  const size = entry.size ?? 0;
+  if (size === 0 || size > maxReadBytes) {
+    return [fileOf(entry, null, readers)];
+  }
   // Base64 is a third larger than the bytes.
-  if (!mayRequest(room) || (!room.empty && (size * 4) / 3 > room.bytes)) {
+  // Out of requests, its readers having taken what was left: late, so a
+  // file whose readers always take a whole read is passed over on the
+  // next (the kit's `fillPage`), never a page that stops before it again
+  // and again.
+  if (!mayRequest(room)) {
+    return "late";
+  }
+  if (!room.empty && (size * 4) / 3 > room.bytes) {
     return "full";
   }
   const response = await fetchInRoom(
@@ -325,14 +741,14 @@ const itemsOf = async (
   }
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength > maxReadBytes) {
-    return known;
+    return [fileOf(entry, null, readers)];
   }
   const taken = takeContent(room, {
     type: "file",
     contentType: entry.file?.mimeType ?? unknownType,
     base64: toBase64(bytes),
   });
-  return taken === null ? "full" : [fileOf(entry, taken.content)];
+  return taken === null ? "full" : [fileOf(entry, taken.content, readers)];
 };
 
 /**
@@ -392,12 +808,14 @@ const readPage = async (
   const began = position.phase === "list" ? (position.began ?? time) : null;
   const here: Position =
     position.phase === "list" ? { ...position, began } : position;
+  // Each SharePoint group's users, read once a page.
+  const groups = new Map<string, SyncReader[] | null>();
   const { items, at, done } = await fillPage({
     room,
     entries: feed.value,
     at: position.at,
     keyOf: (entry) => `${entry.id} ${entry.eTag ?? ""}`,
-    itemsFor: async (entry) => await itemsOf(room, place, entry),
+    itemsFor: async (entry) => await itemsOf(room, place, entry, groups),
     passOver: (entry) => withoutContent(place, entry),
   });
   if (!done) {
@@ -421,6 +839,15 @@ const siteSchema = z.object({
   name: z.string().nullish(),
 });
 
+/** Where SharePoint keeps a library: its site, list and tenant. */
+const driveIdsSchema = z
+  .object({
+    siteUrl: z.string().nullish(),
+    listId: z.string().nullish(),
+    tenantId: z.string().nullish(),
+  })
+  .nullish();
+
 const sitesSchema = z.object({
   value: z.array(siteSchema),
   "@odata.nextLink": z.string().optional(),
@@ -432,6 +859,7 @@ const drivesSchema = z.object({
       id: z.string(),
       name: z.string().nullish(),
       driveType: z.string().nullish(),
+      sharepointIds: driveIdsSchema,
     })
   ),
   "@odata.nextLink": z.string().optional(),
@@ -504,26 +932,49 @@ const listingGet = async <Schema extends z.ZodType>(
   return schema.parse(await response.json());
 };
 
-/** The document libraries of one page of a site's drives, as places to pick. */
-const librariesIn = (
+/**
+ * Libraries asked of Graph per page of a site's drives (`$top`): a
+ * platform bound, not a cap on what is listed. A read may send
+ * `syncPageLimits.requests` requests; less the page of sites and the page
+ * of drives, that leaves one check of each library's sharing
+ * (`sharingReadOf`) for this many. So a page a read ran out of room in,
+ * which the next read takes again from its start, always fits that next
+ * read, and the listing always moves on.
+ */
+const librariesPerPage = syncPageLimits.requests - 2;
+
+/**
+ * The document libraries of one page of a site's drives, as places to
+ * pick, each with whether the account may read who opens its files
+ * (`sharingReadOf`); `OutOfRoomError` before any of them when the read has
+ * no room left for one, so the page is read again whole.
+ */
+const librariesIn = async (
+  room: SyncRoom,
   answer: z.infer<typeof drivesSchema>,
   siteName: string
-): SyncChoice[] =>
-  answer.value.flatMap((library): SyncChoice[] =>
-    library.driveType === libraryType &&
-    syncPlaceSchema.safeParse(library.id).success
-      ? [
-          {
-            place: library.id,
-            title: library.name ?? "",
-            within: siteName,
-            // Who may open a library's files isn't read yet (GRA-2145,
-            // its next slice): they are read by nobody.
-            sharingRead: false,
-          },
-        ]
-      : []
-  );
+): Promise<SyncChoice[]> => {
+  const choices: SyncChoice[] = [];
+  for (const library of answer.value) {
+    if (
+      library.driveType === libraryType &&
+      syncPlaceSchema.safeParse(library.id).success
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- one library after another, within the read's room
+      const sharingRead = await sharingReadOf(room, library.sharepointIds);
+      if (sharingRead === "late") {
+        throw new OutOfRoomError();
+      }
+      choices.push({
+        place: library.id,
+        title: library.name ?? "",
+        within: siteName,
+        sharingRead,
+      });
+    }
+  }
+  return choices;
+};
 
 /**
  * Lists `site`'s document libraries into `choices`, one page of Graph's
@@ -547,13 +998,15 @@ const listSite = async (
       room,
       atPage(
         graphUrl(`/sites/${segment(site.id)}/drives`, {
-          $select: "id,name,driveType",
+          $select: "id,name,driveType,sharepointIds",
+          $top: String(librariesPerPage),
         }),
         listing.drivePage ?? undefined
       ),
       drivesSchema
     );
-    choices.push(...librariesIn(answer, siteName));
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    choices.push(...(await librariesIn(room, answer, siteName)));
     const next = nextPageOf(answer["@odata.nextLink"]);
     if (next === null) {
       break;
@@ -659,6 +1112,26 @@ export const librarySync = defineSync({
       path: `${v1}${drives}/{place}/items/{item}/content`,
       redirects: downloadHosts,
     },
+    {
+      method: "GET",
+      host: graphHost,
+      path: `${v1}${drives}/{place}/items/{item}/permissions`,
+    },
+    // SharePoint's REST API on the company's own host, under a site at
+    // its root, `/sites/<name>` or `/teams/<name>`: the account's own
+    // permissions on a library or a file, and a site group's users. A
+    // subsite's files are refused, so nobody's.
+    ...["", "/sites/{site}", "/teams/{site}"].flatMap((under) =>
+      [
+        "/_api/web/{list}/EffectiveBasePermissions",
+        "/_api/web/{list}/{item}/EffectiveBasePermissions",
+        "/_api/web/sitegroups/{group}/users",
+      ].map((path) => ({
+        method: "GET" as const,
+        host: tenantHost,
+        path: `${under}${path}`,
+      }))
+    ),
   ],
   choices: choicesOf,
   read: async ({ place, cursor, deadline }) =>

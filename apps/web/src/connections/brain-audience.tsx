@@ -431,8 +431,10 @@ export const BrainAudience = ({
       </Field>
       <p className="text-muted-foreground">
         <Trans>
-          Who may read it is decided inside Grasp, not by the permissions in{" "}
-          {label}: choose a team if not everyone should see it.
+          Files copied from the places picked below are read only by those who
+          can open them in {label}, and the audience chosen here narrows that
+          further; what agents read through {label} is decided by this audience
+          alone.
         </Trans>
       </p>
       {erasing ? (

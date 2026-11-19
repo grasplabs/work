@@ -267,6 +267,15 @@ const isPathTemplate = (path: string): boolean => {
 export const hostSchema = z.string().regex(hostPattern);
 
 /**
+ * A sync route's host that stands for the connection's own host at its
+ * provider, which connect learns for that connection alone (a company's
+ * SharePoint host, `<tenant>.sharepoint.com`), with a credential of its
+ * own for it (GRA-2145). Connect's egress sends that credential only to
+ * that host, and the connector's own credential never there.
+ */
+export const tenantHost = "{tenant}";
+
+/**
  * Hosts a redirect may lead to, as `*.<host>`: the `*` stands for exactly
  * one DNS label, such as a SharePoint tenant's `contoso` in
  * `contoso.sharepoint.com`.
@@ -310,13 +319,17 @@ export const redirectHostMatches = (
 export const routeSchema = z
   .strictObject({
     method: z.enum(httpMethods),
-    host: hostSchema,
+    host: z.union([hostSchema, z.literal(tenantHost)]),
     path: z.string().max(512).refine(isPathTemplate, "Not a path template"),
     redirects: z.array(redirectHostSchema).min(1).max(4).optional(),
   })
   .refine(
     ({ method, redirects }) => redirects === undefined || method === "GET",
     "Only a GET may follow a redirect"
+  )
+  .refine(
+    ({ host, redirects }) => redirects === undefined || host !== tenantHost,
+    "A request to the connection's own host follows no redirect"
   );
 export type Route = z.infer<typeof routeSchema>;
 
@@ -526,10 +539,13 @@ export const connectorManifestSchema = z
   )
   .refine(
     ({ hosts, actions, syncs = {} }) =>
-      [...Object.values(actions), ...Object.values(syncs)].every(({ routes }) =>
+      Object.values(actions).every(({ routes }) =>
         routes.every(({ host }) => hosts.includes(host))
+      ) &&
+      Object.values(syncs).every(({ routes }) =>
+        routes.every(({ host }) => host === tenantHost || hosts.includes(host))
       ),
-    "Every route's host must be one of the connector's hosts"
+    "Every route's host must be one of the connector's hosts, or a sync's the connection's own (`tenantHost`)"
   )
   .refine(
     ({ actions }) =>

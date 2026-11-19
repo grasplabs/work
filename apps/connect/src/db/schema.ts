@@ -568,6 +568,27 @@ export const connectionTokens = sqliteTable("connection_tokens", {
 });
 
 /**
+ * A connection's token for its own host at the provider (GRA-2145: a
+ * company's SharePoint host, for SharePoint's REST API), got with the
+ * grant's refresh token (tokens.ts `tenantCredentialFor`): the host, as
+ * the connection's own token found it, and the access token for it,
+ * sealed for the connection alone. It is of one grant: it goes with the
+ * grant's `connection_tokens` row, which a grant connected again replaces,
+ * and is written only while that row is as it was read. A token's key no
+ * longer held, a token past its time, or one its host no longer takes, is
+ * asked for again: none is ever resealed.
+ */
+export const connectionTenantTokens = sqliteTable("connection_tenant_tokens", {
+  connectionId: text("connection_id")
+    .primaryKey()
+    .references(() => connectionTokens.connectionId, { onDelete: "cascade" }),
+  host: text().notNull(),
+  sealed: text().notNull(),
+  accessExpiresAt: timestamp("access_expires_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
  * A place of a shared connection an admin picked for one of its
  * connector's syncs (`places: "picked"`: a shared drive, a document
  * library): the only places that sync reads of it (sync.ts). Who picked
