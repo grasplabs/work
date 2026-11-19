@@ -23,8 +23,8 @@ import {
 } from "./directory.ts";
 import { SourceError, requestBudget } from "./event-kinds.ts";
 import type { ProviderAccess } from "./event-kinds.ts";
-import { grantHolds } from "./providers.ts";
-import { grantedScopesOf } from "./tokens.ts";
+import { grantHolds, providerFor } from "./providers.ts";
+import { grantedScopesOf, widenGrant } from "./tokens.ts";
 
 // The directory's groups (GRA-2056): an admin maps an Entra group to a
 // team, and the daily read places the group's members. Read with the
@@ -50,8 +50,10 @@ import { grantedScopesOf } from "./tokens.ts";
 //   `directory.group_gone`, never an empty group.
 // - A connection made before groups were asked for: its renewals keep
 //   the grant it has (providers.ts `renewedAsGranted`), so it goes on
-//   reading people, leavers and teams; its group calls answer
-//   `directory.groups_not_granted`, send nothing, and leave it as it is.
+//   reading people, leavers and teams. Its group calls ask once for the
+//   scope (`groupsToken`), which an admin's consent since brings; without
+//   it they answer `directory.groups_not_granted` with the admin consent
+//   link, send nothing to Graph, and leave the connection as it is.
 //   A refusal with the scope held is Microsoft's own
 //   (`directory.group_refused`), which connecting again doesn't mend.
 // - Personal data: of members, only Entra object IDs leave connect, and a
@@ -228,21 +230,83 @@ const membersRequestOf = (groupId: string, cursor: string | null): URL =>
 /** The scope the groups' calls are made with (providers.ts). */
 const groupsScope = "Group.ReadBasic.All";
 
-/**
- * The access token of `connectionId` for a groups call, renewed if it must
- * be: `directory.groups_not_granted` when its grant, as connect kept it,
- * lacks the groups' scope (a connection made before Grasp asked for it,
- * which renews with what it holds and goes on reading people). Nothing is
- * sent then, and the connection is left as it is. A grant connect didn't
- * keep is asked: a refusal is then the one below.
- */
-const groupsToken = async (env: Env, connectionId: string): Promise<string> => {
-  const token = await directoryToken(env, connectionId);
+/** Whether `connectionId`'s grant, as connect kept it, holds the groups' scope. */
+const holdsGroups = async (
+  env: Env,
+  connectionId: string
+): Promise<boolean> => {
   const granted = await grantedScopesOf(env, connectionId);
-  if (granted !== null && !grantHolds(granted, groupsScope)) {
-    throw directoryErrors.create("directory.groups_not_granted");
+  return granted !== null && grantHolds(granted, groupsScope);
+};
+
+/**
+ * Where an admin of the directory's tenant consents, for the whole
+ * organization, to what Grasp's directory app asks for (Microsoft's
+ * tenant-wide admin consent URL); none when connect holds no client for
+ * it.
+ */
+const consentUrlOf = (env: Env, tenant: string): string | undefined => {
+  const provider = providerFor("microsoft-directory");
+  const client = provider?.kind === "oauth" ? provider.client(env) : undefined;
+  if (client === undefined) {
+    return undefined;
   }
-  return token;
+  const url = new URL(
+    `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/adminconsent`
+  );
+  url.searchParams.set("client_id", client.id);
+  return url.href;
+};
+
+/** `directory.groups_not_granted`, with the consent link an admin can use. */
+const notGranted = (env: Env, tenant: string): unknown => {
+  const consentUrl = consentUrlOf(env, tenant);
+  return directoryErrors.create(
+    "directory.groups_not_granted",
+    consentUrl === undefined ? undefined : { consentUrl }
+  );
+};
+
+/**
+ * The access token of `connection` for a groups call.
+ *
+ * Renewed first, as any call renews a token that is due, and only then
+ * is the grant judged, as it stands after: so a renewal that brings the
+ * groups' scope counts at once. A connection made before Grasp asked for
+ * the scope (it renews with what it holds, and goes on reading people) is
+ * then asked once more, for every scope its app asks for now
+ * (`widenGrant`): a plain renewal is for the scopes first asked for, so
+ * this is how a scope an admin consented to since reaches it, with
+ * nothing to reconnect. Refused (no consent yet), it is
+ * `directory.groups_not_granted`, with the admin consent link, and the
+ * connection is left as it was: nothing marks it.
+ *
+ * A renewal that fails, on a connection whose grant lacked the scope
+ * before it, also answers `directory.groups_not_granted`: the instruction
+ * an admin can act on, not the moment's failure, which the people's read
+ * reports on its own.
+ */
+const groupsToken = async (
+  env: Env,
+  { connectionId, tenant }: { connectionId: string; tenant: string }
+): Promise<string> => {
+  const heldBefore = await holdsGroups(env, connectionId);
+  let token: string;
+  try {
+    token = await directoryToken(env, connectionId);
+  } catch (error) {
+    if (heldBefore) {
+      throw error;
+    }
+    throw notGranted(env, tenant);
+  }
+  if (await holdsGroups(env, connectionId)) {
+    return token;
+  }
+  if (await widenGrant(env, connectionId, groupsScope)) {
+    return await directoryToken(env, connectionId);
+  }
+  throw notGranted(env, tenant);
 };
 
 /**
@@ -276,7 +340,7 @@ export const searchDirectoryGroups = async (
   );
   const connection = await entraConnection(env, connectionId);
   const access: ProviderAccess = {
-    token: await groupsToken(env, connection.connectionId),
+    token: await groupsToken(env, connection),
     budget: requestBudget(1),
   };
   let page: z.output<typeof graphGroupPageSchema>;
@@ -317,7 +381,7 @@ export const readDirectoryGroup = async (
   const id = groupId.toLowerCase();
   const url = membersRequestOf(id, cursor);
   const access: ProviderAccess = {
-    token: await groupsToken(env, connection.connectionId),
+    token: await groupsToken(env, connection),
     budget: requestBudget(cursor === null ? 2 : 1),
   };
   let group: DirectoryGroup | null = null;
