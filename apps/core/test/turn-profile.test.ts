@@ -155,9 +155,9 @@ const madeAgent = async (
 
 describe("the profile without the Brain grant", setUpTime, () => {
   // GRA-2202: what a person told Grasp about themselves reaches their own
-  // later chats with Grasp's own chat agent, with no Brain grant; never a
-  // chat others read, a woken turn, another agent without the grant, a
-  // retired memory, or another person's.
+  // later chats, whichever agent they address there, with no Brain grant;
+  // never a chat others read, a woken turn, a retired memory, or another
+  // person's.
   it("is in the model's input in a new chat of theirs, whatever the question's words, with no search step", async () => {
     const { personId } = await memberAndAdmin();
     await aboutThemselves(personId, "Pizza is my favourite food");
@@ -252,7 +252,7 @@ describe("the profile without the Brain grant", setUpTime, () => {
     }).toStrictEqual({ shared: false, woken: false, other: false });
   });
 
-  it("is only Grasp's own chat agent's without the grant: an agent an admin made gets it once granted, also when addressed after another", async () => {
+  it("is every agent's they address in their own chat, granted the Brain or not, also two addressed in one question", async () => {
     const { admin, personId } = await memberAndAdmin();
     const mark = word();
     await aboutThemselves(personId, `My badge word is ${mark}`);
@@ -308,8 +308,8 @@ describe("the profile without the Brain grant", setUpTime, () => {
         JSON.stringify(request?.body).includes(mark)
       ),
     }).toStrictEqual({
-      alone: { plain: false, granted: true },
-      addressed: [false, true],
+      alone: { plain: true, granted: true },
+      addressed: [true, true],
     });
   });
 

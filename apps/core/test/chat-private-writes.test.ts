@@ -458,23 +458,30 @@ describe("what a chat writes for others once it used something only its person m
   );
 
   it(
-    "holds a write after a turn that handed Grasp's own chat agent the person's profile without the Brain grant (GRA-2202)",
+    "holds a write after a turn that handed the person's profile to an agent without the Brain grant, Grasp's own or one an admin made (GRA-2202)",
     slow,
     async () => {
-      const builder = await signedInApi(idp, "builder");
+      const [builder, admin] = await Promise.all([
+        signedInApi(idp, "builder"),
+        signedInApi(idp, "admin"),
+      ]);
       const { app, release } = await liveNotes(builder);
-      const marker = `profile-${unique()}`;
+      const made = await admin.api.connections.makeAgent({
+        name: "Claire",
+        face: "pen",
+        job: "Claire's job.",
+        modelRole: null,
+      });
+      await admin.api.connections.setAgentReach(made.id, true, {
+        who: "everyone",
+      });
+      const markers = [`own-${unique()}`, `made-${unique()}`];
       const provider = await fakeProvider(
-        writesNote(app, release, marker),
+        writesNote(app, release, markers[0] ?? ""),
+        says("It waits for you."),
+        writesNote(app, release, markers[1] ?? ""),
         says("It waits for you.")
       );
-      // Grasp's own chat agent, granted the App and not the Brain.
-      await requestGranted(idp, builder, {
-        subject: { type: "agent", agentId: chatAgentId },
-        object: { type: "app", appId: app },
-        actions: ["read", "write"],
-        binding: "NOTES",
-      });
       const statement = `Leads the ${word()} depot`;
       await rememberAs(env, builder.userId, {
         change: crypto.randomUUID(),
@@ -484,25 +491,49 @@ describe("what a chat writes for others once it used something only its person m
         quote: statement,
       });
       const stub = workspace(env, personalWorkspaceId(builder.userId));
-      const chat = await stub.createChat(
-        "Questions",
-        builder.userId,
-        chatAgentId
-      );
-
-      await stub.ask(chat.id, {
-        text: `Add a note about the ${word()} keys.`,
-        model,
-      });
+      const outcomes = [];
+      for (const agentId of [chatAgentId, made.id]) {
+        // Granted the App and not the Brain.
+        // oxlint-disable-next-line no-await-in-loop -- one agent after another
+        await requestGranted(idp, builder, {
+          subject: { type: "agent", agentId },
+          object: { type: "app", appId: app },
+          actions: ["read", "write"],
+          binding: "NOTES",
+        });
+        // oxlint-disable-next-line no-await-in-loop -- one agent after another
+        const chat = await stub.createChat(
+          "Questions",
+          builder.userId,
+          agentId
+        );
+        const before = provider.requests.length;
+        // oxlint-disable-next-line no-await-in-loop -- one agent after another
+        await stub.ask(chat.id, {
+          text: `Add a note about the ${word()} keys.`,
+          model,
+        });
+        // oxlint-disable-next-line no-await-in-loop -- one agent after another
+        await eventsOf("chat.private_read", chat.id, 1);
+        outcomes.push({
+          // oxlint-disable-next-line no-await-in-loop -- one agent after another
+          answers: await answers(stub, chat.id),
+          handed: JSON.stringify(
+            provider.requests.slice(before).map(({ body }) => body)
+          ).includes(statement),
+        });
+      }
 
       expect({
-        answers: await answers(stub, chat.id),
-        handed: JSON.stringify(
-          provider.requests.map(({ body }) => body)
-        ).includes(statement),
+        outcomes,
         after: await noteTitles(builder.userId, app, release),
-      }).toStrictEqual({ answers: ["held"], handed: true, after: [] });
-      await eventsOf("chat.private_read", chat.id, 1);
+      }).toStrictEqual({
+        outcomes: [
+          { answers: ["held"], handed: true },
+          { answers: ["held"], handed: true },
+        ],
+        after: [],
+      });
     }
   );
 

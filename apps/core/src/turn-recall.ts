@@ -19,7 +19,6 @@ import {
 } from "./agent-scope.ts";
 import { textOf } from "./agent.ts";
 import type { CodeTurn } from "./agent.ts";
-import { firstAgentId } from "./agents.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import {
   memoryKeyOf,
@@ -631,9 +630,9 @@ const lookElsewhere = (
  * Brain grant, the question's search (its analysis and where else to
  * look alongside), and the person's profile read beside it, taken if it
  * arrived by the search's end, in the room the search left; without it,
- * the person's own profile alone, in their own chat with Grasp's own chat
- * agent, read now, so a person with nothing about themselves gets no run
- * at all (GRA-2202), and `undefined` for that and anywhere else.
+ * the person's own profile alone, in their own chat, read now, so a
+ * person with nothing about themselves gets no run at all (GRA-2202), and
+ * `undefined` for that and anywhere else.
  */
 const findsOf = async (
   recalling: Recalling,
@@ -652,11 +651,11 @@ const findsOf = async (
   | undefined
 > => {
   if (!recalling.grant) {
-    // Only where the turn reads as the person (their own chat, a turn they
-    // started), and only with Grasp's own chat agent: any other agent, an
-    // admin's or a builder's, gets it with the Brain grant alone, as it
-    // could carry it out through its own reads and calls (GRA-1928).
-    if (!reads.personal || recalling.turn.scope.agentId !== firstAgentId) {
+    // Only where the turn reads as the person: their own chat, a turn they
+    // started. Every agent they address there gets it alike: it is their
+    // own word, as what they type there is, and one conversation they
+    // see; another agent's reads and calls that leave Grasp are GRA-1928.
+    if (!reads.personal) {
       return undefined;
     }
     const own = await ownProfileOf(recalling);
