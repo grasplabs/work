@@ -28,6 +28,7 @@ import type {
   SourceReaders,
   SourceRef,
 } from "../src/brain-next.ts";
+import { turnRecallMethod } from "../src/brain-search.ts";
 import { keepAudience } from "../src/chat-audiences.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { chatAudiences, teamMembers, teams } from "../src/db/core/schema.ts";
@@ -38,7 +39,6 @@ import {
   analysisPurpose,
   recallTimeoutReason,
   turnRecallDeadlineMs,
-  turnRecallMethod,
 } from "../src/turn-recall.ts";
 import type { ChatPlace } from "../src/workspace.ts";
 import {

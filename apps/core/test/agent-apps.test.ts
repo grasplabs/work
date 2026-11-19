@@ -2,7 +2,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { turnRecallMethod } from "../src/turn-recall.ts";
+import { turnRecallMethod } from "../src/brain-search.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";

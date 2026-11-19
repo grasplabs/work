@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { withheldResult } from "../src/agent.ts";
-import { turnRecallMethod } from "../src/turn-recall.ts";
+import { turnRecallMethod } from "../src/brain-search.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
