@@ -541,6 +541,49 @@ describe(
       });
     });
 
+    it("stays in an admin's hands: listed as any member, their role changed, and removed", async () => {
+      const { admin } = await connectedDirectory(idp);
+      const una = await memberWith(crypto.randomUUID());
+      await directoryHolds([user({ id: una.oid, accountEnabled: false })]);
+      await readAt(nextDay());
+      const listed = async () => {
+        const all = await admin.api.members.list();
+        const entry = all.find(({ userId }) => userId === una.userId);
+        // When they joined, as a type: the time is the test's own.
+        return entry && { ...entry, joinedAt: typeof entry.joinedAt };
+      };
+
+      const whileSuspended = await listed();
+      const roleChanged = await outcome(
+        admin.api.members.setRole(una.userId, "builder")
+      );
+      const afterRoleChange = await listed();
+      const removed = await outcome(admin.api.members.remove(una.userId));
+
+      expect({
+        whileSuspended,
+        roleChanged,
+        role: afterRoleChange?.role,
+        removed,
+        afterRemoval: await listed(),
+        suspension: await suspensionOf(una.userId),
+      }).toStrictEqual({
+        // Exactly what any member shows: nothing claims they may act.
+        whileSuspended: {
+          userId: una.userId,
+          name: una.name,
+          email: String(una.person.email),
+          role: "user",
+          joinedAt: "string",
+        },
+        roleChanged: "ok",
+        role: "builder",
+        removed: "ok",
+        afterRemoval: undefined,
+        suspension: null,
+      });
+    });
+
     it("can't be erased while merely suspended, and is removed and erased as anyone else", async () => {
       const { admin } = await connectedDirectory(idp);
       const ivy = await memberWith(crypto.randomUUID());
