@@ -14,7 +14,7 @@ import type {
 } from "@grasp-os/shared/ai-providers";
 import { failureText } from "@grasp-os/shared/errors";
 import { i18n as active } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
+import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -49,7 +49,8 @@ import {
   FieldLabel,
 } from "../grasp/field/index.ts";
 import { EU, Flag, US } from "../grasp/flags/index.ts";
-import { Form } from "../grasp/form/index.ts";
+import { Form, FormActions } from "../grasp/form/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
 import {
   Cable,
   ChevronDown,
@@ -94,7 +95,11 @@ import { ReadOnlyRow } from "./read-only-row.tsx";
 // once into a password field, goes straight to core and on to connect,
 // which seals it, and is never back on the page. Then the default model
 // and its fallbacks, the providers' main models first. The organization's
-// own admins change it; Grasp staff only read it.
+// own admins change it; Grasp staff only read it. While nothing is
+// connected and nothing answers, the Providers card is where the first
+// provider is connected: the providers as tiles, an OpenAI-compatible
+// endpoint on one quiet line under them, and the key in the same card,
+// added and tested in one step (Ruben, 19 Nov 2026).
 
 /** The most fallbacks a choice may have, as core takes it. */
 const fallbacksMax = 5;
@@ -141,6 +146,11 @@ const testFailures: Readonly<Record<string, MessageDescriptor>> = {
   "model.rate_limited": msg`It was too busy and asked to wait.`,
 };
 
+/** Under this width of the card, the providers' tiles stand in one column. */
+const tilesNarrow = "@container (width < 26rem)";
+/** From this width of the card, the providers' tiles stand in one row. */
+const tilesWide = "@container (width >= 48rem)";
+
 const styles = stylex.create({
   // A flag, then the place it stands for.
   place: {
@@ -168,6 +178,24 @@ const styles = stylex.create({
     listStyle: "none",
   },
   fallback: { display: "flex", alignItems: "center", gap: grasp.space1 },
+  stack: { display: "grid", gap: grasp.space4, minWidth: 0 },
+  // The tiles measure the card, not the window.
+  tilesFrame: { containerType: "inline-size", minWidth: 0 },
+  // Equal tiles: one row where it holds them all, two by two under it,
+  // one column on a phone; with the four named providers core offers,
+  // never one left alone on a row.
+  tiles: {
+    display: "grid",
+    gap: grasp.space2,
+    gridTemplateColumns: {
+      default: "repeat(2, minmax(0, 1fr))",
+      [tilesNarrow]: "minmax(0, 1fr)",
+      [tilesWide]: "none",
+    },
+    gridAutoFlow: { default: "row", [tilesWide]: "column" },
+    gridAutoColumns: { default: "auto", [tilesWide]: "minmax(0, 1fr)" },
+  },
+  start: { justifySelf: "start" },
 });
 
 type Change = (session: Session) => Promise<unknown>;
@@ -268,13 +296,16 @@ const KeyInput = ({
   provider,
   value,
   onValueChange,
+  autoFocus = false,
 }: {
   provider: OrganizationProviderId;
   value: string;
   onValueChange: (value: string) => void;
+  autoFocus?: boolean;
 }) => (
   <Input
     autoComplete="off"
+    autoFocus={autoFocus}
     onValueChange={onValueChange}
     placeholder={keyStarts[provider]}
     required
@@ -287,6 +318,14 @@ const KeyInput = ({
 
 /** Why a change failed, in the person's words. */
 const reasonOf = (error: unknown): string => failureText(error);
+
+/** Why a test failed, by core's code: this page's short words, else the chat's own. */
+const testFailureText = (code: string, i18n: I18n): string => {
+  const short = Object.hasOwn(testFailures, code)
+    ? testFailures[code]
+    : undefined;
+  return short === undefined ? failureMessage(code, i18n) : i18n._(short);
+};
 
 /** Test: one tiny call; working, then Works, or Failed and why under the name. */
 const useTest = (
@@ -304,14 +343,7 @@ const useTest = (
       // How its calls go is read again: the test was one.
       void router.invalidate();
       if (!outcome.ok) {
-        const short = Object.hasOwn(testFailures, outcome.code)
-          ? testFailures[outcome.code]
-          : undefined;
-        throw new Error(
-          short === undefined
-            ? failureMessage(outcome.code, i18n)
-            : i18n._(short)
-        );
+        throw new Error(testFailureText(outcome.code, i18n));
       }
     },
     { working: t`Testing`, done: t`Works`, failed: t`Failed` }
@@ -548,17 +580,87 @@ const WhereItRuns = ({ provider }: { provider: OrganizationProviderId }) => {
   );
 };
 
+/** A custom endpoint's address; `autoFocus` where it is the first field. */
+const AddressField = ({
+  value,
+  onValueChange,
+  autoFocus = false,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  autoFocus?: boolean;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Field>
+      <FieldLabel>{t`Address`}</FieldLabel>
+      <Input
+        autoFocus={autoFocus}
+        inputMode="url"
+        onValueChange={onValueChange}
+        placeholder="https://models.example.com/v1"
+        required
+        type="url"
+        value={value}
+      />
+      <FieldError match="valueMissing">{t`Enter your endpoint's address.`}</FieldError>
+      <FieldError match="typeMismatch">{t`Enter an address that starts with https://.`}</FieldError>
+    </Field>
+  );
+};
+
+/**
+ * A new provider's key, with what becomes of it; `refused`, why the
+ * provider refused it, under the field until the key is changed.
+ */
+const KeyField = ({
+  provider,
+  value,
+  onValueChange,
+  refused,
+  autoFocus = false,
+}: {
+  provider: OrganizationProviderId;
+  value: string;
+  onValueChange: (value: string) => void;
+  refused?: string;
+  autoFocus?: boolean;
+}) => {
+  const { t } = useLingui();
+  return (
+    // Left out, not false, while nothing is refused: false would hide the
+    // browser's own check (a key not pasted).
+    <Field {...(refused === undefined ? {} : { invalid: true })}>
+      <FieldLabel>{t`Key`}</FieldLabel>
+      <KeyInput
+        autoFocus={autoFocus}
+        onValueChange={onValueChange}
+        provider={provider}
+        value={value}
+      />
+      <FieldDescription>
+        {t`Only its last four characters are shown again.`}
+      </FieldDescription>
+      <FieldError match="valueMissing">{t`Paste the key.`}</FieldError>
+      {refused === undefined ? null : <FieldError match>{refused}</FieldError>}
+    </Field>
+  );
+};
+
+/** Adds a provider's key, with a custom endpoint's address; throws, with why, where it failed. */
+type Connect = (
+  provider: OrganizationProviderId,
+  key: string,
+  baseUrl: string
+) => Promise<void>;
+
 /** Adding a provider, in a dialog: which one, by its mark; a custom endpoint's address; its key. */
 const AddProviderDialog = ({
   offered,
   onAdd,
 }: {
   offered: AiProvidersListing["offered"];
-  onAdd: (
-    provider: OrganizationProviderId,
-    key: string,
-    baseUrl: string
-  ) => Promise<void>;
+  onAdd: Connect;
 }) => {
   const { t } = useLingui();
   const formId = useId();
@@ -648,32 +750,13 @@ const AddProviderDialog = ({
                 ))}
               </RadioGroup>
               {custom ? (
-                <Field>
-                  <FieldLabel>{t`Address`}</FieldLabel>
-                  <Input
-                    inputMode="url"
-                    onValueChange={setBaseUrl}
-                    placeholder="https://models.example.com/v1"
-                    required
-                    type="url"
-                    value={baseUrl}
-                  />
-                  <FieldError match="valueMissing">{t`Enter your endpoint's address.`}</FieldError>
-                  <FieldError match="typeMismatch">{t`Enter an address that starts with https://.`}</FieldError>
-                </Field>
+                <AddressField onValueChange={setBaseUrl} value={baseUrl} />
               ) : null}
-              <Field>
-                <FieldLabel>{t`Key`}</FieldLabel>
-                <KeyInput
-                  onValueChange={setKey}
-                  provider={provider.provider}
-                  value={key}
-                />
-                <FieldDescription>
-                  {t`Only its last four characters are shown again.`}
-                </FieldDescription>
-                <FieldError match="valueMissing">{t`Paste the key.`}</FieldError>
-              </Field>
+              <KeyField
+                onValueChange={setKey}
+                provider={provider.provider}
+                value={key}
+              />
               {add.error === null || add.error === undefined ? null : (
                 <Alert tone="danger">{reasonOf(add.error)}</Alert>
               )}
@@ -1117,6 +1200,216 @@ const Source = ({
   );
 };
 
+/** Adds `provider`'s key, with a custom endpoint's address. */
+const addProvider = async (
+  session: Session,
+  provider: OrganizationProviderId,
+  key: string,
+  baseUrl: string
+): Promise<void> => {
+  await (provider === "openai-compatible"
+    ? session.aiProviders.add({ provider, key, baseUrl })
+    : session.aiProviders.add({ provider, key }));
+};
+
+/** A provider's mark at a tile's size: its brand's tile, or a plug for a custom endpoint. */
+const TileMark = ({ provider }: { provider: OrganizationProviderId }) => {
+  const brand = marks[provider];
+  return brand === undefined ? (
+    <ItemMedia icon={Cable} />
+  ) : (
+    <ItemMedia>
+      <BrandIcon brand={brand} decorative size="md" />
+    </ItemMedia>
+  );
+};
+
+/**
+ * The provider chosen, its key and Connect, in the card: Connecting while
+ * the key is added and tested, then the connected row once the page reads
+ * again, or why the provider refused it under the key.
+ */
+const ConnectForm = ({
+  provider,
+  label,
+  connect,
+  onChange,
+}: {
+  provider: OrganizationProviderId;
+  label: string;
+  connect: Connect;
+  /** Back to the choice of provider. */
+  onChange: () => void;
+}) => {
+  const { t } = useLingui();
+  const [key, setKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  // Why the last try failed, until the key or the address changes.
+  const [refused, setRefused] = useState<string>();
+  const connecting = useAction(
+    async () => {
+      await connect(provider, key, baseUrl);
+    },
+    {
+      working: t`Connecting`,
+      done: t`Connected`,
+      failed: t`Not connected`,
+      onError: (error) => {
+        setRefused(reasonOf(error));
+      },
+    }
+  );
+  const custom = provider === "openai-compatible";
+  return (
+    <Form
+      aria-label={t`Connect ${label}`}
+      onSubmit={(event) => {
+        // Sent only once every field is right; sent here, not by the browser.
+        event.preventDefault();
+        setRefused(undefined);
+        void connecting.run();
+      }}
+    >
+      <Item size="sm" variant="outline">
+        <TileMark provider={provider} />
+        <ItemContent>
+          <ItemTitle>{label}</ItemTitle>
+          <ItemDescription>
+            <WhereItRuns provider={provider} />
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <Button
+            disabled={connecting.state === "working"}
+            onClick={onChange}
+            size="sm"
+            variant="ghost"
+          >
+            {t`Change`}
+          </Button>
+        </ItemActions>
+      </Item>
+      {/* The first field takes the focus the pressed tile had. */}
+      {custom ? (
+        <AddressField
+          autoFocus
+          onValueChange={(value) => {
+            setBaseUrl(value);
+            setRefused(undefined);
+          }}
+          value={baseUrl}
+        />
+      ) : null}
+      <KeyField
+        autoFocus={!custom}
+        onValueChange={(value) => {
+          setKey(value);
+          setRefused(undefined);
+        }}
+        provider={provider}
+        value={key}
+        {...(refused === undefined ? {} : { refused })}
+      />
+      <FormActions>
+        <Button type="submit" variant="ink" {...connecting.status}>
+          {t`Connect`}
+        </Button>
+      </FormActions>
+    </Form>
+  );
+};
+
+/**
+ * Connecting the first provider, in the Providers card: one line of what it
+ * is for, the named providers as tiles, and under them one quiet line for
+ * an OpenAI-compatible endpoint, which is no brand to choose among them. A
+ * choice opens its key in the same card.
+ */
+const ConnectProvider = ({
+  offered,
+  connect,
+}: {
+  offered: AiProvidersListing["offered"];
+  connect: Connect;
+}) => {
+  const { t } = useLingui();
+  const [chosen, setChosen] = useState<OrganizationProviderId>();
+  const provider = offered.find((each) => each.provider === chosen);
+  if (provider !== undefined) {
+    return (
+      <ConnectForm
+        connect={connect}
+        // A new choice is a new form: no key typed for another stays.
+        key={provider.provider}
+        label={providerName(provider.provider, provider.label)}
+        onChange={() => {
+          setChosen(undefined);
+        }}
+        provider={provider.provider}
+      />
+    );
+  }
+  const named = offered.filter(
+    ({ provider: each }) => each !== "openai-compatible"
+  );
+  const endpoint = offered.some(
+    ({ provider: each }) => each === "openai-compatible"
+  );
+  return (
+    <div {...stylex.props(styles.stack)}>
+      <Heading level={3} size="sm">
+        {t`Choose the AI that Grasp's chat, agents and workflows run on.`}
+      </Heading>
+      <div {...stylex.props(styles.tilesFrame)}>
+        <div {...stylex.props(styles.tiles)}>
+          {named.map((each) => {
+            const label = providerName(each.provider, each.label);
+            return (
+              <Item
+                key={each.provider}
+                render={
+                  <button
+                    aria-label={label}
+                    onClick={() => {
+                      setChosen(each.provider);
+                    }}
+                    type="button"
+                  />
+                }
+                size="sm"
+                variant="outline"
+              >
+                <TileMark provider={each.provider} />
+                <ItemContent>
+                  <ItemTitle>{label}</ItemTitle>
+                  <ItemDescription>
+                    <WhereItRuns provider={each.provider} />
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+            );
+          })}
+        </div>
+      </div>
+      {endpoint ? (
+        // The quietest button: an action here, not a place to go, so not a
+        // link; under the tiles, never one of them.
+        <Button
+          icon={Cable}
+          layout={styles.start}
+          onClick={() => {
+            setChosen("openai-compatible");
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {t`Use an OpenAI-compatible endpoint`}
+        </Button>
+      ) : null}
+    </div>
+  );
+};
+
 /** Settings › AI providers, on what core listed; `editable` for the organization's own admins. */
 export const AiProvidersSettings = ({
   listing,
@@ -1125,7 +1418,7 @@ export const AiProvidersSettings = ({
   listing: AiProvidersListing;
   editable: boolean;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const router = useRouter();
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
@@ -1160,16 +1453,31 @@ export const AiProvidersSettings = ({
       );
     });
   };
-  const addKey = async (
-    provider: OrganizationProviderId,
-    key: string,
-    baseUrl: string
-  ): Promise<void> => {
-    await changeOrThrow(async (session) =>
-      provider === "openai-compatible"
-        ? await session.aiProviders.add({ provider, key, baseUrl })
-        : await session.aiProviders.add({ provider, key })
-    );
+  const addKey: Connect = async (provider, key, baseUrl) => {
+    await changeOrThrow(async (session) => {
+      await addProvider(session, provider, key, baseUrl);
+    });
+  };
+  // The first provider, in one step: its key added, then tested with one
+  // tiny call, and the page read again only after, so the card turns into
+  // the connected row only once the key works. A key its provider refuses
+  // is removed again: kept, it would stand as the organization's provider,
+  // close this card on a key that doesn't work, and leave every chat, agent
+  // and workflow failing on it, while the admin, told why under the field,
+  // pastes the right one here. A custom endpoint is kept untested: it is
+  // tested once a model it serves is named (testModelOf).
+  const connect: Connect = async (provider, key, baseUrl) => {
+    await changeOrThrow(async (session) => {
+      await addProvider(session, provider, key, baseUrl);
+      if (provider === "openai-compatible") {
+        return;
+      }
+      const outcome = await session.aiProviders.test(provider);
+      if (!outcome.ok) {
+        await session.aiProviders.remove(provider);
+        throw new Error(testFailureText(outcome.code, i18n));
+      }
+    });
   };
   const addable = offered.filter(
     ({ provider }) => !providers.some((each) => each.provider === provider)
@@ -1188,51 +1496,67 @@ export const AiProvidersSettings = ({
           });
         }}
       />
-      <SectionCard
-        variant="grouped"
-        {...(editable && addable.length > 0
-          ? {
-              actions: <AddProviderDialog offered={addable} onAdd={addKey} />,
-            }
-          : {})}
-        density="compact"
-        flush
-        title={t`Providers`}
-      >
-        {failure === undefined && !unanswered ? null : (
-          <SettingsRows>
+      {unanswered ? (
+        // Nothing answers yet: the card is where the first provider is
+        // connected, for the organization's own admins.
+        <SectionCard variant="grouped" density="compact" title={t`Providers`}>
+          <div {...stylex.props(styles.stack)}>
             {failure === undefined ? null : (
-              <RowAlert variant="danger">{failure}</RowAlert>
+              <Alert tone="danger">{failure}</Alert>
             )}
-            {unanswered ? (
-              <RowAlert variant="attention">
-                {t`No provider is connected, so Grasp's AI can't answer yet.`}
-              </RowAlert>
-            ) : null}
-          </SettingsRows>
-        )}
-        {providers.length > 0 ? (
-          <ItemGroup aria-label={t`Connected providers`} separated>
-            {providers.map((provider) => (
-              <ProviderRow
-                editable={editable}
-                // A new key is a new row: no test of the key it replaced stays.
-                key={`${provider.provider}:${provider.mask}:${String(provider.updatedAt)}`}
-                onDelete={async () => {
-                  await changeOrThrow(async (session) => {
-                    await session.aiProviders.remove(provider.provider);
-                  });
-                }}
-                onReplace={async (key) => {
-                  await addKey(provider.provider, key, provider.baseUrl ?? "");
-                }}
-                provider={provider}
-                testModel={testModelOf(provider.provider, choice)}
-              />
-            ))}
-          </ItemGroup>
-        ) : null}
-      </SectionCard>
+            {editable ? (
+              <ConnectProvider connect={connect} offered={addable} />
+            ) : (
+              <Text size="sm" tone="muted">
+                {t`The organization's own admins connect its AI provider here.`}
+              </Text>
+            )}
+          </div>
+        </SectionCard>
+      ) : (
+        <SectionCard
+          variant="grouped"
+          {...(editable && addable.length > 0
+            ? {
+                actions: <AddProviderDialog offered={addable} onAdd={addKey} />,
+              }
+            : {})}
+          density="compact"
+          flush
+          title={t`Providers`}
+        >
+          {failure === undefined ? null : (
+            <SettingsRows>
+              <RowAlert variant="danger">{failure}</RowAlert>
+            </SettingsRows>
+          )}
+          {providers.length > 0 ? (
+            <ItemGroup aria-label={t`Connected providers`} separated>
+              {providers.map((provider) => (
+                <ProviderRow
+                  editable={editable}
+                  // A new key is a new row: no test of the key it replaced stays.
+                  key={`${provider.provider}:${provider.mask}:${String(provider.updatedAt)}`}
+                  onDelete={async () => {
+                    await changeOrThrow(async (session) => {
+                      await session.aiProviders.remove(provider.provider);
+                    });
+                  }}
+                  onReplace={async (key) => {
+                    await addKey(
+                      provider.provider,
+                      key,
+                      provider.baseUrl ?? ""
+                    );
+                  }}
+                  provider={provider}
+                  testModel={testModelOf(provider.provider, choice)}
+                />
+              ))}
+            </ItemGroup>
+          ) : null}
+        </SectionCard>
+      )}
       {providers.length === 0 ? null : (
         <Models
           choice={choice}

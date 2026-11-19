@@ -3861,6 +3861,7 @@ msgid "Cc / Bcc"
 msgstr "CC / CCO"
 
 #: src/agents/new-agent.tsx
+#: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Cambiar"
 
@@ -4303,6 +4304,10 @@ msgstr "Elige uno"
 msgid "Choose or write an answer first"
 msgstr "Elige o escribe primero una respuesta"
 
+#: src/settings/ai-providers.tsx
+msgid "Choose the AI that Grasp's chat, agents and workflows run on."
+msgstr "Elige la IA con la que funcionan el chat, los agentes y los flujos de trabajo de Grasp."
+
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
 msgstr "Elige quién quieres que te entreviste."
@@ -4677,6 +4682,7 @@ msgstr "Coincide"
 #: src/connections/request-app-dialog.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/settings/ai-providers.tsx
 msgid "Connect"
 msgstr "Conectar"
 
@@ -4684,6 +4690,10 @@ msgstr "Conectar"
 #: src/connections/integration-item.tsx
 msgid "Connect {app}"
 msgstr "Conectar {app}"
+
+#: src/settings/ai-providers.tsx
+msgid "Connect {label}"
+msgstr "Conectar {label}"
 
 #: src/connections/overview-lists.tsx
 #: src/onboarding/connect-steps.tsx
@@ -4712,6 +4722,7 @@ msgid "Connect another account"
 msgstr "Conectar otra cuenta"
 
 #: src/onboarding/connect-steps.tsx
+#: src/settings/ai-providers.tsx
 msgid "Connected"
 msgstr "Conectado"
 
@@ -4767,6 +4778,10 @@ msgstr "Conectada, a través de Composio"
 #: src/onboarding/ai-step.tsx
 msgid "Connected: {names}"
 msgstr "Conectado: {names}"
+
+#: src/settings/ai-providers.tsx
+msgid "Connecting"
+msgstr "Conectando"
 
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
@@ -10159,10 +10174,6 @@ msgid "No projects yet"
 msgstr "Aún no hay proyectos"
 
 #: src/settings/ai-providers.tsx
-msgid "No provider is connected, so Grasp's AI can't answer yet."
-msgstr "No hay ningún proveedor conectado, así que la IA de Grasp aún no puede responder."
-
-#: src/settings/ai-providers.tsx
 msgid "No provider of your own is connected: switching to your own keys leaves AI off until you add one."
 msgstr "No hay ningún proveedor propio conectado: si cambias a tus propias claves, la IA queda desactivada hasta que añadas uno."
 
@@ -10414,6 +10425,7 @@ msgstr "No borrado"
 msgid "Not confirmed by the board yet"
 msgstr "Aún no confirmada por la dirección"
 
+#: src/settings/ai-providers.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Not connected"
 msgstr "No conectada"
@@ -15930,6 +15942,10 @@ msgstr "El que elija la persona que pregunta"
 msgid "The organization has no teams yet."
 msgstr "La organización aún no tiene equipos."
 
+#: src/settings/ai-providers.tsx
+msgid "The organization's own admins connect its AI provider here."
+msgstr "Los administradores de la propia organización conectan aquí su proveedor de IA."
+
 #: src/connections/http-connections.tsx
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 msgstr "El origen es https:// y un nombre de host público, sin nada detrás: https://api.example.com."
@@ -17152,6 +17168,10 @@ msgstr "Usar una lista de personal en su lugar"
 #: src/connections/request-app-dialog.tsx
 msgid "Use an address that starts with http:// or https://."
 msgstr "Usa una dirección que empiece por http:// o https://."
+
+#: src/settings/ai-providers.tsx
+msgid "Use an OpenAI-compatible endpoint"
+msgstr "Usar un endpoint compatible con OpenAI"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Use another list"
