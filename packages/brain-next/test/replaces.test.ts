@@ -303,6 +303,157 @@ describe("a memory that replaces earlier ones of its writer", () => {
     });
   });
 
+  it("refuses a replacement it may not make with the same answer whether or not an erasure would leave its memory out", async () => {
+    /** An add drawn from a source, with a writer's memory about the person of `email` replacing nothing there is. */
+    const asked = async (email: string) => {
+      const at = setUp();
+      const source = `test:${crypto.randomUUID()}`;
+      await shared().addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: "drawn",
+        access: at.access,
+      });
+      return await shared()
+        .addMemories({
+          change: crypto.randomUUID(),
+          access: at.access,
+          entities: [
+            {
+              key: "c",
+              kind: "person",
+              identifiers: [{ type: "email", value: email }],
+            },
+          ],
+          memories: [
+            {
+              about: "c",
+              type: "fact",
+              statement: "Leads sales",
+              speaker: { kind: "system" },
+              basis: { kind: "writer", writer: at.writer },
+              replaces: [crypto.randomUUID()],
+            },
+          ],
+          extracted: { source, version: 1 },
+        })
+        .then(
+          () => "added",
+          (error: unknown) => (error instanceof Error ? error.message : "")
+        );
+    };
+    const kept = `kept-${unique("p")}@example.test`;
+    const erased = `erased-${unique("p")}@example.test`;
+    await shared().erasePersonShared({
+      person: unique("person"),
+      identifiers: [{ type: "email", value: erased }],
+      reason: "person_erased",
+    });
+    const answers = { kept: await asked(kept), erased: await asked(erased) };
+
+    expect({
+      same: answers.kept === answers.erased,
+      refused: refusal.test(answers.kept),
+    }).toStrictEqual({ same: true, refused: true });
+  });
+
+  it("refuses a replacement whose memory names its entity by a name, not by its id", async () => {
+    const at = setUp();
+    const old = await add(at, requirement("old", at.writer));
+
+    // The same customer by name, as a later add would find it.
+    await expect(
+      add(at, requirement("new", at.writer, [old.memory]), {
+        reader: at.reader,
+      })
+    ).rejects.toThrow(refusal);
+  });
+
+  it("refuses a replacement it may not make with the same answer whether or not its speaker was erased", async () => {
+    const at = setUp();
+    const old = await add(at, requirement("old", at.writer));
+    const erased = unique("person");
+    await shared().erasePersonShared({
+      person: erased,
+      identifiers: [],
+      reason: "person_erased",
+    });
+    const asked = async (person: string) =>
+      await add(
+        at,
+        {
+          ...requirement("new", at.writer, [crypto.randomUUID()]),
+          speaker: { kind: "internal", person },
+        },
+        { entity: old.entity, reader: at.reader }
+      ).then(
+        () => "added",
+        (error: unknown) => (error instanceof Error ? error.message : "")
+      );
+    const answers = {
+      kept: await asked(unique("person")),
+      erased: await asked(erased),
+    };
+
+    expect({
+      same: answers.kept === answers.erased,
+      refused: refusal.test(answers.kept),
+    }).toStrictEqual({ same: true, refused: true });
+  });
+
+  it("writes no replacement of a memory an erasure leaves out of the add, and ends nothing", async () => {
+    /** A drawn add whose memory about a customer, relating it to the person of `email`, replaces one there: what is current after. */
+    const after = async (email: string) => {
+      const at = setUp();
+      const old = await add(at, requirement("old", at.writer));
+      const source = `test:${crypto.randomUUID()}`;
+      await shared().addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: "drawn",
+        access: at.access,
+      });
+      await shared().addMemories({
+        change: crypto.randomUUID(),
+        access: at.access,
+        entities: [
+          { key: "c", kind: "customer", id: old.entity },
+          {
+            key: "p",
+            kind: "person",
+            identifiers: [{ type: "email", value: email }],
+          },
+        ],
+        memories: [
+          {
+            about: "c",
+            attribute: "contact",
+            object: "p",
+            type: "fact",
+            statement: "Their contact",
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: at.writer },
+            replaces: [old.memory],
+          },
+        ],
+        extracted: { source, version: 1 },
+        reader: at.reader,
+      });
+      return await currentOf(old.entity, at.reader);
+    };
+    const erased = `erased-${unique("p")}@example.test`;
+    await shared().erasePersonShared({
+      person: unique("person"),
+      identifiers: [{ type: "email", value: erased }],
+      reason: "person_erased",
+    });
+
+    expect({
+      kept: await after(`kept-${unique("p")}@example.test`),
+      erased: await after(erased),
+    }).toStrictEqual({ kept: ["Their contact"], erased: ["old"] });
+  });
+
   it("is never named by a memory drawn from a source", async () => {
     const at = setUp();
     await expect(
