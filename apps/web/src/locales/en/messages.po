@@ -128,6 +128,10 @@ msgstr "{app} is off"
 msgid "{app} needs someone to sign in again. Until then, what uses it waits."
 msgstr "{app} needs someone to sign in again. Until then, what uses it waits."
 
+#: src/connections/integrations-header.tsx
+msgid "{app} stopped working. Disconnect it and connect it again; until then, what uses it waits."
+msgstr "{app} stopped working. Disconnect it and connect it again; until then, what uses it waits."
+
 #: src/connections/revocations-by-hand.tsx
 msgid "{app}, {whose}'s own"
 msgstr "{app}, {whose}'s own"
@@ -2658,6 +2662,10 @@ msgstr "An admin decides. It holds in this chat only."
 msgid "An admin hasn't set up company memory yet."
 msgstr "An admin hasn't set up company memory yet."
 
+#: src/connections/integrations-header.tsx
+msgid "An admin needs to connect {app} again. Until then, what uses it waits."
+msgstr "An admin needs to connect {app} again. Until then, what uses it waits."
+
 #: src/workflows/workflow-triggers.tsx
 msgid "An admin refused or took back its reading of these events: it hears nothing."
 msgstr "An admin refused or took back its reading of these events: it hears nothing."
@@ -3219,6 +3227,10 @@ msgstr "Ask for changes"
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
 msgstr "Ask for it"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Ask for the app you need, and an admin can add it."
+msgstr "Ask for the app you need, and an admin can add it."
 
 #: src/chat/global-chat.tsx
 #: src/frame/shell-pending.tsx
@@ -4724,6 +4736,7 @@ msgstr "Connect {label}"
 msgid "Connect {name}"
 msgstr "Connect {name}"
 
+#: src/connections/integration-tile.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Connect again"
 msgstr "Connect again"
@@ -10036,6 +10049,10 @@ msgstr "No App is called “{asked}”"
 msgid "No Apps in it yet."
 msgstr "No Apps in it yet."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "No apps match your search"
+msgstr "No apps match your search"
+
 #: src/apps/apps-overview.tsx
 msgid "No Apps yet"
 msgstr "No Apps yet"
@@ -10118,7 +10135,6 @@ msgid "No goals yet."
 msgstr "No goals yet."
 
 #: src/apps/app-integrations.tsx
-#: src/routes/_shell.integrations.index.tsx
 msgid "No integrations match your search."
 msgstr "No integrations match your search."
 
@@ -11299,6 +11315,10 @@ msgstr "Open"
 msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Open"
+
+#: src/connections/integrations-header.tsx
+msgid "Open {lapsedApp}"
+msgstr "Open {lapsedApp}"
 
 #: src/frame/part-words.tsx
 #: src/knowledge/uploads.tsx

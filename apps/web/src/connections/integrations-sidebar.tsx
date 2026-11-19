@@ -28,6 +28,7 @@ import {
 import type { IconData } from "../grasp/icons/index.ts";
 import type { SidebarSection } from "../grasp/sidebar/index.ts";
 import { groupLabel } from "./groups.ts";
+import { integrationsOf } from "./integrations.ts";
 
 // Integrations as the sidebar's section while the person is in it, as
 // Settings and the Brain are (grasp/frame/grasp-sidebar.tsx): its name
@@ -56,6 +57,24 @@ const kindIcons: Readonly<Record<CatalogGroup, IconData>> = {
   Other: AppWindow,
 };
 
+/**
+ * How many apps each kind holds, by the same rule as the kind's own page:
+ * the apps of that kind nobody connected yet (what is connected stands
+ * under Connected).
+ */
+const kindCounts = (
+  entries: Parameters<typeof integrationsOf>[0],
+  connections: Parameters<typeof integrationsOf>[1]
+): Map<CatalogGroup, number> => {
+  const counts = new Map<CatalogGroup, number>();
+  for (const integration of integrationsOf(entries, connections)) {
+    if (integration.listed && integration.connections.length === 0) {
+      counts.set(integration.group, (counts.get(integration.group) ?? 0) + 1);
+    }
+  }
+  return counts;
+};
+
 /** The last page outside Integrations, to go back to. */
 interface Outside {
   pathname: string;
@@ -80,12 +99,13 @@ export const useIntegrationsSection = (): SidebarSection | undefined => {
     return undefined;
   }
   const catalog = overview?.loaderData?.catalog;
+  const connections = overview?.loaderData?.connections;
   const entries = catalog?.state === "ready" ? catalog.data.entries : [];
   const chosen = overview?.search.group;
-  const counts = new Map<CatalogGroup, number>();
-  for (const entry of entries) {
-    counts.set(entry.group, (counts.get(entry.group) ?? 0) + 1);
-  }
+  const counts = kindCounts(
+    entries,
+    connections?.state === "ready" ? connections.data : []
+  );
   const kinds = catalogGroups.filter(
     (group) => entries.length === 0 || (counts.get(group) ?? 0) > 0
   );

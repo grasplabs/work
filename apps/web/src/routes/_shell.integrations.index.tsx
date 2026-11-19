@@ -43,7 +43,14 @@ import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
 import { Plus, Search as SearchIcon } from "../grasp/icons/index.ts";
 import {
@@ -512,6 +519,56 @@ const Notices = ({
 };
 
 /**
+ * Below the apps: outside APIs an admin approved and the apps people asked
+ * for. While someone searches, only the outside APIs the search finds.
+ */
+const Extras = ({
+  identity,
+  listed,
+  q,
+  requests,
+}: {
+  identity: Identity;
+  listed: Parameters<typeof httpConnectionsMatching>[0] | undefined;
+  q: string | undefined;
+  requests: Parameters<typeof RequestedApps>[0]["requests"];
+}) => {
+  if (
+    q !== undefined &&
+    httpConnectionsMatching(listed ?? [], q).length === 0
+  ) {
+    return null;
+  }
+  return (
+    <>
+      <HttpConnections connections={listed} identity={identity} search={q} />
+      {q === undefined ? (
+        <RequestedApps requests={requests} search={q} />
+      ) : null}
+    </>
+  );
+};
+
+/** A search that finds nothing: say so, and offer to ask for the app. */
+const NothingFound = ({ onRequest }: { onRequest: () => void }) => {
+  const { t } = useLingui();
+  return (
+    <Empty shape="cards" size="md">
+      <EmptyHeader>
+        <EmptyMedia picture="search" />
+        <EmptyTitle>{t`No apps match your search`}</EmptyTitle>
+        <EmptyDescription>{t`Ask for the app you need, and an admin can add it.`}</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button icon={Plus} onClick={onRequest} variant="quiet">
+          {t`Request app`}
+        </Button>
+      </EmptyContent>
+    </Empty>
+  );
+};
+
+/**
  * What the page shows for a kind or a search: the apps nobody connected
  * that it keeps, and how many apps and outside APIs show in all.
  */
@@ -558,12 +615,13 @@ const Integrations = () => {
   const [requesting, setRequesting] = useState(false);
   // The overview itself: no kind chosen and nothing searched.
   const overview = group === undefined && q === undefined;
+  const kind = group === undefined ? undefined : i18n._(groupLabel[group]);
   const crumbs =
-    group === undefined
+    kind === undefined
       ? [{ label: t`Integrations` }]
       : [
           { label: t`Integrations`, to: "/integrations" as const },
-          { label: i18n._(groupLabel[group]) },
+          { label: kind },
         ];
   return (
     <>
@@ -589,9 +647,7 @@ const Integrations = () => {
               </Button>
             </div>
           }
-          title={
-            group === undefined ? t`Integrations` : i18n._(groupLabel[group])
-          }
+          title={kind ?? t`Integrations`}
         />
         <Returned connection={connection} integrations={integrations} />
         <Notices
@@ -611,7 +667,10 @@ const Integrations = () => {
         </output>
         <div {...stylex.props(styles.lists)}>
           {overview && loaded ? (
-            <IntegrationsHeader integrations={integrations} />
+            <IntegrationsHeader
+              identity={identity}
+              integrations={integrations}
+            />
           ) : null}
           {group === undefined ? (
             <Await
@@ -639,21 +698,19 @@ const Integrations = () => {
           ) : null}
           <Others group={group} open={app} others={others} q={q} />
           {loaded && shown === 0 ? (
-            <Empty size="md">
-              <EmptyHeader>
-                <EmptyDescription>{t`No integrations match your search.`}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
+            <NothingFound
+              onRequest={() => {
+                setRequesting(true);
+              }}
+            />
           ) : null}
           {group === undefined ? (
-            <>
-              <HttpConnections
-                connections={listed}
-                identity={identity}
-                search={q}
-              />
-              <RequestedApps requests={requests} search={q} />
-            </>
+            <Extras
+              identity={identity}
+              listed={listed}
+              q={q}
+              requests={requests}
+            />
           ) : null}
         </div>
       </Page>

@@ -1,3 +1,4 @@
+import { oauthProviderSchema } from "@grasp-os/shared/connect-names";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -5,6 +6,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+import { Badge } from "../grasp/badge/index.ts";
 import {
   Item,
   ItemContent,
@@ -24,8 +26,9 @@ import { ProviderMark } from "./provider-mark.tsx";
 // where it stands: to sign in to again, or how many workflows use it once
 // that is read, or for whom it is connected until then. Not connected, it
 // is how many tools it has. Every tile is the same: one height across the
-// grid, its mark, its name and one short fact in the same quiet words, so
-// no tile stands out but by its mark (Ruben, 19 Nov 2026).
+// grid, its mark, its name and one short fact in the same quiet words;
+// only one that needs someone stands out, by its amber badge (Ruben, 19
+// Nov 2026).
 
 const styles = stylex.create({
   // Tiles side by side, as many as the width takes.
@@ -68,10 +71,19 @@ const ConnectedFact = ({
   uses: readonly ConnectionWorkflows[] | undefined;
 }) => {
   const { t } = useLingui();
-  // The header card and the app's nerve say it louder: here it is one
-  // quiet fact like any other.
+  // Amber, the one sign that something needs someone; the small badge
+  // keeps the tile's height (the grid sets it either way).
+  // Only Grasp's Microsoft and Google connectors can be signed in to
+  // again; anything else is connected anew.
   if (reliedOnLapsed(integration, uses)) {
-    return t`Sign in again`;
+    return (
+      <Badge size="sm" tone="attention">
+        {integration.source === "native" &&
+        oauthProviderSchema.safeParse(integration.id).success
+          ? t`Sign in again`
+          : t`Connect again`}
+      </Badge>
+    );
   }
   if (uses === undefined) {
     return integration.connections.some(({ scope }) => scope === "shared")

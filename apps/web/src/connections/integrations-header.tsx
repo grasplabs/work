@@ -1,3 +1,5 @@
+import { isAdmin } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -8,6 +10,7 @@ import { Card } from "../grasp/card/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { canReconnect } from "./connect-dialog.tsx";
 import { IntegrationsNerves, LINES } from "./integrations-nerves.tsx";
 import type { Integration } from "./integrations.ts";
 import { reliedOnLapsed } from "./integrations.ts";
@@ -49,11 +52,69 @@ const styles = stylex.create({
   },
 });
 
+/**
+ * What this person can do about an app whose connection ran out, as core
+ * decides it: sign in again (their own, or a shared Microsoft or Google
+ * one for an admin); for an admin, disconnect a shared one that can't be
+ * signed in to again (a Composio toolkit) and connect it anew, from its
+ * Sheet; or nothing, when only an admin can.
+ */
+type Fix = "sign-in" | "reconnect" | "none";
+
+const fixOf = (
+  integration: Integration,
+  identity: Pick<Identity, "role" | "staff">
+): Fix => {
+  const lapsed = integration.connections.find(
+    ({ status }) => status === "needs_reauth"
+  );
+  if (lapsed === undefined) {
+    return "none";
+  }
+  if (canReconnect(lapsed, integration.offered, identity)) {
+    return "sign-in";
+  }
+  return isAdmin(identity.role) && !identity.staff ? "reconnect" : "none";
+};
+
+/** The card's one line under its title: what needs someone, and who. */
+const Line = ({
+  count,
+  first,
+  others,
+  fix,
+}: {
+  count: number;
+  first: Integration | undefined;
+  others: number;
+  fix: Fix;
+}): string => {
+  const { t } = useLingui();
+  if (first === undefined) {
+    return count === 0
+      ? t`Pick an app below to connect it. Grasp reaches only what you connect.`
+      : t`Everything connected works.`;
+  }
+  const app = first.name;
+  if (others > 0) {
+    return t`${plural(others, { one: `${app} and # other app need someone to sign in again.`, other: `${app} and # other apps need someone to sign in again.` })}`;
+  }
+  if (fix === "sign-in") {
+    return t`${app} needs someone to sign in again. Until then, what uses it waits.`;
+  }
+  if (fix === "reconnect") {
+    return t`${app} stopped working. Disconnect it and connect it again; until then, what uses it waits.`;
+  }
+  return t`An admin needs to connect ${app} again. Until then, what uses it waits.`;
+};
+
 /** The header card, over every app's tile. */
 export const IntegrationsHeader = ({
   integrations,
+  identity,
 }: {
   integrations: readonly Integration[];
+  identity: Pick<Identity, "role" | "staff">;
 }) => {
   const { t } = useLingui();
   const navigate = useNavigate({ from: "/integrations/" });
@@ -72,20 +133,9 @@ export const IntegrationsHeader = ({
   }));
   const count = connected.length;
   const [first] = lapsed;
+  const lapsedApp = first?.name ?? "";
   const others = lapsed.length - 1;
-  let line: string;
-  if (first === undefined) {
-    line =
-      count === 0
-        ? t`Pick an app below to connect it. Grasp reaches only what you connect.`
-        : t`Everything connected works.`;
-  } else if (others === 0) {
-    const app = first.name;
-    line = t`${app} needs someone to sign in again. Until then, what uses it waits.`;
-  } else {
-    const app = first.name;
-    line = t`${plural(others, { one: `${app} and # other app need someone to sign in again.`, other: `${app} and # other apps need someone to sign in again.` })}`;
-  }
+  const fix = first === undefined ? "none" : fixOf(first, identity);
   return (
     <Card padding="lg">
       <div {...stylex.props(styles.field)}>
@@ -109,8 +159,10 @@ export const IntegrationsHeader = ({
               ? t`Connect the apps your work runs on`
               : t`${plural(count, { one: "Grasp reaches # app", other: "Grasp reaches # apps" })}`}
           </Heading>
-          <Text tone="muted">{line}</Text>
-          {first === undefined ? null : (
+          <Text tone="muted">
+            <Line count={count} first={first} fix={fix} others={others} />
+          </Text>
+          {first === undefined || fix === "none" ? null : (
             <Button
               render={
                 <Link
@@ -123,7 +175,7 @@ export const IntegrationsHeader = ({
               size="sm"
               variant="ink"
             >
-              {t`Sign in again`}
+              {fix === "sign-in" ? t`Sign in again` : t`Open ${lapsedApp}`}
             </Button>
           )}
         </div>

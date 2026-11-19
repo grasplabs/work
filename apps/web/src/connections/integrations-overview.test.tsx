@@ -30,8 +30,12 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 type Entry = OfferedCatalog["entries"][number];
 
-const entry = (id: string, name: string): Entry => ({
-  source: "native",
+const entry = (
+  id: string,
+  name: string,
+  source: Entry["source"] = "native"
+): Entry => ({
+  source,
   id,
   name,
   categories: ["chat"],
@@ -63,12 +67,18 @@ const connection = (
 let root: Root | undefined;
 
 /** The overview's header and tiles at `/integrations`, and the router, to read where a press went. */
-const opened = async (connections: ListedConnection[]) => {
+const admin = { role: "admin", staff: false } as const;
+const member = { role: "user", staff: false } as const;
+
+const opened = async (
+  connections: ListedConnection[],
+  identity: { role: "admin" | "user"; staff: boolean } = admin
+) => {
   const integrations = integrationsOf(
     [
       entry("microsoft", "Microsoft 365"),
       entry("google", "Google Workspace"),
-      entry("acme-crm", "Acme CRM"),
+      entry("acme-crm", "Acme CRM", "composio"),
     ],
     connections
   );
@@ -78,7 +88,7 @@ const opened = async (connections: ListedConnection[]) => {
     path: "/integrations/",
     component: () => (
       <>
-        <IntegrationsHeader integrations={integrations} />
+        <IntegrationsHeader identity={identity} integrations={integrations} />
         <TileGrid label="Apps">
           {integrations.map((integration) => (
             <IntegrationTile
@@ -157,6 +167,33 @@ describe("the Integrations overview", () => {
     await expect(appAfter(router, fix)).resolves.toBe("native:google");
   });
 
+  it("has an admin connect a toolkit again from its Sheet, as it can't be signed in to again", async () => {
+    const { host, router } = await opened([
+      connection("acme-crm", { source: "composio", status: "needs_reauth" }),
+    ]);
+    expect(host.textContent).toContain(
+      "Acme CRM stopped working. Disconnect it and connect it again"
+    );
+    const open = [...host.querySelectorAll("a")].find(
+      (link) => link.textContent === "Open Acme CRM"
+    );
+    await expect(appAfter(router, open)).resolves.toBe("composio:acme-crm");
+  });
+
+  it("tells someone who can't sign in again who can, with nothing to press", async () => {
+    const { host } = await opened(
+      [connection("google", { status: "needs_reauth" })],
+      member
+    );
+    expect(host.textContent).toContain(
+      "An admin needs to connect Google Workspace again."
+    );
+    const fixes = [...host.querySelectorAll("a")].filter(
+      (link) => link.textContent === "Sign in again"
+    );
+    expect(fixes).toHaveLength(0);
+  });
+
   it("asks for a first app while nothing is connected, with nothing to fix", async () => {
     const { host } = await opened([]);
     expect(host.querySelector("h2")?.textContent).toBe(
@@ -181,7 +218,7 @@ describe("the Integrations overview", () => {
       "Acme CRM3 tools",
     ]);
     await expect(appAfter(router, tiles[2]?.querySelector("a"))).resolves.toBe(
-      "native:acme-crm"
+      "composio:acme-crm"
     );
   });
 });
