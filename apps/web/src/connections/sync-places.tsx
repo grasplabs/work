@@ -4,6 +4,7 @@ import type {
 } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
 import { syncErrors } from "@grasp-os/shared/sync";
+import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
@@ -34,11 +35,13 @@ import { useChange } from "./use-change.ts";
 // Brain what comes through it (brain-audience.tsx): which of its shared
 // drives or SharePoint libraries Grasp may copy into the Brain. The two
 // decisions belong together, and the page says, before anything is
-// picked, that everyone who may read it can read everything in a picked
-// place: the source's own permissions are not copied (GRA-1831). Core
-// and connect decide who may pick and check every pick (sync-picks.ts,
-// connect's sync.ts); the card only asks. It promises nothing about when
-// a copy is made or taken away.
+// picked, who will read what a picked place holds: for Google, those
+// Google lets open each file, of those the audience holds, which Grasp
+// reads only with an account that can share it (GRA-2145); each place
+// whose sharing the sync doesn't read is marked, as nobody reads its
+// files. Core and connect decide who may pick and check every pick
+// (sync-picks.ts, connect's sync.ts); the card only asks. It promises
+// nothing about when a copy is made or taken away.
 //
 // A save changes only what the admin ticked or unticked: it starts from
 // every place picked now (`picks`), those the listing doesn't show too,
@@ -181,14 +184,23 @@ const PlacesForm = ({
         <Trans>Copy into the Brain from {label}</Trans>
       </FieldLegend>
       <FieldDescription>
-        <Trans>
-          Everyone you let read {label} in the Brain will be able to read
-          everything in the places you pick, because the permissions in {label}{" "}
-          are not copied.
-        </Trans>
+        {connection.provider === "google" ? (
+          <Trans>
+            Each file is read in the Brain only by those {label} lets open it,
+            of those you let read {label} here. The account you connected must
+            be able to share files in each drive you pick: nobody reads the
+            files it can&apos;t share.
+          </Trans>
+        ) : (
+          <Trans>
+            Everyone you let read {label} in the Brain will be able to read
+            everything in the places you pick, because the permissions in{" "}
+            {label} are not copied.
+          </Trans>
+        )}
       </FieldDescription>
       <ul className="flex flex-col gap-2">
-        {places.choices.map(({ place, title, within }, index) => {
+        {places.choices.map(({ place, title, within, sharingRead }, index) => {
           // By position: a place's ID is the provider's, in any alphabet.
           const box = `${ids}-${index}`;
           return (
@@ -216,6 +228,11 @@ const PlacesForm = ({
                     <FieldDescription id={`${box}-in`}>
                       {within}
                     </FieldDescription>
+                  )}
+                  {sharingRead ? null : (
+                    <Badge className="self-start" variant="attention">
+                      <Trans>Nobody reads its files</Trans>
+                    </Badge>
                   )}
                 </FieldContent>
               </Field>

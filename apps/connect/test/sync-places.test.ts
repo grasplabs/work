@@ -667,9 +667,27 @@ describe("a shared connection's picked places", () => {
       choices: {
         feed: "sites",
         choices: [
-          { place: "sales", title: "Sales", within: null, picked: false },
-          { place: "legal", title: "Legal Team", within: null, picked: true },
-          { place: "board", title: longName, within: null, picked: false },
+          {
+            place: "sales",
+            title: "Sales",
+            within: null,
+            sharingRead: true,
+            picked: false,
+          },
+          {
+            place: "legal",
+            title: "Legal Team",
+            within: null,
+            sharingRead: true,
+            picked: true,
+          },
+          {
+            place: "board",
+            title: longName,
+            within: null,
+            sharingRead: true,
+            picked: false,
+          },
         ],
         picks: ["legal"],
         cursor: null,
@@ -703,9 +721,27 @@ describe("a shared connection's picked places", () => {
       shared: {
         feed: "sites",
         choices: [
-          { place: "sales", title: "Sales", within: null, picked: false },
-          { place: "legal", title: "Legal", within: null, picked: false },
-          { place: "board", title: "Board", within: null, picked: false },
+          {
+            place: "sales",
+            title: "Sales",
+            within: null,
+            sharingRead: true,
+            picked: false,
+          },
+          {
+            place: "legal",
+            title: "Legal",
+            within: null,
+            sharingRead: true,
+            picked: false,
+          },
+          {
+            place: "board",
+            title: "Board",
+            within: null,
+            sharingRead: true,
+            picked: false,
+          },
         ],
         picks: [],
         cursor: null,

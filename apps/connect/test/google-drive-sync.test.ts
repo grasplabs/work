@@ -1,5 +1,5 @@
 import { syncErrors } from "@grasp-os/shared/sync";
-import type { SyncPageRequest } from "@grasp-os/shared/sync";
+import type { SyncPage, SyncPageRequest } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -37,6 +37,17 @@ interface Drive {
   changes: Record<string, Record<string, unknown>>;
   /** Each file's content, by ID. */
   contents: Record<string, string>;
+  /**
+   * The person's folders, by ID: the one each is in (none for the top of
+   * their Drive), and whether its access is limited, which Google gives a
+   * folder alone.
+   */
+  folders: Record<
+    string,
+    { parent?: string; limited?: boolean; throttled?: boolean }
+  >;
+  /** Whether Drive refuses the top of My Drive (its `root` alias). */
+  rootRefused?: boolean;
   /** A file's version now, by ID, when it moved since it was listed or changed. */
   versions: Record<string, string>;
   /** Answers every request instead, when it answers. */
@@ -53,17 +64,23 @@ const drive: Drive = {
   owned: [],
   changes: {},
   contents: {},
+  folders: {},
   versions: {},
 };
+
+/** The top of the person's My Drive: no folder above it. */
+const myDrive = "my-drive";
 
 const reset = (): void => {
   drive.start = "100";
   drive.owned = [];
   drive.changes = {};
   drive.contents = {};
+  drive.folders = { [myDrive]: {} };
   drive.versions = {};
   drive.answer = undefined;
   drive.slow = undefined;
+  drive.rootRefused = undefined;
 };
 
 const listing = (url: URL): Response => {
@@ -108,6 +125,41 @@ const versionOf = (id: string): string => {
   );
 };
 
+/**
+ * A folder's own fields, as Drive answers them: the top of My Drive by its
+ * alias ("The alias root can be used to refer to the root folder anywhere
+ * a file ID is provided"), each folder where it is and whether its access
+ * is limited, which only a folder carries, or a rate limit; none for
+ * anything else.
+ */
+const folderCall = (id: string): Response | undefined => {
+  if (id === "root") {
+    return drive.rootRefused === true
+      ? Response.json({ error: { code: 403 } }, { status: 403 })
+      : Response.json({ id: myDrive, inheritedPermissionsDisabled: false });
+  }
+  const held = drive.folders[id];
+  if (held?.throttled === true) {
+    return Response.json(
+      {
+        error: {
+          code: 403,
+          message: "Rate limit exceeded",
+          errors: [{ reason: "rateLimitExceeded" }],
+        },
+      },
+      { status: 403 }
+    );
+  }
+  return held === undefined
+    ? undefined
+    : Response.json({
+        id,
+        ...(held.parent === undefined ? {} : { parents: [held.parent] }),
+        inheritedPermissionsDisabled: held.limited === true,
+      });
+};
+
 const internet = fakeInternet((request, url) => {
   const refused = scopeRefusal(providers, request, url);
   if (refused !== undefined) {
@@ -137,6 +189,10 @@ const internet = fakeInternet((request, url) => {
     return listing(url);
   }
   const [id = "", exported] = path.slice("/drive/v3/files/".length).split("/");
+  const asFolder = exported === undefined ? folderCall(id) : undefined;
+  if (asFolder !== undefined) {
+    return asFolder;
+  }
   const content = drive.contents[id];
   if (content === undefined) {
     return Response.json({ error: { code: 404 } }, { status: 404 });
@@ -171,6 +227,7 @@ const read = async (connectionId: string, cursor: string | null) =>
   await exports.default.readSyncPage(request(connectionId, cursor));
 
 const owner = "owner@acme.test";
+const colleague = "colleague@acme.test";
 
 /** A file the person owns, shared as `permissions`. */
 const ownedFile = (
@@ -185,6 +242,7 @@ const ownedFile = (
   version: "3",
   ownedByMe: true,
   lastModifyingUser: { emailAddress: "Owner@Acme.test" },
+  parents: [myDrive],
   permissions: [{ type: "user", emailAddress: owner }],
   ...fields,
 });
@@ -275,6 +333,182 @@ describe("syncing a person's own Drive", () => {
         path.startsWith("/drive/v3/files/video")
       )
     ).toBeFalsy();
+  });
+
+  it("gives a file in a folder with limited access only to its owner and those it is shared with on the file itself", async () => {
+    const connectionId = await connected();
+    drive.folders.hr = { parent: myDrive, limited: true };
+    drive.owned = [
+      ownedFile("salaries", {
+        parents: ["hr"],
+        permissions: [
+          { type: "user", emailAddress: owner, role: "owner" },
+          // Shared on the folder above: My Drive doesn't say where from.
+          {
+            type: "user",
+            emailAddress: "colleague@acme.test",
+            role: "reader",
+            permissionDetails: [{ inherited: true }],
+          },
+          {
+            type: "user",
+            emailAddress: "hr@acme.test",
+            role: "reader",
+            permissionDetails: [{ inherited: false }],
+          },
+        ],
+      }),
+    ];
+    drive.contents.salaries = "salaries";
+
+    const { items } = await read(connectionId, null);
+
+    expect(
+      items.flatMap((item) => (item.gone ? [] : [item.readers]))
+    ).toStrictEqual([
+      [
+        { kind: "account", id: owner },
+        { kind: "account", id: "hr@acme.test" },
+      ],
+    ]);
+  });
+
+  it("gives nobody a file whose folders don't reach the top of the person's My Drive, and keeps a file there as it is", async () => {
+    const connectionId = await connected();
+    // Someone else's folder the person's file is in, with nothing above it
+    // the person can see; and a folder Drive no longer gives.
+    drive.folders["their-folder"] = {};
+    // Each shared with a colleague, which only a file at the top keeps.
+    const shared = (id: string, parents?: string[]) =>
+      ownedFile(id, {
+        parents,
+        permissions: [
+          { type: "user", emailAddress: owner, role: "owner" },
+          { type: "user", emailAddress: colleague, role: "reader" },
+        ],
+      });
+    drive.owned = [
+      shared("at-top", [myDrive]),
+      shared("in-theirs", ["their-folder"]),
+      shared("in-lost", ["lost-folder"]),
+      shared("nowhere"),
+    ];
+    for (const { id } of drive.owned) {
+      drive.contents[id] = id;
+    }
+
+    const { items } = await read(connectionId, null);
+
+    expect(
+      items.map((item) => (item.gone ? undefined : [item.id, item.readers]))
+    ).toStrictEqual([
+      [
+        "at-top",
+        [
+          { kind: "account", id: owner },
+          { kind: "account", id: colleague },
+        ],
+      ],
+      ["in-theirs", null],
+      ["in-lost", null],
+      ["nowhere", null],
+    ]);
+  });
+
+  it("gives nobody a file at all when Drive refuses the top of My Drive", async () => {
+    const connectionId = await connected();
+    drive.rootRefused = true;
+    drive.owned = [
+      ownedFile("plan", {
+        permissions: [
+          { type: "user", emailAddress: owner, role: "owner" },
+          { type: "user", emailAddress: colleague, role: "reader" },
+        ],
+      }),
+    ];
+    drive.contents.plan = "plan";
+
+    const { items } = await read(connectionId, null);
+
+    expect(
+      items.map((item) => (item.gone ? undefined : item.readers))
+    ).toStrictEqual([null]);
+  });
+
+  it("moves on past a file whose folders take every request a read has left, and one more or one fewer", async () => {
+    // A read's room (50 requests): the change feed's start and the
+    // listing, then the top of My Drive, leave 47 for the file's folders.
+    const outcomes = [];
+    for (const depth of [46, 47, 48]) {
+      // oxlint-disable-next-line no-await-in-loop -- one Drive after another
+      const connectionId = await connected();
+      const chain = Array.from(
+        { length: depth },
+        (_, index) => `deep-${index}`
+      );
+      for (const [index, id] of chain.entries()) {
+        drive.folders[id] = { parent: chain[index + 1] ?? myDrive };
+      }
+      drive.owned = [ownedFile("deep", { parents: [chain[0] ?? myDrive] })];
+      drive.contents.deep = "deep";
+      const pages: (number | string)[] = [];
+      let cursor: string | null = null;
+      // Two reads at most: the second passes over a file late on the first.
+      for (let at = 0; at < 3; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one read after another
+        const page: SyncPage | string = await exports.default
+          .readSyncPage(request(connectionId, cursor))
+          .catch((error: unknown) => syncErrors.codeOf(error) ?? "failed");
+        pages.push(typeof page === "string" ? page : page.items.length);
+        if (typeof page === "string") {
+          break;
+        }
+        ({ cursor } = page);
+        if (page.items.length > 0) {
+          break;
+        }
+      }
+      outcomes.push({ depth, pages });
+    }
+
+    expect(outcomes).toStrictEqual([
+      { depth: 46, pages: [0, 1] },
+      { depth: 47, pages: [0, 1] },
+      { depth: 48, pages: [0, 1] },
+    ]);
+  });
+
+  it("reads the top of My Drive once a read, whatever the files", async () => {
+    const connectionId = await connected();
+    drive.owned = Array.from({ length: 4 }, (_, index) =>
+      ownedFile(`top-${index}`)
+    );
+    for (const { id } of drive.owned) {
+      drive.contents[id] = id;
+    }
+    const before = sentToGoogle().length;
+
+    await read(connectionId, null);
+
+    expect(
+      sentToGoogle()
+        .slice(before)
+        .filter(({ path }) => path.startsWith("/drive/v3/files/root"))
+    ).toHaveLength(1);
+  });
+
+  it("waits when Google throttles a folder's read, rather than giving its files nobody", async () => {
+    const connectionId = await connected();
+    drive.folders.slow = { parent: myDrive, throttled: true };
+    drive.owned = [ownedFile("plan", { parents: ["slow"] })];
+    drive.contents.plan = "plan";
+
+    await expect(
+      exports.default
+        .readSyncPage(request(connectionId, null))
+        .then(() => "ok")
+        .catch((error: unknown) => syncErrors.codeOf(error))
+    ).resolves.toBe("sync.throttled");
   });
 
   it("then brings only what changed, and what went away", async () => {
