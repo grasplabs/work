@@ -48,7 +48,7 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
 import { hostFunctionCall } from "../src/function-host.ts";
 import type { HostedApp, Runner } from "../src/function-host.ts";
-import { brainGrantRead } from "../src/history-access.ts";
+import { appRead } from "../src/history-access.ts";
 import { defaultMaxAttempts } from "../src/outbox-delivery.ts";
 import type { OutboxConsumer } from "../src/outbox-delivery.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -1355,19 +1355,20 @@ const agentOf = async (
 };
 
 /**
- * A real chat of Bob's whose code read the Brain, and its agent, granted
- * `write` on the fixture's App and the Brain (`readId`), which the read
- * rests on.
+ * A real chat of Bob's whose code queried the fixture's App, and its
+ * agent, granted `write` on that App and `read` (`readId`), which the
+ * query rests on.
  */
 const chatThatRead = async (fx: Fixture) => {
   const { agent } = await agentOf(fx);
   const stub = workspace(env, agent.workspaceId);
   const created = { id: agent.chatId };
+  const read = appRead("query", fx.app);
   await runInDurableObject(stub, (_object, state) => {
     state.storage.sql.exec(
       "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
       created.id,
-      brainGrantRead
+      read
     );
   });
   const asked = await requestPermission(
@@ -1375,9 +1376,9 @@ const chatThatRead = async (fx: Fixture) => {
     fx.ada,
     {
       subject: { type: "agent", agentId: agent.agentId },
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
+      object: { type: "app", appId: fx.app },
+      actions: ["read"],
+      binding: "REQUESTS_READ",
     },
     rolesOf(fx.ada)
   );
@@ -1385,7 +1386,7 @@ const chatThatRead = async (fx: Fixture) => {
   return {
     agent,
     stub,
-    chat: { id: created.id, read: brainGrantRead },
+    chat: { id: created.id, read },
     readId: asked.id,
   };
 };

@@ -613,11 +613,10 @@ const requireObjectFits = (
   object: PermissionObject,
   actions: readonly string[]
 ): void => {
-  // The Brain is the one platform offer an agent or an independent
-  // workflow may hold too: Apps, runs and agents share its permission.
-  const brainReader =
-    actions.includes("brain") &&
-    (subject.type === "agent" || subject.type === "workflow");
+  // The Brain is the one platform offer an independent workflow may hold
+  // too: Apps and runs share its permission. An agent reads it with none
+  // (brain-recall.ts `requireBrainReader`, GRA-2203).
+  const brainReader = actions.includes("brain") && subject.type === "workflow";
   if (object.type === "platform" && subject.type !== "app" && !brainReader) {
     refuseRequest("subject: Only an App uses what the platform offers.");
   }
@@ -1688,23 +1687,6 @@ export const grantedPermissions = async (
     context,
     onBehalfOf: authority.onBehalfOf,
   });
-};
-
-/**
- * Whether `authority` holds an active `brain` grant, read now: what an
- * App, run or agent needs to recall. A chat asks it before its turn, to
- * offer the brain at all and recall for the question (workspace.ts,
- * agent.ts), and recall asks it again as it reads.
- */
-export const hasBrainGrant = async (
-  env: Env,
-  authority: Authority
-): Promise<boolean> => {
-  const granted = await grantedPermissions(env, authority);
-  return granted.some(
-    ({ object, actions }) =>
-      object.type === "platform" && actions.includes("brain")
-  );
 };
 
 /**

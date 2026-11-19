@@ -67,10 +67,9 @@ describe("chat agent sandbox", () => {
       "import { env as imported, exports } from 'cloudflare:workers'; export default async (self, env) => ({ given: Object.keys(env), imported: Object.keys(imported ?? {}), exports: Object.keys(exports ?? {}) });"
     );
 
-    // No `env.brain`: its agent doesn't hold the brain permission.
     expect(result).toStrictEqual({
       isError: false,
-      text: `Returned:\n${JSON.stringify({ given: ["chat", "connections", "apps", "build", "workflows", "workflowBuild", "skills", "dashboard"], imported: [], exports: [] })}`,
+      text: `Returned:\n${JSON.stringify({ given: ["chat", "connections", "apps", "build", "workflows", "workflowBuild", "skills", "brain", "dashboard"], imported: [], exports: [] })}`,
     });
   });
 

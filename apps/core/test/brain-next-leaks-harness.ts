@@ -8,14 +8,10 @@ import { vi } from "vite-plus/test";
 import { organizationId } from "../src/auth/auth.ts";
 import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
-import { chatAgentId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
-import { requestGranted } from "./apps.ts";
 import { brainSurfaces, textOf } from "./brain-next-surfaces.ts";
 import type { Answer, Probe, Probing } from "./brain-next-surfaces.ts";
-import type { Idp } from "./idp.ts";
-import { signedInApi } from "./sign-in.ts";
 
 /**
  * What the marker test's files share (brain-next-leaks.test.ts and the
@@ -551,23 +547,4 @@ export const textsFor = async (
   return items.flatMap(({ text, found }) =>
     found === "meaning" ? [] : [text]
   );
-};
-
-/**
- * Grants the chat agent the Brain permission, once for the file that
- * calls this (its binding name can be granted only once): a test file's
- * own, as each file starts from empty storage.
- */
-export const chatAgentReadsBrainOnce = (idp: Idp): (() => Promise<void>) => {
-  let grant: Promise<unknown> | undefined;
-  return async () => {
-    grant ??= (async () =>
-      await requestGranted(idp, await signedInApi(idp, "admin"), {
-        subject: { type: "agent", agentId: chatAgentId },
-        object: { type: "platform" },
-        actions: ["brain"],
-        binding: "BRAIN",
-      }))();
-    await grant;
-  };
 };

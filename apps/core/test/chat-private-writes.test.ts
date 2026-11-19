@@ -64,7 +64,7 @@ const slow = { timeout: 120_000 };
 
 /**
  * A builder's Notes App, live, and a chat in its own Workspace whose
- * agent may write to it and holds the `brain` grant, answered by what
+ * agent may write to it, answered by what
  * `replies` makes of the App: the builder's chat (`builder`'s, when
  * given), or with `asMember` the chat of a member the builder added to
  * the App as a user.
@@ -96,12 +96,6 @@ const notesChat = async (
     object: { type: "app", appId: app },
     actions: ["read", "write"],
     binding: "NOTES",
-  });
-  await requestGranted(idp, admin, {
-    subject: chats.agent,
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
   });
   const { chat, ask } = await chats.newChat();
   /** The App's notes, as its builder's page reads them. */
@@ -458,7 +452,7 @@ describe("what a chat writes for others once it used something only its person m
   );
 
   it(
-    "holds a write after a turn that handed the person's profile to an agent without the Brain grant, Grasp's own or one an admin made (GRA-2202)",
+    "holds a write after a turn that handed the person's profile to any agent, Grasp's own or one an admin made (GRA-2202)",
     slow,
     async () => {
       const [builder, admin] = await Promise.all([
@@ -493,7 +487,7 @@ describe("what a chat writes for others once it used something only its person m
       const stub = workspace(env, personalWorkspaceId(builder.userId));
       const outcomes = [];
       for (const agentId of [chatAgentId, made.id]) {
-        // Granted the App and not the Brain.
+        // Granted the App alone: the Brain needs no grant.
         // oxlint-disable-next-line no-await-in-loop -- one agent after another
         await requestGranted(idp, builder, {
           subject: { type: "agent", agentId },

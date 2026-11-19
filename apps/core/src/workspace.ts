@@ -218,7 +218,6 @@ import {
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
-import { hasBrainGrant } from "./permissions.ts";
 import type { WorkContext } from "./restricted.ts";
 import { retireUnseen } from "./unseen-memories.ts";
 
@@ -2702,7 +2701,6 @@ export class Workspace extends DurableObject<Env> {
         shared,
         audience,
         personal,
-        readsBrain: await hasBrainGrant(this.env, authority),
         context,
         capture: { attended: !unattended },
       });

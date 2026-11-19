@@ -10,7 +10,6 @@ import type { SourceReaders } from "../src/brain-next.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { newTeam } from "./admin-teams.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
@@ -30,20 +29,6 @@ const setUpTime = { timeout: 60_000 };
 
 /** A member of the organization, whom no other test uses: the chat's person. */
 const newPerson = async () => await signedInWithRole(idp, "user");
-
-type Admin = Awaited<ReturnType<typeof signedInApi>>;
-
-/** Grants `agent` the Brain permission, as an admin would. */
-const grantBrain = async (
-  admin: Admin,
-  agent: { type: "agent"; agentId: string }
-) =>
-  await requestGranted(idp, admin, {
-    subject: agent,
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
 
 /** A source in the Brain that `readers` may read. */
 const inBrain = async (text: string, readers: SourceReaders) => {
@@ -196,7 +181,7 @@ describe("a chat's history", setUpTime, () => {
     ]);
   });
 
-  it("recalls for a chat only under the Brain permission, and only what its person may read", async () => {
+  it("recalls for a chat's code, with no grant, only what its person may read", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await newPerson();
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
@@ -212,28 +197,16 @@ describe("a chat's history", setUpTime, () => {
     const recallStep = codeStep(
       `export default async (self, env) => { try { const pack = await env.brain.recall(${JSON.stringify({ question: word, budget: { tokens: 800 } })}); return pack.items.map(({ text }) => text); } catch (error) { return error.code ?? String(error); } };`
     );
-    const { stub, chat, ask, agent } = await chatOf(
+    const { stub, chat, ask } = await chatOf(
       person.userId,
       recallStep,
-      says("Nothing."),
-      recallStep,
-      says("Still nothing."),
-      recallStep,
-      says("Refused.")
+      says("Found it.")
     );
-    // Without the Brain permission: no `env.brain` to call at all.
     await ask("What is the plan?");
-    const brainGrant = await grantBrain(admin, agent);
-    await ask("What is the plan, now?");
-    // Revoked: gone again, from the next turn.
-    await admin.api.permissions.revoke(brainGrant);
-    await ask("And now?");
     const results = await codeResults(stub, chat.id);
     expect(results.map(({ text }) => text)).toStrictEqual([
-      expect.stringContaining("This chat has no API named env.brain"),
-      // Once granted, the code's own: their own plan, never the team's.
+      // Their team's plan, never the team's they aren't in.
       `Returned:\n["Our plan: ${word}."]`,
-      expect.stringContaining("This chat has no API named env.brain"),
     ]);
   });
 });

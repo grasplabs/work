@@ -21,7 +21,6 @@ import {
 } from "../src/db/core/schema.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -60,8 +59,8 @@ import { signedInApi, unique } from "./sign-in.ts";
 // Team claims and drawings (the `members` reader set) name nobody: code's
 // reach never reads that set, and only uploads name their uploader.
 // 7. The audit log names who was named: each answer is audited by who
-//    asked and counts alone. Without the brain permission a chat's code
-//    has no `env.brain` at all; the harness probes the refusals.
+//    asked and counts alone. Every chat's code has `env.brain`, with no
+//    grant (GRA-2203); the harness probes the refusals.
 // The leak harness (brain-next-leaks.test.ts) probes the same read with
 // the markers and their twins, every way it answers.
 
@@ -209,12 +208,6 @@ const ownChatOf = async (
   ...replies: ProviderReply[]
 ) => {
   const chat = await chatOf(person.userId, ...replies);
-  await requestGranted(idp, admin, {
-    subject: chat.agent,
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
   return chat;
 };
 
@@ -274,12 +267,6 @@ const askedInDirectMessage = async (
   question: string
 ): Promise<WhoKnowsAnswer | undefined> => {
   const agentId = crypto.randomUUID();
-  await requestGranted(idp, admin, {
-    subject: { type: "agent", agentId },
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
   await fakeProvider(askingCode(question), says("Asked."));
   const stub = workspace(env, personalWorkspaceId(person.userId));
   const { chatId } = await stub.askThrough(

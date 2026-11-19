@@ -141,8 +141,6 @@ export interface TurnRequest {
    * a chat app, in a turn they started (workspace.ts, `answersAlone`).
    */
   personal: boolean;
-  /** Whether the chat's agent holds the brain permission. */
-  readsBrain: boolean;
   context: TurnContext;
   /** What the turn's capture for the Brain records besides how it ended. */
   capture: {
@@ -1084,8 +1082,6 @@ export class ChatHarness {
     // turn asked again sets up and recalls again, a second recall run
     // audited as the first was. Who reads the answer decides what it may
     // hand over (turn-recall.ts).
-    // Without the Brain grant, only the person's own profile, in their own
-    // chat (turn-recall.ts `findsOf`, GRA-2202).
     const recall = await this.#recall(turn, request);
     try {
       return await this.#conversation.submit(
@@ -1113,8 +1109,7 @@ export class ChatHarness {
               ...(request.question.built === undefined
                 ? {}
                 : { built: shownBuilt(request.question.built) }),
-              // A step for a search alone: a profile handed over is none.
-              ...(recall === undefined || !recall.searched
+              ...(recall === undefined
                 ? {}
                 : {
                     recall: {
@@ -1143,7 +1138,7 @@ export class ChatHarness {
    */
   async #recall(
     turn: CodeTurn,
-    { question: { text }, shared, audience, personal, readsBrain }: TurnRequest
+    { question: { text }, shared, audience, personal }: TurnRequest
   ) {
     const { messages } = await this.#conversation.context(context);
     return await recallForTurn(
@@ -1156,7 +1151,6 @@ export class ChatHarness {
         personal,
         history: messages,
         provenance: this.#sources,
-        grant: readsBrain,
       },
       text
     );
@@ -1374,7 +1368,7 @@ export class ChatHarness {
     /** The lines the turn's runs sent the Workspace, one after another. */
     let logged: Promise<void> = Promise.resolve();
     const turn: CodeTurn = {
-      apis: apisFor(request.shared, request.readsBrain),
+      apis: apisFor(request.shared),
       scope,
       runs: {
         open: async (opening) =>
@@ -1434,14 +1428,14 @@ export class ChatHarness {
             ),
           }
         : {}),
-      // Only in a person's own chat, by an agent that may read the brain.
-      ...(request.readsBrain && !request.shared
-        ? {
+      // Only in a person's own chat.
+      ...(request.shared
+        ? {}
+        : {
             thinking: showThinking(
               async () => await brainOf(env, scope.personId)
             ),
-          }
-        : {}),
+          }),
       withheld: async () => {
         const checked = await this.#guard(scope);
         this.#sources = checked.sources;

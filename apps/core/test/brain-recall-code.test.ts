@@ -76,9 +76,9 @@ import { publishDefinition } from "./workflow-publishing.ts";
 // (`ctx.brain.<alias>.recall`) and a chat's code (`env.brain.recall`)
 // send the same request and get the same pack, from core's
 // brain-recall.ts. How it can fail, and what each test holds it to:
-// 1. Code without the grant to read the Brain recalls: a declaration, a
-//    workflow's step or an agent with no active grant gets nothing, and a
-//    revoked grant stops the next recall.
+// 1. Code without the grant to read the Brain recalls: a declaration or
+//    a workflow's step with no active grant gets nothing, and a revoked
+//    grant stops the next recall. A chat's agent needs none (GRA-2203).
 // 2. What an App or a workflow recalls reaches someone who couldn't read
 //    it at the source: it may end up in App data, a run's output, a
 //    decision or an App a run writes to, which any member may read. So it
@@ -599,12 +599,11 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     const { workflow } = await recallingWorkflow(ada, admin);
     // The chat: its code, the turn's own recall before the question
     // being no code run of it.
-    const { stub, chat, ask, agent } = await chatOf(
+    const { stub, chat, ask } = await chatOf(
       ada.userId,
       recallCode(request),
       says("Done.")
     );
-    await granted(ada, admin, brainGrant(agent));
     await ask("What about leave?");
     const [fromCode] = await codeResults(stub, chat.id);
 
@@ -818,26 +817,16 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     // A workflow whose grant is revoked after its binding was approved.
     const run = await recallingWorkflow(ada, admin);
     await revokePermission(env, admin, run.permissionId);
-    // A chat whose agent holds no grant: no `env.brain` at all.
-    const { stub, chat, ask } = await chatOf(
-      ada.userId,
-      recallCode(requestOf(word)),
-      says("Done.")
-    );
-    await ask("What about leave?");
-    const [fromCode] = await codeResults(stub, chat.id);
     expect({
       unbound: await askedOf(unbound, ada, asks),
       before: before.length,
       revoked: await askedOf(app, ada, asks),
       run: await ranOf(ada, run.workflow.id, asks),
-      chat: fromCode?.text.includes("no API named env.brain"),
     }).toStrictEqual({
       unbound: { failed: "permission.unavailable" },
       before: 1,
       revoked: { failed: "permission.unavailable" },
       run: { failed: "workflow.binding_unapproved" },
-      chat: true,
     });
   });
 
@@ -865,12 +854,11 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       { question: word, budget: { tokens: 800 }, asOf: `${word} at noon` },
       { question: word, budget: { tokens: 800 }, reader: ada.userId },
     ];
-    const { stub, chat, ask, agent } = await chatOf(
+    const { stub, chat, ask } = await chatOf(
       ada.userId,
       ...asked.map((request) => recallCode(request)),
       says("Done.")
     );
-    await granted(ada, admin, brainGrant(agent));
     await ask("Go on.");
     const results = await codeResults(stub, chat.id);
     const fromCode = results.map(({ text }) => returnedOf(text));
@@ -1089,7 +1077,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
   });
 
   it("withholds what a chat's code recalled from its later requests once its person's teams may no longer read it", async () => {
-    const { admin, ada } = await company();
+    const { ada } = await company();
     const team = await teamOf(ada);
     /**
      * Whether a chat whose code recalled a plan of the team's still sends
@@ -1102,13 +1090,12 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       const word = `route${unique().replaceAll(/\W/gu, "")}`;
       const text = `Route plan: ${word} departs at noon.`;
       const source = await added(text, { kind: "team", teamId: team });
-      const { ask, agent, provider } = await chatOf(
+      const { ask, provider } = await chatOf(
         ada.userId,
         recallCode(requestOf(word)),
         says("Read it."),
         says("And now.")
       );
-      await granted(ada, admin, brainGrant(agent));
       await ask(word);
       await change(source, word);
       const before = provider.requests.length;
@@ -1139,9 +1126,8 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
   });
 
   it("answers nothing when the audit log can't take the recall", async () => {
-    const { word, admin, ada } = await company();
+    const { word, ada } = await company();
     const { agent, chat, id } = await chatOf(ada.userId);
-    const permissionId = await granted(ada, admin, brainGrant(agent));
     // The failed append is logged as an error: that's what it is.
     const logged = vi.spyOn(console, "error").mockReturnValue();
     const answered = await recallFor(
@@ -1153,7 +1139,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
           mode: "interactive",
         }),
         context: { type: "chat", workspaceId: id, chatId: chat.id },
-        permissionId: permissionIdSchema.parse(permissionId),
+        permissionId: null,
         actor: { type: "system" },
       },
       requestOf(word)
@@ -2201,14 +2187,13 @@ describe("code's recall beside team claims", setUpTime, () => {
       reviewed: { version: 1 },
     });
     const { workflow } = await recallingWorkflow(ada, admin);
-    const { stub, chat, ask, agent } = await chatOf(
+    const { stub, chat, ask } = await chatOf(
       ada.userId,
       recallCode(request),
       says("Done."),
       recallCode(request),
       says("Done.")
     );
-    await granted(ada, admin, brainGrant(agent));
     const asked = { question: request.question, tokens: request.budget.tokens };
     const codeRecalls = async () => ({
       app: await askedOf(app, ada, asked),

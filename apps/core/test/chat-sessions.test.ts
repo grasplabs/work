@@ -108,7 +108,6 @@ const sessionOf = (
     question: { text, model: asked, files: [] },
     shared: false,
     personal: true,
-    readsBrain: false,
     context: { skills: [] },
     capture: { attended: true },
   }),

@@ -69,7 +69,6 @@ import {
   add,
   answerOf,
   textsFor,
-  chatAgentReadsBrainOnce,
 } from "./brain-next-leaks-harness.ts";
 import type { Finding } from "./brain-next-leaks-harness.ts";
 import { brainModules } from "./brain-next-modules.ts";
@@ -134,9 +133,6 @@ const accountOf = (claims: Claims): SourceReader => ({
   tenant: acmeTenant,
   account: String(claims.oid),
 });
-
-/** Grants the chat agent the Brain permission, once for the file. */
-const chatAgentReadsBrain = chatAgentReadsBrainOnce(idp);
 
 teamsWatched();
 
@@ -2861,7 +2857,6 @@ describe(
       // workspace.ts `answersAlone`). Never in a thread others read, even
       // one whose roster holds them alone: no instruction file of theirs,
       // and none of their own chat's tools, their connections first.
-      await chatAgentReadsBrain();
       const depot = `d${unique()}`;
       const marker = markerWord();
       const userMarker = markerWord();
@@ -3035,7 +3030,6 @@ describe(
       // recalled. A team she and Ben are both in, and one of hers alone,
       // are never recalled where others read the answer (GRA-1820); her
       // direct message is her own chat, as in Grasp (GRA-1821).
-      await chatAgentReadsBrain();
       const ann = await teamsMember(
         idp,
         ...Array.from({ length: 8 }, () => says("Noted."))
@@ -3194,7 +3188,6 @@ describe(
       // next turn in the shared chat must no longer carry it. Her direct
       // message is her own chat (GRA-1821): her memories, read as her,
       // there and when history is read again.
-      await chatAgentReadsBrain();
       const ann = await teamsMember(
         idp,
         ...Array.from({ length: 4 }, () => says("Noted."))
@@ -3332,7 +3325,6 @@ describe(
       // company, as a woken turn in Grasp does (workspace.ts
       // `answersAlone`). Its first turn there asks nothing the Brain holds,
       // so the woken turn's history carries none of her own.
-      await chatAgentReadsBrain();
       const ann = await teamsMember(
         idp,
         says("Hi."),
@@ -3437,7 +3429,6 @@ describe(
       // ranks it for them alone: only where the answer reaches them alone,
       // their direct message now too (GRA-1821). A group chat recalls as
       // the company (`brain-company-memory:`), which counts no use.
-      await chatAgentReadsBrain();
       const ann = await teamsMember(idp, says("Noted."), says("Noted."));
       const ben = await memberAnsweredBy(idp, ann.provider);
       const [inGroup, inDirect] = [`d${unique()}`, `d${unique()}`];
@@ -3497,7 +3488,6 @@ describe(
       // chat in Grasp (GRA-1920): their word, in their own store, which
       // nobody else reads, a team-mate in their own direct message
       // included.
-      await chatAgentReadsBrain();
       const depot = `d${unique()}`;
       const word = markerWord();
       const statement = `Depot ${depot} opens at ${word}`;

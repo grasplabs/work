@@ -27,7 +27,7 @@ import type {
 import { audienceOf } from "./chat-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { personErasures } from "./db/core/schema.ts";
-import { grantedPermissions, hasBrainGrant } from "./permissions.ts";
+import { grantedPermissions } from "./permissions.ts";
 
 // What a chat's earlier code results may still send to the model (GRA-690).
 // A result rests on what its run read, each recorded with the run: each
@@ -42,21 +42,13 @@ import { grantedPermissions, hasBrainGrant } from "./permissions.ts";
 // stays), an App deleted. A source no check here names (one an earlier
 // release recorded, a Knowledge collection or document say) is never
 // readable: its run is withheld.
-//
-// What a run read under the agent's `brain` grant is pinned with that
-// grant (`brainGrantRead`), so its results are withheld once the grant is
-// revoked.
-
-/** The source a run's read of the Brain under the agent's `brain` grant is recorded as. */
-export const brainGrantRead = "brain-grant";
 
 // What a chat's recall before a question read of the new Brain
 // (turn-recall.ts) is pinned too: each version it handed over, by its
 // source as its producer names it and its number. A version never changes
 // and an erased source's key is never added again, so a pin means the same
 // text for as long as it is kept; it is withheld once the person may no
-// longer read that version (`readableVersionsAs`), and with the agent's
-// `brain` grant (`brainGrantRead`).
+// longer read that version (`readableVersionsAs`).
 
 const brainVersionPrefix = "brain-version:";
 
@@ -274,7 +266,7 @@ const readableBrainCompanyVersions = async (
 // reach. It is withheld, as a passage is, once that reach may no longer
 // read it (erased, its source narrowed, the person out of the team, or,
 // as the company, anyone unnamed in the chat), or its writer retired it
-// (`readableMemoriesAs`), and with the agent's `brain` grant. A newer
+// (`readableMemoriesAs`). A newer
 // memory that replaced it withholds nothing: the next recall brings that.
 
 // A pin carries what its memory rests on as the recall read it
@@ -469,20 +461,6 @@ const readableBrainCompanyMemories = async (
     : [];
 };
 
-/**
- * Of the Brain reads in `sources`, the agent's `brain` grant, while it
- * holds it (`hasBrainGrant`), as the Brain's recall decides it.
- */
-const readableBrain = async (
-  env: Env,
-  scope: Omit<AgentScope, "runId">,
-  sources: readonly string[]
-): Promise<string[]> =>
-  sources.includes(brainGrantRead) &&
-  (await hasBrainGrant(env, chatAuthority(scope)))
-    ? [brainGrantRead]
-    : [];
-
 // Who a chat's code was told knows about a topic (`env.brain.whoKnows`,
 // brain-recall.ts `whoKnowsFor`): each person named is pinned by their
 // member id beside the version cited for them, and withheld once they are
@@ -594,7 +572,6 @@ type WithheldKind =
   | "people"
   | "memories"
   | "passages"
-  | "grants"
   | "connections"
   | "apps"
   | "unknown";
@@ -620,9 +597,6 @@ const withheldKindOf = (source: string): WithheldKind => {
     ].some((prefix) => source.startsWith(prefix))
   ) {
     return "passages";
-  }
-  if (source === brainGrantRead) {
-    return "grants";
   }
   if (connectionReadOf(source) !== undefined) {
     return "connections";
@@ -773,8 +747,8 @@ const readableApps = async (
  * Of `sourceIds`, those the chat's agent may read for its person now: a
  * connection call a grant the agent holds in this chat now covers, on a
  * connection not disconnected that the person may use themselves; an App
- * read the agent's grants and the person's role in the App allow now; the
- * agent's `brain` grant, while it holds it; a version of the Brain, while the person may read it (their teams and
+ * read the agent's grants and the person's role in the App allow now; a
+ * version of the Brain, while the person may read it (their teams and
  * the company, for what code's recall handed over); a memory of the new
  * Brain, while the person (or, as the company read it, the company) may
  * read it and its writer has not retired it, replaced or expired or not;
@@ -798,7 +772,6 @@ export const readableSources = async (
   const [
     apps,
     connections,
-    brain,
     versions,
     teamVersions,
     companyVersions,
@@ -808,7 +781,6 @@ export const readableSources = async (
   ] = await Promise.all([
     readableApps(env, scope, sourceIds),
     readableConnections(env, scope, sourceIds),
-    readableBrain(env, scope, sourceIds),
     readableBrainVersions(env, scope, sourceIds),
     readableAt(env, scope, sourceIds, brainTeamVersionPrefix, "teams"),
     readableBrainCompanyVersions(env, scope, sourceIds, cut),
@@ -820,7 +792,6 @@ export const readableSources = async (
   const readable = new Set([
     ...apps,
     ...connections,
-    ...brain,
     ...versions,
     ...teamVersions,
     ...companyVersions,

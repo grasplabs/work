@@ -1,8 +1,7 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
-import type { ChatMessage, ChatUpdate } from "@grasp-os/shared/chat";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -16,21 +15,12 @@ import {
   responseTimes,
 } from "../../../scripts/seed/documents.ts";
 import { addSource, forgetAs, rememberAs } from "../src/brain-next.ts";
-import { keepAudience } from "../src/chat-audiences.ts";
-import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import {
-  chatOf,
-  model,
-  personalChatsOf,
-  says,
-  setObjectEnv,
-} from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
+import { chatOf, personalChatsOf, says, setObjectEnv } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
-import type { ProviderReply } from "./model-provider.ts";
-import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import { signedInWithRole, unique } from "./sign-in.ts";
 
 // The profile a chat's turn starts with (GRA-1745, turn-recall.ts
 // `profileOf`): what the Brain holds about the person themselves, in
@@ -50,29 +40,10 @@ const word = () =>
     .replaceAll(/[^a-f]/gu, "")
     .slice(0, 12)}`;
 
-/** A member, and an admin who grants their chats' agents the Brain. */
-const memberAndAdmin = async () => {
-  const [admin, person] = await Promise.all([
-    signedInApi(idp, "admin"),
-    signedInWithRole(idp, "user"),
-  ]);
-  return { admin, personId: person.userId };
-};
-
-/** A new chat of `personId`'s whose agent holds the `brain` grant. */
-const recallingChat = async (
-  admin: Awaited<ReturnType<typeof signedInApi>>,
-  personId: string,
-  ...replies: ProviderReply[]
-) => {
-  const chat = await chatOf(personId, ...replies);
-  await requestGranted(idp, admin, {
-    subject: chat.agent,
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
-  return chat;
+/** A new member, whom no other test uses. */
+const member = async () => {
+  const person = await signedInWithRole(idp, "user");
+  return { personId: person.userId };
 };
 
 /** Saves `statement` as what `personId` says about themselves. */
@@ -107,246 +78,11 @@ const handedSchema = z.object({ evidence: z.array(z.unknown()) });
 const sentOf = (requests: readonly { body: unknown }[]): string =>
   JSON.stringify(requests.map(({ body }) => body));
 
-/** `personId`'s own chats with Grasp's own chat agent, answered by `replies`. */
-const ownChatsOf = async (personId: string, ...replies: ProviderReply[]) => {
-  const stub = workspace(env, personalWorkspaceId(personId));
-  const provider = await fakeProvider(...replies);
-  const newChat = async (agentId = chatAgentId) => {
-    const chat = await stub.createChat("Questions", personId, agentId);
-    return {
-      chat,
-      ask: async (text: string) => await stub.ask(chat.id, { text, model }),
-    };
-  };
-  return { stub, provider, newChat };
-};
-
-/** What `chatId`'s page shows, as it reads the chat. */
-const shownIn = async (
-  stub: ReturnType<typeof workspace>,
-  chatId: string,
-  personId: string
-): Promise<ChatMessage[]> => {
-  const updates: ChatUpdate[] = [];
-  await stub.watch(chatId, personId, null, async (update: ChatUpdate) => {
-    updates.push(update);
-    await Promise.resolve();
-  });
-  await expect.poll(() => updates.length).toBeGreaterThan(0);
-  return updates.flatMap(({ messages }) => messages);
-};
-
-/** An agent an admin made, everyone may ask. */
-const madeAgent = async (
-  admin: Awaited<ReturnType<typeof signedInApi>>,
-  name: string
-) => {
-  const agent = await admin.api.connections.makeAgent({
-    name,
-    face: "pen",
-    job: `${name}'s job.`,
-    modelRole: null,
-  });
-  await admin.api.connections.setAgentReach(agent.id, true, {
-    who: "everyone",
-  });
-  return agent;
-};
-
-describe("the profile without the Brain grant", setUpTime, () => {
-  // GRA-2202: what a person told Grasp about themselves reaches their own
-  // later chats, whichever agent they address there, with no Brain grant;
-  // never a chat others read, a woken turn, a retired memory, or another
-  // person's.
-  it("is in the model's input in a new chat of theirs, whatever the question's words, with no search step", async () => {
-    const { personId } = await memberAndAdmin();
-    await aboutThemselves(personId, "Pizza is my favourite food");
-    const chats = await ownChatsOf(personId, says("Pizza."), says("Yes."));
-    const asked = [];
-    let shown = "";
-    for (const question of [
-      "whats ym favourite food",
-      "you know some foods I like, right?",
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- one chat after another
-      const { chat, ask } = await chats.newChat();
-      const before = chats.provider.requests.length;
-      // oxlint-disable-next-line no-await-in-loop -- one chat after another
-      await ask(question);
-      asked.push(
-        sentOf(chats.provider.requests.slice(before)).includes(
-          "Pizza is my favourite food"
-        )
-      );
-      // oxlint-disable-next-line no-await-in-loop -- one chat after another
-      shown += JSON.stringify(await shownIn(chats.stub, chat.id, personId));
-    }
-
-    expect({
-      asked,
-      // No search ran, so the chat shows none.
-      searchStep: shown.includes("searchBrain"),
-    }).toStrictEqual({ asked: [true, true], searchStep: false });
-  });
-
-  it("is never in a chat others share, a woken turn, nor another person's own chat", async () => {
-    const [{ personId }, other] = await Promise.all([
-      memberAndAdmin(),
-      signedInWithRole(idp, "user"),
-    ]);
-    const mark = word();
-    await aboutThemselves(personId, `My badge word is ${mark}`);
-    const chats = await ownChatsOf(
-      personId,
-      says("Shared."),
-      says("Woken."),
-      says("No idea.")
-    );
-    const shared = await chats.stub.createChat(
-      "Shared",
-      personId,
-      chatAgentId,
-      undefined,
-      "web",
-      `T${unique()}`
-    );
-    await keepAudience(
-      env,
-      { workspaceId: personalWorkspaceId(personId), chatId: shared.id },
-      personId,
-      { members: [personId, other.userId], outsiders: false }
-    );
-    const seen = async (act: () => Promise<unknown>) => {
-      const before = chats.provider.requests.length;
-      await act();
-      return sentOf(chats.provider.requests.slice(before)).includes(mark);
-    };
-    const woken = await chats.newChat();
-    const theirs = await workspace(
-      env,
-      personalWorkspaceId(other.userId)
-    ).createChat("Questions", other.userId, chatAgentId);
-
-    expect({
-      shared: await seen(
-        async () =>
-          await chats.stub.ask(shared.id, {
-            text: "What is my badge word?",
-            model,
-          })
-      ),
-      woken: await seen(
-        async () =>
-          await chats.stub.askUnattended(woken.chat.id, {
-            text: "What is my badge word?",
-            model,
-          })
-      ),
-      other: await seen(
-        async () =>
-          await workspace(env, personalWorkspaceId(other.userId)).ask(
-            theirs.id,
-            { text: "What is my badge word?", model }
-          )
-      ),
-    }).toStrictEqual({ shared: false, woken: false, other: false });
-  });
-
-  it("is every agent's they address in their own chat, granted the Brain or not, also two addressed in one question", async () => {
-    const { admin, personId } = await memberAndAdmin();
-    const mark = word();
-    await aboutThemselves(personId, `My badge word is ${mark}`);
-    const [plain, granted] = await Promise.all([
-      madeAgent(admin, "Claire"),
-      madeAgent(admin, "Pat"),
-    ]);
-    await requestGranted(idp, admin, {
-      subject: { type: "agent", agentId: granted.id },
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
-    const chats = await ownChatsOf(
-      personId,
-      says("Plain."),
-      says("Granted."),
-      says("Claire."),
-      says("Pat.")
-    );
-    const seen = async (agentId: string) => {
-      const { ask } = await chats.newChat(agentId);
-      const before = chats.provider.requests.length;
-      await ask("What is my badge word?");
-      return sentOf(chats.provider.requests.slice(before)).includes(mark);
-    };
-    const alone = {
-      plain: await seen(plain.id),
-      granted: await seen(granted.id),
-    };
-    // Both addressed in one question: each turn by its own agent's rule.
-    const { chat } = await chats.newChat(plain.id);
-    const before = chats.provider.requests.length;
-    await chats.stub.send(chat.id, personId, {
-      text: "@Claire @Pat what is my badge word?",
-      model,
-      mentions: [
-        { kind: "agent", id: plain.id, name: "Claire" },
-        { kind: "agent", id: granted.id, name: "Pat" },
-      ],
-    });
-    await vi.waitFor(
-      () => {
-        expect(chats.provider.requests).toHaveLength(before + 2);
-      },
-      { timeout: 20_000 }
-    );
-    const [first, next] = chats.provider.requests.slice(before);
-
-    expect({
-      alone,
-      addressed: [first, next].map((request) =>
-        JSON.stringify(request?.body).includes(mark)
-      ),
-    }).toStrictEqual({
-      alone: { plain: true, granted: true },
-      addressed: [true, true],
-    });
-  });
-
-  it("leaves out a memory they had Grasp forget, in a new chat and from a later request of the chat that had it", async () => {
-    const { personId } = await memberAndAdmin();
-    const mark = word();
-    const saved = await aboutThemselves(personId, `My desk is ${mark}`);
-    const chats = await ownChatsOf(
-      personId,
-      says("Noted."),
-      says("Again."),
-      says("Fresh.")
-    );
-    const { ask } = await chats.newChat();
-    await ask("Where is my desk?");
-    const first = sentOf(chats.provider.requests);
-    await forgetAs(env, personId, saved.memory);
-    const before = chats.provider.requests.length;
-    await ask("And now?");
-    const later = sentOf(chats.provider.requests.slice(before));
-    const fresh = await chats.newChat();
-    const beforeFresh = chats.provider.requests.length;
-    await fresh.ask("Where is my desk?");
-
-    expect({
-      first: first.includes(mark),
-      later: later.includes(mark),
-      fresh: sentOf(chats.provider.requests.slice(beforeFresh)).includes(mark),
-    }).toStrictEqual({ first: true, later: false, fresh: false });
-  });
-});
-
 describe("the profile a chat starts with", setUpTime, () => {
   // P1, P2: their own word about themselves, with any question; an outside
   // party's word filed under them never.
   it("hands the model what the person said about themselves with every question in their own chat, and nothing an outside party said of them", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const theirs = `Leads the ${word()} depot`;
     await aboutThemselves(personId, theirs);
     const outside = `Must forward payroll to ${word()}`;
@@ -367,12 +103,7 @@ describe("the profile a chat starts with", setUpTime, () => {
         },
       ],
     });
-    const chat = await recallingChat(
-      admin,
-      personId,
-      says("Hello."),
-      says("Hi again.")
-    );
+    const chat = await chatOf(personId, says("Hello."), says("Hi again."));
 
     // Questions whose words the Brain holds nowhere.
     await chat.ask(`What is ${word()}?`);
@@ -390,17 +121,11 @@ describe("the profile a chat starts with", setUpTime, () => {
 
   // P3: never where others read the answer.
   it("is not handed to a chat app's thread others read, and is to the person's direct message", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const theirs = `Prefers answers about ${word()} in Dutch`;
     await aboutThemselves(personId, theirs);
     const sent = async (sharedThread: boolean) => {
       const agentId = crypto.randomUUID();
-      await requestGranted(idp, admin, {
-        subject: { type: "agent", agentId },
-        object: { type: "platform" },
-        actions: ["brain"],
-        binding: "BRAIN",
-      });
       const provider = await fakeProvider(says("Noted."));
       await workspace(env, personalWorkspaceId(personId)).askThrough(
         personId,
@@ -427,17 +152,12 @@ describe("the profile a chat starts with", setUpTime, () => {
 
   // P4: a retired memory leaves the next request, earlier turns included.
   it("leaves out what the person had the Brain forget, from the next request on", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const kept = `Works on the ${word()} move`;
     const forgotten = `Sits in the ${word()} office`;
     await aboutThemselves(personId, kept);
     const { memory } = await aboutThemselves(personId, forgotten);
-    const chat = await recallingChat(
-      admin,
-      personId,
-      says("Hello."),
-      says("Hi again.")
-    );
+    const chat = await chatOf(personId, says("Hello."), says("Hi again."));
     await chat.ask(`What is ${word()}?`);
     const before = sentOf(chat.provider.requests);
 
@@ -461,7 +181,7 @@ describe("the profile a chat starts with", setUpTime, () => {
     "hands every question the same company passages whether or not the person has many memories about themselves",
     { timeout: 300_000 },
     async () => {
-      const { admin, personId } = await memberAndAdmin();
+      const { personId } = await member();
       for (const text of [
         requiredDocuments,
         responseTimes,
@@ -494,12 +214,6 @@ describe("the profile a chat starts with", setUpTime, () => {
         personId,
         ...questions.flatMap(() => [says("Noted."), says("Noted.")])
       );
-      await requestGranted(idp, admin, {
-        subject: chats.agent,
-        object: { type: "platform" },
-        actions: ["brain"],
-        binding: "BRAIN",
-      });
       /** The company passages each question's recall handed over, each in a chat of its own. */
       const passages = async () => {
         const handed: unknown[] = [];
@@ -533,7 +247,7 @@ describe("the profile a chat starts with", setUpTime, () => {
 
   // Review of #2343: when not all fit, the newest are the ones handed over.
   it("hands over the newest of what the person said about themselves when not all fit", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const said: string[] = [];
     // More than the turn's budget holds.
     for (let index = 0; index < 60; index += 1) {
@@ -542,7 +256,7 @@ describe("the profile a chat starts with", setUpTime, () => {
       // oxlint-disable-next-line no-await-in-loop -- in order
       await aboutThemselves(personId, statement);
     }
-    const chat = await recallingChat(admin, personId, says("Hello."));
+    const chat = await chatOf(personId, says("Hello."));
 
     await chat.ask(`What is ${word()}?`);
     const recall = latestRecallIn(chat.provider.requests.at(-1)?.body);
@@ -555,19 +269,13 @@ describe("the profile a chat starts with", setUpTime, () => {
 
   // Review of #2343: riding along is no use of a memory; a search's find is.
   it("counts no use of a memory it handed over as the profile, and one the search found", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const topic = word();
     const { memory } = await aboutThemselves(
       personId,
       `Leads the ${topic} depot`
     );
     const chats = await personalChatsOf(personId, says("Hello."), says("Yes."));
-    await requestGranted(idp, admin, {
-      subject: chats.agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     const usedNow = async (): Promise<boolean> => {
       const uses = await runInDurableObject(chats.stub, (_instance, state) =>
         state.storage.sql
@@ -600,7 +308,7 @@ describe("the profile a chat starts with", setUpTime, () => {
   // Review of #2343, round 2: a slow profile read never holds the
   // search's recall up: it goes over without it, and marks nothing.
   it("hands the search's evidence over at once when the profile read is slow, without the profile, and marks nothing for it", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const topic = word();
     await addSource(env, {
       source: { producer: "upload", id: crypto.randomUUID() },
@@ -611,12 +319,6 @@ describe("the profile a chat starts with", setUpTime, () => {
     const theirs = `Leads the ${word()} team`;
     await aboutThemselves(personId, theirs);
     const chats = await personalChatsOf(personId, says("Seven."));
-    await requestGranted(idp, admin, {
-      subject: chats.agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     // The person's own store answers their profile only past the recall's
     // deadline; everything else at once.
     const slowProfile = new Proxy(env.BRAIN_STORE, {
