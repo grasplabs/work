@@ -186,6 +186,8 @@ export const directoryErrors = defineErrorFamily({
     "The directory's daily read failed: nothing it read was kept.",
   // Microsoft's answer alone: what came of the read is the reader's to
   // say (core's directory-people.ts `deletedOf`), as it differs by page.
+  "directory.not_admin":
+    "The account that connected the directory can't read it: connect it with an admin account of the Workspace.",
   "directory.deleted_refused":
     "Microsoft refused to list the directory's deleted accounts.",
   "directory.deleted_unsupported":

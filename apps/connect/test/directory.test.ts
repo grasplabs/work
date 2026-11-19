@@ -41,6 +41,8 @@ interface Directories {
   google: Record<string, unknown>[];
   /** Graph's deleted users. */
   deleted?: Record<string, unknown>[];
+  /** Google's deleted users (`showDeleted=true`). */
+  googleDeleted?: Record<string, unknown>[];
   /** Answers every page instead, when set. */
   answer?: () => Response;
   /** The next link each Graph page hands back, instead of its own. */
@@ -106,7 +108,9 @@ const internet = fakeInternet((_request, url) => {
     url.pathname === "/admin/directory/v1/users"
   ) {
     const { page, next } = slice(
-      directories.google,
+      url.searchParams.get("showDeleted") === "true"
+        ? (directories.googleDeleted ?? [])
+        : directories.google,
       Number(url.searchParams.get("pageToken") ?? "0"),
       Number(url.searchParams.get("maxResults") ?? "100")
     );
@@ -542,9 +546,8 @@ describe("a directory read", () => {
     });
   });
 
-  it("of Entra's deleted users answers their IDs alone, lower case, guests and IDs that aren't Entra's left out, and is no Google connection's", async () => {
+  it("of Entra's deleted users answers their IDs alone, lower case, guests and IDs that aren't Entra's left out", async () => {
     const microsoft = await connectDirectory(someone("admin"));
-    const google = await connectDirectory(someone("admin"), "google-directory");
     const left = guid();
     directories.deleted = [
       { id: left.toUpperCase(), userType: "Member" },
@@ -554,9 +557,6 @@ describe("a directory read", () => {
     const answer = await readDeleted(microsoft);
     const [sent] = internet.sent;
     const asked = new URL(`https://${sent?.host ?? ""}${sent?.path ?? ""}`);
-    const requests = internet.sent.length;
-    // A Google connection's token is never sent to Graph.
-    const ofGoogle = await codeOf(readDeleted(google));
     directories.deleted = [];
 
     expect({
@@ -564,15 +564,68 @@ describe("a directory read", () => {
       host: sent?.host,
       path: asked.pathname,
       select: asked.searchParams.get("$select"),
-      ofGoogle,
-      sentForGoogle: internet.sent.length - requests,
     }).toStrictEqual({
       answer: { tenant: acmeTenant, deleted: [left], next: null },
       host: "graph.microsoft.com",
       path: "/v1.0/directory/deletedItems/microsoft.graph.user",
       select: "id,userType",
-      ofGoogle: "directory.not_found",
-      sentForGoogle: 0,
+    });
+  });
+
+  it("of Google's deleted users answers their IDs alone, every page, from Google's own users endpoint", async () => {
+    const google = await connectDirectory(someone("admin"), "google-directory");
+    const deleted = Array.from({ length: 150 }, () => googleUser());
+    directories.googleDeleted = [...deleted, googleUser({ id: "not-google" })];
+    const first = await readDeleted(google);
+    const [sent] = internet.sent;
+    const asked = new URL(`https://${sent?.host ?? ""}${sent?.path ?? ""}`);
+    const second = await exports.default.readDeletedDirectoryUsers({
+      connectionId: google,
+      cursor: first.next,
+    });
+    directories.googleDeleted = [];
+
+    expect({
+      host: sent?.host,
+      path: asked.pathname,
+      customer: asked.searchParams.get("customer"),
+      showDeleted: asked.searchParams.get("showDeleted"),
+      fields: asked.searchParams.get("fields"),
+      tenant: first.tenant,
+      ids: [...first.deleted, ...second.deleted],
+      last: second.next,
+    }).toStrictEqual({
+      host: "admin.googleapis.com",
+      path: "/admin/directory/v1/users",
+      customer: "my_customer",
+      showDeleted: "true",
+      fields: "nextPageToken,users(id)",
+      tenant: acmeDomain,
+      ids: deleted.map(({ id }) => id),
+      last: null,
+    });
+  });
+
+  it("of Google's directory says an admin must connect it when Google refuses a member's token, and Entra's as before", async () => {
+    const google = await connectDirectory(someone("admin"), "google-directory");
+    const microsoft = await connectDirectory(someone("admin"));
+    const refusing = async (connectionId: string, status: number) => {
+      directories.answer = answeredWith(status);
+      try {
+        return await codeOf(read(connectionId));
+      } finally {
+        delete directories.answer;
+      }
+    };
+
+    expect({
+      googleForbidden: await refusing(google, 403),
+      googleUnauthorized: await refusing(google, 401),
+      entraForbidden: await refusing(microsoft, 403),
+    }).toStrictEqual({
+      googleForbidden: "directory.not_admin",
+      googleUnauthorized: "directory.inactive",
+      entraForbidden: "directory.inactive",
     });
   });
 

@@ -136,6 +136,12 @@ export const accounts = sqliteTable(
       table.providerId,
       sql`lower(${table.oid})`
     ),
+    // Google's directory people by the sign-in's own ID (its `sub`), as
+    // directory-ties.ts compares it: through `lower()`, like Entra's.
+    index("accounts_provider_account_lower_idx").on(
+      table.providerId,
+      sql`lower(${table.accountId})`
+    ),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
       table.accountId

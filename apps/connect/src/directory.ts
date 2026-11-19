@@ -77,10 +77,10 @@ const graphSpec = { name: "Microsoft Graph", hosts: [graphHost] };
 const graph = readFromProvider(graphSpec);
 /** Graph's answer as it came: its deleted users are parsed apart from the fetch (`deletedPageOf`). */
 const graphBytes = bytesFromProvider(graphSpec);
-const googleDirectory = readFromProvider({
-  name: "Google's directory",
-  hosts: [googleHost],
-});
+const googleSpec = { name: "Google's directory", hosts: [googleHost] };
+const googleDirectory = readFromProvider(googleSpec);
+/** Google's answer as it came: its deleted users are parsed apart from the fetch (`deletedLists`). */
+const googleBytes = bytesFromProvider(googleSpec);
 
 /** IDs as Entra issues them. */
 const guidPattern =
@@ -180,6 +180,19 @@ const graphDeletedUsers = (): URL => {
   return url;
 };
 
+/**
+ * Google's deleted users, as a read asks for them: those deleted in the
+ * last 20 days (the Admin SDK's users guide), their IDs alone.
+ */
+const googleDeletedUsers = (): URL => {
+  const url = new URL(`https://${googleHost}${googleUsersPath}`);
+  url.searchParams.set("customer", "my_customer");
+  url.searchParams.set("maxResults", String(directoryLimits.peoplePerRead));
+  url.searchParams.set("showDeleted", "true");
+  url.searchParams.set("fields", "nextPageToken,users(id)");
+  return url;
+};
+
 const googleUsers = (): URL => {
   const url = new URL(`https://${googleHost}${googleUsersPath}`);
   url.searchParams.set("customer", "my_customer");
@@ -246,8 +259,12 @@ const requestOf = (provider: DirectoryProvider, cursor: string | null): URL =>
   linkedRequest(usersOf[provider](), positions[provider], cursor);
 
 /** The request a read of Entra's deleted users sends, at `cursor`. */
-const deletedRequestOf = (cursor: string | null): URL =>
+const graphDeletedRequestOf = (cursor: string | null): URL =>
   linkedRequest(graphDeletedUsers(), "$skiptoken", cursor);
+
+/** The request a read of Google's deleted users sends, at `cursor`. */
+const googleDeletedRequestOf = (cursor: string | null): URL =>
+  linkedRequest(googleDeletedUsers(), "pageToken", cursor);
 
 /**
  * The Entra object ID of `user` when it is one of the tenant's own
@@ -463,7 +480,7 @@ const directoryToken = async (
 };
 
 /** The provider's refusal or failure, as the directory's error. */
-const readFailure = (error: unknown): unknown => {
+const readFailure = (error: unknown, provider: DirectoryProvider): unknown => {
   if (error instanceof z.ZodError) {
     return directoryErrors.create("directory.provider_failed");
   }
@@ -477,35 +494,95 @@ const readFailure = (error: unknown): unknown => {
       retryAfterMs === undefined ? undefined : { retryAfterMs }
     );
   }
-  // Google's directory refuses a token of someone who isn't its admin:
-  // it needs an admin's account connected.
+  // Google's directory refuses a token of someone who isn't its admin
+  // (403): no reconnect by them mends it, so it says who must connect it.
+  if (status === 403 && provider === "google-directory") {
+    return directoryErrors.create("directory.not_admin");
+  }
   if (status === 401 || status === 403) {
     return directoryErrors.create("directory.inactive");
   }
   return directoryErrors.create("directory.provider_failed");
 };
 
+/** A page of a directory's deleted accounts: their IDs, and the link to the next. */
+interface DeletedPage {
+  ids: string[];
+  next: string | null;
+}
+
+const googleDeletedPageSchema = z.object({
+  users: z.array(z.object({ id: z.string() })).nullish(),
+  nextPageToken: z.string().nullish(),
+});
+
 /**
- * A page of Entra's deleted users as Graph answered it, or null when the
- * answer, though it came, isn't such a page: empty, not JSON, or JSON of
- * another shape. Told apart by what failed, here, from a fetch that
+ * Each provider's deleted users: the request a read sends at a cursor, its
+ * answer's bytes as they came, and the page they hold, or null when the
+ * answer, though it came, isn't such a page (empty, not JSON, or JSON of
+ * another shape): told apart by what failed, here, from a fetch that
  * failed (`deletedReadFailure`).
  */
-const deletedPageOf = (
-  bytes: Uint8Array
-): z.output<typeof graphDeletedPageSchema> | null => {
-  let json: unknown;
-  try {
-    json = JSON.parse(new TextDecoder().decode(bytes));
-  } catch {
-    return null;
+const deletedLists: Record<
+  DirectoryProvider,
+  {
+    request: (cursor: string | null) => URL;
+    bytes: (access: ProviderAccess, url: string) => Promise<Uint8Array>;
+    pageOf: (json: unknown) => DeletedPage | null;
   }
-  const page = graphDeletedPageSchema.safeParse(json);
-  return page.success ? page.data : null;
+> = {
+  "microsoft-directory": {
+    request: graphDeletedRequestOf,
+    bytes: async (access, url) => await graphBytes(access, url, answerMaxBytes),
+    pageOf: (json) => {
+      const page = graphDeletedPageSchema.safeParse(json);
+      return page.success
+        ? {
+            // Guests aside, and IDs that aren't Entra's.
+            ids: page.data.value.flatMap(({ id, userType }) =>
+              guidPattern.test(id) && userType?.toLowerCase() !== "guest"
+                ? [id.toLowerCase()]
+                : []
+            ),
+            next: page.data["@odata.nextLink"] ?? null,
+          }
+        : null;
+    },
+  },
+  "google-directory": {
+    request: googleDeletedRequestOf,
+    bytes: async (access, url) =>
+      await googleBytes(access, url, answerMaxBytes),
+    pageOf: (json) => {
+      const page = googleDeletedPageSchema.safeParse(json);
+      if (!page.success) {
+        return null;
+      }
+      const token = page.data.nextPageToken ?? "";
+      const next = googleDeletedUsers();
+      next.searchParams.set("pageToken", token);
+      return {
+        // IDs that aren't Google's aside.
+        ids: (page.data.users ?? []).flatMap(({ id }) =>
+          googleIdPattern.test(id) ? [id] : []
+        ),
+        next: token === "" ? null : next.href,
+      };
+    },
+  },
+};
+
+/** The JSON `bytes` hold, or nothing when they hold none. */
+const jsonIn = (bytes: Uint8Array): { json: unknown } | undefined => {
+  try {
+    return { json: JSON.parse(new TextDecoder().decode(bytes)) };
+  } catch {
+    return undefined;
+  }
 };
 
 /**
- * Why Entra's deleted users couldn't be fetched, as the directory's
+ * Why a directory's deleted users couldn't be fetched, as the directory's
  * error. The line core goes by (directory-people.ts `deletedOf`): a
  * refusal of the list itself, or an endpoint that isn't one, is its
  * permission or the endpoint, not the moment, and doesn't pass by
@@ -513,11 +590,14 @@ const deletedPageOf = (
  * this call: its permission, `User.Read.All` without an Entra role, is
  * still unproved on a real tenant) and `directory.deleted_unsupported`
  * (400 or 404; an answer that came but isn't a list is the same,
- * `deletedPageOf`). Anything else, throttling, server errors and a fetch
+ * `deletedLists`). Anything else, throttling, server errors and a fetch
  * that never got an answer among it, is the moment: the read's own
  * failures (`readFailure`).
  */
-const deletedReadFailure = (error: unknown): unknown => {
+const deletedReadFailure = (
+  error: unknown,
+  provider: DirectoryProvider
+): unknown => {
   if (error instanceof SourceError) {
     if (error.status === 401 || error.status === 403) {
       return directoryErrors.create("directory.deleted_refused");
@@ -526,7 +606,7 @@ const deletedReadFailure = (error: unknown): unknown => {
       return directoryErrors.create("directory.deleted_unsupported");
     }
   }
-  return readFailure(error);
+  return readFailure(error, provider);
 };
 
 /** Whether `cursor` is a link `request` would go on from. */
@@ -598,7 +678,7 @@ export const readDirectory = async (
   try {
     page = await pageOf(connection.provider, access, url);
   } catch (error) {
-    throw readFailure(error);
+    throw readFailure(error, connection.provider);
   }
   const { people, disabled, next, read } = page;
   // A next link elsewhere, or a page past what was asked, is never kept,
@@ -613,45 +693,38 @@ export const readDirectory = async (
 };
 
 /**
- * Reads one page of an Entra directory connection's deleted users, from
- * `cursor` on: the proof that someone no longer listed has left. Only
- * Entra keeps such a list; a Google connection is `directory.not_found`.
+ * Reads one page of a directory connection's deleted users, from `cursor`
+ * on: the proof that someone no longer listed has left. Entra keeps a
+ * deleted account 30 days, Google 20.
  */
 export const readDeletedDirectoryUsers = async (
   env: Env,
   request: unknown
 ): Promise<DirectoryDeletedRead> => {
   const connection = await connectionToRead(env, request);
-  if (connection.provider !== "microsoft-directory") {
-    throw directoryErrors.create("directory.not_found");
-  }
-  const url = deletedRequestOf(connection.cursor);
+  const list = deletedLists[connection.provider];
+  const url = list.request(connection.cursor);
   const access: ProviderAccess = {
     token: await directoryToken(env, connection.connectionId),
     budget: requestBudget(1),
   };
   let bytes: Uint8Array;
   try {
-    bytes = await graphBytes(access, url.href, answerMaxBytes);
+    bytes = await list.bytes(access, url.href);
   } catch (error) {
-    throw deletedReadFailure(error);
+    throw deletedReadFailure(error, connection.provider);
   }
-  const page = deletedPageOf(bytes);
+  const answered = jsonIn(bytes);
+  const page = answered === undefined ? null : list.pageOf(answered.json);
   if (page === null) {
     throw directoryErrors.create("directory.deleted_unsupported");
   }
-  const next = page["@odata.nextLink"] ?? null;
   // A next link elsewhere is never kept, nor taken for the end. Its size
   // is bounded where it is kept: core takes the whole read as one value.
-  if (next !== null && !isCursorFor(deletedRequestOf, next)) {
+  if (page.next !== null && !isCursorFor(list.request, page.next)) {
     throw directoryErrors.create("directory.provider_failed");
   }
-  const deleted = page.value.flatMap(({ id, userType }) =>
-    guidPattern.test(id) && userType?.toLowerCase() !== "guest"
-      ? [id.toLowerCase()]
-      : []
-  );
-  return { tenant: connection.tenant, deleted, next };
+  return { tenant: connection.tenant, deleted: page.ids, next: page.next };
 };
 
 /**
@@ -699,7 +772,7 @@ export const lookUpInDirectory = async (
     if (error instanceof SourceError && error.status === 404) {
       return { tenant: connection.tenant, person: null };
     }
-    throw readFailure(error);
+    throw readFailure(error, provider.data);
   }
   // Someone else answered for the ID asked: nobody is taken for them; nor
   // is an account with no name made anyone (channels/door.ts makes a
