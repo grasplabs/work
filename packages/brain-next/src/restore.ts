@@ -839,13 +839,15 @@ const restoreMemory = async (
           : extractorRowOf(sql, line.extractor)
       )
       .one();
-    // What it replaces, of what this store holds, as its add checked it:
-    // each restored before it, as lines come in the store's order.
+    // What it replaces, of what this store holds, as its add checked it,
+    // with when an undo ended that: each restored before it, as lines come
+    // in the store's order.
     if (line.replaces !== undefined) {
       sql.exec(
-        `INSERT INTO memory_replacements (memory, replaced)
-        SELECT ?1, row FROM memories
-        WHERE id IN (SELECT value FROM json_each(?2))`,
+        `INSERT INTO memory_replacements (memory, replaced, undone_at)
+        SELECT ?1, held.row, asked.value ->> 'undoneAt'
+        FROM json_each(?2) AS asked
+        JOIN memories AS held ON held.id = asked.value ->> 'memory'`,
         row,
         JSON.stringify(line.replaces)
       );

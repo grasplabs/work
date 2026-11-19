@@ -2,7 +2,6 @@ import type { Identifier, Speaker } from "./contract.ts";
 import { erasedConfirmer } from "./contract.ts";
 import { foldIdentifier } from "./entities.ts";
 import { hashOf } from "./files.ts";
-import { keepReplacedEnded } from "./memories.ts";
 
 // A person's erasure in the shared store (contract.ts
 // `erasePersonShared`; erasure.ts runs it through the ledger): erasing a
@@ -367,18 +366,6 @@ export const applyPerson = (
     theirs,
     key
   ).rowsWritten;
-  // What a memory it hides replaced stays history: it never comes back
-  // because what replaced it is gone, for no reader.
-  keepReplacedEnded(
-    sql,
-    sql
-      .exec<{ memory: number }>(
-        "SELECT memory FROM person_erasure_memories WHERE erasure = ?",
-        key
-      )
-      .toArray()
-      .map(({ memory }) => memory)
-  );
   // A confirmation made over a memory it hides stands over the rest: the
   // memory it overruled goes, the confirmed one stays confirmed (the
   // tick's delete would take every confirmation made over what it
