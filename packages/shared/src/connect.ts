@@ -823,12 +823,15 @@ export interface SharedSyncPlaces {
   feed: string;
   /**
    * Each place: its ID, its own name, what it is in (a library's site;
-   * null for a shared drive), and whether it is picked. Names are whole.
+   * null for a shared drive), whether the sync reads who may open its
+   * files (`sharingRead`: else nobody reads them), and whether it is
+   * picked. Names are whole.
    */
   choices: {
     place: string;
     title: string;
     within: string | null;
+    sharingRead: boolean;
     picked: boolean;
   }[];
   /**

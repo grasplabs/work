@@ -71,6 +71,16 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // The groups copied reader lists name (source-readers.ts, GRA-1761): a
   // provider's group IDs, which name no person.
   "core.source_reader_groups": noPerson,
+  // The pairs of a picked shared place and a reader that copied reader
+  // lists name (source-readers.ts, GRA-2145): the place's group and a
+  // reader as the Brain's sets name it, an account by its random token
+  // (`core.source_reader_tokens`), never by an address or an object ID,
+  // as the Brain's sets do (`brainStore.reader_set_members`): an erased
+  // person's token goes with their accounts, and a pair names one nobody
+  // holds again.
+  "core.source_reader_pairs": {
+    company: "who a picked place's documents are shared with, by token",
+  },
   // Every address a person's sign-ins proved, for their erasure alone
   // (source-readers.ts): forgotten with their accounts.
   "core.sign_in_addresses": { erased: "identity" },
@@ -808,6 +818,7 @@ export const reviewedPersonColumns: Readonly<
   "core.access_revocations": ["user_ids"],
   "core.accounts": ["user_id", "verified_email", "verified_email_at"],
   "core.source_reader_tokens": ["person"],
+  "core.source_reader_pairs": ["principal"],
   "core.sign_in_addresses": ["user_id"],
   "core.action_invocations": ["person_id"],
   "core.agent_held_starts": ["person_id"],

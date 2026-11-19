@@ -318,6 +318,7 @@ const withCleanNames = (answered: unknown): unknown => {
             place: fieldOf(choice, "place"),
             title: cleanName(title),
             within: within === null ? null : cleanName(within),
+            sharingRead: fieldOf(choice, "sharingRead"),
           }
         : choice;
     }),
