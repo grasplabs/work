@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { chatAskSchema } from "../src/chat.ts";
+import { workflowTitleSchema } from "../src/workflow-resources.ts";
 
 // A question the agent asks (chat.ts `askLine`): one line of text a person
 // sees as it is. Standard emoji are text people read, selectors and joiners
@@ -51,6 +52,46 @@ describe("a question's line", () => {
       payload: taken("Ship it\u{E0101}\u{E0142} today?"),
       loneSelector: taken("Ship it Y️ today?"),
     }).toStrictEqual({ filler: false, payload: false, loneSelector: false });
+  });
+});
+
+/** `title` as a workflow's title is stored, or false where it is refused. */
+const titled = (title: string): string | false => {
+  const parsed = workflowTitleSchema.safeParse(title);
+  return parsed.success ? parsed.data : false;
+};
+
+describe("a workflow's title", () => {
+  it("is a line by the same rule, trimmed: text and standard emoji taken, nothing unseen and nothing empty", () => {
+    expect({
+      trimmed: titled("  Email triage  "),
+      family: titled("Family \u{1F468}\u200D\u{1F469}\u200D\u{1F467}"),
+      longest: titled("x".repeat(100)),
+      tooLong: titled("x".repeat(101)),
+      empty: titled("   "),
+      filler: titled("\u3164"),
+      fillerInside: titled("Inbox\u3164triage"),
+      selector: titled("A\uFE0F"),
+      selectorPayload: titled("A\u{E0100}"),
+      zeroWidth: titled("Inbox\u200Btriage"),
+      override: titled("\u202Eegairt"),
+      lines: titled("Inbox\ntriage"),
+      separator: titled("Inbox\u2028triage"),
+    }).toStrictEqual({
+      trimmed: "Email triage",
+      family: "Family \u{1F468}\u200D\u{1F469}\u200D\u{1F467}",
+      longest: "x".repeat(100),
+      tooLong: false,
+      empty: false,
+      filler: false,
+      fillerInside: false,
+      selector: false,
+      selectorPayload: false,
+      zeroWidth: false,
+      override: false,
+      lines: false,
+      separator: false,
+    });
   });
 });
 

@@ -91,6 +91,7 @@ import {
   desc,
   eq,
   gt,
+  gte,
   lt,
   lte,
   inArray,
@@ -191,6 +192,7 @@ import {
   chatDrafts,
   chatFiles,
   chatMessages,
+  chatRequestKeys,
   chatRunSources,
   chatSearchText,
   chatSources,
@@ -270,6 +272,12 @@ interface LiveTurn {
  * an update about once a second, and each is a call back to the door.
  */
 const textEveryMs = 300;
+
+/**
+ * How long a request's key is kept (`chatRequestKeys`): a page sends a
+ * repeat within seconds, or when its connection is back.
+ */
+const requestKeyMs = 24 * 60 * 60 * 1000;
 
 /**
  * `tell`, called with the latest text at most every {@link textEveryMs},
@@ -1079,6 +1087,11 @@ export class Workspace extends DurableObject<Env> {
    * waiting on a call.
    */
   readonly #sent = new Set<Promise<unknown>>();
+  /** The questions sent with a key whose turn is still starting, by key (`send`). */
+  readonly #starting = new Map<
+    string,
+    { chatId: ChatId; started: Promise<boolean> }
+  >();
 
   /**
    * Set once its person's erasure began (`erasePerson`): from then on
@@ -1425,8 +1438,15 @@ export class Workspace extends DurableObject<Env> {
     by?: AuditActor,
     via: ChatChannel = "web",
     thread?: string,
-    make?: ChatMake
+    make?: ChatMake,
+    /** The page's key for this chat: a repeat finds the chat it made. */
+    key?: string
   ): Chat {
+    const repeated =
+      key === undefined ? undefined : this.chatMadeWith(personId, key);
+    if (repeated !== undefined) {
+      return repeated;
+    }
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
       // No agent core names: nowhere an agent can work.
@@ -1458,10 +1478,85 @@ export class Workspace extends DurableObject<Env> {
         })
         .returning()
         .get();
+      if (key !== undefined) {
+        this.#keepRequest("create", key, id);
+      }
       return made;
     });
     this.#deliverAudit();
     return chat;
+  }
+
+  /**
+   * The chat `personId` made with `key` within a day, as the first call
+   * made it, if they made one: what a repeat of `createChat` answers, and
+   * what its caller asks first, so a repeat is checked for nothing a new
+   * chat would be (chats-rpc.ts).
+   */
+  chatMadeWith(personId: string, key: string): Chat | undefined {
+    const made = this.#requested("create", key);
+    return made === undefined
+      ? undefined
+      : this.#graspChat(made.chatId, personId);
+  }
+
+  /** The chat a request with `key` was kept for, and when, if one was within a day. */
+  #requested(
+    kind: "create" | "send",
+    key: string
+  ): { chatId: ChatId; at: Date } | undefined {
+    return this.#db
+      .select({ chatId: chatRequestKeys.chatId, at: chatRequestKeys.at })
+      .from(chatRequestKeys)
+      .where(
+        and(
+          eq(chatRequestKeys.kind, kind),
+          eq(chatRequestKeys.key, key),
+          gt(chatRequestKeys.at, new Date(Date.now() - requestKeyMs))
+        )
+      )
+      .get();
+  }
+
+  /**
+   * Whether the question `chat` took at `at` is still there: its turn
+   * under way, or something of it kept. A key outlives a restart, and a
+   * turn that had only just started may not: its question was kept
+   * nowhere yet, so a repeat asks it again rather than answer for it.
+   */
+  async #questionStands(chat: Chat, at: Date): Promise<boolean> {
+    if (this.#turns.has(chat.id)) {
+      return true;
+    }
+    const kept = this.#db
+      .select({ id: chatMessages.id })
+      .from(chatMessages)
+      .where(
+        and(eq(chatMessages.chatId, chat.id), gte(chatMessages.createdAt, at))
+      )
+      .limit(1)
+      .get();
+    return (
+      kept !== undefined || (await this.#activeTurn(chat.id)) !== undefined
+    );
+  }
+
+  /** Keeps `key` for what `chatId` just took, and drops the keys past their day. */
+  #keepRequest(kind: "create" | "send", key: string, chatId: ChatId): void {
+    const now = Date.now();
+    this.#db
+      .delete(chatRequestKeys)
+      .where(lte(chatRequestKeys.at, new Date(now - requestKeyMs)))
+      .run();
+    this.#db
+      .insert(chatRequestKeys)
+      .values({ kind, key, chatId, at: new Date(now) })
+      // A question asked again after a restart lost it (`#questionStands`).
+      .onConflictDoUpdate({
+        target: [chatRequestKeys.kind, chatRequestKeys.key],
+        set: { chatId, at: new Date(now) },
+      })
+      .run();
   }
 
   /**
@@ -2714,16 +2809,72 @@ export class Workspace extends DurableObject<Env> {
   async send(
     chatId: unknown,
     personId: string,
-    question: Question
+    question: Question,
+    /**
+     * The page's key for this question (`ChatQuestion.key`): a repeat is
+     * the same question, taken once. One that comes while the first is
+     * still starting waits on that start and resolves or is refused with
+     * it; one after resolves at once. A question refused before it
+     * started keeps no key, so the page may send it again.
+     */
+    key?: string
   ): Promise<void> {
     const chat = this.#graspChat(chatId, personId);
+    if (key !== undefined && (await this.sentBefore(chatId, personId, key))) {
+      return;
+    }
     const started = Promise.withResolvers<boolean>();
+    if (key !== undefined) {
+      this.#starting.set(key, { chatId: chat.id, started: started.promise });
+    }
     const ended = this.#sentTurns(chat, question, started);
     this.#sent.add(ended);
     void this.#forget(ended);
-    await started.promise;
+    try {
+      await started.promise;
+      if (key !== undefined) {
+        this.#keepRequest("send", key, chat.id);
+      }
+    } finally {
+      if (key !== undefined) {
+        this.#starting.delete(key);
+      }
+    }
     // The alarm keeps the object up until the turn ends (`alarm`).
     await this.#alarmBy(Date.now());
+  }
+
+  /**
+   * Whether `personId`'s chat took the question with `key` already
+   * (`send`): resolves once it has, as the first call did, or is refused
+   * with it; false for a key not taken, or one whose question a restart
+   * lost. What `send`'s caller asks first, so a repeat is checked for
+   * nothing a new question would be (chats-rpc.ts).
+   */
+  async sentBefore(
+    chatId: unknown,
+    personId: string,
+    key: string
+  ): Promise<boolean> {
+    const chat = this.#graspChat(chatId, personId);
+    const taken = this.#requested("send", key);
+    // Another chat's key says nothing of this question.
+    if (
+      (taken ?? this.#starting.get(key) ?? { chatId: chat.id }).chatId !==
+      chat.id
+    ) {
+      throw agentErrors.create("agent.invalid_question");
+    }
+    if (taken !== undefined && (await this.#questionStands(chat, taken.at))) {
+      return true;
+    }
+    // After the last await, so of two repeats only one starts a turn.
+    const starting = this.#starting.get(key);
+    if (starting === undefined) {
+      return false;
+    }
+    await starting.started;
+    return true;
   }
 
   /**
@@ -4963,6 +5114,10 @@ export class Workspace extends DurableObject<Env> {
         // What an earlier release kept of the chat's own drafts (schema.ts):
         // rows that name it, which go with it.
         this.#dropChatDrafts(id);
+        this.#db
+          .delete(chatRequestKeys)
+          .where(eq(chatRequestKeys.chatId, id))
+          .run();
         this.#db.delete(chats).where(eq(chats.id, id)).run();
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);

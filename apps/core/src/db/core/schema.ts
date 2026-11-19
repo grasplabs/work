@@ -606,7 +606,7 @@ export const staffListPlaced = sqliteTable("staff_list_placed", {
 
 /**
  * The ids of every team deleted (GRA-2055), kept for good: written by the
- * trigger `teams_delete_retires` (migration 0277) in the statement that
+ * trigger `teams_delete_retires` (migration 0278) in the statement that
  * deletes the row, so no code of any release, before this one or after a
  * rollback, deletes a team without it. The staff list makes a members'
  * team only under an id not here, checked in the statement that makes it
@@ -4695,6 +4695,11 @@ export const workflowResources = sqliteTable(
      * owner turns it on.
      */
     askable: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The name people gave it, shown where `name` would be; null for none.
+     * `name` stays the key everything references.
+     */
+    title: text(),
   },
   (table) => [
     // Listing reads a person's own workflows by owner (`listWorkflowResources`).

@@ -24,19 +24,20 @@ import type { z } from "zod";
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
 import { models } from "../models.ts";
-import type { Listening, ListeningOutcome } from "../models.ts";
+import type { Listening, ListeningCall, ListeningOutcome } from "../models.ts";
 import { platformAi } from "../platform-ai.ts";
 import { jsonOf } from "../request-body.ts";
 import { isOwnOrigin } from "../rpc.ts";
-import { sessionRecheckMs } from "../session-check.ts";
+import { reachesWorkspace, sessionRecheckMs } from "../session-check.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
 import { platformTranscription } from "../transcription.ts";
 import { interviewCaller } from "./interview-caller.ts";
 import { onboardingStore } from "./store.ts";
-import type { Took } from "./store.ts";
+import type { Took, TranscriptionSessionNote } from "./store.ts";
 
 // `GET /api/transcription` (`@grasp-os/shared/voice`): what someone says
-// on the onboarding's pages, written down as they say it. The page streams
+// on the onboarding's pages, or dictates into the chat's composer
+// (GRA-1998), written down as they say it. The page streams
 // its microphone to its own origin over a WebSocket, as `connect-src
 // 'self'` allows and nothing else; core relays it to live transcription
 // behind its interface (src/transcription.ts), which reaches the provider
@@ -53,8 +54,9 @@ import type { Took } from "./store.ts";
 //   "start", "language", "sampleRate", "previousText"?, "link"?:
 //   {"secret"}}` (`transcriptionStartSchema`). With `link`, someone's own
 //   interview link, for the account it belongs to, by the session cookie
-//   the upgrade carried (interview-caller.ts); without, an admin signed
-//   in, by that cookie.
+//   the upgrade carried (interview-caller.ts); without, whoever is signed
+//   in, by that cookie: a member dictating, or Grasp's staff at the
+//   onboarding.
 // - Core answers `{"type": "ready", "session", "maxSeconds"}` once the
 //   upstream is open, or an `error` frame and closes.
 // - Then the page sends binary frames of audio, 16-bit little-endian PCM,
@@ -72,34 +74,96 @@ import type { Took } from "./store.ts";
 //
 // - Listen for anyone (GRA-361, C4): only someone's own link, for the
 //   account it belongs to, signed in, while it may be saved (the store's
-//   `transcriptionOnLink`, as a line said), or an admin signed in. Another
+//   `transcriptionOnLink`, as a line said), or someone signed in. Another
 //   person's link, an unknown one and a removed person's answer as at the
 //   speech endpoint. Nothing reaches the upstream before that, and nothing
 //   but `start` is read until it.
 // - Keep listening once that no longer holds (GRA-361, L7, L8): the link
-//   and its session, or the admin's session, is checked again every
-//   `sessionRecheckMs` while the socket is open, as `/rpc`'s connections
-//   are, and a socket ends once it fails, or once the check can't be made.
-// - Lend an admin's cookie to another site: browsers send cookies with
+//   and its session, or the session of whoever is signed in, is checked
+//   again every `sessionRecheckMs` while the socket is open, as `/rpc`'s
+//   connections are, and a socket ends once it fails, or once the check
+//   can't be made.
+// - Lend someone's cookie to another site: browsers send cookies with
 //   any WebSocket upgrade, so the upgrade must come from the deployment's
 //   own origin (`isOwnOrigin`), as `/rpc`'s.
 // - Keep the audio (A1): each frame is passed on and dropped; only its
 //   length is counted. Nothing heard is logged, counted or audited.
 // - Run up the bill (C1): a socket hears at most `maxSessionSeconds` of
 //   audio, and is open at most `maxOpenMs`, then ends; each link and each
-//   admin has minutes a day (`heardBudgets`), which a socket holds as it
-//   opens (the store's `transcriptionOpened`), so sockets opened side by
-//   side share one budget; the router limits sockets opened per address.
+//   person signed in has minutes a day (`heardBudgets`), which a socket
+//   holds as it opens (the store's `transcriptionOpened`), so sockets
+//   opened side by side share one budget; the router limits sockets
+//   opened per address.
 //   The model gateway admits each socket as it opens, for the seconds it
 //   holds, before the upstream is opened (models.ts, `listen`), judged by
 //   the rules as any model call; once it closed, it is charged the
 //   seconds it heard, and audited as a model call, never with anything
 //   heard.
 // - Tell the company who talked, and when: a session on a link is noted
-//   in the onboarding's own log, which only staff read; an admin's is in
-//   the audit log, opened and closed, with its ID and seconds. The
-//   gateway's `model.call` for a session on a link is the system's, as a
-//   line said on one is: it names neither the person nor the session.
+//   in the onboarding's own log, which only staff read; one of Grasp's
+//   staff is in the audit log, opened and closed, with its ID and
+//   seconds. The gateway's `model.call` for a session on a link is the
+//   system's, as a line said on one is: it names neither the person nor
+//   the session.
+//
+// Every member may dictate (GRA-1998), where only admins could listen.
+// What that changes, and what holds it:
+//
+// - Who gets in. Anyone `identify` finds behind the upgrade's session: a
+//   current member of this organization, whatever their role. Nobody
+//   signed in, a removed or erased member, a session for an interview
+//   alone (GRA-1790) and anyone before Grasp's go but its admins have no
+//   identity and are refused. A deployment holds one organization: a
+//   member of another has no session here. Grasp's staff get no more
+//   than before: only as admins, each ask in the client's audit log
+//   (`auditStaffRoute`), and theirs stays the onboarding's, the only
+//   place a staff session reaches.
+// - One person running up Grasp's bill, which is every member's now, not
+//   a few admins': each person has the half hour a day an admin had
+//   (`heardBudgets.person`), counted by their user ID alone, so no role
+//   has two and a change of role starts none; held as a socket opens, so
+//   any number of sockets, tabs or devices side by side share it, and a
+//   socket whose close is never counted keeps what it held. The most a
+//   deployment can hear a day is its members times that, and the
+//   gateway's own limits on Grasp's key stand above it.
+// - Opening and closing sockets with nothing said, each an upstream
+//   session on Grasp's key and a `model.call` in the audit log for none
+//   of the budget: a socket's close counts what the gateway charges, its
+//   seconds rounded up, and a second at least (the store's
+//   `transcriptionClosed`), on a link and for staff too. So a day's
+//   budget is at most as many sockets as it has seconds, 1,800 a person.
+// - Accepted, as decided: dictation is on Grasp's key, so it is in
+//   Grasp's own spend and never in the organization's spend overview or
+//   under its month's limit; what bounds it is the members times 1,800
+//   seconds a day. And someone signed in who has an interview link has
+//   both budgets, the link's for their interview and their own.
+// - Spending someone else's minutes: the budget is keyed by the session's
+//   user ID, never by anything the page sends. The start names no person.
+// - A member removed, erased or signed out while a socket is open: the
+//   check every `sessionRecheckMs` finds nobody, and ends it, upstream
+//   too. A changed role ends nothing: every role may dictate.
+// - Another site opening it with a member's cookie (cross-site WebSocket
+//   hijacking), to listen or to spend their minutes: the own-origin check
+//   on the upgrade, before any socket is made, holds for every member as
+//   it did for an admin.
+// - What they dictate kept anywhere: nothing more is stored than before.
+//   The store holds the seconds held against today's budget under the
+//   user ID, gone the next day; the words go back to the page alone, and
+//   to a chat only if the member sends them, as typed words do.
+// - The audit log saying something else than what happened: a dictation
+//   is one `model.call` when its socket closed, by the member
+//   (`actorOf`), for `chat.dictation`, with the seconds heard and their
+//   cost, never per frame and never anything heard; refused by the
+//   gateway, one `model.refused`. It is not the onboarding's: nothing is
+//   written as `onboarding.transcription.*`, and none of it counts in the
+//   onboarding's use. A start says only whose interview it is, so core
+//   can't tell why an admin listens without a link: an admin is a member
+//   and theirs is dictation, as nothing of the onboarding's pages opens
+//   one without a link.
+// - The words transcription listens out for (`listeningTerms`): a
+//   dictation gets the company's own, as an admin's did, never a team's
+//   names. They go to the provider as hints, and come back only when
+//   said.
 
 /** How long the page has to send `start`. */
 const startWaitMs = 10_000;
@@ -115,15 +179,27 @@ export const maxOpenMs = 2 * maxSessionSeconds * 1000;
 
 /**
  * Seconds of audio heard a day: on someone's link, more than an hour's
- * interview has them talk; for an admin, enough to try the pages.
+ * interview has them talk; for a person signed in, whatever their role,
+ * half an hour of dictation.
  */
-export const heardBudgets = { link: 60 * 60, admin: 30 * 60 } as const;
+export const heardBudgets = { link: 60 * 60, person: 30 * 60 } as const;
 
 /** The transcription model sockets and recordings are written down with, as the gateway names it. */
 export const transcriptionModel = `${platformAi.transcription.provider}/${platformAi.transcription.model}`;
 
-/** What the gateway is told every socket is for. */
-const purpose = "onboarding.transcription";
+/**
+ * What the gateway is told a socket is for, and where it works: the
+ * onboarding's, on a link or for Grasp's staff; or a member's dictation,
+ * counted as theirs and never as the onboarding's.
+ */
+const onboardingListening = {
+  purpose: "onboarding.transcription",
+  work: { onboarding: true },
+} as const satisfies Pick<ListeningCall, "purpose" | "work">;
+const dictationListening = {
+  purpose: "chat.dictation",
+  work: { platform: "dictation" },
+} as const satisfies Pick<ListeningCall, "purpose" | "work">;
 
 /** The gateway's refusals, as the page is told them; any other is a failure. */
 const gatewayRefusals: Partial<
@@ -150,10 +226,15 @@ interface Hearer {
   /** Seconds heard under `who` today, before this session. */
   heard: number;
   budget: number;
-  counted: Took["purpose"];
   by: AuditActor;
-  /** The person whose link it is on, for the onboarding's own log. */
-  person?: string;
+  /** What the gateway is told it is for. */
+  listening: Pick<ListeningCall, "purpose" | "work">;
+  /**
+   * For a session of the onboarding's: what its seconds count as in the
+   * onboarding's use, and the person whose link it is on, for the
+   * onboarding's own log. A member's dictation has none.
+   */
+  onboarding?: { counted: Took["purpose"]; person?: string };
   /** Checks again that it may still listen: why not, or `undefined`. */
   still: () => Promise<CodedError | undefined>;
 }
@@ -180,8 +261,20 @@ const linkStill = async (
   return found.ok ? undefined : interviewErrors.create(found.code);
 };
 
-/** Why an admin no longer may listen, or `undefined`. */
-const adminStill = async (
+/**
+ * Whether `person`, signed in, may listen: every member; of Grasp's
+ * staff, who reach the onboarding alone, its admins, as before any member
+ * could.
+ */
+const mayListen = (
+  person: Parameters<typeof reachesWorkspace>[0] & { role: string }
+): boolean => reachesWorkspace(person) || isAdmin(person.role);
+
+/**
+ * Why someone signed in no longer may listen, or `undefined`: their
+ * session ended, or they were removed, and `identify` finds nobody.
+ */
+const signedInStill = async (
   env: Env,
   headers: Headers,
   userId: string
@@ -190,7 +283,7 @@ const adminStill = async (
   if (person?.userId !== userId) {
     return authErrors.create("auth.unauthenticated");
   }
-  return isAdmin(person.role) ? undefined : roleErrors.create("role.forbidden");
+  return mayListen(person) ? undefined : roleErrors.create("role.forbidden");
 };
 
 /** Whom a session on someone's link is for, or why their link refuses it. */
@@ -226,40 +319,47 @@ const onLink = async (
     who,
     heard,
     budget: heardBudgets.link,
-    counted: "interviews",
     // As a line said on a link: by the system, never in anyone's name.
     by: { type: "system" },
-    person,
+    listening: onboardingListening,
+    onboarding: { counted: "interviews", person },
     still: async () => await linkStill(env, headers, secretMark, account),
   };
 };
 
-/** Whom a session for an admin signed in is for, or why it is refused. */
-const forAdmin = async (
+/**
+ * Whom a session without a link is for, or why it is refused: a member
+ * signed in, dictating; or Grasp's staff, who reach the onboarding alone,
+ * so theirs is the onboarding's.
+ */
+const forSignedIn = async (
   env: Env,
   headers: Headers
 ): Promise<Hearer | CodedError> => {
-  // Grasp's staff, who may reach the onboarding alone, among them.
   const person = await identify(env, headers);
   if (person === undefined) {
     return authErrors.create("auth.unauthenticated");
   }
   // A staff member's view is in the client's audit log (staff-audit.ts).
   await auditStaffRoute(env, person, "onboarding.transcription");
-  if (!isAdmin(person.role)) {
+  if (!mayListen(person)) {
     return roleErrors.create("role.forbidden");
   }
-  const { who, heard } = await onboardingStore(env).heardForAdmin(
-    person.userId
-  );
+  // One budget a person, by their user ID, whatever their role.
+  const { who, heard } = await onboardingStore(env).heardForUser(person.userId);
   return {
     who,
     heard,
-    budget: heardBudgets.admin,
-    // The admin's own onboarding, as their lines said are counted.
-    counted: "reading",
+    budget: heardBudgets.person,
     by: actorOf(person),
-    still: async () => await adminStill(env, headers, person.userId),
+    ...(reachesWorkspace(person)
+      ? { listening: dictationListening }
+      : {
+          listening: onboardingListening,
+          // As the lines said for an admin's own onboarding are counted.
+          onboarding: { counted: "reading" },
+        }),
+    still: async () => await signedInStill(env, headers, person.userId),
   };
 };
 
@@ -390,7 +490,7 @@ class Relay {
     try {
       hearer =
         start.link === undefined
-          ? await forAdmin(this.#env, this.#headers)
+          ? await forSignedIn(this.#env, this.#headers)
           : await onLink(this.#env, this.#headers, start.link, this.#requestId);
     } catch {
       log.error("transcription.check_failed", { requestId: this.#requestId });
@@ -414,11 +514,14 @@ class Relay {
   async #open(start: Start, hearer: Hearer): Promise<void> {
     let held: { held: number; day: string };
     try {
+      const { by, onboarding } = hearer;
       held = await onboardingStore(this.#env).transcriptionOpened({
-        ...this.#note(hearer),
         who: hearer.who,
         budget: hearer.budget,
         most: maxSessionSeconds,
+        ...(onboarding === undefined
+          ? {}
+          : { note: this.#note(by, onboarding) }),
       });
     } catch {
       log.error("transcription.note_failed", { requestId: this.#requestId });
@@ -446,7 +549,7 @@ class Relay {
     try {
       // The page names none: what to listen out for is the store's.
       const keyterms = await onboardingStore(this.#env).listeningTerms(
-        hearer.person
+        hearer.onboarding?.person
       );
       session = await platformTranscription(listening).open({
         language: start.language,
@@ -501,9 +604,8 @@ class Relay {
         seconds,
         // Open at most `maxOpenMs`, ended by the check after it.
         openMs: maxOpenMs + sessionRecheckMs,
-        purpose,
+        ...hearer.listening,
         trigger: hearer.by,
-        work: { onboarding: true },
         requestId: this.#requestId,
       });
     } catch (error) {
@@ -667,31 +769,38 @@ class Relay {
     if (hearer === undefined) {
       return;
     }
+    const { by, onboarding } = hearer;
     try {
       await onboardingStore(this.#env).transcriptionClosed({
-        ...this.#note(hearer),
         who: hearer.who,
-        purpose: hearer.counted,
         seconds: this.#seconds(),
         held: this.#held,
         day: this.#day,
-        ended,
+        ...(onboarding === undefined
+          ? {}
+          : {
+              noted: {
+                note: this.#note(by, onboarding),
+                purpose: onboarding.counted,
+                ended,
+              },
+            }),
       });
     } catch {
       log.error("transcription.count_failed", { requestId: this.#requestId });
     }
   }
 
-  #note(hearer: Hearer) {
-    return {
-      id: this.#id,
-      by: hearer.by,
-      ...(hearer.person === undefined ? {} : { person: hearer.person }),
-    };
+  /** The session as the onboarding notes one of its own. */
+  #note(
+    by: AuditActor,
+    { person }: NonNullable<Hearer["onboarding"]>
+  ): TranscriptionSessionNote {
+    return { id: this.#id, by, ...(person === undefined ? {} : { person }) };
   }
 }
 
-/** `GET /api/transcription`: a live transcription, for someone's link or an admin. */
+/** `GET /api/transcription`: a live transcription, for someone's link or whoever is signed in. */
 export const transcriptionResponse = (
   request: Request,
   env: Env,

@@ -174,11 +174,11 @@ export const speechErrors = defineErrorFamily({
 // it. A WebSocket on the page's own origin, which core relays to the
 // transcription upstream. On someone's interview link, with the link's
 // secret in the first frame and the session of the account the interview
-// belongs to on the upgrade; or for an admin signed in, with the session
-// the upgrade carries. The frames are described where
+// belongs to on the upgrade; or for any member signed in, dictating, with
+// the session the upgrade carries. The frames are described where
 // core serves it (src/onboarding/transcription.ts).
 
-/** Where the onboarding's pages open a live transcription. */
+/** Where a page opens a live transcription. */
 export const transcriptionPath = "/api/transcription";
 
 /** The sample rates the audio may have, in samples a second. */

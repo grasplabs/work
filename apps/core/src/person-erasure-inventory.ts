@@ -465,6 +465,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.chat_drafts": { erased: "workspace" },
   "workspace.chat_files": { erased: "workspace" },
   "workspace.chat_messages": { erased: "workspace" },
+  "workspace.chat_request_keys": { erased: "workspace" },
   // Its person's alone, erased with their workspace. A memory's pin also
   // names other people by ID (its writer, the person whose word it is):
   // their erasure removes neither, and the IDs stay in this person's chat,

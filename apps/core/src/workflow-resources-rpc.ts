@@ -57,6 +57,7 @@ import {
   releaseWorkflowName,
   setWorkflowAskable,
   setWorkflowProcess,
+  setWorkflowTitle,
   workflowAskable,
   workflowSource,
 } from "./workflow-resources.ts";
@@ -114,7 +115,11 @@ export class WorkflowResourcesRpc
     return this.#sources;
   }
 
-  async create(name: string, project?: string): Promise<WorkflowResource> {
+  async create(
+    name: string,
+    project?: string,
+    title?: string
+  ): Promise<WorkflowResource> {
     return await withPerson(
       this.#check,
       async (person) =>
@@ -123,7 +128,8 @@ export class WorkflowResourcesRpc
           person,
           project,
           "workflow",
-          async () => await createWorkflowResource(this.#env, person, name),
+          async () =>
+            await createWorkflowResource(this.#env, person, name, title),
           ({ id }) => id
         )
     );
@@ -210,6 +216,13 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await setWorkflowProcess(this.#env, person, id, process)
+    );
+  }
+
+  async setTitle(id: string, title: unknown): Promise<WorkflowResource> {
+    return await withPerson(
+      this.#check,
+      async (person) => await setWorkflowTitle(this.#env, person, id, title)
     );
   }
 

@@ -55,6 +55,7 @@ const workflow = (
   id,
   namespace: "grasp",
   name,
+  title: null,
   owner: "user-owner",
   currentVersion,
   role: "builder",

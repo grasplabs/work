@@ -17,6 +17,7 @@ const workflow = (
 ): WorkflowSummary => ({
   workflowId: workflowResourceIdSchema.parse(`id-${name}`),
   name,
+  title: null,
   version: 1,
   owner: { userId: "owner", name: null },
   lastRun: {
