@@ -137,12 +137,14 @@ export const directoryUser = (
 /** Where the onboarding's company step sends the browser back to. */
 export const companyStep = "/setup?step=company";
 
+type Admin = Awaited<ReturnType<typeof signedInApi>>;
+
 /**
- * An admin who connected the directory from the company step: their API,
- * and where the browser came back to.
+ * An admin who connected the directory from the company step (`by`, or a
+ * new one): their API, and where the browser came back to.
  */
-export const connectedDirectory = async (idp: Idp) => {
-  const admin = await signedInApi(idp, "admin");
+export const connectedDirectory = async (idp: Idp, by?: Admin) => {
+  const admin = by ?? (await signedInApi(idp, "admin"));
   const { url } = await admin.api.onboarding.connectDirectory(
     "microsoft",
     companyStep

@@ -11,6 +11,7 @@ import {
   ne,
   not,
   or,
+  sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -115,6 +116,12 @@ const readingSchema = z.strictObject({
 const runSchema = z.strictObject({
   requests: z.number().int().positive(),
   queries: z.number().int().positive(),
+  /**
+   * Whose own connections are read nothing of now, by core's user ID:
+   * members core has suspended (GRA-2143). Sent whole with every run, so
+   * connect keeps no list of its own.
+   */
+  paused: z.array(z.string().min(1).max(256)),
 });
 
 const graphPageSchema = z.object({
@@ -403,7 +410,7 @@ export const readReaderGroups = async (
   env: Env,
   request: unknown
 ): Promise<number> => {
-  const { requests, queries } = connectErrors.parse(
+  const { requests, queries, paused } = connectErrors.parse(
     "connect.invalid",
     runSchema,
     request
@@ -434,6 +441,9 @@ export const readReaderGroups = async (
         inArray(connections.provider, groupProviderSchema.options),
         isNotNull(connections.tenant),
         isNotNull(connections.accountId),
+        // Not a suspended person's, a read under way of theirs included:
+        // it goes on, from where it was, once they're back.
+        sql`${connections.ownerUserId} NOT IN (SELECT value FROM json_each(${JSON.stringify(paused)}))`,
         or(
           isNotNull(connections.readerGroupsReading),
           isNull(connections.readerGroupsTriedAt),
