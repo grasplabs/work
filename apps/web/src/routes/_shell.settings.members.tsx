@@ -12,7 +12,7 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatDate } from "../format.ts";
@@ -81,6 +81,7 @@ import {
 import { TeamsPanel } from "../settings/teams.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { useNarrow } from "../use-narrow.ts";
 
 // Settings → Members and roles, on one page as the library's Settings
 // pattern has it: one compact card of people, each with their face, their
@@ -557,22 +558,6 @@ const peopleColumns = ({
   ];
   return narrow ? columns.filter((column) => column.key !== "since") : columns;
 };
-
-/** Whether the window is narrower than a phone's: the library's own breakpoint (media.belowPhone). */
-const belowPhone = "(width < 40rem)";
-const onWidth = (changed: () => void): (() => void) => {
-  const query = matchMedia(belowPhone);
-  query.addEventListener("change", changed);
-  return () => {
-    query.removeEventListener("change", changed);
-  };
-};
-const useNarrow = (): boolean =>
-  useSyncExternalStore(
-    onWidth,
-    () => matchMedia(belowPhone).matches,
-    () => false
-  );
 
 /**
  * The people as one table, the library's Members pattern as Ruben chose it
