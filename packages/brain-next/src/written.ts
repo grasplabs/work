@@ -128,12 +128,9 @@ export const listWritten = (
  *
  * In the same statement, every older memory of theirs it ends (memories.ts
  * `newerSql`: the same entity and attribute, and for an attribute of many
- * values or none, the same value; or one it replaces), and every one
- * those end in turn along a chain of replacements, is retired too, under
- * the same change: a retired memory ends nothing, so taking back the
- * newer of two copies, or the last of a chain, would otherwise make an
- * older one current again for its readers. Each step goes to an older
- * memory, so the walk ends.
+ * values or none, the same value) is retired too, under the same change:
+ * a retired memory ends nothing, so taking back the newer of two copies
+ * would otherwise make the older one current again for its readers.
  */
 export const retireWritten = (
   sql: SqlStorage,
@@ -142,31 +139,24 @@ export const retireWritten = (
   const stamp = nextStamp(sql);
   const retiredRows = sql
     .exec<{ id: string; retired_at: number; retired_change: string | null }>(
-      `WITH RECURSIVE taken(row, entity, attribute, one_value, value_key,
-        lineage_order) AS (
+      `WITH taken AS MATERIALIZED (
         SELECT m.row, m.entity, m.attribute, m.one_value, m.value_key,
           m.lineage_order
         FROM memories AS m
         WHERE m.id = ?1 AND m.lineage = ?2 AND m.retired_at IS NULL
           AND ${unerasedSql("m")}
-        UNION
-        SELECT m.row, m.entity, m.attribute, m.one_value, m.value_key,
-          m.lineage_order
-        FROM taken CROSS JOIN memories AS m
-        WHERE m.lineage = ?2 AND m.retired_at IS NULL AND ${unerasedSql("m")}
-          AND (EXISTS (
-              SELECT 1 FROM memory_replacements AS named
-              WHERE named.memory = taken.row AND named.replaced = m.row
-            )
+      )
+      UPDATE memories AS m SET retired_at = ?3, retired_change = ?4
+      WHERE m.lineage = ?2 AND m.retired_at IS NULL AND ${unerasedSql("m")}
+        AND EXISTS (
+          SELECT 1 FROM taken WHERE taken.row = m.row
             OR (taken.entity = m.entity
               AND (taken.lineage_order > m.lineage_order
                 OR (taken.lineage_order = m.lineage_order AND taken.row > m.row))
               AND ((m.one_value = 1 AND m.attribute = taken.attribute)
                 OR (m.one_value = 0 AND m.attribute IS taken.attribute
-                  AND m.value_key = taken.value_key))))
-      )
-      UPDATE memories AS m SET retired_at = ?3, retired_change = ?4
-      WHERE m.row IN (SELECT row FROM taken)
+                  AND m.value_key = taken.value_key)))
+        )
       RETURNING id, retired_at, retired_change`,
       id,
       lineageOfWriter(writer),
