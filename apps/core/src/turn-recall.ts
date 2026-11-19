@@ -635,7 +635,8 @@ const findsOf = async (
   | undefined
 > => {
   if (!recalling.grant) {
-    const own = reads.personal ? await ownProfileOf(recalling) : [];
+    // Only in their own chat: the harness asks for no other (chat-harness.ts).
+    const own = await ownProfileOf(recalling);
     return own.length === 0
       ? undefined
       : {
