@@ -595,6 +595,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.team_counts": noPerson,
   "onboarding.usage": noPerson,
   "onboarding.referrals": { erased: "interview" },
+  "onboarding.erased_addresses": {
+    kept: "keeps someone erased off the staff list, as keyed hashes of their addresses, by ID",
+  },
   "onboarding.more_voices": {
     none: "work to hear more about; who asked is the audit log's",
   },
@@ -998,6 +1001,7 @@ export const reviewedPersonColumns: Readonly<
   "onboarding.link_codes": ["person"],
   "onboarding.links": ["person", "sent_to_email", "user_id"],
   "onboarding.participations": ["person"],
+  "onboarding.erased_addresses": ["user_id"],
   "onboarding.people": ["email"],
   "onboarding.readbacks": ["person"],
   "onboarding.referrals": ["person"],
