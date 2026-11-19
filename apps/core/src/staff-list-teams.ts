@@ -232,6 +232,28 @@ interface Placement {
 }
 
 /**
+ * The same team for `userId`, named by another key now (an address that
+ * changed at Google and on the list): only the key their primary row keeps
+ * changes, so an address that later goes to someone else never moves
+ * them, and no membership an admin took away comes back.
+ */
+const rekeyOf = (
+  db: DrizzleD1Database,
+  userId: string,
+  before: Placed | undefined,
+  placeKey: PlaceKey | undefined,
+  holds: SQL
+): BatchItem<"sqlite">[] =>
+  before !== undefined && placeKey !== undefined && before.placeKey !== placeKey
+    ? [
+        db
+          .update(teamPrimaries)
+          .set({ placeKey })
+          .where(and(eq(teamPrimaries.userId, userId), holds)),
+      ]
+    : [];
+
+/**
  * The staff list's rule for one person (GRA-2055), decided here alone:
  * nothing automatic overrides what an admin did by hand, and lack of proof
  * never takes anything away. The list touches someone's memberships only
@@ -256,7 +278,7 @@ export const placementOf = (
   { userId, before, after, placeKey, proved, key }: Placement,
   now: Date,
   holds: SQL
-) => {
+): { statements: BatchItem<"sqlite">[]; leaves: boolean } => {
   const moved = before?.teamId !== after;
   const joins =
     after !== undefined &&
@@ -267,7 +289,10 @@ export const placementOf = (
   const waits =
     after !== undefined && placeKey !== undefined && !proved && moved;
   if (!(moved || joins)) {
-    return { statements: [], leaves: false };
+    return {
+      statements: rekeyOf(db, userId, before, placeKey, holds),
+      leaves: false,
+    };
   }
   const entry = (
     action: "team.member.added" | "team.member.removed",
@@ -322,7 +347,8 @@ export const placementOf = (
           .insert(teamPrimaries)
           .select(
             sql`SELECT ${userId}, ${after}, ${now.getTime()}, 0, ${placeKey}, 1
-            WHERE ${holds}`
+            WHERE ${holds}
+              AND EXISTS (SELECT 1 FROM ${teams} WHERE ${teams.id} = ${after} AND ${teams.organizationId} = ${organizationId})`
           )
           .onConflictDoUpdate({
             target: teamPrimaries.userId,
@@ -596,25 +622,42 @@ const placeVersion = async (
       { ...row, placeKey: placeKeySchema.parse(placeKey) },
     ])
   );
+  // Who proves each key now: one someone else proves names them, not
+  // whoever was placed by it before.
+  const proverOf = new Map<PlaceKey, string>();
+  for (const { userId, key } of found) {
+    proverOf.set(key, userId);
+  }
   /**
-   * What the list gives `userId` now: by what it named them by before,
-   * whether or not they prove it now, so lack of proof takes nothing
-   * away; else by what they prove that it names.
+   * What the list gives `userId` now. By what their sign-in proves of what
+   * it names: the key they were placed by first, else another, as an
+   * address that changed at Google and on the list. Proving nothing it
+   * names, by what it named them by before, while nobody else proves that,
+   * so lack of proof takes nothing away; and while someone else does (an
+   * address that changed hands), they stay as they are.
    */
   const assigned = (userId: string) => {
     const before = was.get(userId);
     const proves = provedBy.get(userId) ?? [];
-    if (before !== undefined && teamOf.has(before.placeKey)) {
-      return {
-        after: teamOf.get(before.placeKey),
-        placeKey: before.placeKey,
-        proved: proves.includes(before.placeKey),
-      };
+    const placeKey =
+      before !== undefined && proves.includes(before.placeKey)
+        ? before.placeKey
+        : proves[0];
+    if (placeKey !== undefined) {
+      return { after: teamOf.get(placeKey), placeKey, proved: true };
     }
-    const [placeKey] = proves;
-    return placeKey === undefined
-      ? { after: undefined, placeKey: undefined, proved: false }
-      : { after: teamOf.get(placeKey), placeKey, proved: true };
+    if (before === undefined) {
+      return { after: undefined, placeKey: undefined, proved: false };
+    }
+    const prover = proverOf.get(before.placeKey);
+    if (prover !== undefined && prover !== userId) {
+      return { after: before.teamId, placeKey: before.placeKey, proved: false };
+    }
+    return {
+      after: teamOf.get(before.placeKey),
+      placeKey: before.placeKey,
+      proved: false,
+    };
   };
   const changes = await Promise.all(
     [...new Set([...was.keys(), ...provedBy.keys()])]
@@ -624,7 +667,12 @@ const placeVersion = async (
         const before = was.get(userId);
         const { after, placeKey, proved } = assigned(userId);
         const changed =
-          before?.teamId !== after || (before?.pending === true && proved);
+          before?.teamId !== after ||
+          (before?.pending === true && proved) ||
+          // What the list names them by changed hands to them alone.
+          (before !== undefined &&
+            placeKey !== undefined &&
+            before.placeKey !== placeKey);
         return changed ? [{ userId, before, after, placeKey, proved }] : [];
       })
       .map(async (change): Promise<Placement> => ({

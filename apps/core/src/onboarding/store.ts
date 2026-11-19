@@ -1554,7 +1554,8 @@ export class Onboarding extends DurableObject<Env> {
       if (confirmed) {
         this.#confirmed(before, roster);
         this.#rosterConfirmed(new Date().toISOString());
-        this.#keepConfirmedPlaces(roster);
+        // As written, with what the entries kept (`#insertPeople`).
+        this.#keepConfirmedPlaces(this.#roster() ?? roster);
       } else {
         this.#holdNew(before, roster);
       }
@@ -1683,14 +1684,31 @@ export class Onboarding extends DurableObject<Env> {
 
   /** Writes `entries` as the list's people, in their order. */
   #insertPeople(entries: Roster["people"]): void {
+    // An entry saved without its Microsoft directory account keeps the one
+    // it had (GRA-2055): only the directory read gives one, and a save
+    // that brings another replaces it; a page that left it out never
+    // drops it, so a member the list placed by it stays placed.
+    const had = new Map(
+      this.#db
+        .select({
+          id: people.id,
+          tenant: people.entraTenant,
+          oid: people.entraOid,
+        })
+        .from(people)
+        .all()
+        .map(({ id, tenant, oid }) => [id, { tenant, oid }])
+    );
+    this.#db.delete(people).run();
     for (const [position, { entra, ...person }] of entries.entries()) {
+      const kept = had.get(person.id);
       this.#db
         .insert(people)
         .values({
           ...person,
           position,
-          entraTenant: entra?.tenant ?? null,
-          entraOid: entra?.oid ?? null,
+          entraTenant: entra?.tenant ?? kept?.tenant ?? null,
+          entraOid: entra?.oid ?? kept?.oid ?? null,
         })
         .run();
     }
@@ -1735,7 +1753,6 @@ export class Onboarding extends DurableObject<Env> {
         .map((row) => [row.id, row])
     );
     this.#db.delete(teams).run();
-    this.#db.delete(people).run();
     for (const [position, team] of roster.teams.entries()) {
       const was = mapped.get(team.id);
       this.#db
@@ -4945,14 +4962,20 @@ export class Onboarding extends DurableObject<Env> {
   renameTeam(id: string, name: string): void {
     this.ctx.storage.transactionSync(() => {
       this.#db.update(teams).set({ name }).where(eq(teams.id, id)).run();
-      // So the confirmed list's placing never names it back (GRA-2055).
+      // A change to the confirmed list like any other (GRA-2055): a new
+      // version, so a placing that read the old name writes nothing more
+      // once the next claims it, and that one names the team as renamed.
       const confirmed = this.ctx.storage.kv.get(confirmedTeamsKey);
-      if (confirmed !== undefined) {
+      const teamsNow =
+        confirmed === undefined ? [] : confirmedTeamsSchema.parse(confirmed);
+      if (teamsNow.some((team) => team.id === id)) {
         this.ctx.storage.kv.put(
           confirmedTeamsKey,
-          confirmedTeamsSchema
-            .parse(confirmed)
-            .map((team) => (team.id === id ? { ...team, name } : team))
+          teamsNow.map((team) => (team.id === id ? { ...team, name } : team))
+        );
+        this.ctx.storage.kv.put(
+          confirmedVersionKey,
+          this.confirmedVersion() + 1
         );
       }
       const held = this.companyTeams();
@@ -5157,14 +5180,21 @@ export class Onboarding extends DurableObject<Env> {
       .all();
   }
 
-  /** Whether the staff list has the members' team `id` (GRA-2055). */
+  /**
+   * Whether the staff list has the members' team `id` (GRA-2055): the list
+   * as saved, or as last confirmed, which the next placing names and makes
+   * (`confirmedPlaces`).
+   */
   listsTeam(id: string): boolean {
+    const confirmed = this.ctx.storage.kv.get(confirmedTeamsKey);
     return (
       this.#db
         .select({ id: teams.id })
         .from(teams)
         .where(eq(teams.id, id))
-        .all().length > 0
+        .all().length > 0 ||
+      (confirmed !== undefined &&
+        confirmedTeamsSchema.parse(confirmed).some((team) => team.id === id))
     );
   }
 

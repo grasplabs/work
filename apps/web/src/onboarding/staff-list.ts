@@ -509,6 +509,21 @@ const underSavedIds = (
 };
 
 /**
+ * `person` as a list read again gives them, with what the saved list held
+ * of the same person (`before`, by id) kept: whether they are away, and
+ * the Microsoft directory account the list places their sign-in by
+ * (GRA-2055), which a file or the HR platform doesn't give. One rule for
+ * every read that merges into the saved list (`withSaved`).
+ */
+const asSaved = (person: RosterPerson, before: RosterPerson): RosterPerson => ({
+  ...person,
+  away: before.away,
+  ...(person.entra === undefined && before.entra !== undefined
+    ? { entra: before.entra }
+    : {}),
+});
+
+/**
  * A staff list read again, with what the admin set on the one before kept
  * for the teams and people in both, by id: a team they switched off stays
  * off, someone marked away stays away, a lead they picked stays the lead
@@ -548,7 +563,7 @@ export const withSaved = (
     }),
     people: roster.people.map((person) => {
       const before = savedPeople.get(person.id);
-      return before === undefined ? person : { ...person, away: before.away };
+      return before === undefined ? person : asSaved(person, before);
     }),
   };
 };

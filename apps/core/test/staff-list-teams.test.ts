@@ -546,6 +546,66 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     });
   });
 
+  it("keep a member in their team once their address changes at Google and on the list, though the old address comes back later for someone in another team", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user", "google");
+    const tag = unique();
+    const oldAddress = emailOf(ann);
+    const newAddress = `ann-new-${tag}@acme.test`;
+    const listed = (
+      ids: readonly string[],
+      annAt: string,
+      withBob: boolean
+    ): RosterInput => ({
+      teams: ["Finance", "Sales"].map((name, index) => ({
+        id: ids[index] ?? `t${index}`,
+        name: `${name} ${tag}`,
+        lead: null,
+      })),
+      people: [
+        { id: `ann-${tag}`, name: "Ann", email: annAt, team: ids[0] ?? "" },
+        ...(withBob
+          ? [
+              {
+                id: `bob-${tag}`,
+                name: "Bob",
+                email: oldAddress,
+                team: ids[1] ?? "",
+              },
+            ]
+          : []),
+      ],
+    });
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      listed(["t0", "t1"], oldAddress, false)
+    );
+    const ids = ["Finance", "Sales"].map(
+      (name) =>
+        first?.teams.find((team) => team.name === `${name} ${tag}`)?.id ?? ""
+    );
+    // Her address changes at Google and on the list; her team stays.
+    await env.DB.prepare(
+      "UPDATE accounts SET verified_email = ? WHERE user_id = ?"
+    )
+      .bind(newAddress, ann.userId)
+      .run();
+    await admin.api.onboarding.confirmRoster(listed(ids, newAddress, false));
+    // Later her old address is Bob's, at Google and on the list, in Sales.
+    const [bob] = await manyMembers(1);
+    await env.DB.prepare(
+      "UPDATE accounts SET verified_email = ? WHERE user_id = ?"
+    )
+      .bind(oldAddress, bob?.id ?? "")
+      .run();
+    await admin.api.onboarding.confirmRoster(listed(ids, newAddress, true));
+    const teams = await membersTeams(admin);
+
+    expect({
+      finance: teams.get(`Finance ${tag}`)?.memberIds,
+      sales: teams.get(`Sales ${tag}`)?.memberIds,
+    }).toStrictEqual({ finance: [ann.userId], sales: [bob?.id] });
+  });
+
   it("take a member out of the team the list moved them from, though nothing proves them now, and add them to the new one only once their sign-in does", async () => {
     const admin = await signedInApi(idp, "admin");
     const ann = await signedInApi(idp, "user", "google");
@@ -598,6 +658,76 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       still: [],
       proved: [`Finance ${tag}`],
     });
+  });
+
+  it("leave out a member the list gave a team while nothing proved them, once an admin removed them from it by hand, also after adding them by hand first", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    /**
+     * Ann placed in Sales, then moved by the list to Finance while nothing
+     * proves her (her Finance membership waits), with `byHand` done to her
+     * Finance membership meanwhile; then she signs in and the admin
+     * confirms the unchanged list. Whether she is in Finance after.
+     */
+    const inFinanceAfter = async (byHand: "add then remove" | "remove") => {
+      const ann = await signedInApi(idp, "user", "google");
+      const run = unique();
+      const listed = (ids: readonly string[], annIn: number): RosterInput => ({
+        teams: ["Sales", "Finance"].map((name, index) => ({
+          id: ids[index] ?? `t${index}`,
+          name: `${name} ${run} ${tag}`,
+          lead: null,
+        })),
+        people: [
+          {
+            id: `ann-${run}`,
+            name: "Ann",
+            ...onList(ann),
+            team: ids[annIn] ?? "",
+          },
+        ],
+      });
+      const { roster: first } = await admin.api.onboarding.confirmRoster(
+        listed(["t0", "t1"], 0)
+      );
+      const ids = ["Sales", "Finance"].map(
+        (name) =>
+          first?.teams.find((team) => team.name === `${name} ${run} ${tag}`)
+            ?.id ?? ""
+      );
+      const finance = ids[1] ?? "";
+      const handAdd = async () =>
+        await callAuth("/organization/add-team-member", admin.session, {
+          teamId: finance,
+          userId: ann.userId,
+        });
+      if (byHand === "remove") {
+        // In Finance by hand already, before the list moves her there.
+        await handAdd();
+      }
+      await env.DB.prepare(
+        "UPDATE accounts SET verified_email = NULL WHERE user_id = ?"
+      )
+        .bind(ann.userId)
+        .run();
+      await admin.api.onboarding.confirmRoster(listed(ids, 1));
+      if (byHand === "add then remove") {
+        await handAdd();
+      }
+      await callAuth("/organization/remove-team-member", admin.session, {
+        teamId: finance,
+        userId: ann.userId,
+      });
+      await signedIn(idp, "google", ann.person);
+      await admin.api.onboarding.confirmRoster(listed(ids, 1));
+      const teams = await membersTeams(admin);
+      return teams.get(`Finance ${run} ${tag}`)?.memberIds.includes(ann.userId);
+    };
+
+    expect({
+      addThenRemove: await inFinanceAfter("add then remove"),
+      remove: await inFinanceAfter("remove"),
+    }).toStrictEqual({ addThenRemove: false, remove: false });
   });
 
   it("place a Microsoft member by the directory account their entry carries: never by an address alone, another tenant's account or a guest's, and still once their address changes at the directory", async () => {
@@ -680,6 +810,41 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       renamed: [eli.userId],
       eliMoved: [],
     });
+  });
+
+  it("keep a Microsoft member's directory account on their entry when a save leaves it out, so the member stays placed", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const eli = await signedInApi(idp, "user");
+    const tag = unique();
+    const { email, entra } = onList(eli);
+    const listed = (finance: string, withAccount: boolean): RosterInput => ({
+      teams: [{ id: finance, name: `Finance ${tag}`, lead: null }],
+      people: [
+        {
+          id: `eli-${tag}`,
+          name: "Eli",
+          email,
+          ...(withAccount ? { entra } : {}),
+          team: finance,
+        },
+      ],
+    });
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      listed("finance", true)
+    );
+    const finance = first?.teams[0]?.id ?? "";
+    // A page that left the account out (a file read, say) confirms again.
+    const events = await auditedDuring(async () => {
+      await admin.api.onboarding.confirmRoster(listed(finance, false));
+    });
+    const { roster } = await admin.api.onboarding.view();
+    const teams = await membersTeams(admin);
+
+    expect({
+      kept: roster?.people.find(({ id }) => id === `eli-${tag}`)?.entra,
+      inFinance: teams.get(`Finance ${tag}`)?.memberIds,
+      events: events.filter(({ action }) => action.startsWith("team.member.")),
+    }).toStrictEqual({ kept: entra, inFinance: [eli.userId], events: [] });
   });
 
   it("keep a Microsoft member's directory account out of Grasp's staff view of the staff list", async () => {
@@ -1374,7 +1539,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     }).toStrictEqual({ landed: true, inSales: false, primaries: [] });
   });
 
-  it("never make a team the list made once again under its id after an admin deleted it, though a stale confirm still holds it", async () => {
+  it("never make a team the list made once again under its id once it was deleted, though a stale confirm still holds it", async () => {
     const admin = await signedInApi(idp, "admin");
     const ann = await signedInApi(idp, "user");
     const tag = unique();
@@ -1407,9 +1572,12 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       teams: [{ id: sales, name: `Sales ${tag}`, lead: null }],
       people: [{ id: "bo", name: "Bo", team: sales }],
     });
+    // Settings refuses, the confirmed list naming it; code of an earlier
+    // release deletes it all the same.
     const deleted = await callAuth("/organization/remove-team", admin.session, {
       teamId: board,
     });
+    await env.DB.prepare("DELETE FROM teams WHERE id = ?").bind(board).run();
     // ...and the stale confirm goes on: Board held and minted, to it.
     const stale = rosterSchema.parse(listed(board, sales));
     const { roster: named, minted } = await intoMembersTeams(env, stale, {
@@ -1426,7 +1594,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       newId: again !== undefined && again !== board,
       annIn: teams.get(`Board ${tag}`)?.memberIds.includes(ann.userId),
       reads: texts.some((text) => text.includes(marker)),
-    }).toStrictEqual({ deleted: 200, newId: true, annIn: true, reads: false });
+    }).toStrictEqual({ deleted: 409, newId: true, annIn: true, reads: false });
   });
 
   it("never make a team again under an id the list made while its confirm ran, when the admin deleted it in between", async () => {
@@ -1455,7 +1623,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       drafted.teams.find(({ name }) => name === `Sales ${tag}`)?.id ?? "";
     // A confirm from a stale tab read Board as still to make. Just before
     // it makes it, another confirm made it, its minutes were shared, it
-    // was taken off the list and an admin deleted it.
+    // was taken off the list and deleted.
     const landing = landingAt(/insert into "teams"/iu, "before", async () => {
       await admin.api.onboarding.confirmRoster(drafted);
       await add(`Board minutes ${marker}`, { kind: "team", teamId: board });
@@ -1463,9 +1631,9 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
         teams: [{ id: sales, name: `Sales ${tag}`, lead: null }],
         people: [{ id: "bo", name: "Bo", team: sales }],
       });
-      await callAuth("/organization/remove-team", admin.session, {
-        teamId: board,
-      });
+      // Deleted by code of an earlier release: Settings refuses while the
+      // confirmed list names it.
+      await env.DB.prepare("DELETE FROM teams WHERE id = ?").bind(board).run();
     });
     await confirmOn(admin, landing.coreEnv, drafted);
     const afterStale = await membersTeams(admin);
@@ -2106,6 +2274,156 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       after: await agreeWhen("after"),
       before: await agreeWhen("before"),
     }).toStrictEqual({ after: true, before: true });
+  });
+
+  it("name a team as a rename in Settings did, though a confirm's placing that read the list's older name was under way", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const named = (id: string, name: string): RosterInput => ({
+      teams: [{ id, name, lead: null }],
+      people: [{ id: `bo-${tag}`, name: "Bo", team: id }],
+    });
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      named("team", `Team ${tag}`)
+    );
+    const id = first?.teams[0]?.id ?? "";
+    // A confirm renames it Sales; just before its placing writes that, an
+    // admin renames it Revenue in Settings.
+    const landing = landingAt(
+      /^update "teams" set "name"/iu,
+      "before",
+      async () => {
+        await callAuth("/organization/update-team", admin.session, {
+          teamId: id,
+          data: { name: `Revenue ${tag}` },
+        });
+      }
+    );
+    await confirmOn(admin, landing.coreEnv, named(id, `Sales ${tag}`));
+    const { roster } = await admin.api.onboarding.view();
+    const row = await env.DB.prepare("SELECT name FROM teams WHERE id = ?")
+      .bind(id)
+      .first<{ name: string }>();
+
+    expect({
+      landed: landing.landed(),
+      settings: row?.name,
+      list: roster?.teams[0]?.name,
+    }).toStrictEqual({
+      landed: true,
+      settings: `Revenue ${tag}`,
+      list: `Revenue ${tag}`,
+    });
+  });
+
+  it("refuse to delete in Settings a team the confirmed list names, though a draft since leaves it out; and never make it again under its id once older code deleted it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user", "google");
+    const tag = unique();
+    const marker = markerWord();
+    const listed = (
+      ids: readonly string[],
+      withBoard: boolean
+    ): RosterInput => ({
+      teams: [
+        { id: ids[0] ?? "sales", name: `Sales ${tag}`, lead: null },
+        ...(withBoard
+          ? [{ id: ids[1] ?? "board", name: `Board ${tag}`, lead: null }]
+          : []),
+      ],
+      people: [
+        {
+          id: `ann-${tag}`,
+          name: "Ann",
+          ...onList(ann),
+          team: ids[0] ?? "sales",
+        },
+      ],
+    });
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      listed(["sales", "board"], true)
+    );
+    const ids = ["Sales", "Board"].map(
+      (name) =>
+        first?.teams.find((team) => team.name === `${name} ${tag}`)?.id ?? ""
+    );
+    const board = ids[1] ?? "";
+    await add(`Board minutes ${marker}`, { kind: "team", teamId: board });
+    // A draft leaves Board out; the confirmed list still names it.
+    await admin.api.onboarding.saveRoster(listed(ids, false));
+    const refused = await callAuth("/organization/remove-team", admin.session, {
+      teamId: board,
+    });
+    // Code of a release before this one deletes it all the same; then a
+    // member's removal changes the confirmed list, and the clock places it.
+    await env.DB.prepare("DELETE FROM teams WHERE id = ?").bind(board).run();
+    await admin.api.members.remove(ann.userId);
+    await runMinuteTasks();
+    const row = await env.DB.prepare("SELECT id FROM teams WHERE id = ?")
+      .bind(board)
+      .first();
+
+    expect({ refused: refused.status, madeAgain: row !== null }).toStrictEqual({
+      refused: 409,
+      madeAgain: false,
+    });
+  });
+
+  it("finish placing a list though a team someone waits for is deleted as the confirm saves", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user", "google");
+    const tag = unique();
+    const store = onboardingStore(env);
+    const listed = (ids: readonly string[], annIn: number): RosterInput => ({
+      teams: ["Sales", "Finance"].map((name, index) => ({
+        id: ids[index] ?? `t${index}`,
+        name: `${name} ${tag}`,
+        lead: null,
+      })),
+      people: [
+        {
+          id: `ann-${tag}`,
+          name: "Ann",
+          ...onList(ann),
+          team: ids[annIn] ?? "",
+        },
+      ],
+    });
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      listed(["t0", "t1"], 0)
+    );
+    const ids = ["Sales", "Finance"].map(
+      (name) =>
+        first?.teams.find((team) => team.name === `${name} ${tag}`)?.id ?? ""
+    );
+    await env.DB.prepare(
+      "UPDATE accounts SET verified_email = NULL WHERE user_id = ?"
+    )
+      .bind(ann.userId)
+      .run();
+    // The list moves Ann, unproved, to Finance; just before the placing
+    // writes her waiting row, code of an older release deletes Finance.
+    const landing = landingAt(
+      /insert into "team_primaries"/iu,
+      "before",
+      async () => {
+        await env.DB.prepare("DELETE FROM teams WHERE id = ?")
+          .bind(ids[1] ?? "")
+          .run();
+      }
+    );
+    const answered = await outcome(
+      confirmOn(admin, landing.coreEnv, listed(ids, 1))
+    );
+    const placed = await env.DB.prepare(
+      "SELECT placed FROM staff_list_placed"
+    ).first<{ placed: number }>();
+
+    expect({
+      landed: landing.landed(),
+      answered,
+      placed: placed?.placed === (await store.confirmedVersion()),
+    }).toStrictEqual({ landed: true, answered: "ok", placed: true });
   });
 
   it("leave a confirm's placing its list while its lease is live: the clock takes nothing, and the confirm finishes and answers done", async () => {

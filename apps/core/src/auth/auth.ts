@@ -49,7 +49,7 @@ import {
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
-import { addedByHand } from "../staff-list-by-hand.ts";
+import { addedByHand, removedByHand } from "../staff-list-by-hand.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -1014,7 +1014,14 @@ const createAuth = (
           afterAddTeamMember: async ({ teamMember }) => {
             await addedByHand(env, teamMember.teamId, teamMember.userId);
           },
+          // A removal by hand of the team the list gives them stands: the
+          // list doesn't add it back (GRA-2055), before Better Auth's
+          // delete and after it, as an add's mark is.
+          beforeRemoveTeamMember: async ({ teamMember }) => {
+            await removedByHand(env, teamMember.teamId, teamMember.userId);
+          },
           afterRemoveTeamMember: async ({ teamMember }) => {
+            await removedByHand(env, teamMember.teamId, teamMember.userId);
             await teamAccessMayHaveDropped(env, teamMember.teamId, [
               teamMember.userId,
             ]);
