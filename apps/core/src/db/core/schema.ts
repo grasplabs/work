@@ -129,6 +129,13 @@ export const accounts = sqliteTable(
     // Who writes in Teams, by the object id its messages carry
     // (channels/who.ts).
     index("accounts_oid_idx").on(table.oid),
+    // The directory's people by the object id a sign-in of a provider
+    // kept, compared lower case as the daily read keeps it
+    // (directory-ties.ts), with no other comparison of the id changed.
+    index("accounts_provider_oid_lower_idx").on(
+      table.providerId,
+      sql`lower(${table.oid})`
+    ),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
       table.accountId
@@ -566,6 +573,68 @@ export const staffListSynced = sqliteTable("staff_list_synced", {
  */
 export const retiredTeamIds = sqliteTable("retired_team_ids", {
   id: text().primaryKey(),
+});
+
+/**
+ * Everyone the organization's directory listed at its last daily read
+ * that was applied whole (GRA-2056, directory-people.ts): the provider's
+ * ID of each, in the tenant read, with what later reads act on, and the
+ * member they are tied to. Written by that read alone, which replaces
+ * every row of its provider in one batch, and by the tie at sign-in
+ * (`userId` alone). No name, address, title or manager: nothing reads
+ * them here. A person's erasure deletes their rows.
+ */
+export const directoryPeople = sqliteTable(
+  "directory_people",
+  {
+    /** The directory read (`microsoft-directory`). */
+    provider: text().notNull(),
+    /** The provider's tenant the read came from (Entra's tenant ID). */
+    tenant: text().notNull(),
+    /** The provider's ID of the person (Entra's object ID), lower case. */
+    accountId: text("account_id").notNull(),
+    /** Their department, as connect cleaned it; empty for none. */
+    department: text().notNull(),
+    /** Whether their account is turned on; nothing acts on it yet. */
+    enabled: integer({ mode: "boolean" }).notNull(),
+    /**
+     * The member whose sign-in account names the same ID in the same
+     * tenant, while they are a member (`tieDirectoryPeople`); null for
+     * nobody.
+     */
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.tenant, table.accountId] }),
+    index("directory_people_user_id_idx").on(table.userId),
+  ]
+);
+
+/**
+ * Where each provider's daily read of the directory stands (GRA-2056,
+ * directory-people.ts), for the admin: the read last applied, what it
+ * counted, and the last failure since. `run` and `startedAt` are the
+ * claim of the newest read, taken in the batch that applies it, which
+ * holds only while no later-started read claimed it: an older read never
+ * lands after a newer one.
+ */
+export const directoryReads = sqliteTable("directory_reads", {
+  provider: text().primaryKey(),
+  /** The directory connection last read or tried. */
+  connectionId: text("connection_id").notNull(),
+  tenant: text().notNull(),
+  run: text(),
+  startedAt: timestamp("started_at"),
+  /** When the last read was applied; null before one was. */
+  readAt: timestamp("read_at"),
+  /** How many people that read listed, and how many of them were turned off. */
+  people: integer(),
+  disabled: integer(),
+  /** The last read's failure since `readAt`, as a directory error code. */
+  failure: text(),
+  failedAt: timestamp("failed_at"),
 });
 
 /**

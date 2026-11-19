@@ -61,6 +61,9 @@ describe("the onboarding's directory", () => {
         manager: { id: lead },
       }),
       user({ displayName: "A guest", userType: "Guest" }),
+      // An account with no name: listed by the directory, but no one a
+      // roster can name.
+      user({ displayName: "" }),
     ]);
     const { admin, authorization, back } = await connectedDirectory(idp);
     const member = await signedInApi(idp, "user");

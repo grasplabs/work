@@ -37,7 +37,9 @@ import { accessTokenFor } from "./tokens.ts";
 //   built here, on the users endpoint, every time.
 // - Personal data past what a roster needs: only names, email addresses,
 //   departments, jobs and managers are asked for (`$select`, `fields`)
-//   and answered. Nothing of sign-ins, phones, addresses or groups.
+//   and answered. Nothing of sign-ins, phones, addresses or groups. Of
+//   an account that is turned off, only its ID is answered, apart from
+//   the people, for core's daily read to tell a leaver (GRA-2056).
 // - Planted text: anyone with a directory account can name themselves
 //   anything. Names, departments and jobs are cut to what a roster keeps,
 //   without control or format characters, and are only data. IDs that
@@ -209,19 +211,34 @@ const requestOf = (provider: DirectoryProvider, cursor: string | null): URL => {
   return url;
 };
 
-/** Someone in Entra, as kept; none for a guest, a disabled account, or no name. */
+/**
+ * The Entra object ID of `user` when it is one of the tenant's own
+ * accounts, turned off (`accountEnabled: false`); none otherwise.
+ */
+const graphDisabled = (user: z.output<typeof graphUserSchema>): string[] =>
+  guidPattern.test(user.id) &&
+  user.accountEnabled === false &&
+  user.userType?.toLowerCase() !== "guest"
+    ? [user.id.toLowerCase()]
+    : [];
+
+/**
+ * Someone in Entra, as kept; none for a guest or a disabled account. Who
+ * is listed is decided by the ID and whether the account is on, never by
+ * a name: one without a name is answered with an empty one, and a roster
+ * leaves it out itself.
+ */
 const graphPerson = (
   user: z.output<typeof graphUserSchema>
 ): DirectoryPerson | null => {
-  const name = textOf(user.displayName);
   if (
     !guidPattern.test(user.id) ||
     user.accountEnabled === false ||
-    user.userType?.toLowerCase() === "guest" ||
-    name === ""
+    user.userType?.toLowerCase() === "guest"
   ) {
     return null;
   }
+  const name = textOf(user.displayName);
   const manager = user.manager?.id ?? "";
   return {
     id: user.id.toLowerCase(),
@@ -233,19 +250,28 @@ const graphPerson = (
   };
 };
 
-/** Someone in Google's directory, as kept; none for a suspended or archived account, or no name. */
+/** The Google user ID of `user` when its account is suspended or archived; none otherwise. */
+const googleDisabled = (user: z.output<typeof googleUserSchema>): string[] =>
+  googleIdPattern.test(user.id) &&
+  (user.suspended === true || user.archived === true)
+    ? [user.id]
+    : [];
+
+/**
+ * Someone in Google's directory, as kept; none for a suspended or archived
+ * account. One without a name is answered with an empty one, as Entra's.
+ */
 const googlePerson = (
   user: z.output<typeof googleUserSchema>
 ): DirectoryPerson | null => {
-  const name = textOf(user.name?.fullName);
   if (
     !googleIdPattern.test(user.id) ||
     user.suspended === true ||
-    user.archived === true ||
-    name === ""
+    user.archived === true
   ) {
     return null;
   }
+  const name = textOf(user.name?.fullName);
   const organizations = user.organizations ?? [];
   const organization =
     organizations.find(({ primary }) => primary === true) ?? organizations[0];
@@ -304,13 +330,17 @@ const personOf = async (
         googleUserSchema.parse(await googleDirectory(access, url.href))
       );
 
-/** One page of the provider's users: its people, and the link to the next. */
+/**
+ * One page of the provider's users: its people, the IDs of its accounts
+ * that are turned off, and the link to the next.
+ */
 const pageOf = async (
   provider: DirectoryProvider,
   access: ProviderAccess,
   url: URL
 ): Promise<{
   people: DirectoryPerson[];
+  disabled: string[];
   next: string | null;
   read: number;
 }> => {
@@ -318,6 +348,7 @@ const pageOf = async (
     const page = graphPageSchema.parse(await graph(access, url.href));
     return {
       people: page.value.flatMap((user) => graphPerson(user) ?? []),
+      disabled: page.value.flatMap(graphDisabled),
       next: page["@odata.nextLink"] ?? null,
       read: page.value.length,
     };
@@ -329,6 +360,7 @@ const pageOf = async (
   next.searchParams.set("pageToken", token);
   return {
     people: users.flatMap((user) => googlePerson(user) ?? []),
+    disabled: users.flatMap(googleDisabled),
     next: token === "" ? null : next.href,
     read: users.length,
   };
@@ -465,7 +497,7 @@ export const readDirectory = async (
   } catch (error) {
     throw readFailure(error);
   }
-  const { people, next, read } = page;
+  const { people, disabled, next, read } = page;
   // A next link elsewhere, or a page past what was asked, is never kept,
   // nor taken for the end.
   if (
@@ -474,7 +506,7 @@ export const readDirectory = async (
   ) {
     throw directoryErrors.create("directory.provider_failed");
   }
-  return { tenant: connection.tenant, people, next };
+  return { tenant: connection.tenant, people, disabled, next };
 };
 
 /**
@@ -524,10 +556,12 @@ export const lookUpInDirectory = async (
     }
     throw readFailure(error);
   }
-  // Someone else answered for the ID asked: nobody is taken for them.
+  // Someone else answered for the ID asked: nobody is taken for them; nor
+  // is an account with no name made anyone (channels/door.ts makes a
+  // member of whom this answers).
   const asked = provider.data === "microsoft-directory" ? id.toLowerCase() : id;
   return {
     tenant: connection.tenant,
-    person: person?.id === asked ? person : null,
+    person: person?.id === asked && person.name !== "" ? person : null,
   };
 };

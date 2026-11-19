@@ -4,7 +4,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { relayRedirectUri } from "@grasp-os/shared/oauth-relay";
 import {
   staffListTeamRefusals,
@@ -45,6 +45,7 @@ import {
   users,
   verifications,
 } from "../db/core/schema.ts";
+import { tieSignedIn } from "../directory-ties.ts";
 import {
   isErasedEmail,
   isErasedSubject,
@@ -576,6 +577,20 @@ const isErasedSignIn = async (
 };
 
 /**
+ * Ties the directory's people their sign-in accounts name to the member
+ * signing in (directory-people.ts, GRA-2056), by the daily read's own
+ * rule. Their sign-in goes on whatever comes of it: the next read ties
+ * them all the same.
+ */
+const tieAtSignIn = async (env: Env, userId: string): Promise<void> => {
+  try {
+    await tieSignedIn(env, userId);
+  } catch (error) {
+    log.error("directory.tie_failed", errorFields(error));
+  }
+};
+
+/**
  * The session a sign-in through `providerId` gets, or `false` for none.
  * Staff sessions are marked and cut short; everyone else's opens in the
  * deployment's organization, as a member.
@@ -624,17 +639,19 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
           })
         : session.userId;
     // For members.
-    return (await ensureMember(env, config, userId))
-      ? {
-          data: {
-            ...session,
-            userId,
-            staff: false,
-            interview: false,
-            activeOrganizationId: organizationId,
-          },
-        }
-      : false;
+    if (!(await ensureMember(env, config, userId))) {
+      return false;
+    }
+    await tieAtSignIn(env, userId);
+    return {
+      data: {
+        ...session,
+        userId,
+        staff: false,
+        interview: false,
+        activeOrganizationId: organizationId,
+      },
+    };
   }
   // The gate is closed to them: a session for their own interview alone,
   // if a link of one went to their address (GRA-1790). They join nothing:

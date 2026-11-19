@@ -95,6 +95,15 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.retired_team_ids": {
     none: "team ids never to be made again, no person",
   },
+  // Everyone the directory listed at its last daily read, by the
+  // provider's ID of them (directory-people.ts, GRA-2056): a person's rows
+  // go with their accounts, and the keyed hash of each ID that stays
+  // keeps the read from writing them again.
+  "core.directory_people": { erased: "identity" },
+  // Where the daily read stands: a connection, a tenant and counts.
+  "core.directory_reads": {
+    none: "a connection, its tenant and counts, no person",
+  },
   "core.sso_providers": { none: "stays empty: providers come from config" },
   "core.permissions": { company: "grants they asked for or gave" },
   "core.apps": { company: "Apps they own or changed" },
@@ -874,6 +883,9 @@ export const reviewedPersonColumns: Readonly<
   "core.stephen_summaries": ["person_id"],
   "core.stephen_summary_readers": ["person_id"],
   "core.team_members": ["user_id"],
+  // The member a row is tied to; `account_id` names the person too, by
+  // the provider's ID, and goes with them as well (directory-ties.ts).
+  "core.directory_people": ["user_id"],
   "core.teams": ["member_count"],
   "core.tool_class_settings": ["changed_by"],
   "core.trigger_resource_versions": ["principal_binding"],
