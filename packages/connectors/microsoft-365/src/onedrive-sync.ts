@@ -166,7 +166,7 @@ const grantedSchema = z
  * One permission of an item
  * (https://learn.microsoft.com/en-us/graph/api/resources/permission?view=graph-rest-1.0).
  */
-const permissionSchema = z.object({
+export const permissionSchema = z.object({
   grantedToV2: grantedSchema,
   grantedToIdentitiesV2: z.array(grantedSchema).nullish(),
   link: z.object({ scope: z.string().nullish() }).nullish(),
@@ -505,7 +505,7 @@ const granteeReaders = (
  * nobody. Anything else is who it's granted to. An invitation nobody has
  * redeemed is granted to nobody yet.
  */
-const permissionReaders = (permission: Permission): SyncReader[] => {
+export const permissionReaders = (permission: Permission): SyncReader[] => {
   const scope = permission.link?.scope ?? null;
   if (permission.link !== null && permission.link !== undefined) {
     if (scope === "existingAccess") {
@@ -522,7 +522,7 @@ const permissionReaders = (permission: Permission): SyncReader[] => {
 };
 
 /** Readers, each once, in one order: the same list gives the same version. */
-const settled = (readers: SyncReader[]): SyncReader[] => {
+export const settled = (readers: SyncReader[]): SyncReader[] => {
   const byKey = new Map(
     readers.map((reader) => [JSON.stringify(reader), reader])
   );

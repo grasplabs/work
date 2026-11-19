@@ -55,6 +55,11 @@ const documented: readonly { path: RegExp; options: readonly string[] }[] = [
   },
   // https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0
   { path: /^\/v1\.0\/drives\/[^/]+\/items\/[^/]+\/content$/u, options: [] },
+  // https://learn.microsoft.com/en-us/graph/api/driveitem-list-permissions?view=graph-rest-1.0
+  {
+    path: /^\/v1\.0\/drives\/[^/]+\/items\/[^/]+\/permissions$/u,
+    options: ["$select"],
+  },
 ];
 
 /** The drive resource's properties, for a `$select` of a drive. */
@@ -134,11 +139,15 @@ interface SharePoint {
   rootWebUrl: string;
   /** The sites, by path, whose permissions the account may read (an owner). */
   owners: Set<string>;
+  /** Files, by ID, whose own permissions leave the account short of Full Control. */
+  notOwned: Set<string>;
   /**
-   * Each list item's role assignments (`<list>|<item>`), or a refusal, or
-   * a list SharePoint pages.
+   * Each file's permissions as Graph lists them, by ID, or a list Graph
+   * pages: the site's Members and Owners groups when unset.
    */
-  assignments: Record<string, unknown[] | "paged">;
+  permissions: Record<string, unknown[] | "paged">;
+  /** A status Graph answers a file's permissions with instead, by ID. */
+  permissionsStatus: Record<string, number>;
   /** Each SharePoint group's users (`<site path>|<id>`), or hidden ("refused"). */
   groups: Record<string, unknown[] | "refused">;
   /** Each site's drives. */
@@ -184,7 +193,9 @@ const sharePoint: SharePoint = {
   sitePages: [],
   rootWebUrl: "",
   owners: new Set(),
-  assignments: {},
+  notOwned: new Set(),
+  permissions: {},
+  permissionsStatus: {},
   groups: {},
   drives: {},
   feeds: {},
@@ -207,14 +218,15 @@ const whereIs: Record<string, { site: string; list: string }> = {
   },
 };
 
-/** SharePoint's roles, by their base permissions as REST gives them. */
-const roles = {
-  fullControl: { BasePermissions: { High: "2147483647", Low: "4294967295" } },
-  edit: { BasePermissions: { High: "432", Low: "1011030767" } },
-  read: { BasePermissions: { High: "176", Low: "138612833" } },
-  // Lets someone reach an item shared below it, not read the library.
-  limitedAccess: { BasePermissions: { High: "0", Low: "134287360" } },
-};
+/** Full Control, and an editor's rights, as REST gives a web's or an item's. */
+const fullControl = { High: "2147483647", Low: "4294967295" };
+const editRights = { High: "432", Low: "1011030767" };
+
+/** A permission Graph lists as granted to a site group, by its ID in the site. */
+const siteGroupGrant = (id: string, role = "write") => ({
+  roles: [role],
+  grantedToV2: { siteGroup: { id, displayName: `Group ${id}` } },
+});
 
 /** A user as SharePoint names one, with their Entra object ID. */
 const spUser = (id: number, name: string, oid?: string) => ({
@@ -222,13 +234,6 @@ const spUser = (id: number, name: string, oid?: string) => ({
   LoginName: `i:0#.f|membership|${name}@acme.test`,
   PrincipalType: 1,
   ...(oid === undefined ? {} : { AadObjectId: { NameId: oid } }),
-});
-
-/** A SharePoint group, as a role assignment names it. */
-const spGroup = (id: number, name: string) => ({
-  Id: id,
-  LoginName: name,
-  PrincipalType: 8,
 });
 
 /** Entra object IDs of the site's people. */
@@ -262,6 +267,7 @@ const fileIn = (
           siteUrl: `https://${storageHost}${whereIs[library.id]?.site ?? ""}`,
           listId: whereIs[library.id]?.list,
           listItemId: item,
+          tenantId: acmeTenant,
         },
       }),
   ...fields,
@@ -289,22 +295,10 @@ const reset = (): void => {
   sharePoint.rootWebUrl = `https://${storageHost}`;
   // The account owns Sales; in Legal it is a member.
   sharePoint.owners = new Set(["/sites/sales"]);
-  // Each library's file inherits its site's: its Members and its Owners.
-  sharePoint.assignments = Object.fromEntries(
-    Object.values(whereIs).map(({ list }) => [
-      `${list}|1`,
-      [
-        {
-          Member: spGroup(3, "Sales Members"),
-          RoleDefinitionBindings: [roles.edit],
-        },
-        {
-          Member: spGroup(4, "Sales Owners"),
-          RoleDefinitionBindings: [roles.fullControl],
-        },
-      ],
-    ])
-  );
+  sharePoint.notOwned = new Set();
+  // Each file inherits its site's: its Members and its Owners.
+  sharePoint.permissions = {};
+  sharePoint.permissionsStatus = {};
   sharePoint.groups = {
     "/sites/sales|3": [spUser(10, "ada", ada)],
     "/sites/sales|4": [spUser(11, "ben", ben)],
@@ -410,6 +404,25 @@ const driveCall = (library: Library, rest: string, url: URL): Response => {
   if (rest === "/root/delta") {
     return deltaPage(library.id, url);
   }
+  const listed = /^\/items\/(?<item>[^/]+)\/permissions$/u.exec(rest)?.groups
+    ?.item;
+  if (listed !== undefined) {
+    const status = sharePoint.permissionsStatus[listed];
+    if (status !== undefined) {
+      return Response.json({ error: { code: "throttled" } }, { status });
+    }
+    // The site's Members and Owners, unless a test says otherwise.
+    const permissions = sharePoint.permissions[listed] ?? [
+      siteGroupGrant("3"),
+      siteGroupGrant("4", "owner"),
+    ];
+    return permissions === "paged"
+      ? Response.json({
+          value: [siteGroupGrant("3")],
+          "@odata.nextLink": `https://${graphHost}${url.pathname}?$skiptoken=1`,
+        })
+      : Response.json({ value: permissions });
+  }
   const item = /^\/items\/(?<item>[^/]+)\/content$/u.exec(rest)?.groups?.item;
   if (item !== undefined && sharePoint.contents[item] !== undefined) {
     // Graph redirects to the file on SharePoint, as it does.
@@ -435,7 +448,20 @@ const siteOrDriveCall = (url: URL): Response => {
     const size = sharePoint.drivesPerPage ?? drives.length;
     const next = from + size;
     return Response.json({
-      value: drives.slice(from, next),
+      // Each library with where SharePoint keeps it.
+      value: drives.slice(from, next).map((library) => {
+        const where = whereIs[library.id];
+        return where === undefined
+          ? library
+          : {
+              ...library,
+              sharepointIds: {
+                siteUrl: `https://${storageHost}${where.site}`,
+                listId: where.list,
+                tenantId: acmeTenant,
+              },
+            };
+      }),
       ...(next < drives.length
         ? {
             "@odata.nextLink": `https://${graphHost}/v1.0/sites/${encodeURIComponent(decoded)}/drives?$select=id,name,driveType&$skiptoken=${next}`,
@@ -449,14 +475,6 @@ const siteOrDriveCall = (url: URL): Response => {
     : itemNotFound();
 };
 
-/** The base permissions of a site's web, for the account. */
-const effectivePermissions = (site: string): Response =>
-  Response.json(
-    sharePoint.owners.has(site)
-      ? roles.fullControl.BasePermissions
-      : roles.edit.BasePermissions
-  );
-
 const accessDenied = (): Response =>
   Response.json(
     {
@@ -467,12 +485,20 @@ const accessDenied = (): Response =>
     { status: 403 }
   );
 
+/** The list of `listId`'s file at list item `item`, by the file's ID. */
+const fileAt = (listId: string, item: string): string | undefined =>
+  Object.entries(whereIs).find(([, { list }]) => list === listId)?.[0] ===
+  undefined
+    ? undefined
+    : `${listId}|${item}`;
+
 /**
- * SharePoint's REST API on the company's host
- * (https://learn.microsoft.com/en-us/sharepoint/dev/sp-add-ins/set-custom-permissions-on-a-list-by-using-the-rest-interface):
- * a web's effective permissions, a list item's role assignments, which
- * only someone who may enumerate its permissions reads, and a group's
- * users, which a group that shows its members to its members alone hides.
+ * SharePoint's REST API on the company's host: the account's own
+ * permissions on a list or a list item ("the effective permissions… that
+ * are assigned to the current user": Full Control where it owns the
+ * site, an editor's elsewhere, or on a file whose own permissions leave
+ * it out), and a site group's users, which a group that shows its
+ * members to its members alone hides.
  */
 const restCall = (url: URL): Response => {
   const match =
@@ -481,27 +507,17 @@ const restCall = (url: URL): Response => {
     );
   const site = match?.groups?.site ?? "";
   const rest = match?.groups?.rest ?? "";
-  if (rest === "effectiveBasePermissions") {
-    return effectivePermissions(site);
-  }
-  const item =
-    /^lists\(guid'(?<list>[^']+)'\)\/items\((?<item>\d+)\)\/roleassignments$/u.exec(
+  const held =
+    /^lists\(guid'(?<list>[^']+)'\)(?:\/items\((?<item>\d+)\))?\/EffectiveBasePermissions$/u.exec(
       rest
     )?.groups;
-  if (item !== undefined) {
-    if (url.searchParams.get("$expand") !== "Member,RoleDefinitionBindings") {
-      return invalid();
-    }
-    if (!sharePoint.owners.has(site)) {
-      return accessDenied();
-    }
-    const held = sharePoint.assignments[`${item.list}|${item.item}`] ?? [];
-    return held === "paged"
-      ? Response.json({
-          value: [],
-          "odata.nextLink": `${url.href}&$skiptoken=1`,
-        })
-      : Response.json({ value: held });
+  if (held !== undefined) {
+    const file =
+      held.item === undefined ? undefined : fileAt(held.list ?? "", held.item);
+    const owns =
+      sharePoint.owners.has(site) &&
+      (file === undefined || !sharePoint.notOwned.has(file));
+    return Response.json(owns ? fullControl : editRights);
   }
   const group = /^sitegroups\/getbyid\((?<id>\d+)\)\/users$/u.exec(rest)?.groups
     ?.id;
@@ -608,6 +624,10 @@ const readAll = async (
     }
   }
 };
+
+/** Readers in one order, to compare as sets. */
+const ordered = (readers: readonly unknown[]): string[] =>
+  readers.map((reader) => JSON.stringify(reader)).toSorted();
 
 /** The readers of each item a whole read of `place` gives: none for one gone. */
 const readersRead = async (connectionId: string, place: string) => {
@@ -813,114 +833,155 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
       { gone: true, id: "shortcut", kind: "file" },
       { gone: true, id: "moved", kind: "file" },
     ]);
-    // Nothing of the account's own, and no permissions read.
+    // Nothing of the account's own.
     expect(
-      sentToGraph().filter(
-        (path) => path.startsWith("/v1.0/me") || path.endsWith("/permissions")
-      )
+      sentToGraph().filter((path) => path.startsWith("/v1.0/me"))
     ).toStrictEqual([]);
   });
 
-  it("reads who may open a file from its role assignments: only roles that view items, each group's members, and a link for anyone or the whole organisation", async () => {
+  it("reads who may open a file from Graph's list of its permissions: roles that open it, users and groups by their IDs, each site group's members, and links as personal sync reads them", async () => {
     const { admin, connectionId } = await sharedConnection();
     await pick(admin, connectionId, [salesDocs.id]);
-    const { list } = whereIs[salesDocs.id] ?? { list: "" };
     const [kim, lee] = [
       "cccccccc-0000-4000-8000-000000000003",
       "dddddddd-0000-4000-8000-000000000004",
     ];
-    const [entraGroup, teamGroup, otherTeam] = [
+    const [entraGroup, teamGroup, otherTeam, sharedWith] = [
       "eeeeeeee-0000-4000-8000-000000000005",
       "ffffffff-0000-4000-8000-000000000006",
       "99999999-0000-4000-8000-000000000007",
+      "88888888-0000-4000-8000-000000000008",
     ];
-    sharePoint.assignments[`${list}|1`] = [
+    const otherTenant = "77777777-0000-4000-8000-000000000009";
+    sharePoint.permissions[`${salesDocs.id}-file`] = [
+      siteGroupGrant("5"),
+      // A role that opens nothing.
+      { roles: ["sp.limitedAccess"], grantedToV2: { user: { id: lee } } },
+      // An Entra group shared with directly.
+      { roles: ["read"], grantedToV2: { group: { id: sharedWith } } },
+      // A SharePoint user Graph gives no Entra ID for.
+      { roles: ["read"], grantedToV2: { siteUser: { id: "31" } } },
+      // Links: for the organisation, and for specific people.
+      { roles: ["read"], link: { scope: "organization", type: "view" } },
       {
-        Member: spGroup(5, "Sales Members"),
-        RoleDefinitionBindings: [roles.edit],
-      },
-      // Reaches something shared below it, not the file.
-      {
-        Member: spUser(12, "lee", lee),
-        RoleDefinitionBindings: [roles.limitedAccess],
-      },
-      {
-        Member: {
-          Id: 13,
-          LoginName: `c:0-.f|rolemanager|spo-grid-all-users/${acmeTenant}`,
-          PrincipalType: 4,
-        },
-        RoleDefinitionBindings: [roles.read],
-      },
-      {
-        Member: { Id: 14, LoginName: "c:0(.s|true", PrincipalType: 4 },
-        RoleDefinitionBindings: [roles.read],
-      },
-      // A link for the organisation, and one for specific people.
-      {
-        Member: spGroup(15, "SharingLinks.0a.OrganizationView.0b"),
-        RoleDefinitionBindings: [roles.read],
-      },
-      {
-        Member: spGroup(16, "SharingLinks.0c.Flexible.0d"),
-        RoleDefinitionBindings: [roles.read],
+        roles: ["write"],
+        link: { scope: "users", type: "edit" },
+        grantedToIdentitiesV2: [{ user: { id: kim } }],
       },
     ];
     sharePoint.groups["/sites/sales|5"] = [
       spUser(10, "ada", ada),
-      { Id: 20, LoginName: `c:0t.c|tenant|${entraGroup}`, PrincipalType: 4 },
-      {
-        Id: 21,
-        LoginName: `c:0o.c|federateddirectoryclaimprovider|${teamGroup}`,
-        PrincipalType: 4,
-      },
-      // A group's owners, and a user without an Entra object ID: nobody.
-      {
-        Id: 22,
-        LoginName: `c:0o.c|federateddirectoryclaimprovider|${otherTeam}_o`,
-        PrincipalType: 4,
-      },
+      { LoginName: `c:0t.c|tenant|${entraGroup}` },
+      { LoginName: `c:0o.c|federateddirectoryclaimprovider|${teamGroup}` },
+      // A group's owners, a user without an Entra object ID, "Everyone",
+      // and another tenant's everyone: nobody.
+      { LoginName: `c:0o.c|federateddirectoryclaimprovider|${otherTeam}_o` },
       spUser(23, "old"),
+      { LoginName: "c:0(.s|true" },
+      {
+        LoginName: `c:0-.f|rolemanager|spo-grid-all-users/${otherTenant}`,
+      },
+      {
+        LoginName: `c:0-.f|rolemanager|spo-grid-all-users/${acmeTenant}`,
+      },
     ];
-    sharePoint.groups["/sites/sales|16"] = [spUser(24, "kim", kim)];
+    const expected = [
+      { kind: "account", id: ada },
+      { kind: "group", id: entraGroup },
+      { kind: "group", id: teamGroup },
+      { kind: "tenant", id: acmeTenant },
+      { kind: "group", id: sharedWith },
+      { kind: "link" },
+      { kind: "account", id: kim },
+    ];
 
-    const { items } = await readAll(connectionId, salesDocs.id);
+    const [readers] = await readersRead(connectionId, salesDocs.id);
 
-    expect(
-      items.map((item) => (item.gone ? null : item.readers))
-    ).toStrictEqual([
-      [
-        { kind: "account", id: ada },
-        { kind: "group", id: entraGroup },
-        { kind: "group", id: teamGroup },
-        { kind: "tenant", id: acmeTenant },
-        { kind: "link" },
-        { kind: "account", id: kim },
-      ],
-    ]);
+    expect(ordered(readers ?? [])).toStrictEqual(ordered(expected));
   });
 
-  it("gives nobody a file whose role assignments or group members SharePoint won't give whole", async () => {
+  it("gives nobody a file the account doesn't own, without asking for its permissions, or whose list or group members SharePoint won't give whole", async () => {
     const { admin, connectionId } = await sharedConnection();
     await pick(admin, connectionId, [
       salesDocs.id,
       salesContracts.id,
       legalDocs.id,
     ]);
-    // Members a group shows to its members alone.
-    sharePoint.assignments[`${whereIs[salesContracts.id]?.list ?? ""}|1`] = [
-      { Member: spGroup(6, "Board"), RoleDefinitionBindings: [roles.read] },
-    ];
+    // A list Graph pages.
+    sharePoint.permissions[`${salesDocs.id}-file`] = "paged";
+    // A group whose members show to its members alone.
+    sharePoint.permissions[`${salesContracts.id}-file`] = [siteGroupGrant("6")];
     sharePoint.groups["/sites/sales|6"] = "refused";
-    // A list SharePoint pages.
-    sharePoint.assignments[`${whereIs[salesDocs.id]?.list ?? ""}|1`] = "paged";
-
-    expect({
+    const notWhole = {
       paged: await readersRead(connectionId, salesDocs.id),
       hidden: await readersRead(connectionId, salesContracts.id),
-      // The account isn't Legal's owner: SharePoint refuses its sharing.
+      // A member of Legal, not its owner.
       notOwner: await readersRead(connectionId, legalDocs.id),
-    }).toStrictEqual({ paged: [null], hidden: [null], notOwner: [null] });
+    };
+    // A file in a site it owns, whose own permissions leave it out.
+    sharePoint.permissions[`${salesDocs.id}-file`] = [siteGroupGrant("3")];
+    sharePoint.notOwned.add(`${whereIs[salesDocs.id]?.list ?? ""}|1`);
+    const before = internet.sent.length;
+    const fileNotOwned = await readersRead(connectionId, salesDocs.id);
+
+    expect({
+      ...notWhole,
+      fileNotOwned,
+      // Not one permission asked for, of the file it doesn't own.
+      asked: internet.sent
+        .slice(before)
+        .filter(({ path }) => path.includes("/permissions")),
+    }).toStrictEqual({
+      paged: [null],
+      hidden: [null],
+      notOwner: [null],
+      fileNotOwned: [null],
+      asked: [],
+    });
+  });
+
+  it("reads a site group's members on the file's own site, as its ID names it only there", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id, legalDocs.id]);
+    sharePoint.owners.add("/sites/legal");
+    const kim = "cccccccc-0000-4000-8000-000000000003";
+    sharePoint.groups["/sites/legal|3"] = [spUser(12, "kim", kim)];
+    sharePoint.groups["/sites/legal|4"] = [];
+    sharePoint.feeds[legalDocs.id] = {
+      ...sharePoint.feeds[legalDocs.id],
+      // One page with both: a group read on one site never stands for the other's.
+      "": {
+        entries: [
+          fileIn(salesDocs, "sales-plan", {
+            parentReference: { driveId: legalDocs.id },
+          }),
+          fileIn(legalDocs, "legal-plan"),
+        ],
+        end: "t1",
+      },
+    };
+    sharePoint.contents["sales-plan"] = "sales";
+    sharePoint.contents["legal-plan"] = "legal";
+
+    await expect(
+      readersRead(connectionId, legalDocs.id)
+    ).resolves.toStrictEqual([
+      [
+        { kind: "account", id: ada },
+        { kind: "account", id: ben },
+      ],
+      [{ kind: "account", id: kim }],
+    ]);
+  });
+
+  it("waits when Graph throttles a file's permissions, rather than giving it nobody", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    sharePoint.permissionsStatus[`${salesDocs.id}-file`] = 429;
+
+    await expect(
+      outcomeOf(async () => await read(connectionId, salesDocs.id, null))
+    ).resolves.toBe("sync.throttled");
   });
 
   it("sends SharePoint's token only to the company's own SharePoint host and Graph's only to Graph, asking for SharePoint's once a grant", async () => {

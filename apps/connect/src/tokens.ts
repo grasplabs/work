@@ -831,6 +831,18 @@ export const tenantCredentialFor = async (
     });
     throw connectionErrors.create("connection.refresh_failed");
   }
+  // A token whose answer names the rights it holds holds the one asked
+  // for, or it is no use: no token.
+  const right = provider.tenantResource.scope(host).toLowerCase();
+  if (
+    minted.scope !== undefined &&
+    !minted.scope
+      .toLowerCase()
+      .split(" ")
+      .some((granted) => granted === right || right.endsWith(`/${granted}`))
+  ) {
+    return undefined;
+  }
   const sealed = await vault.seal(
     minted.accessToken,
     tenantSealContext(connectionId)
