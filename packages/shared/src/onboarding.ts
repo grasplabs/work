@@ -135,6 +135,18 @@ export const rosterPersonSchema = z.strictObject({
   title: z.string().trim().max(80).default(""),
   /** Away these weeks: they get no link, and nothing waits for them. */
   away: z.boolean().default(false),
+  /**
+   * Their account in the company's Microsoft directory, where the list came
+   * from the directory read: its tenant and object id, which the list
+   * places a Microsoft sign-in by (GRA-2055). None for a list from a file
+   * or typed by hand: then no Microsoft sign-in is placed by the list.
+   */
+  entra: z
+    .strictObject({
+      tenant: z.string().trim().min(1).max(100),
+      oid: z.string().trim().min(1).max(100),
+    })
+    .optional(),
 });
 export type RosterPerson = z.output<typeof rosterPersonSchema>;
 
@@ -531,4 +543,6 @@ export const onboardingErrors = defineErrorFamily({
     "The team is told: what was agreed stays as it was agreed.",
   "onboarding.interviews_kept":
     "The team is told: the interviews stay part of the onboarding.",
+  "onboarding.teams_follow":
+    "The staff list is saved. Its people are put in their teams shortly.",
 });

@@ -330,6 +330,13 @@
       "when": 1795031932916,
       "tag": "0046_team_minted",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1795040736231,
+      "tag": "0047_confirmed_places",
+      "breakpoints": true
     }
   ]
 }

@@ -124,6 +124,8 @@ export interface OnboardingDirectory {
 /** Everyone in the onboarding's directory, read just now. */
 export interface DirectoryPeople {
   suite: DirectorySuite;
+  /** The connection's tenant at the provider, as it was connected. */
+  tenant: string;
   people: DirectoryPerson[];
 }
 

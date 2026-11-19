@@ -522,10 +522,19 @@ export const googlePerson = (claims: Claims = {}): Claims => {
   };
 };
 
-/** Someone signed in with `role`, as the configured admins or made so by one. */
-export const signedInWithRole = async (idp: Idp, role: Role) => {
-  const person = entraPerson(acmeTenant);
-  const session = await signedIn(idp, "microsoft", person, {
+/**
+ * Someone signed in with `role`, as the configured admins or made so by
+ * one: through Microsoft, or through Google, whose address the sign-in
+ * proves (source-readers.ts `provedSignInAccounts`).
+ */
+export const signedInWithRole = async (
+  idp: Idp,
+  role: Role,
+  provider: "microsoft" | "google" = "microsoft"
+) => {
+  const person =
+    provider === "google" ? googlePerson() : entraPerson(acmeTenant);
+  const session = await signedIn(idp, provider, person, {
     coreEnv: withSignIn({ admins: [person.email] }),
   });
   const { userId } = await whoami(session);
@@ -538,8 +547,12 @@ export const signedInWithRole = async (idp: Idp, role: Role) => {
 };
 
 /** Someone signed in with `role`, and their API, on a connection of their own. */
-export const signedInApi = async (idp: Idp, role: Role) => {
-  const person = await signedInWithRole(idp, role);
+export const signedInApi = async (
+  idp: Idp,
+  role: Role,
+  provider: "microsoft" | "google" = "microsoft"
+) => {
+  const person = await signedInWithRole(idp, role, provider);
   const { core, closed } = await openRpc(person.session);
   return { ...person, core, closed, api: core.authenticate() };
 };

@@ -146,7 +146,9 @@ import {
   brainOpinions,
   brainSent,
   brainTeams,
+  confirmedPlaces,
   countedPeople,
+  erasedPeople,
   countedWorks,
   drawFailures,
   referrals,
@@ -325,20 +327,39 @@ const queuedKey = "forget_lines_queued";
 const kickoffChangesKey = "kickoff_changes";
 
 /**
+ * The version of the list the admin last confirmed (GRA-2055), one more
+ * with each confirmed save, its places held in `confirmed_places`.
+ */
+const confirmedVersionKey = "confirmed_version";
+
+/**
  * The teams of the list the admin last confirmed (GRA-2055), by id and
- * name, with a version one more at each confirm and each rename in
- * Settings: what core makes and names in Settings › Members
- * (staff-list-teams.ts `syncTeams`), never an older version after a newer.
+ * name: what that version's placing makes and names in Settings › Members
+ * (staff-list-teams.ts `placePrimaries`), kept with its places.
  */
 const confirmedTeamsKey = "confirmed_teams";
 
-const confirmedTeamsSchema = z.object({
+const confirmedTeamsSchema = z.array(
+  z.object({ id: z.string(), name: z.string() })
+);
+
+const confirmedPlacesSchema = z.object({
   version: z.int().positive(),
-  teams: z.array(z.object({ id: z.string(), name: z.string() })),
+  teams: confirmedTeamsSchema,
+  places: z.array(
+    z.object({
+      /** The entry on the list. */
+      person: z.string(),
+      /** Lower case; empty when the entry has none to place by. */
+      email: z.string(),
+      entra: z.object({ tenant: z.string(), oid: z.string() }).nullable(),
+      team: z.string(),
+    })
+  ),
 });
 
-/** What `confirmedTeams` answers. */
-export type ConfirmedTeams = z.infer<typeof confirmedTeamsSchema>;
+/** What `confirmedPlaces` answers. */
+export type ConfirmedPlaces = z.infer<typeof confirmedPlacesSchema>;
 
 /**
  * The company's teams as the admin last confirmed them (`#rosterConfirmed`):
@@ -1534,9 +1555,8 @@ export class Onboarding extends DurableObject<Env> {
       if (confirmed) {
         this.#confirmed(before, roster);
         this.#rosterConfirmed(new Date().toISOString());
-        this.#keepConfirmedTeams(
-          roster.teams.map(({ id, name }) => ({ id, name }))
-        );
+        // As written, with what the entries kept (`#insertPeople`).
+        this.#keepConfirmedPlaces(this.#roster() ?? roster);
       } else {
         this.#holdNew(before, roster);
       }
@@ -1663,6 +1683,38 @@ export class Onboarding extends DurableObject<Env> {
     );
   }
 
+  /** Writes `entries` as the list's people, in their order. */
+  #insertPeople(entries: Roster["people"]): void {
+    // An entry saved without its Microsoft directory account keeps the one
+    // it had (GRA-2055): only the directory read gives one, and a save
+    // that brings another replaces it; a page that left it out never
+    // drops it, so a member the list placed by it stays placed.
+    const had = new Map(
+      this.#db
+        .select({
+          id: people.id,
+          tenant: people.entraTenant,
+          oid: people.entraOid,
+        })
+        .from(people)
+        .all()
+        .map(({ id, tenant, oid }) => [id, { tenant, oid }])
+    );
+    this.#db.delete(people).run();
+    for (const [position, { entra, ...person }] of entries.entries()) {
+      const kept = had.get(person.id);
+      this.#db
+        .insert(people)
+        .values({
+          ...person,
+          position,
+          entraTenant: entra?.tenant ?? kept?.tenant ?? null,
+          entraOid: entra?.oid ?? kept?.oid ?? null,
+        })
+        .run();
+    }
+  }
+
   /**
    * Writes who works where, in the caller's transaction. Whoever left the
    * list keeps nothing; with `late`, as staff put the list right, a team
@@ -1702,7 +1754,6 @@ export class Onboarding extends DurableObject<Env> {
         .map((row) => [row.id, row])
     );
     this.#db.delete(teams).run();
-    this.#db.delete(people).run();
     for (const [position, team] of roster.teams.entries()) {
       const was = mapped.get(team.id);
       this.#db
@@ -1720,12 +1771,7 @@ export class Onboarding extends DurableObject<Env> {
         })
         .run();
     }
-    for (const [position, person] of roster.people.entries()) {
-      this.#db
-        .insert(people)
-        .values({ ...person, position })
-        .run();
-    }
+    this.#insertPeople(roster.people);
     // Checked again here: someone erased since their code was made
     // (`#freshCodes` waits) gets none.
     const closed = this.#erasedPeople();
@@ -1767,10 +1813,14 @@ export class Onboarding extends DurableObject<Env> {
       this.#erase(person);
       erased.push(person);
       // Off the list, they take part in nothing: no mark of theirs stays,
-      // their withdrawal's neither.
+      // their withdrawal's neither, nor their erasure's mark (`markErased`).
       this.#db
         .delete(participations)
         .where(eq(participations.person, person))
+        .run();
+      this.#db
+        .delete(erasedPeople)
+        .where(eq(erasedPeople.person, person))
         .run();
       this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
       this.#db.delete(links).where(eq(links.person, person)).run();
@@ -4931,19 +4981,25 @@ export class Onboarding extends DurableObject<Env> {
    * A team renamed in Settings › Members (GRA-2055): the staff list names
    * the members' teams, so its name there follows at once, and so does
    * what every member reads of the company's teams, given to the Brain
-   * anew (`#keepConfirmed`). On the confirmed list, a new version of it
-   * (`confirmedTeams`), so a confirm that read the old name never writes it
-   * back. Nothing when the list has no such team.
+   * anew (`#keepConfirmed`). Nothing when the list has no such team.
    */
   renameTeam(id: string, name: string): void {
     this.ctx.storage.transactionSync(() => {
       this.#db.update(teams).set({ name }).where(eq(teams.id, id)).run();
-      const confirmed = this.confirmedTeams();
-      if (confirmed?.teams.some((team) => team.id === id) === true) {
-        this.#keepConfirmedTeams(
-          confirmed.teams.map((team) =>
-            team.id === id ? { ...team, name } : team
-          )
+      // A change to the confirmed list like any other (GRA-2055): a new
+      // version, so a placing that read the old name writes nothing more
+      // once the next claims it, and that one names the team as renamed.
+      const confirmed = this.ctx.storage.kv.get(confirmedTeamsKey);
+      const teamsNow =
+        confirmed === undefined ? [] : confirmedTeamsSchema.parse(confirmed);
+      if (teamsNow.some((team) => team.id === id)) {
+        this.ctx.storage.kv.put(
+          confirmedTeamsKey,
+          teamsNow.map((team) => (team.id === id ? { ...team, name } : team))
+        );
+        this.ctx.storage.kv.put(
+          confirmedVersionKey,
+          this.confirmedVersion() + 1
         );
       }
       const held = this.companyTeams();
@@ -4970,34 +5026,199 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * The teams of the list the admin last confirmed, with its version
-   * (GRA-2055): null before any confirm.
+   * Where the list the admin last confirmed puts each entry (GRA-2055), by
+   * its address and its Microsoft directory account: by a version that
+   * only grows, one per confirmed save, so a placement from an older list
+   * never applies after a newer one (staff-list-teams.ts `placePrimaries`).
+   * Null before any confirm.
    */
-  confirmedTeams(): ConfirmedTeams | null {
-    const held = this.ctx.storage.kv.get(confirmedTeamsKey);
-    return held === undefined ? null : confirmedTeamsSchema.parse(held);
+  confirmedPlaces(): ConfirmedPlaces | null {
+    const version = this.confirmedVersion();
+    return version === 0
+      ? null
+      : confirmedPlacesSchema.parse({
+          version,
+          teams: this.ctx.storage.kv.get(confirmedTeamsKey) ?? [],
+          places: this.#db
+            .select()
+            .from(confirmedPlaces)
+            .all()
+            .map(({ person, email, entraTenant, entraOid, team }) => ({
+              person,
+              email,
+              entra:
+                entraTenant === null || entraOid === null
+                  ? null
+                  : { tenant: entraTenant, oid: entraOid },
+              team,
+            })),
+        });
   }
 
-  /** In a transaction: `confirmed` as the confirmed list's teams, under the next version. */
-  #keepConfirmedTeams(confirmed: ConfirmedTeams["teams"]): void {
-    this.ctx.storage.kv.put(confirmedTeamsKey, {
-      version: (this.confirmedTeams()?.version ?? 0) + 1,
-      teams: confirmed,
+  /** The version of the list the admin last confirmed, 0 before any (`confirmedPlaces`). */
+  confirmedVersion(): number {
+    return z
+      .int()
+      .nonnegative()
+      .parse(this.ctx.storage.kv.get(confirmedVersionKey) ?? 0);
+  }
+
+  /** In a confirmed save's transaction: its places, under the next version. */
+  #keepConfirmedPlaces(roster: Roster): void {
+    const version = this.confirmedVersion() + 1;
+    this.ctx.storage.kv.put(
+      confirmedTeamsKey,
+      roster.teams.map(({ id, name }) => ({ id, name }))
+    );
+    this.#db.delete(confirmedPlaces).run();
+    // The first of two entries sharing an address, or an account, keeps
+    // it; an entry whose person core erased places nobody (`markErased`).
+    const addresses = new Set<string>();
+    const accounts = new Set<string>();
+    const erased = new Set(
+      this.#db
+        .select({ person: erasedPeople.person })
+        .from(erasedPeople)
+        .all()
+        .map(({ person }) => person)
+    );
+    for (const { id, email, entra, team } of roster.people.filter(
+      (person) => !erased.has(person.id)
+    )) {
+      const address = email.toLowerCase();
+      const account =
+        entra === undefined
+          ? undefined
+          : `${entra.tenant.toLowerCase()}:${entra.oid.toLowerCase()}`;
+      const byAddress = address !== "" && !addresses.has(address);
+      const byAccount = account !== undefined && !accounts.has(account);
+      addresses.add(address);
+      if (account !== undefined) {
+        accounts.add(account);
+      }
+      if (byAddress || byAccount) {
+        this.#db
+          .insert(confirmedPlaces)
+          .values({
+            person: id,
+            email: byAddress ? address : "",
+            entraTenant: byAccount ? (entra?.tenant ?? null) : null,
+            entraOid: byAccount ? (entra?.oid ?? null) : null,
+            team,
+          })
+          .run();
+      }
+    }
+    this.ctx.storage.kv.put(confirmedVersionKey, version);
+  }
+
+  /**
+   * Takes the places of `emails` and of the Microsoft accounts `oids` out
+   * of where the confirmed list places people (GRA-2055): their person was
+   * erased or removed as a member, so nobody signing in with either is
+   * placed by them. The list without them is a new version, in the same
+   * transaction: a placing of the list that still had them is stale, and
+   * the next claim (`placePrimaries`) makes its writes nothing. The
+   * roster's entry stays; a removed member's keeps its address (the
+   * company's, Nick's D5), and the admin's next confirm places it again if
+   * the list still has it. Whether the list had any of them.
+   */
+  forgetPlaceOf({
+    emails,
+    oids,
+  }: {
+    emails: readonly string[];
+    oids: readonly string[];
+  }): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      const forgotten = this.#db
+        .delete(confirmedPlaces)
+        .where(
+          or(
+            inList(
+              sql`lower(${confirmedPlaces.email})`,
+              emails.map((email) => email.toLowerCase())
+            ),
+            inList(
+              sql`lower(${confirmedPlaces.entraOid})`,
+              oids.map((oid) => oid.toLowerCase())
+            )
+          )
+        )
+        .returning({ person: confirmedPlaces.person })
+        .all();
+      if (forgotten.length > 0) {
+        this.ctx.storage.kv.put(
+          confirmedVersionKey,
+          this.confirmedVersion() + 1
+        );
+      }
+      return forgotten.length > 0;
     });
   }
 
   /**
+   * The entries `persons` whose person core erased (GRA-2055), marked so
+   * the staff list places nobody by them again, by address or by account,
+   * and out of where the confirmed list places people, as a new version in
+   * the same transaction: a placing of the list that still had them is
+   * stale, and the next claim (`placePrimaries`) makes its writes nothing.
+   * What the store keeps of the entries stays as it is. The mark goes when
+   * an admin takes the entry off the list; an admin who wants a successor
+   * placed adds a new entry. Whether the confirmed list had any of them.
+   */
+  markErased(persons: readonly string[]): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      const at = new Date().toISOString();
+      for (const person of persons) {
+        this.#db
+          .insert(erasedPeople)
+          .values({ person, erasedAt: at })
+          .onConflictDoNothing()
+          .run();
+      }
+      const unplaced = this.#db
+        .delete(confirmedPlaces)
+        .where(inList(confirmedPlaces.person, persons))
+        .returning({ person: confirmedPlaces.person })
+        .all();
+      if (unplaced.length > 0) {
+        this.ctx.storage.kv.put(
+          confirmedVersionKey,
+          this.confirmedVersion() + 1
+        );
+      }
+      return unplaced.length > 0;
+    });
+  }
+
+  /**
+   * Who is on the list, by their ID, email and Microsoft directory account
+   * (GRA-2055), for core to find someone it erases (person-erasure.ts):
+   * only core asks, and nothing of it leaves core.
+   */
+  rosterEmails(): { id: string; email: string; oid: string | null }[] {
+    return this.#db
+      .select({ id: people.id, email: people.email, oid: people.entraOid })
+      .from(people)
+      .all();
+  }
+
+  /**
    * Whether the staff list has the members' team `id` (GRA-2055): the list
-   * as saved, or as last confirmed, whose teams core makes and names.
+   * as saved, or as last confirmed, which the next placing names and makes
+   * (`confirmedPlaces`).
    */
   listsTeam(id: string): boolean {
+    const confirmed = this.ctx.storage.kv.get(confirmedTeamsKey);
     return (
       this.#db
         .select({ id: teams.id })
         .from(teams)
         .where(eq(teams.id, id))
         .all().length > 0 ||
-      this.confirmedTeams()?.teams.some((team) => team.id === id) === true
+      (confirmed !== undefined &&
+        confirmedTeamsSchema.parse(confirmed).some((team) => team.id === id))
     );
   }
 
@@ -5022,11 +5243,13 @@ export class Onboarding extends DurableObject<Env> {
         )
     );
     return {
-      ...roster,
       teams: roster.teams.map((team) => ({
         ...team,
         does: mapped.get(team.id) ?? team.does,
       })),
+      // A directory account is the admin's alone, on the page that shows
+      // the directory's people (GRA-2055).
+      people: roster.people.map(({ entra: _account, ...person }) => person),
     };
   }
 
@@ -5610,18 +5833,6 @@ export class Onboarding extends DurableObject<Env> {
     this.#deliverAudit();
     await this.#afterForget();
     return true;
-  }
-
-  /**
-   * Who is on the list, by their ID and email, for core to find someone it
-   * erases by the address that was theirs (person-erasure.ts): only core
-   * asks, and nothing of it leaves core.
-   */
-  rosterEmails(): { id: string; email: string }[] {
-    return this.#db
-      .select({ id: people.id, email: people.email })
-      .from(people)
-      .all();
   }
 
   /**
@@ -10639,14 +10850,19 @@ export class Onboarding extends DurableObject<Env> {
         .from(people)
         .orderBy(asc(people.position))
         .all()
-        .map(({ id, name, email, team, title, away }) => ({
-          id,
-          name,
-          email,
-          team,
-          title,
-          away,
-        })),
+        .map(
+          ({ id, name, email, team, title, away, entraTenant, entraOid }) => ({
+            id,
+            name,
+            email,
+            team,
+            title,
+            away,
+            ...(entraTenant === null || entraOid === null
+              ? {}
+              : { entra: { tenant: entraTenant, oid: entraOid } }),
+          })
+        ),
     };
   }
 

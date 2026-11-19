@@ -69,6 +69,7 @@ import {
   stephenSummaries,
   stephenSummaryReaders,
   teamMembers,
+  teamPrimaries,
   users,
   workflowDecisionConfirmations,
   apps as appRegistry,
@@ -83,6 +84,7 @@ import {
   emailHashOf,
   emailKeyVersion,
   erasedAddress,
+  entraSubject,
   subjectHashOf,
   subjectKeyVersion,
   subjectsOf,
@@ -93,6 +95,7 @@ import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
 import { forgetTokens, keptAccountKeysOf } from "./source-readers.ts";
+import { placePrimaries } from "./staff-list-teams.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
 import { erasedChatPin } from "./workflows/run-evidence.ts";
 
@@ -473,6 +476,87 @@ const runs: ErasureStep = {
 };
 
 /**
+ * The staff list places nobody by the erased person `userId`'s entries
+ * again (GRA-2055): each entry on the list, or place in the confirmed
+ * one, that names them, by the keyed hash of the address that was theirs
+ * (while kept under the current key and not released) or by the
+ * Microsoft object id an entry from the directory carries (as their
+ * accounts name it, or once those went, its keyed hash), is marked erased
+ * and leaves the confirmed places as a new version (`markErased`). A
+ * placing of the list that still had them, under way, writes nothing more
+ * once the new version is claimed. What the store keeps of the entry
+ * stays as it is.
+ */
+const unplaceOnList = async (
+  env: Env,
+  userId: string,
+  erasure: { emailHash: string | null; keyVersion: number }
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const [held, erased] = await db.batch([
+    db
+      .select({
+        providerId: accounts.providerId,
+        accountId: accounts.accountId,
+        oid: accounts.oid,
+      })
+      .from(accounts)
+      .where(eq(accounts.userId, userId)),
+    db
+      .select({ hash: erasedSubjects.subjectHash })
+      .from(erasedSubjects)
+      .where(
+        and(
+          eq(erasedSubjects.userId, userId),
+          eq(erasedSubjects.keyVersion, subjectKeyVersion)
+        )
+      ),
+  ]);
+  const subjects = new Set(
+    held.flatMap((account) => subjectsOf(account, directoryProviderId))
+  );
+  const hashes = new Set(erased.map(({ hash }) => hash));
+  const byEmail =
+    erasure.emailHash !== null && erasure.keyVersion === emailKeyVersion;
+  const theirs = async (email: string, oid: string | null) => {
+    if (
+      byEmail &&
+      email !== "" &&
+      (await emailHashOf(env, email)) === erasure.emailHash
+    ) {
+      return true;
+    }
+    if (oid === null) {
+      return false;
+    }
+    const subject = entraSubject(oid);
+    return (
+      subjects.has(subject) || hashes.has(await subjectHashOf(env, subject))
+    );
+  };
+  const store = onboardingStore(env);
+  const confirmed = await store.confirmedPlaces();
+  const entries = [
+    ...(await store.rosterEmails()),
+    ...(confirmed?.places ?? []).map(({ person, email, entra }) => ({
+      id: person,
+      email,
+      oid: entra?.oid ?? null,
+    })),
+  ];
+  const theirEntries = new Set<string>();
+  for (const { id, email, oid } of entries) {
+    // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+    if (!theirEntries.has(id) && (await theirs(email, oid))) {
+      theirEntries.add(id);
+    }
+  }
+  if (theirEntries.size > 0 && (await store.markErased([...theirEntries]))) {
+    await placePrimaries(env, { type: "system" });
+  }
+};
+
+/**
  * Their interview (GRA-1187), deleted as the onboarding deletes one on
  * its person's own request (`deleteOnRequest`): what they said and agreed
  * to, every drawing it was in, the Brain's records resting on it, and
@@ -519,6 +603,7 @@ const interview: ErasureStep = {
     // next holder keeps theirs. Until it has, this throws and the erasure
     // is tried again.
     await eraseOnboardingAccount(env, userId);
+    await unplaceOnList(env, userId, erasure);
     // Their address released, or hashed under an older key: they can't be
     // found on the list by it, and whatever interview they have is left.
     // Recorded as skipped, never as done.
@@ -626,6 +711,8 @@ const channels: ErasureStep = {
       ...theirInvitations,
       db.delete(notifications).where(eq(notifications.personId, userId)),
       db.delete(teamMembers).where(eq(teamMembers.userId, userId)),
+      // And the team the staff list gave them (GRA-2055).
+      db.delete(teamPrimaries).where(eq(teamPrimaries.userId, userId)),
       // The cards still to be pressed of their requests, then the requests.
       db
         .delete(stephenRequestCards)

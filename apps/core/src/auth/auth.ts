@@ -49,7 +49,7 @@ import {
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
-import { syncTeams } from "../staff-list-teams.ts";
+import { addedByHand, removedByHand } from "../staff-list-by-hand.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -1000,7 +1000,28 @@ const createAuth = (
         // App shared with it away: their hosts tell the open pages to
         // look again (access-revocations.ts).
         organizationHooks: {
+          // A membership an admin adds by hand is theirs, though the staff
+          // list once made it: the list never takes it away (GRA-2055,
+          // staff-list-teams.ts `placementOf`). Marked before Better Auth's
+          // insert, so a confirm landing after the insert never takes the
+          // admin's new row; and again after it, so a confirm that placed
+          // them there in between (Better Auth then finds that row) leaves
+          // it the admin's too. An add that fails, or finds the membership
+          // there already, leaves it the admin's all the same.
+          beforeAddTeamMember: async ({ teamMember }) => {
+            await addedByHand(env, teamMember.teamId, teamMember.userId);
+          },
+          afterAddTeamMember: async ({ teamMember }) => {
+            await addedByHand(env, teamMember.teamId, teamMember.userId);
+          },
+          // A removal by hand of the team the list gives them stands: the
+          // list doesn't add it back (GRA-2055), before Better Auth's
+          // delete and after it, as an add's mark is.
+          beforeRemoveTeamMember: async ({ teamMember }) => {
+            await removedByHand(env, teamMember.teamId, teamMember.userId);
+          },
           afterRemoveTeamMember: async ({ teamMember }) => {
+            await removedByHand(env, teamMember.teamId, teamMember.userId);
             await teamAccessMayHaveDropped(env, teamMember.teamId, [
               teamMember.userId,
             ]);
@@ -1009,26 +1030,11 @@ const createAuth = (
             await teamGone(env, team.id);
           },
           // The onboarding's staff list names these same teams (GRA-2055,
-          // staff-list-teams.ts), whose names are their own, here: a
-          // rename shows on the list at once, as a new version of its
-          // confirmed teams that a confirm under way never writes over
-          // (`syncTeams`). The rename is kept whatever comes of that, so
-          // a failure is logged, not answered: the list's next save takes
-          // the name from here again (`intoMembersTeams`). A team on the
-          // list, saved or confirmed, is taken off there first, so it
-          // never names one gone.
+          // staff-list-teams.ts): a rename shows on it at once, and a team
+          // on it is taken off there first, so it never names one gone.
           afterUpdateTeam: async ({ team }) => {
-            if (team === null) {
-              return;
-            }
-            try {
+            if (team !== null) {
               await onboardingStore(env).renameTeam(team.id, team.name);
-              await syncTeams(env, { type: "system" });
-            } catch (error) {
-              log.error("onboarding.team_rename_unfollowed", {
-                teamId: team.id,
-                error: error instanceof Error ? error.name : "unknown",
-              });
             }
           },
           beforeDeleteTeam: async ({ team }) => {

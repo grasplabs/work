@@ -135,6 +135,12 @@ const accountOf = (claims: Claims): SourceReader => ({
   account: String(claims.oid),
 });
 
+/** The account `claims` signed in with, as the directory read puts it on a staff-list entry. */
+const directoryAccountOf = (claims: Claims) => ({
+  tenant: acmeTenant,
+  oid: String(claims.oid),
+});
+
 /** Grants the chat agent the Brain permission, once for the file. */
 const chatAgentReadsBrain = chatAgentReadsBrainOnce(idp);
 
@@ -3440,6 +3446,86 @@ describe(
         groupRecalled: true,
         afterGroup: { groupCompany: false, directCompany: false, own: false },
         afterDirect: { company: true, own: true },
+      });
+    });
+
+    // The onboarding's staff list puts people in the members' teams
+    // (GRA-2055, staff-list-teams.ts): a team's source reaches whom the
+    // admin's confirm placed in it, and nobody else: not someone on a
+    // draft, nor someone moved out since.
+    it("gives a team's source to whom the confirmed staff list puts in the team, and to nobody a draft names or the list moved out", async () => {
+      const admin = await signedInApi(idp, "admin");
+      // Placed by their account in the company's directory, which their
+      // entries from its read carry.
+      const ann = await signedInApi(idp, "user");
+      const ben = await signedInApi(idp, "user");
+
+      const tag = unique();
+      const marker = markerWord();
+      const annEmail = String(ann.person.email);
+      /** The staff list: Ann in `annIn`, and Ben in Sales when `withBen`. */
+      const roster = (
+        ids: { sales: string; support: string },
+        annIn: "sales" | "support",
+        withBen: boolean
+      ) => ({
+        teams: [
+          { id: ids.sales, name: `Sales ${tag}`, lead: null },
+          { id: ids.support, name: `Support ${tag}`, lead: null },
+        ],
+        people: [
+          {
+            id: `ann-${tag}`,
+            name: "Ann",
+            email: annEmail,
+            entra: directoryAccountOf(ann.person),
+            team: ids[annIn],
+          },
+          ...(withBen
+            ? [
+                {
+                  id: `ben-${tag}`,
+                  name: "Ben",
+                  email: String(ben.person.email),
+                  entra: directoryAccountOf(ben.person),
+                  team: ids.sales,
+                },
+              ]
+            : []),
+        ],
+      });
+      const { roster: kept } = await admin.api.onboarding.confirmRoster(
+        roster({ sales: "sales", support: "support" }, "sales", false)
+      );
+      const idOf = (name: string): string =>
+        kept?.teams.find((team) => team.name === `${name} ${tag}`)?.id ?? "";
+      const ids = { sales: idOf("Sales"), support: idOf("Support") };
+      await add(`Sales handbook ${marker}`, {
+        kind: "team",
+        teamId: ids.sales,
+      });
+      const reads = async (person: string): Promise<boolean> => {
+        const texts = await textsFor(person, marker);
+        return texts.some((text) => text.includes(marker));
+      };
+      const placed = {
+        ann: await reads(ann.userId),
+        ben: await reads(ben.userId),
+      };
+      // A draft naming Ben in Sales gives him nothing.
+      await admin.api.onboarding.saveRoster(roster(ids, "sales", true));
+      const drafted = await reads(ben.userId);
+      // Ann moved to Support on the list: Sales' source is no longer hers.
+      await admin.api.onboarding.confirmRoster(roster(ids, "support", false));
+
+      expect({
+        placed,
+        drafted,
+        moved: await reads(ann.userId),
+      }).toStrictEqual({
+        placed: { ann: true, ben: false },
+        drafted: false,
+        moved: false,
       });
     });
 

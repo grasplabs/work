@@ -12456,6 +12456,10 @@ msgstr "Enregistré, mais il ne passe pas encore la vérification : Définition 
 msgid "Saved."
 msgstr "Enregistré."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Saved. Your people are put in their teams shortly."
+msgstr "Enregistré. Vos collaborateurs rejoignent leurs équipes sous peu."
+
 #: src/chat/thread.tsx
 msgid "Saving to your memory"
 msgstr "Enregistrement dans votre mémoire"
@@ -15295,8 +15299,8 @@ msgid "This page's stored code no longer matches the code that was published, so
 msgstr "Le code enregistré de cette page ne correspond plus au code publié, elle n’a donc pas été ouverte. Prévenez un admin."
 
 #: src/settings/use-team-change.ts
-msgid "This team is on the staff list. Take it off there and confirm the list first."
-msgstr "Cette équipe figure sur la liste du personnel. Retirez-la de là et confirmez d’abord la liste."
+msgid "This team is on the staff list. Take it off there first."
+msgstr "Cette équipe figure sur la liste du personnel. Retirez-la d’abord de là."
 
 #: src/brain/sources-page.tsx
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."

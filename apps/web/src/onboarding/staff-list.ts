@@ -305,6 +305,8 @@ interface Entry {
   lead: boolean;
   /** Who they report to, by name or email address, in lower case; empty for nobody. */
   manager: string;
+  /** Their account in the company's Microsoft directory, when the list is its read. */
+  entra?: { tenant: string; oid: string };
 }
 
 /**
@@ -348,6 +350,7 @@ const rosterOf = (
       team,
       title: entry.title.slice(0, textMost),
       away: false,
+      ...(entry.entra === undefined ? {} : { entra: entry.entra }),
     };
     if (people.some((each) => each.id === person.id)) {
       continue;
@@ -421,7 +424,9 @@ export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
  */
 export const directoryListOf = (
   people: readonly DirectoryPerson[],
-  noTeam: string
+  noTeam: string,
+  /** The Microsoft directory's tenant, when the directory is one: each person keeps their object id in it, which the list places their sign-in by. */
+  entraTenant?: string
 ): StaffList => {
   const byKey = new Map<string, DirectoryPerson>();
   for (const person of people) {
@@ -444,6 +449,9 @@ export const directoryListOf = (
         manager === undefined
           ? ""
           : manager.email || manager.name.toLowerCase(),
+      ...(entraTenant === undefined
+        ? {}
+        : { entra: { tenant: entraTenant, oid: person.id } }),
     };
   });
   return { ...rosterOf(entries, noTeam), skipped: 0 };
@@ -501,6 +509,21 @@ const underSavedIds = (
 };
 
 /**
+ * `person` as a list read again gives them, with what the saved list held
+ * of the same person (`before`, by id) kept: whether they are away, and
+ * the Microsoft directory account the list places their sign-in by
+ * (GRA-2055), which a file or the HR platform doesn't give. One rule for
+ * every read that merges into the saved list (`withSaved`).
+ */
+const asSaved = (person: RosterPerson, before: RosterPerson): RosterPerson => ({
+  ...person,
+  away: before.away,
+  ...(person.entra === undefined && before.entra !== undefined
+    ? { entra: before.entra }
+    : {}),
+});
+
+/**
  * A staff list read again, with what the admin set on the one before kept
  * for the teams and people in both, by id: a team they switched off stays
  * off, someone marked away stays away, a lead they picked stays the lead
@@ -540,7 +563,7 @@ export const withSaved = (
     }),
     people: roster.people.map((person) => {
       const before = savedPeople.get(person.id);
-      return before === undefined ? person : { ...person, away: before.away };
+      return before === undefined ? person : asSaved(person, before);
     }),
   };
 };
