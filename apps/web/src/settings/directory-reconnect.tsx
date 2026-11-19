@@ -47,15 +47,10 @@ export const DirectoryReconnect = ({
   const search: unknown = useSearch({ strict: false });
   const [state, setState] = useState<"idle" | "starting" | "failed">("idle");
   const returned = returnedSchema.safeParse(search);
-  if (returned.success && returned.data.directory === provider) {
-    return (
-      <p>
-        <Trans>
-          {name} is connected again. Grasp reads it at its next daily read.
-        </Trans>
-      </p>
-    );
-  }
+  // Beside the button, never instead of it: the address keeps saying so
+  // on a reload, when a later read may have failed again.
+  const connectedAgain =
+    returned.success && returned.data.directory === provider;
   const connect = async (): Promise<void> => {
     setState("starting");
     try {
@@ -73,6 +68,13 @@ export const DirectoryReconnect = ({
   };
   return (
     <div className="flex flex-col items-start gap-2">
+      {connectedAgain ? (
+        <p>
+          <Trans>
+            {name} is connected again. Grasp reads it at its next daily read.
+          </Trans>
+        </p>
+      ) : null}
       <Button
         disabled={state === "starting"}
         onClick={() => {
