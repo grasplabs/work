@@ -9,7 +9,6 @@ import { eraseSources, runSource } from "../brain-next-origins.ts";
 import {
   workflowResourceParams,
   workflowStartReceipts,
-  runBrainEvidence,
   runBrainMemories,
   runBrainVersions,
   runChatSources,
@@ -382,10 +381,6 @@ const startDetailsRemoved = async (
           notKept(runBrainMemories.runId)
         )
       ),
-    // And what an older core recorded of its recalls before runs recalled
-    // from the new Brain, while the table exists (schema.ts): this goes
-    // when the table is dropped.
-    db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, due)),
     db
       .delete(runChatSources)
       .where(
