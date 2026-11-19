@@ -2,7 +2,7 @@ import { connectionCallbackPath } from "@grasp-os/shared/connect";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { placeErrors, placesLimits } from "@grasp-os/shared/document-places";
 import type { PlacesProvider } from "@grasp-os/shared/document-places";
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -380,6 +380,31 @@ describe("the documents' connection", () => {
 });
 
 describe("a read of a place", () => {
+  it("is kept on renewal only while it holds every scope it held: one that lost a scope it held needs an admin to connect it again", async () => {
+    const connectionId = await connectPlaces(someone("admin"));
+    await env.DB.prepare(
+      "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .run();
+    // Not one connecting asks for (`required`), but one it was granted.
+    providers.state.refreshGranted = asAsked["microsoft-documents"].replace(
+      " https://graph.microsoft.com/User.Read",
+      ""
+    );
+    const read = await codeOf(exports.default.readPlaces({ connectionId }));
+    providers.state.refreshGranted = undefined;
+    const row = await env.DB.prepare(
+      "SELECT status FROM connections WHERE id = ?"
+    )
+      .bind(connectionId)
+      .first<{ status: string }>();
+    expect({ read, status: row?.status }).toStrictEqual({
+      read: "place.inactive",
+      status: "needs_reauth",
+    });
+  });
+
   it("of Microsoft 365 lists the admin's OneDrive and the SharePoint sites, without anyone's OneDrive site or a site that isn't one", async () => {
     const connectionId = await connectPlaces(someone("admin"));
     places.graphSites = [

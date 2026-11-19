@@ -112,15 +112,14 @@ export interface OAuthProviderConfig {
    * `allowed`, or less than `required`, are refused
    * (`connection.scopes_refused`). For a connection that must hold no
    * more than it asks for, as the directory's and the documents'; none
-   * for the rest. A renewal (`renewedAsGranted`) must hold `kept`
-   * (`required` when unset) and all its connection held before: a scope
-   * added to `required` later is asked of connecting only, so a
-   * connection made before it goes on with what it was granted.
+   * for the rest. A renewal (`renewedAsGranted`) must hold all its
+   * connection held before, and nothing beyond `allowed`: a scope added
+   * to `required` later is asked of connecting only, so a connection made
+   * before it goes on with what it was granted.
    */
   granted?: {
     allowed: ReadonlySet<string>;
     required: readonly string[];
-    kept?: readonly string[];
   };
   /**
    * Scopes a renewed token must hold, or its connection is marked for
@@ -440,10 +439,6 @@ const microsoftDirectory: OAuthProviderConfig = {
       microsoftDirectoryScopes.map((scope) => scope.toLowerCase())
     ),
     required: ["User.Read.All", "Group.ReadBasic.All"],
-    // A connection made before groups were asked for renews with what it
-    // was granted, and keeps reading people (directory-groups.ts answers
-    // its group calls `directory.groups_not_granted`).
-    kept: ["User.Read.All"],
   },
   sharedOnly: true,
   client: (env) =>
@@ -806,12 +801,11 @@ const signInScopes: ReadonlySet<string> = new Set([
 /**
  * Whether a renewal's `tokens` hold what their connection was granted,
  * where it must hold no more (`granted`): nothing beyond what is allowed,
- * nothing short of what every renewal must keep, and nothing less than
- * the connection's earlier grant (`before`, its token answer's scope, as
- * kept; null where connect didn't keep it), the OpenID scopes aside. A
- * grant that predates a scope asked for since is no change; one that lost
- * a scope it had, or gained one unasked, is. An answer that lists none is
- * refused.
+ * and nothing less than the connection's earlier grant (`before`, its
+ * token answer's scope, as kept), the OpenID scopes aside, which an
+ * answer may leave out. A grant that predates a scope asked for since is
+ * no change; one that lost a scope it had, or gained one unasked, is. An
+ * answer that lists none is refused.
  */
 export const renewedAsGranted = (
   { granted }: OAuthProviderConfig,
@@ -821,20 +815,16 @@ export const renewedAsGranted = (
   if (granted === undefined) {
     return true;
   }
-  if (scope === undefined) {
+  // Connect keeps no connection with a restricted grant whose answer said
+  // nothing of it (`grantedAsAsked`): an unknown either way is refused.
+  if (scope === undefined || before === null) {
     return false;
   }
   const scopes = scopesOf(scope);
-  const held = before === null ? [] : [...scopesOf(before)];
+  const held = [...scopesOf(before)];
   return (
     [...scopes].every((each) => granted.allowed.has(each)) &&
-    (granted.kept ?? granted.required).every((each) =>
-      scopes.has(each.toLowerCase())
-    ) &&
-    held.every(
-      (each) =>
-        signInScopes.has(each) || !granted.allowed.has(each) || scopes.has(each)
-    )
+    held.every((each) => signInScopes.has(each) || scopes.has(each))
   );
 };
 
