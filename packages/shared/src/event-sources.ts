@@ -235,8 +235,10 @@ export interface EventSourceTestResult {
   delivery: EventSourceDelivery;
   /**
    * The enabled triggers on its source and type, as a delivery of it would
-   * find them: each would start its workflow only while its `start` is
-   * `active`, and the event's data is an input the workflow takes.
+   * find them. Matching isn't starting: each carries where its `start`
+   * stands, and a delivery starts its workflow only while that is
+   * `active` (never `requested`, `revoked` or null) and the event's data
+   * is an input the workflow takes. Whoever shows them says which.
    */
   matched: EventSourceTrigger[];
 }

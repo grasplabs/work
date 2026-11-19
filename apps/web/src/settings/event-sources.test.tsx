@@ -124,6 +124,13 @@ const shown = async (
               start: "active" as const,
               workflow: { id: "workflow-1", name: "Book a payment" },
             },
+            {
+              id: "trigger-2",
+              type: "payment.paid",
+              enabled: true,
+              start: "requested" as const,
+              workflow: { id: "workflow-2", name: "Thank the payer" },
+            },
           ],
         }
       ),
@@ -335,7 +342,7 @@ describe("the Webhooks settings", () => {
     }).toStrictEqual({ left: 1, said: true, secret: undefined });
   });
 
-  it("says what a source received lately, and reads its events, a payload and a test's matches only as each is asked for", async () => {
+  it("says what a source received lately, and reads its events, a payload and a test's matches only as each is asked for, saying which matched trigger would start and which is held", async () => {
     const asked = await shown([
       {
         ...shop,
@@ -371,9 +378,11 @@ describe("the Webhooks settings", () => {
       payloadBeforeAsked: opened.includes("INV-42"),
       payload: withPayload.includes("INV-42"),
       asked: asked.slice(askedOpened.length, askedOpened.length + 2),
-      matched: document.body.textContent.includes(
-        "1 trigger starts on this type, for Book a payment. A test event starts no workflow."
-      ),
+      matched: [
+        "2 triggers match this type. A test event starts no workflow.",
+        "An event from the sender would start Book a payment now, if its data is an input the workflow takes.",
+        "An event from the sender would not start Thank the payer: its trigger still waits for an admin's approval.",
+      ].map((sentence) => document.body.textContent.includes(sentence)),
     }).toStrictEqual({
       summary: true,
       askedClosed: 0,
@@ -389,7 +398,7 @@ describe("the Webhooks settings", () => {
         { delivery: ["source-shop", "delivery-1"] },
         { sendTest: ["source-shop", { type: "payment.paid", data: {} }] },
       ],
-      matched: true,
+      matched: [true, true, true],
     });
   });
 });

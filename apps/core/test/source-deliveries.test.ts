@@ -1494,4 +1494,44 @@ describe("what an event source received", () => {
       accepted: 1,
     });
   });
+
+  it("answers no payload when the read can't be put on record", async () => {
+    const { admin, source, secret, token } = await newSource();
+    const marker = `INV-${unique()}`;
+    await send(token, secret, eventOf(marker, 9));
+    const [listed] = await deliveriesOf(
+      admin.api.workflowResources.sources,
+      source.id
+    );
+    // The same admin, on a core whose audit outbox takes nothing.
+    const unaudited = await openRpc(admin.session, {
+      coreEnv: failingBatchOf(/audit_outbox/u),
+    });
+    const { sources } = unaudited.core.authenticate().workflowResources;
+    let answered: unknown;
+    const read = await outcome(
+      (async () => {
+        answered = await sources.delivery(source.id, listed?.id ?? "");
+      })()
+    );
+    // Only the read of a payload is refused: the list needs no record.
+    const lists = await outcome(sources.deliveries(source.id));
+    const audited = await auditedOn(source.id, "event_source.delivery.read");
+
+    expect({
+      held: listed?.payloadHeld,
+      lists,
+      refused: read !== "ok",
+      answered,
+      leaked: read.includes(marker),
+      audited: audited.details,
+    }).toStrictEqual({
+      held: true,
+      lists: "ok",
+      refused: true,
+      answered: undefined,
+      leaked: false,
+      audited: [],
+    });
+  });
 });

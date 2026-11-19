@@ -406,6 +406,10 @@ msgstr "{count, plural, one {# Zeitfresser} other {# Zeitfresser}}"
 msgid "{count, plural, one {# tool allowed} other {# tools allowed}}"
 msgstr "{count, plural, one {# Tool erlaubt} other {# Tools erlaubt}}"
 
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# trigger matches this type. A test event starts no workflow.} other {# triggers match this type. A test event starts no workflow.}}"
+msgstr "{count, plural, one {# Trigger passt zu diesem Typ. Ein Testereignis startet keinen Workflow.} other {# Trigger passen zu diesem Typ. Ein Testereignis startet keinen Workflow.}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# wish} other {# wishes}}"
 msgstr "{count, plural, one {# Wunsch} other {# Wünsche}}"
@@ -733,10 +737,6 @@ msgstr "{live} von {count}"
 #: src/onboarding/setup-steps.tsx
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
 msgstr "{mapped, plural, one {Eine Aufgabe ist erfasst und für Sie bereit.} other {# Aufgaben sind erfasst und für Sie bereit.}}"
-
-#: src/settings/event-source-activity.tsx
-msgid "{matched, plural, one {# trigger starts on this type, for {workflows}. A test event starts no workflow.} other {# triggers start on this type, for {workflows}. A test event starts no workflow.}}"
-msgstr "{matched, plural, one {# Trigger startet bei diesem Typ, für {workflows}. Ein Testereignis startet keinen Workflow.} other {# Trigger starten bei diesem Typ, für {workflows}. Ein Testereignis startet keinen Workflow.}}"
 
 #: src/brain/learned-section.tsx
 msgid "{memories, plural, one {# memory from an earlier version is no longer in this source.} other {# memories from earlier versions are no longer in this source.}}"
@@ -2582,6 +2582,22 @@ msgstr "Ein Ereignis bei einer Verbindung"
 #: src/workflows/workflow-triggers.tsx
 msgid "An event from a webhook source"
 msgstr "Ein Ereignis aus einer Webhook-Quelle"
+
+#: src/settings/event-source-activity.tsx
+msgid "An event from the sender would not start {name}: its trigger has no approval."
+msgstr "Ein Ereignis des Absenders würde {name} nicht starten: Der Trigger hat keine Freigabe."
+
+#: src/settings/event-source-activity.tsx
+msgid "An event from the sender would not start {name}: its trigger still waits for an admin's approval."
+msgstr "Ein Ereignis des Absenders würde {name} nicht starten: Der Trigger wartet noch auf die Freigabe eines Admins."
+
+#: src/settings/event-source-activity.tsx
+msgid "An event from the sender would not start {name}: its trigger's approval was taken back."
+msgstr "Ein Ereignis des Absenders würde {name} nicht starten: Die Freigabe des Triggers wurde zurückgenommen."
+
+#: src/settings/event-source-activity.tsx
+msgid "An event from the sender would start {name} now, if its data is an input the workflow takes."
+msgstr "Ein Ereignis des Absenders würde {name} jetzt starten, sofern seine Daten eine Eingabe sind, die der Workflow annimmt."
 
 #: src/apps/app-webhooks.tsx
 msgid "An https address on the public internet, with no user name, password or IP address in it."
@@ -9426,8 +9442,8 @@ msgid "No teams yet."
 msgstr "Noch keine Teams."
 
 #: src/settings/event-source-activity.tsx
-msgid "No trigger starts on this type. A test event starts no workflow."
-msgstr "Kein Trigger startet bei diesem Typ. Ein Testereignis startet keinen Workflow."
+msgid "No trigger matches this type. A test event starts no workflow."
+msgstr "Kein Trigger passt zu diesem Typ. Ein Testereignis startet keinen Workflow."
 
 #: src/brain/sources-page.tsx
 msgid "No uploads are shared with a team or everyone."

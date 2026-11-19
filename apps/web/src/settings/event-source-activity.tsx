@@ -4,6 +4,7 @@ import type {
   EventSourceDeliveryPage,
   EventSourceRefusals,
   EventSourceTestResult,
+  EventSourceTrigger,
 } from "@grasp-os/shared/event-sources";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -23,7 +24,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime, formatList } from "../format.ts";
+import { formatDateTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // What a source received, under its row in Settings › Webhooks (core's
@@ -133,6 +134,41 @@ const DeliveryRow = ({
   );
 };
 
+/**
+ * A trigger a test event matched: whether an event from the sender would
+ * start its workflow now, or what holds it. Only a trigger whose `start`
+ * an admin granted starts anything (core's workflows/source-events.ts).
+ */
+const MatchedTrigger = ({ trigger }: { trigger: EventSourceTrigger }) => {
+  const { t } = useLingui();
+  const { name } = trigger.workflow;
+  switch (trigger.start) {
+    case "active": {
+      return (
+        <span>{t`An event from the sender would start ${name} now, if its data is an input the workflow takes.`}</span>
+      );
+    }
+    case "requested": {
+      return (
+        <span className="text-status-attention">{t`An event from the sender would not start ${name}: its trigger still waits for an admin's approval.`}</span>
+      );
+    }
+    case "revoked": {
+      return (
+        <span className="text-status-attention">{t`An event from the sender would not start ${name}: its trigger's approval was taken back.`}</span>
+      );
+    }
+    case null: {
+      return (
+        <span className="text-status-attention">{t`An event from the sender would not start ${name}: its trigger has no approval.`}</span>
+      );
+    }
+    default: {
+      return trigger.start satisfies never;
+    }
+  }
+};
+
 /** A test event for `source`: its type and data, and what it matched. */
 const TestEvent = ({
   source,
@@ -170,10 +206,8 @@ const TestEvent = ({
       await onSent();
     }
   };
-  const matched = result?.matched.length ?? 0;
-  const workflows = formatList(
-    result?.matched.map(({ workflow }) => workflow.name) ?? []
-  );
+  const matched = result?.matched ?? [];
+  const count = matched.length;
   return (
     <form
       className="flex flex-col gap-2"
@@ -210,10 +244,15 @@ const TestEvent = ({
         </Button>
       </div>
       {result === undefined ? null : (
-        <output className="text-sm">
-          {matched === 0
-            ? t`No trigger starts on this type. A test event starts no workflow.`
-            : t`${plural(matched, { one: `# trigger starts on this type, for ${workflows}. A test event starts no workflow.`, other: `# triggers start on this type, for ${workflows}. A test event starts no workflow.` })}`}
+        <output className="flex flex-col gap-1 text-sm">
+          <span>
+            {count === 0
+              ? t`No trigger matches this type. A test event starts no workflow.`
+              : t`${plural(count, { one: "# trigger matches this type. A test event starts no workflow.", other: "# triggers match this type. A test event starts no workflow." })}`}
+          </span>
+          {matched.map((trigger) => (
+            <MatchedTrigger key={trigger.id} trigger={trigger} />
+          ))}
         </output>
       )}
       <ErrorText>{notJson ? t`The data isn't JSON.` : failure}</ErrorText>
