@@ -23,10 +23,11 @@
 import * as stylex from "@stylexjs/stylex";
 import { renderElement } from "@ui-sdk/react/primitive";
 import type { RenderProp } from "@ui-sdk/react/primitive";
-import { useId } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
+import { Icon, Plus } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { useWords, withGiven } from "../words/words";
 import { cardMarker } from "./app-card.stylex";
@@ -34,6 +35,7 @@ import type { AppCardLabels } from "./labels";
 import { MoreMenu, Window } from "./parts";
 import type { AppCardAction, AppCardPreview } from "./parts";
 import { styles } from "./styles";
+import { useAttention } from "./watch";
 import { englishLabels } from "./words";
 
 /** What a caller may style: its size and where it sits. Never its look. */
@@ -59,8 +61,19 @@ export interface AppCardOwner {
 export interface AppCardProps {
   /** The app's name: the card's title, and the link that opens it. */
   title: string;
+  /**
+   * The app's mark before its title, and over the quiet line of a window with nothing to show (no
+   * preview, or one that failed): an IconTile (`size="sm"`) or a BrandIcon (`size="xs"`). Decorative:
+   * the title names the app.
+   */
+  mark?: ReactNode;
   /** Where the card goes: the app. Leave it out when `render` is a router's link that carries it. */
   href?: string;
+  /**
+   * Opens the app where there is no address to go to (an app opened in a panel): the title is then a
+   * button that reaches over the card, in place of the link. With `href` or `render`, the link wins.
+   */
+  onOpen?: () => void;
   /**
    * The card's link drawn as a router's own (`render={<Link to="/apps/tickets" />}`): it takes the
    * link's look, words and wiring, and keeps its own props. Without it, an `<a href>`.
@@ -87,7 +100,7 @@ export interface AppCardProps {
   actions?: readonly AppCardAction[];
   /**
    * Where the app stands: `building` draws App building in the window and says so in the meta
-   * line; `failed` a quiet window, and says so too.
+   * line; `failed` a quiet window that says so, the meta line keeping who and when.
    * @default "ready"
    */
   status?: AppCardState;
@@ -156,7 +169,44 @@ const Heading = ({
   return <h3 {...stylex.props(styles.heading)}>{children}</h3>;
 };
 
-/** The meta line's words in each state: the caller's meta, or what is the case with the app. */
+interface CardLinkProps {
+  href: string | undefined;
+  render: RenderProp | undefined;
+  /** Pressed where there is no link: the words are a button then. */
+  onPress: (() => void) | undefined;
+  /** The part that shows this link's focus: the frame (scripts/check-focus-ring.ts reads it). */
+  ring: string;
+  describedBy?: string;
+  title?: string;
+  children: string;
+}
+
+/** The card's one press, reaching over it: a link (`href`, `render`), else a button. */
+const CardLink = ({
+  href,
+  render,
+  onPress,
+  ring,
+  describedBy,
+  title,
+  children,
+}: CardLinkProps) => {
+  const props = {
+    title,
+    "data-slot": "app-card-link",
+    "data-card-link": "",
+    "data-ring-on": ring,
+    "aria-describedby": describedBy,
+    className: stylex.props(styles.link).className,
+    children,
+  };
+  if (href === undefined && render === undefined && onPress !== undefined) {
+    return <button type="button" onClick={onPress} {...props} />;
+  }
+  return renderElement("a", { href, ...props }, render);
+};
+
+/** The meta line's words in each state: the caller's meta (who and when), or that the app is being built. A failed app says so in its window, not again here. */
 const metaOf = (
   state: AppCardState,
   meta: string | undefined,
@@ -165,15 +215,14 @@ const metaOf = (
   if (state === "building") {
     return words.building;
   }
-  if (state === "failed") {
-    return words.failed;
-  }
   return meta;
 };
 
 export const AppCard = ({
   title,
+  mark,
   href,
+  onOpen,
   render,
   description,
   preview,
@@ -200,8 +249,12 @@ export const AppCard = ({
   ]
     .filter((part) => part !== "")
     .join(" ");
+  // Hovered or holding the focus: with reduced motion, the only time a running app runs.
+  const [box, setBox] = useState<HTMLElement | null>(null);
+  const attention = useAttention(box);
   return (
     <article
+      ref={setBox}
       data-slot="app-card"
       data-state={state}
       data-tone={tone}
@@ -216,6 +269,8 @@ export const AppCard = ({
         <Window
           preview={preview}
           title={title}
+          mark={mark}
+          attention={attention}
           building={state === "building"}
           failed={state === "failed"}
           buildingLabel={words.building}
@@ -225,23 +280,22 @@ export const AppCard = ({
       </div>
       <div {...stylex.props(styles.words)}>
         <div {...stylex.props(styles.titleRow)}>
+          {mark === undefined || mark === null ? null : (
+            <span aria-hidden="true" {...stylex.props(styles.mark)}>
+              {mark}
+            </span>
+          )}
           <Heading level={level}>
-            {renderElement(
-              "a",
-              {
-                href,
-                title,
-                "data-slot": "app-card-link",
-                "data-card-link": "",
-                // The part that shows this link's focus: the frame (scripts/check-focus-ring.ts reads it).
-                "data-ring-on": `${id}-frame`,
-                "aria-describedby":
-                  describedBy === "" ? undefined : describedBy,
-                className: stylex.props(styles.link).className,
-                children: title,
-              },
-              render
-            )}
+            <CardLink
+              href={href}
+              render={render}
+              onPress={onOpen}
+              ring={`${id}-frame`}
+              describedBy={describedBy === "" ? undefined : describedBy}
+              title={title}
+            >
+              {title}
+            </CardLink>
           </Heading>
           {actions === undefined || actions.length === 0 ? null : (
             <MoreMenu actions={actions} label={`${words.more}, ${title}`} />
@@ -263,10 +317,22 @@ export const AppCard = ({
   );
 };
 
+/** How many cards a row the grid stands, by its own width. */
+export type AppCardGridDensity = "comfortable" | "compact" | "dense";
+
 /** Every prop an AppCardGrid takes. */
 export interface AppCardGridProps {
   /** The cards. */
-  children: ReactNode;
+  children?: ReactNode;
+  /**
+   * How many to a row, by the grid's own width (a container, not the window): `comfortable` two
+   * from 40rem and three from 96rem; `compact` two from 36rem and three from 60rem (the Apps page
+   * beside a sidebar at a desktop's width); `dense` two from 32rem, three from 52rem, four from 80rem.
+   * @default "comfortable"
+   */
+  density?: AppCardGridDensity;
+  /** What stands in the grid when it has no cards: normally an `Empty`, with its action. */
+  empty?: ReactNode;
   /** Its size and where it sits. */
   layout?: AppCardLayoutStyle;
 }
@@ -275,8 +341,98 @@ export interface AppCardGridProps {
 // beside a sidebar: each frame wide enough to read the app), three from 96rem (a wide screen,
 // where two would make each frame taller than the window). The room, not the window, decides.
 /** The Apps page's grid: one, two or three cards a row, by the room it has. */
-export const AppCardGrid = ({ children, layout }: AppCardGridProps) => (
-  <div data-slot="app-card-grid" {...stylex.props(styles.room, layout)}>
-    <div {...stylex.props(styles.grid)}>{children}</div>
-  </div>
-);
+export const AppCardGrid = ({
+  children,
+  density = "comfortable",
+  empty,
+  layout,
+}: AppCardGridProps) => {
+  const none =
+    children === undefined ||
+    children === null ||
+    children === false ||
+    (Array.isArray(children) && children.length === 0);
+  return (
+    <div
+      data-slot="app-card-grid"
+      data-density={density}
+      {...stylex.props(styles.room, layout)}
+    >
+      <div {...stylex.props(styles.grid, styles[density])}>
+        {none && empty !== undefined ? (
+          <div {...stylex.props(styles.empty)}>{empty}</div>
+        ) : (
+          children
+        )}
+      </div>
+    </div>
+  );
+};
+
+/** A press with nothing to do: a New app card given neither an address nor `onSelect` stays a button. */
+const keepOn = () => {
+  // Nothing to start.
+};
+
+/** Every prop an AppCardNew takes. */
+export interface AppCardNewProps {
+  /** Where making a new app starts. Leave it out when `render` is a router's link that carries it. */
+  href?: string;
+  /** The card's link drawn as a router's own; without it and `href`, a button. */
+  render?: RenderProp;
+  /** Starts a new app, where there is no address to go to. */
+  onSelect?: () => void;
+  /**
+   * The card's heading level, as the apps' cards beside it.
+   * @default 3
+   */
+  headingLevel?: 2 | 3 | 4;
+  /** Its size and where it sits. */
+  layout?: AppCardLayoutStyle;
+}
+
+/**
+ * The grid's first or last card: the frame's box on a soft ground with a dashed rim and a plus, and
+ * "New app" under it, the whole card one press (a link with `href` or `render`, else a button).
+ */
+export const AppCardNew = ({
+  href,
+  render,
+  onSelect,
+  headingLevel = 3,
+  layout,
+}: AppCardNewProps) => {
+  const id = useId();
+  const words = useWords("appCard", englishLabels);
+  return (
+    <article
+      data-slot="app-card-new"
+      {...stylex.props(styles.card, cardMarker, layout)}
+    >
+      <div
+        id={`${id}-frame`}
+        aria-hidden="true"
+        data-slot="app-card-frame"
+        {...stylex.props(styles.frame, styles.newFrame)}
+      >
+        <span {...stylex.props(styles.newPlus)}>
+          <Icon icon={Plus} />
+        </span>
+      </div>
+      <div {...stylex.props(styles.words)}>
+        <div {...stylex.props(styles.titleRow)}>
+          <Heading level={headingLevel}>
+            <CardLink
+              href={href}
+              render={render}
+              onPress={onSelect ?? keepOn}
+              ring={`${id}-frame`}
+            >
+              {words.newApp}
+            </CardLink>
+          </Heading>
+        </div>
+      </div>
+    </article>
+  );
+};

@@ -16,12 +16,12 @@ import type {
   ButtonVariant,
   ButtonWords,
 } from "../button";
+import { buttonWords } from "../button/words";
 import type { IconData } from "../icons";
 import { ms } from "../tokens/tokens.values";
 import { useWords } from "../words/words";
 import { useStill } from "./still-context";
 import { dialogStyles as styles } from "./styles";
-import { dialogWords } from "./words";
 
 type ClosePrimitiveProps = ComponentProps<typeof ClosePrimitive>;
 
@@ -137,7 +137,7 @@ export const ActionButton = ({
   life,
 }: ActionButtonProps) => {
   const failed = useFailed(error);
-  const { actionFailed } = useWords("dialog", dialogWords);
+  const { actionFailed } = useWords("button", buttonWords);
   const {
     variant = "quiet",
     icon,
@@ -201,7 +201,7 @@ interface LiveActionProps {
 // person's failed press reaches the console as nothing.
 const LiveAction = ({ rest, action, look }: LiveActionProps) => {
   const running = useRef<Promise<unknown> | null>(null);
-  const { actionFailed } = useWords("dialog", dialogWords);
+  const { actionFailed } = useWords("button", buttonWords);
   if (action === undefined) {
     return (
       <ClosePrimitive

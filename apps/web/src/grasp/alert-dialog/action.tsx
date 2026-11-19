@@ -11,10 +11,12 @@ import { useRef } from "react";
 import type { ComponentProps, MouseEvent } from "react";
 
 import type { ButtonVariant, ButtonWords } from "../button";
+import { buttonWords } from "../button/words";
 import { ActionButton, runWork } from "../dialog/action";
 import type { ActionButtonProps } from "../dialog/action";
 import { useStill } from "../dialog/still-context";
 import type { IconData } from "../icons";
+import { useWords } from "../words/words";
 
 type ClosePrimitiveProps = ComponentProps<typeof ClosePrimitive>;
 
@@ -65,8 +67,12 @@ interface WithWork {
   action: (event: Event | undefined, details: { source: string }) => unknown;
   /** The words while the work runs ("Deleting"). Leave it out to keep the button's own words. */
   workingLabel?: string;
-  /** The words when the work failed, said plainly on the button, to a screen reader and to an agent ("Could not delete"). */
-  failedLabel: string;
+  /**
+   * The words when the work failed, said plainly on the button, to a screen reader and to an agent ("Could not delete"). Leave it out for
+   * the neutral one, from Button's catalogue.
+   * @default "Could not finish"
+   */
+  failedLabel?: string;
 }
 
 /** Every prop an AlertDialogAction takes: these, and the rest of UI SDK's AlertDialogClose. */
@@ -152,13 +158,14 @@ const LiveAction = ({ rest, action, look }: LiveActionProps) => {
  * after its work when it has some.
  */
 export const AlertDialogAction = (props: AlertDialogActionProps) => {
+  const { actionFailed } = useWords("button", buttonWords);
   const {
     children,
     variant,
     icon,
     action,
     workingLabel,
-    failedLabel,
+    failedLabel = actionFailed,
     agentConfirm,
     ...rest
   } = props;

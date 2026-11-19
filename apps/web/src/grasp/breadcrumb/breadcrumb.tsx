@@ -97,6 +97,14 @@ export interface BreadcrumbProps {
   layout?: BreadcrumbLayoutStyle;
 }
 
+/**
+ * A step as the list draws it: an entry, and whether it is the page you are on. The older shape's
+ * last item always is; in the parts, only a BreadcrumbPage is.
+ */
+interface Step extends BreadcrumbEntry {
+  page?: boolean;
+}
+
 /** Every prop a BreadcrumbList takes. */
 export interface BreadcrumbListProps {
   /** The steps, a BreadcrumbItem each, from the top of the site down to the page you are on, which comes last. */
@@ -113,11 +121,17 @@ export interface BreadcrumbItemProps {
 export interface BreadcrumbLinkProps {
   /** The page's name, as its own title says it. */
   children: string;
-  /** Where the step goes. Without it the step is its name alone, not a link. */
+  /**
+   * Where the step goes. Without it the step is its name alone, not a link: a plain step, as each
+   * folder of a file's path is. Last on the path, a plain step is not the page you are on.
+   */
   href?: string;
 }
 
-/** Every prop a BreadcrumbPage takes: the page you are on, last on the path. */
+/**
+ * Every prop a BreadcrumbPage takes: the page you are on, last on the path, said by
+ * `aria-current="page"`. Only the last step may be one; written earlier it is drawn as a plain step.
+ */
 export interface BreadcrumbPageProps {
   /** The page's name, as its own title says it. */
   children: string;
@@ -349,7 +363,7 @@ const measureLine = (
       .width ?? 0;
   const levels = all.filter((li) => li.dataset.ellipsis === undefined);
   // The page's name in full, to the fraction of a pixel, however much of it shows.
-  const name = last.querySelector('[aria-current="page"]');
+  const name = last.querySelector("[data-slot=breadcrumb-current]");
   const range = document.createRange();
   if (name !== null) {
     range.selectNodeContents(name);
@@ -384,7 +398,7 @@ const keepFocus = (ol: HTMLOListElement | null) => {
     "[data-ellipsis] button",
     "li[data-fold] a",
     "a",
-    "[aria-current]",
+    "[data-slot=breadcrumb-current]",
   ]
     .map((query) => [...ol.querySelectorAll<HTMLElement>(query)].find(seen))
     .find((element) => element !== undefined);
@@ -531,7 +545,7 @@ const Back = createContext(false);
 const HiddenWords = createContext("");
 
 /** The steps on one line, folded to fit: the list's own drawing, for the parts and the older shape. */
-const Trail = ({ items }: { items: BreadcrumbEntry[] }) => {
+const Trail = ({ items }: { items: Step[] }) => {
   const back = useContext(Back);
   const hiddenLabel = useContext(HiddenWords);
   // Until the script runs (and with none) nothing folds and the levels give way with an ellipsis,
@@ -585,7 +599,12 @@ const Trail = ({ items }: { items: BreadcrumbEntry[] }) => {
       {...stylex.props(...lookOf({ index, count, middle, back, state }))}
     >
       {index === count - 1 ? (
-        <Current label={item.label} cut={state.cut} whole={!scripted} />
+        <Current
+          label={item.label}
+          cut={state.cut}
+          whole={!scripted}
+          page={item.page ?? true}
+        />
       ) : (
         <Level
           item={item}
@@ -649,7 +668,7 @@ const listOf = (children: ReactNode): ReactNode[] =>
     : [children];
 
 /** The steps written in a list: each BreadcrumbItem's link or page, as a name and where it goes. */
-const stepsOf = (children: ReactNode): BreadcrumbEntry[] =>
+const stepsOf = (children: ReactNode): Step[] =>
   listOf(children).flatMap((child) => {
     if (
       !isValidElement<BreadcrumbItemProps>(child) ||
@@ -657,22 +676,26 @@ const stepsOf = (children: ReactNode): BreadcrumbEntry[] =>
     ) {
       return [];
     }
-    return listOf(child.props.children).flatMap((part): BreadcrumbEntry[] => {
+    return listOf(child.props.children).flatMap((part): Step[] => {
       if (
         isValidElement<BreadcrumbLinkProps>(part) &&
         part.type === BreadcrumbLink
       ) {
         return [
           part.props.href === undefined
-            ? { label: part.props.children }
-            : { label: part.props.children, href: part.props.href },
+            ? { label: part.props.children, page: false }
+            : {
+                label: part.props.children,
+                href: part.props.href,
+                page: false,
+              },
         ];
       }
       if (
         isValidElement<BreadcrumbPageProps>(part) &&
         part.type === BreadcrumbPage
       ) {
-        return [{ label: part.props.children }];
+        return [{ label: part.props.children, page: true }];
       }
       return [];
     });

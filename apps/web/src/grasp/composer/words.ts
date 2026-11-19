@@ -39,6 +39,7 @@ const englishAttachmentWords: ComposerAttachmentWords = {
 
 const englishVoiceWords: ComposerVoiceWords = {
   asking: "Asking for the microphone",
+  askingShort: "Asking…",
   listening: "Listening",
   speaking: "Speaking",
   thinking: "Writing it down",

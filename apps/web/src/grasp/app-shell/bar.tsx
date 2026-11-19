@@ -16,6 +16,7 @@ import { useWords, withGiven } from "../words/words";
 import { cardLine } from "./card-line.stylex";
 import { RenamableName } from "./rename";
 import { appShellWords } from "./words";
+import type { AppShellWords } from "./words";
 
 /** A step on the way to the page, in the page bar. The last is the page itself. */
 export interface AppShellCrumb {
@@ -90,6 +91,11 @@ export interface AppShellBarProps {
    * @default "Breadcrumb"
    */
   breadcrumbLabel?: string;
+  /**
+   * This bar's own words, over the catalogue's (GraspWords), key by key (`{ more: "More on this
+   * page" }`). Any left out are the catalogue's, else English. A flat prop beside it still wins.
+   */
+  words?: Partial<AppShellWords>;
   /**
    * The crumbs are not known yet: the bar keeps its height and shows a placeholder in their place
    * (Skeleton's dot field), and says it is busy, so nothing jumps when they arrive.
@@ -1313,6 +1319,7 @@ export const PageBar = ({
   actionItems,
   moreLabel,
   breadcrumbLabel,
+  words,
   loading = false,
   barEnd,
 }: AppShellBarProps & {
@@ -1321,10 +1328,10 @@ export const PageBar = ({
   barEnd?: ReactNode;
 }) => {
   const [bar, setBar] = useState<HTMLElement | null>(null);
-  const { breadcrumb, more } = withGiven(useWords("appShell", appShellWords), {
-    breadcrumb: breadcrumbLabel,
-    more: moreLabel,
-  });
+  const { breadcrumb, more } = withGiven(
+    useWords("appShell", appShellWords, words),
+    { breadcrumb: breadcrumbLabel, more: moreLabel }
+  );
   // How many of the action items the last measure folded into the More menu.
   const [folded, setFolded] = useState(0);
   useFitBar(bar, setFolded);

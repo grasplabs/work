@@ -737,6 +737,8 @@ export const SelectTrigger = ({
         <button
           type="button"
           {...props}
+          // Without truncate a long value wraps by design, so a second line is no fault (check-widths).
+          data-may-wrap={truncate ? undefined : ""}
           {...stylex.props(
             styles.trigger,
             sizeStyles[size],
