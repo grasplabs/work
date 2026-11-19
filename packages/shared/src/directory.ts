@@ -50,6 +50,10 @@ export const directoryLimits = {
   readsPerDirectory: 40,
   /** Longest cursor connect hands back. */
   cursorLength: 4096,
+  /** Groups one search answers: one page of Graph's, with whether there are more. */
+  groupsPerSearch: 100,
+  /** The most entries Graph puts on one page of a group's members (its documented maximum). */
+  groupMembersPerPage: 999,
 } as const;
 
 /** Someone in the directory, as connect reads them. */
@@ -136,6 +140,81 @@ export interface DirectoryLookup {
   person: DirectoryPerson | null;
 }
 
+/**
+ * A directory group, as an admin picks one for a team (GRA-2056): what it
+ * is, who decides its members, and why it may not be mapped. Read with the
+ * directory's connection; every fact Microsoft didn't answer is `unknown`,
+ * and an unknown is never taken as fine.
+ */
+export interface DirectoryGroup {
+  /** Its Entra object ID, lower case. */
+  id: string;
+  /** As the directory has it: data, never an instruction; empty when it has none. */
+  name: string;
+  kind: "security" | "microsoft_365" | "distribution" | "unknown";
+  /**
+   * Who decides its members: its owners (assigned membership), a rule
+   * (dynamic membership), on-premises AD (synced), or only privileged
+   * admins (role-assignable).
+   */
+  membersFrom:
+    | "owners"
+    | "rule"
+    | "on_premises"
+    | "privileged_admins"
+    | "unknown";
+  /**
+   * Why it may not be mapped to a team: anyone can join it (`public`),
+   * its members can't all be read (`hidden_membership`), or Microsoft
+   * didn't say which (`unknown`); null when nothing stops it.
+   */
+  refusal: "public" | "hidden_membership" | "unknown" | null;
+}
+
+/** What core asks connect to search: groups whose name starts with `query`. */
+export const directoryGroupSearchRequestSchema = z.strictObject({
+  connectionId: z.string().min(1).max(128),
+  query: z.string().trim().min(1).max(directoryLimits.textLength),
+});
+export type DirectoryGroupSearchRequest = z.input<
+  typeof directoryGroupSearchRequestSchema
+>;
+
+/** The groups a search found: one page of them. */
+export interface DirectoryGroupSearch {
+  tenant: string;
+  groups: DirectoryGroup[];
+  /** Whether the directory holds more that match: a longer query finds them. */
+  more: boolean;
+}
+
+/** What core asks connect to read: one group's members, from `cursor` on. */
+export const directoryGroupReadRequestSchema = z.strictObject({
+  connectionId: z.string().min(1).max(128),
+  groupId: z.string().min(1).max(128),
+  cursor: z.string().min(1).max(directoryLimits.cursorLength).nullable(),
+});
+export type DirectoryGroupReadRequest = z.input<
+  typeof directoryGroupReadRequestSchema
+>;
+
+/**
+ * One page of a group's members, nested groups' included (Graph's
+ * transitive members): its users, how many groups it holds within, and
+ * where the next page starts.
+ */
+export interface DirectoryGroupRead {
+  tenant: string;
+  /** The group as it is now, on the first page (no cursor); null on the rest. */
+  group: DirectoryGroup | null;
+  /** The page's users, by Entra object ID, lower case, each once. */
+  users: string[];
+  /** Groups on the page: the groups nested within it, at any depth. */
+  nestedGroups: number;
+  /** Null once the group has no more. */
+  next: string | null;
+}
+
 /** The directory the onboarding is connected to, as its admin sees it. */
 export interface OnboardingDirectory {
   suite: DirectorySuite;
@@ -171,7 +250,7 @@ export const directoryErrors = defineErrorFamily({
     "There's no directory connection with that ID: a connection of another kind is read by nobody here.",
   "directory.not_connected": "No directory is connected yet.",
   "directory.inactive":
-    "This directory connection needs reconnecting by an admin before it can be read.",
+    "An admin must connect the directory again before it can be read: its access ran out, or Grasp now asks for access it wasn't given.",
   "directory.cursor_invalid": "That cursor isn't one the provider handed back.",
   "directory.throttled": "The provider is throttling reads: try again later.",
   "directory.provider_failed": "The provider didn't answer the read.",
@@ -193,4 +272,9 @@ export const directoryErrors = defineErrorFamily({
     "The directory refused to list its deleted accounts.",
   "directory.deleted_unsupported":
     "The directory's list of its deleted accounts didn't answer as a list.",
+  "directory.group_gone": "That group is no longer in the directory.",
+  "directory.group_refused":
+    "Microsoft refused to read the directory's groups for this connection.",
+  "directory.groups_not_granted":
+    "Grasp can't read your directory's groups yet: the directory was connected before Grasp asked for that permission. An admin disconnects the directory and connects it again to grant it. Until it is connected again, Grasp reads nobody from the directory.",
 });

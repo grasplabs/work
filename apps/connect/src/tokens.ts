@@ -18,10 +18,10 @@ import type { TokenSet } from "./oauth-client.ts";
 import { oweRevoke, revocable } from "./owed-revokes.ts";
 import {
   bearer,
-  grantedAsAsked,
   providerFor,
   scopesLacking,
   renewalHolds,
+  renewedAsGranted,
 } from "./providers.ts";
 import type {
   Credential,
@@ -172,6 +172,19 @@ const readRow = async (
     .from(connectionTokens)
     .where(eq(connectionTokens.connectionId, connectionId))
     .get();
+
+/**
+ * What connection `connectionId`'s tokens were last granted, as the
+ * provider's answer listed it: null when connect didn't keep it, or holds
+ * no tokens of it.
+ */
+export const grantedScopesOf = async (
+  env: Env,
+  connectionId: string
+): Promise<string | null> => {
+  const row = await readRow(env.DB, connectionId);
+  return row?.grantedScopes ?? null;
+};
 
 const isFresh = (row: TokenRow, now: number): boolean =>
   row.accessExpiresAt.getTime() - expirySkewMs > now;
@@ -512,9 +525,11 @@ const refreshUnderLease = async (
       throw connectErrors.create("connect.connection_inactive");
     }
     // A connection that must hold exactly what it asked for (the
-    // directory's, the documents') is kept only while each renewal says so: granted more
-    // or less since, it needs an admin to connect it again.
-    if (!grantedAsAsked(provider, minted)) {
+    // directory's, the documents') is kept only while each renewal says so:
+    // granted more than it may hold, or less than it held, since, it needs
+    // an admin to connect it again. One made before a scope was asked for
+    // renews with what it was granted (`renewedAsGranted`).
+    if (!renewedAsGranted(provider, minted, row.grantedScopes)) {
       // What it minted is never kept: revoked where the provider can
       // (Entra can't, and its refresh token lapses unused).
       await discardMint(provider, context.client, minted);

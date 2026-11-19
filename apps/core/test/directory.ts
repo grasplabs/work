@@ -85,6 +85,14 @@ export const directoryFailsAt = async (from: number): Promise<void> => {
   await setDirectory({ failAt: from });
 };
 
+/**
+ * What Entra answers the directory's app was granted, from now on, at
+ * connecting and at each renewal: `scope`, or `directoryGranted` for null.
+ */
+export const directoryGrants = async (scope: string | null): Promise<void> => {
+  await setDirectory({ granted: scope });
+};
+
 /** Someone in Entra, as Graph answers the directory's reads. */
 export const directoryUser = (
   fields: Record<string, unknown> = {}

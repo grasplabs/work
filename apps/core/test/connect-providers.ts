@@ -63,6 +63,8 @@ export const googleDirectoryClient = clients.googleDirectory;
  * `$expand=manager`), a hundred to a page; `{ failAt }`, the offset of
  * a page Graph then fails with a server error; and `{ loopAt }`, the
  * offset of a page whose next link points back at itself (null for none).
+ * `{ granted }` is what Entra says the directory's app was granted, at
+ * connecting and at each renewal (null for `directoryGranted`).
  * Its deleted users likewise: `{ deleted }` (`/directory/deletedItems`),
  * `{ deletedFailAt }` with `{ deletedFailStatus }` and `{ deletedFailBody }`
  * (null for Graph's error), and `{ deletedNext }`, the next link every page of
@@ -78,7 +80,8 @@ export const directoryControlUrl = "https://graph-control.test/directory";
 export const hibobControlUrl = "https://hibob-control.test/people";
 
 /** What the directory's Entra app is granted, as Entra's token answer says. */
-export const directoryGranted = "openid profile email User.Read User.Read.All";
+export const directoryGranted =
+  "openid profile email User.Read User.Read.All Group.ReadBasic.All";
 
 /** Grasp's Entra app for the documents' connection, as set on connect. */
 export const documentsClient = clients.microsoftDocuments;
@@ -610,7 +613,7 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const directory = { users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null, google: [], googleDeleted: [], googleFailAt: null, googleRefused: null, googleDeletedRefused: null };
+const directory = { granted: null, users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null, google: [], googleDeleted: [], googleFailAt: null, googleRefused: null, googleDeletedRefused: null };
 /** Google's Admin SDK users, as the directory's reads ask for them, a page at a time: its deleted ones with \`showDeleted\`. */
 const googleUsersList = (url) => {
   // Every page refused, as Google refuses a token of someone who isn't an admin.
@@ -1085,6 +1088,30 @@ export default {
       return new Response("Not found", { status: 404 });
     }
     const form = new URLSearchParams(await request.text());
+    // The directory's app renewing its tokens, as Entra does: granted what
+    // \`{ granted }\` says (\`directoryControlUrl\`), in the tenant of the URL.
+    if (form.get("grant_type") === "refresh_token" && form.get("client_id") === ${JSON.stringify(directoryClient.id)}) {
+      if (form.get("client_secret") !== ${JSON.stringify(directoryClient.secret)}) {
+        return Response.json({ error: "invalid_client" }, { status: 401 });
+      }
+      const renewing = (form.get("refresh_token") ?? "").replace(/^refresh./u, "");
+      const issuer = url.pathname.split("/")[1];
+      const renewed = {
+        iss: "https://login.microsoftonline.com/" + issuer + "/v2.0",
+        aud: ${JSON.stringify(directoryClient.id)},
+        tid: issuer,
+        oid: renewing,
+        preferred_username: renewing + "@acme.test",
+      };
+      return Response.json({
+        token_type: "Bearer",
+        access_token: "access." + renewing + "." + crypto.randomUUID(),
+        refresh_token: "refresh." + renewing,
+        expires_in: 3600,
+        id_token: [encoded({ alg: "RS256" }), encoded(renewed), "signature"].join("."),
+        scope: directory.granted ?? ${JSON.stringify(directoryGranted)},
+      });
+    }
     const [challenge, tenant, subject, granted] = (form.get("code") ?? "").split(".");
     const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
     const digest = base64Url(
@@ -1118,7 +1145,7 @@ export default {
       refresh_token: "refresh." + subject,
       expires_in: 3600,
       id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
-      ...(forDirectory ? { scope: ${JSON.stringify(directoryGranted)} } : {}),
+      ...(forDirectory ? { scope: directory.granted ?? ${JSON.stringify(directoryGranted)} } : {}),
       ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
       ...(granted === undefined ? {} : { scope: atob(granted) }),
     });

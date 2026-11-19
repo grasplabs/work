@@ -146,7 +146,7 @@ const internet = fakeInternet((_request, url) => {
 /** Exactly what each directory's app asks for, as the provider answers it. */
 const asAsked: Record<DirectoryProvider, string> = {
   "microsoft-directory":
-    "openid profile email https://graph.microsoft.com/User.Read https://graph.microsoft.com/User.Read.All",
+    "openid profile email https://graph.microsoft.com/User.Read https://graph.microsoft.com/User.Read.All https://graph.microsoft.com/Group.ReadBasic.All",
   "google-directory":
     "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/admin.directory.user.readonly",
 };
@@ -306,6 +306,7 @@ describe("the directory's connection", () => {
                 "offline_access",
                 "User.Read",
                 "User.Read.All",
+                "Group.ReadBasic.All",
               ]
             : [
                 "openid",

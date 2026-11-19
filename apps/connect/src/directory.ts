@@ -40,12 +40,13 @@ import { accessTokenFor } from "./tokens.ts";
 //   scope (oauth.ts, `grantedAsAsked`), so it can't read mail, calendars
 //   or files; it takes no connector calls (call.ts, no connector can
 //   name its provider); and nothing but the provider's users endpoint is
-//   sent it, or its deleted users. A cursor is only ever read for its
+//   sent it, its deleted users, or its groups (directory-groups.ts). A cursor is only ever read for its
 //   position: the request is built here, on the endpoint the read asks,
 //   every time.
 // - Personal data past what a roster needs: only names, email addresses,
 //   departments, jobs and managers are asked for (`$select`, `fields`)
-//   and answered. Nothing of sign-ins, phones, addresses or groups. Of
+//   and answered. Nothing of sign-ins, phones or addresses, nor of a
+//   person's groups: only a mapped group's members, by ID. Of
 //   an account that is turned off, only its ID is answered, apart from
 //   the people, for core's daily read to tell a leaver (GRA-2056); of a
 //   deleted one, only its ID too, from Entra's deleted users.
@@ -74,7 +75,7 @@ const googleUsersPath = "/admin/directory/v1/users";
 
 /** Each provider's API, sent the token: only on its own host, over HTTPS. */
 const graphSpec = { name: "Microsoft Graph", hosts: [graphHost] };
-const graph = readFromProvider(graphSpec);
+export const graph = readFromProvider(graphSpec);
 /** Graph's answer as it came: its deleted users are parsed apart from the fetch (`deletedPageOf`). */
 const graphBytes = bytesFromProvider(graphSpec);
 const googleSpec = { name: "Google's directory", hosts: [googleHost] };
@@ -83,7 +84,7 @@ const googleDirectory = readFromProvider(googleSpec);
 const googleBytes = bytesFromProvider(googleSpec);
 
 /** IDs as Entra issues them. */
-const guidPattern =
+export const guidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 /** IDs as Google's directory issues them. */
 const googleIdPattern = /^\d{1,32}$/u;
@@ -224,7 +225,7 @@ const usersOf: Record<DirectoryProvider, () => URL> = {
  * that isn't a link to that same endpoint, or holds no position, is
  * refused before anything is sent.
  */
-const linkedRequest = (
+export const linkedRequest = (
   url: URL,
   position: string,
   cursor: string | null
@@ -462,7 +463,7 @@ export const directoryConnections = async (
  * admin to reconnect; a renewal the provider didn't answer is
  * `directory.provider_failed`.
  */
-const directoryToken = async (
+export const directoryToken = async (
   env: Env,
   connectionId: string
 ): Promise<string> => {
@@ -480,7 +481,10 @@ const directoryToken = async (
 };
 
 /** The provider's refusal or failure, as the directory's error. */
-const readFailure = (error: unknown, provider: DirectoryProvider): unknown => {
+export const readFailure = (
+  error: unknown,
+  provider: DirectoryProvider
+): unknown => {
   if (error instanceof z.ZodError) {
     return directoryErrors.create("directory.provider_failed");
   }
@@ -610,7 +614,7 @@ const deletedReadFailure = (
 };
 
 /** Whether `cursor` is a link `request` would go on from. */
-const isCursorFor = (
+export const isCursorFor = (
   request: (cursor: string) => URL,
   cursor: string
 ): boolean => {
@@ -630,15 +634,13 @@ const isCursorOf = (provider: DirectoryProvider, cursor: string): boolean =>
   isCursorFor((at) => requestOf(provider, at), cursor);
 
 /**
- * The directory connection a read names, active, its provider, and the
- * read's position; `directory.not_found` or `directory.inactive` otherwise.
+ * The active directory connection `connectionId`, with its tenant and
+ * provider; `directory.not_found` or `directory.inactive` otherwise.
  */
-const connectionToRead = async (env: Env, request: unknown) => {
-  const { connectionId, cursor } = directoryErrors.parse(
-    "directory.not_found",
-    directoryReadRequestSchema,
-    request
-  );
+export const activeDirectoryConnection = async (
+  env: Env,
+  connectionId: string
+) => {
   const connection = await drizzle(env.DB)
     .select()
     .from(connections)
@@ -659,8 +661,20 @@ const connectionToRead = async (env: Env, request: unknown) => {
     connectionId: connection.id,
     tenant: connection.tenant,
     provider: provider.data,
-    cursor,
   };
+};
+
+/**
+ * The directory connection a read names, active, its provider, and the
+ * read's position; `directory.not_found` or `directory.inactive` otherwise.
+ */
+const connectionToRead = async (env: Env, request: unknown) => {
+  const { connectionId, cursor } = directoryErrors.parse(
+    "directory.not_found",
+    directoryReadRequestSchema,
+    request
+  );
+  return { ...(await activeDirectoryConnection(env, connectionId)), cursor };
 };
 
 /** Reads one page of a directory connection's people, from `cursor` on. */
