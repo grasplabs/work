@@ -146,7 +146,17 @@ export const googleDirectoryHolds = async (
     googleDeleted: deleted,
     googleFailAt: null,
     googleRefused: null,
+    googleDeletedRefused: null,
   });
+};
+
+/**
+ * Has Google refuse only the reads of its deleted users with HTTP
+ * `status`, the people read answered, until `googleDirectoryHolds` is
+ * called again.
+ */
+export const googleDeletedRefuses = async (status: number): Promise<void> => {
+  await setDirectory({ googleDeletedRefused: status });
 };
 
 /**

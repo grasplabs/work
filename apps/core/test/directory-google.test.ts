@@ -7,6 +7,7 @@ import { directoryKinds, tieDirectoryPeople } from "../src/directory-ties.ts";
 import { landingAt } from "./d1-landing.ts";
 import {
   connectedGoogleDirectory,
+  googleDeletedRefuses,
   googleDirectoryFailsAt,
   googleDirectoryHolds,
   googleDirectoryRefuses,
@@ -331,6 +332,38 @@ describe("the Google Workspace directory's daily read", () => {
       ann: { suspended: 1, suspendedBy: "directory" },
       bea: { suspended: 0, suspendedBy: null },
       kept: [{ id: ann.sub, enabled: 0, deleted: 1 }],
+    });
+  });
+
+  it("goes on without the deleted users when Google refuses only them, says so, and suspends nobody for having left", async () => {
+    await connectedGoogleDirectory(idp);
+    const [ann, bea] = [
+      await memberWith(googleId()),
+      await memberWith(googleId()),
+    ];
+    await googleDirectoryHolds([user({ id: ann.sub }), user({ id: bea.sub })]);
+    await readAt(nextDay());
+    // Ann deleted, Bea still listed; the deleted users refused (403).
+    await googleDirectoryHolds([user({ id: bea.sub })], [{ id: ann.sub }]);
+    await googleDeletedRefuses(403);
+
+    await readAt(nextDay());
+
+    expect({
+      read: await env.DB.prepare(
+        "SELECT failure, deleted_failure AS deletedFailure, people FROM directory_reads WHERE provider = 'google-directory'"
+      ).first(),
+      ann: await suspensionOf(ann.userId),
+      kept: await keptStates(),
+    }).toStrictEqual({
+      // Applied as without the deleted list: Bea listed, Ann's row gone.
+      read: {
+        failure: null,
+        deletedFailure: "directory.deleted_refused",
+        people: 1,
+      },
+      ann: { suspended: 0, suspendedBy: null },
+      kept: [{ id: bea.sub, enabled: 1, deleted: 0 }],
     });
   });
 

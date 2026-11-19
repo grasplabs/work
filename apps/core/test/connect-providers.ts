@@ -610,7 +610,7 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const directory = { users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null, google: [], googleDeleted: [], googleFailAt: null, googleRefused: null };
+const directory = { users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null, google: [], googleDeleted: [], googleFailAt: null, googleRefused: null, googleDeletedRefused: null };
 /** Google's Admin SDK users, as the directory's reads ask for them, a page at a time: its deleted ones with \`showDeleted\`. */
 const googleUsersList = (url) => {
   // Every page refused, as Google refuses a token of someone who isn't an admin.
@@ -620,6 +620,10 @@ const googleUsersList = (url) => {
   const top = Number(url.searchParams.get("maxResults") ?? "100");
   const from = Number(url.searchParams.get("pageToken") ?? "0");
   const deleted = url.searchParams.get("showDeleted") === "true";
+  // The deleted users alone refused, as a role that may list people but not them might be.
+  if (deleted && directory.googleDeletedRefused !== null) {
+    return Response.json({ error: { code: directory.googleDeletedRefused } }, { status: directory.googleDeletedRefused });
+  }
   const users = deleted ? directory.googleDeleted : directory.google;
   if (!deleted && directory.googleFailAt === from) {
     return Response.json({ error: { code: 500 } }, { status: 500 });
