@@ -1532,7 +1532,7 @@ describe("what the recall before a question may reach", setUpTime, () => {
     }).toStrictEqual({ answered: 1, marker: false });
   });
 
-  it("reads as the turn's place for what the chat's own search and code recall too: their teams only in their own chat, in Grasp or their direct message, the company alone elsewhere", async () => {
+  it("reads as the turn's place for what the chat's own search and code recall too: in their own chat, in Grasp or their direct message, the search everything they may read and code their teams, the company alone elsewhere", async () => {
     const person = await signedInWithRole(idp, "user");
     const teamId = crypto.randomUUID();
     const db = drizzle(env.DB);
@@ -1637,10 +1637,18 @@ describe("what the recall before a question may reach", setUpTime, () => {
       // A thread others share offers no brain to the code at all.
       thread: { own: false, team: false, company: false },
     };
+    // The search is the recall's own (GRA-2203): as them in their own
+    // chat, their own store included.
+    const searched = {
+      ...expected,
+      web: { own: true, team: true, company: true },
+      slack: { own: true, team: true, company: true },
+      teams: { own: true, team: true, company: true },
+    };
     expect({
       code: await each("code"),
       tool: await each("tool"),
-    }).toStrictEqual({ code: expected, tool: expected });
+    }).toStrictEqual({ code: expected, tool: searched });
   });
 
   it("recalls in a chat others share only what the company may read, nothing with anyone unnamed in it, nor in a turn nobody started there", async () => {
