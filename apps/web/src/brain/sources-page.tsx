@@ -339,7 +339,9 @@ const MemoryResult = ({
               <Trans context="a memory nobody else may read">Only you</Trans>
             </Badge>
           ) : null}
-          {memory.confirmed ? (
+          {/* A saved memory is taken as correct: a confirmation is shown
+              only where it settled a disagreement. */}
+          {memory.confirmed && memory.contested ? (
             <Badge variant="passed">
               <Trans context="a memory a person confirmed">Confirmed</Trans>
             </Badge>

@@ -31,8 +31,7 @@ import { MemoriesPage } from "./memories-page.tsx";
 // again; two confirmations at once both show; a reply for an entity no
 // longer open, or for a list read again since, is dropped; the box is
 // locked while a correction saves; focus stays where the person was; a
-// page of no facts that has more still offers them; and the person's own
-// word not yet confirmed can be confirmed. A fact of their own is shared
+// page of no facts that has more still offers them. A fact of their own is shared
 // exactly as the dialog shows it, with the audience they pick; one that
 // changed meanwhile says so; what they may not share offers no share; and
 // one they shared they can take back.
@@ -444,6 +443,8 @@ describe("the Memories page's actions", () => {
               statement: "Churned",
               source: null,
               yours: true,
+              // A side to settle: what the page offers to confirm.
+              contested: true,
             }),
           ],
           next: null,
@@ -725,57 +726,6 @@ describe("the Memories page's actions", () => {
       said,
       after: document.body.textContent.includes("The store failed"),
     }).toStrictEqual({ said: true, after: false });
-  });
-
-  it("offers to confirm the person's own word not yet confirmed", async () => {
-    const own: BrainEntityListed = {
-      entity: { store: "own", id: "e-own" },
-      kind: "customer",
-      name: null,
-      unreadable: true,
-      borrowed: true,
-    };
-    const confirmedOwn: string[] = [];
-    await shown({
-      contested: async () => await Promise.resolve({ facts: [], next: null }),
-      entities: async () =>
-        await Promise.resolve({ entities: [own], next: null }),
-      memories: async () =>
-        await Promise.resolve({
-          entity: own,
-          memories: [
-            memory("m-mine", "e-own", "Churned", {
-              store: "own",
-              statement: "Churned",
-              source: null,
-              yours: true,
-              confirmed:
-                confirmedOwn.length > 0
-                  ? { at: "2026-11-11T09:00:00.000Z", byYou: true }
-                  : null,
-            }),
-          ],
-          next: null,
-        }),
-      confirm: async (place: BrainMemoryPlace) => {
-        confirmedOwn.push(`${place.store} ${place.memory}`);
-        return await Promise.resolve("done");
-      },
-    });
-    await press(
-      buttons("Something you corrected, which you can no longer read")[0]
-    );
-    await press(buttons("This one is right")[0]);
-    expect({
-      confirmedOwn,
-      shown: document.body.textContent.includes("Confirmed by you"),
-      // Its words once: they are its value and its statement alike.
-      once: document.body.textContent.split("Churned").length - 1,
-    }).toStrictEqual({
-      confirmedOwn: ["own m-mine"],
-      shown: true,
-      once: 1,
-    });
   });
 });
 

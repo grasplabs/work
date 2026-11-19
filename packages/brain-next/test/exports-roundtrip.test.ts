@@ -30,9 +30,10 @@ const shared = (): Store => env.BRAIN_STORE.getByName("brain");
 
 /**
  * The seeds the test runs: together they make every feature. Seeds 1 to
- * 40 were each run once when these were chosen, and all passed.
+ * 40 were each run once when these were chosen, and all passed; of them,
+ * only 30 settles a fact sources disagree on (a confirmation).
  */
-const seeds = [9, 25];
+const seeds = [9, 25, 30];
 
 /** What a store a seed makes may hold, each checked to be made by some seed. */
 const features = [
@@ -315,10 +316,20 @@ const operate = async (series: Series, operation: number): Promise<void> => {
     if (chance < 0.6) {
       await addOne(series, operation);
     } else if (chance < 0.75 && memories.length > 0) {
-      await shared().confirmMemory({
-        memory: pick(memories).id,
-        reader: pick(readers),
-      });
+      // Only a contested memory takes a confirmation: from the one picked
+      // on, the first the reader picked settles, drawing no more of the
+      // series' randomness than one pick each.
+      const start = memories.indexOf(pick(memories));
+      const reader = pick(readers);
+      for (const { id } of [
+        ...memories.slice(start),
+        ...memories.slice(0, start),
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one try at a time
+        if ((await shared().confirmMemory({ memory: id, reader })) === "done") {
+          break;
+        }
+      }
     } else if (chance < 0.88) {
       await retireOne(series);
     } else if (chance < 0.95) {

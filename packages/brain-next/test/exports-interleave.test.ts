@@ -203,8 +203,9 @@ const writeBetween = async (part: number, fixture: Fixture) => {
     ],
     extracted: { source: kept, version: 1 },
   });
+  // The status again, now over the side just added too.
   await shared().confirmMemory({
-    memory: drawn.memories[1] ?? "",
+    memory: drawn.memories[0] ?? "",
     reader: confirmer,
   });
   await shared().confirmMemory({

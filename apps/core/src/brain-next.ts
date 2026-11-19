@@ -5814,11 +5814,13 @@ const memoryPlaceSchema = memoryRefSchema.omit({ entity: true });
 export type StoredMemoryPlace = z.infer<typeof memoryPlaceSchema>;
 
 /**
- * The member `personId` confirms memory `memory`, current and one they may
- * read, over the current memories they may read that say otherwise, as
- * their own word (the Brain's `confirmMemory`): `nothing` alike for one
- * there isn't, they may not read, or that isn't current. Refused once
- * they are no longer a member.
+ * The member `personId` settles a fact sources disagree on: confirms
+ * memory `memory`, current and one they may read, over the current
+ * memories they may read that say otherwise, as their own word (the
+ * Brain's `confirmMemory`): `nothing` alike for one there isn't, they may
+ * not read, that isn't current, or that nothing they may read contests (a
+ * saved memory is taken as correct). Refused once they are no longer a
+ * member.
  */
 export const confirmAs = async (
   env: BrainEnv & ReaderEnv,
@@ -5872,7 +5874,7 @@ export type Correction = z.input<typeof correctionSchema>;
  * retired), and confirms again, a repeat that records nothing new. Once they may no longer read it (its source narrowed or
  * erased), a retry answers null, as for any memory they may not read: a
  * correction an earlier try saved stays in their own store, where the
- * page shows it and they can confirm it themselves. The same `change`
+ * page shows it. The same `change`
  * with other text is refused (`brain.correction_reused`). Null alike when
  * the memory isn't one they may read and when it is a relation. Refused
  * once they are no longer a member.
@@ -5924,9 +5926,12 @@ export const correctAs = async (
     throw error;
   }
   try {
+    // A correction takes a side against what it corrects: confirmed as
+    // it is saved, whatever contests it in their own store.
     await ownBrain(env, reader.person).confirmMemory({
       memory: saved.memory,
       reader,
+      correction: true,
     });
   } catch (error) {
     throw erasedAs(error);
