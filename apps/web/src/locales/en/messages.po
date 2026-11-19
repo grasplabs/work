@@ -857,6 +857,10 @@ msgstr "{name} edited it"
 msgid "{name} has no documents."
 msgstr "{name} has no documents."
 
+#: src/settings/directory-reads.tsx
+msgid "{name} hasn’t been read yet."
+msgstr "{name} hasn’t been read yet."
+
 #: src/settings/stephen-settings.tsx
 msgid "{name} in {appName}"
 msgstr "{name} in {appName}"
@@ -1020,6 +1024,10 @@ msgstr "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} o
 #: src/onboarding/interviews-progress.tsx
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
 msgstr "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
+
+#: src/settings/directory-reads.tsx
+msgid "{people, plural, one {{name} was last read {readAt}, listing # person.} other {{name} was last read {readAt}, listing # people.}}"
+msgstr "{people, plural, one {{name} was last read {readAt}, listing # person.} other {{name} was last read {readAt}, listing # people.}}"
 
 #: src/brain/brain.ts
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
@@ -4374,6 +4382,10 @@ msgstr "Connect first: {systems}."
 msgid "Connect shared accounts and decide what Apps may do"
 msgstr "Connect shared accounts and decide what Apps may do"
 
+#: src/settings/directory-reads.tsx
+msgid "Connect the directory again"
+msgstr "Connect the directory again"
+
 #: src/onboarding/connect-steps.tsx
 msgid "Connected"
 msgstr "Connected"
@@ -5140,6 +5152,7 @@ msgid "Didn't start a workflow from a webhook event"
 msgstr "Didn't start a workflow from a webhook event"
 
 #: src/brain/brain-atlas.ts
+#: src/settings/directory-reads.tsx
 msgid "Directory"
 msgstr "Directory"
 
@@ -5826,6 +5839,10 @@ msgstr "Everything around employees, from hiring to leaving."
 #: src/routes/_shell.settings.audit.tsx
 msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
 msgstr "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
+
+#: src/settings/directory-reads.tsx
+msgid "Everything else was read, but nobody was suspended for an account deleted there. Connect the directory again with an administrator’s account. If this stays, ask Grasp’s support to help."
+msgstr "Everything else was read, but nobody was suspended for an account deleted there. Connect the directory again with an administrator’s account. If this stays, ask Grasp’s support to help."
 
 #: src/workflows/business-process.tsx
 msgid "Everything from a first client conversation until the money is in the bank."
@@ -6647,6 +6664,10 @@ msgstr "Grasp added a widget to your dashboard."
 msgid "Grasp asks"
 msgstr "Grasp asks"
 
+#: src/settings/directory-reads.tsx
+msgid "Grasp can no longer read the directory with its connection. Connect it again with an administrator’s account."
+msgstr "Grasp can no longer read the directory with its connection. Connect it again with an administrator’s account."
+
 #: src/chat/global-chat.tsx
 #: src/core.ts
 #: src/guest/api.ts
@@ -6804,6 +6825,10 @@ msgstr "Grasp proposes"
 msgid "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
 msgstr "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
 
+#: src/settings/directory-reads.tsx
+msgid "Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says."
+msgstr "Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says."
+
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 msgstr "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
@@ -6850,6 +6875,10 @@ msgstr "Grasp staff work from the admin dashboard"
 #: src/settings/ai-providers.tsx
 msgid "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
 msgstr "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
+
+#: src/settings/directory-reads.tsx
+msgid "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
+msgstr "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
 
 #: src/route-error.tsx
 msgid "Grasp was updated while this page was open. Try again to load the new version."
@@ -9875,6 +9904,10 @@ msgstr "Nothing found"
 #: src/settings/filter-menu.tsx
 msgid "Nothing found."
 msgstr "Nothing found."
+
+#: src/settings/directory-reads.tsx
+msgid "Nothing has changed through the directory since the read of {lastRead}: until a read succeeds, nobody joins, moves or is suspended through it."
+msgstr "Nothing has changed through the directory since the read of {lastRead}: until a read succeeds, nobody joins, moves or is suspended through it."
 
 #: src/dashboard/activity.tsx
 #: src/workflows/activity-bar.tsx
@@ -14640,6 +14673,10 @@ msgctxt "a source of the Brain"
 msgid "The company's vision"
 msgstr "The company's vision"
 
+#: src/settings/directory-reads.tsx
+msgid "The connected directory belongs to another organization than the one people sign in with. Connect your own organization’s directory."
+msgstr "The connected directory belongs to another organization than the one people sign in with. Connect your own organization’s directory."
+
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
 msgstr "The connection stopped working. Workflows that use it wait until someone signs in again."
@@ -14699,6 +14736,14 @@ msgstr "The directory and sign-in through Microsoft or Google. Adds teams and ro
 #: src/brain/brain-atlas.ts
 msgid "The directory brought in the teams and their roles."
 msgstr "The directory brought in the teams and their roles."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory couldn’t be read, last tried {failedAt}."
+msgstr "The directory couldn’t be read, last tried {failedAt}."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory holds more people than Grasp can read at once. Ask Grasp’s support to help."
+msgstr "The directory holds more people than Grasp can read at once. Ask Grasp’s support to help."
 
 #: src/agents/agent-documents.tsx
 msgid "The documents couldn't be loaded. Reload the page."
@@ -14775,6 +14820,10 @@ msgstr "The interviews are over."
 #: src/routes/_shell.settings.onboarding.tsx
 msgid "The interviews aren’t planned yet. You plan them at the end of your onboarding."
 msgstr "The interviews aren’t planned yet. You plan them at the end of your onboarding."
+
+#: src/settings/directory-reads.tsx
+msgid "The last read couldn’t list the accounts deleted in the directory."
+msgstr "The last read couldn’t list the accounts deleted in the directory."
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/traces.tsx
@@ -15972,6 +16021,10 @@ msgstr "Unshare"
 #: src/settings/staff-access.tsx
 msgid "Until"
 msgstr "Until"
+
+#: src/settings/directory-reads.tsx
+msgid "Until a read succeeds, nobody joins, moves or is suspended through the directory."
+msgstr "Until a read succeeds, nobody joins, moves or is suspended through the directory."
 
 #: src/onboarding/no-sender.tsx
 msgid "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."

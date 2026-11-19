@@ -4,12 +4,17 @@ import {
   disconnectPersonalMaxOwners,
   oauthFlowLifetimeMs,
 } from "@grasp-os/shared/connect";
+import {
+  directoryErrors,
+  directoryProviderSchema,
+} from "@grasp-os/shared/directory";
 import type { CodedError } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
   DirectoryAccount,
+  DirectoryRead,
   Erasure,
   ErasurePreview,
   Invitation,
@@ -54,6 +59,7 @@ import { personOf } from "./connections.ts";
 import {
   channelAccounts,
   directoryPeople,
+  directoryReads,
   invitations,
   memberRemovals,
   members,
@@ -274,6 +280,49 @@ const listTeams = async (
 ): ReturnType<MembersApi["teams"]> => {
   requireMemberAdmin(by);
   return await teamsWithMembers(env);
+};
+
+/**
+ * A code as the directory's read recorded it: always the directory's own,
+ * its read's catch-all for anything else (directory-people.ts `failedWith`).
+ */
+const readCodeOf = (code: string) =>
+  directoryErrors.codeOf({ code }) ?? "directory.read_failed";
+
+/**
+ * Where the daily read of each directory stands (directory-people.ts), for
+ * admins: what an admin can act on when it fails, or goes without the
+ * deleted accounts. Nothing about any person.
+ */
+const listDirectoryReads = async (
+  env: Env,
+  by: Identity
+): Promise<DirectoryRead[]> => {
+  requireMemberAdmin(by);
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(directoryReads)
+    .orderBy(asc(directoryReads.provider));
+  return rows.flatMap((row) => {
+    const provider = directoryProviderSchema.safeParse(row.provider);
+    if (!provider.success) {
+      return [];
+    }
+    return [
+      {
+        provider: provider.data,
+        readAt: row.readAt?.toISOString() ?? null,
+        people: row.people,
+        disabled: row.disabled,
+        failure:
+          row.failure === null || row.failedAt === null
+            ? null
+            : { code: readCodeOf(row.failure), at: row.failedAt.toISOString() },
+        deletedFailure:
+          row.deletedFailure === null ? null : readCodeOf(row.deletedFailure),
+      },
+    ];
+  });
 };
 
 /**
@@ -975,6 +1024,13 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await listTeams(this.#env, person)
+    );
+  }
+
+  async directoryReads(): Promise<DirectoryRead[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listDirectoryReads(this.#env, person)
     );
   }
 
