@@ -164,6 +164,8 @@ export const composerWords = {
     effort: "Effort",
     /** For a model with one level (`noEffortLabel`). */
     none: "This model has one level of effort.",
+    /** The menu's Thinking row: its word and its levels' name (`thinkingLabel`). */
+    thinking: "Thinking",
   },
   /** ComposerReasoning: the control's name (`aria-label`). */
   reasoning: {

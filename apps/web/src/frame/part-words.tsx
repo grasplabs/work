@@ -658,6 +658,10 @@ export const usePartWords = (): GraspWordsCatalog => {
         model: t`Model`,
         effort: t`How hard it thinks`,
         none: t`This model has one level of effort.`,
+        thinking: t({
+          message: "Thinking",
+          context: "how hard a model thinks",
+        }),
       },
       reasoning: { label: t`How hard it thinks` },
       agent: {

@@ -198,7 +198,10 @@ export const LevelWords = ({
   </span>
 );
 
-/** How hard the agent thinks: a word in the footer and a small menu of levels. */
+/**
+ * How hard the agent thinks: a word in the footer and a small menu of levels. `ComposerModelEffort`
+ * holds the same levels as its menu's Thinking row.
+ */
 export const ComposerReasoning = ({
   levels,
   value,

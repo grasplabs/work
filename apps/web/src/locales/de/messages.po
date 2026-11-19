@@ -16120,6 +16120,11 @@ msgstr "Sie finden es unter Apps und sehen es so, wie es jetzt ist."
 msgid "Thinking"
 msgstr "Denkt nach"
 
+#: src/frame/part-words.tsx
+msgctxt "how hard a model thinks"
+msgid "Thinking"
+msgstr "Denken"
+
 #: src/apps/app-data.tsx
 msgid "This App changed. Reload to see its current version."
 msgstr "Diese App hat sich geändert. Laden Sie neu, um ihre aktuelle Version zu sehen."

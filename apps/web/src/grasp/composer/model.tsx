@@ -127,6 +127,10 @@ const styles = stylex.create({
     minHeight: 0,
     maxHeight: "inherit",
   },
+  // With a foot under the list (the Thinking row): it keeps its room, the list scrolls.
+  commandFooted: {
+    gridTemplateRows: "auto minmax(0, 1fr) auto",
+  },
   search: {
     display: "flex",
     alignItems: "center",
@@ -260,7 +264,6 @@ const styles = stylex.create({
 
 const noFavourites: string[] = [];
 
-/** The model picker: a quiet control in the footer and a menu with a rail of makers. */
 /** What the list shows: searching looks through every maker; otherwise the rail's choice shows. */
 const shownModels = (
   models: ComposerModelOption[],
@@ -300,6 +303,187 @@ const listTop = (
   };
 };
 
+/** The menu's words, filled in. */
+export interface ModelMenuWords {
+  label: string;
+  search: string;
+  makers: string;
+  favourites: string;
+  empty: string;
+}
+
+interface ModelMenuProps {
+  models: ComposerModelOption[];
+  makers: ComposerModelMaker[];
+  value: string;
+  favourites: string[];
+  connect: Record<string, ReactNode> | undefined;
+  words: ModelMenuWords;
+  /** A model chosen. */
+  onPick: (value: string) => void;
+  /** Under the list, across the menu: ComposerModelEffort's Thinking row. */
+  foot?: ReactNode;
+}
+
+/**
+ * The menu: a search field, the rail of makers and the chosen maker's models, and what the host of
+ * the menu puts at its foot. ComposerModel and ComposerModelEffort open the same one.
+ */
+export const ModelMenu = ({
+  models,
+  makers,
+  value,
+  favourites,
+  connect,
+  words,
+  onPick,
+  foot,
+}: ModelMenuProps) => {
+  const current = models.find((model) => model.value === value);
+  const [query, setQuery] = useState("");
+  const [rail, setRail] = useState<string>(
+    current?.maker ?? makers[0]?.value ?? ""
+  );
+  // Searching looks through every maker; otherwise the rail's choice shows.
+  const shown = shownModels(models, favourites, rail, query);
+  const markOf = (maker: string) =>
+    makers.find((entry) => entry.value === maker)?.icon;
+  // The list's heading: the rail's choice by name. Searching looks through every maker, so none.
+  const headingId = useId();
+  const { heading, connectRow } = listTop(
+    makers,
+    rail,
+    query,
+    words.favourites,
+    connect
+  );
+  return (
+    <Command
+      query={query}
+      onQueryChange={(next: string) => {
+        setQuery(next);
+      }}
+      onAction={onPick}
+      {...stylex.props(
+        styles.command,
+        foot !== undefined && foot !== null && styles.commandFooted
+      )}
+    >
+      <div {...stylex.props(styles.search)}>
+        <Icon icon={Search} />
+        <CommandInput
+          aria-label={words.search}
+          placeholder={words.search}
+          {...stylex.props(styles.input)}
+        />
+      </div>
+      <div {...stylex.props(styles.body)}>
+        <div
+          // The comment stands on the line above the role, between the attributes, so a formatter cannot part them.
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a <fieldset> brings its own border, padding and min-width
+          role="group"
+          aria-label={words.makers}
+          {...stylex.props(styles.rail)}
+        >
+          {favourites.length > 0 && (
+            <button
+              type="button"
+              aria-pressed={rail === FAVOURITES && !query.trim()}
+              aria-label={words.favourites}
+              onClick={() => {
+                setRail(FAVOURITES);
+                setQuery("");
+              }}
+              {...stylex.props(styles.maker, focus.ring)}
+            >
+              <Icon icon={Star} />
+            </button>
+          )}
+          {makers.map((maker) => (
+            <button
+              key={maker.value}
+              type="button"
+              aria-pressed={rail === maker.value && !query.trim()}
+              aria-label={maker.label}
+              title={maker.label}
+              onClick={() => {
+                setRail(maker.value);
+                setQuery("");
+              }}
+              {...stylex.props(styles.maker, focus.ring)}
+            >
+              {maker.icon === undefined ? (
+                maker.label.slice(0, 1)
+              ) : (
+                <Icon icon={maker.icon} />
+              )}
+            </button>
+          ))}
+        </div>
+        <div {...stylex.props(styles.list)}>
+          {heading !== "" && (
+            <div
+              id={headingId}
+              data-slot="composer-model-heading"
+              {...stylex.props(styles.heading)}
+            >
+              {heading}
+            </div>
+          )}
+          {connectRow !== undefined && (
+            <div {...stylex.props(styles.connect)}>{connectRow}</div>
+          )}
+          <CommandEmpty {...stylex.props(styles.empty)}>
+            {words.empty}
+          </CommandEmpty>
+          <CommandList aria-labelledby={heading === "" ? undefined : headingId}>
+            {shown.map((model) => {
+              const mark = markOf(model.maker);
+              return (
+                <CommandItem
+                  key={model.value}
+                  value={model.value}
+                  label={model.label}
+                  disabled={model.disabled}
+                  {...stylex.props(styles.row)}
+                >
+                  {mark && <Icon icon={mark} />}
+                  <span {...stylex.props(styles.rowWords)}>
+                    <span {...stylex.props(styles.rowName)}>{model.label}</span>
+                    {model.disabled === true &&
+                      model.reason !== undefined &&
+                      model.reason !== "" && (
+                        <span {...stylex.props(styles.rowWhy)}>
+                          {model.reason}
+                        </span>
+                      )}
+                    {model.description !== undefined &&
+                      model.description !== "" && (
+                        <span {...stylex.props(visuallyHidden)}>
+                          {model.description}
+                        </span>
+                      )}
+                  </span>
+                  {model.value === value && (
+                    <span aria-hidden="true" {...stylex.props(styles.tick)}>
+                      <Icon icon={Tick} />
+                    </span>
+                  )}
+                </CommandItem>
+              );
+            })}
+          </CommandList>
+        </div>
+      </div>
+      {foot}
+    </Command>
+  );
+};
+
+/**
+ * The model picker: a quiet control in the footer and a menu with a rail of makers. For a model
+ * with levels, `ComposerModelEffort` opens the same menu with its Thinking row at the foot.
+ */
 export const ComposerModel = ({
   models,
   makers,
@@ -316,49 +500,28 @@ export const ComposerModel = ({
 }: ComposerModelProps) => {
   const disabled = useComposerDisabled();
   // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
-  const words = useComposerWords("model");
-  const label = labelGiven ?? labelDeprecated ?? words.label;
-  const searchLabel = searchGiven ?? words.search;
-  const makersLabel = makersGiven ?? words.makers;
-  const favouritesLabel = favouritesGiven ?? words.favourites;
-  const emptyLabel = emptyGiven ?? words.empty;
+  const catalogue = useComposerWords("model");
+  const words: ModelMenuWords = {
+    label: labelGiven ?? labelDeprecated ?? catalogue.label,
+    search: searchGiven ?? catalogue.search,
+    makers: makersGiven ?? catalogue.makers,
+    favourites: favouritesGiven ?? catalogue.favourites,
+    empty: emptyGiven ?? catalogue.empty,
+  };
   const current = models.find((model) => model.value === value);
   const currentMaker = makers.find((maker) => maker.value === current?.maker);
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [rail, setRail] = useState<string>(
-    current?.maker ?? makers[0]?.value ?? ""
-  );
-
-  // Searching looks through every maker; otherwise the rail's choice shows.
-  const shown = shownModels(models, favourites, rail, query);
-
-  const markOf = (maker: string) =>
-    makers.find((entry) => entry.value === maker)?.icon;
-  // The list's heading: the rail's choice by name. Searching looks through every maker, so none.
-  const headingId = useId();
-  const { heading, connectRow } = listTop(
-    makers,
-    rail,
-    query,
-    favouritesLabel,
-    connect
-  );
 
   return (
     <Popover
       open={open}
       onOpenChange={(next: boolean) => {
         setOpen(next);
-        if (next) {
-          setQuery("");
-          setRail(current?.maker ?? makers[0]?.value ?? "");
-        }
       }}
     >
       <PopoverTrigger
         disabled={disabled}
-        aria-label={`${label}: ${current?.label ?? ""}`}
+        aria-label={`${words.label}: ${current?.label ?? ""}`}
         render={(props: Record<string, unknown>) => (
           <button
             {...props}
@@ -395,135 +558,26 @@ export const ComposerModel = ({
         align="start"
         sideOffset={popup.popoverGap}
         collisionPadding={popup.gutter}
-        aria-label={label}
+        aria-label={words.label}
         {...stylex.props(
           popoverStyles.panel,
           popoverStyles.motion,
           styles.panel
         )}
       >
-        <Command
-          query={query}
-          onQueryChange={(next: string) => {
-            setQuery(next);
-          }}
-          onAction={(chosen: string) => {
+        {/* Mounted anew each time it opens: the search empty, the rail on the chosen model's maker. */}
+        <ModelMenu
+          models={models}
+          makers={makers}
+          value={value}
+          favourites={favourites}
+          connect={connect}
+          words={words}
+          onPick={(chosen) => {
             onValueChange(chosen);
             setOpen(false);
           }}
-          {...stylex.props(styles.command)}
-        >
-          <div {...stylex.props(styles.search)}>
-            <Icon icon={Search} />
-            <CommandInput
-              aria-label={searchLabel}
-              placeholder={searchLabel}
-              {...stylex.props(styles.input)}
-            />
-          </div>
-          <div {...stylex.props(styles.body)}>
-            <div
-              // The comment stands on the line above the role, between the attributes, so a formatter cannot part them.
-              // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a <fieldset> brings its own border, padding and min-width
-              role="group"
-              aria-label={makersLabel}
-              {...stylex.props(styles.rail)}
-            >
-              {favourites.length > 0 && (
-                <button
-                  type="button"
-                  aria-pressed={rail === FAVOURITES && !query.trim()}
-                  aria-label={favouritesLabel}
-                  onClick={() => {
-                    setRail(FAVOURITES);
-                    setQuery("");
-                  }}
-                  {...stylex.props(styles.maker, focus.ring)}
-                >
-                  <Icon icon={Star} />
-                </button>
-              )}
-              {makers.map((maker) => (
-                <button
-                  key={maker.value}
-                  type="button"
-                  aria-pressed={rail === maker.value && !query.trim()}
-                  aria-label={maker.label}
-                  title={maker.label}
-                  onClick={() => {
-                    setRail(maker.value);
-                    setQuery("");
-                  }}
-                  {...stylex.props(styles.maker, focus.ring)}
-                >
-                  {maker.icon === undefined ? (
-                    maker.label.slice(0, 1)
-                  ) : (
-                    <Icon icon={maker.icon} />
-                  )}
-                </button>
-              ))}
-            </div>
-            <div {...stylex.props(styles.list)}>
-              {heading !== "" && (
-                <div
-                  id={headingId}
-                  data-slot="composer-model-heading"
-                  {...stylex.props(styles.heading)}
-                >
-                  {heading}
-                </div>
-              )}
-              {connectRow !== undefined && (
-                <div {...stylex.props(styles.connect)}>{connectRow}</div>
-              )}
-              <CommandEmpty {...stylex.props(styles.empty)}>
-                {emptyLabel}
-              </CommandEmpty>
-              <CommandList
-                aria-labelledby={heading === "" ? undefined : headingId}
-              >
-                {shown.map((model) => {
-                  const mark = markOf(model.maker);
-                  return (
-                    <CommandItem
-                      key={model.value}
-                      value={model.value}
-                      label={model.label}
-                      disabled={model.disabled}
-                      {...stylex.props(styles.row)}
-                    >
-                      {mark && <Icon icon={mark} />}
-                      <span {...stylex.props(styles.rowWords)}>
-                        <span {...stylex.props(styles.rowName)}>
-                          {model.label}
-                        </span>
-                        {model.disabled === true &&
-                          model.reason !== undefined &&
-                          model.reason !== "" && (
-                            <span {...stylex.props(styles.rowWhy)}>
-                              {model.reason}
-                            </span>
-                          )}
-                        {model.description !== undefined &&
-                          model.description !== "" && (
-                            <span {...stylex.props(visuallyHidden)}>
-                              {model.description}
-                            </span>
-                          )}
-                      </span>
-                      {model.value === value && (
-                        <span aria-hidden="true" {...stylex.props(styles.tick)}>
-                          <Icon icon={Tick} />
-                        </span>
-                      )}
-                    </CommandItem>
-                  );
-                })}
-              </CommandList>
-            </div>
-          </div>
-        </Command>
+        />
       </PopoverContent>
     </Popover>
   );
