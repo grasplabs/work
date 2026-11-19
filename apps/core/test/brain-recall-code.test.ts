@@ -1151,6 +1151,46 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     expect(answered).toBe("refused");
   });
 
+  it("asks a chat's agent no grant, only that its person may still act: refused while they are suspended", async () => {
+    const { word, ada } = await company();
+    /** What a recall answers a chat's agent acting for `userId`, with no grant. */
+    const answeredFor = async (userId: string) => {
+      const { agent, chat, id } = await chatOf(userId);
+      return await recallFor(
+        env,
+        {
+          authority: authoritySchema.parse({
+            subject: agent,
+            onBehalfOf: userId,
+            mode: "interactive",
+          }),
+          context: { type: "chat", workspaceId: id, chatId: chat.id },
+          permissionId: null,
+          actor: { type: "system" },
+        },
+        requestOf(word)
+      ).then(
+        (pack) => (pack.items.length > 0 ? "answered" : "empty"),
+        (error: unknown) =>
+          error instanceof Error && "code" in error ? error.code : "thrown"
+      );
+    };
+    const suspended = await person("user");
+    await env.DB.prepare(
+      "UPDATE members SET suspended_at = ?, suspended_by = 'directory' WHERE user_id = ?"
+    )
+      .bind(Date.now(), suspended.userId)
+      .run();
+
+    expect({
+      active: await answeredFor(ada.userId),
+      suspended: await answeredFor(suspended.userId),
+    }).toStrictEqual({
+      active: "answered",
+      suspended: "permission.unavailable",
+    });
+  });
+
   it("gives a run that would keep more than 1,000 recalled versions no pack, refused and audited so", async () => {
     const { word, admin, ada } = await company();
     const { workflow } = await recallingWorkflow(ada, admin, {
