@@ -1,4 +1,8 @@
-import type { DirectoryProvider, directoryErrors } from "./directory.ts";
+import type {
+  DirectoryDeletedFailure,
+  DirectoryProvider,
+  DirectoryReadFailure,
+} from "./directory.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { Role } from "./roles.ts";
 
@@ -39,11 +43,6 @@ export interface OrganizationTeam {
   memberIds: string[];
 }
 
-/** A code of the directory's errors (`directoryErrors`). */
-export type DirectoryErrorCode = NonNullable<
-  ReturnType<(typeof directoryErrors)["codeOf"]>
->;
-
 /**
  * Where the daily read of one of the organization's directories stands
  * (GRA-2056), for its admins: the read last applied, and what went wrong
@@ -61,13 +60,13 @@ export interface DirectoryRead {
    * Why the reads since `readAt` failed, and when the last one did; null
    * when none failed since.
    */
-  failure: { code: DirectoryErrorCode; at: string } | null;
+  failure: { code: DirectoryReadFailure; at: string } | null;
   /**
    * Why the last applied read went without the directory's deleted
    * accounts (`directory.deleted_refused` or `directory.deleted_unsupported`):
    * nobody was suspended for an account deleted there. Null when it read them.
    */
-  deletedFailure: DirectoryErrorCode | null;
+  deletedFailure: DirectoryDeletedFailure | null;
 }
 
 /**

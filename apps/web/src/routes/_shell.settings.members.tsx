@@ -72,8 +72,7 @@ import {
 } from "../settings/settings-parts.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
-// Offboarding, for admins: where the directory's daily read stands
-// (settings/directory-reads.tsx); the organization's members, each with their
+// Offboarding, for admins: the organization's members, each with their
 // role, whether the directory suspended them and why
 // (settings/member-suspension.tsx), a way to end their sessions, and a way
 // to remove them for good;
@@ -509,9 +508,7 @@ const Members = () => {
   const { identity } = Route.useRouteContext();
   return (
     <>
-      {page.state === "ready" ? (
-        <DirectoryReads reads={page.data.directoryReads} />
-      ) : null}
+      <DirectoryReads />
       <Roles />
       {page.state === "ready" ? (
         <>
@@ -544,14 +541,11 @@ export const Route = createFileRoute("/_shell/settings/members")({
   component: MembersPage,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [members, invitations, removed, directoryReads] = await Promise.all(
-        [
-          session.members.list(),
-          session.members.invitations(),
-          session.members.removed(),
-          session.members.directoryReads(),
-        ]
-      );
-      return { members, invitations, removed, directoryReads };
+      const [members, invitations, removed] = await Promise.all([
+        session.members.list(),
+        session.members.invitations(),
+        session.members.removed(),
+      ]);
+      return { members, invitations, removed };
     }),
 });

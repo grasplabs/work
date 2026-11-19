@@ -4,10 +4,6 @@ import {
   disconnectPersonalMaxOwners,
   oauthFlowLifetimeMs,
 } from "@grasp-os/shared/connect";
-import {
-  directoryErrors,
-  directoryProviderSchema,
-} from "@grasp-os/shared/directory";
 import type { CodedError } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -283,13 +279,6 @@ const listTeams = async (
 };
 
 /**
- * A code as the directory's read recorded it: always the directory's own,
- * its read's catch-all for anything else (directory-people.ts `failedWith`).
- */
-const readCodeOf = (code: string) =>
-  directoryErrors.codeOf({ code }) ?? "directory.read_failed";
-
-/**
  * Where the daily read of each directory stands (directory-people.ts), for
  * admins: what an admin can act on when it fails, or goes without the
  * deleted accounts. Nothing about any person.
@@ -303,26 +292,17 @@ const listDirectoryReads = async (
     .select()
     .from(directoryReads)
     .orderBy(asc(directoryReads.provider));
-  return rows.flatMap((row) => {
-    const provider = directoryProviderSchema.safeParse(row.provider);
-    if (!provider.success) {
-      return [];
-    }
-    return [
-      {
-        provider: provider.data,
-        readAt: row.readAt?.toISOString() ?? null,
-        people: row.people,
-        disabled: row.disabled,
-        failure:
-          row.failure === null || row.failedAt === null
-            ? null
-            : { code: readCodeOf(row.failure), at: row.failedAt.toISOString() },
-        deletedFailure:
-          row.deletedFailure === null ? null : readCodeOf(row.deletedFailure),
-      },
-    ];
-  });
+  return rows.map((row) => ({
+    provider: row.provider,
+    readAt: row.readAt?.toISOString() ?? null,
+    people: row.people,
+    disabled: row.disabled,
+    failure:
+      row.failure === null || row.failedAt === null
+        ? null
+        : { code: row.failure, at: row.failedAt.toISOString() },
+    deletedFailure: row.deletedFailure,
+  }));
 };
 
 /**

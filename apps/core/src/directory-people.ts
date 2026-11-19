@@ -1,6 +1,14 @@
 import { createAuditEvent } from "@grasp-os/shared/audit";
-import { directoryErrors } from "@grasp-os/shared/directory";
-import type { DirectoryConnection } from "@grasp-os/shared/directory";
+import {
+  directoryErrors,
+  isDirectoryDeletedFailure,
+  isDirectoryReadFailure,
+} from "@grasp-os/shared/directory";
+import type {
+  DirectoryConnection,
+  DirectoryDeletedFailure,
+  DirectoryReadFailure,
+} from "@grasp-os/shared/directory";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { clockLeaseMs } from "@grasp-os/workerflow/clock";
 import { and, eq, sql } from "drizzle-orm";
@@ -96,7 +104,7 @@ interface Listed {
    */
   deleted: string[];
   /** Why the deleted accounts couldn't be read (`deletedOf`); null when they were. */
-  deletedFailure: string | null;
+  deletedFailure: DirectoryDeletedFailure | null;
 }
 
 /**
@@ -128,12 +136,6 @@ const everyPage = async <Page extends { next: string | null }>(
   } while (cursor !== null);
 };
 
-/** The failures of the deleted list's first page the read goes on without it for. */
-const deletedUnreadable = new Set<string | undefined>([
-  "directory.deleted_refused",
-  "directory.deleted_unsupported",
-]);
-
 /**
  * Every deleted account of `connection`, or why the list can't be read at
  * all. Where the line is, and why: added to a read that worked without
@@ -149,7 +151,7 @@ const deletedOf = async (
   env: Env,
   connection: DirectoryConnection,
   deadline: number
-): Promise<{ ids: string[] } | { failure: string }> => {
+): Promise<{ ids: string[] } | { failure: DirectoryDeletedFailure }> => {
   const ids = new Set<string>();
   let pages = 0;
   try {
@@ -171,7 +173,8 @@ const deletedOf = async (
     );
   } catch (error) {
     const code = directoryErrors.codeOf(error);
-    if (pages === 0 && code !== undefined && deletedUnreadable.has(code)) {
+    // The failures of the first page the read goes on without it for.
+    if (pages === 0 && isDirectoryDeletedFailure(code)) {
       return { failure: code };
     }
     throw error;
@@ -452,7 +455,7 @@ const recordFailure = async (
   kind: DirectoryKind,
   connection: DirectoryConnection,
   tenant: string,
-  code: string,
+  code: DirectoryReadFailure,
   startedAt: Date
 ): Promise<void> => {
   const failedAt = new Date();
@@ -499,7 +502,8 @@ const failedWith = async (
       kind,
       connection,
       tenant,
-      code ?? "directory.read_failed",
+      // Typed as the admin is told it; anything else as the catch-all.
+      isDirectoryReadFailure(code) ? code : "directory.read_failed",
       startedAt
     );
   } catch (error) {
