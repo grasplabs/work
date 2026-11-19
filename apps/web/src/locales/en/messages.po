@@ -573,6 +573,7 @@ msgctxt "how long something is kept"
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# day} other {# days}}"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/figures.tsx
 msgid "{days, plural, one {runs started today} other {runs started in the last # days}}"
 msgstr "{days, plural, one {runs started today} other {runs started in the last # days}}"
@@ -11124,6 +11125,7 @@ msgstr "Number"
 msgid "Ocean"
 msgstr "Ocean"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/figures.tsx
 msgid "of them wait for a decision"
 msgstr "of them wait for a decision"
@@ -16295,6 +16297,7 @@ msgstr "The run's own files"
 msgid "The runs couldn't be read."
 msgstr "The runs couldn't be read."
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/figures.tsx
 msgid "The runs, in figures"
 msgstr "The runs, in figures"
@@ -16988,6 +16991,7 @@ msgctxt "chats from today"
 msgid "Today"
 msgstr "Today"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/today-lanes.tsx
 msgctxt "the workflows' runs of today, laid out in time"
 msgid "Today"
@@ -18643,6 +18647,7 @@ msgstr "Withdraw invitation"
 msgid "Withdrew an invitation"
 msgstr "Withdrew an invitation"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/figures.tsx
 msgid "without a person"
 msgstr "without a person"

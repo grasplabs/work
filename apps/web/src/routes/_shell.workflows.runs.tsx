@@ -1,5 +1,6 @@
 import { runFilterStatuses } from "@grasp-os/shared/run-filter";
 import type { RunFilterStatus } from "@grasp-os/shared/run-filter";
+import { runActivityDefaultDays } from "@grasp-os/shared/workflows";
 import type {
   RunActivity,
   RunFilter,
@@ -7,7 +8,7 @@ import type {
 } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -17,7 +18,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { PageSkeletonTable } from "../grasp/blocks/page-skeleton-table/page-skeleton-table.tsx";
+import { PageSkeletonDashboard } from "../grasp/blocks/page-skeleton-dashboard/page-skeleton-dashboard.tsx";
 import {
   Select,
   SelectContent,
@@ -257,19 +258,38 @@ const WorkflowRuns = () => {
 const none = (): string => "";
 
 /**
- * The runs before they are read: the bar, the header, and the log's
- * table waiting with its columns (workflows/runs.tsx).
+ * The runs before they are read: the bar, the header, today's lanes, the
+ * figures and the log's table waiting with its columns (workflows/runs.tsx).
  */
 const RunsPending = () => {
   const { t } = useLingui();
+  const days = runActivityDefaultDays;
   const title = t`Runs`;
   return (
     <>
       <SiteHeader
         crumbs={[{ label: t`Workflows`, to: "/workflows" }, { label: title }]}
       />
-      <PageSkeletonTable<RunsPage["runs"][number]>
+      <PageSkeletonDashboard<RunsPage["runs"][number]>
+        // As the page lays it out: today's lanes, the figures, then the log.
+        chart={{
+          title: t({
+            message: "Today",
+            context: "the workflows' runs of today, laid out in time",
+          }),
+        }}
         descriptionLines={0}
+        stats={{
+          "aria-label": t`The runs, in figures`,
+          titles: [
+            t`${plural(days, {
+              one: "runs started today",
+              other: "runs started in the last # days",
+            })}`,
+            t`without a person`,
+            t`of them wait for a decision`,
+          ],
+        }}
         table={{
           label: title,
           columns: [

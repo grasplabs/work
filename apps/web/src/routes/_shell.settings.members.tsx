@@ -453,6 +453,8 @@ const peopleColumns = ({
     {
       key: "name",
       header: words.name,
+      // While the people are read, a person's box: their circle, name and email.
+      placeholder: "person",
       value: (row) => `${row.name} ${row.email}`,
       cell: (row) => {
         const date = formatDate(row.at);

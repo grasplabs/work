@@ -36,6 +36,9 @@ const styles = stylex.create({
   w48: { width: "8rem" },
   w56: { width: "10rem" },
   w64: { width: "7rem" },
+  // A head action's place: a small button's height, a short word's width, standing still.
+  action: { width: "4.5rem", height: grasp.controlSm },
+  actions: { display: "flex", alignItems: "center", gap: grasp.space2 },
 });
 
 const WIDTHS = [
@@ -57,6 +60,18 @@ export interface PageSkeletonRecordProps {
   descriptionLines?: number;
   /** The card's rows lead with their kind's icon: each placeholder shows the icon's box, then its line where the name will start. Without, the line starts where a name does. @default true */
   icons?: boolean;
+  /**
+   * The card's density, as the loaded card's: `compact` for a dense page (a settings card, a
+   * record in a narrow column), SectionCard's own.
+   * @default "comfortable"
+   */
+  density?: "comfortable" | "compact";
+  /**
+   * How many actions the card's head holds (Edit, Share): each waits as a still small button in its
+   * place, so a phone's head, where they wrap under the title, keeps its height when they arrive.
+   * @default 0
+   */
+  actions?: number;
 }
 
 /** The record's page before it arrives: the header's placeholders, then its card's quiet rows. */
@@ -64,6 +79,8 @@ export const PageSkeletonRecord = ({
   rows = 4,
   descriptionLines = 1,
   icons = true,
+  density = "comfortable",
+  actions = 0,
 }: PageSkeletonRecordProps) => (
   <div data-slot="page-skeleton-record" {...stylex.props(styles.page)}>
     <PageHeader
@@ -72,7 +89,20 @@ export const PageSkeletonRecord = ({
       loadingLines={descriptionLines}
       loading
     />
-    <SectionCard title="" loading>
+    <SectionCard
+      title=""
+      density={density}
+      loading
+      actions={
+        actions > 0 ? (
+          <span aria-hidden="true" {...stylex.props(styles.actions)}>
+            {Array.from({ length: actions }, (_, index) => (
+              <Skeleton key={index} variant="block" layout={styles.action} />
+            ))}
+          </span>
+        ) : undefined
+      }
+    >
       <div aria-hidden="true">
         <RowList>
           {Array.from({ length: rows }, (_, index) => (

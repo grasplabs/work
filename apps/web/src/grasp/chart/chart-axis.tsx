@@ -69,7 +69,17 @@ const Tick = ({
   );
 };
 
-export const ChartAxis = ({ side, format, width = 36 }: ChartAxisProps) => {
+/**
+ * The room the axes take, px: the x axis's names under the drawing, the y axis's values before it.
+ * A chart's waiting frame (page-skeleton-dashboard) stands its lines in the same places.
+ */
+export const chartAxisRoom = { x: 30, y: 36 } as const;
+
+export const ChartAxis = ({
+  side,
+  format,
+  width = chartAxisRoom.y,
+}: ChartAxisProps) => {
   const { xKey, setValueFormat } = useChart();
   // The y axis writes the values: the chart's table writes them the same way. One wrapper for good,
   // reading the latest format, so a format written inline never makes the chart draw again.
@@ -103,6 +113,7 @@ export const ChartAxis = ({ side, format, width = 36 }: ChartAxisProps) => {
       axisLine={false}
       tickLine={false}
       tickMargin={4}
+      height={chartAxisRoom.x}
       tick={tick}
     />
   ) : (

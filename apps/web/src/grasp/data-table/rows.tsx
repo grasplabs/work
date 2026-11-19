@@ -4,6 +4,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 import type { RowData } from "@tanstack/react-table";
+import { isValidElement } from "react";
 import type { ReactNode } from "react";
 
 import { Badge } from "../badge";
@@ -19,6 +20,7 @@ import { ChevronDown, ChevronRight, More } from "../icons";
 import { Skeleton } from "../skeleton";
 import { TableCell, TableRow, tableAboveStatus } from "../table";
 import { ChooseRow } from "./choose";
+import { DataTablePersonWaiting } from "./person";
 import { styles } from "./styles";
 import type { DataTableRowAction } from "./types";
 import type { Model, TableRowOf } from "./use-data-table";
@@ -309,13 +311,17 @@ export const DataRow = <Row extends RowData>({
             lead &&
             !model.flags.grouping &&
             (model.flags.expanding || row.depth > 0);
-          // A control in the cell stands in a box one line tall, as the row's menu does: the row keeps its height.
-          const shown =
-            meta.control === true ? (
-              <span {...stylex.props(styles.cellControl)}>{content}</span>
-            ) : (
-              content
-            );
+          // A control in the cell stands in a box one line tall, as the row's menu does: the row keeps its
+          // height. So does a Badge: on the text's line it sat off the baseline and grew the row by half a
+          // pixel, against a row of words and against the table's own placeholders.
+          const inLine =
+            meta.control === true ||
+            (isValidElement(value) && value.type === Badge);
+          const shown = inLine ? (
+            <span {...stylex.props(styles.cellControl)}>{content}</span>
+          ) : (
+            content
+          );
           return (
             <TableCell
               key={column.id}
@@ -397,14 +403,18 @@ export const Placeholders = <Row extends RowData>({
           align={model.metaOf(column.id)?.align}
           hideBelow={model.hideOf(column.id)}
         >
-          <span
-            {...stylex.props(
-              at === 0 ? styles.waitingLead : styles.waiting,
-              waitingAlign(model.metaOf(column.id)?.align)
-            )}
-          >
-            <Skeleton />
-          </span>
+          {model.metaOf(column.id)?.placeholder === "person" ? (
+            <DataTablePersonWaiting />
+          ) : (
+            <span
+              {...stylex.props(
+                at === 0 ? styles.waitingLead : styles.waiting,
+                waitingAlign(model.metaOf(column.id)?.align)
+              )}
+            >
+              <Skeleton />
+            </span>
+          )}
         </TableCell>
       ))}
       {hasActions && <TableCell />}

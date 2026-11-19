@@ -573,6 +573,7 @@ msgctxt "how long something is kept"
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# Tag} other {# Tage}}"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/figures.tsx
 msgid "{days, plural, one {runs started today} other {runs started in the last # days}}"
 msgstr "{days, plural, one {heute gestartete Läufe} other {in den letzten # Tagen gestartete Läufe}}"
@@ -11124,6 +11125,7 @@ msgstr "Zahl"
 msgid "Ocean"
 msgstr "Ozean"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/figures.tsx
 msgid "of them wait for a decision"
 msgstr "davon warten auf eine Entscheidung"
@@ -16295,6 +16297,7 @@ msgstr "Die eigenen Dateien des Laufs"
 msgid "The runs couldn't be read."
 msgstr "Die Läufe konnten nicht gelesen werden."
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/figures.tsx
 msgid "The runs, in figures"
 msgstr "Die Ausführungen in Zahlen"
@@ -16988,6 +16991,7 @@ msgctxt "chats from today"
 msgid "Today"
 msgstr "Heute"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/today-lanes.tsx
 msgctxt "the workflows' runs of today, laid out in time"
 msgid "Today"
@@ -18643,6 +18647,7 @@ msgstr "Einladung zurückziehen"
 msgid "Withdrew an invitation"
 msgstr "Hat eine Einladung zurückgezogen"
 
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/figures.tsx
 msgid "without a person"
 msgstr "ohne eine Person"

@@ -38,6 +38,12 @@ export interface DataTableColumn<Row> {
   wrap?: boolean;
   /** Its name can be pressed to sort the rows by it, and again to turn the order over. @default false */
   sortable?: boolean;
+  /**
+   * Its shape while the table is `loading`: `person` waits as a DataTablePerson does, its picture's
+   * circle and two lines (a name and its email), so the row stands as tall as it will.
+   * @default "line"
+   */
+  placeholder?: "line" | "person";
   /** It starts hidden, with the `view` piece; the View menu shows it. @default false */
   hidden?: boolean;
   /** It starts held at the start or the end, with the `pinning` piece. */
