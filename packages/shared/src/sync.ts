@@ -183,12 +183,15 @@ export type SyncPlaces = z.infer<typeof syncPlacesSchema>;
  * account can see: its ID, its own name, and the name of what it is in (a
  * library's site; null for a place in nothing else). Names are only ever
  * shown, whole: none is cut, so two places of one long-named site stay
- * apart.
+ * apart. `sharingRead`: whether the sync reads who may open its items
+ * with the connected account (GRA-2145); where it doesn't, they are read
+ * by nobody, and the picker says so.
  */
 export const syncChoiceSchema = z.strictObject({
   place: syncPlaceSchema,
   title: z.string(),
   within: z.string().nullable(),
+  sharingRead: z.boolean(),
 });
 export type SyncChoice = z.infer<typeof syncChoiceSchema>;
 

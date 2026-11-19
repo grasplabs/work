@@ -512,7 +512,16 @@ const librariesIn = (
   answer.value.flatMap((library): SyncChoice[] =>
     library.driveType === libraryType &&
     syncPlaceSchema.safeParse(library.id).success
-      ? [{ place: library.id, title: library.name ?? "", within: siteName }]
+      ? [
+          {
+            place: library.id,
+            title: library.name ?? "",
+            within: siteName,
+            // Who may open a library's files isn't read yet (GRA-2145,
+            // its next slice): they are read by nobody.
+            sharingRead: false,
+          },
+        ]
       : []
   );
 

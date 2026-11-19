@@ -185,12 +185,25 @@ const longSite =
 const libraries = (): SharedSyncPlaces => ({
   feed: "libraries",
   choices: [
-    { place: "b!docs", title: "Documents", within: longSite, picked: false },
-    { place: "b!legal", title: "Documents", within: "Legal", picked: false },
+    {
+      place: "b!docs",
+      title: "Documents",
+      within: longSite,
+      sharingRead: true,
+      picked: false,
+    },
+    {
+      place: "b!legal",
+      title: "Documents",
+      within: "Legal",
+      sharingRead: true,
+      picked: false,
+    },
     {
       place: "b!contracts",
       title: "Contracts",
       within: longSite,
+      sharingRead: true,
       picked: true,
     },
   ],
@@ -429,6 +442,52 @@ describe("picking a shared connection's places to sync", () => {
       failed,
       reads: asked.filter(([method]) => method === "syncPlaces").length,
     }).toStrictEqual({ reading: true, failed: true, reads: 2 });
+  });
+
+  it("says for Google that each file is read only by those Google lets open it, and marks a drive whose files nobody would read", async () => {
+    await shown(
+      {
+        held: {
+          feed: "shared-drives",
+          choices: [
+            {
+              place: "sales",
+              title: "Sales",
+              within: null,
+              sharingRead: true,
+              picked: false,
+            },
+            {
+              place: "board",
+              title: "Board",
+              within: null,
+              sharingRead: false,
+              picked: false,
+            },
+          ],
+          picks: [],
+        },
+      },
+      { ...microsoft, provider: "google" }
+    );
+    const marked = [...document.querySelectorAll("li")].map((place) => ({
+      place: place.querySelector("label")?.textContent,
+      nobody: place.textContent?.includes("Nobody reads its files"),
+    }));
+    expect({
+      sentence: text().includes(
+        `Each file is read in the Brain only by those ${label} lets open it, of those you let read ${label} here. The account you connected must be able to share files in each drive you pick: nobody reads the files it can't share.`
+      ),
+      notCopied: text().includes("are not copied"),
+      marked,
+    }).toStrictEqual({
+      sentence: true,
+      notCopied: false,
+      marked: [
+        { place: "Sales", nobody: false },
+        { place: "Board", nobody: true },
+      ],
+    });
   });
 
   it("says what the account can't open, in its own provider's words, rather than showing an empty list", async () => {
