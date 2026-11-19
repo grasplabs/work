@@ -105,7 +105,7 @@ export const memberFromDirectory = async (
       .insert(members)
       .select(
         sql`SELECT ${crypto.randomUUID()}, ${organizationId}, ${userId}, 'user',
-          ${now.getTime()}, NULL, NULL
+          ${now.getTime()}, NULL, NULL, NULL
           WHERE EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${userId})
             AND ${mayAct(userId)}`
       )

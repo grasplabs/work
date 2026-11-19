@@ -297,6 +297,8 @@ export const rpcParamNames: ParamNames = {
     "erasure": ["userId"],
     "invitations": [],
     "invite": ["email","role"],
+    "letDirectoryDecide": ["userId"],
+    "liftSuspension": ["userId"],
     "list": [],
     "releaseAddress": ["email"],
     "releaseTeamPin": ["userId","teamId"],

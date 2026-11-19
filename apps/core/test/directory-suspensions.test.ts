@@ -42,6 +42,8 @@ import {
   routed,
   signIn,
   signedIn,
+  signedInApi,
+  staffPerson,
   unique,
   whoami,
   withSignIn,
@@ -551,8 +553,17 @@ describe(
       const listed = async () => {
         const all = await admin.api.members.list();
         const entry = all.find(({ userId }) => userId === una.userId);
-        // When they joined, as a type: the time is the test's own.
-        return entry && { ...entry, joinedAt: typeof entry.joinedAt };
+        // Times as their type: they are the test's own.
+        return (
+          entry && {
+            ...entry,
+            joinedAt: typeof entry.joinedAt,
+            suspension: entry.suspension && {
+              ...entry.suspension,
+              since: typeof entry.suspension.since,
+            },
+          }
+        );
       };
 
       const whileSuspended = await listed();
@@ -570,13 +581,15 @@ describe(
         afterRemoval: await listed(),
         suspension: await suspensionOf(una.userId),
       }).toStrictEqual({
-        // Exactly what any member shows: nothing claims they may act.
+        // As any member, with their suspension and its reason.
         whileSuspended: {
           userId: una.userId,
           name: una.name,
           email: String(una.person.email),
           role: "user",
           joinedAt: "string",
+          suspension: { since: "string", reason: "disabled" },
+          keptActive: null,
         },
         roleChanged: "ok",
         role: "builder",
@@ -1063,6 +1076,462 @@ describe("a member whose directory account was deleted", () => {
     }).toStrictEqual({
       status: { failure: null, deletedFailure: null },
       row: null,
+    });
+  });
+});
+
+/** When an admin's mark keeps `userId` active; null for none. */
+const keptActiveOf = async (userId: string) =>
+  await env.DB.prepare(
+    "SELECT kept_active_at IS NOT NULL AS kept FROM members WHERE user_id = ?"
+  )
+    .bind(userId)
+    .first<number>("kept");
+
+/** The events of `events` recorded as `action`: who, on what, about whom. */
+const recordedAs = (
+  action: string,
+  events: Awaited<ReturnType<typeof auditedDuring>>
+) =>
+  events
+    .filter((event) => event.action === action)
+    .map(({ actor, target, detail }) => ({
+      actor: actor.type,
+      by: "userId" in actor ? actor.userId : null,
+      target: target?.type,
+      detail,
+    }));
+
+/** How many sessions `userId` holds now. */
+const sessionCount = async (userId: string) =>
+  await env.DB.prepare("SELECT count(*) AS n FROM sessions WHERE user_id = ?")
+    .bind(userId)
+    .first<number>("n");
+
+// GRA-2141: an admin lifts a suspension and keeps the member active; the
+// read respects that until an admin lets the directory decide again.
+describe("a suspension an admin lifts", () => {
+  it("stays lifted through later reads, until an admin lets the directory decide, audited both ways", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const ann = await memberWith(crypto.randomUUID());
+    await directoryHolds([user({ id: ann.oid, accountEnabled: false })]);
+    await readAt(nextDay());
+    const listed = async () => {
+      const everyone = await admin.api.members.list();
+      return everyone.find(({ userId }) => userId === ann.userId);
+    };
+    const suspended = await listed();
+
+    const lifting = await auditedDuring(async () => {
+      await admin.api.members.liftSuspension(ann.userId);
+    });
+    const lifted = {
+      suspension: await suspensionOf(ann.userId),
+      kept: await keptActiveOf(ann.userId),
+      sessions: await sessionCount(ann.userId),
+      listed: await listed(),
+    };
+    // Still turned off in the directory: the next read leaves them active.
+    await readAt(nextDay());
+    const afterRead = await suspensionOf(ann.userId);
+    const again = await signedIn(idp, "microsoft", ann.person);
+    const signedInAgain = await nowSignedIn(again);
+    const releasing = await auditedDuring(async () => {
+      await admin.api.members.letDirectoryDecide(ann.userId);
+    });
+    const kept = await keptActiveOf(ann.userId);
+    await readAt(nextDay());
+
+    expect({
+      suspended: suspended?.suspension?.reason,
+      lifted: {
+        ...lifted,
+        listed: {
+          suspension: lifted.listed?.suspension,
+          kept: lifted.listed?.keptActive && {
+            ...lifted.listed.keptActive,
+            since: typeof lifted.listed.keptActive.since,
+          },
+        },
+      },
+      lifting: recordedAs("member.suspension_lifted", lifting),
+      afterRead,
+      signedInAgain,
+      releasing: recordedAs("member.kept_active_released", releasing),
+      kept,
+      decided: await suspensionOf(ann.userId),
+    }).toStrictEqual({
+      suspended: "disabled",
+      lifted: {
+        suspension: { suspended: 0, suspendedBy: null },
+        kept: 1,
+        // No session is minted: they sign in again.
+        sessions: 0,
+        // What letting the directory decide would act on: still off.
+        listed: {
+          suspension: null,
+          kept: { since: "string", directory: "disabled" },
+        },
+      },
+      lifting: [
+        {
+          actor: "person",
+          by: admin.userId,
+          target: "member",
+          detail: { userId: ann.userId },
+        },
+      ],
+      afterRead: { suspended: 0, suspendedBy: null },
+      signedInAgain: "user",
+      releasing: [
+        {
+          actor: "person",
+          by: admin.userId,
+          target: "member",
+          detail: { userId: ann.userId },
+        },
+      ],
+      kept: 0,
+      decided: { suspended: 1, suspendedBy: "directory" },
+    });
+  });
+
+  it("is lifted only by a company admin, never by Grasp staff, a builder, oneself, or for someone not suspended, removed or erased", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const [bo, cy, di] = [
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+    ];
+    await directoryHolds([
+      user({ id: bo.oid, accountEnabled: false }),
+      user({ id: cy.oid }),
+      user({ id: di.oid, accountEnabled: false }),
+    ]);
+    await readAt(nextDay());
+    const builder = await signedInApi(idp, "builder");
+    const staff = await signedIn(idp, "grasp-staff", staffPerson());
+    const { core } = await openRpc(staff);
+    const staffApi = core.authenticate();
+    await admin.api.members.remove(di.userId);
+    await admin.api.members.erase(di.userId, di.name);
+
+    expect({
+      staff: await outcome(staffApi.members.liftSuspension(bo.userId)),
+      staffRelease: await outcome(
+        staffApi.members.letDirectoryDecide(bo.userId)
+      ),
+      builder: await outcome(builder.api.members.liftSuspension(bo.userId)),
+      self: await outcome(admin.api.members.liftSuspension(admin.userId)),
+      notSuspended: await outcome(admin.api.members.liftSuspension(cy.userId)),
+      erased: await outcome(admin.api.members.liftSuspension(di.userId)),
+      releaseNone: await admin.api.members.letDirectoryDecide(cy.userId),
+      bo: await suspensionOf(bo.userId),
+    }).toStrictEqual({
+      staff: "role.forbidden",
+      staffRelease: "role.forbidden",
+      builder: "role.forbidden",
+      self: "member.self",
+      notSuspended: "member.not_suspended",
+      erased: "member.not_found",
+      releaseNone: { released: false },
+      bo: { suspended: 1, suspendedBy: "directory" },
+    });
+  });
+
+  it("can't be lifted by a suspended admin, for themselves or anyone", async () => {
+    await connectedDirectory(idp);
+    const [eli, fay, gil] = [
+      await memberWith(crypto.randomUUID(), "admin"),
+      await memberWith(crypto.randomUUID(), "admin"),
+      await memberWith(crypto.randomUUID()),
+    ];
+    await onlyAdmins(eli.userId, fay.userId);
+    // Eli's connection, opened while they could still act.
+    const { core } = await openRpc(eli.session);
+    const eliApi = core.authenticate();
+    await directoryHolds([
+      user({ id: eli.oid, accountEnabled: false }),
+      user({ id: fay.oid }),
+      user({ id: gil.oid, accountEnabled: false }),
+    ]);
+    await readAt(nextDay());
+
+    const refused = {
+      self: await outcome(eliApi.members.liftSuspension(eli.userId)),
+      other: await outcome(eliApi.members.liftSuspension(gil.userId)),
+    };
+
+    expect({
+      refused,
+      eli: await suspensionOf(eli.userId),
+      gil: await suspensionOf(gil.userId),
+    }).toStrictEqual({
+      // The read ended their sessions: their connection answers nothing.
+      refused: { self: "auth.unauthenticated", other: "auth.unauthenticated" },
+      eli: { suspended: 1, suspendedBy: "directory" },
+      gil: { suspended: 1, suspendedBy: "directory" },
+    });
+  });
+
+  it("holds against a read landing just before the lift, and one landing just after it", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const [hal, ivy] = [
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+    ];
+    await directoryHolds([
+      user({ id: hal.oid, accountEnabled: false }),
+      user({ id: ivy.oid, accountEnabled: false }),
+    ]);
+    await readAt(nextDay());
+    // Hal: the next read applies its batch just before the lift's update.
+    const before = landingAt(
+      /update "members" set "suspended_at"/u,
+      "before",
+      async () => {
+        await readAt(nextDay());
+      }
+    );
+    const { core } = await openRpc(admin.session, { coreEnv: before.coreEnv });
+    await core.authenticate().members.liftSuspension(hal.userId);
+    // Ivy: the lift lands inside the next read, just before its batch.
+    const after = landingAt(
+      /insert into "directory_reads"/u,
+      "before",
+      async () => {
+        await admin.api.members.liftSuspension(ivy.userId);
+      }
+    );
+    await readAt(nextDay(), { DB: after.coreEnv.DB });
+
+    expect({
+      landed: [before.landed(), after.landed()],
+      hal: await suspensionOf(hal.userId),
+      halKept: await keptActiveOf(hal.userId),
+      ivy: await suspensionOf(ivy.userId),
+      ivyKept: await keptActiveOf(ivy.userId),
+    }).toStrictEqual({
+      landed: [true, true],
+      hal: { suspended: 0, suspendedBy: null },
+      halKept: 1,
+      ivy: { suspended: 0, suspendedBy: null },
+      ivyKept: 1,
+    });
+  });
+
+  it("changes nothing when an admin removes them just before the lift", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const jo = await memberWith(crypto.randomUUID());
+    const other = await signedInApi(idp, "admin");
+    await directoryHolds([user({ id: jo.oid, accountEnabled: false })]);
+    await readAt(nextDay());
+    const removing = landingAt(
+      /update "members" set "suspended_at"/u,
+      "before",
+      async () => {
+        await other.api.members.remove(jo.userId);
+      }
+    );
+    const { core } = await openRpc(admin.session, {
+      coreEnv: removing.coreEnv,
+    });
+
+    const lifted = await outcome(
+      core.authenticate().members.liftSuspension(jo.userId)
+    );
+
+    expect({
+      landed: removing.landed(),
+      lifted,
+      row: await suspensionOf(jo.userId),
+    }).toStrictEqual({
+      landed: true,
+      lifted: "member.not_found",
+      row: null,
+    });
+  });
+
+  it("changes nothing when the admin lifting or releasing is removed just before", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const [pia, quinn] = [
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+    ];
+    const lifter = await signedInApi(idp, "admin");
+    await directoryHolds([
+      user({ id: pia.oid, accountEnabled: false }),
+      user({ id: quinn.oid, accountEnabled: false }),
+    ]);
+    await readAt(nextDay());
+    await admin.api.members.liftSuspension(quinn.userId);
+    // The lifter's lift of Pia, and their release of Quinn, each with the
+    // lifter removed by the other admin just before.
+    const attempt = async (
+      call: (api: typeof lifter.api) => Promise<unknown>
+    ) => {
+      const removed = landingAt(/update "members" set/u, "before", async () => {
+        await admin.api.members.remove(lifter.userId);
+      });
+      const { core } = await openRpc(lifter.session, {
+        coreEnv: removed.coreEnv,
+      });
+      const answered = await outcome(call(core.authenticate()));
+      return { landed: removed.landed(), answered };
+    };
+
+    const lift = await attempt(async (api) => {
+      await api.members.liftSuspension(pia.userId);
+    });
+
+    expect({
+      lift,
+      pia: await suspensionOf(pia.userId),
+    }).toStrictEqual({
+      lift: { landed: true, answered: "role.forbidden" },
+      pia: { suspended: 1, suspendedBy: "directory" },
+    });
+    const releaser = await signedInApi(idp, "admin");
+    const removedFirst = landingAt(
+      /update "members" set "kept_active_at"/u,
+      "before",
+      async () => {
+        await admin.api.members.remove(releaser.userId);
+      }
+    );
+    const { core } = await openRpc(releaser.session, {
+      coreEnv: removedFirst.coreEnv,
+    });
+    const release = await outcome(
+      core.authenticate().members.letDirectoryDecide(quinn.userId)
+    );
+    expect({
+      landed: removedFirst.landed(),
+      release,
+      quinnKept: await keptActiveOf(quinn.userId),
+    }).toStrictEqual({
+      landed: true,
+      release: "role.forbidden",
+      quinnKept: 1,
+    });
+  });
+
+  it("never counts an admin kept active whose own account is turned off as one who stays", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const [kim, lou] = [
+      await memberWith(crypto.randomUUID(), "admin"),
+      await memberWith(crypto.randomUUID(), "admin"),
+    ];
+    // Kim is suspended while Lou stays, then kept active by an admin.
+    await directoryHolds([
+      user({ id: kim.oid, accountEnabled: false }),
+      user({ id: lou.oid }),
+    ]);
+    await readAt(nextDay());
+    await admin.api.members.liftSuspension(kim.userId);
+    await onlyAdmins(kim.userId, lou.userId);
+    // Lou turned off too: Kim, though kept active, is turned off as well.
+    await directoryHolds([
+      user({ id: kim.oid, accountEnabled: false }),
+      user({ id: lou.oid, accountEnabled: false }),
+    ]);
+
+    const events = await auditedDuring(async () => {
+      await readAt(nextDay());
+    });
+
+    expect({
+      kim: await suspensionOf(kim.userId),
+      lou: await suspensionOf(lou.userId),
+      withheld: events
+        .filter(({ action }) => action === "member.suspension_withheld")
+        .map(({ detail }) => detail?.userId),
+    }).toStrictEqual({
+      kim: { suspended: 0, suspendedBy: null },
+      lou: { suspended: 0, suspendedBy: null },
+      withheld: [lou.userId],
+    });
+  });
+
+  it("never suspends the last admin Microsoft signs in because an admin kept active was deleted since", async () => {
+    await connectedDirectory(idp);
+    const [ada, ben] = [
+      await memberWith(crypto.randomUUID(), "admin"),
+      await memberWith(crypto.randomUUID(), "admin"),
+    ];
+    await onlyAdmins(ada.userId, ben.userId);
+    // Ada turned off by mistake, suspended, and lifted by Ben.
+    await directoryHolds([
+      user({ id: ada.oid, accountEnabled: false }),
+      user({ id: ben.oid }),
+    ]);
+    await readAt(nextDay());
+    const { core } = await openRpc(ben.session);
+    await core.authenticate().members.liftSuspension(ada.userId);
+    // Ada leaves and IT deletes her account; months later Ben is turned off.
+    await directoryHolds(
+      [user({ id: ben.oid, accountEnabled: false })],
+      [{ id: ada.oid }]
+    );
+
+    const events = await auditedDuring(async () => {
+      await readAt(nextDay());
+    });
+
+    expect({
+      ada: await keptActiveOf(ada.userId),
+      ben: await suspensionOf(ben.userId),
+      bensSessions: await sessionCount(ben.userId),
+      withheld: events
+        .filter(({ action }) => action === "member.suspension_withheld")
+        .map(({ detail }) => detail?.userId),
+    }).toStrictEqual({
+      ada: 1,
+      ben: { suspended: 0, suspendedBy: null },
+      bensSessions: 1,
+      withheld: [ben.userId],
+    });
+  });
+
+  it("lists why each member is suspended, and what the directory holds for one kept active", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const [mia, ned, oz, pia] = [
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+    ];
+    // Mia turned off; Ned turned off, then deleted; Oz turned off, then
+    // gone from the directory altogether (purged): all still suspended.
+    // Pia turned off and kept active, then turned on again.
+    await directoryHolds([
+      user({ id: mia.oid, accountEnabled: false }),
+      user({ id: ned.oid, accountEnabled: false }),
+      user({ id: oz.oid, accountEnabled: false }),
+      user({ id: pia.oid, accountEnabled: false }),
+    ]);
+    await readAt(nextDay());
+    await admin.api.members.liftSuspension(pia.userId);
+    await directoryHolds(
+      [user({ id: mia.oid, accountEnabled: false }), user({ id: pia.oid })],
+      [{ id: ned.oid }]
+    );
+    await readAt(nextDay());
+
+    const everyone = await admin.api.members.list();
+    const reasons = Object.fromEntries(
+      everyone.flatMap(({ userId, suspension, keptActive }) =>
+        [mia, ned, oz, pia].some((each) => each.userId === userId)
+          ? [[userId, suspension?.reason ?? keptActive?.directory]]
+          : []
+      )
+    );
+
+    expect(reasons).toStrictEqual({
+      [mia.userId]: "disabled",
+      [ned.userId]: "deleted",
+      [oz.userId]: "unlisted",
+      [pia.userId]: "enabled",
     });
   });
 });

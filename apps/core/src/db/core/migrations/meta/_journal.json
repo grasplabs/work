@@ -1989,6 +1989,13 @@
       "when": 1795080166853,
       "tag": "0283_directory_deleted_failure",
       "breakpoints": true
+    },
+    {
+      "idx": 284,
+      "version": "6",
+      "when": 1795084449028,
+      "tag": "0284_kept_active",
+      "breakpoints": true
     }
   ]
 }
