@@ -2615,7 +2615,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** The reader confirms a memory as their own word (memories.ts). */
   async confirmMemory(request: ConfirmRequest): Promise<MemoryChangeOutcome> {
-    const { memory, reader } = checked(confirmRequestSchema, request);
+    const { memory, reader, correction } = checked(
+      confirmRequestSchema,
+      request
+    );
     this.#mayRead(reader);
     return await this.#changing(async () => {
       if (!(await this.#readable())) {
@@ -2626,7 +2629,11 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         if (isRestoring(this.ctx.storage.sql)) {
           throw new Error(restoringNow);
         }
-        return confirmMemory(this.ctx.storage.sql, { id: memory, reader });
+        return confirmMemory(this.ctx.storage.sql, {
+          id: memory,
+          reader,
+          ...(correction === undefined ? {} : { correction }),
+        });
       });
     });
   }

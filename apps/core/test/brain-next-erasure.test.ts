@@ -1708,8 +1708,20 @@ describe(
             about: "c",
             type: "fact",
             statement: `Acme ${mark} pays on time`,
+            attribute: "status",
+            value: "paying",
             speaker: { kind: "system" },
             basis: { kind: "writer", writer: leaver },
+          },
+          // What an App says otherwise: a disagreement they settle.
+          {
+            about: "c",
+            type: "fact",
+            statement: `Acme ${mark} pays late`,
+            attribute: "status",
+            value: "late",
+            speaker: { kind: "system" },
+            basis: { kind: "writer", writer: "app:crm" },
           },
         ],
       });
@@ -1749,6 +1761,11 @@ describe(
             statement: `Acme ${mark} pays on time`,
             writer: leaver,
             confirmedBy: leaver,
+          },
+          {
+            statement: `Acme ${mark} pays late`,
+            writer: "app:crm",
+            confirmedBy: undefined,
           },
         ],
         tables: ["memories", "memory_confirmations"],

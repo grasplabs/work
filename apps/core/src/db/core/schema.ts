@@ -2870,11 +2870,9 @@ export const brainCaptureIntents = sqliteTable(
 );
 
 /**
- * What a run's recalls of today's Brain cited (GRA-299). Nothing writes or
- * reads it since runs recall from the new Brain (`runBrainVersions`);
- * retention still removes its rows with the run (workflows/retention.ts).
- * Kept until a later release drops it, so a core still serving during a
- * rollout keeps working (expand, then contract).
+ * What a run's recalls of the old Brain cited (GRA-299). Nothing writes or
+ * reads it since GRA-1941; it stays for a rollback to the release before, which
+ * still does, and the next contract migration drops it (expand, then contract).
  */
 export const runBrainEvidence = sqliteTable(
   "run_brain_evidence",
@@ -6663,34 +6661,13 @@ export const brainGapStates = sqliteTable("brain_gap_states", {
   answeredBy: text("answered_by"),
 });
 
-// Knowledge's host tables: Grasp's own records about Knowledge, kept here
-// and not in Knowledge's database, which holds only the Brain's own
-// (collections, documents, versions, sections, links, payloads, search).
-// They name Knowledge's collections and documents by ID, with no foreign
-// key: no batch holds both databases.
+// What is left of Knowledge's host tables: Grasp's own records about the
+// old Brain's Knowledge database, gone since GRA-1941.
 
 /**
- * Which version of each App its entry in Knowledge's Apps collection held,
- * while core indexed Apps there. Nothing writes it any more; it is dropped
- * in a later release.
- */
-export const appEntries = sqliteTable("app_entries", {
-  appId: text("app_id").primaryKey(),
-  version: integer().notNull(),
-  /**
-   * The SHA-256 of the name and description the entry holds; null for
-   * none read yet, which is indexed again.
-   */
-  described: text(),
-  indexedAt: timestamp("indexed_at").notNull(),
-});
-
-/**
- * A file once uploaded into a Knowledge collection: its original, kept in
- * R2, and where extracting its text into the document at `path` stood.
- * Nothing uploads into Knowledge any more; a person's erasure and the
- * clock forget them (knowledge-uploads.ts), and the table is dropped in a
- * later release.
+ * A file once uploaded into a Knowledge collection. Nothing writes or reads it
+ * since GRA-1941; it stays for a rollback to the release before, which still
+ * does, and the next contract migration drops it (expand, then contract).
  */
 export const uploads = sqliteTable(
   "uploads",
@@ -6708,10 +6685,6 @@ export const uploads = sqliteTable(
     uploadedBy: text("uploaded_by").notNull(),
     /** JSON: the audit log's actor for the person who uploaded it. */
     actor: text().notNull(),
-    /**
-     * `saving`: claimed for the save of its text, when uploads into
-     * Knowledge still saved one (knowledge-uploads.ts).
-     */
     status: text({
       enum: ["pending", "extracting", "saving", "ready", "failed"],
     }).notNull(),
@@ -6735,8 +6708,9 @@ export const uploads = sqliteTable(
 );
 
 /**
- * Originals to delete from R2 (knowledge-uploads.ts), by key: recorded as
- * their uploads are forgotten, and deleted by the cleanup after.
+ * Originals of `uploads` to delete from R2. Nothing writes or reads it since
+ * GRA-1941; it stays for a rollback to the release before, which still does,
+ * and the next contract migration drops it (expand, then contract).
  */
 export const uploadCleanups = sqliteTable("upload_cleanups", {
   /** The original's key in R2. */
@@ -6751,9 +6725,9 @@ export const uploadCleanups = sqliteTable("upload_cleanups", {
 });
 
 /**
- * The daily computations of Knowledge's usage signals, one row per
- * attempt, while core computed them. Nothing writes it any more; it is
- * dropped in a later release.
+ * The daily computations of Knowledge's usage signals. Nothing writes or
+ * reads it; `knowledge_signals` references it, and the next contract
+ * migration drops both (expand, then contract).
  */
 export const knowledgeSignalComputations = sqliteTable(
   "knowledge_signal_computations",
@@ -6774,17 +6748,9 @@ export const knowledgeSignalComputations = sqliteTable(
 );
 
 /**
- * The usage signals of a computation: one per kind, collection and subject
- * (a search's key, or a document's ID), for the collection's owner, with
- * an ID derived from those three, the same in every computation. Readers
- * take only the finished computation started last, so a computation's
- * signals show all at once when it finishes, and never those of one that
- * doesn't. Written under the computation's ID: one that outlived its lease
- * and lost its row fails on the foreign key. `evidence` is JSON, IDs and
- * counts only; `evidence_at` is when its latest evidence was seen (a
- * question's latest search), null for a document's. Reads check the
- * collection (and the document) in Knowledge, and so never show a signal
- * about one that's gone.
+ * Knowledge's usage signals. Nothing writes or reads it since GRA-1941; it
+ * stays for a rollback to the release before, which still does, and the next
+ * contract migration drops it (expand, then contract).
  */
 export const knowledgeSignals = sqliteTable(
   "knowledge_signals",
@@ -6822,26 +6788,6 @@ export const knowledgeSignals = sqliteTable(
       table.value,
       table.id
     ),
-  ]
-);
-
-/**
- * Signals an owner dismissed, by kind, collection and subject, so they
- * outlast the computations: a signal is hidden while it has no evidence
- * newer than its dismissal. A computation's finish removes those whose
- * signal it no longer has, or has with newer evidence, so a signal that
- * went away and came back shows again.
- */
-export const knowledgeSignalDismissals = sqliteTable(
-  "knowledge_signal_dismissals",
-  {
-    kind: text({ enum: knowledgeSignalKinds }).notNull(),
-    collectionId: text("collection_id").notNull(),
-    subject: text().notNull(),
-    dismissedAt: timestamp("dismissed_at").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.kind, table.collectionId, table.subject] }),
   ]
 );
 

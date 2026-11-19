@@ -381,7 +381,6 @@
   "@grasp-os/core test/invocation-sources.test.ts": 2.3,
   "@grasp-os/core test/json-profile.test.ts": 19.4,
   "@grasp-os/core test/kickoff.test.ts": 4.2,
-  "@grasp-os/core test/knowledge-uploads.test.ts": 4.2,
   "@grasp-os/core test/lab.test.ts": 4.4,
   "@grasp-os/core test/lineage-host-calls.test.ts": 7.8,
   "@grasp-os/core test/lineage-quotas.test.ts": 42.1,

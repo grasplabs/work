@@ -276,11 +276,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.org_settings": {
     none: "the organization's billing and Pulse settings",
   },
-  // Written only by an older core (rows from before, or during a rollout or
-  // after a rollback), and removed with the run by retention until a later
-  // contract migration drops it; this entry goes with the table.
   "core.run_brain_evidence": {
-    company: "what a run recalled, as runs are (D3)",
+    none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
   },
   "core.run_brain_versions": {
     company:
@@ -385,10 +382,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company:
       "who uploaded which file into the Brain for a team or everyone, by ID and the file's name; their uploads for themselves alone, by ID with no name, go with brain_sources once the Brain erased them; a file's text is the Brain's",
   },
-  "core.uploads": { erased: "brain" },
-  "core.knowledge_signals": { erased: "apps" },
-  "core.knowledge_signal_dismissals": {
-    none: "subject is a search or document",
+  "core.uploads": {
+    none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
+  },
+  "core.knowledge_signals": {
+    none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
   },
   "core.verifications": {
     kept: "a sign-in's state for its minutes, by a random identifier",
@@ -429,7 +427,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_run_file_chunks": { company: "files of runs (D3)" },
   "core.app_candidate_reports": noPerson,
   "core.app_default_stores": noPerson,
-  "core.app_entries": noPerson,
   "core.app_origins": noPerson,
   "core.app_test_fixtures": noPerson,
   "core.build_receipts": noPerson,
@@ -899,7 +896,6 @@ export const reviewedPersonColumns: Readonly<
   "core.hidden_connectors": ["hidden_by"],
   "core.improvement_signals": ["subject"],
   "core.invitations": ["email", "inviter_id"],
-  "core.knowledge_signal_dismissals": ["subject"],
   "core.knowledge_signals": ["owner", "subject"],
   "core.member_removals": ["user_id"],
   // `suspended_by` names what suspended the member (the directory's read),

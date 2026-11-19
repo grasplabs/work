@@ -56,7 +56,6 @@ import {
   notifications,
   chatAudiences,
   businessStores,
-  knowledgeSignals,
   personErasureAreas,
   personErasures,
   sessions,
@@ -90,7 +89,6 @@ import {
   subjectsOf,
 } from "./erased-people.ts";
 import { dropHeldStarts } from "./held-starts.ts";
-import { eraseUploadsOf, uploadsOf } from "./knowledge-uploads.ts";
 import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
@@ -328,10 +326,9 @@ const identity: ErasureStep = {
 /**
  * What core holds of them for the Brain beside their own store (the
  * `brain_sources` area): their skill shares, who answered a gap if it was
- * them (the answers stay, as the company's, said by no one), and every
- * file they once uploaded into Knowledge, with its original
- * (knowledge-uploads.ts). Knowledge itself is gone (GRA-1941): what its
- * databases held of them goes with them, deleted in the account.
+ * them (the answers stay, as the company's, said by no one). Knowledge
+ * itself is gone (GRA-1941): what its databases held of them went with
+ * them, deleted in the account.
  * Complete only once each returned: a failure leaves the area pending,
  * and the clock runs it again.
  */
@@ -368,7 +365,6 @@ const brain: ErasureStep = {
       { type: "person", userId: erasure.requestedBy },
       userId
     );
-    await eraseUploadsOf(env, userId);
     await completed(db, userId, "brain");
   },
 };
@@ -701,11 +697,7 @@ const workspaceArea: ErasureStep = {
  * what App preferences kept of them in every App's store
  * (`sdk_preferences`, which nothing writes since they were removed, until
  * GRA-1550 drops it), what the forms they sent held in each
- * store's outbox for its webhooks, and the usage signals computed for them as
- * the owner of
- * Knowledge collections (what others asked there, counted, and what they
- * haven't read or reviewed), which the daily computation no longer makes
- * for anyone erased (knowledge/signals.ts), and the deliveries of the
+ * store's outbox for its webhooks, and the deliveries of the
  * forms they sent to the Apps' webhooks (app-webhooks.ts): one still
  * waiting carries what they sent out of the company, so it goes unsent,
  * and one settled names them by ID only, so it goes too. None is queued
@@ -743,7 +735,6 @@ const apps: ErasureStep = {
       await appPreview(env, appIdSchema.parse(id)).forgetPerson(userId);
     }
     await db.batch([
-      db.delete(knowledgeSignals).where(eq(knowledgeSignals.owner, userId)),
       db
         .delete(appWebhookDeliveries)
         .where(eq(appWebhookDeliveries.personId, userId)),
@@ -883,7 +874,7 @@ const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
 /**
  * Where the erasure of `userId` from the Brain stands, as core records it,
  * across its Brain areas: `brain` (what core holds of them for the
- * Brain: skill shares, gap answers, old uploads), `brain_sources` (the new
+ * Brain: skill shares, gap answers), `brain_sources` (the new
  * Brain: pending until its call returned, which is only once their own
  * store was erased whole, files included) and `brain_shared` (what the new
  * Brain derived about them where others may read it). In the areas' own
@@ -1145,14 +1136,8 @@ export const erasePerson = async (
     actor: actorOf(by),
     action: "member.erasure.requested",
     target: { type: "member", id: target },
-    // How many files they once uploaded into Knowledge it forgets (the
-    // `brain` area, knowledge-uploads.ts), counted here, in its one event:
-    // nothing uploads into Knowledge any more, so these are the ones it
-    // erases, and `member.erased` is often written in a later run, once
-    // they are gone.
     detail: {
       userId: target,
-      knowledgeUploads: await uploadsOf(env, target),
     },
   };
   await auditedBatch(env, db, [
