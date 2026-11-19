@@ -1,9 +1,11 @@
+import type { ConnectionBrainAudience } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { personOf } from "../src/connections.ts";
 import { readSyncPlaces } from "../src/sync-picks.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { consentCode, stephenGoogleUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { signInConfig } from "./sign-in-config.ts";
@@ -18,6 +20,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { newTeam } from "./teams.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 // The places of a shared connection an admin picks to sync into the Brain
@@ -114,6 +117,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
       feed: "shared-drives",
       from: before?.picks ?? [],
       places: [ours[0] ?? "", ours[59] ?? ""],
+      acknowledged: { kind: "nobody" },
     });
     const after = await admin.api.connections.syncPlaces(connectionId);
 
@@ -155,6 +159,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
       feed: "shared-drives",
       from: held?.picks ?? [],
       places: [first],
+      acknowledged: { kind: "nobody" },
     });
     // Another admin moves the pick to the last drive once the listing's
     // first read has answered.
@@ -170,6 +175,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
           feed: "shared-drives",
           from: [first],
           places: [last],
+          acknowledged: { kind: "nobody" },
         });
       }
       return answer;
@@ -229,6 +235,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
       feed: "shared-drives",
       from: [],
       places: ["sales"],
+      acknowledged: { kind: "nobody" } as const,
     };
 
     // Refused in core, before connect: recorded here, one event each.
@@ -280,6 +287,95 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
     });
   });
 
+  it("picks a place only once the admin confirmed who will read everything in it now, and records each refusal with that audience", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const connectionId = await sharedGoogle(admin);
+    const [sales, finance] = await Promise.all([newTeam(), newTeam()]);
+    const prefix = `drive-${unique()}`;
+    const zero = `${prefix}-0`;
+    const one = `${prefix}-1`;
+    await driveHeld(zero);
+    await driveHeld(one);
+    const forSales = { kind: "team", teamId: sales } as const;
+    const forFinance = { kind: "team", teamId: finance } as const;
+    await chooseAudience(admin.api, connectionId, forSales);
+    const save = async (
+      places: string[],
+      acknowledged?: ConnectionBrainAudience
+    ): Promise<string> => {
+      const page = await admin.api.connections.syncPlaces(connectionId);
+      return await outcome(
+        admin.api.connections.pickSyncPlaces({
+          connectionId,
+          feed: "shared-drives",
+          from: page?.picks ?? [],
+          places,
+          ...(acknowledged === undefined ? {} : { acknowledged }),
+        })
+      );
+    };
+    const picksNow = async () => {
+      const page = await admin.api.connections.syncPlaces(connectionId);
+      return page?.picks ?? [];
+    };
+
+    const outcomes: Record<string, string> = {};
+    const picks: Record<string, string[]> = {};
+    const refusals = await auditedDuring(async () => {
+      outcomes.unconfirmed = await save([zero]);
+      // Confirmed for an audience the page showed before another was chosen.
+      outcomes.staleNobody = await save([zero], { kind: "nobody" });
+      // The page shows Sales; another admin moves it to Finance meanwhile.
+      await chooseAudience(admin.api, connectionId, forFinance);
+      outcomes.staleTeam = await save([zero], forSales);
+      picks.refused = await picksNow();
+      outcomes.confirmed = await save([zero], forFinance);
+      // Another place needs confirming again, swapped for one too;
+      // un-picking needs none.
+      outcomes.another = await save([zero, one]);
+      outcomes.swapped = await save([one]);
+      outcomes.both = await save([zero, one], forFinance);
+      outcomes.unpicked = await save([one]);
+      picks.after = await picksNow();
+    });
+
+    expect({
+      outcomes,
+      picks,
+      recorded: refusals
+        .filter(({ action }) => action === "connection.sync_places")
+        .map(({ actor, target, detail }) => ({
+          actor: "userId" in actor ? actor.userId : actor.type,
+          target: target?.id,
+          detail,
+        })),
+    }).toStrictEqual({
+      outcomes: {
+        unconfirmed: "sync.unacknowledged",
+        staleNobody: "sync.unacknowledged",
+        staleTeam: "sync.unacknowledged",
+        confirmed: "ok",
+        another: "sync.unacknowledged",
+        swapped: "sync.unacknowledged",
+        both: "ok",
+        unpicked: "ok",
+      },
+      picks: { refused: [], after: [one] },
+      // Each with the audience it was refused for.
+      recorded: [sales, sales, finance, finance, finance].map((team) => ({
+        actor: admin.userId,
+        target: connectionId,
+        detail: {
+          feed: "shared-drives",
+          outcome: "refused",
+          reason: "sync.unacknowledged",
+          who: "team",
+          team,
+        },
+      })),
+    });
+  });
+
   it("refuses a save from a page another admin's pick made stale, and keeps that pick", async () => {
     const [first, second] = await Promise.all([
       signedInApi(idp, "admin"),
@@ -300,6 +396,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
       feed: "shared-drives",
       from: secondPage?.picks ?? [],
       places: [one],
+      acknowledged: { kind: "nobody" },
     });
     // The first, on the page from before, ticks drive 0 and saves.
     const stale = await outcome(
@@ -308,6 +405,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
         feed: "shared-drives",
         from: firstPage?.picks ?? [],
         places: [zero],
+        acknowledged: { kind: "nobody" },
       })
     );
     const now = await first.api.connections.syncPlaces(connectionId);

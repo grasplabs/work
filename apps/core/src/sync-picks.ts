@@ -1,4 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
+import { connectionBrainAudienceSchema } from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
   SharedSyncPlaces,
@@ -14,6 +15,10 @@ import { z } from "zod";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { hideUnpickedPlaces } from "./brain-sync.ts";
+import {
+  connectionAudienceOf,
+  requireAcknowledged,
+} from "./connection-audiences.ts";
 
 // The places of a shared connection an admin picks to sync into the Brain
 // (GRA-1758, GRA-1759): its connector's shared drives or SharePoint
@@ -24,7 +29,11 @@ import { hideUnpickedPlaces } from "./brain-sync.ts";
 // no admin role here), and records the refusal of anyone else, which
 // connect never sees. Who may
 // read what a picked place brings is the connection's Brain audience
-// (connection-audiences.ts), not the source's permissions.
+// (connection-audiences.ts), not the source's permissions (GRA-2207): so
+// a save that picks a place is made only once the admin confirmed the
+// audience held now will read everything in it (`acknowledged`), and
+// connect records that audience in the save's audit event. A save that
+// only un-picks narrows what is read, and needs no confirmation.
 
 const connectionIdSchema = z.string().min(1).max(128);
 
@@ -33,6 +42,7 @@ const pickSchema = z.strictObject({
   feed: syncFeedSchema,
   from: syncPicksSchema,
   places: syncPicksSchema,
+  acknowledged: connectionBrainAudienceSchema.optional(),
 });
 
 /**
@@ -114,7 +124,10 @@ export const readSyncPlaces = async (
 /**
  * Sets the places of the shared connection `connectionId` its sync `feed`
  * reads to `places`, the whole set, as one of the company's admins picked
- * them from `from`, the picks their page started from. Connect checks the
+ * them from `from`, the picks their page started from. A save that picks
+ * a place `from` doesn't hold is refused (`sync.unacknowledged`), and
+ * recorded, unless `acknowledged` is the connection's Brain audience held
+ * now: who will read everything in it. Connect checks the
  * connection and the places, refuses (`sync.picks_changed`) when the
  * picks held are no longer `from`, and records the change in the audit
  * log. Then, before it answers, every place no longer picked is hidden in
@@ -134,17 +147,32 @@ export const pickSyncPlaces = async (
       ? request.connectionId
       : undefined;
   await requireCompanyAdmin(env, identity, asked);
-  const { connectionId, feed, from, places } = syncErrors.parse(
+  const { connectionId, feed, from, places, acknowledged } = syncErrors.parse(
     "sync.invalid",
     pickSchema,
     request
   );
+  const audience = await connectionAudienceOf(env, connectionId);
+  // `from` is what connect checks the picks held against, so a place it
+  // doesn't hold is one this save picks.
+  if (places.some((place) => !from.includes(place))) {
+    await requireAcknowledged(
+      env,
+      identity,
+      "connection.sync_places",
+      connectionId,
+      audience,
+      acknowledged,
+      { feed }
+    );
+  }
   const { version } = await env.CONNECT.pickSyncPlaces({
     person: await person(),
     connectionId,
     feed,
     from,
     places,
+    audience,
   });
   await hideUnpickedPlaces(env, {
     connectionId,

@@ -774,12 +774,16 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
    * never Grasp staff; audited. Refused (`connection.brain_erasing`) while
    * what the Brain kept of it is being erased. `from` is the audience the
    * admin was looking at: refused (`connection.brain_audience_changed`),
-   * with nothing changed, once another is held.
+   * with nothing changed, once another is held. A change that lets anyone
+   * read who couldn't before is refused (`sync.unacknowledged`) unless
+   * `acknowledged` is `audience`: the admin confirmed it reads everything
+   * the connection brings, whatever the source's permissions (GRA-2207).
    */
   setBrainAudience: (
     connectionId: string,
     audience: ConnectionBrainAudience,
-    from: ConnectionBrainAudience
+    from: ConnectionBrainAudience,
+    acknowledged?: ConnectionBrainAudience
   ) => Promise<void>;
   /**
    * Erases everything the Brain kept from the shared connection
@@ -812,6 +816,14 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
      */
     from: string[];
     places: string[];
+    /**
+     * The connection's Brain audience the admin confirmed will read
+     * everything in the places picked, whatever the source's permissions
+     * (GRA-2207). Needed when the save picks a place `from` doesn't hold,
+     * and it must be the audience held now: else refused
+     * (`sync.unacknowledged`), with nothing changed.
+     */
+    acknowledged?: ConnectionBrainAudience;
   }) => Promise<void>;
 }
 
@@ -823,15 +835,12 @@ export interface SharedSyncPlaces {
   feed: string;
   /**
    * Each place: its ID, its own name, what it is in (a library's site;
-   * null for a shared drive), whether the sync reads who may open its
-   * files (`sharingRead`: else nobody reads them), and whether it is
-   * picked. Names are whole.
+   * null for a shared drive), and whether it is picked. Names are whole.
    */
   choices: {
     place: string;
     title: string;
     within: string | null;
-    sharingRead: boolean;
     picked: boolean;
   }[];
   /**

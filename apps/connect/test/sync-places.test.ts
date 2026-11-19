@@ -1,7 +1,11 @@
 import { connectionErrors } from "@grasp-os/shared/connect";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { syncErrors } from "@grasp-os/shared/sync";
-import type { SyncPageRequest, SyncPlacesRequest } from "@grasp-os/shared/sync";
+import type {
+  PickSyncPlaces,
+  SyncPageRequest,
+  SyncPlacesRequest,
+} from "@grasp-os/shared/sync";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -244,10 +248,14 @@ const sharedConnection = async (): Promise<{
   return { admin, connectionId };
 };
 
+/** The audience a test's picks are made under, unless it names one. */
+const everyone: PickSyncPlaces["audience"] = { kind: "everyone" };
+
 const pick = async (
   person: ReturnType<typeof someone>,
   connectionId: string,
-  picked: string[]
+  picked: string[],
+  audience: PickSyncPlaces["audience"] = everyone
 ) =>
   await exports.default.pickSyncPlaces({
     person,
@@ -255,6 +263,7 @@ const pick = async (
     feed: "sites",
     from: await heldPicks(connectionId, "sites"),
     places: picked,
+    audience,
   });
 
 /** What a site's page read answered, or the code it was refused with. */
@@ -409,7 +418,10 @@ describe("a shared connection's picked places", () => {
     await pick(admin, connectionId, ["sales", "legal"]);
     // The same places again change nothing and record nothing.
     await pick(admin, connectionId, ["legal", "sales"]);
-    await pick(admin, connectionId, ["board"]);
+    await pick(admin, connectionId, ["board"], {
+      kind: "team",
+      teamId: "team-sales",
+    });
 
     expect({
       refused,
@@ -446,6 +458,7 @@ describe("a shared connection's picked places", () => {
             places: 2,
             added: 2,
             removed: 0,
+            who: "everyone",
           },
         },
         {
@@ -456,6 +469,8 @@ describe("a shared connection's picked places", () => {
             places: 1,
             added: 1,
             removed: 2,
+            who: "team",
+            team: "team-sales",
           },
         },
       ],
@@ -503,6 +518,7 @@ describe("a shared connection's picked places", () => {
           feed: "sites",
           from,
           places: ["sales"],
+          audience: { kind: "everyone" },
         })
     );
 
@@ -526,6 +542,7 @@ describe("a shared connection's picked places", () => {
             places: 1,
             added: 1,
             removed: 2,
+            who: "everyone",
           },
         },
         {
@@ -558,6 +575,7 @@ describe("a shared connection's picked places", () => {
       feed: "sites",
       from: shown?.picks ?? [],
       places: [...(shown?.picks ?? []), "board"],
+      audience: { kind: "everyone" },
     });
     const stale = await outcomeOf(
       async () =>
@@ -567,6 +585,7 @@ describe("a shared connection's picked places", () => {
           feed: "sites",
           from: ["sales"],
           places: ["sales"],
+          audience: { kind: "everyone" },
         })
     );
     const held = await heldPicks(connectionId, "sites");
@@ -594,6 +613,7 @@ describe("a shared connection's picked places", () => {
             feed: "folders",
             from: [],
             places: ["inbox"],
+            audience: { kind: "everyone" },
           })
       ),
     };
@@ -667,27 +687,9 @@ describe("a shared connection's picked places", () => {
       choices: {
         feed: "sites",
         choices: [
-          {
-            place: "sales",
-            title: "Sales",
-            within: null,
-            sharingRead: true,
-            picked: false,
-          },
-          {
-            place: "legal",
-            title: "Legal Team",
-            within: null,
-            sharingRead: true,
-            picked: true,
-          },
-          {
-            place: "board",
-            title: longName,
-            within: null,
-            sharingRead: true,
-            picked: false,
-          },
+          { place: "sales", title: "Sales", within: null, picked: false },
+          { place: "legal", title: "Legal Team", within: null, picked: true },
+          { place: "board", title: longName, within: null, picked: false },
         ],
         picks: ["legal"],
         cursor: null,
@@ -721,27 +723,9 @@ describe("a shared connection's picked places", () => {
       shared: {
         feed: "sites",
         choices: [
-          {
-            place: "sales",
-            title: "Sales",
-            within: null,
-            sharingRead: true,
-            picked: false,
-          },
-          {
-            place: "legal",
-            title: "Legal",
-            within: null,
-            sharingRead: true,
-            picked: false,
-          },
-          {
-            place: "board",
-            title: "Board",
-            within: null,
-            sharingRead: true,
-            picked: false,
-          },
+          { place: "sales", title: "Sales", within: null, picked: false },
+          { place: "legal", title: "Legal", within: null, picked: false },
+          { place: "board", title: "Board", within: null, picked: false },
         ],
         picks: [],
         cursor: null,

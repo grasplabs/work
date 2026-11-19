@@ -546,7 +546,8 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
       admin,
       shared.id,
       { kind: "everyone" },
-      { kind: "nobody" }
+      { kind: "nobody" },
+      { kind: "everyone" }
     );
     const { workflow, serving } = await searching(ada, admin, shared.id);
     const trigger = await triggerOf(ada, admin, workflow.id);

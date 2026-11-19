@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
-import type { SharedSyncPlaces } from "@grasp-os/shared/connect";
+import type {
+  ConnectionBrainAudience,
+  SharedSyncPlaces,
+} from "@grasp-os/shared/connect";
 import { syncErrors } from "@grasp-os/shared/sync";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -9,7 +12,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -20,7 +23,8 @@ import { SyncPlaces } from "./sync-places.tsx";
 // The places of a shared connection an admin picks to sync into the
 // Brain, on its card beside its Brain audience. These start from what an
 // admin must not miss: that everyone in the audience will read everything
-// in a picked place; a save from a stale page undoing another admin's
+// in a picked place, whatever the source lets them open, confirmed for
+// the audience held now; a save from a stale page undoing another admin's
 // pick, or dropping a pick the page didn't show; a save that core refused
 // looking as if it went through; two libraries a screen reader can't
 // tell apart; an empty list, or a slow one, looking like a failure.
@@ -48,6 +52,68 @@ type Asked = [string, ...unknown[]][];
 /** The refusal's words, as core gives them. */
 const refusal = "Only the company's admins pick what syncs.";
 const unreachable = "Grasp can't be reached right now.";
+
+/** What the admin ticks to confirm, for everyone in the company. */
+const everyoneReads = `Everyone in the company will be able to read everything in the places you pick, whatever their permissions in ${label}.`;
+
+/** The connection's Brain audience the card shows, for a test to change. */
+let audienceNow: ConnectionBrainAudience = { kind: "everyone" };
+const audienceListeners = new Set<() => void>();
+
+/**
+ * The audience core holds, when another admin changed it behind the
+ * card: the card shows it once it reads the audiences again.
+ */
+let heldByCore: ConnectionBrainAudience | undefined;
+let audienceReads = 0;
+
+/** The card reads the audiences again: it shows what core holds. */
+const audienceReadAgain = (): void => {
+  audienceReads += 1;
+  audienceNow = heldByCore ?? audienceNow;
+  for (const listener of audienceListeners) {
+    listener();
+  }
+};
+
+/** Has core hold `audience` now, as the card beside the picker reads it. */
+const audienceChosen = async (
+  audience: ConnectionBrainAudience
+): Promise<void> => {
+  await act(async () => {
+    audienceNow = audience;
+    for (const listener of audienceListeners) {
+      listener();
+    }
+    await Promise.resolve();
+  });
+};
+
+/** The picker with the audience held now, and its team's name, Sales the one team the page knows. */
+const Picker = ({ connection }: { connection: CatalogConnection }) => {
+  const audience = useSyncExternalStore(
+    (listener) => {
+      audienceListeners.add(listener);
+      return () => {
+        audienceListeners.delete(listener);
+      };
+    },
+    () => audienceNow
+  );
+  return (
+    <SyncPlaces
+      audience={audience}
+      connection={connection}
+      label={label}
+      onAudienceStale={audienceReadAgain}
+      team={
+        audience.kind === "team" && audience.teamId === "sales"
+          ? "Sales"
+          : undefined
+      }
+    />
+  );
+};
 
 /** How core answers, for each test to set. */
 interface Core {
@@ -84,11 +150,23 @@ const shown = async (
         feed: string;
         from: string[];
         places: string[];
+        acknowledged?: ConnectionBrainAudience;
       }) => {
         asked.push(["pickSyncPlaces", request]);
         await Promise.resolve();
         if (fake.refuseSave === true) {
           throw new Error(refusal);
+        }
+        // As core: a place picked only when confirmed for the audience now.
+        const picksMore = request.places.some(
+          (place) => !request.from.includes(place)
+        );
+        if (
+          picksMore &&
+          JSON.stringify(request.acknowledged) !==
+            JSON.stringify(heldByCore ?? audienceNow)
+        ) {
+          throw syncErrors.create("sync.unacknowledged");
         }
         // As connect: only from the picks held now.
         const held = [...fake.held.picks].toSorted();
@@ -109,7 +187,7 @@ const shown = async (
       await action(session),
   };
   const rootRoute = createRootRoute({
-    component: () => <SyncPlaces connection={connection} label={label} />,
+    component: () => <Picker connection={connection} />,
   });
   const router = createRouter({
     routeTree: rootRoute,
@@ -185,25 +263,12 @@ const longSite =
 const libraries = (): SharedSyncPlaces => ({
   feed: "libraries",
   choices: [
-    {
-      place: "b!docs",
-      title: "Documents",
-      within: longSite,
-      sharingRead: true,
-      picked: false,
-    },
-    {
-      place: "b!legal",
-      title: "Documents",
-      within: "Legal",
-      sharingRead: true,
-      picked: false,
-    },
+    { place: "b!docs", title: "Documents", within: longSite, picked: false },
+    { place: "b!legal", title: "Documents", within: "Legal", picked: false },
     {
       place: "b!contracts",
       title: "Contracts",
       within: longSite,
-      sharingRead: true,
       picked: true,
     },
   ],
@@ -217,25 +282,126 @@ describe("picking a shared connection's places to sync", () => {
     });
     root = undefined;
     document.body.replaceChildren();
+    audienceNow = { kind: "everyone" };
+    heldByCore = undefined;
+    audienceReads = 0;
   });
 
-  it("says before anything is picked who reads a picked library's files, and to connect again if every library is marked, and names each place with its site", async () => {
+  it("names each place with its site, and asks nothing until a place is ticked", async () => {
     await shown({ held: libraries() });
     const boxes = [...document.querySelectorAll('[role="checkbox"]')];
     expect({
-      consequence: text().includes(
-        `Each file is read in the Brain only by those ${label} lets open it, of those you let read ${label} here. The account you connected must own each site you pick: nobody reads the files of a library marked below. If every library is marked, disconnect ${label} and connect it again.`
-      ),
+      asked: boxOf(everyoneReads) !== undefined,
       // A screen reader tells the two "Documents" apart by their site.
       names: boxes.map(nameOf),
     }).toStrictEqual({
-      consequence: true,
+      asked: false,
       names: [
         `Documents ${longSite}`,
         "Documents Legal",
         `Contracts ${longSite}`,
       ],
     });
+  });
+
+  it("saves a place ticked only once the admin confirmed the audience reads everything in it, and asks again for another audience", async () => {
+    const fake: Core = { held: libraries() };
+    const asked = await shown(fake);
+    await click(boxOf("Documents", "Legal"));
+    const unconfirmed = button("Save the places")?.disabled;
+    await click(boxOf(everyoneReads));
+    const confirmed = button("Save the places")?.disabled;
+    // Another admin narrows the audience to Sales meanwhile.
+    await audienceChosen({ kind: "team", teamId: "sales" });
+    const teamReads = boxOf(
+      `Everyone in the team Sales will be able to read everything in the places you pick, whatever their permissions in ${label}.`
+    );
+    const again = {
+      ticked: teamReads?.getAttribute("aria-checked"),
+      save: button("Save the places")?.disabled,
+    };
+    await click(teamReads);
+    await click(button("Save the places"));
+    await until(() => fake.held.picks.includes("b!legal"));
+    // Un-picking only narrows what is read: nothing to confirm.
+    await until(() => button("Save the places")?.disabled === true);
+    await click(boxOf("Contracts", longSite));
+    const unpicking = {
+      asked: document.querySelectorAll('[role="checkbox"]').length,
+      save: button("Save the places")?.disabled,
+    };
+    expect({
+      unconfirmed,
+      confirmed,
+      again,
+      unpicking,
+      saved: asked
+        .filter(([method]) => method === "pickSyncPlaces")
+        .map(([, request]) => request),
+    }).toStrictEqual({
+      unconfirmed: true,
+      confirmed: false,
+      again: { ticked: "false", save: true },
+      unpicking: { asked: 3, save: false },
+      saved: [
+        {
+          connectionId: "c1",
+          feed: "libraries",
+          from: ["b!contracts"],
+          places: ["b!contracts", "b!legal"],
+          acknowledged: { kind: "team", teamId: "sales" },
+        },
+      ],
+    });
+  });
+
+  it("asks again, for the audience held now, when another admin changed it behind the page", async () => {
+    const fake: Core = { held: libraries() };
+    const asked = await shown(fake);
+    // Another admin narrows the audience to Sales; the page still shows everyone.
+    heldByCore = { kind: "team", teamId: "sales" };
+    await click(boxOf("Documents", "Legal"));
+    await click(boxOf(everyoneReads));
+    await click(button("Save the places"));
+    const salesReads = `Everyone in the team Sales will be able to read everything in the places you pick, whatever their permissions in ${label}.`;
+    await until(() => boxOf(salesReads) !== undefined);
+    const askedAgain = {
+      reads: audienceReads,
+      ticked: boxOf(salesReads)?.getAttribute("aria-checked"),
+      save: button("Save the places")?.disabled,
+      kept: boxOf("Documents", "Legal")?.getAttribute("aria-checked"),
+    };
+    await click(boxOf(salesReads));
+    await click(button("Save the places"));
+    await until(() => fake.held.picks.includes("b!legal"));
+    expect({
+      askedAgain,
+      saved: asked
+        .filter(([method]) => method === "pickSyncPlaces")
+        .map(([, request]) =>
+          typeof request === "object" &&
+          request !== null &&
+          "acknowledged" in request
+            ? request.acknowledged
+            : undefined
+        ),
+    }).toStrictEqual({
+      askedAgain: { reads: 1, ticked: "false", save: true, kept: "true" },
+      saved: [{ kind: "everyone" }, { kind: "team", teamId: "sales" }],
+    });
+  });
+
+  it("names a team the page doesn't know as this team, never by an empty name", async () => {
+    audienceNow = { kind: "team", teamId: "gone" };
+    await shown({ held: libraries() });
+    await click(boxOf("Documents", "Legal"));
+    expect({
+      asked:
+        boxOf(
+          `Everyone in this team will be able to read everything in the places you pick, whatever their permissions in ${label}.`
+        ) !== undefined,
+      empty: text().includes("Everyone in the team  will"),
+    }).toStrictEqual({ asked: true, empty: false });
   });
 
   it("saves only what was ticked and unticked, from every pick held, a pick the listing didn't show included", async () => {
@@ -246,6 +412,7 @@ describe("picking a shared connection's places to sync", () => {
     const asked = await shown(fake);
     await click(boxOf("Documents", "Legal"));
     await click(boxOf("Contracts", longSite));
+    await click(boxOf(everyoneReads));
     await click(button("Save the places"));
     await until(
       () => asked.filter(([method]) => method === "syncPlaces").length === 2
@@ -262,6 +429,7 @@ describe("picking a shared connection's places to sync", () => {
             feed: "libraries",
             from: ["b!contracts", "b!archive"],
             places: ["b!archive", "b!legal"],
+            acknowledged: { kind: "everyone" },
           },
         ],
       ],
@@ -278,6 +446,7 @@ describe("picking a shared connection's places to sync", () => {
       choice.picked = fake.held.picks.includes(choice.place);
     }
     await click(boxOf("Documents", longSite));
+    await click(boxOf(everyoneReads));
     await click(button("Save the places"));
     await until(() => text().includes("changed in the meantime"));
     const checked = [
@@ -304,6 +473,7 @@ describe("picking a shared connection's places to sync", () => {
     const reading = Promise.withResolvers<boolean>();
     fake.pending = reading.promise;
     await click(boxOf("Documents", "Legal"));
+    await click(boxOf(everyoneReads));
     await click(button("Save the places"));
     await until(() => fake.held.picks.includes("b!legal"));
     // Ticked while the places are read again: nothing happens.
@@ -343,6 +513,7 @@ describe("picking a shared connection's places to sync", () => {
     const reading = Promise.withResolvers<boolean>();
     fake.pending = reading.promise;
     await click(boxOf("Documents", longSite));
+    await click(boxOf(everyoneReads));
     await click(button("Save the places"));
     const notice = "These are the ones picked now";
     // The save was refused, and the page is reading the places again.
@@ -380,6 +551,7 @@ describe("picking a shared connection's places to sync", () => {
     }
     fake.refuseListing = true;
     await click(boxOf("Documents", longSite));
+    await click(boxOf(everyoneReads));
     await click(button("Save the places"));
     await until(() => button("Try again") !== undefined);
     const failed = {
@@ -405,6 +577,7 @@ describe("picking a shared connection's places to sync", () => {
     const fake: Core = { held: libraries(), refuseSave: true };
     const asked = await shown(fake);
     await click(boxOf("Documents", longSite));
+    await click(boxOf(everyoneReads));
     fake.refuseListing = true;
     await click(button("Save the places"));
     await until(
@@ -442,52 +615,6 @@ describe("picking a shared connection's places to sync", () => {
       failed,
       reads: asked.filter(([method]) => method === "syncPlaces").length,
     }).toStrictEqual({ reading: true, failed: true, reads: 2 });
-  });
-
-  it("says for Google that each file is read only by those Google lets open it, and marks a drive whose files nobody would read", async () => {
-    await shown(
-      {
-        held: {
-          feed: "shared-drives",
-          choices: [
-            {
-              place: "sales",
-              title: "Sales",
-              within: null,
-              sharingRead: true,
-              picked: false,
-            },
-            {
-              place: "board",
-              title: "Board",
-              within: null,
-              sharingRead: false,
-              picked: false,
-            },
-          ],
-          picks: [],
-        },
-      },
-      { ...microsoft, provider: "google" }
-    );
-    const marked = [...document.querySelectorAll("li")].map((place) => ({
-      place: place.querySelector("label")?.textContent,
-      nobody: place.textContent?.includes("Nobody reads its files"),
-    }));
-    expect({
-      sentence: text().includes(
-        `Each file is read in the Brain only by those ${label} lets open it, of those you let read ${label} here. The account you connected must be able to share files in each drive you pick: nobody reads the files it can't share.`
-      ),
-      notCopied: text().includes("are not copied"),
-      marked,
-    }).toStrictEqual({
-      sentence: true,
-      notCopied: false,
-      marked: [
-        { place: "Sales", nobody: false },
-        { place: "Board", nobody: true },
-      ],
-    });
   });
 
   it("says what the account can't open, in its own provider's words, rather than showing an empty list", async () => {
