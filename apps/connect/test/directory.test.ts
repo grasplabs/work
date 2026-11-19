@@ -39,6 +39,8 @@ const providers = fakeProviders();
 interface Directories {
   graph: Record<string, unknown>[];
   google: Record<string, unknown>[];
+  /** Graph's deleted users. */
+  deleted?: Record<string, unknown>[];
   /** Answers every page instead, when set. */
   answer?: () => Response;
   /** The next link each Graph page hands back, instead of its own. */
@@ -63,14 +65,15 @@ const slice = (
   };
 };
 
-const internet = fakeInternet((_request, url) => {
-  if (directories.answer !== undefined) {
-    return directories.answer();
+/** Graph's users, or its deleted users, as the directory's reads ask for them; none for anything else. */
+const graphList = (url: URL): Response | undefined => {
+  if (url.hostname !== "graph.microsoft.com") {
+    return undefined;
   }
-  if (
-    url.hostname === "graph.microsoft.com" &&
-    url.pathname === "/v1.0/users"
-  ) {
+  if (url.pathname === "/v1.0/directory/deletedItems/microsoft.graph.user") {
+    return Response.json({ value: directories.deleted ?? [] });
+  }
+  if (url.pathname === "/v1.0/users") {
     const { page, next } = slice(
       directories.graph,
       Number(url.searchParams.get("$skiptoken") ?? "0"),
@@ -86,6 +89,17 @@ const internet = fakeInternet((_request, url) => {
               `https://graph.microsoft.com/v1.0/users?$top=100&$skiptoken=${next}`,
           }),
     });
+  }
+  return undefined;
+};
+
+const internet = fakeInternet((_request, url) => {
+  if (directories.answer !== undefined) {
+    return directories.answer();
+  }
+  const listed = graphList(url);
+  if (listed !== undefined) {
+    return listed;
   }
   if (
     url.hostname === "admin.googleapis.com" &&
@@ -184,6 +198,16 @@ const connectDirectory = async (
 
 const read = async (connectionId: string, cursor: string | null = null) =>
   await exports.default.readDirectory({ connectionId, cursor });
+
+/** An answer of HTTP `code`, as a provider's error. */
+const answeredWith = (code: number) => () =>
+  Response.json({ error: { code: "x" } }, { status: code });
+
+const readDeleted = async (connectionId: string) =>
+  await exports.default.readDeletedDirectoryUsers({
+    connectionId,
+    cursor: null,
+  });
 
 const lookUp = async (connectionId: string, id: string) =>
   await exports.default.lookUpInDirectory({ connectionId, id });
@@ -515,6 +539,74 @@ describe("a directory read", () => {
       bearer: true,
       select: "id,displayName,mail,department,jobTitle,accountEnabled,userType",
       expand: "manager($select=id)",
+    });
+  });
+
+  it("of Entra's deleted users answers their IDs alone, lower case, guests and IDs that aren't Entra's left out, and is no Google connection's", async () => {
+    const microsoft = await connectDirectory(someone("admin"));
+    const google = await connectDirectory(someone("admin"), "google-directory");
+    const left = guid();
+    directories.deleted = [
+      { id: left.toUpperCase(), userType: "Member" },
+      { id: guid(), userType: "Guest" },
+      { id: "x') or true", userType: "Member" },
+    ];
+    const answer = await readDeleted(microsoft);
+    const [sent] = internet.sent;
+    const asked = new URL(`https://${sent?.host ?? ""}${sent?.path ?? ""}`);
+    const requests = internet.sent.length;
+    // A Google connection's token is never sent to Graph.
+    const ofGoogle = await codeOf(readDeleted(google));
+    directories.deleted = [];
+
+    expect({
+      answer,
+      host: sent?.host,
+      path: asked.pathname,
+      select: asked.searchParams.get("$select"),
+      ofGoogle,
+      sentForGoogle: internet.sent.length - requests,
+    }).toStrictEqual({
+      answer: { tenant: acmeTenant, deleted: [left], next: null },
+      host: "graph.microsoft.com",
+      path: "/v1.0/directory/deletedItems/microsoft.graph.user",
+      select: "id,userType",
+      ofGoogle: "directory.not_found",
+      sentForGoogle: 0,
+    });
+  });
+
+  it("of Entra's deleted users tells a refusal or an endpoint that isn't one from a failure of the moment", async () => {
+    const connectionId = await connectDirectory(someone("admin"));
+    const answered = async (answer: () => Response) => {
+      directories.answer = answer;
+      try {
+        return await codeOf(readDeleted(connectionId));
+      } finally {
+        delete directories.answer;
+      }
+    };
+
+    expect({
+      unauthorized: await answered(answeredWith(401)),
+      forbidden: await answered(answeredWith(403)),
+      badRequest: await answered(answeredWith(400)),
+      notFound: await answered(answeredWith(404)),
+      notAList: await answered(() => Response.json({ value: "none" })),
+      empty: await answered(() => new Response("")),
+      notJson: await answered(() => new Response("<html>Sign in</html>")),
+      throttled: await answered(answeredWith(429)),
+      serverError: await answered(answeredWith(500)),
+    }).toStrictEqual({
+      unauthorized: "directory.deleted_refused",
+      forbidden: "directory.deleted_refused",
+      badRequest: "directory.deleted_unsupported",
+      notFound: "directory.deleted_unsupported",
+      notAList: "directory.deleted_unsupported",
+      empty: "directory.deleted_unsupported",
+      notJson: "directory.deleted_unsupported",
+      throttled: "directory.throttled",
+      serverError: "directory.provider_failed",
     });
   });
 

@@ -14,6 +14,8 @@ import { connectionIn, envOf, reached } from "./contexts.ts";
 import { landingAt } from "./d1-landing.ts";
 import {
   connectedDirectory,
+  deletedFailAt,
+  deletedLinksTo,
   directoryFailsAt,
   directoryHolds,
   directoryUser as user,
@@ -749,3 +751,318 @@ describe(
     });
   }
 );
+
+/** The read's own failure, if its last read failed, and why its last applied one went without the deleted users. */
+const readStatus = async () =>
+  await env.DB.prepare(
+    "SELECT failure, deleted_failure AS deletedFailure FROM directory_reads WHERE provider = 'microsoft-directory'"
+  ).first<{ failure: string | null; deletedFailure: string | null }>();
+
+/** Whether the directory keeps a row for `oid`, and whether it is on. */
+const rowOf = async (oid: string) =>
+  await env.DB.prepare(
+    "SELECT enabled FROM directory_people WHERE account_id = ?"
+  )
+    .bind(oid)
+    .first<number>("enabled");
+
+// Slice 3b: missing from the read, and in Entra's deleted users, is a
+// leaver; missing alone is nobody's proof.
+describe("a member whose directory account was deleted", () => {
+  it("is suspended, and lifted once restored; missing alone, listed too, or a guest suspends nobody", async () => {
+    await connectedDirectory(idp);
+    const [ada, bea, cy, dee] = [
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+    ];
+    // Ada deleted; Bea missing, not deleted; Cy deleted yet listed (the
+    // lists disagree for a while, and Graph's case with them); Dee
+    // deleted, as a guest.
+    await directoryHolds(
+      [user({ id: cy.oid })],
+      [
+        { id: ada.oid.toUpperCase(), userType: "Member" },
+        { id: cy.oid.toUpperCase(), userType: "Member" },
+        { id: dee.oid, userType: "Guest" },
+      ]
+    );
+
+    const events = await auditedDuring(async () => {
+      await readAt(nextDay());
+    });
+    const deleted = {
+      ada: await suspensionOf(ada.userId),
+      bea: await suspensionOf(bea.userId),
+      cy: await suspensionOf(cy.userId),
+      dee: await suspensionOf(dee.userId),
+      adaSession: await nowSignedIn(ada.session),
+      status: await readStatus(),
+      read: events.find(({ action }) => action === "directory.people_read")
+        ?.detail,
+    };
+    // Restored: listed again, turned on.
+    await directoryHolds([user({ id: ada.oid }), user({ id: cy.oid })]);
+    await readAt(nextDay());
+
+    expect({
+      deleted,
+      restored: await suspensionOf(ada.userId),
+    }).toStrictEqual({
+      deleted: {
+        ada: { suspended: 1, suspendedBy: "directory" },
+        bea: { suspended: 0, suspendedBy: null },
+        cy: { suspended: 0, suspendedBy: null },
+        dee: { suspended: 0, suspendedBy: null },
+        adaSession: "auth.unauthenticated",
+        status: { failure: null, deletedFailure: null },
+        read: {
+          provider: "microsoft-directory",
+          people: 1,
+          disabled: 0,
+          deleted: 1,
+          tied: 2,
+        },
+      },
+      restored: { suspended: 0, suspendedBy: null },
+    });
+  });
+
+  it("keeps no row for the many deleted accounts nobody signed in with, and still suspends the one a member did", async () => {
+    await connectedDirectory(idp);
+    const mo = await memberWith(crypto.randomUUID());
+    const strangers = Array.from({ length: 250 }, () => crypto.randomUUID());
+    await directoryHolds(
+      [],
+      [...strangers.map((id) => ({ id })), { id: mo.oid }]
+    );
+
+    const events = await auditedDuring(async () => {
+      await readAt(nextDay());
+    });
+    const { results } = await env.DB.prepare(
+      "SELECT account_id AS id FROM directory_people WHERE enabled = 0"
+    ).all<{ id: string }>();
+
+    expect({
+      kept: results.map(({ id }) => id),
+      deleted: events.find(({ action }) => action === "directory.people_read")
+        ?.detail?.deleted,
+      mo: await suspensionOf(mo.userId),
+    }).toStrictEqual({
+      kept: [mo.oid],
+      deleted: 1,
+      mo: { suspended: 1, suspendedBy: "directory" },
+    });
+  });
+
+  it("never leaves the company without an admin when every admin is deleted", async () => {
+    await connectedDirectory(idp);
+    const [eve, fin] = [
+      await memberWith(crypto.randomUUID(), "admin"),
+      await memberWith(crypto.randomUUID(), "admin"),
+    ];
+    await onlyAdmins(eve.userId, fin.userId);
+    await directoryHolds([], [{ id: eve.oid }, { id: fin.oid }]);
+
+    const events = await auditedDuring(async () => {
+      await readAt(nextDay());
+    });
+
+    expect({
+      eve: await suspensionOf(eve.userId),
+      fin: await suspensionOf(fin.userId),
+      withheld: events.filter(
+        ({ action }) => action === "member.suspension_withheld"
+      ).length,
+    }).toStrictEqual({
+      eve: { suspended: 0, suspendedBy: null },
+      fin: { suspended: 0, suspendedBy: null },
+      withheld: 2,
+    });
+  });
+
+  it("applies nothing, people included, when a later page of the deleted users fails, even refused, or links elsewhere", async () => {
+    await connectedDirectory(idp);
+    const gus = await memberWith(crypto.randomUUID());
+    // Someone the read would list, to show its people part isn't kept either.
+    const ivo = crypto.randomUUID();
+    const deleted = [
+      { id: gus.oid },
+      ...Array.from({ length: 120 }, () => ({ id: crypto.randomUUID() })),
+    ];
+    const attempt = async (fail: () => Promise<void>) => {
+      await directoryHolds([user({ id: ivo })], deleted);
+      await fail();
+      await readAt(nextDay());
+      return {
+        status: await readStatus(),
+        gus: await suspensionOf(gus.userId),
+        ivo: await rowOf(ivo),
+      };
+    };
+
+    expect({
+      serverError: await attempt(async () => {
+        await deletedFailAt(100);
+      }),
+      refusedLater: await attempt(async () => {
+        await deletedFailAt(100, 403);
+      }),
+      emptyLater: await attempt(async () => {
+        await deletedFailAt(100, 200, "");
+      }),
+      notJsonLater: await attempt(async () => {
+        await deletedFailAt(100, 200, "<html>Sign in</html>");
+      }),
+      elsewhere: await attempt(async () => {
+        await deletedLinksTo(
+          "https://graph.example.test/v1.0/users?$skiptoken=1"
+        );
+      }),
+    }).toStrictEqual({
+      serverError: {
+        status: { failure: "directory.provider_failed", deletedFailure: null },
+        gus: { suspended: 0, suspendedBy: null },
+        ivo: null,
+      },
+      refusedLater: {
+        status: { failure: "directory.deleted_refused", deletedFailure: null },
+        gus: { suspended: 0, suspendedBy: null },
+        ivo: null,
+      },
+      emptyLater: {
+        status: {
+          failure: "directory.deleted_unsupported",
+          deletedFailure: null,
+        },
+        gus: { suspended: 0, suspendedBy: null },
+        ivo: null,
+      },
+      notJsonLater: {
+        status: {
+          failure: "directory.deleted_unsupported",
+          deletedFailure: null,
+        },
+        gus: { suspended: 0, suspendedBy: null },
+        ivo: null,
+      },
+      elsewhere: {
+        status: { failure: "directory.provider_failed", deletedFailure: null },
+        gus: { suspended: 0, suspendedBy: null },
+        ivo: null,
+      },
+    });
+  });
+
+  it("goes on without them when their first page came but isn't a list, empty or not JSON, and says so", async () => {
+    await connectedDirectory(idp);
+    const attempt = async (body: string) => {
+      const [jan, kai, lee] = [
+        await memberWith(crypto.randomUUID()),
+        await memberWith(crypto.randomUUID()),
+        await memberWith(crypto.randomUUID()),
+      ];
+      await directoryHolds(
+        [user({ id: jan.oid, accountEnabled: false }), user({ id: lee.oid })],
+        [{ id: kai.oid }]
+      );
+      await deletedFailAt(0, 200, body);
+      await readAt(nextDay());
+      return {
+        status: await readStatus(),
+        jan: await suspensionOf(jan.userId),
+        kai: await suspensionOf(kai.userId),
+        lee: await rowOf(lee.oid),
+      };
+    };
+    // The read as before 3b: people, ties and 3a's suspensions.
+    const asBefore = {
+      status: {
+        failure: null,
+        deletedFailure: "directory.deleted_unsupported",
+      },
+      jan: { suspended: 1, suspendedBy: "directory" },
+      kai: { suspended: 0, suspendedBy: null },
+      lee: 1,
+    };
+
+    expect({
+      empty: await attempt(""),
+      notJson: await attempt("<html>Sign in</html>"),
+    }).toStrictEqual({ empty: asBefore, notJson: asBefore });
+  });
+
+  it("goes on without them when the deleted users are refused outright, says so, and reads them again next day", async () => {
+    await connectedDirectory(idp);
+    const [jan, kai, lee] = [
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+      await memberWith(crypto.randomUUID()),
+    ];
+    // Jan turned off, Kai deleted (and so missing), Lee listed.
+    const holds = async () => {
+      await directoryHolds(
+        [user({ id: jan.oid, accountEnabled: false }), user({ id: lee.oid })],
+        [{ id: kai.oid }]
+      );
+    };
+    await holds();
+    await deletedFailAt(0, 403);
+
+    const events = await auditedDuring(async () => {
+      await readAt(nextDay());
+    });
+    const refused = {
+      status: await readStatus(),
+      jan: await suspensionOf(jan.userId),
+      kai: await suspensionOf(kai.userId),
+      lee: await rowOf(lee.oid),
+      deleted: events.find(({ action }) => action === "directory.people_read")
+        ?.detail?.deleted,
+    };
+    // The next day's read is answered: Kai's deletion is read then.
+    await holds();
+    await readAt(nextDay());
+
+    expect({
+      refused,
+      nextDay: {
+        status: await readStatus(),
+        kai: await suspensionOf(kai.userId),
+      },
+    }).toStrictEqual({
+      refused: {
+        // The read as before 3b: people, ties and 3a's suspensions.
+        status: { failure: null, deletedFailure: "directory.deleted_refused" },
+        jan: { suspended: 1, suspendedBy: "directory" },
+        kai: { suspended: 0, suspendedBy: null },
+        lee: 1,
+        deleted: 0,
+      },
+      nextDay: {
+        status: { failure: null, deletedFailure: null },
+        kai: { suspended: 1, suspendedBy: "directory" },
+      },
+    });
+  });
+
+  it("keeps nothing of an erased person the deleted users still hold", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const hal = await memberWith(crypto.randomUUID());
+    await admin.api.members.remove(hal.userId);
+    await admin.api.members.erase(hal.userId, hal.name);
+    await directoryHolds([], [{ id: hal.oid }]);
+
+    await readAt(nextDay());
+
+    expect({
+      status: await readStatus(),
+      row: await rowOf(hal.oid),
+    }).toStrictEqual({
+      status: { failure: null, deletedFailure: null },
+      row: null,
+    });
+  });
+});

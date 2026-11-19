@@ -173,7 +173,7 @@ export const readMaxItems = 100;
 /** How long one request to a provider may take. */
 const requestTimeoutMs = 15_000;
 /** Largest answer read from a provider, in bytes. */
-const answerMaxBytes = 4 * 1024 * 1024;
+export const answerMaxBytes = 4 * 1024 * 1024;
 /** The longest a source that fails, or an event whose delivery does, waits. */
 export const maxWaitMs = 60 * 60_000;
 /**

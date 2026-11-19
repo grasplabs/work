@@ -22,11 +22,50 @@ const setDirectory = async (fields: Record<string, unknown>): Promise<void> => {
   });
 };
 
-/** Who is in the tenant's directory, from now on, as Graph has them, every page answered. */
+/**
+ * Who is in the tenant's directory, from now on, as Graph has them, and
+ * who it holds deleted (`deleted`, none by default), every page answered.
+ */
 export const directoryHolds = async (
-  users: Record<string, unknown>[]
+  users: Record<string, unknown>[],
+  deleted: Record<string, unknown>[] = []
 ): Promise<void> => {
-  await setDirectory({ users, failAt: null, loopAt: null });
+  await setDirectory({
+    users,
+    failAt: null,
+    loopAt: null,
+    deleted,
+    deletedFailAt: null,
+    deletedFailStatus: 500,
+    deletedFailBody: null,
+    deletedNext: null,
+  });
+};
+
+/**
+ * Has Graph answer the page of its deleted users that starts at offset
+ * `from` with HTTP `status` (a server error by default), and `body` as it
+ * is when given (Graph's error otherwise), until `directoryHolds` is
+ * called again.
+ */
+export const deletedFailAt = async (
+  from: number,
+  status = 500,
+  body: string | null = null
+): Promise<void> => {
+  await setDirectory({
+    deletedFailAt: from,
+    deletedFailStatus: status,
+    deletedFailBody: body,
+  });
+};
+
+/**
+ * Has every page of Graph's deleted users link on to `next`, until
+ * `directoryHolds` is called again.
+ */
+export const deletedLinksTo = async (next: string): Promise<void> => {
+  await setDirectory({ deletedNext: next });
 };
 
 /**

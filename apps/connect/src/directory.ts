@@ -8,6 +8,7 @@ import {
 } from "@grasp-os/shared/directory";
 import type {
   DirectoryConnection,
+  DirectoryDeletedRead,
   DirectoryLookup,
   DirectoryPerson,
   DirectoryProvider,
@@ -18,7 +19,13 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { connections } from "./db/schema.ts";
-import { SourceError, readFromProvider, requestBudget } from "./event-kinds.ts";
+import {
+  SourceError,
+  answerMaxBytes,
+  bytesFromProvider,
+  readFromProvider,
+  requestBudget,
+} from "./event-kinds.ts";
 import type { ProviderAccess } from "./event-kinds.ts";
 import { accessTokenFor } from "./tokens.ts";
 
@@ -33,13 +40,15 @@ import { accessTokenFor } from "./tokens.ts";
 //   scope (oauth.ts, `grantedAsAsked`), so it can't read mail, calendars
 //   or files; it takes no connector calls (call.ts, no connector can
 //   name its provider); and nothing but the provider's users endpoint is
-//   sent it. A cursor is only ever read for its position: the request is
-//   built here, on the users endpoint, every time.
+//   sent it, or its deleted users. A cursor is only ever read for its
+//   position: the request is built here, on the endpoint the read asks,
+//   every time.
 // - Personal data past what a roster needs: only names, email addresses,
 //   departments, jobs and managers are asked for (`$select`, `fields`)
 //   and answered. Nothing of sign-ins, phones, addresses or groups. Of
 //   an account that is turned off, only its ID is answered, apart from
-//   the people, for core's daily read to tell a leaver (GRA-2056).
+//   the people, for core's daily read to tell a leaver (GRA-2056); of a
+//   deleted one, only its ID too, from Entra's deleted users.
 // - Planted text: anyone with a directory account can name themselves
 //   anything. Names, departments and jobs are cut to what a roster keeps,
 //   without control or format characters, and are only data. IDs that
@@ -58,11 +67,16 @@ import { accessTokenFor } from "./tokens.ts";
 
 const graphHost = "graph.microsoft.com";
 const graphUsersPath = "/v1.0/users";
+const graphDeletedUsersPath =
+  "/v1.0/directory/deletedItems/microsoft.graph.user";
 const googleHost = "admin.googleapis.com";
 const googleUsersPath = "/admin/directory/v1/users";
 
 /** Each provider's API, sent the token: only on its own host, over HTTPS. */
-const graph = readFromProvider({ name: "Microsoft Graph", hosts: [graphHost] });
+const graphSpec = { name: "Microsoft Graph", hosts: [graphHost] };
+const graph = readFromProvider(graphSpec);
+/** Graph's answer as it came: its deleted users are parsed apart from the fetch (`deletedPageOf`). */
+const graphBytes = bytesFromProvider(graphSpec);
 const googleDirectory = readFromProvider({
   name: "Google's directory",
   hosts: [googleHost],
@@ -87,6 +101,11 @@ const graphUserSchema = z.object({
 
 const graphPageSchema = z.object({
   value: z.array(graphUserSchema),
+  "@odata.nextLink": z.string().optional(),
+});
+
+const graphDeletedPageSchema = z.object({
+  value: z.array(z.object({ id: z.string(), userType: z.string().nullish() })),
   "@odata.nextLink": z.string().optional(),
 });
 
@@ -153,6 +172,14 @@ const graphUsers = (): URL => {
   return url;
 };
 
+/** Entra's deleted users, as a read asks for them: their IDs, and whether each was a guest. */
+const graphDeletedUsers = (): URL => {
+  const url = new URL(`https://${graphHost}${graphDeletedUsersPath}`);
+  url.searchParams.set("$select", "id,userType");
+  url.searchParams.set("$top", String(directoryLimits.peoplePerRead));
+  return url;
+};
+
 const googleUsers = (): URL => {
   const url = new URL(`https://${googleHost}${googleUsersPath}`);
   url.searchParams.set("customer", "my_customer");
@@ -179,13 +206,16 @@ const usersOf: Record<DirectoryProvider, () => URL> = {
 };
 
 /**
- * The request a read sends: the provider's users endpoint, at the
- * position `cursor` names, if any. Only that is taken from a cursor; a
- * cursor that isn't a link to the provider's users, or holds no position,
- * is refused before anything is sent.
+ * The request a read sends: `url`, at the position `cursor` names
+ * under `position`, if any. Only that is taken from a cursor; a cursor
+ * that isn't a link to that same endpoint, or holds no position, is
+ * refused before anything is sent.
  */
-const requestOf = (provider: DirectoryProvider, cursor: string | null): URL => {
-  const url = usersOf[provider]();
+const linkedRequest = (
+  url: URL,
+  position: string,
+  cursor: string | null
+): URL => {
   if (cursor === null) {
     return url;
   }
@@ -195,21 +225,29 @@ const requestOf = (provider: DirectoryProvider, cursor: string | null): URL => {
   } catch {
     throw directoryErrors.create("directory.cursor_invalid");
   }
-  const position = link.searchParams.get(positions[provider]);
+  const at = link.searchParams.get(position);
   if (
     link.protocol !== "https:" ||
     link.host !== url.host ||
     link.pathname !== url.pathname ||
     link.username !== "" ||
     link.password !== "" ||
-    position === null ||
-    position === ""
+    at === null ||
+    at === ""
   ) {
     throw directoryErrors.create("directory.cursor_invalid");
   }
-  url.searchParams.set(positions[provider], position);
+  url.searchParams.set(position, at);
   return url;
 };
+
+/** The request a read of `provider`'s users sends, at `cursor`. */
+const requestOf = (provider: DirectoryProvider, cursor: string | null): URL =>
+  linkedRequest(usersOf[provider](), positions[provider], cursor);
+
+/** The request a read of Entra's deleted users sends, at `cursor`. */
+const deletedRequestOf = (cursor: string | null): URL =>
+  linkedRequest(graphDeletedUsers(), "$skiptoken", cursor);
 
 /**
  * The Entra object ID of `user` when it is one of the tenant's own
@@ -447,24 +485,75 @@ const readFailure = (error: unknown): unknown => {
   return directoryErrors.create("directory.provider_failed");
 };
 
-/** Whether `cursor` is a link a read of `provider` would go on from. */
-const isCursorOf = (provider: DirectoryProvider, cursor: string): boolean => {
+/**
+ * A page of Entra's deleted users as Graph answered it, or null when the
+ * answer, though it came, isn't such a page: empty, not JSON, or JSON of
+ * another shape. Told apart by what failed, here, from a fetch that
+ * failed (`deletedReadFailure`).
+ */
+const deletedPageOf = (
+  bytes: Uint8Array
+): z.output<typeof graphDeletedPageSchema> | null => {
+  let json: unknown;
+  try {
+    json = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+  const page = graphDeletedPageSchema.safeParse(json);
+  return page.success ? page.data : null;
+};
+
+/**
+ * Why Entra's deleted users couldn't be fetched, as the directory's
+ * error. The line core goes by (directory-people.ts `deletedOf`): a
+ * refusal of the list itself, or an endpoint that isn't one, is its
+ * permission or the endpoint, not the moment, and doesn't pass by
+ * retrying in a quarter hour: `directory.deleted_refused` (401 or 403 on
+ * this call: its permission, `User.Read.All` without an Entra role, is
+ * still unproved on a real tenant) and `directory.deleted_unsupported`
+ * (400 or 404; an answer that came but isn't a list is the same,
+ * `deletedPageOf`). Anything else, throttling, server errors and a fetch
+ * that never got an answer among it, is the moment: the read's own
+ * failures (`readFailure`).
+ */
+const deletedReadFailure = (error: unknown): unknown => {
+  if (error instanceof SourceError) {
+    if (error.status === 401 || error.status === 403) {
+      return directoryErrors.create("directory.deleted_refused");
+    }
+    if (error.status === 400 || error.status === 404) {
+      return directoryErrors.create("directory.deleted_unsupported");
+    }
+  }
+  return readFailure(error);
+};
+
+/** Whether `cursor` is a link `request` would go on from. */
+const isCursorFor = (
+  request: (cursor: string) => URL,
+  cursor: string
+): boolean => {
   if (cursor.length > directoryLimits.cursorLength) {
     return false;
   }
   try {
-    requestOf(provider, cursor);
+    request(cursor);
     return true;
   } catch {
     return false;
   }
 };
 
-/** Reads one page of a directory connection's people, from `cursor` on. */
-export const readDirectory = async (
-  env: Env,
-  request: unknown
-): Promise<DirectoryRead> => {
+/** Whether `cursor` is a link a read of `provider` would go on from. */
+const isCursorOf = (provider: DirectoryProvider, cursor: string): boolean =>
+  isCursorFor((at) => requestOf(provider, at), cursor);
+
+/**
+ * The directory connection a read names, active, its provider, and the
+ * read's position; `directory.not_found` or `directory.inactive` otherwise.
+ */
+const connectionToRead = async (env: Env, request: unknown) => {
   const { connectionId, cursor } = directoryErrors.parse(
     "directory.not_found",
     directoryReadRequestSchema,
@@ -486,14 +575,28 @@ export const readDirectory = async (
   if (connection.status !== "active") {
     throw directoryErrors.create("directory.inactive");
   }
-  const url = requestOf(provider.data, cursor);
+  return {
+    connectionId: connection.id,
+    tenant: connection.tenant,
+    provider: provider.data,
+    cursor,
+  };
+};
+
+/** Reads one page of a directory connection's people, from `cursor` on. */
+export const readDirectory = async (
+  env: Env,
+  request: unknown
+): Promise<DirectoryRead> => {
+  const connection = await connectionToRead(env, request);
+  const url = requestOf(connection.provider, connection.cursor);
   const access: ProviderAccess = {
-    token: await directoryToken(env, connection.id),
+    token: await directoryToken(env, connection.connectionId),
     budget: requestBudget(1),
   };
   let page: Awaited<ReturnType<typeof pageOf>>;
   try {
-    page = await pageOf(provider.data, access, url);
+    page = await pageOf(connection.provider, access, url);
   } catch (error) {
     throw readFailure(error);
   }
@@ -501,12 +604,54 @@ export const readDirectory = async (
   // A next link elsewhere, or a page past what was asked, is never kept,
   // nor taken for the end.
   if (
-    (next !== null && !isCursorOf(provider.data, next)) ||
+    (next !== null && !isCursorOf(connection.provider, next)) ||
     read > directoryLimits.peoplePerRead
   ) {
     throw directoryErrors.create("directory.provider_failed");
   }
   return { tenant: connection.tenant, people, disabled, next };
+};
+
+/**
+ * Reads one page of an Entra directory connection's deleted users, from
+ * `cursor` on: the proof that someone no longer listed has left. Only
+ * Entra keeps such a list; a Google connection is `directory.not_found`.
+ */
+export const readDeletedDirectoryUsers = async (
+  env: Env,
+  request: unknown
+): Promise<DirectoryDeletedRead> => {
+  const connection = await connectionToRead(env, request);
+  if (connection.provider !== "microsoft-directory") {
+    throw directoryErrors.create("directory.not_found");
+  }
+  const url = deletedRequestOf(connection.cursor);
+  const access: ProviderAccess = {
+    token: await directoryToken(env, connection.connectionId),
+    budget: requestBudget(1),
+  };
+  let bytes: Uint8Array;
+  try {
+    bytes = await graphBytes(access, url.href, answerMaxBytes);
+  } catch (error) {
+    throw deletedReadFailure(error);
+  }
+  const page = deletedPageOf(bytes);
+  if (page === null) {
+    throw directoryErrors.create("directory.deleted_unsupported");
+  }
+  const next = page["@odata.nextLink"] ?? null;
+  // A next link elsewhere is never kept, nor taken for the end. Its size
+  // is bounded where it is kept: core takes the whole read as one value.
+  if (next !== null && !isCursorFor(deletedRequestOf, next)) {
+    throw directoryErrors.create("directory.provider_failed");
+  }
+  const deleted = page.value.flatMap(({ id, userType }) =>
+    guidPattern.test(id) && userType?.toLowerCase() !== "guest"
+      ? [id.toLowerCase()]
+      : []
+  );
+  return { tenant: connection.tenant, deleted, next };
 };
 
 /**

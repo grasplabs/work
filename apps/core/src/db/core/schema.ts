@@ -712,6 +712,13 @@ export const directoryReads = sqliteTable("directory_reads", {
   /** The last read's failure since `readAt`, as a directory error code. */
   failure: text(),
   failedAt: timestamp("failed_at"),
+  /**
+   * Why the last applied read went on without the deleted accounts, as a
+   * directory error code (`directory.deleted_refused` or
+   * `directory.deleted_unsupported`): nobody was suspended for having
+   * left. Null when it read them.
+   */
+  deletedFailure: text("deleted_failure"),
 });
 
 /**

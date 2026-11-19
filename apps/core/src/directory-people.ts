@@ -11,12 +11,14 @@ import { tellKept } from "./access-revocations.ts";
 import { auditedBatch, outboxedEventWithDetailWhere } from "./audit-outbox.ts";
 import { signInConfig } from "./auth/config.ts";
 import {
+  accounts,
   directoryPeople,
   directoryReads,
   erasedSubjects,
 } from "./db/core/schema.ts";
 import { suspensionStatements } from "./directory-suspensions.ts";
 import {
+  jsonValuesOf,
   keptIn,
   placementStatements,
   readPlacementOf,
@@ -62,7 +64,8 @@ import { connectionOf } from "./onboarding/directory.ts";
 //   (person-erasure.ts), with their accounts.
 // - Personal data past its use: the provider's ID, the tenant, the
 //   department and whether the account is on. Rows go with the first read
-//   that no longer lists the person.
+//   that neither lists the person nor holds them deleted. Of a deleted
+//   account, only its ID is read, kept as one turned off.
 // - A directory too big for one batch: the people go to D1 as one JSON
 //   value, which D1 takes up to 2 MB (`d1ValueBytes`), measured as sent;
 //   a larger read is refused as `directory.too_large`, nothing applied,
@@ -87,18 +90,141 @@ interface Listed {
   people: { id: string; department: string }[];
   /** Turned off. */
   disabled: string[];
+  /**
+   * Deleted (Entra keeps a deleted account 30 days), and listed neither on
+   * nor off: kept as turned off, for 3a's rules to suspend and lift.
+   */
+  deleted: string[];
+  /** Why the deleted accounts couldn't be read (`deletedOf`); null when they were. */
+  deletedFailure: string | null;
 }
 
 /**
+ * Every page `readPage` answers, from the first on, each handed to `take`:
+ * refused past the clock's lease on the task (`deadline`), and at a next
+ * link handed back before, the provider failing, never read again.
+ */
+const everyPage = async <Page extends { next: string | null }>(
+  deadline: number,
+  readPage: (cursor: string | null) => Promise<Page>,
+  take: (page: Page) => void
+): Promise<void> => {
+  const followed = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    if (Date.now() >= deadline) {
+      throw directoryErrors.create("directory.read_too_long");
+    }
+    // oxlint-disable-next-line no-await-in-loop -- each read goes on from the last
+    const page = await readPage(cursor);
+    take(page);
+    cursor = page.next;
+    if (cursor !== null) {
+      if (followed.has(cursor)) {
+        throw directoryErrors.create("directory.provider_failed");
+      }
+      followed.add(cursor);
+    }
+  } while (cursor !== null);
+};
+
+/** The failures of the deleted list's first page the read goes on without it for. */
+const deletedUnreadable = new Set<string | undefined>([
+  "directory.deleted_refused",
+  "directory.deleted_unsupported",
+]);
+
+/**
+ * Every deleted account of `connection`, or why the list can't be read at
+ * all. Where the line is, and why: added to a read that worked without
+ * it, the list must never take that read away. So a first page refused,
+ * or not a list (connect's `deletedReadFailure`), which no retry in a
+ * quarter hour mends, leaves the read as it was before: applied, with no
+ * proof of anyone having left, and the reason recorded. Anything else
+ * fails the whole read, to be tried again in a quarter hour: throttling
+ * or a server error, which pass, and any failure past the first page, so
+ * a part of the list is never taken for all of it.
+ */
+const deletedOf = async (
+  env: Env,
+  connection: DirectoryConnection,
+  deadline: number
+): Promise<{ ids: string[] } | { failure: string }> => {
+  const ids = new Set<string>();
+  let pages = 0;
+  try {
+    // Connect answers the same connection's tenant as for its people,
+    // whose pages were checked already.
+    await everyPage(
+      deadline,
+      async (cursor) =>
+        await env.CONNECT.readDeletedDirectoryUsers({
+          connectionId: connection.id,
+          cursor,
+        }),
+      (read) => {
+        pages += 1;
+        for (const id of read.deleted) {
+          ids.add(id);
+        }
+      }
+    );
+  } catch (error) {
+    const code = directoryErrors.codeOf(error);
+    if (pages === 0 && code !== undefined && deletedUnreadable.has(code)) {
+      return { failure: code };
+    }
+    throw error;
+  }
+  return { ids: [...ids] };
+};
+
+/**
+ * Of the deleted accounts `ids`, those a sign-in account of `kind`
+ * carries: kept before the batch, so the many deleted accounts nobody
+ * signed in with never take room in its one value (`d1ValueBytes`) nor
+ * time. It drops none that matters: only such an account ties a row to a
+ * member (directory-ties.ts `tiedMember`, which asks its tenant and
+ * membership again as it ties), and none can appear after this, as Entra
+ * signs no deleted account in. Someone restored and signing in meanwhile
+ * is listed by the next read, and owes no suspension. Sought by the
+ * index on the provider and `lower()` of the ID
+ * (`accounts_provider_oid_lower_idx`), as the tie seeks it.
+ */
+const carriedOf = async (
+  env: Env,
+  kind: DirectoryKind,
+  ids: string[]
+): Promise<string[]> => {
+  const db = drizzle(env.DB);
+  const id = sql<string>`lower(${kind.signedInAs})`;
+  const found = await Promise.all(
+    jsonValuesOf(ids).map(
+      async (value) =>
+        await db
+          .selectDistinct({ id })
+          .from(accounts)
+          .where(
+            and(
+              eq(accounts.providerId, kind.signInProvider),
+              sql`${id} IN (SELECT value FROM json_each(${value}))`
+            )
+          )
+    )
+  );
+  return found.flat().map((row) => row.id);
+};
+
+/**
  * Every page of `connection`, read through connect: the whole directory
- * of `tenant`, the deployment's own sign-in tenant, or a directory error;
- * a page connect answers for any other tenant is refused. Bounded by what is real: the clock's lease on the
- * task (`deadline`), past which it is refused as `directory.read_too_long`,
- * and the provider's own end; a next link it handed back already is the
- * provider failing, never read again.
+ * of `tenant`, the deployment's own sign-in tenant, then its deleted
+ * users, or a directory error (`everyPage`). Someone missing from the
+ * people is a leaver only when the deleted users hold them (slice 3b):
+ * missing alone suspends nobody.
  */
 const listedIn = async (
   env: Env,
+  kind: DirectoryKind,
   connection: DirectoryConnection,
   tenant: string,
   deadline: number
@@ -110,33 +236,41 @@ const listedIn = async (
     tenant,
     people: [],
     disabled: [],
+    deleted: [],
+    deletedFailure: null,
   };
-  const followed = new Set<string>();
-  let cursor: string | null = null;
-  do {
-    if (Date.now() >= deadline) {
-      throw directoryErrors.create("directory.read_too_long");
-    }
-    // oxlint-disable-next-line no-await-in-loop -- each read goes on from the last
-    const read = await env.CONNECT.readDirectory({
-      connectionId: connection.id,
-      cursor,
-    });
-    if (read.tenant.toLowerCase() !== listed.tenant) {
-      throw directoryErrors.create("directory.other_tenant");
-    }
-    for (const { id, department } of read.people) {
-      listed.people.push({ id, department });
-    }
-    listed.disabled.push(...read.disabled);
-    cursor = read.next;
-    if (cursor !== null) {
-      if (followed.has(cursor)) {
-        throw directoryErrors.create("directory.provider_failed");
+  await everyPage(
+    deadline,
+    async (cursor) =>
+      await env.CONNECT.readDirectory({ connectionId: connection.id, cursor }),
+    (read) => {
+      // Refused for another tenant than the deployment's own.
+      if (read.tenant.toLowerCase() !== tenant) {
+        throw directoryErrors.create("directory.other_tenant");
       }
-      followed.add(cursor);
+      for (const { id, department } of read.people) {
+        listed.people.push({ id, department });
+      }
+      listed.disabled.push(...read.disabled);
     }
-  } while (cursor !== null);
+  );
+  // The proof someone no longer listed has left, read in full in the same
+  // read: an account listed, on or off, wins over the deleted list, which
+  // may lag behind it, and the next read settles it.
+  const listedIds = new Set([
+    ...listed.people.map(({ id }) => id),
+    ...listed.disabled,
+  ]);
+  const deleted = await deletedOf(env, connection, deadline);
+  if ("failure" in deleted) {
+    listed.deletedFailure = deleted.failure;
+  } else {
+    listed.deleted = await carriedOf(
+      env,
+      kind,
+      deleted.ids.filter((id) => !listedIds.has(id))
+    );
+  }
   return listed;
 };
 
@@ -159,7 +293,8 @@ const entriesOf = async (
     // oxlint-disable-next-line no-await-in-loop -- one hash at a time
     entries.push([id, department, 1, await hashOf(id)]);
   }
-  for (const id of listed.disabled) {
+  // A deleted account is kept as one turned off: it can't sign in either.
+  for (const id of [...listed.disabled, ...listed.deleted]) {
     // oxlint-disable-next-line no-await-in-loop -- one hash at a time
     entries.push([id, "", 0, await hashOf(id)]);
   }
@@ -210,6 +345,7 @@ const apply = async (
         provider: kind.provider,
         people: listed.people.length,
         disabled: listed.disabled.length,
+        deleted: listed.deleted.length,
       },
     },
     "core"
@@ -280,6 +416,7 @@ const apply = async (
         disabled: listed.disabled.length,
         failure: null,
         failedAt: null,
+        deletedFailure: listed.deletedFailure,
       })
       .where(
         and(
@@ -402,13 +539,21 @@ const readKind = async (
   const startedAt = new Date();
   const deadline = at.getTime() + clockLeaseMs;
   try {
-    const listed = await listedIn(env, connection, tenant, deadline);
+    const listed = await listedIn(env, kind, connection, tenant, deadline);
     const json = await entriesOf(env, kind, listed);
     const placement = await readPlacementOf(env, kind, listed.people);
     if (Date.now() >= deadline) {
       throw directoryErrors.create("directory.read_too_long");
     }
     await apply(env, kind, connection, listed, json, placement, startedAt);
+    if (listed.deletedFailure !== null) {
+      // The fall-back `deletedOf` chose: the rest of the read was applied,
+      // with nobody suspended for having left.
+      log.warn("directory.read_applied_without_deleted", {
+        provider: kind.provider,
+        code: listed.deletedFailure,
+      });
+    }
   } catch (error) {
     await failedWith(env, kind, connection, tenant, startedAt, error);
   }
