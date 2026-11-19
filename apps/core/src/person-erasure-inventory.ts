@@ -100,6 +100,21 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // go with their accounts, and the keyed hash of each ID that stays
   // keeps the read from writing them again.
   "core.directory_people": { erased: "identity" },
+  // Which members' team each department of the directory fills
+  // (directory-teams.ts): a department and a team, no person.
+  "core.directory_departments": {
+    none: "a department's name and a team's id, no person",
+  },
+  // The memberships the directory's read made, by the membership's own
+  // key: each goes with its membership, which removal deletes.
+  "core.directory_memberships": {
+    erased: "removal",
+    via: "team_members",
+  },
+  // What an admin pinned of a member's teams: deleted with their removal,
+  // which every erasure needs first; a removed person is in no team to
+  // pin again.
+  "core.team_pins": { erased: "removal" },
   // Where the daily read stands: a connection, a tenant and counts.
   "core.directory_reads": {
     none: "a connection, its tenant and counts, no person",
@@ -886,6 +901,7 @@ export const reviewedPersonColumns: Readonly<
   // The member a row is tied to; `account_id` names the person too, by
   // the provider's ID, and goes with them as well (directory-ties.ts).
   "core.directory_people": ["user_id"],
+  "core.team_pins": ["user_id"],
   "core.teams": ["member_count"],
   "core.tool_class_settings": ["changed_by"],
   "core.trigger_resource_versions": ["principal_binding"],

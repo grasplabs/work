@@ -613,6 +613,67 @@ export const directoryPeople = sqliteTable(
 );
 
 /**
+ * Which members' team each department of the directory fills (GRA-2056,
+ * directory-teams.ts): by the team's id, linked by name once, when the
+ * read first met the department and exactly one team had its name
+ * (`teamNameKey`); held by id after, so a rename of either never breaks
+ * it. Goes with the team. Names a department and a team, no person.
+ */
+export const directoryDepartments = sqliteTable(
+  "directory_departments",
+  {
+    provider: text().notNull(),
+    /** The department as the read keeps it (`directory_people.department`). */
+    department: text().notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.department] }),
+    index("directory_departments_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The team memberships the directory's daily read made (GRA-2056,
+ * directory-teams.ts), by the membership's own key: the only ones it ever
+ * takes away. Goes with the membership however it goes (by hand, with
+ * the team, a removal or an erasure). Better Auth's `team_members` takes
+ * no field of ours, so this is the mark beside it.
+ */
+export const directoryMemberships = sqliteTable("directory_memberships", {
+  membershipKey: text("membership_key")
+    .primaryKey()
+    .references(() => teamMembers.membershipKey, { onDelete: "cascade" }),
+});
+
+/**
+ * A member an admin put in a team, or took out of it, by hand (GRA-2056):
+ * the directory's read never changes that pair until an admin lets it
+ * (`releaseTeamPin`, members.ts). Written in Better Auth's before hooks
+ * of the two routes that change a membership by hand (auth.ts).
+ */
+export const teamPins = sqliteTable(
+  "team_pins",
+  {
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Kept in the team (true) or kept out of it (false). */
+    kept: integer({ mode: "boolean" }).notNull(),
+    pinnedAt: timestamp("pinned_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.teamId] }),
+    index("team_pins_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
  * Where each provider's daily read of the directory stands (GRA-2056,
  * directory-people.ts), for the admin: the read last applied, what it
  * counted, and the last failure since. `run` and `startedAt` are the

@@ -1961,6 +1961,13 @@
       "when": 1795065983370,
       "tag": "0279_directory_people",
       "breakpoints": true
+    },
+    {
+      "idx": 280,
+      "version": "6",
+      "when": 1795067988240,
+      "tag": "0280_directory_teams",
+      "breakpoints": true
     }
   ]
 }

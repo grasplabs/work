@@ -184,6 +184,16 @@ export interface MembersApi {
    * The latest page, or the page before `before`.
    */
   removed: (before?: ErasureCursor) => Promise<RemovedPeoplePage>;
+  /**
+   * Lets the organization's directory decide again whether the member with
+   * `userId` is in team `teamId`: takes away the pin an admin's hand add or
+   * removal put on them there, audited. The membership stays as it is
+   * until the directory's next daily read. Answers whether there was one.
+   */
+  releaseTeamPin: (
+    userId: string,
+    teamId: string
+  ) => Promise<{ released: boolean }>;
 }
 
 /** Why an admin's change to a member was refused or not finished. */

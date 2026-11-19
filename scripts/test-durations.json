@@ -342,6 +342,7 @@
   "@grasp-os/core test/data-store-receipts.test.ts": 6.7,
   "@grasp-os/core test/data-stores.test.ts": 47.3,
   "@grasp-os/core test/directory-people.test.ts": 12.1,
+  "@grasp-os/core test/directory-teams.test.ts": 11.5,
   "@grasp-os/core test/docs.test.ts": 2.1,
   "@grasp-os/core test/draft-data-model.test.ts": 11.2,
   "@grasp-os/core test/draft-files.test.ts": 4.8,
