@@ -912,6 +912,32 @@ describe("a memory that replaces earlier ones of its writer", () => {
       });
     });
 
+    it("is restored with its undo, so what it replaced stays current", async () => {
+      const at = setUp();
+      const old = await add(at, requirement("old", at.writer));
+      const replacing = await add(
+        at,
+        requirement("new", at.writer, [old.memory]),
+        {
+          entity: old.entity,
+          reader: at.reader,
+        }
+      );
+      await shared().retireMemory({
+        memory: replacing.memory,
+        reader: at.reader,
+        writer: at.writer,
+        change: "undo",
+      });
+      const { id } = await shared().startExport("test");
+      await expect(exportSettled(shared, id)).resolves.toBe("done");
+
+      await expect(restoredAfterLoss(shared, id, empty)).resolves.toBe("done");
+      await expect(currentOf(old.entity, at.reader)).resolves.toStrictEqual([
+        "old",
+      ]);
+    });
+
     it("is restored with what it replaces, and still brings it back once retired", async () => {
       const at = setUp();
       const old = await add(at, requirement("old", at.writer));
