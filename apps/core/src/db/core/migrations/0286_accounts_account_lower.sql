@@ -1,0 +1,1 @@
+CREATE INDEX `accounts_provider_account_lower_idx` ON `accounts` (`provider_id`,lower("account_id"));

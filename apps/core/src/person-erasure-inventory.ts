@@ -129,6 +129,13 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.directory_group_teams": {
     none: "a directory group's id and name and a team's id, no person",
   },
+  // The members of each mapped group, by the provider's ID of them: each
+  // row goes with the person's `directory_people` row, which erasure
+  // deletes.
+  "core.directory_group_members": {
+    erased: "identity",
+    via: "directory_people",
+  },
   // Where the daily read stands: a connection, a tenant and counts.
   "core.directory_reads": {
     none: "a connection, its tenant and counts, no person",

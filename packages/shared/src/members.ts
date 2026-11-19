@@ -1,3 +1,8 @@
+import type {
+  DirectoryDeletedFailure,
+  DirectoryProvider,
+  DirectoryReadFailure,
+} from "./directory.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { Role } from "./roles.ts";
 
@@ -36,6 +41,92 @@ export interface OrganizationTeam {
   id: string;
   name: string;
   memberIds: string[];
+}
+
+/** A member, by name, as the directory's placement shows them to admins. */
+export interface PlacedMember {
+  userId: string;
+  name: string;
+  email: string;
+}
+
+/** A team, by its ID and name. */
+export interface TeamName {
+  id: string;
+  name: string;
+}
+
+/**
+ * A member who may act and is in no team (GRA-2056, slice 4), with what
+ * the directory says of them: an admin places them by hand.
+ */
+export interface UnplacedMember extends PlacedMember {
+  /**
+   * Their department as the directory holds it: empty for none, null when
+   * the directory holds no account of theirs (or none is read).
+   */
+  department: string | null;
+  /** The team that department is linked to, if it is. */
+  departmentTeam: TeamName | null;
+}
+
+/**
+ * A member in a team the directory's read put them in, which their
+ * department there no longer fills (GRA-2135): the read moves them only
+ * into the team their department fills, so they stay until an admin acts.
+ */
+export interface DirectoryMover extends PlacedMember {
+  /** The team the read put them in. */
+  team: TeamName;
+  /** Their department as the directory holds it now; empty for none. */
+  department: string;
+  /** The team that department is linked to, if it is. */
+  departmentTeam: TeamName | null;
+}
+
+/**
+ * An admin's hand add (`kept`) or removal of a member tied to the
+ * directory, in a team: the directory's read leaves that pair as the
+ * admin set it until an admin releases it (`releaseTeamPin`).
+ */
+export interface TeamPin extends PlacedMember {
+  team: TeamName;
+  kept: boolean;
+  /** When an admin set it (ISO 8601). */
+  pinnedAt: string;
+}
+
+/** Who the directory leaves for an admin to place, and what admins placed by hand. */
+export interface DirectoryPlacement {
+  unplaced: UnplacedMember[];
+  movers: DirectoryMover[];
+  pins: TeamPin[];
+}
+
+/**
+ * Where the daily read of one of the organization's directories stands
+ * (GRA-2056), for its admins: the read last applied, and what went wrong
+ * since. A failed read changed nothing, and is tried again every quarter
+ * hour until one is applied.
+ */
+export interface DirectoryRead {
+  provider: DirectoryProvider;
+  /** When the last read was applied (ISO 8601); null before one was. */
+  readAt: string | null;
+  /** How many people that read listed turned on, and how many turned off. */
+  people: number | null;
+  disabled: number | null;
+  /**
+   * Why the reads since `readAt` failed, and when the last one did; null
+   * when none failed since.
+   */
+  failure: { code: DirectoryReadFailure; at: string } | null;
+  /**
+   * Why the last applied read went without the directory's deleted
+   * accounts (`directory.deleted_refused` or `directory.deleted_unsupported`):
+   * nobody was suspended for an account deleted there. Null when it read them.
+   */
+  deletedFailure: DirectoryDeletedFailure | null;
 }
 
 /**
@@ -148,6 +239,8 @@ export interface MembersApi {
   list: () => Promise<Member[]>;
   /** The organization's teams by name, each with its members. */
   teams: () => Promise<OrganizationTeam[]>;
+  /** Where the daily read of each directory read stands; none before one was tried. */
+  directoryReads: () => Promise<DirectoryRead[]>;
   /**
    * Removes the member with `userId`. Removing someone already removed
    * finishes what the first removal left undone (disconnecting their
@@ -208,6 +301,12 @@ export interface MembersApi {
     userId: string,
     teamId: string
   ) => Promise<{ released: boolean }>;
+  /**
+   * Who of the members the directory leaves for an admin to place (in no
+   * team; in a team its read made that their department no longer fills),
+   * and every hand pin on a member tied to the directory.
+   */
+  directoryPlacement: () => Promise<DirectoryPlacement>;
 }
 
 /** Why an admin's change to a member was refused or not finished. */
