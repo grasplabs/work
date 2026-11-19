@@ -75,6 +75,7 @@ import { sheetWords } from "../grasp/sheet/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
 import { signInWords } from "../grasp/sign-in/words.ts";
 import { sourcesWords } from "../grasp/sources/words.ts";
+import { stepFootWords } from "../grasp/step-foot/words.ts";
 import { stepperWords } from "../grasp/stepper/words.ts";
 import { tabsWords } from "../grasp/tabs/words.ts";
 import { tagInputWords } from "../grasp/tag-input/words.ts";
@@ -170,6 +171,7 @@ export const englishPartWords: GraspWordsCatalog = {
   diff: diffWords,
   diffFiles: diffFilesWords,
   dialog: dialogWords,
+  stepFoot: stepFootWords,
   draft: englishDraftWords,
   drawer: drawerWords,
   dropdownMenu: dropdownMenuWords,
@@ -645,6 +647,11 @@ export const usePartWords = (): GraspWordsCatalog => {
       counts: (added, removed) =>
         t`${plural(added, { 0: "No lines added", one: "# line added", other: "# lines added" })}, ${plural(removed, { 0: "none removed", other: "# removed" })}`,
       nothing: t`No files changed.`,
+    },
+    stepFoot: {
+      back: t`Back`,
+      next: t`Next`,
+      step: (step, total) => t`Step ${step} of ${total}`,
     },
     codeBlock: {
       copy: t`Copy code`,

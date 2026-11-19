@@ -42,6 +42,7 @@ import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { scroll } from "../scroll/scroll";
 import { Skeleton } from "../skeleton";
+import { StepFoot } from "../step-foot";
 import { Textarea } from "../textarea";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
@@ -803,7 +804,7 @@ interface FooterProps {
   backLabel: string;
 }
 
-/** Back, Skip and Submit. */
+/** Back, Skip and Submit: StepFoot in a card's look, with no bar; why Send waits read with it. */
 const QuestionFooter = ({
   empty,
   held,
@@ -817,63 +818,36 @@ const QuestionFooter = ({
   backLabel,
 }: FooterProps) => (
   <div data-slot="question-tool-footer" {...stylex.props(styles.footer)}>
-    {held && heldReason !== undefined && heldReason !== "" ? (
-      <p
-        id={heldId}
-        data-slot="question-tool-held"
-        {...stylex.props(styles.held)}
-      >
-        {heldReason}
-      </p>
-    ) : null}
-    {onBack !== undefined && (
-      <PressPrimitive
-        onClick={() => {
-          onBack();
-        }}
-        pendingAnnouncement=""
-        render={(props: Record<string, unknown>) => (
-          <Button {...props} variant="ghost" size="sm" layout={styles.back}>
-            {backLabel}
-          </Button>
-        )}
-      />
-    )}
-    {onSkip !== undefined && (
-      <PressPrimitive
-        onClick={() => {
-          onSkip();
-        }}
-        pendingAnnouncement=""
-        render={(props: Record<string, unknown>) => (
-          <Button {...props} variant="ghost" size="sm">
-            {skipLabel}
-          </Button>
-        )}
-      />
-    )}
-    {/* Held, Send keeps its place in the keys' order (aria-disabled), so its reason is reached. */}
-    <PressPrimitive
-      onClick={onSubmit}
+    <StepFoot
+      size="sm"
+      keys={false}
+      onBack={onBack}
+      onNext={onSubmit}
+      finishLabel={submitLabel}
       disabled={empty || held}
-      focusableWhenDisabled={held}
-      aria-describedby={
-        held && heldReason !== undefined && heldReason !== ""
-          ? heldId
-          : undefined
+      note={
+        held && heldReason !== undefined && heldReason !== "" ? (
+          <span id={heldId} data-slot="question-tool-held">
+            {heldReason}
+          </span>
+        ) : undefined
       }
-      pendingAnnouncement=""
-      render={(props: Record<string, unknown>) => (
-        <Button
-          {...props}
-          variant="ink"
-          size="sm"
-          disabled={empty || held}
-          focusableWhenDisabled={held}
-        >
-          {submitLabel}
-        </Button>
-      )}
+      extra={
+        onSkip === undefined ? undefined : (
+          <PressPrimitive
+            onClick={() => {
+              onSkip();
+            }}
+            pendingAnnouncement=""
+            render={(props: Record<string, unknown>) => (
+              <Button {...props} variant="ghost" size="sm">
+                {skipLabel}
+              </Button>
+            )}
+          />
+        )
+      }
+      words={{ back: backLabel }}
     />
   </div>
 );
