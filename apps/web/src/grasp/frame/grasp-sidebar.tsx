@@ -3,7 +3,12 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useLocation, useMatchRoute } from "@tanstack/react-router";
+import {
+  Link,
+  useLocation,
+  useMatchRoute,
+  useNavigate,
+} from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useAgentSection } from "../../agents/agent-section.tsx";
@@ -378,6 +383,7 @@ export const useGraspSidebar = ({
   const [tab, setTab] = useState<SidebarView>("home");
   // What waits on the person: the Inbox view's list, and so the bell's
   // dot and the Inbox's count.
+  const navigate = useNavigate();
   const waitingItems = useWaitingItems(
     identity,
     identity.onboardingOnly !== true
@@ -426,8 +432,16 @@ export const useGraspSidebar = ({
             },
           ],
           tab,
+          // The switch is the one way in to the Inbox: choosing it opens
+          // the Inbox's page too, so there is something to see even when
+          // nothing waits and the view has no row to press.
           onTabChange: (next: string) => {
-            setTab(next === "inbox" ? "inbox" : "home");
+            if (next === "inbox") {
+              setTab("inbox");
+              void navigate({ to: "/inbox" });
+              return;
+            }
+            setTab("home");
           },
           tabsLabel: t`Views`,
         }
