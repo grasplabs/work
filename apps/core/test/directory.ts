@@ -26,7 +26,16 @@ const setDirectory = async (fields: Record<string, unknown>): Promise<void> => {
 export const directoryHolds = async (
   users: Record<string, unknown>[]
 ): Promise<void> => {
-  await setDirectory({ users, failAt: null });
+  await setDirectory({ users, failAt: null, loopAt: null });
+};
+
+/**
+ * Has Graph answer the page of the directory's reads that starts at offset
+ * `from` with a next link back to that same page, until `directoryHolds`
+ * is called again.
+ */
+export const directoryLoopsAt = async (from: number): Promise<void> => {
+  await setDirectory({ loopAt: from });
 };
 
 /**

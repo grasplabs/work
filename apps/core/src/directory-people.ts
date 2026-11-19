@@ -2,10 +2,12 @@ import { createAuditEvent } from "@grasp-os/shared/audit";
 import { directoryErrors } from "@grasp-os/shared/directory";
 import type { DirectoryConnection } from "@grasp-os/shared/directory";
 import { log } from "@grasp-os/shared/log";
+import { clockLeaseMs } from "@grasp-os/workerflow/clock";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedEventWithDetailWhere } from "./audit-outbox.ts";
+import { signInConfig } from "./auth/config.ts";
 import {
   directoryPeople,
   directoryReads,
@@ -31,7 +33,10 @@ import { connectionOf } from "./onboarding/directory.ts";
 // - Another tenant's person under the same ID: the tenant is compared too,
 //   and only the connection of the deployment's own tenant is read
 //   (onboarding/directory.ts `connectionOf`), each page refused unless it
-//   says that tenant.
+//   says the tenant the deployment's sign-in config names.
+// - A slow tie: object IDs are kept lower case where they are written (the
+//   sign-in's account, connect's read), so the tie compares them as they
+//   are, by `accounts_oid_idx`, one lookup a person.
 // - A read that failed or stopped part way: every page is read before
 //   anything is written, then the whole read is applied in one batch, one
 //   transaction. A failure records only itself (`directory_reads`): the
@@ -48,17 +53,18 @@ import { connectionOf } from "./onboarding/directory.ts";
 //   department and whether the account is on. Rows go with the first read
 //   that no longer lists the person.
 // - A directory too big for one batch: the people go to D1 as one JSON
-//   value, which D1 takes up to 2 MB (`d1ValueBytes`); a larger read is
-//   refused as `directory.too_large`, nothing applied, rather than cut
-//   short.
+//   value, which D1 takes up to 2 MB (`d1ValueBytes`), measured as sent;
+//   a larger read is refused as `directory.too_large`, nothing applied,
+//   rather than cut short.
+// - A read that never ends: it stops at the clock's lease on the task
+//   (`clockLeaseMs`), and at a next link the provider handed back before,
+//   failed as a whole. Every failure, D1's refusal of the batch too, is
+//   recorded (`directory_reads`), and nothing of the read is kept.
 
 const dayMs = 24 * 60 * 60 * 1000;
 
 /** The most D1 takes in one value (its limits page: "Maximum string, BLOB or table row size"). */
 const d1ValueBytes = 2_000_000;
-
-/** What an entry of the read's JSON holds beside its ID and department: its hash, quotes, commas, brackets and the flag. */
-const entryOverheadBytes = 64 + 12;
 
 /** The action the audit log records an applied read under. */
 const readAction = "directory.people_read";
@@ -73,45 +79,52 @@ interface Listed {
 }
 
 /**
- * Every page of `connection`, read through connect: the whole directory,
- * or a directory error. Refused as `directory.too_large` once what it
- * holds would no longer fit one D1 value.
+ * Every page of `connection`, read through connect: the whole directory
+ * of `tenant`, the deployment's own sign-in tenant, or a directory error;
+ * a page connect answers for any other tenant is refused. Bounded by what is real: the clock's lease on the
+ * task (`deadline`), past which it is refused as `directory.read_too_long`,
+ * and the provider's own end; a next link it handed back already is the
+ * provider failing, never read again.
  */
 const listedIn = async (
   env: Env,
-  connection: DirectoryConnection
+  connection: DirectoryConnection,
+  tenant: string,
+  deadline: number
 ): Promise<Listed> => {
   if (connection.status !== "active") {
     throw directoryErrors.create("directory.inactive");
   }
   const listed: Listed = {
-    tenant: connection.tenant,
+    tenant,
     people: [],
     disabled: [],
   };
-  let bytes = 0;
+  const followed = new Set<string>();
   let cursor: string | null = null;
   do {
+    if (Date.now() >= deadline) {
+      throw directoryErrors.create("directory.read_too_long");
+    }
     // oxlint-disable-next-line no-await-in-loop -- each read goes on from the last
     const read = await env.CONNECT.readDirectory({
       connectionId: connection.id,
       cursor,
     });
-    if (read.tenant.toLowerCase() !== connection.tenant.toLowerCase()) {
+    if (read.tenant.toLowerCase() !== listed.tenant) {
       throw directoryErrors.create("directory.other_tenant");
     }
     for (const { id, department } of read.people) {
       listed.people.push({ id, department });
-      bytes += id.length + new TextEncoder().encode(department).length;
     }
     listed.disabled.push(...read.disabled);
-    bytes += read.disabled.join("").length;
-    // Each entry's subject hash (64 characters) and JSON's own marks too.
-    const entries = listed.people.length + listed.disabled.length;
-    if (bytes + entries * entryOverheadBytes > d1ValueBytes) {
-      throw directoryErrors.create("directory.too_large");
-    }
     cursor = read.next;
+    if (cursor !== null) {
+      if (followed.has(cursor)) {
+        throw directoryErrors.create("directory.provider_failed");
+      }
+      followed.add(cursor);
+    }
   } while (cursor !== null);
   return listed;
 };
@@ -119,7 +132,10 @@ const listedIn = async (
 /** One entry of the JSON the batch reads: ID, department, turned on (1 or 0), erased subject's hash. */
 type Entry = [string, string, 0 | 1, string];
 
-/** `listed` as the batch's one JSON value. */
+/**
+ * `listed` as the batch's one JSON value, or `directory.too_large` when
+ * that is more than D1 takes in one value.
+ */
 const entriesOf = async (
   env: Env,
   kind: DirectoryKind,
@@ -136,7 +152,12 @@ const entriesOf = async (
     // oxlint-disable-next-line no-await-in-loop -- one hash at a time
     entries.push([id, "", 0, await hashOf(id)]);
   }
-  return JSON.stringify(entries);
+  const json = JSON.stringify(entries);
+  // The JSON as D1 is sent it, escapes and all, in bytes.
+  if (new TextEncoder().encode(json).length > d1ValueBytes) {
+    throw directoryErrors.create("directory.too_large");
+  }
+  return json;
 };
 
 /**
@@ -151,11 +172,11 @@ const apply = async (
   kind: DirectoryKind,
   connection: DirectoryConnection,
   listed: Listed,
+  json: string,
   startedAt: Date
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const run = crypto.randomUUID();
-  const json = await entriesOf(env, kind, listed);
   const claimed = sql`EXISTS (
     SELECT 1 FROM ${directoryReads}
     WHERE ${directoryReads.provider} = ${kind.provider} AND ${directoryReads.run} = ${run}
@@ -311,24 +332,40 @@ const readKind = async (
     return;
   }
   const connection = await connectionOf(env, kind.provider);
-  if (connection === undefined) {
+  const config = signInConfig(env);
+  const tenant =
+    config === undefined ? undefined : kind.tenantIn(config)?.toLowerCase();
+  if (connection === undefined || tenant === undefined) {
     return;
   }
   // Before the first page: a read that started later, whichever ends
-  // first, is the one that stands.
+  // first, is the one that stands. The clock started the task at `at`,
+  // and takes it for dead once its lease is over.
   const startedAt = new Date();
-  let listed: Listed;
+  const deadline = at.getTime() + clockLeaseMs;
   try {
-    listed = await listedIn(env, connection);
+    const listed = await listedIn(env, connection, tenant, deadline);
+    const json = await entriesOf(env, kind, listed);
+    if (Date.now() >= deadline) {
+      throw directoryErrors.create("directory.read_too_long");
+    }
+    await apply(env, kind, connection, listed, json, startedAt);
   } catch (error) {
+    // Whatever stopped it, the read is recorded as failed; one that isn't
+    // the directory's own (D1 refusing the batch, say) goes on to the
+    // clock's report too.
     const code = directoryErrors.codeOf(error);
+    await recordFailure(
+      env,
+      kind,
+      connection,
+      code ?? "directory.read_failed",
+      startedAt
+    );
     if (code === undefined) {
       throw error;
     }
-    await recordFailure(env, kind, connection, code, startedAt);
-    return;
   }
-  await apply(env, kind, connection, listed, startedAt);
 };
 
 /**

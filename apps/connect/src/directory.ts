@@ -222,19 +222,23 @@ const graphDisabled = (user: z.output<typeof graphUserSchema>): string[] =>
     ? [user.id.toLowerCase()]
     : [];
 
-/** Someone in Entra, as kept; none for a guest, a disabled account, or no name. */
+/**
+ * Someone in Entra, as kept; none for a guest or a disabled account. Who
+ * is listed is decided by the ID and whether the account is on, never by
+ * a name: one without a name is answered with an empty one, and a roster
+ * leaves it out itself.
+ */
 const graphPerson = (
   user: z.output<typeof graphUserSchema>
 ): DirectoryPerson | null => {
-  const name = textOf(user.displayName);
   if (
     !guidPattern.test(user.id) ||
     user.accountEnabled === false ||
-    user.userType?.toLowerCase() === "guest" ||
-    name === ""
+    user.userType?.toLowerCase() === "guest"
   ) {
     return null;
   }
+  const name = textOf(user.displayName);
   const manager = user.manager?.id ?? "";
   return {
     id: user.id.toLowerCase(),
@@ -253,19 +257,21 @@ const googleDisabled = (user: z.output<typeof googleUserSchema>): string[] =>
     ? [user.id]
     : [];
 
-/** Someone in Google's directory, as kept; none for a suspended or archived account, or no name. */
+/**
+ * Someone in Google's directory, as kept; none for a suspended or archived
+ * account. One without a name is answered with an empty one, as Entra's.
+ */
 const googlePerson = (
   user: z.output<typeof googleUserSchema>
 ): DirectoryPerson | null => {
-  const name = textOf(user.name?.fullName);
   if (
     !googleIdPattern.test(user.id) ||
     user.suspended === true ||
-    user.archived === true ||
-    name === ""
+    user.archived === true
   ) {
     return null;
   }
+  const name = textOf(user.name?.fullName);
   const organizations = user.organizations ?? [];
   const organization =
     organizations.find(({ primary }) => primary === true) ?? organizations[0];
@@ -550,10 +556,12 @@ export const lookUpInDirectory = async (
     }
     throw readFailure(error);
   }
-  // Someone else answered for the ID asked: nobody is taken for them.
+  // Someone else answered for the ID asked: nobody is taken for them; nor
+  // is an account with no name made anyone (channels/door.ts makes a
+  // member of whom this answers).
   const asked = provider.data === "microsoft-directory" ? id.toLowerCase() : id;
   return {
     tenant: connection.tenant,
-    person: person?.id === asked ? person : null,
+    person: person?.id === asked && person.name !== "" ? person : null,
   };
 };

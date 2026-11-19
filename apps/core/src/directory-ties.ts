@@ -1,3 +1,4 @@
+import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import type { DirectoryProvider } from "@grasp-os/shared/directory";
 import { and, eq, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -25,10 +26,17 @@ export interface DirectoryKind {
   provider: DirectoryProvider;
   /** The sign-in provider (auth/config.ts) whose accounts name its people. */
   signInProvider: string;
-  /** The column of such an account holding the provider's ID of its person. */
+  /**
+   * The column of an account holding the provider's ID of its person, lower
+   * case as written (auth.ts `keptClaimsOf`, connect's read): a sign-in's,
+   * which ties them, or another of theirs that carries the same ID (one the
+   * directory made from a Teams message), which only their erasure reads.
+   */
   signedInAs: SQLiteColumn;
   /** The subject erasure keeps of a person with provider ID `id` (erased-people.ts). */
   subjectOf: (id: string) => string;
+  /** The tenant the deployment signs people in from, which alone its directory may be. */
+  tenantIn: (config: SignInConfig) => string | undefined;
 }
 
 /**
@@ -40,6 +48,7 @@ const entra: DirectoryKind = {
   signInProvider: providerIds.entra,
   signedInAs: accounts.oid,
   subjectOf: entraSubject,
+  tenantIn: (config) => config.entra?.tenantId,
 };
 
 /** The directories read daily. Google's waits on proof that its sign-in `sub` is its directory's user ID. */
@@ -54,8 +63,8 @@ export const directoryKinds: readonly DirectoryKind[] = [entra];
 const tiedMember = (kind: DirectoryKind): SQL => sql`(
   SELECT ${accounts.userId} FROM ${accounts}
   WHERE ${accounts.providerId} = ${kind.signInProvider}
-    AND lower(${kind.signedInAs}) = ${directoryPeople.accountId}
-    AND lower(${accounts.verifiedTenant}) = lower(${directoryPeople.tenant})
+    AND ${kind.signedInAs} = ${directoryPeople.accountId}
+    AND lower(${accounts.verifiedTenant}) = ${directoryPeople.tenant}
     AND ${activeMember(accounts.userId)}
   ORDER BY ${accounts.userId}
   LIMIT 1
@@ -88,7 +97,7 @@ export const tieSignedIn = async (env: Env, userId: string): Promise<void> => {
       db,
       kind,
       sql`${directoryPeople.accountId} IN (
-        SELECT lower(${kind.signedInAs}) FROM ${accounts}
+        SELECT ${kind.signedInAs} FROM ${accounts}
         WHERE ${accounts.userId} = ${userId}
           AND ${accounts.providerId} = ${kind.signInProvider}
       )`
@@ -99,9 +108,11 @@ export const tieSignedIn = async (env: Env, userId: string): Promise<void> => {
 /**
  * Deletes the directory's rows of a person being erased (person-erasure.ts,
  * the identity area), in the batch that deletes their accounts, before it
- * does: the rows tied to `userId`, and those of every ID their sign-in
- * accounts name, tied or not (the tie lasts only while they are a member).
- * The read writes none of them again: the keyed hash of each subject stays
+ * does: the rows tied to `userId`, and those of every ID any account of
+ * theirs carries, whichever provider's, tied or not (the tie lasts only
+ * while they are a member, and is only ever a sign-in's; the directory
+ * made Teams writers members under an account of its own). The read
+ * writes none of them again: the keyed hash of each subject stays
  * (erased-people.ts).
  */
 export const forgetDirectoryPeople = (db: DrizzleD1Database, userId: string) =>
@@ -114,7 +125,7 @@ export const forgetDirectoryPeople = (db: DrizzleD1Database, userId: string) =>
         ) => sql`(${directoryPeople.provider} = ${kind.provider} AND ${directoryPeople.accountId} IN (
           SELECT lower(${kind.signedInAs}) FROM ${accounts}
           WHERE ${accounts.userId} = ${userId}
-            AND ${accounts.providerId} = ${kind.signInProvider}
+            AND ${kind.signedInAs} IS NOT NULL
         ))`
       )
     )

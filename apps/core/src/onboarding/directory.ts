@@ -141,7 +141,8 @@ export const readOnboardingDirectory = async (
     if (read.tenant.toLowerCase() !== connection.tenant.toLowerCase()) {
       throw directoryErrors.create("directory.other_tenant");
     }
-    people.push(...read.people);
+    // A roster names everyone it holds: an account with no name is none.
+    people.push(...read.people.filter(({ name }) => name !== ""));
     if (people.length > onboardingPeopleMax) {
       throw directoryErrors.create("directory.too_large");
     }

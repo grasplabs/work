@@ -58,8 +58,9 @@ export const directoryClient = clients.microsoftDirectory;
 /**
  * Where tests set who is in the tenant's directory, for the directory's
  * reads: POST `{ users }` as Graph has them (`/users` with `$select` and
- * `$expand=manager`), a hundred to a page, and `{ failAt }`, the offset of
- * a page Graph then fails with a server error (null for none).
+ * `$expand=manager`), a hundred to a page; `{ failAt }`, the offset of
+ * a page Graph then fails with a server error; and `{ loopAt }`, the
+ * offset of a page whose next link points back at itself (null for none).
  */
 export const directoryControlUrl = "https://graph-control.test/directory";
 
@@ -598,7 +599,7 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const directory = { users: [], failAt: null };
+const directory = { users: [], failAt: null, loopAt: null };
 const hibob = { key: null, employees: [] };
 /** Graph's users, as the directory's reads ask for them, a page at a time. */
 const directoryGraph = (url) => {
@@ -609,10 +610,12 @@ const directoryGraph = (url) => {
   if (directory.failAt === from) {
     return Response.json({ error: { code: "generalException" } }, { status: 500 });
   }
+  // The page whose next link a test has Graph point back at itself.
+  const after = directory.loopAt === from ? from : next;
   return Response.json({
     value: directory.users.slice(from, next),
-    ...(next < directory.users.length
-      ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/users?$top=" + top + "&$skiptoken=" + next }
+    ...(after < directory.users.length
+      ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/users?$top=" + top + "&$skiptoken=" + after }
       : {}),
   });
 };

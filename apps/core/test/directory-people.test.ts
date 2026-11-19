@@ -1,15 +1,22 @@
+import { clockLeaseMs } from "@grasp-os/workerflow/clock";
 import { env } from "cloudflare:workers";
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
+import { directoryKinds, tieDirectoryPeople } from "../src/directory-ties.ts";
+import { says } from "./agent-chat.ts";
 import { landingAt } from "./d1-landing.ts";
 import {
   connectedDirectory,
   directoryFailsAt,
   directoryHolds,
+  directoryLoopsAt,
   directoryUser as user,
 } from "./directory.ts";
 import { mockIdp } from "./idp.ts";
 import { runClockTask } from "./maintenance.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { acmeTenant, entraClient, otherTenant } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -19,6 +26,7 @@ import {
   whoami,
   withSignIn,
 } from "./sign-in.ts";
+import { messageFrom, post, teamsPerson, watched } from "./teams-door.ts";
 
 // The directory read once a day (GRA-2056, slice 1): everyone Entra lists,
 // by their object ID, tied to the member whose Microsoft sign-in named the
@@ -29,6 +37,7 @@ import {
 // coming back.
 
 const idp = mockIdp();
+watched();
 const dayMs = 24 * 60 * 60 * 1000;
 const task = "directory.people";
 
@@ -273,16 +282,16 @@ describe("the directory's daily read", () => {
     });
   });
 
-  it("refuses a directory too large for one D1 value as too large, rather than apply part of it", async () => {
+  it("refuses as too large a directory whose escaped JSON is over D1's value, though its text alone fits, and applies none of it", async () => {
     await connectedDirectory(idp);
     await directoryHolds([user()]);
     await readAt(nextDay());
     const good = await rows();
-    // Over D1's 2 MB a value: each entry its ID, an 80-character
-    // department and its hash.
-    const department = "d".repeat(80);
+    // Quotes and backslashes, each escaped in JSON: 80 characters of text,
+    // 160 of JSON. 9,000 such people are 1.7 MB of text and 2.5 MB of JSON.
+    const department = '"\\'.repeat(40);
     await directoryHolds(
-      Array.from({ length: 11_000 }, () => user({ department }))
+      Array.from({ length: 9000 }, () => user({ department }))
     );
 
     await readAt(nextDay());
@@ -291,6 +300,84 @@ describe("the directory's daily read", () => {
     expect({ rows: await rows(), failure: now?.failure }).toStrictEqual({
       rows: good,
       failure: "directory.too_large",
+    });
+  });
+
+  it("records a batch D1 refuses as the read's failure, and changes nothing", async () => {
+    await connectedDirectory(idp);
+    await directoryHolds([user()]);
+    await readAt(nextDay());
+    const good = await rows();
+    await directoryHolds([user(), user()]);
+    // D1 refusing the read's batch, as it would one past its limits.
+    const refusing = new Proxy(env.DB, {
+      get: (target, key) => {
+        if (key === "batch") {
+          return async (): Promise<never> =>
+            await Promise.reject(new Error("D1_ERROR: refused"));
+        }
+        const value: unknown = Reflect.get(target, key, target);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    const outcome = await readAt(nextDay(), { DB: refusing }).then(
+      () => "applied",
+      (error: unknown) => (error instanceof Error ? error.message : "refused")
+    );
+    const now = await status();
+
+    expect({
+      outcome,
+      rows: await rows(),
+      failure: now?.failure,
+    }).toStrictEqual({
+      outcome: "D1_ERROR: refused",
+      rows: good,
+      failure: "directory.read_failed",
+    });
+  });
+
+  it("fails the whole read when the directory repeats a next link, and applies none of it", async () => {
+    await connectedDirectory(idp);
+    await directoryHolds([user()]);
+    await readAt(nextDay());
+    const good = await rows();
+    await directoryHolds(Array.from({ length: 250 }, () => user()));
+    await directoryLoopsAt(100);
+
+    await readAt(nextDay());
+    const now = await status();
+
+    expect({ rows: await rows(), failure: now?.failure }).toStrictEqual({
+      rows: good,
+      failure: "directory.provider_failed",
+    });
+  });
+
+  it("fails the whole read once the clock's lease on it is over, applies none of it, and says so", async () => {
+    await connectedDirectory(idp);
+    await directoryHolds([user()]);
+    await readAt(nextDay());
+    const good = await rows();
+    await directoryHolds([user(), user()]);
+    // A read started more than a lease ago, the last one applied two days
+    // before that: due, but already past the time the clock gave it.
+    const at = new Date(Date.now() - clockLeaseMs - 60_000);
+    await env.DB.prepare(
+      "UPDATE directory_reads SET read_at = ? WHERE provider = 'microsoft-directory'"
+    )
+      .bind(at.getTime() - 2 * dayMs)
+      .run();
+
+    await readAt(at);
+    const now = await status();
+
+    expect({ rows: await rows(), failure: now?.failure }).toStrictEqual({
+      rows: good,
+      failure: "directory.read_too_long",
     });
   });
 
@@ -423,5 +510,133 @@ describe("the directory's daily read", () => {
       kept: [newer],
       status: { failure: null, failed: 0, people: 1, disabled: 0 },
     });
+  });
+
+  it("after the erasure of a member a Teams message made, who never signed in, keeps nothing of them, though the directory still lists them", async () => {
+    const oid = crypto.randomUUID();
+    await directoryHolds([
+      user({ id: oid, displayName: "Sanne de Vries", department: "Finance" }),
+    ]);
+    const { admin } = await connectedDirectory(idp);
+    await fakeProvider(says("Answered."));
+    await post(messageFrom(teamsPerson(oid)));
+    const made = await env.DB.prepare(
+      "SELECT user_id AS userId, provider_id AS provider FROM accounts WHERE oid = ?"
+    )
+      .bind(oid)
+      .all<{ userId: string; provider: string }>();
+    const [account] = made.results;
+    const userId = account?.userId ?? "";
+    await readAt(nextDay());
+    const listed = await rowOf(oid);
+
+    await admin.api.members.remove(userId);
+    await admin.api.members.erase(userId, "Sanne de Vries");
+    const erased = await rowOf(oid);
+    await readAt(nextDay());
+
+    expect({
+      accounts: made.results.map(({ provider }) => provider),
+      // Never tied: a tie is for a Microsoft sign-in alone.
+      listed: listed?.userId,
+      erased,
+      after: await rowOf(oid),
+    }).toStrictEqual({
+      accounts: ["entra-directory"],
+      listed: null,
+      erased: undefined,
+      after: undefined,
+    });
+  });
+
+  it("keeps an account with no name listed, as any account that is on", async () => {
+    await connectedDirectory(idp);
+    const nameless = crypto.randomUUID();
+    await directoryHolds([
+      user({ id: nameless, displayName: "", department: "Finance" }),
+    ]);
+
+    await readAt(nextDay());
+
+    await expect(rowOf(nameless)).resolves.toStrictEqual(
+      untiedRow(nameless, "Finance")
+    );
+  });
+
+  it("refuses a read whose pages say another tenant than the one the deployment signs in from, and changes nothing", async () => {
+    await connectedDirectory(idp);
+    await directoryHolds([user()]);
+    await readAt(nextDay());
+    const good = await rows();
+    await directoryHolds([user(), user()]);
+    // Connect answering for another tenant than its connection said.
+    const real = env.CONNECT;
+    const elsewhere = new Proxy(real, {
+      get: (target, key) => {
+        if (key === "readDirectory") {
+          return async (request: Parameters<typeof real.readDirectory>[0]) => ({
+            ...(await target.readDirectory(request)),
+            tenant: otherTenant,
+          });
+        }
+        const value: unknown = Reflect.get(target, key, target);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    await readAt(nextDay(), { CONNECT: elsewhere });
+    const now = await status();
+
+    expect({ rows: await rows(), failure: now?.failure }).toStrictEqual({
+      rows: good,
+      failure: "directory.other_tenant",
+    });
+  });
+
+  it("ties thousands of people to thousands of members in one read, each found by the object ID index", async () => {
+    await connectedDirectory(idp);
+    const count = 3000;
+    const people = Array.from({ length: count }, () => ({
+      oid: crypto.randomUUID(),
+      userId: crypto.randomUUID(),
+    }));
+    // Members who signed in with Microsoft, as their sign-ins keep them:
+    // too many to sign in one by one in a test.
+    const now = Date.now();
+    const listed = JSON.stringify(
+      people.map(({ oid, userId }) => [oid, userId])
+    );
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) SELECT value ->> 1, 'Someone', (value ->> 1) || '@acme.test', 0, ?1, ?1 FROM json_each(?2)"
+      ).bind(now, listed),
+      env.DB.prepare(
+        "INSERT INTO accounts (id, account_id, provider_id, user_id, oid, verified_tenant, created_at, updated_at) SELECT value ->> 1, 'sub-' || (value ->> 1), 'microsoft', value ->> 1, value ->> 0, ?1, ?2, ?2 FROM json_each(?3)"
+      ).bind(acmeTenant, now, listed),
+      env.DB.prepare(
+        "INSERT INTO members (id, organization_id, user_id, role, created_at) SELECT value ->> 1, 'organization', value ->> 1, 'user', ?1 FROM json_each(?2)"
+      ).bind(now, listed),
+    ]);
+    await directoryHolds(people.map(({ oid }) => user({ id: oid })));
+
+    await readAt(nextDay());
+
+    const kept = await rows();
+    const [entra] = directoryKinds;
+    const tie =
+      entra === undefined
+        ? undefined
+        : tieDirectoryPeople(drizzle(env.DB), entra, sql`1`).toSQL();
+    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${tie?.sql ?? ""}`)
+      .bind(...(tie?.params ?? []))
+      .all<{ detail: string }>();
+    expect({
+      tied: kept.filter(({ userId }) => userId !== null).length,
+      byIndex: plan.results.some(({ detail }) =>
+        detail.includes("accounts_oid_idx")
+      ),
+    }).toStrictEqual({ tied: count, byIndex: true });
   });
 });
