@@ -2606,12 +2606,18 @@ describe("erasing a person", () => {
       "SELECT key FROM mail_outbox WHERE lower(to_address) = ?",
       listed
     );
+    // Moved into the addresses kept out, and gone from where they waited.
+    const waiting = await onList(
+      "SELECT hash FROM left_addresses WHERE user_id = ?",
+      person.userId
+    );
 
     expect({
       kept: await listedAs(again.id),
       link: await store.linkOf(again.id),
       mail,
-    }).toStrictEqual({ kept: "", link: null, mail: [] });
+      waiting,
+    }).toStrictEqual({ kept: "", link: null, mail: [], waiting: [] });
   });
 
   it("keeps out an address of an entry that left the list for the account its link moved to", async () => {
