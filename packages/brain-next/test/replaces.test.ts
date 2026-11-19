@@ -357,6 +357,29 @@ describe("a memory that replaces earlier ones of its writer", () => {
     }).toStrictEqual({ same: true, refused: true });
   });
 
+  it("replaces a memory named twice once", async () => {
+    const at = setUp();
+    const old = await add(at, requirement("old", at.writer));
+    const replacing = await add(
+      at,
+      requirement("new", at.writer, [old.memory, old.memory]),
+      { entity: old.entity, reader: at.reader }
+    );
+    const replaced = await currentOf(old.entity, at.reader);
+    await shared().retireMemory({
+      memory: replacing.memory,
+      reader: at.reader,
+      writer: at.writer,
+      change: "undo",
+      undo: true,
+    });
+
+    expect({
+      replaced,
+      undone: await currentOf(old.entity, at.reader),
+    }).toStrictEqual({ replaced: ["new"], undone: ["old"] });
+  });
+
   it("refuses a replacement whose memory names its entity by a name, not by its id", async () => {
     const at = setUp();
     const old = await add(at, requirement("old", at.writer));
