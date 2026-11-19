@@ -22,6 +22,7 @@ import {
   directoryClient,
   documentsClient,
   googleConnectClient,
+  googleDirectoryClient,
   platformOpenAiKey,
   slackApp,
   teamsBot,
@@ -377,6 +378,9 @@ export const coreProject = (
                 // Stephen's eval on Google connects through it.
                 GOOGLE_CLIENT_ID: googleConnectClient.id,
                 GOOGLE_CLIENT_SECRET: googleConnectClient.secret,
+                // The directory's own Google client (connect's providers.ts).
+                GOOGLE_DIRECTORY_CLIENT_ID: googleDirectoryClient.id,
+                GOOGLE_DIRECTORY_CLIENT_SECRET: googleDirectoryClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
                 // The client's Teams bot, which Entra and the Bot Connector
                 // in test/connect-providers.ts know.
