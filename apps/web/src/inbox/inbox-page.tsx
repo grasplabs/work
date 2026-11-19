@@ -407,6 +407,7 @@ const ToDo = ({
   notLoaded,
   onSaid,
   foot,
+  tail,
 }: {
   items: readonly InboxItem[];
   chosen: string | undefined;
@@ -416,6 +417,8 @@ const ToDo = ({
   onSaid: (said: string) => void;
   /** What stands at the head of the list: the weekly report, once it is ready. */
   foot: ReactNode;
+  /** What stands quietly under the list: the week's report so far. */
+  tail: ReactNode;
 }) => {
   const { i18n } = useLingui();
   const navigate = useNavigate();
@@ -528,7 +531,7 @@ const ToDo = ({
   if (items.length === 0) {
     return (
       <div {...stylex.props(styles.list, styles.listEmpty)}>
-        <NoItems failed={failed} foot={foot} />
+        <NoItems failed={failed} foot={foot ?? tail} />
       </div>
     );
   }
@@ -550,6 +553,7 @@ const ToDo = ({
           onOpen={open}
           selected={shown ? selected : undefined}
         />
+        {tail}
       </div>
       {selected === undefined ? null : (
         <PagePanel
@@ -591,6 +595,7 @@ export const InboxPage = ({
   group,
   notLoaded,
   foot,
+  tail,
 }: {
   items: readonly InboxItem[];
   /** The item open, by its ID: the list's first when none is, or it waits no more. */
@@ -600,6 +605,8 @@ export const InboxPage = ({
   notLoaded: readonly Loaded<unknown>[];
   /** What stands at the head of the list: the weekly report, once it is ready. */
   foot?: ReactNode;
+  /** What stands quietly under the list: the week's report so far. */
+  tail?: ReactNode;
 }) => {
   const { t } = useLingui();
   const [said, setSaid] = useState("");
@@ -610,6 +617,7 @@ export const InboxPage = ({
         chosen={chosen}
         foot={foot}
         group={group ?? "all"}
+        tail={tail}
         items={items}
         notLoaded={notLoaded}
         onSaid={setSaid}

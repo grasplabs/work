@@ -71,7 +71,7 @@ const report: BoardReport = {
 const ready = Promise.resolve({ state: "ready" as const, data: report });
 
 /** The report's item on a page of its own, against a fake core. */
-const shown = async () => {
+const shown = async (shownProgramme: Programme = programme) => {
   const core = {
     withSession: async <T,>(
       action: (session: {
@@ -92,7 +92,7 @@ const shown = async () => {
     getParentRoute: () => rootRoute,
     path: "/",
   });
-  const Shown = () => <ReportItem programme={programme} report={ready} />;
+  const Shown = () => <ReportItem programme={shownProgramme} report={ready} />;
   page.update({ component: Shown });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -155,5 +155,17 @@ describe("the weekly report in the inbox", () => {
     expect(file).toContain("75% of this week's 4 runs needed nobody.");
     expect(file).toContain("<title>Acme week 7</title>");
     expect(file).toContain('<meta name="color-scheme" content="light dark">');
+  });
+
+  it("on a day the week has not closed, is the week so far, with when the report is ready", async () => {
+    await shown({
+      ...programme,
+      nextReport: { inDays: 4, week: 7, through: 3 },
+    });
+
+    const row = document.querySelector<HTMLButtonElement>(
+      "button[aria-label='Week 7 so far']"
+    );
+    expect(row?.textContent).toContain("Next report in 4 days");
   });
 });

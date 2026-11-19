@@ -9791,6 +9791,10 @@ msgstr "Página siguiente"
 msgid "Next person"
 msgstr "Siguiente persona"
 
+#: src/inbox/report-row.tsx
+msgid "Next report {inDays, plural, one {tomorrow} other {in # days}}"
+msgstr "Próximo informe {inDays, plural, one {mañana} other {en # días}}"
+
 #: src/activity/pending.tsx
 msgid "Next run {when} ({zone})"
 msgstr "Próxima ejecución {when} ({zone})"
@@ -17475,6 +17479,10 @@ msgstr "semana {week}"
 #: src/inbox/report-row.tsx
 msgid "Week {week}"
 msgstr "Semana {week}"
+
+#: src/inbox/report-row.tsx
+msgid "Week {week} so far"
+msgstr "Semana {week} hasta ahora"
 
 #: src/agents/agent-templates.ts
 msgid "Week in review"
