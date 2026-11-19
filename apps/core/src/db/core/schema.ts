@@ -4618,6 +4618,11 @@ export const workflowResources = sqliteTable(
      * owner turns it on.
      */
     askable: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The name people gave it, shown where `name` would be; null for none.
+     * `name` stays the key everything references.
+     */
+    title: text(),
   },
   (table) => [
     // Listing reads a person's own workflows by owner (`listWorkflowResources`).

@@ -16,6 +16,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { outsideApiOrigin } from "../../connect/test/outside-api-fake.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, appKind } from "../src/apps.ts";
@@ -63,7 +64,7 @@ import {
   killStore,
   restoreStore,
 } from "./brain-next-store-copy.ts";
-import { httpApiOrigin, httpApiReceivedUrl } from "./connect-providers.ts";
+import { httpApiReceivedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { askedModel, jsonWorkflowAppsOf } from "./json-workflow-apps.ts";
 import { workflowStateOf } from "./kept-state.ts";
@@ -1850,7 +1851,7 @@ describe(
       await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
       const { connectionId } = await admin.api.connections.createHttp({
         name: "Billing API",
-        origin: httpApiOrigin,
+        origin: outsideApiOrigin,
         pathPrefixes: ["/v1/invoices"],
         methods: ["GET", "POST"],
         credential: {

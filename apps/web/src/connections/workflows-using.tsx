@@ -1,3 +1,4 @@
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type {
   ConnectionWorkflow,
   ConnectionWorkflows,
@@ -113,7 +114,7 @@ const UsedByCount = ({
                     className="hover:bg-accent focus-visible:bg-accent flex flex-col gap-0.5 rounded-md px-2 py-1.5 outline-none"
                     workflow={workflow}
                   >
-                    <span className="truncate">{workflow.name}</span>
+                    <span className="truncate">{workflowLabel(workflow)}</span>
                   </WorkflowLink>
                 </li>
               ))}
@@ -192,7 +193,7 @@ const WorkflowList = ({
             className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 focus-visible:underline"
             workflow={workflow}
           >
-            {workflow.name}
+            {workflowLabel(workflow)}
           </WorkflowLink>
           <ChevronRightIcon
             aria-hidden="true"

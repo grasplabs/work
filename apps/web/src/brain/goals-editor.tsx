@@ -1,5 +1,6 @@
 import type { Goal } from "@grasp-os/shared/brain";
 import { brainGoalNoticeMaxLength } from "@grasp-os/shared/brain-records";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
@@ -257,7 +258,7 @@ const WorkflowsDialog = ({
                       }}
                     />
                     <label className="min-w-0 truncate text-sm" htmlFor={id}>
-                      {each.name}
+                      {workflowLabel(each)}
                     </label>
                   </li>
                 );

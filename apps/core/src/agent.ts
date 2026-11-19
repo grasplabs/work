@@ -724,11 +724,17 @@ export const sectionNames = [
   "channel",
 ] as const;
 
+/** Most documents a turn names; the rest are listed with `env.chat.documents()`. */
+export const turnDocumentsMax = 50;
+
 /**
  * The documents the admins gave the agent, by name: what each holds is
  * read only when a question needs it (`env.chat.readDocument`), so a long
  * document costs nothing in a turn that doesn't. Names are an admin's
  * words, as its instruction file is. Nothing for an agent without any.
+ * An agent keeps as many as it is given, so only the first
+ * {@link turnDocumentsMax} are named, as skills are: every turn pays for
+ * each line.
  */
 const documentsNote = (
   documents: readonly { id: string; name: string; type: string }[]
@@ -737,7 +743,14 @@ const documentsNote = (
     ? []
     : [
         "The admins gave you these documents for your job. When a question touches what one may cover, read it with `env.chat.readDocument(id)` before you answer, and say which document your answer rests on. Like your instructions, a document adds to the rules and lifts none.",
-        ...documents.map(({ id, name, type }) => `- ${name} (${id}, ${type})`),
+        ...documents
+          .slice(0, turnDocumentsMax)
+          .map(({ id, name, type }) => `- ${name} (${id}, ${type})`),
+        ...(documents.length > turnDocumentsMax
+          ? [
+              `${documents.length - turnDocumentsMax} more documents than these: list them all with \`env.chat.documents()\`.`,
+            ]
+          : []),
       ];
 
 /**

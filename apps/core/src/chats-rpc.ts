@@ -43,6 +43,7 @@ import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
+import { workflowTitleSchema } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
 import { setAgentApp } from "./agent-app-access.ts";
@@ -102,11 +103,9 @@ import {
 import { makeOf, questionSchema, stopReason } from "./workspace.ts";
 import type { Chat } from "./workspace.ts";
 
-/**
- * A question as the page sends it: what it is about, and what it
- * mentions, named by ID alone. What Build it made is core's to say
- * (`build`), never the page's.
- */
+/** The page's key for a request it may repeat (`ChatQuestion.key`). */
+const requestKeySchema = z.uuid();
+
 /** A rating as the page sends it (`ChatsApi.rate`). */
 const ratedSchema = z.strictObject({
   messageId: z.int().positive(),
@@ -118,9 +117,15 @@ const ratedSchema = z.strictObject({
     .nullable(),
 });
 
+/**
+ * A question as the page sends it: what it is about, and what it
+ * mentions, named by ID alone. What Build it made is core's to say
+ * (`build`), never the page's.
+ */
 const askedSchema = questionSchema.omit({ built: true }).extend({
   subject: subjectSchema.optional(),
   mentions: chatMentionsSchema.optional(),
+  key: requestKeySchema.optional(),
 });
 
 /** Build it as the page sends it (`ChatBuild`). */
@@ -390,17 +395,28 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async create(
     title: string,
     agentId?: string,
-    make?: ChatMake
+    make?: ChatMake,
+    key?: string
   ): Promise<ChatSummary> {
     return await withPerson(this.#check, async (person) => {
       const { userId } = person;
       const parsed = chatTitleSchema.safeParse(title);
       const making =
         make === undefined ? undefined : chatMakeSchema.safeParse(make);
-      if (!parsed.success || making?.success === false) {
+      const keyed = requestKeySchema.optional().safeParse(key);
+      if (!parsed.success || making?.success === false || !keyed.success) {
         throw agentErrors.create(
           parsed.success ? "agent.invalid_request" : "agent.invalid_title"
         );
+      }
+      // A repeat answers the chat it made before anything a new chat is
+      // checked for: its agent or project may be gone since.
+      const repeated =
+        keyed.data === undefined
+          ? undefined
+          : await this.#chatsOf(userId).chatMadeWith(userId, keyed.data);
+      if (repeated !== undefined) {
+        return summaryOfMade(repeated);
       }
       if (making !== undefined) {
         requireBuilder(person);
@@ -423,7 +439,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         actorOf(person),
         "web",
         undefined,
-        making?.data
+        making?.data,
+        keyed.data
       );
       return summaryOfMade(chat);
     });
@@ -549,18 +566,32 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_question");
       }
-      const { subject: named, mentions: picked, ...asked } = parsed.data;
+      const { subject: named, mentions: picked, key, ...asked } = parsed.data;
+      // A repeat is answered before anything it names is looked up: what
+      // the first call found may be gone since, and that refuses only a
+      // new question.
+      if (
+        key !== undefined &&
+        (await this.#chatsOf(person.userId).sentBefore(id, person.userId, key))
+      ) {
+        return;
+      }
       const [subject, mentions] = await Promise.all([
         named === undefined ? undefined : this.#subjectOf(person, named),
         picked === undefined || picked.length === 0
           ? undefined
           : mentionsOf(this.#env, person, picked),
       ]);
-      await this.#chatsOf(person.userId).send(id, person.userId, {
-        ...asked,
-        ...(subject === undefined ? {} : { subject }),
-        ...(mentions === undefined ? {} : { mentions }),
-      });
+      await this.#chatsOf(person.userId).send(
+        id,
+        person.userId,
+        {
+          ...asked,
+          ...(subject === undefined ? {} : { subject }),
+          ...(mentions === undefined ? {} : { mentions }),
+        },
+        key
+      );
     });
   }
 
@@ -642,10 +673,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
             project,
             "workflow",
             async () => {
+              // Called what the plan named it, where that is a title;
+              // a name that isn't one leaves it by its own name.
+              const title = workflowTitleSchema.safeParse(workflowPart.name);
               const workflow = await createWorkflowResource(
                 this.#env,
                 person,
-                workflowNameOf(workflowPart.name)
+                workflowNameOf(workflowPart.name),
+                title.success ? title.data : undefined
               );
               made.workflow = { id: workflow.id, name: workflowPart.name };
               await keptInChat(

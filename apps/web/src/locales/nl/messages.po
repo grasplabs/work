@@ -854,10 +854,6 @@ msgid "{name} edited it"
 msgstr "{name} heeft het bewerkt"
 
 #: src/agents/agent-documents.tsx
-msgid "{name} has {most} documents, the most an agent keeps. Remove one to add another."
-msgstr "{name} heeft {most} documenten, het meeste dat een agent bewaart. Verwijder er een om een andere toe te voegen."
-
-#: src/agents/agent-documents.tsx
 msgid "{name} has no documents."
 msgstr "{name} heeft geen documenten."
 
@@ -8929,6 +8925,7 @@ msgstr "Mijn versie van de App startte niet. Zoek uit waarom en los het op:"
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
+#: src/workflows/workflow-settings.tsx
 msgid "Name"
 msgstr "Naam"
 
@@ -10896,8 +10893,8 @@ msgid "PDF"
 msgstr "PDF"
 
 #: src/agents/agent-documents.tsx
-msgid "PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most {most} documents."
-msgstr "PDF, Word, Excel, Markdown, tekst, CSV of JSON, elk tot 10 MB. Hoogstens {most} documenten."
+msgid "PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each."
+msgstr "PDF, Word, Excel, Markdown, tekst, CSV of JSON, elk tot 10 MB."
 
 #: src/onboarding/document-drop.tsx
 msgid "PDF, Word, Excel, PowerPoint or text"
@@ -16727,6 +16724,10 @@ msgstr "Wat mensen vragen"
 #: src/agents/agent-page.tsx
 msgid "What people call it, one line on what it is for, and its picture. All three show where people pick an agent."
 msgstr "Hoe mensen hem noemen, één regel over waarvoor hij is, en zijn afbeelding. Alle drie staan waar mensen een agent kiezen."
+
+#: src/workflows/workflow-settings.tsx
+msgid "What people see instead of {name}."
+msgstr "Wat mensen zien in plaats van {name}."
 
 #: src/dashboard/report.ts
 msgid "What ran"

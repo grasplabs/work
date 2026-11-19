@@ -574,9 +574,10 @@ export const shownVisibly = (text: string): string =>
 
 /**
  * One line of plain text, as everything asked is: taken as written or
- * refused, never trimmed.
+ * refused, never trimmed. The one rule for a line a person reads as what
+ * it is, a workflow's title too (`workflowTitleSchema`).
  */
-const askLine = (max: number) =>
+export const askLine = (max: number) =>
   z
     .string()
     .max(max)
@@ -1144,6 +1145,12 @@ export interface ChatConnectionRequest {
 
 /** A question for the chat's agent, and the model to answer it with. */
 export interface ChatQuestion {
+  /**
+   * A UUID the page makes for this question, so it may send it again
+   * when it never heard that core took it: the same key is the same
+   * question, asked once. Good for a day.
+   */
+  key?: string;
   text: string;
   /** One of `ChatsApi.models()`. */
   model: string;
@@ -1251,12 +1258,15 @@ export interface ChatsApi {
    * Makes a chat with the agent `agentId`, one of `agents()`, or with
    * the company's first agent when none is named. An agent the person may
    * not talk to is `agent.unknown`, as one the company doesn't have. From
-   * "Make something", with what to make (`make`), which it keeps.
+   * "Make something", with what to make (`make`), which it keeps. With
+   * `key`, a UUID the page makes for this chat, a repeat within a day
+   * answers the chat the first call made and makes none.
    */
   create: (
     title: string,
     agentId?: string,
-    make?: ChatMake
+    make?: ChatMake,
+    key?: string
   ) => Promise<ChatSummary>;
   /**
    * The person's chat for an App or a workflow, where its agent changes it

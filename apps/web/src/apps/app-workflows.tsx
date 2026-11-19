@@ -1,5 +1,6 @@
 import type { ViewedApp } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type {
   AppWorkflowBinding,
   WorkflowResource,
@@ -115,7 +116,7 @@ const BindDialog = ({
   };
   const workflowItems = workflows.map((each) => ({
     value: each.id,
-    label: each.name,
+    label: workflowLabel(each),
   }));
   return (
     <Dialog
@@ -203,7 +204,9 @@ const BindingsView = ({
 }) => {
   const [binding, setBinding] = useState<AppWorkflowBinding | null>(null);
   const [drafted, setDrafted] = useState(false);
-  const names = new Map(workflows.map((each) => [each.id, each.name]));
+  const names = new Map(
+    workflows.map((each) => [each.id, workflowLabel(each)])
+  );
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-sm font-medium">

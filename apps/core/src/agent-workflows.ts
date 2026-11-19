@@ -81,6 +81,8 @@ const followsWorkflow =
 export interface AgentIndependentWorkflow {
   id: string;
   name: string;
+  /** The name people gave it, to call it by; null for none. `name` is its key. */
+  title: string | null;
   /** The live version; null before the first is published. */
   currentVersion: number | null;
   /** The person's role in it. */
@@ -135,9 +137,9 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
       method: "workflows.independent",
       read: async (person, permissions) => {
         const listed = await listWorkflowResources(this.env, person);
-        return listed.flatMap(({ id, name, currentVersion, role }) =>
+        return listed.flatMap(({ id, name, title, currentVersion, role }) =>
           followsWorkflow(id)(permissions)
-            ? [{ id, name, currentVersion, role }]
+            ? [{ id, name, title, currentVersion, role }]
             : []
         );
       },
@@ -255,9 +257,11 @@ workflows: {
   offer(workflow: string, args: unknown): Promise<{ offer: string; workflow: string; version: number }>;
   /**
    * The independent workflows (env.workflowBuild) you may follow, of those
-   * the person has a role in.
+   * the person has a role in. \`title\` is the name people gave one, to
+   * call it by when you speak of it; null for none. A workflow is still
+   * referenced by its \`id\` and \`name\`, never by its title.
    */
-  independent(): Promise<{ id: string; name: string; currentVersion: number | null; role: "user" | "builder" }[]>;
+  independent(): Promise<{ id: string; name: string; title: string | null; currentVersion: number | null; role: "user" | "builder" }[]>;
   /**
    * An independent workflow's runs, newest first, at most 50: every run
    * for its builders, the person's own for a user. Their state, never what

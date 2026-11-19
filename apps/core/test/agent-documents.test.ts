@@ -1,7 +1,9 @@
-import { agentDocumentsMax } from "@grasp-os/shared/agents";
+import { agentDocumentsTextMaxBytes } from "@grasp-os/shared/agents";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { turnDocumentsMax } from "../src/agent.ts";
+import { chatFileTextMaxBytes } from "../src/chat-files.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { codeResults, codeStep, model, says } from "./agent-chat.ts";
@@ -14,8 +16,9 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // text, and the agent is told it by name and reads it in the chats it
 // answers. These start from the ways it can fail: someone who isn't the
 // company's own admin adding, listing or removing one; a document told
-// to, or read by, another agent; more documents than an agent keeps, two
-// under one name, or a file that isn't what its name says, taken; a
+// to, or read by, another agent; two under one name, or a file that isn't
+// what its name says, taken; every one of many named in each turn; more
+// text kept than an agent holds, by files added one by one or at once; a
 // deleted agent's documents left behind, or one added to it after; a
 // change unrecorded, or recorded with the file's name or words.
 
@@ -142,7 +145,7 @@ describe("an agent's documents", slow, () => {
     });
   });
 
-  it("take only files that are what their names say, one under each name, and no more than an agent keeps", async () => {
+  it("take only files that are what their names say, one under each name, as many as an agent is given, and a turn names the first", async () => {
     const admin = await signedInApi(idp, "admin");
     const claire = await agentFor(admin, "Claire");
     const add = async (name: string, bytes: Uint8Array) =>
@@ -165,20 +168,21 @@ describe("an agent's documents", slow, () => {
       again: await add("a.md", utf8("a")),
       sameName: await add("a.md", utf8("another")),
     };
-    // All at once: the insert itself holds the most an agent keeps.
-    const filled = await Promise.all(
+    // All at once, and more than a turn names.
+    const more = await Promise.all(
       Array.from(
-        { length: agentDocumentsMax - 1 },
+        { length: turnDocumentsMax },
         async (_each, index) =>
           await add(`more-${index}.md`, utf8(`more ${index}`))
       )
     );
+    const listed = await admin.api.connections.agentDocuments(claire.id);
 
     expect({
       outcomes,
-      filled: filled.every((ended) => ended === "ok"),
-      past: await add("one-too-many.md", utf8("one too many")),
-      kept: await keptFor(claire.id),
+      more: more.every((ended) => ended === "ok"),
+      listed: listed.length,
+      oldestFirst: listed[0]?.name,
     }).toStrictEqual({
       outcomes: {
         notPdf: "agent.document_unsupported",
@@ -189,9 +193,74 @@ describe("an agent's documents", slow, () => {
         again: "ok",
         sameName: "agent.document_named",
       },
-      filled: true,
-      past: "agent.too_many_documents",
-      kept: agentDocumentsMax,
+      more: true,
+      listed: turnDocumentsMax + 1,
+      oldestFirst: "a.md",
+    });
+
+    // A turn names the first of them, and the agent's code lists them all.
+    const code =
+      "export default async (self, env) => (await env.chat.documents()).length;";
+    const provider = await fakeProvider(codeStep(code), says("Done."));
+    const chat = await admin.api.chats.create("With Claire", claire.id);
+    await admin.api.chats.send(chat.id, { text: "What do you have?", model });
+    await settled(admin, chat.id);
+    const [counted] = await codeResults(objectOf(admin), chat.id);
+    const asked = JSON.stringify(provider.requests[0]?.body);
+    const named = listed.filter(({ id }) => asked.includes(id));
+
+    expect({
+      named: named.length,
+      first: named[0]?.name,
+      lastNamed: asked.includes(listed.at(-1)?.id ?? ""),
+      counted: counted?.text.endsWith(String(turnDocumentsMax + 1)),
+    }).toStrictEqual({
+      named: turnDocumentsMax,
+      first: "a.md",
+      lastNamed: false,
+      counted: true,
+    });
+  });
+
+  it("hold together no more text than an agent keeps, however they are added, until one is removed", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const claire = await agentFor(admin, "Claire");
+    const add = async (name: string, bytes: Uint8Array) =>
+      await outcome(
+        admin.api.connections.addAgentDocument(claire.id, { name, bytes })
+      );
+    // Each as much text as one document holds.
+    const large = utf8("a".repeat(chatFileTextMaxBytes));
+    const room = agentDocumentsTextMaxBytes / chatFileTextMaxBytes;
+
+    // All at once, one more than there is room for: the insert itself
+    // holds the most, so they never pass together.
+    const filled = await Promise.all(
+      Array.from(
+        { length: room + 1 },
+        async (_each, index) => await add(`large-${index}.txt`, large)
+      )
+    );
+    const past = await add("small.txt", utf8("one more word"));
+    const keptWhenFull = await admin.api.connections.agentDocuments(claire.id);
+    const [first] = keptWhenFull;
+    if (first === undefined) {
+      throw new Error("No document was kept");
+    }
+    await admin.api.connections.removeAgentDocument(claire.id, first.id);
+
+    expect({
+      added: filled.filter((ended) => ended === "ok").length,
+      refused: filled.filter((ended) => ended !== "ok"),
+      past,
+      keptWhenFull: keptWhenFull.length,
+      afterRemoving: await add("small.txt", utf8("one more word")),
+    }).toStrictEqual({
+      added: room,
+      refused: ["agent.documents_full"],
+      past: "agent.documents_full",
+      keptWhenFull: room,
+      afterRemoving: "ok",
     });
   });
 

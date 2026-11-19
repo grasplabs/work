@@ -1,4 +1,5 @@
 import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowTitleMaxLength } from "@grasp-os/shared/workflow-resources";
 import type {
   SteeredWrite,
   WorkflowDraft,
@@ -17,14 +18,17 @@ import type { ReactNode } from "react";
 
 import { DraftHistory } from "../drafts/draft-history.tsx";
 import { Sharing } from "../drafts/sharing.tsx";
+import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { SavedField } from "../settings/saved-field.tsx";
 import {
   SettingsBody,
   SettingsRow,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
+import { useCoreAction } from "../use-core-action.ts";
 import type { Names } from "./activity-bar.tsx";
 import { AskStephen } from "./ask-stephen.tsx";
 import { ProcessBadge, ProcessPicker } from "./business-process.tsx";
@@ -149,6 +153,46 @@ const OwnedBy = ({ owner, names }: { owner: string; names: Names }) => {
   return name === undefined ? t`Owned by someone else` : t`Owned by ${name}`;
 };
 
+const titleFieldId = "workflow-title";
+
+/**
+ * The name people see for the workflow, as its builders give it: saved as
+ * the field is left, and emptied to show its own name again. Core checks
+ * they may, and audits it.
+ */
+const TitleField = ({
+  resource,
+  onChange,
+}: {
+  resource: Pick<WorkflowResource, "id" | "title">;
+  onChange: () => void;
+}) => {
+  const { busy, failure, run } = useCoreAction();
+  const save = async (title: string | null): Promise<void> => {
+    const changed = await run(
+      async (session) =>
+        await session.workflowResources.setTitle(resource.id, title)
+    );
+    if (changed !== undefined) {
+      onChange();
+    }
+  };
+  return (
+    <span className="flex flex-col gap-1">
+      <SavedField
+        disabled={busy}
+        id={titleFieldId}
+        maxLength={workflowTitleMaxLength}
+        onSave={(title) => {
+          void save(title);
+        }}
+        value={resource.title}
+      />
+      <ErrorText>{failure}</ErrorText>
+    </span>
+  );
+};
+
 /** What the workflow's page read, and what changes it, as its sections need. */
 export interface WorkflowRead {
   resource: WorkflowResource;
@@ -186,10 +230,25 @@ const General = ({
   const router = useRouter();
   const builder = resource.role === "builder";
   const owner = resource.owner === names.me;
+  const { name } = resource;
   return (
     <>
       <SettingsSection title={t`About`}>
         <SettingsBody>
+          {builder ? (
+            <SettingsRow
+              description={t`What people see instead of ${name}.`}
+              htmlFor={titleFieldId}
+              label={t`Name`}
+            >
+              <TitleField
+                onChange={() => {
+                  void router.invalidate();
+                }}
+                resource={resource}
+              />
+            </SettingsRow>
+          ) : null}
           <SettingsRow label={t`Business process`}>
             {builder ? (
               <ProcessPicker

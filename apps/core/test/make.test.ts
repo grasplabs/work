@@ -341,6 +341,9 @@ describe("Make something", { timeout: 120_000 }, () => {
     const after = await madeBy(builder);
     const messages = await messagesOf(stub, chat.id, builder.userId);
     const told = JSON.stringify(provider.requests.at(-1)?.body);
+    const built = await builder.api.workflowResources.get(
+      made.workflow?.id ?? ""
+    );
     const chatOf = async (subject: Subject) => {
       const found = await builder.api.chats.forSubject(subject);
       return found?.id;
@@ -353,6 +356,8 @@ describe("Make something", { timeout: 120_000 }, () => {
       },
       apps: after.apps.filter((id) => !before.apps.includes(id)),
       workflows: after.workflows.filter((id) => !before.workflows.includes(id)),
+      // Called what the plan named it, beside the name core gave it.
+      titled: built.title,
       said: messages.flatMap((message) =>
         message.role === "user"
           ? [{ text: message.text, built: message.built }]
@@ -371,6 +376,7 @@ describe("Make something", { timeout: 120_000 }, () => {
       made: { app: "Month-end close", workflow: "Late reminder" },
       apps: [made.app?.id],
       workflows: [made.workflow?.id],
+      titled: "Late reminder",
       said: [
         { text: "Keep track of the month-end close.", built: undefined },
         { text: "Build it", built: { plan: callId, ...made } },

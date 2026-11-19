@@ -88,11 +88,11 @@ describe(workflowAppsOf, () => {
       uses: [
         {
           connectionId: "c-hubspot",
-          workflows: [{ id: "w1", name: "invoices" }],
+          workflows: [{ id: "w1", name: "invoices", title: null }],
         },
         {
           connectionId: "c-microsoft",
-          workflows: [{ id: "w2", name: "other" }],
+          workflows: [{ id: "w2", name: "other", title: null }],
         },
       ],
       currentVersion: 2,
@@ -117,11 +117,11 @@ describe(workflowAppsOf, () => {
       uses: [
         {
           connectionId: "c-hubspot",
-          workflows: [{ id: "w1", name: "invoices" }],
+          workflows: [{ id: "w1", name: "invoices", title: null }],
         },
         {
           connectionId: "c-hubspot-old",
-          workflows: [{ id: "w2", name: "other" }],
+          workflows: [{ id: "w2", name: "other", title: null }],
         },
       ],
       currentVersion: 2,

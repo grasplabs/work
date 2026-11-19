@@ -985,7 +985,8 @@ describe("chats", () => {
     await settled(first);
     // The next question is under way, its answer streaming, when the
     // object restarts.
-    await ann.chats.send(chat.id, { text: "And this?", model });
+    const again = { key: crypto.randomUUID(), text: "And this?", model };
+    await ann.chats.send(chat.id, again);
     await vi.waitFor(
       () => {
         expect(first.now()?.partial).not.toBeNull();
@@ -1004,6 +1005,9 @@ describe("chats", () => {
     };
     await restart();
     await restart();
+    // Sent again with its key, as a page that never heard it was taken:
+    // the same question, still being answered, not a second one.
+    await ann.chats.send(chat.id, again);
     const after = await follow(ann.chats, chat.id);
     await vi.waitFor(
       () => {
@@ -1033,6 +1037,99 @@ describe("chats", () => {
       running: true,
       listed: [{ id: chat.id, title: "Durable", running: true }],
     });
+  });
+
+  it("take a question sent again with its key once, and one refused before it started again", async () => {
+    const ann = await person();
+    await answering(ann, says("Noted."), says("Again."), says("Here."));
+    const chat = await ann.chats.create("Repeated");
+    const follower = await follow(ann.chats, chat.id);
+    const key = crypto.randomUUID();
+    const refusedKey = crypto.randomUUID();
+
+    // A model the company doesn't offer refuses it before it starts, and
+    // its key stays free for the same question sent right.
+    await expect(
+      outcome(
+        ann.chats.send(chat.id, {
+          key: refusedKey,
+          text: "Any news?",
+          model: "openai/not-a-model",
+        })
+      )
+    ).resolves.not.toBe("resolved");
+
+    // Twice at once, as a page that retries early, and once more after
+    // the answer: one question, one answer.
+    const question = { key, text: "Any news?", model };
+    await Promise.all([
+      ann.chats.send(chat.id, question),
+      ann.chats.send(chat.id, question),
+    ]);
+    await settled(follower);
+    // What a repeat names is not looked up again: it may be gone since.
+    await ann.chats.send(chat.id, {
+      ...question,
+      mentions: [{ kind: "agent", id: crypto.randomUUID() }],
+    });
+    expect(
+      follower.messages().map(({ role, text }) => ({ role, text }))
+    ).toStrictEqual([
+      { role: "user", text: "Any news?" },
+      { role: "assistant", text: "Noted." },
+    ]);
+
+    await ann.chats.send(chat.id, { ...question, key: refusedKey });
+    await vi.waitFor(() => {
+      expect(follower.messages().at(-1)?.text).toBe("Again.");
+    });
+    // Another chat's key says nothing of a question here.
+    const other = await ann.chats.create("Elsewhere");
+    await expect(outcome(ann.chats.send(other.id, question))).resolves.toBe(
+      "agent.invalid_question"
+    );
+    // A key kept for a question a restart then lost, before anything of
+    // it was kept: sent again, it is asked, not answered for.
+    const lost = crypto.randomUUID();
+    await runInDurableObject(objectOf(ann), (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_request_keys (kind, key, chat_id, at) VALUES ('send', ?, ?, ?)",
+        lost,
+        other.id,
+        Date.now()
+      );
+    });
+    const elsewhere = await follow(ann.chats, other.id);
+    await ann.chats.send(other.id, { key: lost, text: "Still there?", model });
+    await settled(elsewhere);
+    expect(elsewhere.messages().at(-1)?.text).toBe("Here.");
+    // A malformed key is no key.
+    await expect(
+      outcome(ann.chats.send(chat.id, { ...question, key: "again" }))
+    ).resolves.toBe("agent.invalid_question");
+  });
+
+  it("are made once for a key, however often the page asks", async () => {
+    const ann = await person();
+    const ben = await person();
+    const key = crypto.randomUUID();
+    const made = await ann.chats.create("Travel", undefined, undefined, key);
+    // Nor is the agent a repeat names looked up again: gone since, it
+    // would refuse only a new chat.
+    await expect(
+      ann.chats.create("Travel", crypto.randomUUID(), undefined, key)
+    ).resolves.toStrictEqual(made);
+    await expect(ann.chats.list()).resolves.toHaveLength(1);
+    // Someone else's same key is their own chat.
+    const other = await ben.chats.create("Travel", undefined, undefined, key);
+    expect(other.id).not.toBe(made.id);
+    // Deleted, its key is free again.
+    await ann.chats.remove(made.id);
+    const next = await ann.chats.create("Travel", undefined, undefined, key);
+    expect(next.id).not.toBe(made.id);
+    await expect(
+      outcome(ann.chats.create("Travel", undefined, undefined, "again"))
+    ).resolves.toBe("agent.invalid_request");
   });
 
   it("keep what their person thought of an answer, for that person alone", async () => {

@@ -73,7 +73,7 @@ const shown = async (
     component: () => (
       <DeleteWorkflow
         admin={admin}
-        resource={{ id: "workflow-1", name: "invoices", role }}
+        resource={{ id: "workflow-1", name: "invoices", title: null, role }}
       />
     ),
   });

@@ -180,7 +180,7 @@ export const connectionWorkflows = async (
   return [...uses].flatMap(([connectionId, using]) => {
     const workflows: ConnectionWorkflow[] = resources
       .filter(({ id }) => using.has(id))
-      .map(({ id, name }) => ({ id, name }));
+      .map(({ id, name, title }) => ({ id, name, title }));
     return workflows.length === 0 ? [] : [{ connectionId, workflows }];
   });
 };
