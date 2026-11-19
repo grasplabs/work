@@ -1,4 +1,3 @@
-import { canBuild } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -22,7 +21,7 @@ const AppsPage = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Apps` }]} />
-      <AppsOverview builds={canBuild(identity.role)} listed={page.data} />
+      <AppsOverview listed={page.data} viewer={identity} />
     </>
   );
 };

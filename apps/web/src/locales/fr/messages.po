@@ -3018,6 +3018,7 @@ msgstr "Applications dans lesquelles il travaille"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "Archive"
@@ -3036,7 +3037,6 @@ msgid "Archived"
 msgstr "Archivées"
 
 #: src/apps/app-status.tsx
-#: src/apps/apps-overview.tsx
 msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archivée"
@@ -10011,6 +10011,7 @@ msgstr "Pas encore de responsable"
 msgid "No page yet"
 msgstr "Pas encore de page"
 
+#: src/apps/apps-overview.tsx
 #: src/frame/part-words.tsx
 msgid "No preview yet"
 msgstr "Pas encore d’aperçu"
@@ -11045,11 +11046,11 @@ msgid "Only you see it. Tell Grasp in the chat what to change, then share it wit
 msgstr "Vous seul la voyez. Dites à Grasp dans le chat ce qu’il faut changer, puis partagez-la avec votre équipe."
 
 #: src/apps/app-status.tsx
-#: src/apps/apps-overview.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Vous seul voyez ceci"
 
+#: src/apps/apps-overview.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/connections/overview-lists.tsx
 #: src/connections/request-app-dialog.tsx
@@ -11129,6 +11130,7 @@ msgstr "Ouvrir Fichiers et applications"
 
 #: src/apps/app-page.tsx
 #: src/apps/app-workspace.tsx
+#: src/apps/apps-overview.tsx
 msgid "Open full page"
 msgstr "Ouvrir en pleine page"
 
@@ -12811,6 +12813,7 @@ msgstr "Ressources"
 #: src/apps/app-history.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
+#: src/apps/apps-overview.tsx
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Restaurer"
@@ -18736,7 +18739,6 @@ msgid "Your team has this one"
 msgstr "Votre équipe a celle-ci"
 
 #: src/apps/app-status.tsx
-#: src/apps/apps-overview.tsx
 msgid "Your team uses it"
 msgstr "Votre équipe l’utilise"
 

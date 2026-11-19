@@ -112,11 +112,11 @@ test("a builder creates a table and its fields in the Data view, and sees them i
     page.getByRole("navigation", { name: "Tables" }).getByText("tasks")
   ).toBeVisible();
 
-  // The draft as the workspace shows it: ready to share, previewed as
+  // The draft as the workspace shows it: ready to publish, previewed as
   // the App's own working version, and its schema generated from the
   // table just made.
   await expect(
-    page.getByRole("button", { name: "Share with your team" })
+    page.getByRole("button", { name: "Publish", exact: true })
   ).toBeEnabled(read);
   await page
     .getByRole("navigation", { name: "Workspace views" })
