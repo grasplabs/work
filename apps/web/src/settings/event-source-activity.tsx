@@ -71,7 +71,7 @@ const Refusals = ({
         return t`${plural(count, { one: "# delivery refused in the last seven days: its webhook-id came before with another event.", other: "# deliveries refused in the last seven days: their webhook-id came before with another event." })}`;
       }
       case "busy": {
-        return t`${plural(count, { one: "# delivery told to try again in the last seven days: a workflow it starts had no room for another run then.", other: "# deliveries told to try again in the last seven days: a workflow they start had no room for another run then." })}`;
+        return t`${plural(count, { one: "# delivery told to try again in the last seven days: a workflow it starts or a run waiting for it couldn't take it then.", other: "# deliveries told to try again in the last seven days: a workflow they start or a run waiting for them couldn't take them then." })}`;
       }
       default: {
         return reason satisfies never;

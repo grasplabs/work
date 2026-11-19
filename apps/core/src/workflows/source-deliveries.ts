@@ -48,7 +48,7 @@ import { triggersOnSource } from "../trigger-resources.ts";
 //   is unauthenticated input: no body, header, signature or sender's
 //   address of one is written anywhere here. What it adds to is a count
 //   whose key is ours alone: the source the URL's token resolved to, one
-//   of four reasons core names (`eventSourceRefusalReasons`) and the hour.
+//   of the reasons core names (`eventSourceRefusalReasons`) and the hour.
 //   Nothing a sender sends is part of a key or a value.
 // - An unauthenticated sender flooding rows. Refused deliveries are one
 //   row for each source, reason and hour, however many came: at most the
@@ -68,8 +68,18 @@ import { triggersOnSource } from "../trigger-resources.ts";
 //   (it timed out, say) is told 202 again and starts nothing anew, though
 //   each trigger says `started` of the run it already has. A delivery is
 //   kept under the hash of its source and `webhook-id` (what the audit
-//   log names it by), once: the retry leaves the first row and the counts
-//   as they are, so nobody reads two runs into one.
+//   log names it by), once: the retry leaves the first row's time, type
+//   and data and the counts as they are, so nobody reads two runs into
+//   one. Only its number of triggers started may rise, to what the retry
+//   says: on a retry every trigger with a run of it says `started`, so
+//   one that got a trigger since (added and approved, then resent) shows
+//   the run it started. A source's ID is a UUID of core's own
+//   (event-sources.ts), with no `:`, so the hash's `webhook:<source>:<id>`
+//   reads one way only. A sender that reuses a `webhook-id` for an event
+//   of another type is told 202 and may start that type's triggers: its
+//   row stays the first event's, its number the most any one delivery of
+//   the ID started. Once the row expired or was trimmed, the same ID is
+//   listed anew.
 // - A sender holding the secret sending a lot. Each accepted delivery is
 //   one row, and a source holds its newest `perSource` at most, trimmed in
 //   the batch that writes one, so a source's rows and payloads (each
@@ -96,11 +106,14 @@ import { triggersOnSource } from "../trigger-resources.ts";
 // - Reading across sources by ID. A delivery is read by its source and its
 //   ID together, in one condition: a delivery of another source is
 //   answered as one that isn't there, and audits nothing.
-// - A signed delivery that fails. One too large, not an event, in
-//   conflict with an earlier one of its `webhook-id` or told to try again
-//   is counted by a reason of its own (`too_large`, `body`, `conflict`,
-//   `busy`), as the likeliest mistakes of a sender being set up; its body
-//   is kept no more than an unsigned one's.
+// - A delivery that fails in other ways, the likeliest mistakes of a
+//   sender being set up. Counted before the signature is checked, so by
+//   anyone who knows the URL: `revoked`, `headers` and `too_large` (a
+//   body past the limit is never read whole, so never verified); counted
+//   for the signature itself: `signature`. Counted only once it is
+//   signed: `body` (not an event), `conflict` (its `webhook-id` came
+//   before with another event), `busy` (told to try again) and `rotated`.
+//   None keeps the body, signed or not.
 // - A revoked or rotated secret. A delivery to a revoked secret, or one
 //   whose secret changed as it was admitted, is refused as before and
 //   counted (`revoked`, `rotated`). What the source accepted before stays
@@ -192,10 +205,11 @@ const trimmed = (db: DrizzleD1Database, source: string) =>
 
 /**
  * Keeps a delivery a source accepted, and counts it, once by its ID: a
- * sender's retry of a delivery already listed (the same `webhook-id`,
- * which started nothing anew) leaves the first as it is and counts
- * nothing. Never throws: the delivery was taken whatever comes of
- * recording it.
+ * sender's retry of a delivery already listed (the same `webhook-id`)
+ * leaves the first as it is and counts nothing, but for its number of
+ * triggers started, raised to the retry's when that is more (a trigger
+ * added since started its run). Never throws: the delivery was taken
+ * whatever comes of recording it.
  */
 export const recordDelivery = async (
   env: Env,
@@ -208,6 +222,17 @@ export const recordDelivery = async (
       keptRow(db, { ...kept, test: false }, now).onConflictDoNothing(),
       // Only when the row before it was written: `changes()` is its.
       counted(db, kept.source, "accepted", now, sql`changes() > 0`),
+      db
+        .update(eventSourceDeliveries)
+        .set({
+          triggers: sql`max(${eventSourceDeliveries.triggers}, ${kept.triggers})`,
+        })
+        .where(
+          and(
+            eq(eventSourceDeliveries.id, kept.id),
+            eq(eventSourceDeliveries.sourceId, kept.source)
+          )
+        ),
       trimmed(db, kept.source),
     ]);
   } catch (error) {

@@ -971,7 +971,8 @@ describe("what an event source received", () => {
       statuses.add(response.status);
     }
     const stale = await send(token, secret, body, { skew: -600 });
-    // Signed with its secret, and still not an event it takes.
+    // Too large, refused before its signature is checked; and signed
+    // with its secret, yet not an event.
     const oversized = await send(
       token,
       secret,
@@ -1460,6 +1461,37 @@ describe("what an event source received", () => {
       statuses: [401, 202],
       runs: [{ invoice: "INV-1", amount: 120 }],
       stored: { deliveries: [], counts: [] },
+    });
+  });
+
+  it("raises a listed delivery's workflows started when a resend of its webhook-id starts a trigger added since, still listing it once", async () => {
+    const { admin, source, secret, token } = await newSource();
+    const { sources } = admin.api.workflowResources;
+    const id = `msg_${unique()}`;
+    const first = await send(token, secret, eventOf(), { id });
+    const [before] = await deliveriesOf(sources, source.id);
+    const { trigger } = await triggerOn(source.id);
+    // Resent from the provider, which keeps its ID.
+    const resent = await send(token, secret, eventOf(), { id, skew: 30 });
+    const again = await send(token, secret, eventOf(), { id, skew: 60 });
+    const listed = await deliveriesOf(sources, source.id);
+    const activity = await activityOf(sources, source.id);
+
+    expect({
+      statuses: [first.status, resent.status, again.status],
+      before: before?.triggersStarted,
+      listed: listed.map(({ id: delivery, triggersStarted }) => ({
+        same: delivery === before?.id,
+        triggersStarted,
+      })),
+      runs: await runInputsOf(trigger.id),
+      accepted: activity?.acceptedLastDay,
+    }).toStrictEqual({
+      statuses: [202, 202, 202],
+      before: 0,
+      listed: [{ same: true, triggersStarted: 1 }],
+      runs: [{ invoice: "INV-1", amount: 120 }],
+      accepted: 1,
     });
   });
 });

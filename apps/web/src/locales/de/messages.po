@@ -311,8 +311,8 @@ msgid "{count, plural, one {# delivery refused in the last seven days: the secre
 msgstr "{count, plural, one {# Zustellung in den letzten sieben Tagen abgelehnt: Das Geheimnis wurde geändert, während sie eintraf.} other {# Zustellungen in den letzten sieben Tagen abgelehnt: Das Geheimnis wurde geändert, während sie eintrafen.}}"
 
 #: src/settings/event-source-activity.tsx
-msgid "{count, plural, one {# delivery told to try again in the last seven days: a workflow it starts had no room for another run then.} other {# deliveries told to try again in the last seven days: a workflow they start had no room for another run then.}}"
-msgstr "{count, plural, one {# Zustellung in den letzten sieben Tagen zum erneuten Versuch aufgefordert: Ein Workflow, den sie startet, hatte gerade keinen Platz für einen weiteren Lauf.} other {# Zustellungen in den letzten sieben Tagen zum erneuten Versuch aufgefordert: Ein Workflow, den sie starten, hatte gerade keinen Platz für einen weiteren Lauf.}}"
+msgid "{count, plural, one {# delivery told to try again in the last seven days: a workflow it starts or a run waiting for it couldn't take it then.} other {# deliveries told to try again in the last seven days: a workflow they start or a run waiting for them couldn't take them then.}}"
+msgstr "{count, plural, one {# Zustellung in den letzten sieben Tagen zum erneuten Versuch aufgefordert: Ein Workflow, den sie startet, oder ein Lauf, der auf sie wartet, konnte sie gerade nicht annehmen.} other {# Zustellungen in den letzten sieben Tagen zum erneuten Versuch aufgefordert: Ein Workflow, den sie starten, oder ein Lauf, der auf sie wartet, konnte sie gerade nicht annehmen.}}"
 
 #: src/onboarding/document-drop.tsx
 msgid "{count, plural, one {# document added. I’m reading it.} other {# documents added. I’m reading them.}}"

@@ -68,8 +68,11 @@ export const eventSourceRetention = {
  * `eventSourceLimits.bodyBytes`; signed, but its body not an event (a
  * JSON object with a `type` and `data`); its `webhook-id` delivered
  * before with another event; or told to try again later (a workflow it
- * starts had no room this hour, or couldn't start). A delivery to a URL
- * no source has is counted nowhere.
+ * starts had no room this hour or couldn't start, or a waiting run
+ * couldn't take it). `revoked`, `headers` and `too_large` are counted
+ * before the signature is checked; `body`, `conflict`, `busy` and
+ * `rotated` only once it is. A delivery to a URL no source has is counted
+ * nowhere.
  */
 export const eventSourceRefusalReasons = [
   "revoked",
@@ -184,8 +187,9 @@ export interface EventSourceDelivery {
   test: boolean;
   /**
    * How many triggers it started a run for; none for a test. A delivery
-   * is listed once by its `webhook-id`: a sender's retry of it starts
-   * nothing more and isn't listed again.
+   * is listed once by its `webhook-id`: a sender's retry of it isn't
+   * listed again, and raises this only when it started a trigger added
+   * since.
    */
   triggersStarted: number;
   /** Whether its payload is still held (`eventSourceRetention.payloadMs`). */
