@@ -461,8 +461,8 @@ msgid "{count, plural, one {Back to the question} other {Back to the # questions
 msgstr "{count, plural, one {Zurück zur Frage} other {Zurück zu den # Fragen}}"
 
 #: src/apps/publish.tsx
-msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
-msgstr "{count, plural, one {Es kann noch nicht geteilt werden: # Problem} other {Es kann noch nicht geteilt werden: # Probleme}}"
+msgid "{count, plural, one {It can't be published yet: # problem} other {It can't be published yet: # problems}}"
+msgstr "{count, plural, one {Sie kann noch nicht veröffentlicht werden: # Problem} other {Sie kann noch nicht veröffentlicht werden: # Probleme}}"
 
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
@@ -919,6 +919,10 @@ msgstr "{name} ist gelöscht."
 #: src/brain/brain-atlas.ts
 msgid "{name} is invited but not interviewed yet."
 msgstr "{name} ist eingeladen, aber noch nicht interviewt."
+
+#: src/apps/publish.tsx
+msgid "{name} is live"
+msgstr "{name} ist live"
 
 #: src/brain/brain-atlas.ts
 msgid "{name} is named, but not seen in use yet."
@@ -2346,6 +2350,7 @@ msgid "Adding an app or workflow shares it with nobody. Only those it is shared 
 msgstr "Eine App oder einen Workflow hinzuzufügen teilt sie mit niemandem. Hier sehen sie nur die, mit denen sie geteilt sind."
 
 #: src/apps/app-webhooks.tsx
+#: src/apps/publish.tsx
 #: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
@@ -3037,6 +3042,7 @@ msgid "Archived"
 msgstr "Archiviert"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archiviert"
@@ -3846,6 +3852,10 @@ msgstr "Etwas am Plan ändern"
 msgid "Change step {id}"
 msgstr "Schritt {id} ändern"
 
+#: src/apps/publish.tsx
+msgid "Change the address"
+msgstr "Adresse ändern"
+
 #: src/settings/stephen-settings.tsx
 msgid "Change the company's"
 msgstr "Das des Unternehmens ändern"
@@ -4158,6 +4168,10 @@ msgstr "Prüfen, ob Grasp erreichbar ist"
 #: src/workflows/workflow-flow.tsx
 msgid "Checking…"
 msgstr "Wird geprüft…"
+
+#: src/apps/publish.tsx
+msgid "Checks pass"
+msgstr "Prüfungen bestanden"
 
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
@@ -6660,8 +6674,8 @@ msgid "Five or more people asked Stephen “{wording}” and he didn't know. Who
 msgstr "Fünf oder mehr Personen haben Stephen „{wording}“ gefragt, und er wusste es nicht. Wer im Unternehmen kann das beantworten, damit er es ab jetzt weiß?"
 
 #: src/apps/publish.tsx
-msgid "Fix these problems the check found, so the App can be shared:"
-msgstr "Behebe diese Probleme, die die Prüfung gefunden hat, damit die App geteilt werden kann:"
+msgid "Fix these problems the check found, so the App can be published:"
+msgstr "Behebe diese Probleme, die die Prüfung gefunden hat, damit die App veröffentlicht werden kann:"
 
 #: src/apps/publish.tsx
 #: src/pages/frame-failure.tsx
@@ -8903,6 +8917,14 @@ msgstr "Hört zu"
 msgid "Live"
 msgstr "Live"
 
+#: src/apps/publish.tsx
+msgid "Live, {label}"
+msgstr "Live, {label}"
+
+#: src/apps/publish.tsx
+msgid "Live, {label}; changes not live yet"
+msgstr "Live, {label}; Änderungen noch nicht live"
+
 #: src/brain/brain.ts
 msgid "Live, being measured"
 msgstr "Live, wird gemessen"
@@ -9809,6 +9831,10 @@ msgstr "Kein {onlySignIn}? Eine Mitarbeiterliste geht auch."
 msgid "No {unit}"
 msgstr "Keine {unit}"
 
+#: src/apps/publish.tsx
+msgid "No address yet"
+msgstr "Noch keine Adresse"
+
 #: src/workflows/workflow-triggers.tsx
 msgid "No admin has been asked to let it read these events on its connection: it hears nothing until one allows it."
 msgstr "Kein Admin wurde gebeten, ihm das Lesen dieser Ereignisse an seiner Verbindung zu erlauben: Er hört nichts, bis einer es erlaubt."
@@ -10361,6 +10387,10 @@ msgstr "Nicht eingeladen: {notInvited}. {sent, plural, one {Die andere Einladung
 msgid "Not listed"
 msgstr "Nicht aufgeführt"
 
+#: src/apps/publish.tsx
+msgid "Not live"
+msgstr "Nicht live"
+
 #: src/frame/page-failed.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Not loaded"
@@ -10642,6 +10672,10 @@ msgstr "Nichts weiter"
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
 msgstr "Nichts Neues startet, bis Sie ihn fortsetzen: Solange er pausiert ist, wird jeder Start abgelehnt. Laufende Läufe gehen bis zu ihrem Ende weiter."
+
+#: src/apps/publish.tsx
+msgid "Nothing new to publish"
+msgstr "Nichts Neues zu veröffentlichen"
 
 #: src/apps/draft-changes.tsx
 msgid "Nothing new: it needs no admin."
@@ -10955,6 +10989,10 @@ msgstr "Nur markierte Wortbeiträge"
 msgid "Only if its condition holds"
 msgstr "Nur wenn die Bedingung zutrifft"
 
+#: src/apps/publish.tsx
+msgid "Only its builders"
+msgstr "Nur ihre Builder"
+
 #: src/apps/app-settings.tsx
 msgid "Only its builders change these settings."
 msgstr "Nur ihre Builder ändern diese Einstellungen."
@@ -11046,6 +11084,7 @@ msgid "Only you see it. Tell Grasp in the chat what to change, then share it wit
 msgstr "Nur Sie sehen sie. Sagen Sie Grasp im Chat, was sich ändern soll, und teilen Sie sie dann mit Ihrem Team."
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Nur Sie sehen das"
@@ -12009,6 +12048,10 @@ msgstr "Anbieter"
 msgid "Providers"
 msgstr "Anbieter"
 
+#: src/apps/publish.tsx
+msgid "Publish"
+msgstr "Veröffentlichen"
+
 #. placeholder {0}: draft.revision
 #: src/workflows/definition-editor.tsx
 msgid "Publish revision {0}"
@@ -12022,6 +12065,15 @@ msgstr "Veröffentlicht"
 #: src/workflows/definition-editor.tsx
 msgid "Published as version {0}."
 msgstr "Als Version {0} veröffentlicht."
+
+#: src/apps/publish.tsx
+msgctxt "a version's message"
+msgid "Published from the App's workspace"
+msgstr "Aus dem Arbeitsbereich der App veröffentlicht"
+
+#: src/apps/publish.tsx
+msgid "Publishing undone"
+msgstr "Veröffentlichung rückgängig gemacht"
 
 #. Product name: keep it as it is
 #: src/brain/brain-atlas.ts
@@ -13924,10 +13976,6 @@ msgstr "Teilen"
 msgid "Share {name}"
 msgstr "{name} teilen"
 
-#: src/apps/publish.tsx
-msgid "Share changes"
-msgstr "Änderungen teilen"
-
 #: src/brain/share-record.tsx
 msgid "Share it"
 msgstr "Teilen"
@@ -13949,7 +13997,6 @@ msgstr "Diesen Eintrag teilen"
 msgid "Share with"
 msgstr "Teilen mit"
 
-#: src/apps/publish.tsx
 #: src/frame/setting-up.tsx
 msgid "Share with your team"
 msgstr "Mit Ihrem Team teilen"
@@ -13957,11 +14004,6 @@ msgstr "Mit Ihrem Team teilen"
 #: src/onboarding/setup-steps.tsx
 msgid "Share your staff list"
 msgstr "Mitarbeiterliste teilen"
-
-#: src/apps/publish.tsx
-msgctxt "a version's message"
-msgid "Shared from the App's workspace"
-msgstr "Aus dem Arbeitsbereich der App geteilt"
 
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
@@ -15323,8 +15365,8 @@ msgid "The App can no longer start a workflow by this name, until a builder bind
 msgstr "Die App kann unter diesem Namen keinen Workflow mehr starten, bis ein Builder ihn wieder bindet. Bereits gestartete Läufe gehen weiter."
 
 #: src/apps/publish.tsx
-msgid "The App changed since you shared it. Going back drops those changes, for everyone who builds this App."
-msgstr "Die App hat sich geändert, seit Sie sie geteilt haben. Zurückgehen verwirft diese Änderungen, für alle, die an dieser App bauen."
+msgid "The App changed since you published it. Going back drops those changes, for everyone who builds this App."
+msgstr "Die App hat sich seit deiner Veröffentlichung geändert. Zurückgehen verwirft diese Änderungen für alle, die an dieser App bauen."
 
 #: src/frame/part-words.tsx
 msgid "The app didn't start"
@@ -16064,6 +16106,10 @@ msgstr "Aussagen"
 #: src/brain/brain.ts
 msgid "They use"
 msgstr "Nutzen"
+
+#: src/apps/publish.tsx
+msgid "They'll find it under Apps once it is published."
+msgstr "Sie finden sie unter Apps, sobald sie veröffentlicht ist."
 
 #: src/apps/publish.tsx
 msgid "They'll find it under Apps, and see it as it is now."
@@ -17956,6 +18002,10 @@ msgstr "Wer kann sie ändern?"
 msgid "Who can fix this"
 msgstr "Wer das beheben kann"
 
+#: src/apps/publish.tsx
+msgid "Who can open it"
+msgstr "Wer sie öffnen kann"
+
 #: src/apps/app-data-model.tsx
 msgid "Who can see and change its records"
 msgstr "Wer ihre Datensätze sehen und ändern kann"
@@ -18616,10 +18666,6 @@ msgstr "Ihr Browser lässt mich das Mikrofon nicht nutzen. Erlauben Sie es neben
 msgid "Your browser's maker writes down what you say."
 msgstr "Der Hersteller Ihres Browsers schreibt auf, was Sie sagen."
 
-#: src/apps/publish.tsx
-msgid "Your changes are shared"
-msgstr "Ihre Änderungen sind geteilt"
-
 #: src/apps/app-history.tsx
 msgid "Your changes go back to how they were then, for everyone who builds this App. What came after stays in its history."
 msgstr "Ihre Änderungen gehen auf den damaligen Stand zurück, für alle, die an dieser App bauen. Was danach kam, bleibt in ihrem Verlauf."
@@ -18739,6 +18785,7 @@ msgid "Your team has this one"
 msgstr "Ihr Team hat diese"
 
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 msgid "Your team uses it"
 msgstr "Ihr Team nutzt es"
 
