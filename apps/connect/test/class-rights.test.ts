@@ -115,9 +115,7 @@ describe("a consent", () => {
         "Calendars.Read.Shared",
         "Sites.ReadWrite.All",
         // Planner's: changing a plan's tasks takes in reading them.
-        "Tasks.ReadWrite",
-        // SharePoint's own, for who may open a picked library's files.
-        "00000003-0000-0ff1-ce00-000000000000/AllSites.Read"
+        "Tasks.ReadWrite"
       )
     );
   });
@@ -315,20 +313,6 @@ describe("a class turned on", () => {
         detail: { provider: "microsoft", reason: "class_turned_on" },
       },
     ]);
-  });
-
-  it("never asks a connection to connect again for SharePoint's right, which a Graph token's answer never names", async () => {
-    const anna = someone();
-    const annas = await connectAccount(providers, anna, {
-      ...ownAccount(anna),
-      granted: `${defaultGrant} Files.Read.All Sites.Read.All Calendars.Read.Shared Tasks.Read`,
-    });
-
-    await exports.default.requireClassRights({
-      classes: ["read-own", "change-own", "read-company"],
-    });
-
-    await expect(stored(annas)).resolves.toStrictEqual(active);
   });
 
   it("is given in place: the same connection comes back with the rights, and isn't asked again", async () => {

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { connectionErrors } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { syncErrors } from "@grasp-os/shared/sync";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -221,11 +222,22 @@ const asAdmin = async (
           await Promise.resolve();
           throw new Error(refusal);
         }
-        const [, next, from] = given;
+        const [, next, from, acknowledged] = given;
         // As core: only from the audience held now.
         if (JSON.stringify(from) !== JSON.stringify(held.audience)) {
           await Promise.resolve();
           throw connectionErrors.create("connection.brain_audience_changed");
+        }
+        // As core: opening it to anyone new only once confirmed.
+        const opens =
+          typeof next === "object" &&
+          next !== null &&
+          "kind" in next &&
+          next.kind !== "nobody" &&
+          held.audience.kind !== "everyone";
+        if (opens && JSON.stringify(acknowledged) !== JSON.stringify(next)) {
+          await Promise.resolve();
+          throw syncErrors.create("sync.unacknowledged");
         }
         if (typeof next === "object" && next !== null && "kind" in next) {
           held.audience = {
@@ -351,7 +363,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
 
     expect({
       asking: asking.includes(
-        "Everyone in the company will be able to find what agents read through Notes, including what was kept before. Choose a team if not everyone should see it."
+        "Everyone in the company will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Choose a team if not everyone should see it."
       ),
       afterCancel,
       asked,
@@ -359,7 +371,13 @@ describe("a shared connection's Brain audience, for an admin", () => {
       asking: true,
       afterCancel: [],
       asked: [
-        ["setBrainAudience", "c1", { kind: "everyone" }, { kind: "nobody" }],
+        [
+          "setBrainAudience",
+          "c1",
+          { kind: "everyone" },
+          { kind: "nobody" },
+          { kind: "everyone" },
+        ],
       ],
     });
   });
@@ -389,7 +407,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       asked,
       erasing: erasing.includes("This can't be undone."),
       toTeam: toTeam.includes(
-        "Everyone in Sales will be able to find what agents read through Notes, including what was kept before."
+        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes."
       ),
       fromNobody,
     }).toStrictEqual({
@@ -448,7 +466,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     expect({
       whileErasing,
       asking: dialogText().includes(
-        "Everyone in Sales will be able to find what agents read through Notes, including what was kept before."
+        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes."
       ),
       asked,
     }).toStrictEqual({
@@ -536,7 +554,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     expect({
       after,
       asking: dialogText().includes(
-        "Everyone in Sales will be able to find what agents read through Notes, including what was kept before."
+        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes."
       ),
     }).toStrictEqual({
       after: { says: true, shown: "nobody", held: { kind: "nobody" } },
@@ -584,7 +602,13 @@ describe("a shared connection's Brain audience, for an admin", () => {
     }).toStrictEqual({
       asking: true,
       asked: [
-        ["setBrainAudience", "c1", { kind: "everyone" }, { kind: "nobody" }],
+        [
+          "setBrainAudience",
+          "c1",
+          { kind: "everyone" },
+          { kind: "nobody" },
+          { kind: "everyone" },
+        ],
       ],
       held: { kind: "team", teamId: "t1" },
       says: true,

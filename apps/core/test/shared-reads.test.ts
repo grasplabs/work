@@ -445,7 +445,8 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
         identity,
         connectionId,
         { kind: "everyone" },
-        { kind: "nobody" }
+        { kind: "nobody" },
+        { kind: "everyone" }
       )
     );
     const audiences = await admin.api.connections.brainAudiences();
@@ -681,7 +682,8 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
         identity,
         connectionId,
         { kind: "team", teamId: team },
-        { kind: "nobody" }
+        { kind: "nobody" },
+        { kind: "team", teamId: team }
       )
     );
     const audiences = await admin.api.connections.brainAudiences();
@@ -743,7 +745,8 @@ describe("what the Brain kept from a shared connection", setUpTime, () => {
         identity,
         connectionId,
         { kind: "everyone" },
-        { kind: "nobody" }
+        { kind: "nobody" },
+        { kind: "everyone" }
       )
     );
     const audiences = await admin.api.connections.brainAudiences();

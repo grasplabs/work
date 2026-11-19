@@ -22,13 +22,6 @@ import type { CompanyToolClass } from "@grasp-os/shared/connect";
 // google-workspace) names the most any class asks for; these tables say
 // which class asks which.
 
-/** How Entra may prefix a Microsoft Graph right in a token's answer. */
-const graphPrefix = "https://graph.microsoft.com/";
-
-/** A right as compared: lower case, without Graph's prefix. */
-const rightKeyOf = (right: string): string =>
-  right.toLowerCase().replace(graphPrefix, "");
-
 /** Asked whatever is on: the sign-in, and a refresh token. */
 const microsoftSignIn = [
   "openid",
@@ -37,30 +30,6 @@ const microsoftSignIn = [
   "offline_access",
   "User.Read",
 ] as const;
-
-/**
- * SharePoint's own right to read every site the person can (delegated
- * `AllSites.Read`), by SharePoint's app ID, as no company's host is known
- * before sign-in (GRA-2145): what a shared library sync reads who may open
- * a file with, through SharePoint's REST API, since Microsoft Graph lists
- * a site group's members to no one. Asked in the same consent as Graph's
- * rights ("For the `/authorize` leg of the request, this parameter can
- * cover multiple resources", Microsoft's auth code flow), and asked of
- * the company's host with the same refresh token (tokens.ts
- * `tenantCredentialFor`). A Graph token's answer never lists it
- * (`rightsElsewhere`).
- */
-export const sharePointRead =
-  "00000003-0000-0ff1-ce00-000000000000/AllSites.Read";
-
-/**
- * Rights of another resource than the token's, by key: asked, but never
- * in the answer of the token a connection keeps, so never looked for
- * there.
- */
-export const rightsElsewhere: ReadonlySet<string> = new Set([
-  rightKeyOf(sharePointRead),
-]);
 
 /**
  * Each class's rights. Reading the person's own is reading their mailbox
@@ -95,15 +64,11 @@ const microsoftClassRights: Readonly<
     "Sites.Read.All",
     "Calendars.Read.Shared",
     "Tasks.Read",
-    // Last, so the first right asked is Graph's: a token asked without
-    // naming its rights is Graph's.
-    sharePointRead,
   ],
   "change-company": [
     "Files.ReadWrite.All",
     "Sites.ReadWrite.All",
     "Tasks.ReadWrite",
-    sharePointRead,
   ],
   "reach-others": ["Mail.Send"],
   "read-others": [
@@ -196,8 +161,12 @@ const googleImpliedRights: Readonly<Record<string, readonly string[]>> = {
   [googleScope("calendar.events")]: [googleScope("calendar.events.readonly")],
 };
 
+/** How Entra may prefix a Microsoft Graph right in a token's answer. */
+const graphPrefix = "https://graph.microsoft.com/";
+
 /** A right as compared: lower case, without Graph's prefix. */
-export const rightKey = (right: string): string => rightKeyOf(right);
+export const rightKey = (right: string): string =>
+  right.toLowerCase().replace(graphPrefix, "");
 
 /**
  * Shared mailboxes' rights, asked only while the company points Stephen at
@@ -366,9 +335,7 @@ export const holdsClassRights = (
   const signInKeys = new Set(suite.signIn.map(rightKey));
   return suiteRights(suite, classes, sharedMailbox)
     .map(rightKey)
-    .every(
-      (key) => signInKeys.has(key) || rightsElsewhere.has(key) || held.has(key)
-    );
+    .every((key) => signInKeys.has(key) || held.has(key));
 };
 
 /**

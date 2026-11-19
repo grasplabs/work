@@ -1,4 +1,3 @@
-import { recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
@@ -14,21 +13,15 @@ import {
 import { z } from "zod";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
-import {
-  addSource,
-  placeGroupOf,
-  recallAs,
-  workBrain,
-} from "../src/brain-next.ts";
+import { addSource } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { syncForStaff } from "../src/brain-sync.ts";
 import { personOf } from "../src/connections.ts";
 import { completeOwedErasures } from "../src/shared-reads.ts";
-import { plainPrincipalOf } from "../src/source-readers.ts";
 import { pickSyncPlaces } from "../src/sync-picks.ts";
 import { allEvents } from "./audit-events.ts";
-import { chooseAudience } from "./brain-audiences.ts";
-import { newTeam } from "./brain-next-leaks-harness.ts";
+import { audienceNow, chooseAudience } from "./brain-audiences.ts";
+import { leave, newTeam } from "./brain-next-leaks-harness.ts";
 import { inStoreOf } from "./brain-next-out-reads.ts";
 import {
   claimStatement,
@@ -42,17 +35,13 @@ import {
   parkWorkerSources,
   pollMs,
   setUpTime,
-  siteChanged,
   sitesFailing,
   sitesHeld,
-  sitesHeldWith,
   syncOn,
 } from "./brain-sync-world.ts";
 import type { Person } from "./brain-sync-world.ts";
 import { interleaving } from "./d1-interleaving.ts";
 import { mockIdpWith } from "./idp.ts";
-import { answeringProvider } from "./model-provider.ts";
-import { noProducers } from "./no-producers.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { connectDb, testBinding } from "./test-env.ts";
@@ -75,22 +64,6 @@ mockIdpWith(idp);
 /** The sample connector's sync of picked places (its `sites`). */
 const feed = "sites";
 
-/** Everyone in the company's tenant, as core names a source's reader. */
-const tenantReader = {
-  kind: "tenant" as const,
-  provider: "microsoft" as const,
-  tenant: acmeTenant,
-};
-
-/** Everyone in the company's tenant, as core names a source's readers. */
-const everyoneInTenant = [tenantReader];
-
-/** `person`'s own Microsoft account, as a synced item's readers name it. */
-const accountAtSource = (person: Person) => ({
-  kind: "account",
-  id: String(person.person.oid),
-});
-
 /** An un-pick's hide taking the sync's places listing (brain-sync.ts `droppedExcept`). */
 const takeListingStatement =
   /^update "brain_sync_sources" set "lease_id" = \?, "lease_until" = \?, "picks_version"/u;
@@ -99,7 +72,10 @@ const takeListingStatement =
 const erasureEndStatement =
   /^update "connection_brain_erasures" set "erasing" = \?/u;
 
-/** `admin` picks `places` on `connectionId`, from the picks held now. */
+/**
+ * `admin` picks `places` on `connectionId`, from the picks held now,
+ * confirming the audience held now reads everything in them.
+ */
 const pick = async (
   admin: Person,
   connectionId: string,
@@ -111,6 +87,7 @@ const pick = async (
     feed,
     from: held?.picks ?? [],
     places,
+    acknowledged: await audienceNow(admin.api, connectionId),
   });
 };
 
@@ -146,12 +123,6 @@ const sync = async (given: Env = env): Promise<void> => {
   await syncOn(given);
 };
 
-/** The Brain's clock: one tick of its work, as core's clock runs it. */
-const brainTick = async (): Promise<void> => {
-  later(pollMs);
-  await workBrain(env, new Date(clockAt()), noProducers);
-};
-
 /** Runs the sync until the picked places are listed and read: the listing, then each place's page. */
 const syncAll = async (given: Env = env): Promise<void> => {
   await sync(given);
@@ -166,7 +137,7 @@ describe("native sync of a shared connection's picked places", () => {
   });
 
   it(
-    "keeps a picked place for the connection's audience alone, never for whoever connected it, nothing while the audience is nobody, and no one's steps",
+    "keeps a picked place for the connection's audience, whatever the source lets each open, never for whoever connected it, nothing while the audience is nobody, and no one's steps",
     setUpTime,
     async () => {
       const [admin, seller, outsider] = await Promise.all([
@@ -178,10 +149,13 @@ describe("native sync of a shared connection's picked places", () => {
       const [picked, unpicked] = [markerOf(), markerOf()];
       const site = `site-${unique()}`;
       const other = `site-${unique()}`;
-      const { connectionId } = await connectSharedSites(admin, {
-        [site]: picked,
-        [other]: unpicked,
-      });
+      // At the source, only the outsider may open the files: the seller
+      // may not, and reads them all the same, as one of the audience.
+      const { connectionId } = await connectSharedSites(
+        admin,
+        { [site]: picked, [other]: unpicked },
+        [{ kind: "account", id: String(outsider.person.oid) }]
+      );
       await pick(admin, connectionId, [site]);
 
       // Nobody may read it yet: nothing is read or kept.
@@ -219,196 +193,12 @@ describe("native sync of a shared connection's picked places", () => {
   );
 
   it(
-    "gives a picked place's file only to those its source lets read it, within the audience, and never to code reading for a team",
+    "takes a picked place from those outside a narrowed audience, and from whoever leaves its team, from the next read",
     setUpTime,
     async () => {
-      const [admin, seller, colleague, outsider] = await Promise.all([
+      const [admin, seller, other] = await Promise.all([
         signedInApi(idp, "admin"),
         signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-      ]);
-      const sales = await newTeam(seller.userId, colleague.userId);
-      const [shared, unread] = [markerOf(), markerOf()];
-      const [site, other] = [`site-${unique()}`, `site-${unique()}`];
-      // At the source, the seller and the outsider may open the file;
-      // the colleague may not.
-      const { connectionId } = await connectSharedSites(
-        admin,
-        { [site]: shared },
-        [accountAtSource(seller), accountAtSource(outsider)]
-      );
-      // A file whose readers couldn't be read.
-      const { connectionId: unreadId } = await connectSharedSites(
-        admin,
-        { [other]: unread },
-        null
-      );
-      for (const [id, place] of [
-        [connectionId, site],
-        [unreadId, other],
-      ] as const) {
-        // oxlint-disable-next-line no-await-in-loop -- one connection at a time
-        await chooseAudience(admin.api, id, { kind: "team", teamId: sales });
-        // oxlint-disable-next-line no-await-in-loop -- one connection at a time
-        await pick(admin, id, [place]);
-      }
-      await syncAll();
-      const { items } = await recallAs(env, seller.userId, {
-        personal: false,
-        question: shared,
-        budget: { tokens: recallBudgetMax },
-      });
-
-      expect({
-        kept: [await heldBy(connectionId), await heldBy(unreadId)],
-        // In the audience and a reader at the source.
-        seller: await finds(seller.userId, shared),
-        // In the audience, not a reader at the source.
-        colleague: await finds(colleague.userId, shared),
-        // A reader at the source, not in the audience.
-        outsider: await finds(outsider.userId, shared),
-        admin: await finds(admin.userId, shared),
-        // Read as the seller's teams, as code acting for them does.
-        forTheTeam: items.some(({ text }) => text.includes(shared)),
-        // Its readers unread: nobody's, the audience's neither.
-        unread: [
-          await finds(seller.userId, unread),
-          await finds(colleague.userId, unread),
-        ],
-      }).toStrictEqual({
-        kept: [{ [site]: 1 }, { [other]: 1 }],
-        seller: true,
-        colleague: false,
-        outsider: false,
-        admin: false,
-        forTheTeam: false,
-        unread: [false, false],
-      });
-    }
-  );
-
-  it(
-    "keeps two places apart: a reader at the source of one reads nothing of the other, nor of a place whose audience leaves them out",
-    setUpTime,
-    async () => {
-      const [admin, seller, colleague] = await Promise.all([
-        signedInApi(idp, "admin"),
-        signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-      ]);
-      const sales = await newTeam(seller.userId);
-      const others = await newTeam(colleague.userId);
-      const [a, b, c] = [markerOf(), markerOf(), markerOf()];
-      const [siteA, siteB, siteC] = [
-        `site-${unique()}`,
-        `site-${unique()}`,
-        `site-${unique()}`,
-      ];
-      // One connection for everyone: the seller may open A at the source,
-      // the colleague B.
-      const { connectionId, subject } = await connectSharedSites(admin, {
-        [siteA]: a,
-        [siteB]: b,
-      });
-      await sitesHeldWith(subject, {
-        [siteA]: { text: `Plan ${a}`, readers: [accountAtSource(seller)] },
-        [siteB]: { text: `Plan ${b}`, readers: [accountAtSource(colleague)] },
-      });
-      // Another, for a team the seller isn't in: the seller may open C at
-      // the source too.
-      const { connectionId: otherId } = await connectSharedSites(
-        admin,
-        { [siteC]: c },
-        [accountAtSource(seller), accountAtSource(colleague)]
-      );
-      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
-      await chooseAudience(admin.api, otherId, {
-        kind: "team",
-        teamId: others,
-      });
-      await pick(admin, connectionId, [siteA, siteB]);
-      await pick(admin, otherId, [siteC]);
-      await syncAll();
-
-      expect({
-        seller: [
-          await finds(seller.userId, a),
-          await finds(seller.userId, b),
-          await finds(seller.userId, c),
-        ],
-        colleague: [
-          await finds(colleague.userId, a),
-          await finds(colleague.userId, b),
-          await finds(colleague.userId, c),
-        ],
-        sales: sales !== others,
-      }).toStrictEqual({
-        seller: [true, false, false],
-        colleague: [false, true, true],
-        sales: true,
-      });
-    }
-  );
-
-  it(
-    "keeps a file's pairs before the Brain is given its readers: one left behind by a reader taken off gives nothing, one missing hides the file",
-    setUpTime,
-    async () => {
-      const [admin, seller, colleague] = await Promise.all([
-        signedInApi(idp, "admin"),
-        signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-      ]);
-      const marker = markerOf();
-      const site = `site-${unique()}`;
-      const both = [accountAtSource(seller), accountAtSource(colleague)];
-      const { connectionId, subject } = await connectSharedSites(
-        admin,
-        { [site]: marker },
-        both
-      );
-      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
-      await pick(admin, connectionId, [site]);
-      await syncAll();
-      const before = [
-        await finds(seller.userId, marker),
-        await finds(colleague.userId, marker),
-      ];
-      // At the source, the file is taken from the colleague.
-      await siteChanged(subject, site, `Plan ${marker}`, [
-        both,
-        [accountAtSource(seller)],
-      ]);
-      await sync();
-      const takenOff = {
-        seller: await finds(seller.userId, marker),
-        colleague: await finds(colleague.userId, marker),
-      };
-      // Without its pairs, nobody holds the file's readers.
-      await env.DB.prepare("DELETE FROM source_reader_pairs WHERE place LIKE ?")
-        .bind(`connection:${connectionId}/%`)
-        .run();
-
-      expect({
-        before,
-        takenOff,
-        withoutPairs: await finds(seller.userId, marker),
-      }).toStrictEqual({
-        before: [true, true],
-        // The colleague's pair is left behind, and gives them nothing.
-        takenOff: { seller: true, colleague: false },
-        withoutPairs: false,
-      });
-    }
-  );
-
-  it(
-    "finds nothing at the next read once the audience narrows between two reads",
-    setUpTime,
-    async () => {
-      const [admin, seller] = await Promise.all([
-        signedInApi(idp, "admin"),
         signedInApi(idp, "user"),
       ]);
       const sales = await newTeam(seller.userId);
@@ -417,117 +207,35 @@ describe("native sync of a shared connection's picked places", () => {
       const { connectionId } = await connectSharedSites(admin, {
         [site]: marker,
       });
+      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+      await pick(admin, connectionId, [site]);
+      await syncAll();
+      /** Whether the seller and the other colleague find the place's file. */
+      const seen = async () => ({
+        seller: await finds(seller.userId, marker),
+        other: await finds(other.userId, marker),
+      });
+      const everyone = await seen();
+
       await chooseAudience(admin.api, connectionId, {
         kind: "team",
         teamId: sales,
       });
-      await pick(admin, connectionId, [site]);
-      await syncAll();
-      const before = await finds(seller.userId, marker);
-      // No run of the sync in between.
-      await chooseAudience(admin.api, connectionId, { kind: "nobody" });
+      const narrowed = await seen();
+      await leave(sales, seller.userId);
+      const left = await seen();
 
       expect({
-        before,
-        after: await finds(seller.userId, marker),
-      }).toStrictEqual({ before: true, after: false });
-    }
-  );
-
-  it(
-    "draws a file's memories for those its source lets read it, for one it lets in later, and hides them from one it takes off",
-    setUpTime,
-    async () => {
-      const [admin, seller, colleague] = await Promise.all([
-        signedInApi(idp, "admin"),
-        signedInApi(idp, "user"),
-        signedInApi(idp, "user"),
-      ]);
-      const name = `Acme${unique().replaceAll("-", "").slice(0, 12)}`;
-      const text = `Plan for ${name}: we renew the contract in March.`;
-      const statement = `${name} renews in March.`;
-      const provider = await answeringProvider((requests) => {
-        const body = JSON.stringify(requests.at(-1)?.body);
-        return {
-          text: body.includes("You check statements")
-            ? JSON.stringify({ supported: [0] })
-            : JSON.stringify({
-                entities: [{ key: "c", kind: "customer", names: [name] }],
-                memories: [
-                  {
-                    about: "c",
-                    type: "fact",
-                    statement,
-                    quote: "we renew the contract in March",
-                  },
-                ],
-              }),
-          inputTokens: 50,
-          outputTokens: 20,
-        };
-      });
-      const site = `site-${unique()}`;
-      const sellerOnly = [accountAtSource(seller)];
-      const { connectionId, subject } = await connectSharedSites(
-        admin,
-        { [site]: name },
-        sellerOnly
-      );
-      await siteChanged(subject, site, text, [
-        sellerOnly,
-        [...sellerOnly, accountAtSource(colleague)],
-        sellerOnly,
-      ]);
-      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
-      await pick(admin, connectionId, [site]);
-      // Ticks the Brain until it has drawn from the file `times` times
-      // (two calls each: the read and its check). Other files share its
-      // queue, so not a fixed number of ticks.
-      const drawn = async (times: number, ticks = 20): Promise<void> => {
-        const calls = provider.requests.filter(({ body }) =>
-          JSON.stringify(body).includes(name)
-        ).length;
-        if (calls < times * 2 && ticks > 0) {
-          await brainTick();
-          await drawn(times, ticks - 1);
-        }
-      };
-      // The listing and its first page alone: the colleague may not read
-      // it yet.
-      await sync();
-      await drawn(1);
-      const memoriesOf = async (personId: string): Promise<string[]> => {
-        const pack = await recallAs(env, personId, {
-          personal: true,
-          question: `${name} renews`,
-          budget: { tokens: recallBudgetMax },
-        });
-        return pack.memories.map(({ statement: said }) => said);
-      };
-      const first = {
-        seller: await memoriesOf(seller.userId),
-        colleague: await memoriesOf(colleague.userId),
-      };
-      // The source lets the colleague in: the new version is drawn again,
-      // for them too.
-      await sync();
-      await drawn(2);
-      const widened = await memoriesOf(colleague.userId);
-      // The source takes the colleague off again: what was drawn for them
-      // is hidden at once, with no drawing.
-      await sync();
-
-      expect({
-        first,
-        widened,
-        narrowed: {
-          seller: await memoriesOf(seller.userId),
-          colleague: await memoriesOf(colleague.userId),
-        },
+        everyone,
+        narrowed,
+        left,
+        // Still picked: kept, for whoever is in the audience.
+        kept: await heldBy(connectionId),
       }).toStrictEqual({
-        first: { seller: [statement], colleague: [] },
-        widened: [statement],
-        narrowed: { seller: [statement], colleague: [] },
+        everyone: { seller: true, other: true },
+        narrowed: { seller: true, other: false },
+        left: { seller: false, other: false },
+        kept: { [site]: 1 },
       });
     }
   );
@@ -718,7 +426,7 @@ describe("native sync of a shared connection's picked places", () => {
   );
 
   it(
-    "erases a shared connection's copies once it is disconnected, hidden from the drain on",
+    "erases a shared connection's copies once it is disconnected, hidden from the moment the disconnect answers",
     setUpTime,
     async () => {
       const [admin, member] = await Promise.all([
@@ -736,6 +444,8 @@ describe("native sync of a shared connection's picked places", () => {
       const before = await finds(member.userId, marker);
 
       await admin.api.connections.disconnect(connectionId);
+      // Before connect's events reach core: nothing to find meanwhile.
+      const atDisconnect = await finds(member.userId, marker);
       await drainAuditOutboxes(env);
       const atDrain = await finds(member.userId, marker);
       await sync();
@@ -747,12 +457,14 @@ describe("native sync of a shared connection's picked places", () => {
 
       expect({
         before,
+        atDisconnect,
         atDrain,
         after: await finds(member.userId, marker),
         kept: await heldBy(connectionId),
         closed,
       }).toStrictEqual({
         before: true,
+        atDisconnect: false,
         atDrain: false,
         after: false,
         kept: {},
@@ -1077,23 +789,6 @@ describe("native sync of a shared connection's picked places", () => {
           ),
         ]);
       }
-      // Each place's items name everyone in the tenant, the reader among
-      // them, as kept items' pairs (source-readers.ts `readerPrincipalsOf`):
-      // the reader holds one pair a place, more than a reader can hold.
-      const tenant = plainPrincipalOf(tenantReader);
-      const pairs = await Promise.all(
-        [first, last].flatMap((connectionId) =>
-          placesOf(connectionId).map(async (place) => [
-            await placeGroupOf(connectionId, feed, place),
-            tenant,
-          ])
-        )
-      );
-      await env.DB.prepare(
-        "INSERT INTO source_reader_pairs (place, principal) SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?) WHERE true ON CONFLICT DO NOTHING"
-      )
-        .bind(JSON.stringify(pairs))
-        .run();
       const marks = {
         own: markerOf(),
         company: markerOf(),
@@ -1135,13 +830,7 @@ describe("native sync of a shared connection's picked places", () => {
       ) => {
         await add(
           { producer: "sync", id: `${connectionId}/1/${unique()}` },
-          {
-            kind: "place",
-            connectionId,
-            feed,
-            place,
-            readers: everyoneInTenant,
-          },
+          { kind: "place", connectionId, feed, place },
           marker
         );
       };
@@ -1177,9 +866,6 @@ describe("native sync of a shared connection's picked places", () => {
         env.DB.prepare(
           "DELETE FROM brain_sync_sources WHERE connection_id IN (?, ?)"
         ).bind(first, last),
-        env.DB.prepare(
-          "DELETE FROM source_reader_pairs WHERE place LIKE ? OR place LIKE ?"
-        ).bind(`connection:${first}/%`, `connection:${last}/%`),
       ]);
     }
   });
@@ -1261,7 +947,6 @@ describe("native sync of a shared connection's picked places", () => {
       connectionId,
       feed,
       place: "site-1",
-      readers: everyoneInTenant,
     };
     const added = async (source: SourceRef): Promise<string> => {
       const answer = await outcome(

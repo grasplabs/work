@@ -28,6 +28,7 @@ import {
   directoryPeople,
   teams,
 } from "./db/core/schema.ts";
+import { unneededGroupRows } from "./directory-reader-groups.ts";
 import { connectionOf } from "./onboarding/directory.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -354,6 +355,9 @@ const unmap = async (
       target: { type: "team", id: before.teamId },
       detail: { provider, groupId: id },
     }),
+    // Its members' rows, unless a reader list names it: then they are the
+    // reader groups' read's (directory-reader-groups.ts).
+    unneededGroupRows(db, id),
   ]);
   if (deleted.length === 0 && !(await stillAdmin(env, by.userId))) {
     throw roleErrors.create("role.forbidden");
