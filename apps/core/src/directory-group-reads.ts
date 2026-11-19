@@ -34,11 +34,12 @@ import type { DirectoryKind } from "./directory-ties.ts";
 //   that suddenly lists nobody: held. Its rows and when it was last read
 //   stay as they were, so nothing changes for anyone, and why is kept for
 //   the admin (`held`).
-// - A group mapped while the read ran: the read didn't read it, so it
-//   isn't marked read, and places nobody until a read reads it. One moved
-//   to another team meanwhile was read whole all the same, and places its
-//   members in the team it is mapped to when the batch lands. One unmapped
-//   meanwhile gets no rows: each needs its mapping.
+// - A group mapped, or moved to another team, while the read ran: it is
+//   marked read only where it is still mapped to the team the read
+//   captured, in the statement, so it places nobody (and makes no team
+//   follow it) until a read reads it for its team. Its member rows are the
+//   group's, not a team's, and place nobody while it is unread. One
+//   unmapped meanwhile gets no rows: each needs its mapping.
 // - Someone the read keeps no row for (a guest, an erased person) in a
 //   group: each row needs the person's row, and goes with it.
 
@@ -173,12 +174,13 @@ export const groupStatements = (
     )
   );
   const outcomes = JSON.stringify(
-    reads.map(({ groupId, held, group }) => [
+    reads.map(({ groupId, held, group, teamId }) => [
       groupId,
       held,
       group?.name ?? null,
       group?.kind ?? null,
       group?.membersFrom ?? null,
+      teamId,
     ])
   );
   /**
@@ -231,9 +233,15 @@ export const groupStatements = (
       .where(
         and(
           eq(directoryGroupTeams.provider, kind.provider),
+          // Only the mapping as the read captured it: a group moved to
+          // another team meanwhile was read for its old one, and placing
+          // by it would make the new team follow a group whose members
+          // nobody placed there (its department's people would leave). It
+          // stays unread until the next read reads it for that team.
           sql`EXISTS (
             SELECT 1 FROM json_each(${outcomes})
             WHERE value ->> 0 = ${directoryGroupTeams.groupId}
+              AND value ->> 5 = ${directoryGroupTeams.teamId}
           )`,
           claimed
         )

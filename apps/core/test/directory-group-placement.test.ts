@@ -360,6 +360,61 @@ describe("teams that follow directory groups", () => {
     });
   });
 
+  it("place nobody by a group moved to another team while the read ran, and take nobody out of that team, until a read reads it there", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const support = unique("Support");
+    const [first, second] = [
+      await teamNamed(admin.session, unique("Helpdesk")),
+      await teamNamed(admin.session, support),
+    ];
+    const [uma, vic] = [await member(), await member()];
+    // Uma is in the group; Vic is in Support by department.
+    await directoryHolds([
+      inDirectory({ id: uma.oid }),
+      inDirectory({ id: vic.oid, department: support }),
+    ]);
+    const desk = group();
+    const id = String(desk.id);
+    await directoryGroupsHold([desk], { [id]: listing(uma) });
+    await admin.api.directoryGroups.mapToTeam(id, first);
+    await readNext();
+    const before = {
+      uma: await teamsOf(uma.userId),
+      vic: await teamsOf(vic.userId),
+    };
+    // The read captured the group on its first team; before its batch
+    // lands, an admin moves the group to Support.
+    const { coreEnv, landed } = landingAt(
+      /insert into "directory_reads"/u,
+      "before",
+      async () => await admin.api.directoryGroups.mapToTeam(id, second)
+    );
+    await readNext({ DB: coreEnv.DB });
+    const listed = await admin.api.directoryGroups.list();
+    const during = {
+      vic: await teamsOf(vic.userId),
+      readAt: listed.find(({ groupId }) => groupId === id)?.readAt,
+    };
+    await readNext();
+    const umaAfter = await teamsOf(uma.userId);
+    expect({
+      landed: landed(),
+      before,
+      during,
+      after: {
+        uma: umaAfter.includes(second),
+        vic: await teamsOf(vic.userId),
+      },
+    }).toStrictEqual({
+      landed: true,
+      before: { uma: [first], vic: [second] },
+      // Support still follows its department: its group wasn't read there.
+      during: { vic: [second], readAt: null },
+      // The next read reads the group for Support: Uma joins, Vic leaves.
+      after: { uma: true, vic: [] },
+    });
+  });
+
   it("keep nothing of an erased person's group membership, though the directory and the group still list them", async () => {
     const { admin } = await connectedDirectory(idp);
     const ted = await member();
