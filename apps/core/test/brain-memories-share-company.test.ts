@@ -3,6 +3,7 @@ import type { BrainShare } from "@grasp-os/shared/brain-memories";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { memberFromDirectory } from "../src/auth/directory-members.ts";
 import { rememberAs } from "../src/brain-next.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -10,7 +11,9 @@ import { signedInApi } from "./sign-in.ts";
 // Sharing a memory with everyone (GRA-1815) in a company of fewer than
 // three people: the others would know who shared it, so it is refused as
 // a team of two is, and not offered. A file of its own: each file starts
-// with empty storage, so the company here is only who signs in below.
+// with empty storage, so the company here is only who signs in below,
+// and two members the directory made who never signed in, who count for
+// nobody (GRA-2156).
 
 const idp = mockIdp();
 
@@ -43,6 +46,18 @@ describe("sharing a memory with everyone in a small company", () => {
       audience: "company",
       change: crypto.randomUUID(),
     });
+    for (const person of ["Never Came", "Not Yet"]) {
+      const oid = crypto.randomUUID();
+      // oxlint-disable-next-line no-await-in-loop -- one member at a time
+      await memberFromDirectory(env, oid, {
+        id: oid,
+        name: person,
+        email: "",
+        department: "",
+        title: "",
+        manager: null,
+      });
+    }
     const small = await anna.api.brainMemories.shareAudiences();
     await expect(anna.api.brainMemories.publish(share())).rejects.toThrow(
       brainMemoryErrors.create("brain.audience_not_yours").message

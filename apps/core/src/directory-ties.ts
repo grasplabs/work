@@ -80,9 +80,11 @@ export const namingAccount = (kind: DirectoryKind): SQL =>
  * scanning the provider's accounts): the one whose account of `kind`
  * (`namingAccount`) names the row's ID in the row's tenant, while they are
  * a member. The tenant is the one a verified sign-in named, or the one the
- * directory read the person in as it made their account. One account per
- * sign-in subject, and none made by the directory where any account names
- * the ID already, so at most one member; the lowest user ID if ever two.
+ * directory read the person in as it made their account. Two accounts
+ * can name one ID: a sign-in for an interview alone, while onboarding's
+ * gate is closed, makes a user who is no member, beside the member the
+ * directory made. The tie names only a member, so it is that one; the
+ * lowest user ID if ever two.
  */
 const tiedMember = (kind: DirectoryKind): SQL => sql`(
   SELECT ${accounts.userId} FROM ${accounts}

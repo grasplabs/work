@@ -1,7 +1,10 @@
+import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { recordEvents, shareAudiencesAs } from "../src/brain-next.ts";
+import { inStoreOf } from "./brain-next-out-reads.ts";
 import { landingAt, withD1ValueLimit } from "./d1-landing.ts";
 import {
   connectedDirectory,
@@ -285,17 +288,28 @@ describe("a person the directory's read places, before they sign in", () => {
     });
   });
 
-  it("is one member when their first sign-in lands between the read's snapshot and its batch", async () => {
+  it("is one member when their first sign-in lands between the read's snapshot and its batch, whatever case their token gives the object ID in", async () => {
     const { admin } = await connectedDirectory(idp);
     const team = await newTeam(admin.session);
     const oid = crypto.randomUUID();
     await directoryHolds([user({ id: oid, department: team.name })]);
     let userId = "";
     const { coreEnv, landed } = landingAt(readsBatch, "before", async () => {
-      ({ userId } = await signsIn(oid));
+      ({ userId } = await signsIn(oid.toUpperCase()));
     });
-
-    await readAt(nextDay(), { DB: coreEnv.DB });
+    // Every ID the read makes sorts below any Better Auth makes, so a
+    // member made over the sign-in would be the one the tie names, every
+    // time: the read must see the sign-in's account, however it is cased.
+    const real = crypto.randomUUID.bind(crypto);
+    const lowest = vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
+      const [, b = "", c = "", d = "", e = ""] = real().split("-");
+      return `00000000-${b}-${c}-${d}-${e}`;
+    });
+    try {
+      await readAt(nextDay(), { DB: coreEnv.DB });
+    } finally {
+      lowest.mockRestore();
+    }
     const naming = await membersNaming(oid);
     await readAt(nextDay());
 
@@ -383,5 +397,71 @@ describe("a person the directory's read places, before they sign in", () => {
       "SELECT failure FROM directory_reads WHERE provider = 'microsoft-directory'"
     ).first<string | null>("failure");
     expect({ placed, failure }).toStrictEqual({ placed: count, failure: null });
+  });
+});
+
+/** Every step the shared store keeps as an event for `team`. */
+const stepsOf = async (team: string): Promise<unknown[]> =>
+  await inStoreOf("brain", (store) =>
+    store
+      .exec<{ step: string }>(
+        "SELECT step FROM events WHERE team = ?",
+        `team:${team}`
+      )
+      .toArray()
+      .map(({ step }) => step)
+  );
+
+/**
+ * A team the read fills with `count` people, none signed in: its id, and
+ * each person's object ID.
+ */
+const filledTeam = async (count: number) => {
+  const { admin } = await connectedDirectory(idp);
+  const team = await newTeam(admin.session);
+  const oids = Array.from({ length: count }, () => crypto.randomUUID());
+  await directoryHolds(oids.map((id) => user({ id, department: team.name })));
+  await readAt(nextDay());
+  return { team: team.id, oids };
+};
+
+describe("the minimums that keep who shared or did something hidden", () => {
+  it("count a team's members only once they signed in, for sharing with it", async () => {
+    const { team, oids } = await filledTeam(5);
+    const [first, second, third] = oids;
+    const sharer = await signsIn(String(first));
+    await signsIn(String(second));
+    const padded = await shareAudiencesAs(env, sharer.userId);
+    await signsIn(String(third));
+    const enough = await shareAudiencesAs(env, sharer.userId);
+
+    expect({
+      padded: padded.teams.map(({ id }) => id),
+      enough: enough.teams.map(({ id }) => id),
+    }).toStrictEqual({ padded: [], enough: [team] });
+  });
+
+  it("count a team's members only once they signed in, for keeping its events", async () => {
+    const { team, oids } = await filledTeam(minTeamShown + 2);
+    const [first, ...others] = oids;
+    const person = await signsIn(String(first));
+    for (const oid of others.slice(0, minTeamShown - 2)) {
+      // oxlint-disable-next-line no-await-in-loop -- one sign-in at a time
+      await signsIn(oid);
+    }
+    const step = (name: string) => ({
+      key: crypto.randomUUID(),
+      personId: person.userId,
+      step: name,
+      system: "crm",
+      writes: false,
+      item: null,
+      at: new Date(),
+    });
+    await recordEvents(env, [step("padded")]);
+    await signsIn(String(others[minTeamShown - 2]));
+    await recordEvents(env, [step("enough")]);
+
+    await expect(stepsOf(team)).resolves.toStrictEqual(["enough"]);
   });
 });
