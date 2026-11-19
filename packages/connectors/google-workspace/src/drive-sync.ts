@@ -671,9 +671,12 @@ const contentOf = async (
   if (how === null) {
     return { content: null };
   }
-  // Out of requests or time before it starts: the next read takes it.
+  // Out of requests or time before it starts, its readers having taken
+  // what was left: late, so a file whose readers always take a whole read
+  // is passed over on the next (the kit's `fillPage`), never a page that
+  // stops before it again and again.
   if (!mayRequest(room)) {
-    return { full: true };
+    return { late: true };
   }
   // Base64 is a third larger than the bytes.
   if ("media" in how && (Number(file.size ?? 0) * 4) / 3 > room.bytes) {
