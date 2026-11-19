@@ -11,6 +11,7 @@ import type { ReadAdvice } from "./directory-read-advice.ts";
 
 const expected: Record<DirectoryReadFailure, ReadAdvice> = {
   "directory.inactive": "connect",
+  "directory.not_admin": "connect",
   "directory.not_found": "connect",
   "directory.other_tenant": "connect",
   "directory.too_large": "tooLarge",

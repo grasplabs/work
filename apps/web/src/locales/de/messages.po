@@ -8758,14 +8758,6 @@ msgstr "Erlaubte Methoden"
 msgid "Microphone: {name}"
 msgstr "Mikrofon: {name}"
 
-#: src/settings/directory-reads.tsx
-msgid "Microsoft refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
-msgstr "Microsoft hat die Auflistung verweigert, also wurde niemand wegen eines dort gelöschten Kontos gesperrt; alles andere wurde abgeglichen. Dem Konto, das das Verzeichnis verbunden hat, fehlt möglicherweise das Recht dazu: Wenden Sie sich an den Support von Grasp."
-
-#: src/settings/directory-reads.tsx
-msgid "Microsoft’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
-msgstr "Microsofts Liste davon kam nicht als Liste an, also wurde niemand wegen eines dort gelöschten Kontos gesperrt; alles andere wurde abgeglichen. Grasp versucht es beim nächsten täglichen Abgleich erneut. Bleibt es dabei, wenden Sie sich an den Support von Grasp."
-
 #: src/workflows/requests/request-plan.tsx
 msgid "Minutes saved a request"
 msgstr "Gesparte Minuten pro Anfrage"
@@ -14736,6 +14728,14 @@ msgstr "Das Verzeichnis konnte nicht abgeglichen werden, zuletzt versucht am {fa
 #: src/settings/directory-reads.tsx
 msgid "The directory holds more people than Grasp can read at once. Ask Grasp’s support to help."
 msgstr "Das Verzeichnis enthält mehr Personen, als Grasp auf einmal lesen kann. Bitten Sie den Support von Grasp um Hilfe."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
+msgstr "Das Verzeichnis hat die Auflistung verweigert, also wurde niemand wegen eines dort gelöschten Kontos gesperrt; alles andere wurde abgeglichen. Dem Konto, das das Verzeichnis verbunden hat, fehlt möglicherweise das Recht dazu: Wenden Sie sich an den Support von Grasp."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
+msgstr "Die Liste des Verzeichnisses kam nicht als Liste an, also wurde niemand wegen eines dort gelöschten Kontos gesperrt; alles andere wurde abgeglichen. Grasp versucht es beim nächsten täglichen Abgleich erneut. Bleibt es dabei, wenden Sie sich an den Support von Grasp."
 
 #: src/agents/agent-documents.tsx
 msgid "The documents couldn't be loaded. Reload the page."

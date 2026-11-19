@@ -379,6 +379,7 @@ export type DirectoryErrorCode = NonNullable<
 export const directoryReadFailures = [
   "directory.not_found",
   "directory.inactive",
+  "directory.not_admin",
   "directory.cursor_invalid",
   "directory.throttled",
   "directory.provider_failed",

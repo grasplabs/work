@@ -8758,14 +8758,6 @@ msgstr "Toegestane methoden"
 msgid "Microphone: {name}"
 msgstr "Microfoon: {name}"
 
-#: src/settings/directory-reads.tsx
-msgid "Microsoft refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
-msgstr "Microsoft weigerde ze op te sommen, dus niemand is geschorst om een account dat daar is verwijderd; al het andere is uitgelezen. Het account dat de directory koppelde, mist misschien het recht om ze op te sommen: vraag de support van Grasp."
-
-#: src/settings/directory-reads.tsx
-msgid "Microsoft’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
-msgstr "De lijst van Microsoft kwam niet als lijst terug, dus niemand is geschorst om een account dat daar is verwijderd; al het andere is uitgelezen. Grasp probeert het bij de volgende dagelijkse uitlezing opnieuw. Blijft dit zo, vraag dan de support van Grasp."
-
 #: src/workflows/requests/request-plan.tsx
 msgid "Minutes saved a request"
 msgstr "Bespaarde minuten per verzoek"
@@ -14736,6 +14728,14 @@ msgstr "De directory kon niet worden uitgelezen, laatst geprobeerd op {failedAt}
 #: src/settings/directory-reads.tsx
 msgid "The directory holds more people than Grasp can read at once. Ask Grasp’s support to help."
 msgstr "De directory bevat meer mensen dan Grasp in één keer kan uitlezen. Vraag de support van Grasp om hulp."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
+msgstr "De directory weigerde ze op te sommen, dus niemand is geschorst om een account dat daar is verwijderd; al het andere is uitgelezen. Het account dat de directory koppelde, mist misschien het recht om ze op te sommen: vraag de support van Grasp."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
+msgstr "De lijst van de directory kwam niet als lijst terug, dus niemand is geschorst om een account dat daar is verwijderd; al het andere is uitgelezen. Grasp probeert het bij de volgende dagelijkse uitlezing opnieuw. Blijft dit zo, vraag dan de support van Grasp."
 
 #: src/agents/agent-documents.tsx
 msgid "The documents couldn't be loaded. Reload the page."

@@ -8758,14 +8758,6 @@ msgstr "Métodos que permite"
 msgid "Microphone: {name}"
 msgstr "Micrófono: {name}"
 
-#: src/settings/directory-reads.tsx
-msgid "Microsoft refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
-msgstr "Microsoft se negó a listarlas, así que nadie fue suspendido por una cuenta eliminada allí; todo lo demás se leyó. Puede que la cuenta que conectó el directorio no tenga permiso para listarlas: pide ayuda al soporte de Grasp."
-
-#: src/settings/directory-reads.tsx
-msgid "Microsoft’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
-msgstr "La lista de Microsoft no respondió como una lista, así que nadie fue suspendido por una cuenta eliminada allí; todo lo demás se leyó. Grasp lo vuelve a intentar en su próxima lectura diaria. Si sigue así, pide ayuda al soporte de Grasp."
-
 #: src/workflows/requests/request-plan.tsx
 msgid "Minutes saved a request"
 msgstr "Minutos ahorrados por solicitud"
@@ -14736,6 +14728,14 @@ msgstr "No se pudo leer el directorio; último intento el {failedAt}."
 #: src/settings/directory-reads.tsx
 msgid "The directory holds more people than Grasp can read at once. Ask Grasp’s support to help."
 msgstr "El directorio contiene más personas de las que Grasp puede leer de una vez. Pide ayuda al soporte de Grasp."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
+msgstr "El directorio se negó a listarlas, así que nadie fue suspendido por una cuenta eliminada allí; todo lo demás se leyó. Puede que la cuenta que conectó el directorio no tenga permiso para listarlas: pide ayuda al soporte de Grasp."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
+msgstr "La lista del directorio no respondió como una lista, así que nadie fue suspendido por una cuenta eliminada allí; todo lo demás se leyó. Grasp lo vuelve a intentar en su próxima lectura diaria. Si sigue así, pide ayuda al soporte de Grasp."
 
 #: src/agents/agent-documents.tsx
 msgid "The documents couldn't be loaded. Reload the page."

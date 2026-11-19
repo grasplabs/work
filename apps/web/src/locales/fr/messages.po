@@ -8758,14 +8758,6 @@ msgstr "Méthodes autorisées"
 msgid "Microphone: {name}"
 msgstr "Micro : {name}"
 
-#: src/settings/directory-reads.tsx
-msgid "Microsoft refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
-msgstr "Microsoft a refusé de les lister, donc personne n’a été suspendu pour un compte supprimé dans l’annuaire ; tout le reste a été lu. Le compte qui a connecté l’annuaire n’a peut-être pas le droit de les lister : demandez au support de Grasp."
-
-#: src/settings/directory-reads.tsx
-msgid "Microsoft’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
-msgstr "La liste de Microsoft n’a pas répondu sous forme de liste, donc personne n’a été suspendu pour un compte supprimé dans l’annuaire ; tout le reste a été lu. Grasp réessaie à sa prochaine lecture quotidienne. Si cela persiste, demandez au support de Grasp."
-
 #: src/workflows/requests/request-plan.tsx
 msgid "Minutes saved a request"
 msgstr "Minutes gagnées par demande"
@@ -14736,6 +14728,14 @@ msgstr "L’annuaire n’a pas pu être lu ; dernier essai le {failedAt}."
 #: src/settings/directory-reads.tsx
 msgid "The directory holds more people than Grasp can read at once. Ask Grasp’s support to help."
 msgstr "L’annuaire compte plus de personnes que Grasp ne peut en lire d’un coup. Demandez de l’aide au support de Grasp."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
+msgstr "L’annuaire a refusé de les lister, donc personne n’a été suspendu pour un compte supprimé dans l’annuaire ; tout le reste a été lu. Le compte qui a connecté l’annuaire n’a peut-être pas le droit de les lister : demandez au support de Grasp."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
+msgstr "La liste de l’annuaire n’a pas répondu sous forme de liste, donc personne n’a été suspendu pour un compte supprimé dans l’annuaire ; tout le reste a été lu. Grasp réessaie à sa prochaine lecture quotidienne. Si cela persiste, demandez au support de Grasp."
 
 #: src/agents/agent-documents.tsx
 msgid "The documents couldn't be loaded. Reload the page."

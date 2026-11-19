@@ -68,14 +68,15 @@ const DeletedReason = ({ reason }: { reason: DirectoryDeletedFailure }) => {
   const said: Record<DirectoryDeletedFailure, ReactElement> = {
     "directory.deleted_refused": (
       <Trans>
-        Microsoft refused to list them, so nobody was suspended for an account
-        deleted there; everything else was read. The account that connected the
-        directory may lack the right to list them: ask Grasp’s support.
+        The directory refused to list them, so nobody was suspended for an
+        account deleted there; everything else was read. The account that
+        connected the directory may lack the right to list them: ask Grasp’s
+        support.
       </Trans>
     ),
     "directory.deleted_unsupported": (
       <Trans>
-        Microsoft’s list of them didn’t answer as a list, so nobody was
+        The directory’s list of them didn’t answer as a list, so nobody was
         suspended for an account deleted there; everything else was read. Grasp
         tries again at its next daily read. If this stays, ask Grasp’s support.
       </Trans>
