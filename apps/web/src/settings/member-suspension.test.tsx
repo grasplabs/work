@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { formatDate } from "../format.ts";
 import { MemberSuspension } from "./member-suspension.tsx";
 
 // A member's suspension in Settings › Members, as an admin reads it: why,
@@ -15,6 +16,10 @@ import { MemberSuspension } from "./member-suspension.tsx";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
+const since = "2026-11-18T07:00:00.000Z";
+// As the row writes it, in this machine's time zone.
+const date = formatDate(since);
+
 /** Ann, suspended for `reason`, or not at all for null. */
 const ann = (reason: DirectoryAccount | null): Member => ({
   userId: "user-ann",
@@ -22,8 +27,7 @@ const ann = (reason: DirectoryAccount | null): Member => ({
   email: "ann@acme.test",
   role: "user",
   joinedAt: "2026-01-05T09:00:00.000Z",
-  suspension:
-    reason === null ? null : { since: "2026-11-18T07:00:00.000Z", reason },
+  suspension: reason === null ? null : { since, reason },
 });
 
 let root: Root | undefined;
@@ -59,7 +63,7 @@ const waysOut: Record<DirectoryAccount, string | null> = {
   deleted:
     "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them.",
   unlisted:
-    "The account can't be restored any more. To end their access for good, remove them.",
+    "The account is no longer listed in the directory. If it was deleted and can still be restored there, restoring it lets Grasp lift the suspension at its next daily read. Otherwise, to end their access for good, remove them.",
   enabled: null,
 };
 
@@ -70,13 +74,10 @@ describe("Settings › Members › a member's suspension", () => {
 
   it("says why they are suspended, since when, and where the way out is, with nothing to click", () => {
     const reasons: Record<DirectoryAccount, string> = {
-      disabled: "Since Nov 18, 2026: the directory turned their account off.",
-      deleted:
-        "Since Nov 18, 2026: their account was deleted in the directory.",
-      unlisted:
-        "Since Nov 18, 2026: their account is no longer in the directory.",
-      enabled:
-        "Since Nov 18, 2026. The directory has turned their account on again, so its next daily read lifts this.",
+      disabled: `Since ${date}: the directory turned their account off.`,
+      deleted: `Since ${date}: their account was deleted in the directory.`,
+      unlisted: `Since ${date}: their account is no longer in the directory.`,
+      enabled: `Since ${date}. The directory has turned their account on again, so its next daily read lifts this.`,
     };
     const states: DirectoryAccount[] = [
       "disabled",
@@ -101,7 +102,6 @@ describe("Settings › Members › a member's suspension", () => {
                 each === null ||
                 text.includes(each) === (each === waysOut[state])
             ),
-            lifting: text.includes("lifts the suspension"),
             buttons,
           },
         ];
@@ -113,22 +113,18 @@ describe("Settings › Members › a member's suspension", () => {
         reason: true,
         suspended: true,
         wayOut: true,
-        lifting: true,
         buttons: 0,
       },
       deleted: {
         reason: true,
         suspended: true,
         wayOut: true,
-        lifting: true,
         buttons: 0,
       },
-      // Purged: it can't be restored, so nothing is said of lifting.
       unlisted: {
         reason: true,
         suspended: true,
         wayOut: true,
-        lifting: false,
         buttons: 0,
       },
       // Turned on again: the next read lifts it, so no way out is named.
@@ -136,7 +132,6 @@ describe("Settings › Members › a member's suspension", () => {
         reason: true,
         suspended: true,
         wayOut: true,
-        lifting: false,
         buttons: 0,
       },
     });

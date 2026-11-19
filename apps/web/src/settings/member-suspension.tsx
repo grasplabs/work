@@ -46,7 +46,7 @@ const SuspensionReason = ({
 
 /**
  * Where the way out of a suspension is, true for its reason: the directory
- * for an account it still holds, removal for one it purged. An account the
+ * for an account it still holds, and removal otherwise. An account the
  * directory turned on again needs none: its next read lifts the suspension.
  */
 const WayOut = ({
@@ -68,10 +68,14 @@ const WayOut = ({
         its next daily read. To end their access for good, remove them.
       </Trans>
     ),
+    // Not listed may be purged, or deleted and still restorable when the
+    // read went without the deleted accounts: say only what is known.
     unlisted: (
       <Trans>
-        The account can&apos;t be restored any more. To end their access for
-        good, remove them.
+        The account is no longer listed in the directory. If it was deleted and
+        can still be restored there, restoring it lets Grasp lift the suspension
+        at its next daily read. Otherwise, to end their access for good, remove
+        them.
       </Trans>
     ),
   };
