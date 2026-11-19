@@ -370,6 +370,37 @@ describe("teams that follow directory groups", () => {
     });
   });
 
+  it("place only object IDs the people read lists, each once, however often a group's pages name them", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const pia = await member();
+    const unlisted = crypto.randomUUID();
+    await directoryHolds([inDirectory({ id: pia.oid })]);
+    const team = await teamNamed(admin.session, unique("Platform"));
+    const platform = group();
+    const id = String(platform.id);
+    // Pia on the first page and again on the second (a hundred to a page),
+    // and someone the people read doesn't list.
+    await directoryGroupsHold([platform], {
+      [id]: [
+        ...listing(pia),
+        ...Array.from({ length: 120 }, () => userEntry(crypto.randomUUID())),
+        userEntry(pia.oid.toUpperCase()),
+        userEntry(unlisted),
+      ],
+    });
+    await admin.api.directoryGroups.mapToTeam(id, team);
+    await readNext();
+    const { results } = await env.DB.prepare(
+      "SELECT account_id AS id FROM directory_group_members WHERE group_id = ?"
+    )
+      .bind(id)
+      .all<{ id: string }>();
+    expect({
+      rows: results.map((row) => row.id),
+      pia: await teamsOf(pia.userId),
+    }).toStrictEqual({ rows: [pia.oid], pia: [team] });
+  });
+
   it("place someone their group lists as they first sign in", async () => {
     const { admin } = await connectedDirectory(idp);
     const oid = crypto.randomUUID();
