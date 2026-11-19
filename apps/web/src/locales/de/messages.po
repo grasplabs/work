@@ -5833,10 +5833,6 @@ msgstr "Als Markdown herunterladen"
 msgid "Download as PDF"
 msgstr "Als PDF herunterladen"
 
-#: src/inbox/report-row.tsx
-msgid "Download page"
-msgstr "Seite herunterladen"
-
 #: src/apps/app-code.tsx
 msgid "Download the file"
 msgstr "Datei herunterladen"
@@ -8984,6 +8980,10 @@ msgstr "Das Gespräch wird geladen"
 #: src/frame/part-words.tsx
 msgid "Loading the page"
 msgstr "Seite wird geladen"
+
+#: src/inbox/report-row.tsx
+msgid "Loading the report"
+msgstr "Bericht wird geladen"
 
 #: src/frame/part-words.tsx
 msgid "Loading the sound"

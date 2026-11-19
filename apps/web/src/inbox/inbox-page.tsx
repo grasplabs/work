@@ -3,17 +3,13 @@ import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
-import {
-  useEffect,
-  useEffectEvent,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { formatDayMonth } from "../format.ts";
+import { PagePanel } from "../frame/page-panel.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { useWide } from "../frame/wide.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
@@ -38,14 +34,8 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { PanelSection } from "../grasp/panel-section/index.ts";
-import { Panel, PanelHeader, PanelView } from "../grasp/panel/index.ts";
+import { Panel, PanelView } from "../grasp/panel/index.ts";
 import { RowList, RowListItem } from "../grasp/row-list/index.ts";
-import {
-  Sheet,
-  SheetBody,
-  SheetContent,
-  SheetTitle,
-} from "../grasp/sheet/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { notLoadedText } from "../load-from-core.tsx";
@@ -58,40 +48,36 @@ import type { Group, InboxItem } from "./items.ts";
 import { orderOf, skip, stepFrom } from "./walk.ts";
 
 // The Inbox, on Grasp UI: what waits on the person, to work through
-// quickly. A full-height list at the start, and beside it an inspector that
-// is always open, on the library's dither: the walk through what waits in
-// its head ("1 of 3", back, next, Skip), the item to decide under "To
-// decide", then its facts (Ruben's pick, 18 November). On a narrow page the
-// list stands alone and a row opens the walk in a Sheet. The open item is
-// the page's address (`?item=<id>`), so a link, Back and a reload keep it;
-// J and K (or the arrow keys in the list) go to the next and the one
-// before; a settled item leaves the list and the one after it opens in its
-// place. No tabs: the sidebar's Inbox view is the Inbox's filter, and what
-// happened is Settings' audit trail. The weekly report stands at the head
-// of the list once it is ready. Items come from items.ts.
-
-/** The page's own width at which the list and the item stand side by side; narrower, the item opens in a Sheet. */
-const WIDE_REM = 52;
+// quickly. The list is the page, in the shell's own room; its inspector is
+// the shell's page panel (frame/page-panel.tsx), always open beside a wide
+// page: the walk through what waits at its head ("1 of 3", back, next,
+// Skip), the item to decide, then its facts (Ruben's pick, 18 November). On
+// a phone the list stands alone and a row opens the panel as the shell's
+// sheet. The open item is the page's address (`?item=<id>`), so a link, Back
+// and a reload keep it; J and K (or the arrow keys in the list) go to the
+// next and the one before; a settled item leaves the list and the one after
+// it opens in its place. No tabs: the sidebar's Inbox view is the Inbox's
+// filter, and what happened is Settings' audit trail. The weekly report
+// stands at the head of the list once it is ready. Items come from items.ts.
+//
+// The shell unmounts the panel's content while the panel has given way to
+// the docked chat or its sheet is closed: where the walk stands, what was
+// skipped and what was said are the page's, kept here. The panel keeps only
+// what an item keeps until it is stepped away from (an answer being typed).
 
 const styles = stylex.create({
-  // The page has the whole card (`page: "whole"` on its route): the list
-  // keeps the shell's own room, the inspector none, so it meets the bar,
-  // the card's end and its foot.
-  page: {
+  // The list, the page itself, in the shell's room.
+  list: {
     display: "flex",
     flexDirection: "column",
+    gap: grasp.space3,
     width: "100%",
-    height: "100%",
-    minHeight: 0,
+    minWidth: 0,
   },
-  split: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr)",
-    height: "100%",
-    minHeight: 0,
-  },
-  splitWide: {
-    gridTemplateColumns: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
+  // Nothing in the list: its state in the middle of the page.
+  listEmpty: {
+    flexGrow: 1,
+    justifyContent: "center",
   },
   // The walk's head: where in what waits the item is, between its arrows, and Skip apart.
   walk: {
@@ -104,30 +90,6 @@ const styles = stylex.create({
   },
   skip: {
     marginInlineStart: "auto",
-  },
-  // The list, the page itself: it scrolls on its own, in the shell's room.
-  pane: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space3,
-    minWidth: 0,
-    minHeight: 0,
-    overflowY: "auto",
-    paddingBlockStart: grasp.space7,
-    paddingBlockEnd: grasp.shellPageRoomBelow,
-    paddingInline: grasp.shellPageInline,
-  },
-  // Nothing in the list: its state in the middle of the page.
-  paneEmpty: {
-    justifyContent: "center",
-  },
-  // The inspector, flush with the bar, the card's end and its foot; one hairline toward the page.
-  panel: {
-    height: "100%",
-    minHeight: 0,
-    borderInlineStartWidth: grasp.hairline,
-    borderInlineStartStyle: "solid",
-    borderInlineStartColor: grasp.line,
   },
   // Nothing waits: the report's item stands under the Empty, at a list's width.
   emptyFoot: {
@@ -382,105 +344,61 @@ const WalkHead = ({
   );
 };
 
-/** What the inspector and the phone's Sheet are given: the list, and the walk's head and item. */
-interface ShapeProps {
-  wide: boolean;
-  /** A row was chosen: on a narrow page the walk opens in a Sheet. */
-  open: boolean;
-  selected: InboxItem | undefined;
-  onClose: () => void;
-  onSaid: (said: string) => void;
-  list: ReactNode;
-  head: ReactNode;
-}
-
-/** The kind of the item shown, as the inspector's and the Sheet's title. */
-const useKind = (selected: InboxItem | undefined): string => {
-  const { i18n } = useLingui();
-  return selected === undefined ? "" : i18n._(kindLabel[selected.kind]);
-};
-
-/** The item shown, answered in place. */
-const Detail = ({ selected, onSaid }: ShapeProps) =>
-  selected === undefined ? null : (
-    <ItemDetail item={selected} key={selected.id} onSaid={onSaid} />
-  );
-
-/** What the inspector holds under its head: the item to decide, then its facts. */
-const Sections = (shape: ShapeProps) => {
-  const { t } = useLingui();
-  const facts = shape.selected?.facts ?? [];
-  return (
-    <>
-      {/* The request is the one title here: the row already names its kind. */}
-      <Detail {...shape} />
-      {facts.length === 0 ? null : (
-        <PanelSection label={t`Facts`}>
-          <RowList aria-label={t`Facts`}>
-            {facts.map(({ label, value }) => (
-              <RowListItem detail={label} key={label} name={value} />
-            ))}
-          </RowList>
-        </PanelSection>
-      )}
-    </>
-  );
-};
-
-/** On a narrow page, the inspector in a Sheet once a row is chosen. */
-const PhoneSheet = (shape: ShapeProps) => {
-  const { wide, open, onClose, head } = shape;
-  const kind = useKind(shape.selected);
-  return !wide && open ? (
-    <Sheet
-      onOpenChange={(next) => {
-        if (!next) {
-          onClose();
-        }
-      }}
-      open
-      size="lg"
-    >
-      <SheetContent>
-        <SheetTitle>{kind}</SheetTitle>
-        <SheetBody>
-          {head}
-          <Sections {...shape} />
-        </SheetBody>
-      </SheetContent>
-    </Sheet>
-  ) : null;
-};
-
 /**
- * The list, and beside it an inspector that is always open, on the dither:
- * the walk in its head, the item to decide, then what is known about it.
+ * What the shell's page panel holds: the walk's head, the item to decide,
+ * answered in place, then what is known about it.
  */
-const Inspector = (shape: ShapeProps) => {
-  const { wide, head, selected } = shape;
-  const kind = useKind(selected);
+const Inspector = ({
+  selected,
+  head,
+  onSaid,
+}: {
+  selected: InboxItem;
+  /** The walk through what waits. */
+  head: ReactNode;
+  onSaid: (said: string) => void;
+}) => {
+  const { t } = useLingui();
   return (
-    <div {...stylex.props(styles.split, wide && styles.splitWide)}>
-      {shape.list}
-      {wide && selected !== undefined ? (
-        <div {...stylex.props(styles.panel)}>
-          <Panel aria-label={kind} framed={false}>
-            <PanelHeader actions={head} texture />
-            <PanelView>
-              <Sections {...shape} />
-            </PanelView>
-          </Panel>
-        </div>
-      ) : null}
-      <PhoneSheet {...shape} />
-    </div>
+    // No name of its own: the shell names the panel, and its sheet, by the item's kind.
+    <Panel framed={false}>
+      <PanelView>
+        {/* In the view, not a PanelHeader: a header with only actions keeps an empty room and a line under its bar. */}
+        {head}
+        {/* The request is the one title here: the row already names its kind. */}
+        <ItemDetail item={selected} key={selected.id} onSaid={onSaid} />
+        {selected.facts.length === 0 ? null : (
+          <PanelSection label={t`Facts`}>
+            <RowList aria-label={t`Facts`}>
+              {selected.facts.map(({ label, value }) => (
+                <RowListItem detail={label} key={label} name={value} />
+              ))}
+            </RowList>
+          </PanelSection>
+        )}
+      </PanelView>
+    </Panel>
   );
 };
 
 /**
- * The list and, beside it, the walk through it: the item shown with its
- * head. On a narrow page the list stands alone, and a row opens the walk
- * in a Sheet.
+ * Whether the page asks its panel open, as the shell takes it: open once a
+ * row is chosen, which opens its sheet on a phone and sends a docked chat
+ * floating; closed once it gave way to the docked chat or its sheet was
+ * closed; else the shell's own (open beside a wide page, a closed sheet on
+ * a phone).
+ */
+const panelOpen = (reading: boolean, gaveWay: boolean): boolean | undefined => {
+  if (reading) {
+    return true;
+  }
+  return gaveWay ? false : undefined;
+};
+
+/**
+ * The list and, in the shell's page panel, the walk through it: the item
+ * shown with its head. On a phone the list stands alone, and a row opens
+ * the panel as a sheet.
  */
 const ToDo = ({
   items,
@@ -488,7 +406,6 @@ const ToDo = ({
   group,
   notLoaded,
   onSaid,
-  wide,
   foot,
 }: {
   items: readonly InboxItem[];
@@ -497,13 +414,16 @@ const ToDo = ({
   group: Group;
   notLoaded: readonly Loaded<unknown>[];
   onSaid: (said: string) => void;
-  /** Whether the page has room for the walk beside the list. */
-  wide: boolean;
   /** What stands at the head of the list: the weekly report, once it is ready. */
   foot: ReactNode;
 }) => {
   const { i18n } = useLingui();
   const navigate = useNavigate();
+  // Only for which row is marked: the shell decides where the panel stands.
+  const wide = useWide();
+  // The panel gave way to the docked chat, or its sheet was closed: it
+  // stays away until a row is chosen.
+  const [gaveWay, setGaveWay] = useState(false);
   // Where the open item stood, so the one after it opens once it is settled.
   const [at, setAt] = useState(0);
   // What was skipped this visit, last skipped last: it waits at the back.
@@ -526,7 +446,7 @@ const ToDo = ({
   }
   const selected =
     index === -1 ? list[Math.min(at, list.length - 1)] : list[index];
-  // On a narrow page the walk opens in a Sheet once a row is chosen.
+  // A row was chosen: the panel is asked open, on a phone as its sheet.
   const reading = chosen !== undefined && selected !== undefined;
   const place = list.findIndex(({ id }) => id === selected?.id);
 
@@ -607,29 +527,18 @@ const ToDo = ({
   const failed = notLoaded.flatMap((part) => notLoadedText(part, i18n) ?? []);
   if (items.length === 0) {
     return (
-      <div {...stylex.props(styles.pane, styles.paneEmpty)}>
+      <div {...stylex.props(styles.list, styles.listEmpty)}>
         <NoItems failed={failed} foot={foot} />
       </div>
     );
   }
-  const shape: ShapeProps = {
-    wide,
-    open: reading,
-    selected,
-    onClose: back,
-    onSaid,
-    head: (
-      <WalkHead
-        count={list.length}
-        onSkip={skipShown}
-        onStep={step}
-        place={place + 1}
-      />
-    ),
-    // The list as the page's own full-height column: no card, no tabs (the
-    // sidebar's Inbox view is the filter), the report's item at its head.
-    list: (
-      <div {...stylex.props(styles.pane)}>
+  // The row of the item the panel shows; none while the panel is away.
+  const shown = reading || (wide && !gaveWay);
+  return (
+    <>
+      {/* The list as the page: no card, no tabs (the sidebar's Inbox view
+          is the filter), the report's item at its head. */}
+      <div {...stylex.props(styles.list)}>
         {failed.map((text) => (
           <Alert key={text} tone="attention">
             {text}
@@ -639,12 +548,37 @@ const ToDo = ({
         <ItemList
           list={list}
           onOpen={open}
-          selected={wide || reading ? selected : undefined}
+          selected={shown ? selected : undefined}
         />
       </div>
-    ),
-  };
-  return <Inspector {...shape} />;
+      {selected === undefined ? null : (
+        <PagePanel
+          label={i18n._(kindLabel[selected.kind])}
+          onOpenChange={(next) => {
+            // The chat docked, or the sheet was closed: the item is open no more.
+            if (!next) {
+              setGaveWay(true);
+              back();
+            }
+          }}
+          open={panelOpen(reading, gaveWay)}
+        >
+          <Inspector
+            head={
+              <WalkHead
+                count={list.length}
+                onSkip={skipShown}
+                onStep={step}
+                place={place + 1}
+              />
+            }
+            onSaid={onSaid}
+            selected={selected}
+          />
+        </PagePanel>
+      )}
+    </>
+  );
 };
 
 /**
@@ -669,37 +603,17 @@ export const InboxPage = ({
 }) => {
   const { t } = useLingui();
   const [said, setSaid] = useState("");
-  // Whether the page has room for the walk beside the list, as the
-  // library's approvals inbox measures its own screen.
-  const page = useRef<HTMLDivElement>(null);
-  const [wide, setWide] = useState(false);
-  useLayoutEffect(() => {
-    const element = page.current;
-    // In rem of 16px, as the library's approvals inbox measures its own.
-    const watch = new ResizeObserver(([entry]) => {
-      setWide((entry?.contentRect.width ?? 0) >= WIDE_REM * 16);
-    });
-    if (element !== null) {
-      watch.observe(element);
-    }
-    return () => {
-      watch.disconnect();
-    };
-  }, []);
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Inbox` }]} />
-      <div ref={page} {...stylex.props(styles.page)}>
-        <ToDo
-          chosen={chosen}
-          foot={foot}
-          group={group ?? "all"}
-          items={items}
-          notLoaded={notLoaded}
-          onSaid={setSaid}
-          wide={wide}
-        />
-      </div>
+      <ToDo
+        chosen={chosen}
+        foot={foot}
+        group={group ?? "all"}
+        items={items}
+        notLoaded={notLoaded}
+        onSaid={setSaid}
+      />
       {/* What was done with an item, for a screen reader: the list only loses it. */}
       <output {...stylex.props(styles.unseen)}>{said}</output>
     </>
