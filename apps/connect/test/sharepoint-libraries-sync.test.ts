@@ -909,9 +909,25 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
     ]);
     // A list Graph pages.
     sharePoint.permissions[`${salesDocs.id}-file`] = "paged";
-    // A group whose members show to its members alone.
+    // A group whose members show to its members alone; and a SharePoint
+    // group Graph names only globally, whose members it reads only in
+    // SharePoint Embedded.
     sharePoint.permissions[`${salesContracts.id}-file`] = [siteGroupGrant("6")];
     sharePoint.groups["/sites/sales|6"] = "refused";
+    sharePoint.feeds[salesContracts.id] = {
+      ...sharePoint.feeds[salesContracts.id],
+      "": {
+        entries: [
+          fileIn(salesContracts, `${salesContracts.id}-file`),
+          fileIn(salesContracts, "board", {}, "2"),
+        ],
+        end: "t1",
+      },
+    };
+    sharePoint.contents.board = "board";
+    sharePoint.permissions.board = [
+      { roles: ["read"], grantedToV2: { sharePointGroup: { id: "0a-board" } } },
+    ];
     const notWhole = {
       paged: await readersRead(connectionId, salesDocs.id),
       hidden: await readersRead(connectionId, salesContracts.id),
@@ -933,11 +949,41 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
         .filter(({ path }) => path.includes("/permissions")),
     }).toStrictEqual({
       paged: [null],
-      hidden: [null],
+      hidden: [null, null],
       notOwner: [null],
       fileNotOwned: [null],
       asked: [],
     });
+  });
+
+  it("reads everyone but guests as the company only when it is the file's own tenant", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [salesDocs.id]);
+    const otherTenant = "77777777-0000-4000-8000-000000000009";
+    sharePoint.feeds[salesDocs.id] = {
+      ...sharePoint.feeds[salesDocs.id],
+      "": {
+        entries: [
+          fileIn(salesDocs, "theirs"),
+          fileIn(salesDocs, "ours", {}, "2"),
+        ],
+        end: "t1",
+      },
+    };
+    sharePoint.contents.theirs = "theirs";
+    sharePoint.contents.ours = "ours";
+    sharePoint.permissions.theirs = [siteGroupGrant("8")];
+    sharePoint.permissions.ours = [siteGroupGrant("9")];
+    sharePoint.groups["/sites/sales|8"] = [
+      { LoginName: `c:0-.f|rolemanager|spo-grid-all-users/${otherTenant}` },
+    ];
+    sharePoint.groups["/sites/sales|9"] = [
+      { LoginName: `c:0-.f|rolemanager|spo-grid-all-users/${acmeTenant}` },
+    ];
+
+    await expect(
+      readersRead(connectionId, salesDocs.id)
+    ).resolves.toStrictEqual([[], [{ kind: "tenant", id: acmeTenant }]]);
   });
 
   it("reads a site group's members on the file's own site, as its ID names it only there", async () => {
