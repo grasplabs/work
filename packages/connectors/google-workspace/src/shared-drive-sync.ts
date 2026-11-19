@@ -11,7 +11,7 @@ import {
 } from "@grasp-os/connector-kit/sync";
 import type { SyncRoom } from "@grasp-os/connector-kit/sync";
 import { syncPlaceSchema } from "@grasp-os/shared/sync";
-import type { SyncChoice, SyncReader } from "@grasp-os/shared/sync";
+import type { SyncChoice } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
 import {
@@ -19,7 +19,7 @@ import {
   permissionFields,
   permissionListSchema,
   readFiles,
-  readersOfPermissions,
+  readersInChain,
 } from "./drive-sync.ts";
 import type { DriveFile, Scope } from "./drive-sync.ts";
 import { apisHost, googleFailure, googleUrl } from "./google.ts";
@@ -109,21 +109,21 @@ const permissionsPageSize = 100;
 const tooSlow = (): ToolError =>
   new ToolError("Google didn't answer in time", { code: "unavailable" });
 
+type Permission = NonNullable<
+  z.infer<typeof permissionListSchema>["permissions"]
+>[number];
+
 /**
- * Who may open `file`, as every page of its permissions says
+ * Every page of `file`'s permissions
  * (https://developers.google.com/workspace/drive/api/reference/rest/v3/permissions/list):
- * null (nobody) when the account can't share it, or the list can't be
- * read whole; "late" when the read has no room or time left for it.
- * Throttled or failed at Google, the page waits.
+ * null when the list can't be read whole; "late" when the read has no
+ * room or time left for it. Throttled or failed at Google, the page waits.
  */
-const readersRead = async (
+const permissionsOf = async (
   room: SyncRoom,
   file: DriveFile
-): Promise<SyncReader[] | null | "late"> => {
-  if (file.capabilities?.canShare !== true) {
-    return null;
-  }
-  const permissions = [];
+): Promise<Permission[] | null | "late"> => {
+  const permissions: Permission[] = [];
   let token: string | undefined = undefined;
   for (;;) {
     if (!mayRequest(room)) {
@@ -166,7 +166,7 @@ const readersRead = async (
     permissions.push(...(page.permissions ?? []));
     const next = page.nextPageToken ?? "";
     if (next === "") {
-      return readersOfPermissions(permissions);
+      return permissions;
     }
     token = next;
   }
@@ -189,10 +189,20 @@ const sharedDrive = (driveId: string): Scope => ({
   // In this drive, and not in the bin: anything else went away from it.
   holds: (file: DriveFile) => file.driveId === driveId && file.trashed !== true,
   fields: "capabilities(canShare)",
-  // Not in the file's own fields: read with requests (`readersRead`),
-  // and unknown without them.
-  readers: () => null,
-  readersRead,
+  // Its chain of folders ends at the drive's own root.
+  root: () => driveId,
+  // Only for a file the account can share: anyone else's list may be
+  // their own access alone, so it is nobody's, and none is asked for.
+  readersRead: async (room, file, folders) =>
+    file.capabilities?.canShare === true
+      ? await readersInChain(
+          room,
+          sharedDrive(driveId),
+          file,
+          folders,
+          async () => await permissionsOf(room, file)
+        )
+      : null,
 });
 
 /**

@@ -31,6 +31,7 @@ const providers = fakeProviders();
 
 const apisHost = "www.googleapis.com";
 const pdf = "application/pdf";
+const folderType = "application/vnd.google-apps.folder";
 
 /** Google's standard parameters, which every method takes. */
 const standard = new Set(["fields", "alt", "prettyPrint", "quotaUser", "key"]);
@@ -184,11 +185,48 @@ const fileIn = (
   modifiedTime: "2026-11-10T09:00:00.000Z",
   version: "3",
   driveId,
+  // At the drive's top, unless a test files it in a folder.
+  parents: [driveId],
   lastModifyingUser: { emailAddress: "Owner@Acme.test" },
   // The connected account may share it: a manager, content manager or
   // contributor of the drive.
   capabilities: { canShare: true },
   ...fields,
+});
+
+/** A folder of a shared drive, in `parent`, with its access limited or not. */
+const folderIn = (
+  driveId: string,
+  id: string,
+  parent: string,
+  limited: boolean
+): DriveFile => ({
+  id,
+  name: id,
+  mimeType: folderType,
+  modifiedTime: "2026-11-10T09:00:00.000Z",
+  version: "1",
+  driveId,
+  parents: [parent],
+  inheritedPermissionsDisabled: limited,
+});
+
+/** A user granted access on the folder `folder`, as its files list them. */
+const grantedOn = (
+  emailAddress: string,
+  folder: string
+): Record<string, unknown> => ({
+  type: "user",
+  emailAddress,
+  role: "reader",
+  permissionDetails: [
+    {
+      permissionType: "file",
+      inherited: true,
+      inheritedFrom: folder,
+      role: "reader",
+    },
+  ],
 });
 
 /** A member of a shared drive, as a file of it lists them: inherited. */
@@ -398,6 +436,18 @@ const fileCall = (url: URL): Response => {
     return permissionsCall(url, id);
   }
   const file = google.files.find((each) => each.id === id);
+  // A folder's own fields: where it is, and whether its access is limited
+  // ("inheritedPermissionsDisabled… Whether this file has inherited
+  // permissions disabled"), which only a folder carries.
+  if (file?.mimeType === folderType && exported === undefined) {
+    return allDrives(url)
+      ? Response.json({
+          id: file.id,
+          parents: file.parents,
+          inheritedPermissionsDisabled: file.inheritedPermissionsDisabled,
+        })
+      : notFound();
+  }
   const content = google.contents[id];
   // A shared drive's file is there only for a call that supports them.
   if (
@@ -507,6 +557,12 @@ const readAll = async (
       return { items: pages.flatMap(({ items }) => items), cursor };
     }
   }
+};
+
+/** The readers of each file a whole read of `place` gives, in order. */
+const readersOf = async (connectionId: string, place: string) => {
+  const { items } = await readAll(connectionId, place);
+  return items.flatMap((item) => (item.gone ? [] : [item.readers]));
 };
 
 describe("syncing a shared connection's picked shared drives", () => {
@@ -754,80 +810,108 @@ describe("syncing a shared connection's picked shared drives", () => {
     ]);
   });
 
-  it("gives a file in a folder with limited access only to those Google lets open its content", async () => {
+  it("gives a file under a folder with limited access only to an organizer and those granted on the file or that folder, never the drive's members", async () => {
     const { admin, connectionId } = await sharedConnection();
     await pick(admin, connectionId, [sales.id]);
-    google.files = [fileIn(sales.id, "contract")];
-    // As Google lists a folder with limited access
-    // (limited-expansive-access): inherited access that shows its
-    // metadata alone, inherited access turned off, and the only ones
-    // that still open it.
-    const inherited = [
-      { permissionType: "member", inherited: true, role: "writer" },
+    // Contracts, legal only: a folder with limited access in Sales.
+    google.files = [
+      folderIn(sales.id, "contracts", sales.id, true),
+      fileIn(sales.id, "msa", { parents: ["contracts"] }),
     ];
-    google.permissions.contract = [
-      // Metadata alone: "`inheritedPermissionsDisabled=true` and
-      // `view=metadata`".
+    google.contents.msa = "msa";
+    google.permissions.msa = [
+      // Members of the drive, as Google lists them on any of its files.
+      member("user", "seller@acme.test", sales.id),
+      member("group", "sales@acme.test", sales.id),
+      { ...member("user", "manager@acme.test", sales.id), role: "organizer" },
+      // Granted on the folder itself.
+      grantedOn("legal@acme.test", "contracts"),
+      // Granted on the file itself.
       {
         type: "user",
-        emailAddress: "seller@acme.test",
+        emailAddress: "auditor@acme.test",
         role: "reader",
-        view: "metadata",
-        inheritedPermissionsDisabled: true,
-        permissionDetails: inherited,
-      },
-      // A view's alone ("Only populated for permissions that belong to a
-      // view"): published to the company, which a search would find.
-      {
-        type: "domain",
-        domain: "acme.test",
-        allowFileDiscovery: true,
-        role: "reader",
-        view: "published",
-      },
-      // Inherited, with inherited access turned off.
-      {
-        type: "group",
-        emailAddress: "sales@acme.test",
-        role: "writer",
-        inheritedPermissionsDisabled: true,
-        permissionDetails: inherited,
-      },
-      // Added again on the folder itself: "an entry with the `inherited`
-      // field set to `false`".
-      {
-        type: "user",
-        emailAddress: "legal@acme.test",
-        role: "reader",
-        inheritedPermissionsDisabled: true,
         permissionDetails: [
-          ...inherited,
           { permissionType: "file", inherited: false, role: "reader" },
         ],
       },
-      // "the `organizer` role in shared drives can always access folders
-      // with limited access".
-      {
-        type: "user",
-        emailAddress: "manager@acme.test",
-        role: "organizer",
-        inheritedPermissionsDisabled: true,
-        permissionDetails: [
-          { permissionType: "member", inherited: true, role: "organizer" },
-        ],
-      },
     ];
 
-    const { items } = await readAll(connectionId, sales.id);
-
-    expect(
-      items.map((item) => (item.gone ? null : item.readers))
-    ).toStrictEqual([
+    await expect(readersOf(connectionId, sales.id)).resolves.toStrictEqual([
       [
-        { kind: "account", id: "legal@acme.test" },
         { kind: "account", id: "manager@acme.test" },
+        { kind: "account", id: "legal@acme.test" },
+        { kind: "account", id: "auditor@acme.test" },
       ],
     ]);
+  });
+
+  it("counts what a folder below a limited one grants, and nothing from above the nearest limited folder", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [sales.id]);
+    google.files = [
+      folderIn(sales.id, "contracts", sales.id, true),
+      // An ordinary folder in it, and another limited one.
+      folderIn(sales.id, "signed", "contracts", false),
+      folderIn(sales.id, "board", "contracts", true),
+      fileIn(sales.id, "nda", { parents: ["signed"] }),
+      fileIn(sales.id, "minutes", { parents: ["board"] }),
+    ];
+    google.contents.nda = "nda";
+    google.contents.minutes = "minutes";
+    const grants = [
+      member("user", "seller@acme.test", sales.id),
+      grantedOn("legal@acme.test", "contracts"),
+      grantedOn("signer@acme.test", "signed"),
+      grantedOn("director@acme.test", "board"),
+    ];
+    google.permissions.nda = grants;
+    google.permissions.minutes = grants;
+
+    await expect(readersOf(connectionId, sales.id)).resolves.toStrictEqual([
+      [
+        { kind: "account", id: "legal@acme.test" },
+        { kind: "account", id: "signer@acme.test" },
+      ],
+      [{ kind: "account", id: "director@acme.test" }],
+    ]);
+  });
+
+  it("gives nobody a file whose folders can't all be read, and reads each folder once a read", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [sales.id]);
+    google.files = [
+      folderIn(sales.id, "projects", sales.id, false),
+      // A folder Drive no longer gives.
+      fileIn(sales.id, "lost", { parents: ["gone-folder"] }),
+      ...Array.from({ length: 5 }, (_, index) =>
+        fileIn(sales.id, `plan-${index}`, { parents: ["projects"] })
+      ),
+    ];
+    google.contents.lost = "lost";
+    google.permissions.lost = [member("user", "seller@acme.test", sales.id)];
+    for (let index = 0; index < 5; index += 1) {
+      google.contents[`plan-${index}`] = "plan";
+      google.permissions[`plan-${index}`] = [
+        member("user", "seller@acme.test", sales.id),
+      ];
+    }
+    const before = sentToGoogle().length;
+
+    const readers = await readersOf(connectionId, sales.id);
+    const fetched = sentToGoogle()
+      .slice(before)
+      .filter(({ pathname }) => pathname === "/drive/v3/files/projects");
+
+    expect({ readers, fetched: fetched.length }).toStrictEqual({
+      readers: [
+        null,
+        ...Array.from({ length: 5 }, () => [
+          { kind: "account", id: "seller@acme.test" },
+        ]),
+      ],
+      fetched: 1,
+    });
   });
 
   it("gives nobody a file whose permissions Google refuses part of the way", async () => {

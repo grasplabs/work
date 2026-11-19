@@ -73,6 +73,11 @@ export const driveSyncFake = () => {
       .slice("/drive/v3/files/".length)
       .split("/");
     const id = decodeURIComponent(rawId);
+    // The top of the person's My Drive, where every file is: a folder
+    // with nothing above it, its access not limited.
+    if (id === "my-drive" && exported === undefined) {
+      return Response.json({ id, inheritedPermissionsDisabled: false });
+    }
     const content = field(field(world, "contents"), id);
     if (typeof content !== "string") {
       return notFound();
