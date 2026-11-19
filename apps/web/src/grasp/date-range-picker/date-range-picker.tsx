@@ -24,6 +24,8 @@ import { useEffect, useState } from "react";
 import type { ComponentProps } from "react";
 
 import { CalendarMonths } from "../calendar/months";
+import { calendarWords } from "../calendar/words";
+import type { CalendarWords } from "../calendar/words";
 import {
   datePlaceholder,
   defaultFormatLabels,
@@ -136,7 +138,7 @@ export interface DateRangePickerProps extends Omit<
    * are the catalogue's, else English. A flat text prop given beside it still wins until the
    * release's step 5.
    */
-  words?: Partial<DateRangePickerWords>;
+  words?: Partial<DateRangePickerWords & CalendarWords>;
 }
 
 const styles = stylex.create({
@@ -387,9 +389,16 @@ export const DateRangePicker = ({
     last7,
     last30,
     thisMonth,
+    trigger: triggerName,
   } = withGiven(useWords("dateRangePicker", dateRangePickerWords, words), {
     presets: presetsLabelGiven,
+    trigger: triggerLabel,
   });
+  // Its months' buttons are its calendar's words: an instance's `previous` and `next` reach them too.
+  const { previous: previousName, next: nextName } = withGiven(
+    useWords("calendar", calendarWords, words),
+    { previous: previousLabel, next: nextLabel }
+  );
   const presetLabels = presetLabelsGiven ?? [
     todayLabel,
     last7,
@@ -482,7 +491,11 @@ export const DateRangePicker = ({
         placeholder={placeholder}
         {...end}
       />
-      <DateTrigger label={triggerLabel} size={size} />
+      <DateTrigger
+        label={triggerLabel}
+        fallbackLabel={triggerName}
+        size={size}
+      />
       <HintPrimitive {...stylex.props(visuallyHidden)} />
       <ContentPrimitive
         align="start"
@@ -518,8 +531,8 @@ export const DateRangePicker = ({
           <div {...stylex.props(styles.calendar)}>
             <CalendarMonths
               months={shown}
-              previousLabel={previousLabel}
-              nextLabel={nextLabel}
+              previousLabel={previousName}
+              nextLabel={nextName}
             />
           </div>
         </div>

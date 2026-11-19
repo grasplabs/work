@@ -101,8 +101,8 @@ export interface AppCardProps {
   tone?: AppCardTone;
   /**
    * A drawn ground in place of the tone: one of the Backdrop's looks (a scene, a dither in its
-   * pattern and colour, or sand), small and still, drawing live while the card is hovered or holds
-   * the focus. Give each app its own, kept by the app's ID, so a row of cards never repeats one.
+   * pattern and colour, or sand), small and still. Give each app its own, kept by the app's ID, so
+   * a row of cards never repeats one.
    */
   ground?: BackdropLook;
   /** The actions in the "…" menu. Without them there is no "…". */
@@ -231,14 +231,11 @@ const metaOf = (
 const toneOf = (ground: BackdropLook | undefined, tone: AppCardTone) =>
   ground === undefined ? styles[tone] : null;
 
-/** Under the window: the drawn ground, still until the card has attention, or the paper grain. */
-const Ground = ({
-  ground,
-  attention,
-}: {
-  ground: BackdropLook | undefined;
-  attention: boolean;
-}) =>
+/**
+ * Under the window: the drawn ground, one still picture (live, it redrew under the pointer and read
+ * as the card refreshing), or the paper grain.
+ */
+const Ground = ({ ground }: { ground: BackdropLook | undefined }) =>
   ground === undefined ? (
     <span aria-hidden="true" {...stylex.props(styles.grain)} />
   ) : (
@@ -252,7 +249,7 @@ const Ground = ({
         look={ground}
         scenes={defaultScenes}
         small
-        still={!attention}
+        still
       />
     </span>
   );
@@ -305,7 +302,7 @@ export const AppCard = ({
         data-slot="app-card-frame"
         {...stylex.props(styles.frame, toneOf(ground, tone))}
       >
-        <Ground ground={ground} attention={attention} />
+        <Ground ground={ground} />
         <Window
           preview={preview}
           title={title}

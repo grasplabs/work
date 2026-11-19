@@ -419,7 +419,7 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
                 t({ message: "mm", context: "a date's month, as typed" }),
                 t({ message: "yyyy", context: "a date's year, as typed" }),
               ]}
-              triggerLabel={t`Choose dates`}
+              words={{ trigger: t`Choose dates` }}
               size="sm"
               value={period}
             />

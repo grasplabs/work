@@ -5125,6 +5125,10 @@ msgstr "Nicht gespeichert. Ihr Name bleibt stehen."
 msgid "Could not send"
 msgstr "Senden fehlgeschlagen"
 
+#: src/frame/part-words.tsx
+msgid "Could not send the answer"
+msgstr "Die Antwort konnte nicht gesendet werden"
+
 #: src/apps/app-workflows.tsx
 msgid "Could not unbind"
 msgstr "Konnte Verknüpfung nicht lösen"

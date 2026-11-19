@@ -742,7 +742,7 @@ const AskedItem = ({
       extra={
         <QuestionTool
           embedded
-          failedLabel={t`Your answer wasn't saved. Try again.`}
+          words={{ failed: t`Your answer wasn't saved. Try again.` }}
           kind="text"
           label={t`Question`}
           onSubmit={answer}
@@ -809,7 +809,7 @@ const GapItem = ({
       extra={
         <QuestionTool
           embedded
-          failedLabel={t`Your answer wasn't saved. Try again.`}
+          words={{ failed: t`Your answer wasn't saved. Try again.` }}
           kind="text"
           label={t`Question`}
           onSubmit={answer}

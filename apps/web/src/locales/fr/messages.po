@@ -5125,6 +5125,10 @@ msgstr "Non enregistré. Votre nom est conservé."
 msgid "Could not send"
 msgstr "Envoi impossible"
 
+#: src/frame/part-words.tsx
+msgid "Could not send the answer"
+msgstr "La réponse n’a pas pu être envoyée"
+
 #: src/apps/app-workflows.tsx
 msgid "Could not unbind"
 msgstr "Impossible de délier"

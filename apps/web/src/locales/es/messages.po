@@ -5125,6 +5125,10 @@ msgstr "No se ha guardado. Tu nombre se mantiene."
 msgid "Could not send"
 msgstr "No se pudo enviar"
 
+#: src/frame/part-words.tsx
+msgid "Could not send the answer"
+msgstr "No se pudo enviar la respuesta"
+
 #: src/apps/app-workflows.tsx
 msgid "Could not unbind"
 msgstr "No se pudo desvincular"

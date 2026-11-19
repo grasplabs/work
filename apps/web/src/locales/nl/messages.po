@@ -5125,6 +5125,10 @@ msgstr "Niet opgeslagen. Je naam blijft staan."
 msgid "Could not send"
 msgstr "Kon niet versturen"
 
+#: src/frame/part-words.tsx
+msgid "Could not send the answer"
+msgstr "Het antwoord kon niet worden verstuurd"
+
 #: src/apps/app-workflows.tsx
 msgid "Could not unbind"
 msgstr "Kon niet ontkoppelen"

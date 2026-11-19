@@ -259,13 +259,11 @@ const AskedQuestions = ({
           }),
           skip: t`Type instead`,
           step: (number, count) => t`${number} of ${count}`,
+          failed: lacksModel(model)
+            ? t`Connect an AI provider before sending.`
+            : (failure ?? t`Could not send`),
         }}
         embedded
-        failedLabel={
-          lacksModel(model)
-            ? t`Connect an AI provider before sending.`
-            : (failure ?? t`Could not send`)
-        }
         // Another question's card is a card of its own.
         key={step}
         kind={item.multiple === true ? "multi" : "single"}

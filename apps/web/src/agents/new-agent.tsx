@@ -534,7 +534,7 @@ export const NewAgent = ({
         {reviewing ? null : (
           <QuestionTool
             {...question}
-            failedLabel={t`Couldn't take that answer`}
+            words={{ failed: t`Couldn't take that answer` }}
             key={step}
             layout={styles.whole}
             onBack={

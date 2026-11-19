@@ -5125,6 +5125,10 @@ msgstr "Could not save. Your name is kept."
 msgid "Could not send"
 msgstr "Could not send"
 
+#: src/frame/part-words.tsx
+msgid "Could not send the answer"
+msgstr "Could not send the answer"
+
 #: src/apps/app-workflows.tsx
 msgid "Could not unbind"
 msgstr "Could not unbind"

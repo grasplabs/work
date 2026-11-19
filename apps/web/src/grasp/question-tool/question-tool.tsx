@@ -117,8 +117,11 @@ export interface QuestionToolProps {
    * the card waits; on success it shows the answer, on failure `failedLabel` shows under it.
    */
   onSubmit: (answer: string[]) => unknown;
-  /** The words when the answer could not be sent, shown under the card and given to an agent. */
-  failedLabel: string;
+  /**
+   * The words when the answer could not be sent, shown under the card and given to an agent.
+   * @default "Could not send the answer"
+   */
+  failedLabel?: string;
   /** Skips the question. Without it, there is no Skip. */
   onSkip?: () => unknown;
   /**
@@ -900,6 +903,7 @@ const withDefaults = (props: QuestionToolProps, words: QuestionToolWords) => ({
   skipLabel: props.skipLabel ?? words.skip,
   backLabel: props.backLabel ?? words.back,
   recommendedLabel: props.recommendedLabel ?? words.recommended,
+  failedLabel: props.failedLabel ?? words.failed,
   embedded: props.embedded ?? false,
 });
 
