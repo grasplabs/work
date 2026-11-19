@@ -10,6 +10,7 @@ import type { ReadAdvice } from "./directory-read-advice.ts";
 // only where a connection is what fails, never "wait" for one.
 
 const expected: Record<DirectoryReadFailure, ReadAdvice> = {
+  "directory.not_connected": "connect",
   "directory.inactive": "connect",
   "directory.not_admin": "connect",
   "directory.not_found": "connect",

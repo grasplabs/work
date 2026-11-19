@@ -372,7 +372,7 @@ export const directoryErrors = defineErrorFamily({
   "directory.group_refused":
     "Microsoft refused to read the directory's groups for this connection.",
   "directory.groups_not_granted":
-    "Grasp can't read your directory's groups yet: the directory was connected before Grasp asked for that permission. An admin disconnects the directory and connects it again to grant it. Until it is connected again, Grasp reads nobody from the directory.",
+    "Grasp can't read your directory's groups yet: the directory was connected before Grasp asked for that permission. An admin connects the directory again from Settings › Members, with the same account, to grant it.",
   "directory.group_not_mappable":
     "That group can't be a team's: anyone can join it, its members can't all be read, or Microsoft didn't say which.",
   "directory.team_not_found": "There's no such team.",
@@ -392,6 +392,7 @@ export type DirectoryErrorCode = NonNullable<
  * `adviceOf`, which fails to type-check until it is placed).
  */
 export const directoryReadFailures = [
+  "directory.not_connected",
   "directory.not_found",
   "directory.inactive",
   "directory.not_admin",
