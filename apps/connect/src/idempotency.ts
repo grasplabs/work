@@ -1,4 +1,7 @@
-import { heldBindingSchema } from "@grasp-os/shared/capability";
+import {
+  capabilityErrors,
+  heldBindingSchema,
+} from "@grasp-os/shared/capability";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type {
@@ -303,13 +306,26 @@ const storedOriginSchema = z.strictObject({
   binding: heldBindingSchema.optional(),
 });
 
+/**
+ * The grant `claims` were signed under. Only a side effect is kept under
+ * a key, and a capability with no grant (a read of its person's own
+ * connection) is always read-only (`requireAllowedEffect`), so one never
+ * gets here: refused as invalid if it does.
+ */
+const grantOf = (claims: CapabilityClaims): string => {
+  if (claims.origin.permissionId === null) {
+    throw capabilityErrors.create("capability.invalid");
+  }
+  return claims.origin.permissionId;
+};
+
 /** What a call whose capability says `claims` keeps under its key. */
 export const keptOf = (claims: CapabilityClaims, input: Json): Kept => ({
   input: claims.sensitive ? null : JSON.stringify(input),
   origin: JSON.stringify({
     mode: claims.authority.mode,
     appVersion: claims.authority.appVersion ?? null,
-    permissionId: claims.origin.permissionId,
+    permissionId: grantOf(claims),
     context: claims.origin.context,
     restricted: claims.restricted,
     ...(claims.origin.binding === undefined
