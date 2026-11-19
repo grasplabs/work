@@ -92,24 +92,25 @@ const PersonRow = ({
   </div>
 );
 
-/** Adding `person` to a team they aren't in, chosen from `teams`. */
+/**
+ * Adding `person` to a team they aren't in, chosen from `teams`. A team
+ * they are in already isn't offered: adding them again would only pin
+ * that membership (auth.ts's before hook), not move them.
+ */
 const AddToTeam = ({
   person,
   teams,
-  except,
   onChanged,
 }: {
   person: PlacedMember;
   teams: readonly OrganizationTeam[];
-  /** A team they are in already, not offered. */
-  except?: string;
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
   const [chosen, setChosen] = useState<string | null>(null);
   const { busy, failure, run } = useTeamChange(onChanged);
   const items = teams
-    .filter((team) => team.id !== except)
+    .filter((team) => !team.memberIds.includes(person.userId))
     .map((team) => ({ value: team.id, label: team.name }));
   const picked = items.some((item) => item.value === chosen) ? chosen : null;
   const who = person.name;
@@ -272,12 +273,7 @@ const Movers = ({
                   person={mover}
                   team={mover.team}
                 />
-                <AddToTeam
-                  except={mover.team.id}
-                  onChanged={onChanged}
-                  person={mover}
-                  teams={teams}
-                />
+                <AddToTeam onChanged={onChanged} person={mover} teams={teams} />
               </>
             }
             key={`${mover.userId} ${mover.team.id}`}
