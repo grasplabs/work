@@ -10,6 +10,8 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
   DirectoryAccount,
+  DirectoryPlacement,
+  DirectoryRead,
   Erasure,
   ErasurePreview,
   Invitation,
@@ -54,6 +56,7 @@ import { personOf } from "./connections.ts";
 import {
   channelAccounts,
   directoryPeople,
+  directoryReads,
   invitations,
   memberRemovals,
   members,
@@ -66,6 +69,7 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { directoryPlacementOf } from "./directory-placement.ts";
 import { directoryKinds } from "./directory-ties.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
@@ -274,6 +278,33 @@ const listTeams = async (
 ): ReturnType<MembersApi["teams"]> => {
   requireMemberAdmin(by);
   return await teamsWithMembers(env);
+};
+
+/**
+ * Where the daily read of each directory stands (directory-people.ts), for
+ * admins: what an admin can act on when it fails, or goes without the
+ * deleted accounts. Nothing about any person.
+ */
+const listDirectoryReads = async (
+  env: Env,
+  by: Identity
+): Promise<DirectoryRead[]> => {
+  requireMemberAdmin(by);
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(directoryReads)
+    .orderBy(asc(directoryReads.provider));
+  return rows.map((row) => ({
+    provider: row.provider,
+    readAt: row.readAt?.toISOString() ?? null,
+    people: row.people,
+    disabled: row.disabled,
+    failure:
+      row.failure === null || row.failedAt === null
+        ? null
+        : { code: row.failure, at: row.failedAt.toISOString() },
+    deletedFailure: row.deletedFailure,
+  }));
 };
 
 /**
@@ -536,6 +567,18 @@ const releaseTeamPin = async (
     throw refusal(by, roleErrors.create("role.forbidden"));
   }
   return { released: released.length > 0 };
+};
+
+/**
+ * Who the directory leaves for an admin to place, and the hand pins
+ * (directory-placement.ts). For admins.
+ */
+const directoryPlacement = async (
+  env: Env,
+  by: Identity
+): Promise<DirectoryPlacement> => {
+  requireMemberAdmin(by);
+  return await directoryPlacementOf(env);
 };
 
 /**
@@ -978,6 +1021,13 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     );
   }
 
+  async directoryReads(): Promise<DirectoryRead[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listDirectoryReads(this.#env, person)
+    );
+  }
+
   async remove(userId: string): Promise<{ connectionsDisconnected: number }> {
     return await withPerson(
       this.#check,
@@ -1045,6 +1095,13 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await releaseTeamPin(this.#env, person, userId, teamId)
+    );
+  }
+
+  async directoryPlacement(): Promise<DirectoryPlacement> {
+    return await withPerson(
+      this.#check,
+      async (person) => await directoryPlacement(this.#env, person)
     );
   }
 

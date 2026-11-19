@@ -402,6 +402,14 @@ msgstr "{count, plural, one {# prueba} other {# pruebas}}"
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
 msgstr "{count, plural, one {# pérdida de tiempo} other {# pérdidas de tiempo}}"
 
+#: src/settings/directory-placement.tsx
+msgid "{count, plural, one {# to check} other {# to check}}"
+msgstr "{count, plural, one {# por revisar} other {# por revisar}}"
+
+#: src/settings/directory-placement.tsx
+msgid "{count, plural, one {# to place} other {# to place}}"
+msgstr "{count, plural, one {# por asignar} other {# por asignar}}"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{count, plural, one {# tool allowed} other {# tools allowed}}"
 msgstr "{count, plural, one {# herramienta permitida} other {# herramientas permitidas}}"
@@ -857,6 +865,10 @@ msgstr "{name} lo editó"
 msgid "{name} has no documents."
 msgstr "{name} no tiene documentos."
 
+#: src/settings/directory-reads.tsx
+msgid "{name} hasn’t been read yet."
+msgstr "{name} aún no se ha leído."
+
 #: src/settings/stephen-settings.tsx
 msgid "{name} in {appName}"
 msgstr "{name} en {appName}"
@@ -1020,6 +1032,10 @@ msgstr "{openCount, plural, =0 {Nada te espera} =1 {Solo una cosa para ti} other
 #: src/onboarding/interviews-progress.tsx
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
 msgstr "{outCount, plural, one {El enlace disponible, como lista} other {Los # enlaces disponibles, como lista}}"
+
+#: src/settings/directory-reads.tsx
+msgid "{people, plural, one {{name} was last read {readAt}, listing # person.} other {{name} was last read {readAt}, listing # people.}}"
+msgstr "{people, plural, one {{name} se leyó por última vez el {readAt}, con # persona.} other {{name} se leyó por última vez el {readAt}, con # personas.}}"
 
 #: src/brain/brain.ts
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
@@ -1446,6 +1462,11 @@ msgstr "{who} no se podrá conceder más tarde: tendrá que volver a pedirse."
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} dio su consentimiento antes de conectarlo:"
 
+#: src/settings/directory-placement.tsx
+msgid "{who} couldn't be added to the team. Try again."
+msgstr "No se pudo añadir a {who} al equipo. Inténtalo de nuevo."
+
+#: src/settings/directory-placement.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "{who} couldn't be taken off {name}. Try again."
 msgstr "No se ha podido quitar a {who} de {name}. Inténtalo de nuevo."
@@ -2018,6 +2039,7 @@ msgstr "ID del autor"
 #: src/chat/composer-menu.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/directory-placement.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "Add"
 msgstr "Añadir"
@@ -2489,6 +2511,10 @@ msgstr "Lo cambia un administrador, en Miembros y roles."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "An admin connects this for everyone."
 msgstr "Un administrador lo conecta para todos."
+
+#: src/settings/directory-placement.tsx
+msgid "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is."
+msgstr "Un administrador los puso en un equipo, o los sacó de uno, a mano, y la lectura diaria del directorio lo deja así."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "An admin refused or took back its reading of these events: it hears nothing."
@@ -4043,6 +4069,10 @@ msgstr "Elige un modelo"
 msgid "Choose a source."
 msgstr "Elige una fuente."
 
+#: src/settings/directory-placement.tsx
+msgid "Choose a team"
+msgstr "Elige un equipo"
+
 #: src/apps/app-workflows.tsx
 msgid "Choose a workflow"
 msgstr "Elija un flujo de trabajo"
@@ -5140,6 +5170,7 @@ msgid "Didn't start a workflow from a webhook event"
 msgstr "No inició un flujo de trabajo a partir de un evento de webhook"
 
 #: src/brain/brain-atlas.ts
+#: src/settings/directory-reads.tsx
 msgid "Directory"
 msgstr "Directorio"
 
@@ -6662,6 +6693,10 @@ msgstr "Ahora mismo no se puede acceder a Grasp. Vuelve a intentarlo en un momen
 msgid "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
 msgstr "Por ahora Grasp no puede enviar por correo a tu gente sus enlaces de entrevista. Envía a cada uno su enlace a mano desde Entrevistas."
 
+#: src/settings/directory-reads.tsx
+msgid "Grasp can’t read the directory with the connection it has: an administrator of your organization has to connect it again. That can’t be done from Settings yet, so ask Grasp’s support."
+msgstr "Grasp no puede leer el directorio con la conexión que tiene: un administrador de tu organización tiene que volver a conectarlo. Eso aún no se puede hacer desde Ajustes, así que pide ayuda al soporte de Grasp."
+
 #: src/settings/erasures.tsx
 msgid "Grasp can’t say how far it got just now. It goes on all the same."
 msgstr "Grasp no puede decir ahora cuánto ha avanzado. Sigue igualmente."
@@ -6804,6 +6839,10 @@ msgstr "Grasp propone"
 msgid "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
 msgstr "Grasp lee en voz alta las preguntas de la entrevista con {whereItRuns}, usando la clave propia de Grasp."
 
+#: src/settings/directory-reads.tsx
+msgid "Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says."
+msgstr "Grasp lee tu directorio una vez al día y mantiene los miembros, sus equipos y sus suspensiones tal como indica."
+
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 msgstr "Grasp solo registra esta respuesta cuando la confirmas aquí. Comprueba lo que se pregunta y lo que respondes."
@@ -6850,6 +6889,10 @@ msgstr "El equipo de Grasp trabaja desde el panel de administración"
 #: src/settings/ai-providers.tsx
 msgid "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
 msgstr "Grasp transcribe las entrevistas con {whereItRuns}, usando la clave propia de Grasp."
+
+#: src/settings/directory-reads.tsx
+msgid "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
+msgstr "Grasp lo vuelve a intentar cada cuarto de hora. Si sigue fallando, pide ayuda al soporte de Grasp."
 
 #: src/route-error.tsx
 msgid "Grasp was updated while this page was open. Try again to load the new version."
@@ -7419,6 +7462,10 @@ msgstr "Importar o exportar"
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "En {name}, crea un usuario de servicio que pueda leer los datos básicos y laborales de las personas, y pega aquí su ID y su token."
+
+#: src/settings/directory-placement.tsx
+msgid "In {team} from the directory."
+msgstr "En {team} por el directorio."
 
 #: src/agents/agent-page.tsx
 msgid "In Grasp's chat"
@@ -8107,6 +8154,14 @@ msgstr "Guardado entre ejecuciones"
 msgid "Kept for 24 hours after the event came. Opening it is recorded in the audit trail."
 msgstr "Se conserva 24 horas desde que llegó el evento. Abrirlo queda anotado en el registro de auditoría."
 
+#: src/settings/directory-placement.tsx
+msgid "Kept in {team} by hand since {date}."
+msgstr "Mantenido a mano en {team} desde el {date}."
+
+#: src/settings/directory-placement.tsx
+msgid "Kept out of {team} by hand since {date}."
+msgstr "Mantenido a mano fuera de {team} desde el {date}."
+
 #: src/activity/audit-words.ts
 msgid "Kept something the chat can no longer read from the model"
 msgstr "Ocultó al modelo algo que el chat ya no puede leer"
@@ -8324,6 +8379,14 @@ msgstr "Permitir que las personas creen agentes propios"
 #: src/activity/audit-words.ts
 msgid "Let someone visit an App"
 msgstr "Permitió que alguien visite una aplicación"
+
+#: src/settings/directory-placement.tsx
+msgid "Let the directory decide"
+msgstr "Que decida el directorio"
+
+#: src/settings/directory-placement.tsx
+msgid "Let the directory decide whether {who} is in {team}"
+msgstr "Que el directorio decida si {who} está en {team}"
 
 #: src/settings/erasures.tsx
 msgid "Let the old address of {who} in again"
@@ -9699,6 +9762,14 @@ msgstr "Nada bien"
 msgctxt "inbox item kind: a mailbox or drive connect stopped hearing"
 msgid "Not hearing"
 msgstr "Sin recepción"
+
+#: src/settings/directory-placement.tsx
+msgid "Not in a team"
+msgstr "Sin equipo"
+
+#: src/settings/directory-placement.tsx
+msgid "Not in the directory."
+msgstr "No está en el directorio."
 
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
@@ -11091,6 +11162,10 @@ msgstr "¿Aplicar una retención legal a la versión {label}?"
 #: src/apps/release-controls.tsx
 msgid "Place hold"
 msgstr "Aplicar retención"
+
+#: src/settings/directory-placement.tsx
+msgid "Placed by hand"
+msgstr "Asignados a mano"
 
 #: src/onboarding/place-picker.tsx
 msgid "Places"
@@ -14008,6 +14083,10 @@ msgstr "Retirar lo que compartiste: {statement}"
 msgid "Take off"
 msgstr "Quitar"
 
+#: src/settings/directory-placement.tsx
+msgid "Take off {name}"
+msgstr "Sacar de {name}"
+
 #: src/dashboard/widget-board.tsx
 msgid "Take off the dashboard"
 msgstr "Quitar del panel"
@@ -14120,6 +14199,14 @@ msgstr "El equipo {team} puede leer este archivo subido."
 #: src/brain/sources-page.tsx
 msgid "Team {teamName}"
 msgstr "Equipo {teamName}"
+
+#: src/settings/directory-placement.tsx
+msgid "Team doesn’t match the directory"
+msgstr "El equipo no coincide con el directorio"
+
+#: src/settings/directory-placement.tsx
+msgid "Team for {who}"
+msgstr "Equipo para {who}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
@@ -14700,6 +14787,38 @@ msgstr "El directorio y el inicio de sesión con Microsoft o Google. Añade equi
 msgid "The directory brought in the teams and their roles."
 msgstr "El directorio trajo los equipos y sus roles."
 
+#: src/settings/directory-reads.tsx
+msgid "The directory couldn’t be read, last tried {failedAt}."
+msgstr "No se pudo leer el directorio; último intento el {failedAt}."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory gives no department."
+msgstr "El directorio no indica ningún departamento."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory gives the department “{department}”, which is linked to {team}."
+msgstr "El directorio indica el departamento «{department}», vinculado a {team}."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory gives the department “{department}”, which no team is linked to."
+msgstr "El directorio indica el departamento «{department}», al que no está vinculado ningún equipo."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory holds more people than Grasp can read at once. Ask Grasp’s support to help."
+msgstr "El directorio contiene más personas de las que Grasp puede leer de una vez. Pide ayuda al soporte de Grasp."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory put them in a team their department there no longer fills. Its daily read moves someone only into the team their department fills, so they stay until you take them off or add them to the right team."
+msgstr "El directorio los puso en un equipo al que su departamento allí ya no corresponde. Su lectura diaria solo mueve a alguien al equipo de su departamento, así que se quedan hasta que los saques o los añadas al equipo correcto."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
+msgstr "El directorio se negó a listarlas, así que nadie fue suspendido por una cuenta eliminada allí; todo lo demás se leyó. Puede que la cuenta que conectó el directorio no tenga permiso para listarlas: pide ayuda al soporte de Grasp."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
+msgstr "La lista del directorio no respondió como una lista, así que nadie fue suspendido por una cuenta eliminada allí; todo lo demás se leyó. Grasp lo vuelve a intentar en su próxima lectura diaria. Si sigue así, pide ayuda al soporte de Grasp."
+
 #: src/agents/agent-documents.tsx
 msgid "The documents couldn't be loaded. Reload the page."
 msgstr "No se pudieron cargar los documentos. Recarga la página."
@@ -14775,6 +14894,10 @@ msgstr "Las entrevistas han terminado."
 #: src/routes/_shell.settings.onboarding.tsx
 msgid "The interviews aren’t planned yet. You plan them at the end of your onboarding."
 msgstr "Las entrevistas aún no están planificadas. Las planificas al final de tu onboarding."
+
+#: src/settings/directory-reads.tsx
+msgid "The last read couldn’t list the accounts deleted in the directory."
+msgstr "La última lectura no pudo listar las cuentas eliminadas en el directorio."
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/traces.tsx
@@ -14861,6 +14984,10 @@ msgstr "La persona en {field}"
 #: src/apps/access-view.tsx
 msgid "the person who added it"
 msgstr "quien lo añadió"
+
+#: src/settings/directory-placement.tsx
+msgid "The pin on {who} couldn't be released. Try again."
+msgstr "No se pudo quitar la fijación de {who}. Inténtalo de nuevo."
 
 #: src/connections/sync-places.tsx
 msgid "The places picked from {label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them."
@@ -15150,6 +15277,10 @@ msgstr "Aparecen cuando las entrevistas de tus equipos describen cómo funciona 
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Se cierran todas sus sesiones, se desconectan sus conexiones personales y no podrá volver a iniciar sesión."
+
+#: src/settings/directory-placement.tsx
+msgid "They can use Grasp, but nothing shared with a team reaches them. Add each to a team: the directory’s daily read leaves a team you chose as it is."
+msgstr "Pueden usar Grasp, pero nada de lo compartido con un equipo les llega. Añade a cada uno a un equipo: la lectura diaria del directorio deja como está el equipo que elijas."
 
 #: src/settings/team-members-dialog.tsx
 msgid "They couldn't be added to {name}. Try again."
@@ -15972,6 +16103,10 @@ msgstr "Dejar de compartir"
 #: src/settings/staff-access.tsx
 msgid "Until"
 msgstr "Hasta"
+
+#: src/settings/directory-reads.tsx
+msgid "Until a read succeeds, nobody joins, moves or is suspended through the directory."
+msgstr "Hasta que una lectura funcione, nadie se une, cambia de equipo ni es suspendido a través del directorio."
 
 #: src/onboarding/no-sender.tsx
 msgid "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."

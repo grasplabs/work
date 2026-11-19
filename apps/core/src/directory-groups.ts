@@ -220,6 +220,7 @@ const mappingOf = (
   teamId: row.teamId,
   mappedAt: row.mappedAt.toISOString(),
   readAt: row.readAt?.toISOString() ?? null,
+  held: row.held,
 });
 
 /** The mapping of `groupId`, as it is now. */
@@ -293,7 +294,7 @@ const map = async (
     db
       .insert(directoryGroupTeams)
       .select(
-        sql`SELECT ${provider}, ${id}, ${team.data}, ${group.name}, ${group.kind}, ${group.membersFrom}, ${mappedAt.getTime()}, NULL
+        sql`SELECT ${provider}, ${id}, ${team.data}, ${group.name}, ${group.kind}, ${group.membersFrom}, ${mappedAt.getTime()}, NULL, NULL
           WHERE ${changes}`
       )
       .onConflictDoUpdate({

@@ -93,7 +93,26 @@ export const directoryGroupsHold = async (
   groups: Record<string, unknown>[],
   members: Record<string, Record<string, unknown>[]> = {}
 ): Promise<void> => {
-  await setDirectory({ groups, members });
+  await setDirectory({
+    groups,
+    members,
+    groupFail: null,
+    groupFailStatus: 500,
+  });
+};
+
+/**
+ * Has Graph fail every page of the group `groupId`'s members with HTTP
+ * `status` (a server error unless told), until `directoryGroupsHold`.
+ */
+export const directoryGroupFails = async (
+  groupId: string,
+  status = 500
+): Promise<void> => {
+  await setDirectory({
+    groupFail: groupId.toLowerCase(),
+    groupFailStatus: status,
+  });
 };
 
 /** A group as Graph answers the directory's group calls: a private, assigned security group unless told. */

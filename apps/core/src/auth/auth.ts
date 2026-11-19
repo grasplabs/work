@@ -602,13 +602,16 @@ export const adoptDirectoryMember = async (
   ) {
     return userId;
   }
+  // The object ID compared lower case, as the directory's daily read
+  // keeps it (directory-people.ts), by `accounts_provider_oid_lower_idx`:
+  // however Entra cases it in the token, it is the same person.
   const [held] = await db
     .select({ userId: accounts.userId })
     .from(accounts)
     .where(
       and(
         eq(accounts.providerId, directoryProviderId),
-        eq(accounts.accountId, signedIn.oid),
+        sql`lower(${accounts.oid}) = lower(${signedIn.oid})`,
         ne(accounts.userId, userId)
       )
     );
