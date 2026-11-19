@@ -30,16 +30,19 @@ export interface DirectoryKind {
    * The provider of the accounts the directory itself made its people
    * members under, before they signed in (auth/directory-members.ts): the
    * same ID, and the tenant it was read in, until their first sign-in
-   * takes the member over (auth.ts `adoptDirectoryMember`).
+   * takes the member over (auth.ts `adoptDirectoryMember`). Null for a
+   * directory whose people become members only as they sign in: no first
+   * sign-in takes a made member over but Entra's, by its object ID.
    */
-  madeProvider: string;
+  madeProvider: string | null;
   /**
    * The column of an account holding the provider's ID of its person, as
    * the provider gave it: a sign-in's, which ties them, or another of
    * theirs that carries the same ID (one the directory made from a Teams
    * message), which only their erasure reads. Compared lower case, as the
    * directory's rows keep IDs, by the index on it with `lower()`
-   * (`accounts_provider_oid_lower_idx`): no other comparison of it changes.
+   * (`accounts_provider_oid_lower_idx`, `accounts_provider_account_lower_idx`):
+   * no other comparison of it changes.
    */
   signedInAs: SQLiteColumn;
   /** The subject erasure keeps of a person with provider ID `id` (erased-people.ts). */
@@ -61,8 +64,24 @@ const entra: DirectoryKind = {
   tenantIn: (config) => config.entra?.tenantId,
 };
 
-/** The directories read daily. Google's waits on proof that its sign-in `sub` is its directory's user ID. */
-export const directoryKinds: readonly DirectoryKind[] = [entra];
+/**
+ * Google Workspace: its user ID, which the Admin SDK answers as the user's
+ * `id` and Google's ID tokens as `sub` (shown on a real Workspace, 19 Nov,
+ * GRA-2056), kept as the sign-in account's own ID, in the Workspace its
+ * `hd` names. Erasure keeps a Google account by that same ID
+ * (erased-people.ts `subjectsOf`: `google:<sub>`).
+ */
+const google: DirectoryKind = {
+  provider: "google-directory",
+  signInProvider: providerIds.google,
+  madeProvider: null,
+  signedInAs: accounts.accountId,
+  subjectOf: (id) => `${providerIds.google}:${id}`,
+  tenantIn: (config) => config.google?.hostedDomain,
+};
+
+/** The directories read daily. */
+export const directoryKinds: readonly DirectoryKind[] = [entra, google];
 
 /**
  * That an account is one naming a person of `kind`, as SQL: their sign-in,
@@ -71,7 +90,12 @@ export const directoryKinds: readonly DirectoryKind[] = [entra];
  * `accounts_provider_oid_lower_idx`.
  */
 export const namingAccount = (kind: DirectoryKind): SQL =>
-  inArray(accounts.providerId, [kind.signInProvider, kind.madeProvider]);
+  inArray(
+    accounts.providerId,
+    kind.madeProvider === null
+      ? [kind.signInProvider]
+      : [kind.signInProvider, kind.madeProvider]
+  );
 
 /**
  * The member tied to the row being written (both sides compared through

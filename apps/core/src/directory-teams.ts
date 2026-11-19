@@ -18,6 +18,8 @@ import {
   accounts,
   auditOutbox,
   directoryDepartments,
+  directoryGroupMembers,
+  directoryGroupTeams,
   directoryMemberships,
   directoryPeople,
   teamMembers,
@@ -25,6 +27,7 @@ import {
   teams,
 } from "./db/core/schema.ts";
 import { uuidSql } from "./db/d1.ts";
+import type { GroupRead } from "./directory-group-reads.ts";
 import { namingAccount } from "./directory-ties.ts";
 import type { DirectoryKind } from "./directory-ties.ts";
 
@@ -51,6 +54,12 @@ import type { DirectoryKind } from "./directory-ties.ts";
 //   that makes it, in one batch, one transaction, from what holds then.
 // - Pages still showing what someone may no longer read: a revocation is
 //   kept in the batch that takes anyone out of a team, and told after.
+// - A team that follows directory groups (G3, directory-group-reads.ts):
+//   a team with a mapped group the read read whole follows its groups, and
+//   no department fills it. Its members are those its groups list; a
+//   membership the read made goes when none of them lists the person any
+//   more, since a group's ID is stable, unlike a department's text. A
+//   group the read held changes nothing.
 
 /** How Better Auth keys a membership (its organization plugin's adapter). */
 export const membershipKeyOf = async (
@@ -138,15 +147,17 @@ const candidatesOf = async (
 /**
  * What the daily read of `kind` may place, from what holds before its
  * batch: each listed person's department, linked to a team already or by
- * name now, and the members whose accounts name them (`namingAccount`), in
- * any tenant; or, for someone it places whom no account names, a member
- * to make (GRA-2156), by a new user ID. Only candidates: the batch writes
- * each only if it still holds as it is written, the tie's tenant among it.
+ * name now, each group read whole's members in its team (`groups`), and
+ * the members whose accounts name them (`namingAccount`), in any tenant;
+ * or, for someone it places whom no account names, a member to make
+ * (GRA-2156), by a new user ID. Only candidates: the batch writes each
+ * only if it still holds as it is written, the tie's tenant among it.
  */
 export const readPlacementOf = async (
   env: Env,
   kind: DirectoryKind,
-  people: readonly { id: string; department: string; name: string }[]
+  people: readonly { id: string; department: string; name: string }[],
+  groups: readonly GroupRead[]
 ): Promise<Placement> => {
   const db = drizzle(env.DB);
   const [signedIn, linked, named] = await db.batch([
@@ -199,17 +210,17 @@ export const readPlacementOf = async (
   /**
    * The pairs that place the person with provider ID `id` in `teamId`:
    * each member an account of theirs names, or one made for them, if the
-   * read lists them on (`people`; never a turned-off account another
-   * placement might name). Every placement of the read goes through it,
-   * so whom the read places, and only they, are made members ahead of
-   * their sign-in.
+   * read lists them on (`people`; never a turned-off account a group
+   * lists) and `kind` makes members ahead of sign-in. Every placement of
+   * the read goes through it, so whom the read places, and only they, are
+   * made members ahead of their sign-in.
    */
   const placedIn = (id: string, teamId: string) => {
     const known = usersOf.get(id);
     if (known !== undefined) {
       return known.map((userId) => [userId, teamId] as const);
     }
-    if (!nameOf.has(id)) {
+    if (kind.madeProvider === null || !nameOf.has(id)) {
       return [];
     }
     const entry = made.get(id) ?? [
@@ -220,10 +231,15 @@ export const readPlacementOf = async (
     made.set(id, entry);
     return [[entry[1], teamId] as const];
   };
-  const pairs = people.flatMap(({ id, department }) => {
-    const teamId = teamOf.get(department);
-    return teamId === undefined ? [] : placedIn(id, teamId);
-  });
+  const pairs = [
+    ...people.flatMap(({ id, department }) => {
+      const teamId = teamOf.get(department);
+      return teamId === undefined ? [] : placedIn(id, teamId);
+    }),
+    ...groups.flatMap(({ teamId, users }) =>
+      users.flatMap((id) => placedIn(id, teamId))
+    ),
+  ];
   return {
     candidates: await candidatesOf(pairs),
     links: jsonValuesOf(links),
@@ -233,39 +249,95 @@ export const readPlacementOf = async (
 
 /**
  * What placing `userId` as they sign in may write: the teams the
- * departments of the directory's people tied to them fill now.
+ * departments of the directory's people tied to them fill now, and the
+ * teams of the groups that list them.
  */
 const memberPlacementOf = async (
   env: Env,
   kind: DirectoryKind,
   userId: string
 ): Promise<Placement> => {
-  const filled = await drizzle(env.DB)
-    .select({ teamId: directoryDepartments.teamId })
-    .from(directoryPeople)
-    .innerJoin(
-      directoryDepartments,
-      and(
-        eq(directoryDepartments.provider, directoryPeople.provider),
-        eq(directoryDepartments.department, directoryPeople.department)
+  const db = drizzle(env.DB);
+  const tied = and(
+    eq(directoryPeople.provider, kind.provider),
+    eq(directoryPeople.userId, userId)
+  );
+  const [filled, grouped] = await db.batch([
+    db
+      .select({ teamId: directoryDepartments.teamId })
+      .from(directoryPeople)
+      .innerJoin(
+        directoryDepartments,
+        and(
+          eq(directoryDepartments.provider, directoryPeople.provider),
+          eq(directoryDepartments.department, directoryPeople.department)
+        )
       )
-    )
-    .where(
-      and(
-        eq(directoryPeople.provider, kind.provider),
-        eq(directoryPeople.userId, userId)
+      .where(tied),
+    db
+      .select({ teamId: directoryGroupTeams.teamId })
+      .from(directoryPeople)
+      .innerJoin(
+        directoryGroupMembers,
+        and(
+          eq(directoryGroupMembers.provider, directoryPeople.provider),
+          eq(directoryGroupMembers.tenant, directoryPeople.tenant),
+          eq(directoryGroupMembers.accountId, directoryPeople.accountId)
+        )
       )
-    );
+      .innerJoin(
+        directoryGroupTeams,
+        and(
+          eq(directoryGroupTeams.provider, directoryGroupMembers.provider),
+          eq(directoryGroupTeams.groupId, directoryGroupMembers.groupId)
+        )
+      )
+      .where(and(tied, isNotNull(directoryGroupTeams.readAt))),
+  ]);
   return {
     candidates: await candidatesOf(
-      filled.map(({ teamId }) => [userId, teamId] as const)
+      [...filled, ...grouped].map(({ teamId }) => [userId, teamId] as const)
     ),
     links: [],
     made: [],
   };
 };
 
-/** That `kind` ties `user` to a person whose department fills `team`, as SQL. */
+/**
+ * That `team` follows the directory's groups, as SQL: a group mapped to
+ * it was read whole since. No department fills such a team.
+ */
+const followsGroups = (kind: DirectoryKind, team: SQL): SQL => sql`EXISTS (
+  SELECT 1 FROM ${directoryGroupTeams}
+  WHERE ${directoryGroupTeams.provider} = ${kind.provider}
+    AND ${directoryGroupTeams.teamId} = ${team}
+    AND ${directoryGroupTeams.readAt} IS NOT NULL
+)`;
+
+/**
+ * That `kind` ties `user` to a person a group of `team`'s lists, that
+ * group read whole since it was mapped to `team`, as SQL.
+ */
+const grouped = (kind: DirectoryKind, user: SQL, team: SQL): SQL => sql`EXISTS (
+  SELECT 1 FROM ${directoryPeople}
+  JOIN ${directoryGroupMembers}
+    ON ${directoryGroupMembers.provider} = ${directoryPeople.provider}
+    AND ${directoryGroupMembers.tenant} = ${directoryPeople.tenant}
+    AND ${directoryGroupMembers.accountId} = ${directoryPeople.accountId}
+  JOIN ${directoryGroupTeams}
+    ON ${directoryGroupTeams.provider} = ${directoryGroupMembers.provider}
+    AND ${directoryGroupTeams.groupId} = ${directoryGroupMembers.groupId}
+  WHERE ${directoryPeople.provider} = ${kind.provider}
+    AND ${directoryPeople.userId} = ${user}
+    AND ${directoryGroupTeams.teamId} = ${team}
+    AND ${directoryGroupTeams.readAt} IS NOT NULL
+)`;
+
+/**
+ * That `kind` ties `user` to a person whose department fills a team
+ * `team` names (a condition on `directory_departments.team_id`), one that
+ * doesn't follow groups, as SQL.
+ */
 const filled = (kind: DirectoryKind, user: SQL, team: SQL): SQL => sql`EXISTS (
   SELECT 1 FROM ${directoryPeople}
   JOIN ${directoryDepartments}
@@ -274,6 +346,7 @@ const filled = (kind: DirectoryKind, user: SQL, team: SQL): SQL => sql`EXISTS (
   WHERE ${directoryPeople.provider} = ${kind.provider}
     AND ${directoryPeople.userId} = ${user}
     AND ${team}
+    AND NOT ${followsGroups(kind, sql`${directoryDepartments.teamId}`)}
 )`;
 
 /**
@@ -344,29 +417,37 @@ export const placementStatements = (
   // A link names only a team that exists, which takes its links with it.
   // A tie names an active member, but at sign-in the tie is a batch of its
   // own: whether they still are one is asked again here.
-  const joinable = sql`${filled(kind, user, sql`${directoryDepartments.teamId} = ${team}`)}
+  const joinable = sql`(${filled(kind, user, sql`${directoryDepartments.teamId} = ${team}`)}
+      OR ${grouped(kind, user, team)})
     AND ${activeMember(user)}
     AND NOT ${pinned(user, team, false)}
     AND NOT EXISTS (
       SELECT 1 FROM ${teamMembers}
       WHERE ${teamMembers.teamId} = ${team} AND ${teamMembers.userId} = ${user}
     )`;
-  // A member leaves a team the read made them a member of only once they
-  // are in the one their department fills now, at this point in the same
-  // batch: never into no team at all.
+  // A member leaves a team the read made them a member of: one that
+  // follows groups once none of its groups lists them; one that follows
+  // its department only once they are in the one their department fills
+  // now, at this point in the same batch, never into no team at all.
+  const member = sql`${teamMembers.userId}`;
+  const memberTeam = sql`${teamMembers.teamId}`;
   const leavable = sql`${teamMembers.membershipKey} IN (
       SELECT ${directoryMemberships.membershipKey} FROM ${directoryMemberships}
     )
-    AND NOT ${filled(kind, sql`${teamMembers.userId}`, sql`${directoryDepartments.teamId} = ${teamMembers.teamId}`)}
-    AND ${filled(
-      kind,
-      sql`${teamMembers.userId}`,
-      sql`${directoryDepartments.teamId} <> ${teamMembers.teamId} AND EXISTS (
-        SELECT 1 FROM ${teamMembers} AS ${replacement}
-        WHERE ${replacement.userId} = ${teamMembers.userId}
-          AND ${replacement.teamId} = ${directoryDepartments.teamId}
-      )`
-    )}
+    AND (
+      (${followsGroups(kind, memberTeam)} AND NOT ${grouped(kind, member, memberTeam)})
+      OR (NOT ${followsGroups(kind, memberTeam)}
+        AND NOT ${filled(kind, member, sql`${directoryDepartments.teamId} = ${teamMembers.teamId}`)}
+        AND ${filled(
+          kind,
+          member,
+          sql`${directoryDepartments.teamId} <> ${teamMembers.teamId} AND EXISTS (
+            SELECT 1 FROM ${teamMembers} AS ${replacement}
+            WHERE ${replacement.userId} = ${teamMembers.userId}
+              AND ${replacement.teamId} = ${directoryDepartments.teamId}
+          )`
+        )})
+    )
     AND NOT ${pinned(sql`${teamMembers.userId}`, sql`${teamMembers.teamId}`, true)}
     AND ${scope}`;
   const linked = systemEntry("directory.department_linked", {

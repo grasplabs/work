@@ -1,3 +1,8 @@
+import type {
+  DirectoryDeletedFailure,
+  DirectoryProvider,
+  DirectoryReadFailure,
+} from "./directory.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { Role } from "./roles.ts";
 
@@ -36,6 +41,32 @@ export interface OrganizationTeam {
   id: string;
   name: string;
   memberIds: string[];
+}
+
+/**
+ * Where the daily read of one of the organization's directories stands
+ * (GRA-2056), for its admins: the read last applied, and what went wrong
+ * since. A failed read changed nothing, and is tried again every quarter
+ * hour until one is applied.
+ */
+export interface DirectoryRead {
+  provider: DirectoryProvider;
+  /** When the last read was applied (ISO 8601); null before one was. */
+  readAt: string | null;
+  /** How many people that read listed turned on, and how many turned off. */
+  people: number | null;
+  disabled: number | null;
+  /**
+   * Why the reads since `readAt` failed, and when the last one did; null
+   * when none failed since.
+   */
+  failure: { code: DirectoryReadFailure; at: string } | null;
+  /**
+   * Why the last applied read went without the directory's deleted
+   * accounts (`directory.deleted_refused` or `directory.deleted_unsupported`):
+   * nobody was suspended for an account deleted there. Null when it read them.
+   */
+  deletedFailure: DirectoryDeletedFailure | null;
 }
 
 /**
@@ -148,6 +179,8 @@ export interface MembersApi {
   list: () => Promise<Member[]>;
   /** The organization's teams by name, each with its members. */
   teams: () => Promise<OrganizationTeam[]>;
+  /** Where the daily read of each directory read stands; none before one was tried. */
+  directoryReads: () => Promise<DirectoryRead[]>;
   /**
    * Removes the member with `userId`. Removing someone already removed
    * finishes what the first removal left undone (disconnecting their

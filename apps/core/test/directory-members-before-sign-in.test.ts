@@ -8,6 +8,8 @@ import { inStoreOf } from "./brain-next-out-reads.ts";
 import { landingAt, withD1ValueLimit } from "./d1-landing.ts";
 import {
   connectedDirectory,
+  directoryGroup,
+  directoryGroupsHold,
   directoryHolds,
   directoryUser as user,
 } from "./directory.ts";
@@ -322,6 +324,35 @@ describe("a person the directory's read places, before they sign in", () => {
       naming: [{ who: userId, provider: "microsoft" }],
       teams: [team.id],
     });
+  });
+
+  it("is made through a mapped group too, but never for a turned-off account the group lists, nor recorded as one suspended", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const team = await newTeam(admin.session);
+    const [on, off] = [crypto.randomUUID(), crypto.randomUUID()];
+    await directoryHolds([
+      user({ id: on }),
+      user({ id: off, accountEnabled: false }),
+    ]);
+    const engineers = directoryGroup();
+    const id = String(engineers.id);
+    await directoryGroupsHold([engineers], {
+      [id]: [on, off].map((oid) => ({
+        "@odata.type": "#microsoft.graph.user",
+        id: oid,
+      })),
+    });
+    await admin.api.directoryGroups.mapToTeam(id, team.id);
+
+    const events = await auditedDuring(async () => {
+      await readAt(nextDay());
+    });
+
+    expect({
+      on: await teamsOf(await madeFor(on)),
+      off: await membersNaming(off),
+      suspended: events.filter(({ action }) => action === "member.suspended"),
+    }).toStrictEqual({ on: [team.id], off: [], suspended: [] });
   });
 
   it("is moved by a later read when their department changes", async () => {

@@ -251,6 +251,19 @@ export interface DirectoryGroupPreview {
   nestedGroups: number;
 }
 
+/**
+ * Why the directory's daily read left a mapped group as it was: Microsoft
+ * has no such group (`gone`), refused to read it (`refused`), it can't be
+ * a team's now (`not_mappable`), or it lists nobody (`empty`).
+ */
+export const directoryGroupHelds = [
+  "gone",
+  "refused",
+  "not_mappable",
+  "empty",
+] as const;
+export type DirectoryGroupHeld = (typeof directoryGroupHelds)[number];
+
 /** A directory group an admin mapped to a team (GRA-2056). */
 export interface DirectoryGroupMapping {
   groupId: string;
@@ -266,6 +279,8 @@ export interface DirectoryGroupMapping {
    * until it has, the mapping places nobody. Null before then.
    */
   readAt: string | null;
+  /** Why the last read left the group as it was; null when it didn't. */
+  held: DirectoryGroupHeld | null;
 }
 
 /**
@@ -344,12 +359,15 @@ export const directoryErrors = defineErrorFamily({
     "The directory's daily read took longer than the clock gives it: nothing it read was kept.",
   "directory.read_failed":
     "The directory's daily read failed: nothing it read was kept.",
-  // Microsoft's answer alone: what came of the read is the reader's to
-  // say (core's directory-people.ts `deletedOf`), as it differs by page.
+  "directory.not_admin":
+    "The account that connected the directory can't read it: connect it with an admin account of the Workspace.",
+  // The directory's answer alone, Microsoft's or Google's: what came of the
+  // read is the reader's to say (core's directory-people.ts `deletedOf`),
+  // as it differs by page.
   "directory.deleted_refused":
-    "Microsoft refused to list the directory's deleted accounts.",
+    "The directory refused to list its deleted accounts.",
   "directory.deleted_unsupported":
-    "Microsoft's list of the directory's deleted accounts didn't answer as a list.",
+    "The directory's list of its deleted accounts didn't answer as a list.",
   "directory.group_gone": "That group is no longer in the directory.",
   "directory.group_refused":
     "Microsoft refused to read the directory's groups for this connection.",
@@ -359,3 +377,54 @@ export const directoryErrors = defineErrorFamily({
     "That group can't be a team's: anyone can join it, its members can't all be read, or Microsoft didn't say which.",
   "directory.team_not_found": "There's no such team.",
 });
+
+/** A code of the directory's errors (`directoryErrors`). */
+export type DirectoryErrorCode = NonNullable<
+  ReturnType<(typeof directoryErrors)["codeOf"]>
+>;
+
+/**
+ * Why a daily read of the directory failed, as core records it
+ * (directory-people.ts): what the read itself, and connect's reads of the
+ * people and the deleted accounts it makes, can throw. Any other error is
+ * recorded as `directory.read_failed`. A code added to what those throw is
+ * added here, and its advice to the admin follows (the web's
+ * `adviceOf`, which fails to type-check until it is placed).
+ */
+export const directoryReadFailures = [
+  "directory.not_found",
+  "directory.inactive",
+  "directory.not_admin",
+  "directory.cursor_invalid",
+  "directory.throttled",
+  "directory.provider_failed",
+  "directory.other_tenant",
+  "directory.too_large",
+  "directory.read_too_long",
+  "directory.read_failed",
+  "directory.deleted_refused",
+  "directory.deleted_unsupported",
+] as const satisfies readonly DirectoryErrorCode[];
+export type DirectoryReadFailure = (typeof directoryReadFailures)[number];
+
+/** Whether `code` is one a daily read records as its failure. */
+export const isDirectoryReadFailure = (
+  code: string | undefined
+): code is DirectoryReadFailure =>
+  directoryReadFailures.some((failure) => failure === code);
+
+/**
+ * Why a daily read went on without the deleted accounts: their list's
+ * first page refused, or not a list (core's directory-people.ts `deletedOf`).
+ */
+export const directoryDeletedFailures = [
+  "directory.deleted_refused",
+  "directory.deleted_unsupported",
+] as const satisfies readonly DirectoryErrorCode[];
+export type DirectoryDeletedFailure = (typeof directoryDeletedFailures)[number];
+
+/** Whether `code` is one a daily read goes on without the deleted accounts for. */
+export const isDirectoryDeletedFailure = (
+  code: string | undefined
+): code is DirectoryDeletedFailure =>
+  directoryDeletedFailures.some((failure) => failure === code);
