@@ -2506,7 +2506,6 @@ msgctxt "inbox item kind"
 msgid "AI tool"
 msgstr "AI-tool"
 
-#: src/brain/atlas-overlays.tsx
 #: src/brain/brain-log.tsx
 #: src/routes/_shell.workflows.runs.tsx
 msgid "All"
@@ -2516,6 +2515,10 @@ msgstr "Alles"
 msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Alles"
+
+#: src/brain/atlas-overlays.tsx
+msgid "All ({total})"
+msgstr "Alle ({total})"
 
 #: src/chat/chat-composer.tsx
 msgid "All agents"
@@ -8966,6 +8969,10 @@ msgstr "Licht"
 #: src/settings/backdrop-settings.tsx
 msgid "Light edge"
 msgstr "Lichte rand"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Light up the dots"
+msgstr "Stippen oplichten"
 
 #: src/projects/project-dialog.tsx
 msgid "Lightbulb"
@@ -15702,6 +15709,10 @@ msgstr "Brein"
 msgid "The Brain's pages"
 msgstr "De pagina's van het Brain"
 
+#: src/brain/atlas-overlays.tsx
+msgid "The brain's view"
+msgstr "Weergave van het brein"
+
 #: src/workflows/business-process.tsx
 msgid "The business process {name} serves"
 msgstr "Het bedrijfsproces dat {name} dient"
@@ -19082,6 +19093,10 @@ msgstr "Van jou"
 msgctxt "a date's year, as typed"
 msgid "yyyy"
 msgstr "jjjj"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Zoom"
+msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
 #: src/frame/part-words.tsx

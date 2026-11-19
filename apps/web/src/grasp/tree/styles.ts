@@ -13,7 +13,7 @@ const chosen = ":is([data-selected], [data-current])";
 // The tree guide's measures: a row's middle, where the parent level's chevron stands (its row's
 // inset, a step in per level above this one, and half the chevron), and the elbow.
 const ROW_MIDDLE = `calc(${grasp.treeRow} / 2)`;
-const GUIDE_X = `calc(${grasp.treeRowInset} + (var(--tree-level, 2) - 2) * ${grasp.treeIndent} + ${grasp.iconSm} / 2 - ${grasp.shellGuide} / 2)`;
+const GUIDE_X = `calc(${grasp.treeRowInset} + (var(--tree-level, 2) - 2) * ${grasp.treeIndent} + ${grasp.iconSm} / 2 - ${grasp.hairline} / 2)`;
 const GUIDE_ELBOW = `min(${grasp.space3}, calc(${grasp.treeIndent} - ${grasp.space1}))`;
 
 export const treeStyles = stylex.create({
@@ -51,7 +51,7 @@ export const treeStyles = stylex.create({
     insetBlockStart: `calc(-1 * ${grasp.hairline})`,
     height: `calc(${grasp.hairline} + ${ROW_MIDDLE} - ${GUIDE_ELBOW})`,
     width: 0,
-    borderInlineStartWidth: grasp.shellGuide,
+    borderInlineStartWidth: grasp.hairline,
     borderInlineStartStyle: "solid",
     borderInlineStartColor: { default: grasp.line, [media.forced]: "GrayText" },
     pointerEvents: "none",
@@ -63,7 +63,7 @@ export const treeStyles = stylex.create({
     insetBlockStart: `calc(${ROW_MIDDLE} - ${GUIDE_ELBOW})`,
     insetBlockEnd: 0,
     width: 0,
-    borderInlineStartWidth: grasp.shellGuide,
+    borderInlineStartWidth: grasp.hairline,
     borderInlineStartStyle: "solid",
     borderInlineStartColor: { default: grasp.line, [media.forced]: "GrayText" },
     pointerEvents: "none",
@@ -76,8 +76,8 @@ export const treeStyles = stylex.create({
     boxSizing: "border-box",
     height: GUIDE_ELBOW,
     width: `calc(${grasp.treeIndent} + ${grasp.iconSm} / 2 + ${grasp.space2} - ${grasp.space1})`,
-    borderInlineStartWidth: grasp.shellGuide,
-    borderBlockEndWidth: grasp.shellGuide,
+    borderInlineStartWidth: grasp.hairline,
+    borderBlockEndWidth: grasp.hairline,
     borderStyle: "solid",
     borderColor: { default: grasp.line, [media.forced]: "GrayText" },
     borderBlockStartColor: "transparent",
@@ -88,8 +88,8 @@ export const treeStyles = stylex.create({
   // Where the stem carries on, the elbow leaves the stem's column to it: one layer of line there.
   guideBranchCut: {
     clipPath: {
-      default: `inset(0 0 0 ${grasp.shellGuide})`,
-      ":dir(rtl)": `inset(0 ${grasp.shellGuide} 0 0)`,
+      default: `inset(0 0 0 ${grasp.hairline})`,
+      ":dir(rtl)": `inset(0 ${grasp.hairline} 0 0)`,
     },
   },
   group: {

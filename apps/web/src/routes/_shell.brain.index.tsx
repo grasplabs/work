@@ -1,5 +1,6 @@
 import type { Gap, Workspace } from "@grasp-os/shared/brain";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
@@ -14,7 +15,7 @@ import {
 } from "../brain/atlas-map.ts";
 import type { Neuron, RegionGroup } from "../brain/atlas-map.ts";
 import {
-  AtlasLegend,
+  AtlasToolbar,
   AtlasTrail,
   legendCorner,
 } from "../brain/atlas-overlays.tsx";
@@ -398,66 +399,71 @@ const AtlasPage = () => {
   });
 
   return (
-    <BrainAtlas
-      atlas={atlas}
-      brain={brain}
-      clear={{
-        ...CLEAR,
-        corner: legendCorner(groups.length),
-        right: 0,
-      }}
-      controls={controls}
-      dive={dive}
-      lit={LIT}
-      onDived={dived}
-      onGo={go}
-      onLaid={(shown) => {
-        setLaid((before) =>
-          before.region === region &&
-          before.group === group &&
-          sameNeurons(before.neurons, shown)
-            ? before
-            : { region, group, neurons: shown }
-        );
-      }}
-      onOpen={open}
-      pointed={pointed}
-      signals={signals}
-      spot={spot}
-      view={view}
-    >
-      {/* Grasp's thinking: a dive into the brain over the atlas, which rests under it. */}
-      <ThinkingDive
-        clear={{ ...CLEAR, right: diveClearOf(chatLayout) }}
-        onOpen={open}
-        still={reduce}
-        thought={thinking.thought}
+    <div {...stylex.props(page.column)}>
+      {/* What changes the view, above it: what a dot says, the region's groups, the zoom. */}
+      <AtlasToolbar
+        {...(groups.length > 0
+          ? {
+              groups: {
+                items: groups,
+                total: groups.reduce((sum, each) => sum + each.count, 0),
+                ...(group === undefined ? {} : { selected: group }),
+                onSelect: (key: string | undefined) => {
+                  go({ region, group: key });
+                },
+              },
+            }
+          : {})}
+        onReset={() => controls.current?.reset()}
+        onSpot={setSpot}
+        onZoom={(factor) => controls.current?.zoom(factor)}
+        {...(spot === undefined ? {} : { spot })}
       />
-      {thinking.thought === undefined ? (
-        <AtlasLegend
-          groups={
-            groups.length > 0
-              ? {
-                  items: groups,
-                  total: groups.reduce((sum, each) => sum + each.count, 0),
-                  selected: group,
-                  onSelect: (key) => {
-                    go({ region, group: key });
-                  },
-                }
-              : undefined
-          }
-          onReset={() => controls.current?.reset()}
-          onSpot={setSpot}
-          onZoom={(factor) => controls.current?.zoom(factor)}
-          spot={spot}
-          under={region !== undefined}
+      <BrainAtlas
+        atlas={atlas}
+        brain={brain}
+        clear={{
+          ...CLEAR,
+          corner: legendCorner(groups.length),
+          right: 0,
+        }}
+        controls={controls}
+        dive={dive}
+        lit={LIT}
+        onDived={dived}
+        onGo={go}
+        onLaid={(shown) => {
+          setLaid((before) =>
+            before.region === region &&
+            before.group === group &&
+            sameNeurons(before.neurons, shown)
+              ? before
+              : { region, group, neurons: shown }
+          );
+        }}
+        onOpen={open}
+        pointed={pointed}
+        signals={signals}
+        spot={spot}
+        view={view}
+      >
+        {/* Grasp's thinking: a dive into the brain over the atlas, which rests under it. */}
+        <ThinkingDive
+          clear={{ ...CLEAR, right: diveClearOf(chatLayout) }}
+          onOpen={open}
+          still={reduce}
+          thought={thinking.thought}
         />
-      ) : null}
-      {dive === undefined ? <AtlasTrail onGo={go} steps={trail} /> : null}
-    </BrainAtlas>
+        {dive === undefined ? <AtlasTrail onGo={go} steps={trail} /> : null}
+      </BrainAtlas>
+    </div>
   );
 };
+
+const page = stylex.create({
+  // The toolbar, then the atlas filling the rest.
+  column: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 },
+});
 
 export const Route = createFileRoute("/_shell/brain/")({
   validateSearch,

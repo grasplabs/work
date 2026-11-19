@@ -1,10 +1,9 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
-import type { ReactNode } from "react";
 
+import { ButtonGroup, ButtonGroupButton } from "../grasp/button-group/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { focus } from "../grasp/focus/focus.ts";
 import {
   ArrowLeft,
   ChevronRight,
@@ -13,41 +12,40 @@ import {
   Minus,
   Plus,
 } from "../grasp/icons/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
 import { Text } from "../grasp/text/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { ToolbarBand } from "../grasp/toolbar-band/index.ts";
 import type { AtlasView } from "./atlas-canvas.tsx";
 import type { RegionGroup } from "./atlas-map.ts";
 import { Mark } from "./region-marks.tsx";
 
 /**
- * What sits in the corners of the atlas, out of the brain's way, as in the prototype
- * (grasplabs/prototype, packages/grasp: components/knowledge/atlas-overlays.tsx): top left what a
- * dot says, under the small brain when a region is open, and above it the region's groups to
- * narrow it to; with the zoom under it. Bottom left the way you came, to step back along. The
- * chat has the bottom centre (chat/global-chat.tsx). Nothing takes a side of the screen.
+ * What stands round the atlas, out of the brain's way, as in the prototype (grasplabs/prototype,
+ * packages/grasp: components/knowledge/atlas-overlays.tsx), on the library's parts: above it a
+ * Toolbar band, with what a dot says at its start (pointing lights those dots, a press keeps them
+ * lit) and at its end a region's groups to narrow it to and the zoom. Bottom left the way you
+ * came, to step back along. The chat has the bottom centre (chat/global-chat.tsx).
  */
 
 /** Which dots a mark of the legend stands for. */
 export type Spot = "known" | "waiting" | "open";
 
 /**
- * The corner of the canvas the legend takes, in pixels, with a little air, for the brain to keep
- * clear: how wide it is, and how high, seen whole and in a region, where the small brain sits in
- * its upper part. From the panel's own styles below.
+ * The canvas's top left corner, in pixels, for the brain to keep clear: inside a region the small
+ * brain is drawn there, to click on; seen whole, nothing is.
  */
-export const LEGEND_CORNER = { width: 184, whole: 164, region: 258 };
+export const LEGEND_CORNER = { width: 160, whole: 0, region: 120 };
 
-/** The corner with a region's groups in the panel as well: wider for their names, and a row higher for each, with "All" and a line under them. */
-export const legendCorner = (groups: number): typeof LEGEND_CORNER => {
-  if (groups === 0) {
-    return LEGEND_CORNER;
-  }
-  return {
-    ...LEGEND_CORNER,
-    width: 264,
-    region: LEGEND_CORNER.region + (groups + 1) * 28 + 13,
-  };
-};
+/** The corner the brain keeps clear: only the small brain's, now the rest is above the canvas. */
+export const legendCorner = (_groups: number): typeof LEGEND_CORNER =>
+  LEGEND_CORNER;
 
 /** A region's groups, to narrow it to one: the tools people named, the employee interviews. */
 export interface LegendGroups {
@@ -60,98 +58,13 @@ export interface LegendGroups {
 }
 
 const PHONE = media.belowTablet;
-const HOVER = media.hover;
-const REDUCED = media.reduced;
 
-// The legend's sizes, which LEGEND_CORNER above counts on: 160 pixels wide, 240 with a region's
-// groups; inside a region its top leaves 100 pixels for the small brain drawn there.
-const LEGEND_WIDTH = `calc(2 * ${grasp.space20})`;
-const LEGEND_WIDE = `calc(3 * ${grasp.space20})`;
-const UNDER_BRAIN = `calc(${grasp.space24} + ${grasp.space1})`;
 // Room on the right of the way back for the chat's bar at the foot of the page.
 const BESIDE_CHAT = `calc(100% - 7.5 * ${grasp.space16})`;
-// The room inside the legend, round its rows and either side of its lines.
-const INSET = `calc(1.5 * ${grasp.space1})`;
 // The room between the steps of the way back.
 const STEP_GAP = `calc(${grasp.space1} / 2)`;
 
 const styles = stylex.create({
-  // One small panel, top left. It lets the pointer through to the brain round its rows.
-  legend: {
-    position: "absolute",
-    top: grasp.space3,
-    left: grasp.space3,
-    display: "flex",
-    flexDirection: "column",
-    boxSizing: "border-box",
-    width: LEGEND_WIDTH,
-    padding: INSET,
-    borderWidth: grasp.hairline,
-    borderStyle: "solid",
-    borderColor: grasp.line,
-    borderRadius: grasp.corner,
-    pointerEvents: "none",
-    transitionProperty: { default: "width, padding", [REDUCED]: "none" },
-    transitionDuration: grasp.durationUi,
-    transitionTimingFunction: grasp.ease,
-  },
-  legendWide: { width: LEGEND_WIDE },
-  legendUnder: { paddingTop: UNDER_BRAIN },
-  // A region's groups, over the marks, a line under them.
-  groups: {
-    display: "flex",
-    flexDirection: "column",
-    margin: 0,
-    marginBottom: INSET,
-    padding: 0,
-    paddingBottom: INSET,
-    borderWidth: 0,
-    borderBottomWidth: grasp.hairline,
-    borderStyle: "solid",
-    borderColor: grasp.line,
-  },
-  row: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-    minHeight: grasp.controlXs,
-    margin: 0,
-    paddingBlock: 0,
-    paddingInline: grasp.space2,
-    borderWidth: 0,
-    borderRadius: grasp.treeRowCorner,
-    color: grasp.ink,
-    fontFamily: grasp.fontSans,
-    fontSize: grasp.textSm,
-    lineHeight: grasp.textSmLine,
-    fontWeight: grasp.weightRegular,
-    textAlign: "start",
-    cursor: "pointer",
-    pointerEvents: "auto",
-    backgroundColor: {
-      default: "transparent",
-      ":hover": { default: null, [HOVER]: grasp.ghostFillHover },
-    },
-    transitionProperty: "background-color",
-    transitionDuration: grasp.durationHover,
-    transitionTimingFunction: grasp.ease,
-  },
-  // The mark whose dots are lit now.
-  lit: { backgroundColor: grasp.ghostFillHover },
-  // What a click chose, kept lit.
-  chosen: { fontWeight: grasp.weightMedium },
-  groupName: { flexGrow: 1, minWidth: 0 },
-  count: { fontVariantNumeric: "tabular-nums" },
-  zoom: {
-    display: "flex",
-    justifyContent: "space-between",
-    marginTop: INSET,
-    paddingTop: INSET,
-    borderTopWidth: grasp.hairline,
-    borderTopStyle: "solid",
-    borderTopColor: grasp.line,
-    pointerEvents: "auto",
-  },
   // Bottom left, clear of the chat's bar beside it; on a phone over the chat.
   trail: {
     position: "absolute",
@@ -201,59 +114,21 @@ const styles = stylex.create({
   shrink: { minWidth: 0, maxWidth: "100%" },
 });
 
-/** A row of the legend, each a button that keeps what it chose pressed. */
-const LegendRow = ({
-  pressed,
-  lit,
-  chosen,
-  label,
-  children,
-  ...handlers
-}: {
-  pressed: boolean;
-  lit: boolean;
-  chosen: boolean;
-  label?: string;
-  children: ReactNode;
-  onClick: () => void;
-  onBlur?: () => void;
-  onFocus?: () => void;
-  onPointerEnter?: () => void;
-  onPointerLeave?: () => void;
-}) => (
-  <button
-    aria-pressed={pressed}
-    title={label}
-    type="button"
-    {...handlers}
-    {...stylex.props(
-      styles.row,
-      lit && styles.lit,
-      chosen && styles.chosen,
-      focus.ring
-    )}
-  >
-    {children}
-  </button>
-);
-
 /**
- * Top left: what a dot says, drawn as the brain draws it: filled where something is known, hollow
- * where it is still waiting, in the attention colour where a question is open. Pointing at one
- * lights up the dots that have it, in the brain or the region on screen; a click keeps them lit.
- * Inside a region it sits under the small brain that says where you are.
+ * Above the atlas, the library's Toolbar band: at its start what a dot says, drawn as the brain
+ * draws it (filled where something is known, hollow where it is still waiting, in the attention
+ * colour where a question is open), each a toggle. Pointing at one lights up the dots that have
+ * it, in the brain or the region on screen; a press keeps them lit. At its end, in a region with
+ * groups, which group it shows; then the zoom.
  */
-export const AtlasLegend = ({
+export const AtlasToolbar = ({
   spot,
-  under,
   groups,
   onSpot,
   onZoom,
   onReset,
 }: {
   spot?: Spot;
-  /** A region is open: the small brain is above it. */
-  under: boolean;
   /** The open region's groups, when it has several. */
   groups?: LegendGroups;
   onSpot: (spot: Spot | undefined) => void;
@@ -263,113 +138,102 @@ export const AtlasLegend = ({
   onReset: () => void;
 }) => {
   const { t } = useLingui();
-  // The mark that is kept lit: what a click chose.
+  // The mark that is kept lit: what a press chose.
   const [picked, setPicked] = useState<Spot>();
-  const marks: { state: Spot; label: ReactNode }[] = [
-    { state: "known", label: <Trans>Known</Trans> },
-    { state: "waiting", label: <Trans>Still waiting</Trans> },
-    { state: "open", label: <Trans>Still open</Trans> },
+  const marks: { state: Spot; label: string }[] = [
+    { state: "known", label: t`Known` },
+    { state: "waiting", label: t`Still waiting` },
+    { state: "open", label: t`Still open` },
   ];
+  const all = "all";
+  const total = groups?.total ?? 0;
   return (
-    // Inside a region the small brain is drawn in its upper part, to click on; under it the marks, and the zoom.
-    <div
-      {...stylex.props(
-        styles.legend,
-        under && styles.legendUnder,
-        groups !== undefined && styles.legendWide
-      )}
-    >
-      {groups ? (
-        <fieldset aria-label={t`Show`} {...stylex.props(styles.groups)}>
-          {[
-            { key: undefined, label: t`All`, count: groups.total },
-            ...groups.items,
-          ].map((group) => (
-            <LegendRow
-              chosen={groups.selected === group.key}
-              key={group.key ?? "all"}
-              label={group.label}
-              lit={groups.selected === group.key}
-              onClick={() => {
-                groups.onSelect(group.key);
+    <ToolbarBand
+      aria-label={t`The brain's view`}
+      end={
+        <>
+          {groups === undefined ? null : (
+            <Select
+              items={[
+                { value: all, label: t`All (${total})` },
+                ...groups.items.map((group) => ({
+                  value: group.key,
+                  label: `${group.label} (${group.count})`,
+                })),
+              ]}
+              onValueChange={(value) => {
+                groups.onSelect(
+                  typeof value === "string" && value !== all ? value : undefined
+                );
               }}
-              pressed={groups.selected === group.key}
+              value={groups.selected ?? all}
             >
-              <Text
-                element="span"
-                layout={styles.groupName}
-                size="sm"
-                tone="ink"
-                wrap="truncate"
-              >
-                {group.label}
-              </Text>
-              <span {...stylex.props(styles.count)}>
-                <Text element="span" size="sm" tone="muted">
-                  {group.count}
-                </Text>
-              </span>
-            </LegendRow>
-          ))}
-        </fieldset>
-      ) : null}
-      {marks.map((mark) => (
-        // Pointing shows its dots for a moment; a click keeps them lit until it is clicked again, so they can be gone over one by one.
-        <LegendRow
-          chosen={picked === mark.state}
-          key={mark.state}
-          lit={spot === mark.state}
-          onBlur={() => {
-            onSpot(picked);
-          }}
-          onClick={() => {
-            const next = picked === mark.state ? undefined : mark.state;
+              <SelectTrigger aria-label={t`Show`} size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          )}
+          <ButtonGroup aria-label={t`Zoom`} size="sm">
+            <ButtonGroupButton
+              aria-label={t`Zoom out`}
+              icon={Minus}
+              onClick={() => {
+                onZoom(1 / 1.25);
+              }}
+            />
+            <ButtonGroupButton
+              aria-label={t`Zoom in`}
+              icon={Plus}
+              onClick={() => {
+                onZoom(1.25);
+              }}
+            />
+            <ButtonGroupButton
+              aria-label={t`Fit and center`}
+              icon={Fit}
+              onClick={onReset}
+            />
+          </ButtonGroup>
+        </>
+      }
+      start={
+        <ToggleGroup
+          aria-label={t`Light up the dots`}
+          onValueChange={(chosen: unknown[]) => {
+            const next = marks.find((mark) => mark.state === chosen[0])?.state;
             setPicked(next);
             onSpot(next);
           }}
-          onFocus={() => {
-            onSpot(mark.state);
-          }}
-          onPointerEnter={() => {
-            onSpot(mark.state);
-          }}
-          onPointerLeave={() => {
-            onSpot(picked);
-          }}
-          pressed={picked === mark.state}
+          size="sm"
+          value={picked === undefined ? [] : [picked]}
         >
-          <Mark state={mark.state} />
-          {mark.label}
-        </LegendRow>
-      ))}
-      <div {...stylex.props(styles.zoom)}>
-        <Button
-          aria-label={t`Zoom out`}
-          icon={Minus}
-          onClick={() => {
-            onZoom(1 / 1.25);
-          }}
-          size="sm"
-          variant="ghost"
-        />
-        <Button
-          aria-label={t`Zoom in`}
-          icon={Plus}
-          onClick={() => {
-            onZoom(1.25);
-          }}
-          size="sm"
-          variant="ghost"
-        />
-        <Button
-          aria-label={t`Fit and center`}
-          icon={Fit}
-          onClick={onReset}
-          size="sm"
-          variant="ghost"
-        />
-      </div>
-    </div>
+          {marks.map((mark) => (
+            // Pointing shows its dots for a moment; a press keeps them lit until it is pressed again.
+            <Toggle
+              key={mark.state}
+              onBlur={() => {
+                onSpot(picked);
+              }}
+              onFocus={() => {
+                onSpot(mark.state);
+              }}
+              onPointerEnter={() => {
+                onSpot(mark.state);
+              }}
+              onPointerLeave={() => {
+                onSpot(picked);
+              }}
+              value={mark.state}
+              {...(spot === mark.state ? { "data-lit": "" } : {})}
+            >
+              <Mark state={mark.state} />
+              {mark.label}
+            </Toggle>
+          ))}
+        </ToggleGroup>
+      }
+    />
   );
 };
 
