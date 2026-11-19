@@ -852,12 +852,12 @@ const connectionGroup = (connectionId: string): string =>
   `${connectionPrefix}${checked(connectionIdSchema, connectionId)}`;
 
 /**
- * A place picked on a shared connection, as the Brain's group (GRA-1719):
- * what native sync copies from it is kept for this group, and core puts a
- * reader in it beside the connection's own group while the place is
- * still picked (`withConnections`). Its connection's group, a "/", then a
- * hash of the sync and the place: a connection's ID holds neither "/" nor
- * ":", so no other group can be named this, and it fits a principal.
+ * A place picked on a shared connection, as a group (GRA-1719): one half
+ * of each pair what native sync copies from it is kept for
+ * (source-readers.ts `pairPrincipalOf`, GRA-2145); nobody holds it alone.
+ * Its connection's group, a "/", then a hash of the sync and the place: a
+ * connection's ID holds neither "/" nor ":", so no other group can be
+ * named this.
  */
 export const placeGroupOf = async (
   connectionId: string,
@@ -1078,8 +1078,9 @@ const memberGroupsOf = async (
  * team. So what agents read through it reaches exactly as far as a
  * document shared with that audience would at the same reach: code's
  * included, and a shared thread's (the company alone) only for everyone.
- * Beside them, apart (`places`), the group of each place picked on such
- * a connection now (GRA-1719): never without the connection's own. An
+ * Beside them, apart (`places`), the pairs the reader holds of each place
+ * picked on such a connection now (GRA-2145, `memberGroupsOf`): never
+ * without the connection's own. An
  * audience whose team is gone is in no one's groups: nobody's. A row that
  * can't be read is nobody's too.
  */
@@ -1257,7 +1258,7 @@ const refuseOtherConnectionReaders = (
     );
   }
   // What native sync copies from a place picked on a shared connection
-  // (GRA-1719), and only that, is for the place's group: keyed under the
+  // (GRA-1719), and only that, is for the place's pairs: keyed under the
   // connection (brain-sync.ts `keyOf`).
   if (
     readers.kind === "place" &&
