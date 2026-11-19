@@ -478,6 +478,38 @@ describe(
       });
     });
 
+    it("goes on reading the directory with the connection of an admin it suspended, and lifts them", async () => {
+      // GRA-2143: the directory connection is the company's, not theirs.
+      const [dan, eve] = [
+        await memberWith(crypto.randomUUID(), "admin"),
+        await memberWith(crypto.randomUUID(), "admin"),
+      ];
+      const { core, closed } = await openRpc(dan.session);
+      await connectedDirectory(idp, {
+        ...dan,
+        core,
+        closed,
+        api: core.authenticate(),
+      });
+      await onlyAdmins(dan.userId, eve.userId);
+      await directoryHolds([
+        user({ id: dan.oid, accountEnabled: false }),
+        user({ id: eve.oid }),
+      ]);
+      await readAt(nextDay());
+      const suspended = await suspensionOf(dan.userId);
+      await directoryHolds([user({ id: dan.oid }), user({ id: eve.oid })]);
+      await readAt(nextDay());
+
+      expect({
+        suspended,
+        lifted: await suspensionOf(dan.userId),
+      }).toStrictEqual({
+        suspended: { suspended: 1, suspendedBy: "directory" },
+        lifted: { suspended: 0, suspendedBy: null },
+      });
+    });
+
     it("doesn't count on an admin it suspended earlier whom the directory no longer lists, nor lift them", async () => {
       await connectedDirectory(idp);
       const [gil, dan] = [

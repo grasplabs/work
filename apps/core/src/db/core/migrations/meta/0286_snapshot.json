@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4c4e2e2e-c2a9-470a-a06f-11fff2498f84",
+  "id": "277f8c67-7d0b-4e5f-b5f0-659ecdc52392",
   "prevId": "72903dba-615b-4f29-bb20-07b7b3aae5a0",
   "tables": {
     "access_revocations": {
@@ -230,6 +230,14 @@
           "columns": [
             "provider_id",
             "lower(\"oid\")"
+          ],
+          "isUnique": false
+        },
+        "accounts_provider_account_lower_idx": {
+          "name": "accounts_provider_account_lower_idx",
+          "columns": [
+            "provider_id",
+            "lower(\"account_id\")"
           ],
           "isUnique": false
         },
@@ -12777,47 +12785,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "source_reader_pairs": {
-      "name": "source_reader_pairs",
-      "columns": {
-        "place": {
-          "name": "place",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "principal": {
-          "name": "principal",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "source_reader_pairs_principal_idx": {
-          "name": "source_reader_pairs_principal_idx",
-          "columns": [
-            "principal",
-            "place"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "source_reader_pairs_place_principal_pk": {
-          "columns": [
-            "place",
-            "principal"
-          ],
-          "name": "source_reader_pairs_place_principal_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "source_reader_tokens": {
       "name": "source_reader_tokens",
       "columns": {
@@ -18355,6 +18322,13 @@
       "accounts_provider_oid_lower_idx": {
         "columns": {
           "lower(\"oid\")": {
+            "isExpression": true
+          }
+        }
+      },
+      "accounts_provider_account_lower_idx": {
+        "columns": {
+          "lower(\"account_id\")": {
             "isExpression": true
           }
         }

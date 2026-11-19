@@ -1,6 +1,14 @@
 import { createAuditEvent } from "@grasp-os/shared/audit";
-import { directoryErrors } from "@grasp-os/shared/directory";
-import type { DirectoryConnection } from "@grasp-os/shared/directory";
+import {
+  directoryErrors,
+  isDirectoryDeletedFailure,
+  isDirectoryReadFailure,
+} from "@grasp-os/shared/directory";
+import type {
+  DirectoryConnection,
+  DirectoryDeletedFailure,
+  DirectoryReadFailure,
+} from "@grasp-os/shared/directory";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { clockLeaseMs } from "@grasp-os/workerflow/clock";
 import { and, eq, sql } from "drizzle-orm";
@@ -16,6 +24,8 @@ import {
   directoryReads,
   erasedSubjects,
 } from "./db/core/schema.ts";
+import { groupStatements, mappedGroupsRead } from "./directory-group-reads.ts";
+import type { GroupRead } from "./directory-group-reads.ts";
 import { suspensionStatements } from "./directory-suspensions.ts";
 import {
   jsonValuesOf,
@@ -96,7 +106,7 @@ interface Listed {
    */
   deleted: string[];
   /** Why the deleted accounts couldn't be read (`deletedOf`); null when they were. */
-  deletedFailure: string | null;
+  deletedFailure: DirectoryDeletedFailure | null;
 }
 
 /**
@@ -128,12 +138,6 @@ const everyPage = async <Page extends { next: string | null }>(
   } while (cursor !== null);
 };
 
-/** The failures of the deleted list's first page the read goes on without it for. */
-const deletedUnreadable = new Set<string | undefined>([
-  "directory.deleted_refused",
-  "directory.deleted_unsupported",
-]);
-
 /**
  * Every deleted account of `connection`, or why the list can't be read at
  * all. Where the line is, and why: added to a read that worked without
@@ -149,7 +153,7 @@ const deletedOf = async (
   env: Env,
   connection: DirectoryConnection,
   deadline: number
-): Promise<{ ids: string[] } | { failure: string }> => {
+): Promise<{ ids: string[] } | { failure: DirectoryDeletedFailure }> => {
   const ids = new Set<string>();
   let pages = 0;
   try {
@@ -171,7 +175,8 @@ const deletedOf = async (
     );
   } catch (error) {
     const code = directoryErrors.codeOf(error);
-    if (pages === 0 && code !== undefined && deletedUnreadable.has(code)) {
+    // The failures of the first page the read goes on without it for.
+    if (pages === 0 && isDirectoryDeletedFailure(code)) {
       return { failure: code };
     }
     throw error;
@@ -324,6 +329,7 @@ const apply = async (
   connection: DirectoryConnection,
   listed: Listed,
   json: string,
+  groups: readonly GroupRead[],
   placement: Placement,
   startedAt: Date
 ): Promise<void> => {
@@ -409,6 +415,9 @@ const apply = async (
     // Before the placement, so someone listed on again is lifted and
     // placed in the same batch.
     ...suspensionStatements(db, kind, claimed, startedAt),
+    // After the people's rows, which each group row needs, and before the
+    // placement, which places by them.
+    ...groupStatements(db, kind, listed.tenant, groups, claimed, startedAt),
   ];
   const results: unknown[] = await auditedBatch(env, db, [
     claim,
@@ -452,7 +461,7 @@ const recordFailure = async (
   kind: DirectoryKind,
   connection: DirectoryConnection,
   tenant: string,
-  code: string,
+  code: DirectoryReadFailure,
   startedAt: Date
 ): Promise<void> => {
   const failedAt = new Date();
@@ -499,7 +508,8 @@ const failedWith = async (
       kind,
       connection,
       tenant,
-      code ?? "directory.read_failed",
+      // Typed as the admin is told it; anything else as the catch-all.
+      isDirectoryReadFailure(code) ? code : "directory.read_failed",
       startedAt
     );
   } catch (error) {
@@ -547,11 +557,29 @@ const readKind = async (
   try {
     const listed = await listedIn(env, kind, connection, tenant, deadline);
     const json = await entriesOf(env, kind, listed);
-    const placement = await readPlacementOf(env, kind, listed.people);
+    // The mapped groups, each read whole or held (directory-group-reads.ts).
+    const groups = await mappedGroupsRead(
+      env,
+      kind,
+      connection,
+      async (readPage, take) => {
+        await everyPage(deadline, readPage, take);
+      }
+    );
+    const placement = await readPlacementOf(env, kind, listed.people, groups);
     if (Date.now() >= deadline) {
       throw directoryErrors.create("directory.read_too_long");
     }
-    await apply(env, kind, connection, listed, json, placement, startedAt);
+    await apply(
+      env,
+      kind,
+      connection,
+      listed,
+      json,
+      groups,
+      placement,
+      startedAt
+    );
     if (listed.deletedFailure !== null) {
       // The fall-back `deletedOf` chose: the rest of the read was applied,
       // with nobody suspended for having left.

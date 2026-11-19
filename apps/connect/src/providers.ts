@@ -845,12 +845,17 @@ export const grantedAsAsked = (
   );
 };
 
-/** The OpenID scopes, which a provider's answer may name or leave out. */
+/**
+ * The OpenID scopes, which a provider's answer may name or leave out:
+ * Google's answer names email and profile by their full URIs.
+ */
 const signInScopes: ReadonlySet<string> = new Set([
   "openid",
   "profile",
   "email",
   "offline_access",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
 ]);
 
 /**

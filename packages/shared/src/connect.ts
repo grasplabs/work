@@ -2076,11 +2076,13 @@ export interface ConnectApi
    * read is under way (connect's reader-groups.ts), sending at most
    * `requests` requests to the providers and starting no turn once it made
    * `queries` D1 queries: core's clock asks every minute, with its shares
-   * of the platform's limits. How many reads became whole.
+   * of the platform's limits. Nothing of the connections `paused` people
+   * own, core's suspended members (GRA-2143). How many reads became whole.
    */
   readReaderGroups: (request: {
     requests: number;
     queries: number;
+    paused: string[];
   }) => Promise<{ read: number }>;
   /**
    * Asks the connections whose grant lacks the rights of `classes`, those

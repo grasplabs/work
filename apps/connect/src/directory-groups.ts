@@ -276,7 +276,7 @@ const groupsToken = async (env: Env, connectionId: string): Promise<string> => {
 const groupsFailure = (error: unknown): unknown =>
   error instanceof SourceError && error.status === 403
     ? directoryErrors.create("directory.group_refused")
-    : readFailure(error);
+    : readFailure(error, "microsoft-directory");
 
 /** An Entra directory connection, active; any other is `directory.not_found`. */
 const entraConnection = async (env: Env, connectionId: string) => {
