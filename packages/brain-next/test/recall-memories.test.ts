@@ -1451,22 +1451,48 @@ describe("memories a reader never uses fade", () => {
     ).toBeTruthy();
   });
 
-  it("never fades a confirmed memory below one that isn't, however recently that one was used", async () => {
+  it("never fades a confirmed side of a disagreement below one that isn't, however recently that one was used", async () => {
     const group = unique("team");
     const person = unique("ann");
     const reader = readerOf(person, group);
     const topic = word();
-    const [older, newer] = await equalMemories(group, topic);
-    await shared().confirmMemory({
-      memory: older?.id ?? "",
-      reader: { person, groups: [group] },
-    });
+    // Two sources disagree on one customer's status.
+    const sideOf = async (value: string, entity?: string) =>
+      await remember(
+        audience(group),
+        [
+          entity === undefined
+            ? { key: "a", kind: "customer", names: [word()] }
+            : { key: "a", kind: "customer", id: entity },
+        ],
+        [
+          fact(
+            "a",
+            `The ${topic} customer is ${value}`,
+            {
+              attribute: "status",
+              value,
+            },
+            unique("writer")
+          ),
+        ]
+      );
+    const older = await sideOf("active");
+    const newer = await sideOf("lost", older.entities.a);
+    const olderId = older.memories[0] ?? "";
+    const newerId = newer.memories[0] ?? "";
+    await expect(
+      shared().confirmMemory({
+        memory: olderId,
+        reader: { person, groups: [group] },
+      })
+    ).resolves.toBe("done");
 
     expect(
       ranksAbove(
-        await packFor(reader, topic, usedAt(new Date(), newer?.id ?? "")),
-        older?.id ?? "",
-        newer?.id ?? ""
+        await packFor(reader, topic, usedAt(new Date(), newerId)),
+        olderId,
+        newerId
       )
     ).toBeTruthy();
   });

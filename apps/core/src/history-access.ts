@@ -744,6 +744,15 @@ const readableApps = async (
 };
 
 /**
+ * The pin of the agent's `brain` grant that releases before every agent
+ * read the Brain with no grant (GRA-2203) recorded with a run that read
+ * it. Nothing writes it now, but a release before this one still may,
+ * while a client can roll back to it: so it is accepted without a check,
+ * and goes, with its rows, in the next release (GRA-2205).
+ */
+const obsoleteBrainGrantPin = "brain-grant";
+
+/**
  * Of `sourceIds`, those the chat's agent may read for its person now: a
  * connection call a grant the agent holds in this chat now covers, on a
  * connection not disconnected that the person may use themselves; an App
@@ -752,7 +761,8 @@ const readableApps = async (
  * the company, for what code's recall handed over); a memory of the new
  * Brain, while the person (or, as the company read it, the company) may
  * read it and its writer has not retired it, replaced or expired or not;
- * a person a run was told of, while they are an active member.
+ * a person a run was told of, while they are an active member; the
+ * obsolete pin of the Brain grant, always (`obsoleteBrainGrantPin`).
  * Anything else, an unknown source or a bare connection included, is
  * not. With why the chat's audience cuts what a recall as the company
  * handed over, when it holds any (`audience`). Throws what the reads
@@ -798,6 +808,7 @@ export const readableSources = async (
     ...memories,
     ...companyMemories,
     ...people,
+    ...sourceIds.filter((source) => source === obsoleteBrainGrantPin),
   ]);
   return audience === undefined ? { readable } : { readable, audience };
 };
