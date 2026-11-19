@@ -112,6 +112,12 @@ export interface TreeProps {
    * @default true
    */
   expandOnPress?: boolean;
+  /**
+   * The tree guide on nested items, as Sidebar's nested rows: a stem down from each open branch's
+   * chevron and a rounded elbow into each of its items, stopping at the last.
+   * @default false
+   */
+  guides?: boolean;
   /** Nothing can be chosen, opened or run. */
   disabled?: boolean;
   /**
@@ -277,17 +283,41 @@ const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
   }
 };
 
+/**
+ * A nested item's part of the tree guide, as Sidebar's: the stem down from its branch's chevron, a
+ * rounded elbow into its row, and the stem on to the next sibling, which the last one has not.
+ */
+const Guide = ({ last }: { last: boolean }) => (
+  <>
+    <span aria-hidden="true" {...stylex.props(styles.guideStem)} />
+    <span
+      aria-hidden="true"
+      {...stylex.props(styles.guideBranch, !last && styles.guideBranchCut)}
+    />
+    {last ? null : (
+      <span aria-hidden="true" {...stylex.props(styles.guideStemOn)} />
+    )}
+  </>
+);
+
 const Items = ({
   nodes,
   current,
   query,
+  guides = false,
+  nested = false,
 }: {
   nodes: TreeNode[];
   current: string | null | undefined;
   query: string;
+  /** Draw the tree guide on nested items (Tree's `guides`). */
+  guides?: boolean;
+  /** These items are a branch's children, under its row. */
+  nested?: boolean;
 }) =>
-  nodes.map((node) => {
+  nodes.map((node, index) => {
     const branch = node.children !== undefined;
+    const guided = guides && nested;
     return (
       <ItemPrimitive
         key={node.value}
@@ -295,8 +325,9 @@ const Items = ({
         branch={branch || undefined}
         disabled={node.disabled}
         label={node.label}
-        {...stylex.props(styles.item)}
+        {...stylex.props(styles.item, guided && styles.guided)}
       >
+        {guided ? <Guide last={index === nodes.length - 1} /> : null}
         <LabelPrimitive {...stylex.props(styles.row, focus.row)}>
           {branch ? (
             <IndicatorPrimitive
@@ -336,6 +367,8 @@ const Items = ({
               nodes={node.children ?? []}
               current={current}
               query={query}
+              guides={guides}
+              nested
             />
           </GroupPrimitive>
         )}
@@ -451,6 +484,7 @@ export const Tree = ({
   onAction,
   current,
   expandOnPress = true,
+  guides = false,
   disabled,
   filterable = false,
   filter,
@@ -530,7 +564,7 @@ export const Tree = ({
       onKeyDown={handleTreeKeyDown}
       {...stylex.props(styles.tree)}
     >
-      <Items nodes={shown} current={current} query={query} />
+      <Items nodes={shown} current={current} query={query} guides={guides} />
     </TreePrimitive>
   );
   if (!filterable) {

@@ -184,6 +184,7 @@ export const useBrainSection = (): SidebarSection | undefined => {
             current={noteId ?? regionShown ?? null}
             defaultExpanded={parts.map((part) => part.value)}
             expandOnPress={false}
+            guides
             aria-label={t`In the brain`}
             items={parts}
           />

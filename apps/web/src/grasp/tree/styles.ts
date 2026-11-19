@@ -10,6 +10,12 @@ import { grasp, media } from "../tokens/tokens.stylex";
 const HOVER = media.hover;
 const chosen = ":is([data-selected], [data-current])";
 
+// The tree guide's measures: a row's middle, where the parent level's chevron stands (its row's
+// inset, a step in per level above this one, and half the chevron), and the elbow.
+const ROW_MIDDLE = `calc(${grasp.treeRow} / 2)`;
+const GUIDE_X = `calc(${grasp.treeRowInset} + (var(--tree-level, 2) - 2) * ${grasp.treeIndent} + ${grasp.iconSm} / 2 - ${grasp.shellGuide} / 2)`;
+const GUIDE_ELBOW = `min(${grasp.space3}, calc(${grasp.treeIndent} - ${grasp.space1}))`;
+
 export const treeStyles = stylex.create({
   tree: {
     display: "flex",
@@ -34,6 +40,57 @@ export const treeStyles = stylex.create({
     gap: grasp.hairline,
     minWidth: 0,
     outline: "none",
+  },
+  // A nested item that draws its part of the tree guide (`guides`).
+  guided: { position: "relative" },
+  // The guide's stem, from the gap above to the elbow, under the branch's chevron: a level's
+  // chevron stands at the row's inset, a step in per level.
+  guideStem: {
+    position: "absolute",
+    insetInlineStart: GUIDE_X,
+    insetBlockStart: `calc(-1 * ${grasp.hairline})`,
+    height: `calc(${grasp.hairline} + ${ROW_MIDDLE} - ${GUIDE_ELBOW})`,
+    width: 0,
+    borderInlineStartWidth: grasp.shellGuide,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: { default: grasp.line, [media.forced]: "GrayText" },
+    pointerEvents: "none",
+  },
+  // Below the elbow to the item's foot: the stem carries on to the next sibling.
+  guideStemOn: {
+    position: "absolute",
+    insetInlineStart: GUIDE_X,
+    insetBlockStart: `calc(${ROW_MIDDLE} - ${GUIDE_ELBOW})`,
+    insetBlockEnd: 0,
+    width: 0,
+    borderInlineStartWidth: grasp.shellGuide,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: { default: grasp.line, [media.forced]: "GrayText" },
+    pointerEvents: "none",
+  },
+  // The elbow into the row, to a step before its words (past the room its chevron takes).
+  guideBranch: {
+    position: "absolute",
+    insetInlineStart: GUIDE_X,
+    insetBlockStart: `calc(${ROW_MIDDLE} - ${GUIDE_ELBOW})`,
+    boxSizing: "border-box",
+    height: GUIDE_ELBOW,
+    width: `calc(${grasp.treeIndent} + ${grasp.iconSm} / 2 + ${grasp.space2} - ${grasp.space1})`,
+    borderInlineStartWidth: grasp.shellGuide,
+    borderBlockEndWidth: grasp.shellGuide,
+    borderStyle: "solid",
+    borderColor: { default: grasp.line, [media.forced]: "GrayText" },
+    borderBlockStartColor: "transparent",
+    borderInlineEndColor: "transparent",
+    borderEndStartRadius: GUIDE_ELBOW,
+    pointerEvents: "none",
+  },
+  // Where the stem carries on, the elbow leaves the stem's column to it: one layer of line there.
+  guideBranchCut: {
+    clipPath: {
+      default: `inset(0 0 0 ${grasp.shellGuide})`,
+      ":dir(rtl)": `inset(0 ${grasp.shellGuide} 0 0)`,
+    },
   },
   group: {
     display: "flex",
