@@ -27,16 +27,25 @@ export const notRemoved = (
     AND ${memberRemovals.userId} = ${userId}
 )`;
 
+/** `members`, as `mayAct` reads it for a suspension: apart from any caller's. */
+const suspendedMembership = alias(members, "suspended_membership");
+
 /**
  * That `userId` (an ID, or a column holding one) may act, and be read as,
  * in the organization now, as a SQL condition: the one check everything
  * that decides so shares (sign-in, every RPC, Apps, agents and workflows
- * acting for them, Teams and Slack, the counts of a team's people). An
- * admin's removal is the reason today; `notRemoved` alone asks only that,
- * for removal itself, erasure's "removed first" and the directory's tie.
+ * acting for them, Teams and Slack, the counts of a team's people).
+ * Neither removed by an admin (`notRemoved`, which alone serves removal
+ * itself, erasure's "removed first" and the directory's tie) nor
+ * suspended (`members.suspended_at`, directory-suspensions.ts).
  */
 export const mayAct = (userId: string | SQLiteColumn | SQL): SQL =>
-  notRemoved(userId);
+  sql`${notRemoved(userId)} AND NOT EXISTS (
+    SELECT 1 FROM ${members} AS ${suspendedMembership}
+    WHERE ${suspendedMembership.organizationId} = ${organizationId}
+      AND ${suspendedMembership.userId} = ${userId}
+      AND ${suspendedMembership.suspendedAt} IS NOT NULL
+  )`;
 
 /** `members`, as `activeMember` reads it: apart from any caller's. */
 const activeMembership = alias(members, "active_membership");

@@ -861,7 +861,9 @@ export const reviewedPersonColumns: Readonly<
   "core.knowledge_signal_dismissals": ["subject"],
   "core.knowledge_signals": ["owner", "subject"],
   "core.member_removals": ["user_id"],
-  "core.members": ["user_id"],
+  // `suspended_by` names what suspended the member (the directory's read),
+  // never a person; the row goes with the removal erasure needs first.
+  "core.members": ["suspended_by", "user_id"],
   "core.notifications": ["person_id"],
   "core.permissions": [
     "granted_by",

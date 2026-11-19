@@ -344,7 +344,7 @@ const ensureMember = async (
   const join = db
     .insert(members)
     .select(
-      sql`SELECT ${memberId}, ${organizationId}, ${userId}, ${role}, ${now.getTime()}
+      sql`SELECT ${memberId}, ${organizationId}, ${userId}, ${role}, ${now.getTime()}, NULL, NULL
         WHERE ${notRemoved(userId)}`
     )
     .onConflictDoNothing();
@@ -1058,6 +1058,17 @@ const createAuth = (
       organization({
         roles,
         creatorRole: "admin",
+        // A member's suspension (directory-suspensions.ts): kept on their
+        // membership, never written through Better Auth (`input: false`),
+        // and none of its member routes is on (routes.ts).
+        schema: {
+          member: {
+            additionalFields: {
+              suspendedAt: { type: "date", required: false, input: false },
+              suspendedBy: { type: "string", required: false, input: false },
+            },
+          },
+        },
         allowUserToCreateOrganization: false,
         disableOrganizationDeletion: true,
         // An organization may have no teams at all: an admin deletes
