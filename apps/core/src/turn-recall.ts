@@ -221,6 +221,11 @@ interface Recalling {
   history: readonly Message[];
   /** Everything the chat has read from: the analysis call's provenance. */
   provenance: readonly string[];
+  /**
+   * Whether the chat's agent holds the Brain grant. Without it, the turn
+   * gets only the person's own profile, in their own chat (`ownProfileOf`).
+   */
+  grant: boolean;
 }
 
 /**
@@ -332,6 +337,46 @@ const profileOf = (
       return [];
     },
   };
+};
+
+/** Whether `error` is a deadline's: the work took too long. */
+const isTimeout = (error: unknown): boolean =>
+  error instanceof DOMException && error.name === "TimeoutError";
+
+/**
+ * The person's profile for a turn whose agent holds no Brain grant
+ * (GRA-2202): what they told Grasp about themselves, in their own word,
+ * from their own store, which they alone may read, as the profile with a
+ * granted recall is (`profileOf`). Waited for, within the recall's
+ * deadline, since nothing else is read; a read that fails or runs past it
+ * gives nothing, logged as `profileOf` logs it. Never the search, the
+ * shared store or anything else of the Brain: those need the grant.
+ */
+const ownProfileOf = async ({
+  env,
+  turn,
+}: Recalling): Promise<RecalledMemory[]> => {
+  try {
+    const { memories } = await withinTime(
+      async () => await profileAs(env, turn.scope.personId, turnRecallBudget),
+      turnRecallDeadlineMs
+    );
+    return memories;
+  } catch (error) {
+    log.warn("chat.profile_unavailable", {
+      reason: isTimeout(error) ? "late" : "failed",
+    });
+    return [];
+  }
+};
+
+/** A pack with nothing in it: the search of a turn that has none. */
+const nothingFound: RecalledPack = {
+  items: [],
+  memories: [],
+  contested: [],
+  notFound: [],
+  truncated: false,
 };
 
 /**
@@ -488,10 +533,6 @@ export interface TurnRecall {
   text: string;
 }
 
-/** Whether `error` is a deadline's: the work took too long. */
-const isTimeout = (error: unknown): boolean =>
-  error instanceof DOMException && error.name === "TimeoutError";
-
 /** Whom a turn's recall reads as: its person, or the company alone. */
 type Reads = { personal: true } | { personal: false; company: true };
 
@@ -569,6 +610,64 @@ const lookElsewhere = (
 };
 
 /**
+ * What a turn's recall finds, started before its run opens: with the
+ * Brain grant, the question's search (its analysis and where else to
+ * look alongside), and the person's profile read beside it, taken if it
+ * arrived by the search's end, in the room the search left; without it,
+ * the person's own profile alone, in their own chat, read now, so a
+ * person with nothing about themselves gets no run at all (GRA-2202), and
+ * `undefined` for that and anywhere else.
+ */
+const findsOf = async (
+  recalling: Recalling,
+  reads: Reads,
+  query: string,
+  signal: AbortSignal
+): Promise<
+  | {
+      grant: boolean;
+      elsewhere: ReturnType<typeof lookElsewhere>;
+      found: () => Promise<{
+        searched: { pack: RecalledPack; fromOwn: boolean };
+        profile: RecalledMemory[];
+      }>;
+    }
+  | undefined
+> => {
+  if (!recalling.grant) {
+    const own = reads.personal ? await ownProfileOf(recalling) : [];
+    return own.length === 0
+      ? undefined
+      : {
+          grant: false,
+          elsewhere: undefined,
+          found: async () =>
+            await Promise.resolve({
+              searched: { pack: nothingFound, fromOwn: false },
+              profile: fitted(own, nothingFound),
+            }),
+        };
+  }
+  // None for a chat's first message: nothing before it to resolve.
+  const input = analysisInput(recalling.history, query);
+  const analysed =
+    input.chat.length === 0
+      ? Promise.resolve(null)
+      : analyse(recalling, input, signal);
+  return {
+    grant: true,
+    elsewhere: lookElsewhere(recalling, reads),
+    found: async () => {
+      // The search as without a profile, with the profile read alongside,
+      // from the same moment.
+      const profiling = profileOf(recalling, reads);
+      const searched = await recalled(recalling, reads, query, analysed);
+      return { searched, profile: fitted(profiling.take(), searched.pack) };
+    },
+  };
+};
+
+/**
  * Recalls evidence for `question` before the turn's first model request,
  * with the analysis alongside, as a run of the chat whose reads are
  * pinned with it before anything is handed over. What it found, or what
@@ -585,21 +684,19 @@ export const recallForTurn = async (
     return undefined;
   }
   const { env, turn } = recalling;
+  // Alongside the first pass from the start; let go of once the recall
+  // ends, however it ends, so no request of it outlives the recall.
+  const analysis = new AbortController();
+  const finds = await findsOf(recalling, reads, query, analysis.signal);
+  if (finds === undefined) {
+    analysis.abort();
+    return undefined;
+  }
+  const { elsewhere, grant } = finds;
   // What its audit event says it read as: never who.
   const readAs: { reads: TurnRecallReads } = {
     reads: reads.personal ? "person" : "company",
   };
-  // Alongside the first pass from the start; let go of once the recall
-  // ends, however it ends, so no request of it outlives the recall. None
-  // for a chat's first message: nothing before it to resolve.
-  const analysis = new AbortController();
-  const input = analysisInput(recalling.history, query);
-  const analysed =
-    input.chat.length === 0
-      ? Promise.resolve(null)
-      : analyse(recalling, input, analysis.signal);
-  // Alongside too.
-  const elsewhere = lookElsewhere(recalling, reads);
   const callId = `recall_${crypto.randomUUID().replaceAll("-", "")}`;
   const source = JSON.stringify({ tool: turnRecallTool, input: { query } });
   let runId: string;
@@ -619,12 +716,7 @@ export const recallForTurn = async (
   let result: string | undefined;
   let failure = "The recall failed.";
   try {
-    // The search as without a profile, with the profile read alongside,
-    // from the same moment, taken if it arrived by the search's end; the
-    // profile only in the room the search left.
-    const profiling = profileOf(recalling, reads);
-    const searched = await recalled(recalling, reads, query, analysed);
-    const profile = fitted(profiling.take(), searched.pack);
+    const { searched, profile } = await finds.found();
     const pack = {
       ...searched.pack,
       memories: [...searched.pack.memories, ...profile],
@@ -683,8 +775,10 @@ export const recallForTurn = async (
         if (fromOwn) {
           await markPrivateRead(env, scope, "recall");
         }
+        // The grant only when it rests on it: the profile alone rests on
+        // the person's own word, pinned memory by memory.
         await recordRunReads(env, scope, [
-          brainGrantRead,
+          ...(grant ? [brainGrantRead] : []),
           ...versions,
           ...memories,
         ]);

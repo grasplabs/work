@@ -15,9 +15,16 @@ import {
   responseTimes,
 } from "../../../scripts/seed/documents.ts";
 import { addSource, forgetAs, rememberAs } from "../src/brain-next.ts";
+import { keepAudience } from "../src/chat-audiences.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
-import { chatOf, personalChatsOf, says, setObjectEnv } from "./agent-chat.ts";
+import {
+  chatOf,
+  model,
+  personalChatsOf,
+  says,
+  setObjectEnv,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -98,6 +105,98 @@ const handedSchema = z.object({ evidence: z.array(z.unknown()) });
 /** Everything the provider was sent, as one string. */
 const sentOf = (requests: readonly { body: unknown }[]): string =>
   JSON.stringify(requests.map(({ body }) => body));
+
+describe("the profile without the Brain grant", setUpTime, () => {
+  // GRA-2202: what a person told Grasp about themselves reaches their own
+  // later chats on the chat agent as Grasp ships it, with no Brain grant;
+  // never a chat others read, a retired memory, or another person's.
+  it("is in the model's input in a new chat of theirs, whatever the question's words", async () => {
+    const { personId } = await memberAndAdmin();
+    await aboutThemselves(personId, "Pizza is my favourite food");
+    const chats = await personalChatsOf(personId, says("Pizza."), says("Yes."));
+    const asked = [];
+    for (const question of [
+      "whats ym favourite food",
+      "you know some foods I like, right?",
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one chat after another
+      const { ask } = await chats.newChat();
+      const before = chats.provider.requests.length;
+      // oxlint-disable-next-line no-await-in-loop -- one chat after another
+      await ask(question);
+      asked.push(
+        sentOf(chats.provider.requests.slice(before)).includes(
+          "Pizza is my favourite food"
+        )
+      );
+    }
+
+    expect(asked).toStrictEqual([true, true]);
+  });
+
+  it("is never in a chat others share, nor in another person's own chat", async () => {
+    const [{ personId }, other] = await Promise.all([
+      memberAndAdmin(),
+      signedInWithRole(idp, "user"),
+    ]);
+    const mark = word();
+    await aboutThemselves(personId, `My badge word is ${mark}`);
+    const stub = workspace(env, personalWorkspaceId(personId));
+    const provider = await fakeProvider(says("Shared."));
+    const chat = await stub.createChat(
+      "Shared",
+      personId,
+      crypto.randomUUID(),
+      undefined,
+      "web",
+      `T${unique()}`
+    );
+    await keepAudience(
+      env,
+      { workspaceId: personalWorkspaceId(personId), chatId: chat.id },
+      personId,
+      { members: [personId, other.userId], outsiders: false }
+    );
+    await stub.ask(chat.id, { text: "What is my badge word?", model });
+    const shared = sentOf(provider.requests);
+    const theirs = await personalChatsOf(other.userId, says("No idea."));
+    const theirChat = await theirs.newChat();
+    await theirChat.ask("What is my badge word?");
+
+    expect({
+      shared: shared.includes(mark),
+      other: sentOf(theirs.provider.requests).includes(mark),
+    }).toStrictEqual({ shared: false, other: false });
+  });
+
+  it("leaves out a memory they had Grasp forget, in a new chat and from a later request of the chat that had it", async () => {
+    const { personId } = await memberAndAdmin();
+    const mark = word();
+    const saved = await aboutThemselves(personId, `My desk is ${mark}`);
+    const chats = await personalChatsOf(
+      personId,
+      says("Noted."),
+      says("Again."),
+      says("Fresh.")
+    );
+    const { ask } = await chats.newChat();
+    await ask("Where is my desk?");
+    const first = sentOf(chats.provider.requests);
+    await forgetAs(env, personId, saved.memory);
+    const before = chats.provider.requests.length;
+    await ask("And now?");
+    const later = sentOf(chats.provider.requests.slice(before));
+    const fresh = await chats.newChat();
+    const beforeFresh = chats.provider.requests.length;
+    await fresh.ask("Where is my desk?");
+
+    expect({
+      first: first.includes(mark),
+      later: later.includes(mark),
+      fresh: sentOf(chats.provider.requests.slice(beforeFresh)).includes(mark),
+    }).toStrictEqual({ first: true, later: false, fresh: false });
+  });
+});
 
 describe("the profile a chat starts with", setUpTime, () => {
   // P1, P2: their own word about themselves, with any question; an outside
