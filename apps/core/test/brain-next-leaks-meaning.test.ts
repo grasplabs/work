@@ -1755,7 +1755,9 @@ describe(
           confirm: writes["nobody's"]?.confirm,
           correct: "corrected",
         },
-        keep: { confirm: "done", correct: "corrected" },
+        // Nothing contests it: a saved memory is taken as correct, so
+        // there is nothing to confirm.
+        keep: { confirm: "nothing", correct: "corrected" },
       });
     });
 

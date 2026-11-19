@@ -220,8 +220,9 @@ const hidden = async (): Promise<number> =>
 /**
  * Anna, Bob and a team: Bob's note about her (her name and address), her
  * own note, and from them memories about her, one in her word about a
- * project, Bob's about the project which she confirmed, and Bob's manager
- * being her; and a colleague with her first name but another address.
+ * project, Bob's about the project which she confirmed over an App's
+ * that says otherwise, and Bob's manager being her; and a colleague with
+ * her first name but another address.
  */
 const annaAndBob = async () => {
   const group = unique("g");
@@ -282,7 +283,8 @@ const annaAndBob = async () => {
         "atlas",
         `Atlas has a finance lead ${marker}`,
         bob,
-        on(bobsNote, "leads finance")
+        on(bobsNote, "leads finance"),
+        { attribute: "status", value: "staffed" }
       ),
       said(
         "bob",
@@ -312,6 +314,23 @@ const annaAndBob = async () => {
         kind: "writer",
         writer: "app:hr",
       }),
+    ]
+  );
+  // What an App says otherwise of the project: a disagreement she settles.
+  await remember(
+    group,
+    [{ key: "atlas", kind: "project", id: added.entities.atlas ?? "" }],
+    [
+      said(
+        "atlas",
+        `Atlas is unstaffed ${marker}`,
+        bob,
+        {
+          kind: "writer",
+          writer: "app:pm",
+        },
+        { attribute: "status", value: "unstaffed" }
+      ),
     ]
   );
   const reader: Reader = { person: bob, groups: [group] };
@@ -405,6 +424,7 @@ describe("a person's erasure in the shared store", () => {
           statement: `Atlas has a finance lead ${at.marker}`,
           by: erasedConfirmer,
         },
+        { statement: `Atlas is unstaffed ${at.marker}`, by: null },
       ],
       other: [`${at.name.split(" ")[0]} joins sales ${at.marker}`],
       bobsNote: `${at.name} (${at.local}@acme.test) leads finance ${at.marker}.`,
@@ -692,7 +712,7 @@ describe("a person's erasure in the shared store", () => {
       left: await rowsHolding(at.anna),
     }).toStrictEqual({
       seen: [],
-      by: [erasedConfirmer],
+      by: [erasedConfirmer, null],
       again: "added",
       byAddress: 0,
       left: {},
@@ -818,7 +838,7 @@ describe("a person's erasure in the shared store", () => {
       lost,
       restoring,
     }).toStrictEqual({
-      asked: 7,
+      asked: 8,
       none: [],
       hiddenNow: taken,
       deleted: { left: 0, erased: taken },
@@ -1856,6 +1876,7 @@ describe("a person's erasure in the shared store", () => {
           statement: `Atlas has a finance lead ${at.marker}`,
           by: erasedConfirmer,
         },
+        { statement: `Atlas is unstaffed ${at.marker}`, by: null },
       ],
       left: {},
       newer: "done",

@@ -263,8 +263,29 @@ describe("a person's own export", () => {
           about: "c",
           type: "fact",
           statement: "Acme is mine to remember",
+          attribute: "status",
+          value: "active",
           speaker: { kind: "system" },
           basis: { kind: "writer", writer: person },
+        },
+      ],
+    });
+    // What else they were told, so there is a disagreement to settle.
+    await own(person).addMemories({
+      change: unique(),
+      access: alone(person),
+      reader: readerOf(person),
+      entities: [{ key: "c", kind: "customer", id: entities.c ?? "" }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: "Acme is lost",
+          attribute: "status",
+          value: "lost",
+          speaker: { kind: "system" },
+          // Another lineage: one writer's newer word would end the first.
+          basis: { kind: "writer", writer: unique() },
         },
       ],
     });
@@ -309,16 +330,18 @@ describe("a person's own export", () => {
     }).toStrictEqual({
       state: "done",
       scope: "person",
-      counts: [3, 3],
+      counts: [3, 5],
       sources: [
         [source, "First words, mine alone"],
         [source, "Second words, mine alone"],
         [other, "Other words, mine alone"],
       ],
-      memories: ["Acme is mine to remember"],
+      memories: ["Acme is mine to remember", "Acme is lost"],
       kinds: [
         "change",
+        "change",
         "confirmation",
+        "memory",
         "memory",
         "version",
         "version",
