@@ -52,8 +52,9 @@ import { grantedScopesOf } from "./tokens.ts";
 //   the grant it has (providers.ts `renewedAsGranted`), so it goes on
 //   reading people, leavers and teams. Its group calls answer
 //   `directory.groups_not_granted` (`groupsToken`), send nothing to
-//   Graph, and leave the connection as it is: an admin disconnects and
-//   connects the directory again to grant the scope.
+//   Graph, and leave the connection as it is: an admin connects the
+//   directory again (Settings › Members), which renews it in place with
+//   the scope (oauth.ts `renewsInPlace`).
 //   A refusal with the scope held is Microsoft's own
 //   (`directory.group_refused`), which connecting again doesn't mend.
 // - Personal data: of members, only Entra object IDs leave connect, and a

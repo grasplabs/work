@@ -2372,6 +2372,10 @@ export const connectionErrors = defineErrorFamily({
     "That account isn't in your organization. Connect an account of your organization.",
   "connection.refresh_failed":
     "The provider didn't renew this connection's access. Try again shortly.",
+  "connection.directory_unreadable":
+    "That account can't read your directory, so the directory stays connected as it was. Connect it again with an account that administers your directory.",
+  "connection.directory_unchecked":
+    "Grasp couldn't check that this account can read your directory just now, so the directory stays connected as it was. Try again in a moment.",
   "connection.already_connected":
     "That account is already connected here. Disconnect it first to connect it again.",
   "connection.not_own_account":

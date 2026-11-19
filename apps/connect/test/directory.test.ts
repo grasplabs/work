@@ -187,18 +187,25 @@ const directoryAccount = (
   ...(granted === null ? {} : { granted }),
 });
 
-/** Connects the directory of `provider` for `admin`, granted `granted`. */
+/**
+ * Connects the directory of `provider` for `admin`, granted `granted`.
+ * What connecting sent (the first read a new connection makes before it
+ * replaces an earlier one, oauth.ts) is none of what a test reads after.
+ */
 const connectDirectory = async (
   admin: ConnectionPerson,
   provider: DirectoryProvider = "microsoft-directory",
   granted: string | null = asAsked[provider]
-): Promise<string> =>
-  await connectAccount(
+): Promise<string> => {
+  const connectionId = await connectAccount(
     providers,
     admin,
     directoryAccount(admin, provider, granted),
     { provider, scope: "shared", tenant: tenantOf(provider) }
   );
+  internet.sent.length = 0;
+  return connectionId;
+};
 
 const read = async (connectionId: string, cursor: string | null = null) =>
   await exports.default.readDirectory({ connectionId, cursor });
