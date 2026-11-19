@@ -1,18 +1,22 @@
 /**
  * The AI providers connect reaches in core's tests (test/connect-providers.ts):
- * Anthropic, OpenAI, Mistral, OpenRouter, ElevenLabs and an organization's
+ * Anthropic, OpenAI, Mistral, OpenRouter, KugelAudio and an organization's
  * own OpenAI-compatible endpoint, each at its own host. Each answers the
  * replies a test planned for the key it is sent (`aiProvidersControlUrl`),
  * one per request, and refuses a key it has no plan for, as a provider
  * refuses a key it doesn't know. Every request it got is kept, with all of
  * its headers, so a test can read where a key went and in which header.
  *
- * ElevenLabs's speech and OpenAI's transcription, which Grasp's own
+ * KugelAudio's speech and OpenAI's transcription, which Grasp's own
  * features reach (@grasp-os/shared/platform-ai), answer as the provider
- * does when no reply is planned for the key: a line with
- * `speechBytesPerChar` bytes of audio for each character, each character
- * said in `secondsPerCharacter`, one after another, and a voice Grasp
- * didn't choose refused; a recording with `writtenText`; and a realtime transcription socket with a delta of
+ * does when no reply is planned for the key: a line sent over the speech
+ * socket with `speechBytesPerChar` bytes of audio for each character,
+ * each character said in `secondsPerCharacter`, one after another, in
+ * two parts (its first word, then the rest), each with when its words
+ * are said from where the part starts, and a voice Grasp didn't choose
+ * refused; a planned refusal (`status`) comes as the socket's error
+ * frame, and each line it was sent is kept as a request, its body the
+ * line's message; a recording with `writtenText`; and a realtime transcription socket with a delta of
  * `partialText` for the first audio of each stretch, and `writtenText` for
  * each commit that has audio, or OpenAI's error for one that has none.
  * Every socket's opening, events and close are kept (`realtimeControlUrl`).
@@ -35,11 +39,11 @@ export const partialText = "Hello";
 /** What a stretch settled at a pause (`{ pause: true }`) is written down as. */
 export const pausedText = "Before the pause";
 
-/** Bytes of audio the fake says for each character of a line. */
-export const speechBytesPerChar = 400;
+/** Bytes of audio the fake says for each character of a line: 30 ms of 16-bit PCM at 24 kHz. */
+export const speechBytesPerChar = 1440;
 
 /** How long the fake takes to say each character of a line. */
-export const secondsPerCharacter = 0.025;
+export const secondsPerCharacter = 0.03;
 
 /**
  * Where tests read the realtime sockets (GET: each one's opening, events,
@@ -141,8 +145,7 @@ export const aiProvidersFake = () => {
     "api.anthropic.com",
     "api.openai.com",
     "eu.api.openai.com",
-    "api.elevenlabs.io",
-    "api.eu.residency.elevenlabs.io",
+    "api.eu.kugelaudio.com",
     "api.mistral.ai",
     "openrouter.ai",
     "llm.acme-ai.test",
@@ -179,8 +182,7 @@ export const aiProvidersFake = () => {
       typeof value.release === "string");
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: its source is embedded
   const keyOf = (request: Request): string | null => {
-    const apiKey =
-      request.headers.get("x-api-key") ?? request.headers.get("xi-api-key");
+    const apiKey = request.headers.get("x-api-key");
     if (apiKey !== null) {
       return apiKey;
     }
@@ -320,69 +322,136 @@ export const aiProvidersFake = () => {
     return new Response(null, { status: 101, webSocket: client });
   };
   /**
-   * ElevenLabs's line said with timestamps: the audio in base64, and when
-   * each character of the line is said; a voice Grasp didn't choose is
-   * refused, as ElevenLabs refuses a voice the account doesn't have.
+   * KugelAudio's speech socket: each message is a line to say, answered
+   * with its audio in two parts, when the words of each part are said,
+   * and a last frame; a voice Grasp didn't choose is refused, as
+   * KugelAudio refuses a voice the key can't see, and so is a line a
+   * refusal is planned for.
    */
-  const spokenLine = (url: URL, body: string): Response => {
-    const voices = [
-      "s3TPKV1kjDlVtZbl4Ksh",
-      "r1KmysJdVYZjJCm4mL3b",
-      "EXAVITQu4vr4xnSDxMaL",
-      "cjVigY5qzO86Huf0OWal",
-      "TX3LPaxmHKxFdv7VOQHJ",
-    ];
-    const voice =
-      /^\/v1\/text-to-speech\/(?<voice>[^/]+)\/with-timestamps$/u.exec(
-        url.pathname
-      )?.groups?.voice;
-    if (voice === undefined || !voices.includes(voice)) {
-      return Response.json(
-        {
-          detail: {
-            status: "voice_not_found",
-            message: `A voice with the voice_id ${voice} was not found.`,
-          },
-        },
-        { status: 404 }
-      );
-    }
-    const asked: unknown = JSON.parse(body);
-    const text =
-      isRecord(asked) && typeof asked.text === "string" ? asked.text : "";
-    // The fake's lines are plain text, one code point to a character.
-    // oxlint-disable-next-line typescript/no-misused-spread -- see above
-    const characters = [...text];
-    const seconds = 0.025;
-    return Response.json(
-      {
-        audio_base64: btoa("\0".repeat(characters.length * 400)),
-        alignment: {
-          characters,
-          character_start_times_seconds: characters.map(
-            (_, at) => at * seconds
+  const openSpeech = (request: Request, url: URL, key: string): Response => {
+    const { 0: client, 1: server } = new WebSocketPair();
+    server.accept();
+    const voices = new Set<unknown>([1656, 1071, 2222, 1073, 2220]);
+    const msPerCharacter = 30;
+    const bytesPerCharacter = 1440;
+    const send = (frame: Record<string, unknown>): void => {
+      server.send(JSON.stringify(frame));
+    };
+    const say = async (body: string): Promise<void> => {
+      seen.push({
+        host: url.hostname,
+        method: request.method,
+        path: url.pathname + url.search,
+        headers: Object.fromEntries(request.headers),
+        body,
+        key,
+      });
+      const requestId = `req-speech-${seen.length}`;
+      const reply = plans.get(key)?.shift();
+      if (reply !== undefined && "status" in reply) {
+        send({
+          error: "Refused by the fake provider",
+          error_code: reply.status === 429 ? "RATE_LIMITED" : "INTERNAL_ERROR",
+          code: reply.status,
+          request_id: requestId,
+        });
+        return;
+      }
+      if (reply !== undefined && "release" in reply) {
+        // Waited for on a timer of this socket's own request.
+        while (!released.has(reply.release)) {
+          // oxlint-disable-next-line no-await-in-loop -- until released
+          await scheduler.wait(10);
+        }
+      }
+      const asked: unknown = JSON.parse(body);
+      if (
+        !isRecord(asked) ||
+        typeof asked.text !== "string" ||
+        !voices.has(asked.voice_id)
+      ) {
+        send({
+          error: "Voice not found",
+          error_code: "NOT_FOUND",
+          code: 404,
+          request_id: requestId,
+        });
+        return;
+      }
+      // The fake's lines are plain text, one code point to a character.
+      const { text } = asked;
+      const cut = text.indexOf(" ") + 1;
+      const parts = cut === 0 ? [text] : [text.slice(0, cut), text.slice(cut)];
+      let from = 0;
+      for (const [chunk, part] of parts.entries()) {
+        const words: Record<string, unknown>[] = [];
+        let at = 0;
+        for (const word of part.split(" ")) {
+          if (word !== "") {
+            words.push({
+              word,
+              start_ms: at * msPerCharacter,
+              end_ms: (at + word.length) * msPerCharacter,
+              char_start: at,
+              char_end: at + word.length,
+              original_char_start: from + at,
+              original_char_end: from + at + word.length,
+              score: 1,
+            });
+          }
+          at += word.length + 1;
+        }
+        send({
+          audio: btoa(
+            String.fromCodePoint(0).repeat(part.length * bytesPerCharacter)
           ),
-          character_end_times_seconds: characters.map(
-            (_, at) => (at + 1) * seconds
-          ),
+          enc: "pcm_s16le",
+          idx: chunk,
+          sr: 24_000,
+          samples: (part.length * bytesPerCharacter) / 2,
+          chunk_id: chunk,
+        });
+        send({
+          word_timestamps: words,
+          chunk_id: chunk,
+          text: part,
+          original_text: text,
+        });
+        from += part.length;
+      }
+      send({
+        final: true,
+        chunks: parts.length,
+        usage: {
+          audio_seconds: (text.length * msPerCharacter) / 1000,
+          characters: text.length,
+          model_id: asked.model_id,
         },
-      },
-      { headers: { "request-id": `req-speech-${seen.length}` } }
-    );
+      });
+    };
+    server.addEventListener("message", (event) => {
+      void say(String(event.data));
+    });
+    return new Response(null, { status: 101, webSocket: client });
   };
-  /** How ElevenLabs's speech and OpenAI's audio endpoints answer when nothing is planned. */
+  /** KugelAudio's speech socket, when `request` opens one with a key. */
+  const speechSocket = (
+    request: Request,
+    url: URL,
+    key: string | null
+  ): Response | undefined =>
+    url.hostname === "api.eu.kugelaudio.com" &&
+    url.pathname === "/ws/tts" &&
+    request.headers.get("upgrade") === "websocket" &&
+    key !== null
+      ? openSpeech(request, url, key)
+      : undefined;
+  /** How OpenAI's audio endpoints answer when nothing is planned. */
   const audioAnswer = (
     request: Request,
     url: URL,
     body: string
   ): Response | undefined => {
-    // Grasp's own ElevenLabs answers at its EU residency host, or its US one.
-    if (
-      url.hostname === "api.elevenlabs.io" ||
-      url.hostname === "api.eu.residency.elevenlabs.io"
-    ) {
-      return request.method === "POST" ? spokenLine(url, body) : undefined;
-    }
     // Grasp's own project answers at OpenAI's EU host, or its US one.
     if (
       url.hostname !== "api.openai.com" &&
@@ -693,6 +762,10 @@ export const aiProvidersFake = () => {
         return await control(request, url);
       }
       const key = keyOf(request);
+      const speech = speechSocket(request, url, key);
+      if (speech !== undefined) {
+        return speech;
+      }
       const body = await request.text();
       const seenAs: ProviderRequest = {
         host: url.hostname,
