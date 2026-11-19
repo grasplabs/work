@@ -96,6 +96,12 @@ const permissionSchema = z.object({
   domain: z.string().nullish(),
   allowFileDiscovery: z.boolean().nullish(),
   deleted: z.boolean().nullish(),
+  role: z.string().nullish(),
+  view: z.string().nullish(),
+  inheritedPermissionsDisabled: z.boolean().nullish(),
+  permissionDetails: z
+    .array(z.object({ inherited: z.boolean().nullish() }))
+    .nullish(),
 });
 
 const fileSchema = z.object({
@@ -122,7 +128,7 @@ const baseFields =
 
 /** A permission's fields that say who it lets open a file (`readersOf`). */
 export const permissionFields =
-  "type,emailAddress,domain,allowFileDiscovery,deleted";
+  "type,emailAddress,domain,allowFileDiscovery,deleted,role,view,inheritedPermissionsDisabled,permissionDetails(inherited)";
 
 /** A file's fields as `scope` reads them: nothing it doesn't use. */
 const fileFieldsOf = (scope: Scope): string => `${baseFields},${scope.fields}`;
@@ -248,17 +254,50 @@ const getJson = async <Schema extends z.ZodType>(
   return schema.parse(await response.json());
 };
 
+/** Roles that open a folder with limited access whatever its sharing. */
+const alwaysOpen: ReadonlySet<string> = new Set(["owner", "organizer"]);
+
+/**
+ * Whether `permission` opens the file's content, as Google documents
+ * folders with limited access, in My Drive and shared drives alike
+ * (https://developers.google.com/workspace/drive/api/guides/limited-expansive-access):
+ * not one that belongs to a view ("Permissions that grant metadata-only
+ * access show `inheritedPermissionsDisabled=true` and `view=metadata`");
+ * and, once inherited permissions are off ("only the `owner` role, the
+ * `organizer` role, and users with direct folder permissions can access
+ * it"), only an owner's, an organizer's, or one added directly
+ * (`permissionDetails` with `inherited` false). Google documents no other
+ * way to tell a direct one, so without that it opens nothing here.
+ */
+const opensContent = (
+  permission: z.infer<typeof permissionSchema>
+): boolean => {
+  if ((permission.view ?? "") !== "") {
+    return false;
+  }
+  if (permission.inheritedPermissionsDisabled !== true) {
+    return true;
+  }
+  return (
+    alwaysOpen.has(permission.role ?? "") ||
+    (permission.permissionDetails ?? []).some(
+      ({ inherited }) => inherited === false
+    )
+  );
+};
+
 /**
  * Who `permissions` let open a file: a user or a group by address; a
  * domain as the tenant only when its people can find the file in their
  * own search, else as a link, like "anyone with the link": a link counts
- * for nobody.
+ * for nobody. A permission that doesn't open its content
+ * (`opensContent`) is nobody's.
  */
 export const readersOfPermissions = (
   permissions: readonly z.infer<typeof permissionSchema>[]
 ): SyncReader[] =>
   permissions.flatMap((permission): SyncReader[] => {
-    if (permission.deleted === true) {
+    if (permission.deleted === true || !opensContent(permission)) {
       return [];
     }
     const address = permission.emailAddress?.toLowerCase() ?? "";

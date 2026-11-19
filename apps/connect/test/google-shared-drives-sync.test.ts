@@ -143,6 +143,11 @@ interface Google {
    * folders. None: the list is refused (403).
    */
   permissions: Record<string, Record<string, unknown>[]>;
+  /**
+   * Pages of a file's permissions Google refuses, by file ID: the page
+   * (its token; "" the first) and the status and reason it answers.
+   */
+  refusals: Record<string, { page: string; status: number; reason: string }>;
 }
 
 const google: Google = {
@@ -151,6 +156,7 @@ const google: Google = {
   changes: {},
   contents: {},
   permissions: {},
+  refusals: {},
 };
 
 // The account can share files in Sales, but only read in Legal.
@@ -236,6 +242,7 @@ const reset = (): void => {
     nda: "secret",
     "own-notes": "my own notes",
   };
+  google.refusals = {};
   google.permissions = {
     "price-list": [
       member("user", "Ada@Acme.test", sales.id),
@@ -344,6 +351,22 @@ const permissionsCall = (url: URL, id: string): Response => {
   const file = google.files.find((each) => each.id === id);
   if (file === undefined || (file.driveId !== undefined && !allDrives(url))) {
     return notFound();
+  }
+  const refusal = google.refusals[id];
+  if (
+    refusal !== undefined &&
+    refusal.page === (url.searchParams.get("pageToken") ?? "")
+  ) {
+    return Response.json(
+      {
+        error: {
+          code: refusal.status,
+          message: refusal.reason,
+          errors: [{ reason: refusal.reason }],
+        },
+      },
+      { status: refusal.status }
+    );
   }
   const permissions = google.permissions[id];
   if (permissions === undefined) {
@@ -646,8 +669,11 @@ describe("syncing a shared connection's picked shared drives", () => {
       fileIn(sales.id, "price-list"),
       // Only readable by the account: Google would list it no one else.
       fileIn(sales.id, "board-minutes", { capabilities: { canShare: false } }),
+      // Google said nothing of whether the account can share it.
+      fileIn(sales.id, "untold", { capabilities: undefined }),
     ];
     google.contents["board-minutes"] = "minutes";
+    google.contents.untold = "untold";
     // The drive's 150 members: two pages of Google's.
     google.permissions["price-list"] = Array.from({ length: 150 }, (_, index) =>
       member("user", `person-${index}@acme.test`, sales.id)
@@ -655,6 +681,7 @@ describe("syncing a shared connection's picked shared drives", () => {
     google.permissions["board-minutes"] = [
       member("user", "ada@acme.test", sales.id),
     ];
+    google.permissions.untold = [member("user", "ada@acme.test", sales.id)];
     const before = sentToGoogle().length;
 
     const { items } = await readAll(connectionId, sales.id);
@@ -686,6 +713,7 @@ describe("syncing a shared connection's picked shared drives", () => {
           last: { kind: "account", id: "person-149@acme.test" },
         },
         { id: "board-minutes", count: undefined, last: undefined },
+        { id: "untold", count: undefined, last: undefined },
       ],
       asked: [
         { file: "price-list", page: null, allDrives: true },
@@ -724,6 +752,118 @@ describe("syncing a shared connection's picked shared drives", () => {
       { id: "crowded", readers: null, content: false },
       { id: "refused", readers: null, content: true },
     ]);
+  });
+
+  it("gives a file in a folder with limited access only to those Google lets open its content", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [sales.id]);
+    google.files = [fileIn(sales.id, "contract")];
+    // As Google lists a folder with limited access
+    // (limited-expansive-access): inherited access that shows its
+    // metadata alone, inherited access turned off, and the only ones
+    // that still open it.
+    const inherited = [
+      { permissionType: "member", inherited: true, role: "writer" },
+    ];
+    google.permissions.contract = [
+      // Metadata alone: "`inheritedPermissionsDisabled=true` and
+      // `view=metadata`".
+      {
+        type: "user",
+        emailAddress: "seller@acme.test",
+        role: "reader",
+        view: "metadata",
+        inheritedPermissionsDisabled: true,
+        permissionDetails: inherited,
+      },
+      // A view's alone ("Only populated for permissions that belong to a
+      // view"): published to the company, which a search would find.
+      {
+        type: "domain",
+        domain: "acme.test",
+        allowFileDiscovery: true,
+        role: "reader",
+        view: "published",
+      },
+      // Inherited, with inherited access turned off.
+      {
+        type: "group",
+        emailAddress: "sales@acme.test",
+        role: "writer",
+        inheritedPermissionsDisabled: true,
+        permissionDetails: inherited,
+      },
+      // Added again on the folder itself: "an entry with the `inherited`
+      // field set to `false`".
+      {
+        type: "user",
+        emailAddress: "legal@acme.test",
+        role: "reader",
+        inheritedPermissionsDisabled: true,
+        permissionDetails: [
+          ...inherited,
+          { permissionType: "file", inherited: false, role: "reader" },
+        ],
+      },
+      // "the `organizer` role in shared drives can always access folders
+      // with limited access".
+      {
+        type: "user",
+        emailAddress: "manager@acme.test",
+        role: "organizer",
+        inheritedPermissionsDisabled: true,
+        permissionDetails: [
+          { permissionType: "member", inherited: true, role: "organizer" },
+        ],
+      },
+    ];
+
+    const { items } = await readAll(connectionId, sales.id);
+
+    expect(
+      items.map((item) => (item.gone ? null : item.readers))
+    ).toStrictEqual([
+      [
+        { kind: "account", id: "legal@acme.test" },
+        { kind: "account", id: "manager@acme.test" },
+      ],
+    ]);
+  });
+
+  it("gives nobody a file whose permissions Google refuses part of the way", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [sales.id]);
+    google.files = [fileIn(sales.id, "price-list")];
+    google.permissions["price-list"] = Array.from({ length: 150 }, (_, index) =>
+      member("user", `person-${index}@acme.test`, sales.id)
+    );
+    // The second page's token refused: start again from the first page.
+    google.refusals["price-list"] = {
+      page: "100",
+      status: 400,
+      reason: "invalid",
+    };
+
+    const { items } = await readAll(connectionId, sales.id);
+
+    expect(
+      items.map((item) => (item.gone ? null : item.readers))
+    ).toStrictEqual([null]);
+  });
+
+  it("waits when Google throttles a file's permissions, rather than giving it nobody", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, [sales.id]);
+    google.files = [fileIn(sales.id, "price-list")];
+    google.refusals["price-list"] = {
+      page: "",
+      status: 403,
+      reason: "rateLimitExceeded",
+    };
+
+    await expect(
+      outcomeOf(async () => await read(connectionId, sales.id, null))
+    ).resolves.toBe("sync.throttled");
   });
 
   it("never reads the connected account's own Drive, nor a drive nobody picked", async () => {
