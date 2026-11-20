@@ -6434,10 +6434,6 @@ msgstr "Mitarbeiterzugriff jetzt beenden"
 msgid "Ended"
 msgstr "Beendet"
 
-#: src/workflows/resource-runs.tsx
-msgid "Ended {ended}"
-msgstr "Beendet am {ended}"
-
 #: src/settings/staff-access.tsx
 msgid "Ending access"
 msgstr "Zugriff wird beendet"
@@ -6940,7 +6936,7 @@ msgstr "Weniger als fünf von {reach} haben ihn gefragt"
 msgid "Fewer than five people: not shown on its own."
 msgstr "Weniger als fünf Personen: wird nicht einzeln gezeigt."
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "Fewer than five people: this isn't shown on its own."
 msgstr "Weniger als fünf Personen: Das wird nicht einzeln gezeigt."
 
@@ -10887,11 +10883,11 @@ msgstr "Kein Datensatz dieser Tabelle hat diese ID."
 msgid "No records yet"
 msgstr "Noch keine Einträge"
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "No requests in {month}"
 msgstr "Keine Anfragen im {month}"
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "No requests in the last twelve months"
 msgstr "Keine Anfragen in den letzten zwölf Monaten"
 
@@ -12013,12 +12009,6 @@ msgctxt "a need nobody has taken up yet"
 msgid "Open"
 msgstr "Offen"
 
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgctxt "column: a button that opens a run"
-msgid "Open"
-msgstr "Öffnen"
-
 #: src/brain/brain-markdown.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "on a timeline: not happened yet"
@@ -12027,11 +12017,6 @@ msgstr "Offen"
 
 #: src/link-confirmation.tsx
 msgctxt "open a link to another site"
-msgid "Open"
-msgstr "Öffnen"
-
-#: src/workflows/resource-runs.tsx
-msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Öffnen"
 
@@ -12139,10 +12124,6 @@ msgstr "Verbindung öffnen"
 #: src/workflows/start-run.tsx
 msgid "Open the run"
 msgstr "Lauf öffnen"
-
-#: src/workflows/resource-runs.tsx
-msgid "Open the run started {started}"
-msgstr "Lauf vom {started} öffnen"
 
 #: src/interview/page.tsx
 msgid "Open this link again whenever you like, and carry on where you stopped."
@@ -14232,6 +14213,11 @@ msgstr "Regel"
 msgid "Rules"
 msgstr "Regeln"
 
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "run"
+msgstr "Lauf"
+
 #: src/activity/audit-event.tsx
 msgid "Run"
 msgstr "Ausführung"
@@ -14289,12 +14275,16 @@ msgstr "Codeschritt wird ausgeführt"
 msgid "Running now"
 msgstr "Läuft gerade"
 
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "runs"
+msgstr "Läufe"
+
 #: src/inbox/report-view.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "Runs"
 msgstr "Ausführungen"
 
@@ -15761,7 +15751,6 @@ msgstr "Workflows starten"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 msgid "Started"
 msgstr "Gestartet"
 
@@ -15773,7 +15762,6 @@ msgstr "Einen Chat begonnen"
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "Started by"
 msgstr "Gestartet von"
 
@@ -15836,7 +15824,6 @@ msgstr "Aussagen"
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
 msgid "Status"
 msgstr "Status"
 
@@ -17783,8 +17770,16 @@ msgid "Tools to allow"
 msgstr "Zu erlaubende Werkzeuge"
 
 #: src/workflows/requests/request-table.tsx
+msgid "topic"
+msgstr "Thema"
+
+#: src/workflows/requests/request-table.tsx
 msgid "Topic"
 msgstr "Thema"
+
+#: src/workflows/requests/request-table.tsx
+msgid "topics"
+msgstr "Themen"
 
 #: src/brain/brain-transcript.tsx
 msgid "Topics"
@@ -18297,7 +18292,6 @@ msgstr "Geprüft bis {entries}"
 #: src/inbox/items.ts
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "Version"
@@ -18335,11 +18329,6 @@ msgstr "Version {number}, aktuell"
 #: src/workflows/workflow-triggers.tsx
 msgid "Version {version}"
 msgstr "Version {version}"
-
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgid "Version {version} · {by}"
-msgstr "Version {version} · {by}"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version} declares no binding to approve."

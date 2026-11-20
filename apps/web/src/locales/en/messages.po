@@ -6434,10 +6434,6 @@ msgstr "End staff access now"
 msgid "Ended"
 msgstr "Ended"
 
-#: src/workflows/resource-runs.tsx
-msgid "Ended {ended}"
-msgstr "Ended {ended}"
-
 #: src/settings/staff-access.tsx
 msgid "Ending access"
 msgstr "Ending access"
@@ -6940,7 +6936,7 @@ msgstr "Fewer than five of {reach} asked him"
 msgid "Fewer than five people: not shown on its own."
 msgstr "Fewer than five people: not shown on its own."
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "Fewer than five people: this isn't shown on its own."
 msgstr "Fewer than five people: this isn't shown on its own."
 
@@ -10887,11 +10883,11 @@ msgstr "No record of this table has that ID."
 msgid "No records yet"
 msgstr "No records yet"
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "No requests in {month}"
 msgstr "No requests in {month}"
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "No requests in the last twelve months"
 msgstr "No requests in the last twelve months"
 
@@ -12013,12 +12009,6 @@ msgctxt "a need nobody has taken up yet"
 msgid "Open"
 msgstr "Open"
 
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgctxt "column: a button that opens a run"
-msgid "Open"
-msgstr "Open"
-
 #: src/brain/brain-markdown.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "on a timeline: not happened yet"
@@ -12027,11 +12017,6 @@ msgstr "Open"
 
 #: src/link-confirmation.tsx
 msgctxt "open a link to another site"
-msgid "Open"
-msgstr "Open"
-
-#: src/workflows/resource-runs.tsx
-msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Open"
 
@@ -12139,10 +12124,6 @@ msgstr "Open the connection"
 #: src/workflows/start-run.tsx
 msgid "Open the run"
 msgstr "Open the run"
-
-#: src/workflows/resource-runs.tsx
-msgid "Open the run started {started}"
-msgstr "Open the run started {started}"
 
 #: src/interview/page.tsx
 msgid "Open this link again whenever you like, and carry on where you stopped."
@@ -14232,6 +14213,11 @@ msgstr "Rule"
 msgid "Rules"
 msgstr "Rules"
 
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "run"
+msgstr "run"
+
 #: src/activity/audit-event.tsx
 msgid "Run"
 msgstr "Run"
@@ -14289,12 +14275,16 @@ msgstr "Running a code step"
 msgid "Running now"
 msgstr "Running now"
 
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "runs"
+msgstr "runs"
+
 #: src/inbox/report-view.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "Runs"
 msgstr "Runs"
 
@@ -15761,7 +15751,6 @@ msgstr "Start workflows"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 msgid "Started"
 msgstr "Started"
 
@@ -15773,7 +15762,6 @@ msgstr "Started a chat"
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "Started by"
 msgstr "Started by"
 
@@ -15836,7 +15824,6 @@ msgstr "Statements"
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
 msgid "Status"
 msgstr "Status"
 
@@ -17783,8 +17770,16 @@ msgid "Tools to allow"
 msgstr "Tools to allow"
 
 #: src/workflows/requests/request-table.tsx
+msgid "topic"
+msgstr "topic"
+
+#: src/workflows/requests/request-table.tsx
 msgid "Topic"
 msgstr "Topic"
+
+#: src/workflows/requests/request-table.tsx
+msgid "topics"
+msgstr "topics"
 
 #: src/brain/brain-transcript.tsx
 msgid "Topics"
@@ -18297,7 +18292,6 @@ msgstr "Verified through {entries}"
 #: src/inbox/items.ts
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "Version"
@@ -18335,11 +18329,6 @@ msgstr "Version {number}, current"
 #: src/workflows/workflow-triggers.tsx
 msgid "Version {version}"
 msgstr "Version {version}"
-
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgid "Version {version} · {by}"
-msgstr "Version {version} · {by}"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version} declares no binding to approve."

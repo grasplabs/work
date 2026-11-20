@@ -16,9 +16,8 @@ import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
-import { formatMonth } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
-import { EmptyCard, Page, PageHeading } from "../frame/page.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
@@ -150,7 +149,6 @@ const RequestsView = ({ page }: { page: RequestsPage }) => {
   const place = search.place ?? null;
   const team = search.team ?? null;
   const narrowed = place !== null || team !== null;
-  const month = formatMonth(page.report.from);
   const summary = aside?.summary ?? null;
   const setMinutes = (kind: RequestKind, minutes: number) => {
     void change(async (session) => {
@@ -193,16 +191,6 @@ const RequestsView = ({ page }: { page: RequestsPage }) => {
         page={page}
       />
       {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
-      {page.tooFew ? (
-        <EmptyCard>{t`Fewer than five people: this isn't shown on its own.`}</EmptyCard>
-      ) : null}
-      {!page.tooFew && page.report.total.requests === 0 ? (
-        <EmptyCard>
-          {page.range === "year"
-            ? t`No requests in the last twelve months`
-            : t`No requests in ${month}`}
-        </EmptyCard>
-      ) : null}
       {hasTable(page, aside) ? (
         <RequestTable
           busy={busy}

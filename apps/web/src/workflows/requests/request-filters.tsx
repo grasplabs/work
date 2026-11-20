@@ -32,7 +32,7 @@ interface Option {
 const styles = stylex.create({
   filters: { display: "flex", flexWrap: "wrap", gap: grasp.space2 },
   // A filter as wide as its longest choice, at least as wide as "All places".
-  filter: { minWidth: "10rem" },
+  filter: { width: "auto", minWidth: "10rem" },
   option: { display: "flex", alignItems: "center", gap: grasp.space2 },
 });
 
