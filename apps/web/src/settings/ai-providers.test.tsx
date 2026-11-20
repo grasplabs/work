@@ -343,17 +343,6 @@ const dialogButton = (name: string): HTMLButtonElement => {
   return found;
 };
 
-/** Chooses the provider named `name` in the Add dialog, by its row's label. */
-const chooseProvider = async (name: string): Promise<void> => {
-  const found = [...document.querySelectorAll("label")].find(
-    (each) => wordsOf(each) === name
-  );
-  if (found === undefined) {
-    throw new TypeError(`No provider ${name}`);
-  }
-  await press(found);
-};
-
 /** What a choice shows: a combobox's text, else its words. */
 const shownIn = (control: Element): string =>
   control instanceof HTMLInputElement ? control.value : wordsOf(control);
@@ -537,30 +526,106 @@ describe("Settings › AI providers", () => {
     expect(document.body.innerHTML).not.toContain(pastedKey);
   });
 
-  it("adds a second provider in a dialog once one is connected", async () => {
+  it("adds another provider in the Add a provider sheet: the rest by where they run, its key tested, then connected", async () => {
     const { api, asked } = fakeAiProviders({
       connected: [{ provider: "openai" }],
     });
     await shown(api);
 
     await press(button("Add a provider"));
-    await chooseProvider("Anthropic");
-    await enter(textField("Key"), pastedKey);
-    await press(dialogButton("Add provider"));
+    const sheet = {
+      groups: [
+        ...document.querySelectorAll('[data-slot="add-connection-tiles"] h3'),
+      ].map(wordsOf),
+      tiles: [...document.querySelectorAll<HTMLElement>("[data-provider]")].map(
+        (each) => each.dataset.provider
+      ),
+    };
+    expect(sheet).toStrictEqual({
+      groups: ["European Union", "United States", "Your own endpoint"],
+      tiles: ["mistral", "anthropic", "openrouter", "openai-compatible"],
+    });
+
+    await press(button("Anthropic"));
+    const key = textField("Key");
+    const getKey = [...document.querySelectorAll("a")].find((each) =>
+      wordsOf(each).startsWith("Get a key from Anthropic")
+    );
+    expect({
+      type: key.type,
+      placeholder: key.placeholder,
+      getKey: getKey?.getAttribute("href"),
+    }).toStrictEqual({
+      type: "password",
+      placeholder: "sk-ant-…",
+      getKey: "https://console.anthropic.com/settings/keys",
+    });
+    await enter(key, pastedKey);
+    await press(button("Connect"));
 
     const rows = [
       ...document.querySelectorAll('ul[aria-label="Connected providers"] > li'),
     ].map((row) => row.textContent ?? "");
     expect({
       asked,
+      connected: text().includes("Anthropic is connected"),
       rows: rows.map(
         (row) => row.includes("Anthropic") || row.includes("OpenAI")
       ),
       masked: rows.some((row) => row.includes("•••• a3f2")),
+      kept: document.body.innerHTML.includes(pastedKey),
     }).toStrictEqual({
-      asked: [["add", { provider: "anthropic", key: pastedKey }]],
+      asked: [
+        ["add", { provider: "anthropic", key: pastedKey }],
+        ["test", "anthropic", undefined],
+      ],
+      connected: true,
       rows: [true, true],
       masked: true,
+      kept: false,
+    });
+  });
+
+  it("keeps no key its provider refuses in the Add a provider sheet: says why under the key, and removes it again", async () => {
+    const { api, asked } = fakeAiProviders({
+      connected: [{ provider: "openai" }],
+      tested: {
+        ok: false,
+        model: "anthropic/claude-haiku-4-5",
+        code: "model.provider_key_failed",
+      },
+    });
+    await shown(api);
+
+    await press(button("Add a provider"));
+    await press(button("Anthropic"));
+    await enter(textField("Key"), pastedKey);
+    await press(button("Connect"));
+
+    const key = textField("Key");
+    const described = (key.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.querySelector(`[id="${id}"]`))
+      .map((each) => (each === null ? "" : wordsOf(each)));
+    const rows = [
+      ...document.querySelectorAll('ul[aria-label="Connected providers"] > li'),
+    ].map((row) => row.textContent ?? "");
+    expect({
+      asked,
+      invalid: key.getAttribute("aria-invalid"),
+      why: described.includes("It refused the key."),
+      cleared: key.value,
+      rows: rows.map((row) => row.includes("Anthropic")),
+    }).toStrictEqual({
+      asked: [
+        ["add", { provider: "anthropic", key: pastedKey }],
+        ["test", "anthropic", undefined],
+        ["remove", "anthropic"],
+      ],
+      invalid: "true",
+      why: true,
+      cleared: "",
+      rows: [false],
     });
   });
 
