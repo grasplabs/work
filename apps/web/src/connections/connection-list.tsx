@@ -1,5 +1,6 @@
 import {
   composioConsentText,
+  composioKeyConsentText,
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
 import type { ListedConnection } from "@grasp-os/shared/connect";
@@ -169,7 +170,14 @@ const Holders = ({
  * log keeps the SHA-256 of the exact text they were shown
  * (`connection.consent`).
  */
-const ConsentRecord = ({ connection }: { connection: ListedConnection }) => {
+const ConsentRecord = ({
+  connection,
+  keyed,
+}: {
+  connection: ListedConnection;
+  /** Whether it was connected with a key the admin typed in. */
+  keyed: boolean;
+}) => {
   const { t } = useLingui();
   const who = connection.connectedByName ?? t`An admin`;
   return (
@@ -181,7 +189,7 @@ const ConsentRecord = ({ connection }: { connection: ListedConnection }) => {
         <Trans>{who} consented to this before connecting it:</Trans>
       </p>
       <blockquote className="text-muted-foreground border-l-2 pl-3">
-        {composioConsentText}
+        {keyed ? composioKeyConsentText : composioConsentText}
       </blockquote>
       <p className="text-muted-foreground">
         <Trans>
@@ -454,7 +462,10 @@ const ConnectionItem = ({
         </p>
       ) : null}
       {connection.source === "composio" ? (
-        <ConsentRecord connection={connection} />
+        <ConsentRecord
+          connection={connection}
+          keyed={integration.auth === "key"}
+        />
       ) : null}
       {choosesBrainAudience(connection, identity) ? (
         <BrainAudience

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { composioKeyConsentText } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -84,11 +85,15 @@ const settled = async (): Promise<void> => {
   }
 };
 
-/** The dialog open on Microsoft 365, with core's `start` as given. */
+/**
+ * The dialog open on Microsoft 365, with core's `start` as given, and any
+ * other of core's connections methods as `more` has them.
+ */
 const opened = async (
   identity: Identity,
   start: () => Promise<{ url: string }>,
-  integration = microsoft
+  integration = microsoft,
+  more: Record<string, unknown> = {}
 ): Promise<void> => {
   if (integration === undefined) {
     throw new Error("No integration");
@@ -106,6 +111,7 @@ const opened = async (
           readOnly: true,
         },
       ]),
+    ...more,
   };
   const core = {
     withSession: async <T,>(
@@ -170,6 +176,35 @@ const allow = (): HTMLElement | null | undefined =>
         each.querySelector("li") === null
     )
     ?.querySelector<HTMLElement>("label");
+
+/** Types `value` into `input`, as someone typing does. */
+const type = async (
+  input: HTMLInputElement | null | undefined,
+  value: string
+): Promise<void> => {
+  if (input === null || input === undefined) {
+    throw new TypeError("Nothing to type into");
+  }
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value"
+    )?.set?.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+/** The input labelled `label`. */
+const field = (label: string): HTMLInputElement | null | undefined => {
+  const id = [...document.querySelectorAll("label")]
+    .find((each) => each.textContent === label)
+    ?.getAttribute("for");
+  return id === null || id === undefined
+    ? undefined
+    : document.querySelector<HTMLInputElement>(`[id="${id}"]`);
+};
 
 /** Where the step titled `title` stands. */
 const stepState = (title: string): string | undefined =>
@@ -304,6 +339,81 @@ describe("the connect dialog's steps", () => {
     expect({ disabled: button("Try again")?.disabled, starts }).toStrictEqual({
       disabled: true,
       starts: 1,
+    });
+  });
+
+  it("connects a toolkit that takes a key from its own form, a field Composio marks secret never shown as typed", async () => {
+    const assign = vi
+      .spyOn(window.location, "assign")
+      .mockImplementation(() => {
+        // The browser stays here for the test to read.
+      });
+    const [pipedesk] = integrationsOf(
+      [{ ...entry("composio", "pipedesk", "Pipedesk"), auth: "key" }],
+      []
+    );
+    const sent: unknown[] = [];
+    await opened(
+      someone("admin"),
+      async () => await waitingForever(),
+      pipedesk,
+      {
+        keyFields: async () =>
+          await Promise.resolve([
+            {
+              name: "generic_api_key",
+              label: "API key",
+              description: "Your Pipedesk API key",
+              required: true,
+              secret: true,
+            },
+            {
+              name: "subdomain",
+              label: "Subdomain",
+              description: null,
+              required: true,
+              secret: false,
+            },
+            {
+              name: "region",
+              label: "Region",
+              description: null,
+              required: false,
+              secret: false,
+            },
+          ]),
+        connectToolkitWithKey: async (request: unknown) => {
+          sent.push(request);
+          return await Promise.resolve({
+            url: "/integrations/composio:pipedesk?connection=c1",
+          });
+        },
+      }
+    );
+    await press(allow());
+    await type(field("API key"), "pd_secret");
+    const waitsForAll = button("Consent and connect")?.disabled;
+    await type(field("Subdomain"), "acme");
+    await press(button("Consent and connect"));
+
+    expect({
+      types: [field("API key")?.type, field("Subdomain")?.type],
+      waitsForAll,
+      sent,
+      sentTo: assign.mock.calls,
+    }).toStrictEqual({
+      types: ["password", "text"],
+      waitsForAll: true,
+      sent: [
+        {
+          toolkit: "pipedesk",
+          tools: [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
+          consent: composioKeyConsentText,
+          values: { generic_api_key: "pd_secret", subdomain: "acme" },
+          returnTo: "/integrations/composio:pipedesk",
+        },
+      ],
+      sentTo: [["/integrations/composio:pipedesk?connection=c1"]],
     });
   });
 

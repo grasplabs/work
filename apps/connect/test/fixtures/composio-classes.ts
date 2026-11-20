@@ -16,6 +16,11 @@ import type { ComposioClasses } from "../../src/composio-classes.ts";
 
 export const composioClasses: Record<string, Record<string, ToolClass>> = {
   ...shipped,
+  // The fake's toolkit that takes a key.
+  pipedesk: {
+    PIPEDESK_LIST_DEALS: "read-company",
+    PIPEDESK_ADD_NOTE: "change-company",
+  },
   hubspot: {
     HUBSPOT_LIST_CONTACTS: "read-company",
     HUBSPOT_GET_CONTACT: "read-company",

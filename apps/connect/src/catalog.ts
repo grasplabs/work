@@ -4,6 +4,7 @@ import {
   catalogToolsRequestSchema,
   composioToolkitSchema,
   connectErrors,
+  connectionErrors,
   firstSentence,
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
@@ -13,6 +14,7 @@ import type {
   CatalogEntry,
   CatalogTool,
   OAuthProvider,
+  ToolkitKeyField,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -222,6 +224,8 @@ const pageSchema = z.object({
 const toolkitSchema = z.object({
   slug: composioToolkitSchema,
   name: z.string().min(1).max(256),
+  /** Every auth scheme it takes ({@link keySchemes} among them, say). */
+  auth_schemes: z.array(z.string()).default([]),
   /** The auth schemes Composio holds an app for: connectable without one of ours. */
   composio_managed_auth_schemes: z.array(z.string()).default([]),
   /** Whether it takes no account at all: then there is nothing to connect. */
@@ -347,14 +351,32 @@ const isListed = ({
   noAuth !== true && meta.tools_count > 0;
 
 /**
- * Whose app connecting a toolkit takes: Composio's, where it holds one
- * (managed auth), so an admin needs nothing but their consent; the
- * organization's own otherwise.
+ * The schemes in which a toolkit takes a key, a token or a username and
+ * password that an admin types in, and no app at all: the ones Composio
+ * supports besides OAuth, in the order connect prefers them.
+ */
+export const keySchemes = ["API_KEY", "BEARER_TOKEN", "BASIC"] as const;
+
+export type KeyScheme = (typeof keySchemes)[number];
+
+const isKeyScheme = (scheme: string): scheme is KeyScheme =>
+  keySchemes.some((each) => each === scheme);
+
+/**
+ * What connecting a toolkit takes: signing in with Composio's app, where
+ * it holds one (managed auth), so an admin needs nothing but their
+ * consent; else a key the admin types in, where it takes one; else an
+ * OAuth app of the organization's own, which Grasp can't take.
  */
 const authOf = ({
   composio_managed_auth_schemes: managed,
-}: z.infer<typeof toolkitSchema>): CatalogAuth =>
-  managed.length > 0 ? "managed" : "own";
+  auth_schemes: schemes,
+}: z.infer<typeof toolkitSchema>): CatalogAuth => {
+  if (managed.length > 0) {
+    return "managed";
+  }
+  return schemes.some(isKeyScheme) ? "key" : "own";
+};
 
 /** Composio's toolkits in the catalog (`isListed`). */
 const composioEntries = async (key: string): Promise<ListedToolkit[]> => {
@@ -538,4 +560,102 @@ export const catalogTools = async (
     throw connectErrors.create("connect.catalog_entry_not_found");
   }
   return await composioTools(key, toolkit.data);
+};
+
+/**
+ * One field of a toolkit's auth, as Composio describes it
+ * (`GET /toolkits/{slug}`). One people never see (`user_visible`) takes
+ * Composio's default, so it isn't asked for.
+ */
+const keyFieldSchema = z.object({
+  name: z.string().regex(/^[A-Za-z_][\w.-]{0,127}$/u),
+  displayName: z.string().min(1).max(256),
+  description: z.string().max(4096).nullish(),
+  is_secret: z.boolean().nullish(),
+  user_visible: z.boolean().default(true),
+});
+
+const fieldListSchema = z.object({
+  required: z.array(z.unknown()).default([]),
+  optional: z.array(z.unknown()).default([]),
+});
+
+/** A toolkit, as Composio describes its auth, of which one scheme is read. */
+const toolkitAuthSchema = z.object({
+  auth_config_details: z
+    .array(
+      z.object({
+        mode: z.string(),
+        fields: z.object({ connected_account_initiation: fieldListSchema }),
+      })
+    )
+    .default([]),
+});
+
+/** What an admin types to connect a toolkit, in the scheme connect takes. */
+export interface KeyAuth {
+  scheme: KeyScheme;
+  fields: ToolkitKeyField[];
+}
+
+/**
+ * The fields of `list`, those connect can read and people see, each
+ * `required` as its list says, and secret unless Composio says it isn't.
+ */
+const fieldsOf = (list: readonly unknown[], required: boolean) =>
+  list.flatMap((item) => {
+    const parsed = keyFieldSchema.safeParse(item);
+    if (!parsed.success || !parsed.data.user_visible) {
+      return [];
+    }
+    const { name, displayName, description, is_secret: secret } = parsed.data;
+    return [
+      {
+        name,
+        label: displayName,
+        description: description ?? null,
+        required,
+        secret: secret !== false,
+      },
+    ];
+  });
+
+/**
+ * What an admin types to connect `toolkit` with a key, as Composio
+ * describes it now: the first of {@link keySchemes} it takes, and the
+ * fields its connected account takes in that scheme. Read fresh each
+ * time, never cached: what connect accepts is what Composio asks for at
+ * that moment. `connection.invalid` for one that signs in with Composio's
+ * app; `connection.own_auth_required` for one that takes an app of its
+ * own, or whose description has no such scheme;
+ * `connect.catalog_unavailable` when Composio doesn't answer.
+ */
+export const keyAuthOf = async (
+  key: string,
+  toolkit: string
+): Promise<KeyAuth> => {
+  const { auth } = await composioEntry(key, toolkit);
+  if (auth !== "key") {
+    throw connectionErrors.create(
+      auth === "own" ? "connection.own_auth_required" : "connection.invalid"
+    );
+  }
+  const { auth_config_details: details } = await fromComposio(
+    async () =>
+      await composioRequest(key, {
+        path: `/toolkits/${encodeURIComponent(toolkit)}`,
+        schema: toolkitAuthSchema,
+      })
+  );
+  for (const scheme of keySchemes) {
+    const detail = details.find(({ mode }) => mode === scheme);
+    if (detail !== undefined) {
+      const { required, optional } = detail.fields.connected_account_initiation;
+      return {
+        scheme,
+        fields: [...fieldsOf(required, true), ...fieldsOf(optional, false)],
+      };
+    }
+  }
+  throw connectionErrors.create("connection.own_auth_required");
 };
