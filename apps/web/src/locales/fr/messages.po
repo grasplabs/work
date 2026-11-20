@@ -3311,7 +3311,6 @@ msgstr "L'approuver remplace le skill {name} de l'équipe {team} pour ses membre
 #: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
-#: src/connections/integrations-skeleton.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
@@ -3753,6 +3752,10 @@ msgstr "Aurore"
 msgctxt "what the Brain remembers about something"
 msgid "Availability"
 msgstr "Disponibilité"
+
+#: src/frame/part-words.tsx
+msgid "Available in your organization"
+msgstr "Disponible dans votre organisation"
 
 #: src/brain/brain.ts
 msgid "Available, direct"
@@ -5149,7 +5152,6 @@ msgstr "Connectez les apps avec lesquelles vous travaillez"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
-#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Connected"
@@ -5635,10 +5637,6 @@ msgstr "Impossible de retirer"
 #: src/connections/http-connections.tsx
 msgid "Couldn't revoke"
 msgstr "Révocation impossible"
-
-#: src/connections/offer-switch.tsx
-msgid "Couldn't save"
-msgstr "Enregistrement impossible"
 
 #: src/drafts/sharing.tsx
 msgid "Couldn't share"
@@ -8507,6 +8505,10 @@ msgid "Hidden for every admin until their evidence changes, or until one of you 
 msgstr "Masquées pour tous les admins jusqu'à ce que leurs éléments changent, ou qu'un de vous les affiche à nouveau."
 
 #: src/frame/part-words.tsx
+msgid "Hidden from members, and no one can connect it."
+msgstr "Masqué pour les membres, et personne ne peut le connecter."
+
+#: src/frame/part-words.tsx
 msgid "Hide column"
 msgstr "Masquer la colonne"
 
@@ -10336,6 +10338,10 @@ msgstr "Chargement des {many}"
 msgid "Loading chats"
 msgstr "Chargement des discussions"
 
+#: src/connections/integrations-skeleton.tsx
+msgid "Loading integrations"
+msgstr "Chargement des intégrations"
+
 #: src/frame/part-words.tsx
 msgid "Loading more {many}"
 msgstr "Chargement d’autres {many}"
@@ -10344,6 +10350,7 @@ msgstr "Chargement d’autres {many}"
 msgid "Loading older messages"
 msgstr "Chargement des messages plus anciens"
 
+#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 msgid "Loading the app"
 msgstr "Chargement de l’app"
@@ -10669,6 +10676,10 @@ msgstr "Membres et rôles"
 #: src/apps/draft-changes.tsx
 msgid "members of the team in {field}"
 msgstr "les membres de l’équipe dans {field}"
+
+#: src/frame/part-words.tsx
+msgid "Members see it in Integrations."
+msgstr "Les membres le voient dans Intégrations."
 
 #: src/brain/brain-section.tsx
 #: src/brain/memories-page.tsx
@@ -12418,10 +12429,6 @@ msgstr "Désactivé, il ne répond à personne ici. Un lieu ne fait que restrein
 msgid "Off, he only answers here: he holds no change for people to confirm."
 msgstr "Désactivé, il ne fait que répondre ici : il ne prépare aucune modification à confirmer."
 
-#: src/connections/offer-switch.tsx
-msgid "Off, nobody can connect it, admins included. Connections already made go on."
-msgstr "Désactivé, personne ne peut le connecter, administrateurs compris. Les connexions existantes continuent."
-
 #: src/agents/agent-share.tsx
 msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
 msgstr "Proposez {name} aux administrateurs de votre entreprise. S'ils le reprennent, il devient un agent de l'entreprise : ils choisissent qui peut l'interroger et ce qu'il peut faire, et vous ne le modifiez plus."
@@ -12430,10 +12437,6 @@ msgstr "Proposez {name} aux administrateurs de votre entreprise. S'ils le repren
 msgid "Offer to the company"
 msgstr "Proposer à l'entreprise"
 
-#: src/connections/offer-switch.tsx
-msgid "Offered"
-msgstr "Proposée"
-
 #: src/agents/agent-share.tsx
 msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
 msgstr "Proposé le {since}. Les administrateurs de votre entreprise peuvent reprendre {name}. Ce que vous lui avez dit ne part pas avec lui, et une fois qu'ils l'ont repris, vous ne pouvez plus l'ouvrir."
@@ -12441,10 +12444,6 @@ msgstr "Proposé le {since}. Les administrateurs de votre entreprise peuvent rep
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
 msgstr "Proposés à l'entreprise"
-
-#: src/connections/offer-switch.tsx
-msgid "Offered to your organization"
-msgstr "Proposé à votre organisation"
 
 #: src/activity/audit-log.tsx
 msgid "Older"
@@ -19826,10 +19825,6 @@ msgstr "Ce que cinq personnes ou plus de l'équipe ont été vues faire :"
 #: src/brain/work-knowledge.tsx
 msgid "What gets in the way"
 msgstr "Ce qui gêne"
-
-#: src/frame/part-words.tsx
-msgid "What Grasp can do"
-msgstr "Ce que Grasp sait faire"
 
 #: src/brain/opportunities-page.tsx
 msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."

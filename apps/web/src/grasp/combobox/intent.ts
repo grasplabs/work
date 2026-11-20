@@ -17,7 +17,10 @@ export const intent = {
   ],
   variants: [
     { name: 'size="md"', when: "The default." },
-    { name: 'size="sm"', when: "In a dense table." },
+    {
+      name: 'size="sm"',
+      when: "In a dense table, a setting row or beside a section's heading.",
+    },
     { name: 'size="lg"', when: "The one choice that matters on a phone." },
   ],
 };

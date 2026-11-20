@@ -1,26 +1,33 @@
-// An app's own page, the library's Settings pattern, all of it in view at once:
+// An app's own page, the library's Settings pattern in one centred column (40rem), all of it in view:
 //
-//   head    PageHeader's band in the app's own colour: its mark, its name, its description (two
-//           sentences at most), and Manage (or Connect) at its end
-//   main    "What Grasp may do": one card, each group of tools a setting row (its name, how many
-//           read and change) with a quiet Select at its edge (Never, Read, Write, Mixed, each
-//           meaning said in its option); a group opens in place to its tools, each with its own
-//           Select. Search in the card's head. A member sees the words, not the Selects.
-//   side    Connection (its facts, then Sign in again and Disconnect), Who can use it (one row),
-//           Used by
-//
-// From 64rem of page the two stand side by side; narrower, the side comes first, then the main card.
+//   head    a card of its own with the dither in the app's colour inside it: the app's mark, its name,
+//           its description (cut at two lines, Show more) and the one action at the end: Connect, or,
+//           once connected, its state ("Connected") as the menu that manages it
+//   facts   one card: signed in as, connected by, who can use it, and whether people in the
+//           organization may connect it (a switch, where the host gives it); left out while empty
+//   used by the workflows and agents that use it, only when something does
+//   tools   "What Grasp may do": one card, each group of tools a setting row with a quiet Select at
+//           its edge; a group opens in place to its tools, one line each. Search in the card's head.
+//           A member sees the words, not the Selects.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Button } from "../../button";
 import { focus } from "../../focus/focus";
-import { Agent, ChevronRight, Icon, Search, Workflow } from "../../icons";
+import {
+  Agent,
+  ChevronRight,
+  Edit,
+  Icon,
+  Search,
+  Show,
+  Workflow,
+} from "../../icons";
+import { iconVars } from "../../icons/icon.stylex";
 import { InputGroup, InputGroupInput, InputGroupText } from "../../input-group";
-import { KeyValueList } from "../../key-value";
-import { PageHeader } from "../../page-header";
 import { RowList, RowListItem } from "../../row-list";
 import { SectionCard } from "../../section-card";
 import {
@@ -31,7 +38,8 @@ import {
 } from "../../select";
 import { SettingRow, SettingsRows } from "../../setting-row";
 import { RowFrame } from "../../setting-row/frame";
-import { grasp } from "../../tokens/tokens.stylex";
+import { Texture } from "../../texture/texture";
+import { grasp, media } from "../../tokens/tokens.stylex";
 import { useWords } from "../../words/words";
 import type { App, AppConnection, AppTool, AppToolChoice } from "./model";
 import {
@@ -39,11 +47,12 @@ import {
   asksConnect,
   canConnect,
   ChoiceWord,
+  Clamped,
   ConnectAction,
   groupChoice,
   GroupSelect,
   ManageMenu,
-  StateWord,
+  OfferSwitch,
   ToolSelect,
   underChoice,
   useAppTint,
@@ -54,40 +63,83 @@ import type { ToolGroup } from "./tools";
 import { appIntegrationWords } from "./words";
 import type { AppIntegrationWords } from "./words";
 
-const WIDE = "@container app-page (width >= 64rem)";
+/** The column's measure: the Settings pattern's centred width. */
+const COLUMN = "40rem";
 
 const styles = stylex.create({
-  page: { display: "grid", gap: grasp.space6, minWidth: 0 },
-  description: { whiteSpace: "pre-line" },
-  body: {
-    containerType: "inline-size",
-    containerName: "app-page",
+  // The column stands centred in the page.
+  page: { position: "relative", isolation: "isolate", minWidth: 0 },
+  column: {
+    display: "grid",
+    gap: grasp.space8,
+    width: "100%",
+    maxWidth: COLUMN,
+    marginInline: "auto",
     minWidth: 0,
   },
-  grid: {
+  // The head: a card of its own, the dither inside it, the mark beside the name and the action at
+  // the line's end.
+  headCard: {
+    position: "relative",
+    isolation: "isolate",
+    overflow: "clip",
     display: "grid",
     gridTemplateColumns: {
-      default: "minmax(0, 1fr)",
-      [WIDE]: "minmax(0, 1fr) minmax(0, 22rem)",
+      default: "auto minmax(0, 1fr) auto",
+      [media.belowPhone]: "auto minmax(0, 1fr)",
     },
-    gap: grasp.space6,
+    columnGap: grasp.space4,
+    rowGap: grasp.space4,
     alignItems: "start",
+    padding: grasp.space6,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    boxShadow: `inset 0 0 0 ${grasp.hairline} ${grasp.line}`,
+    backgroundColor: grasp.raised,
   },
-  // Narrow, the connection comes first.
-  main: { order: { default: 2, [WIDE]: 1 }, minWidth: 0 },
-  side: {
-    order: { default: 1, [WIDE]: 2 },
-    display: "grid",
-    gap: grasp.space6,
-    minWidth: 0,
+  headCardTexture: { zIndex: -1 },
+  // On a phone the action goes under the words, at their start.
+  headCardAction: {
+    gridColumn: { default: "auto", [media.belowPhone]: "2" },
+    justifySelf: "start",
   },
-  search: { width: "14rem", maxWidth: "100%" },
+  // Whether it is offered (an admin): a compact switch and its one line, under the words, at their start.
+  headCardOffer: { gridColumn: "2 / -1", justifySelf: "start", minWidth: 0 },
+  headWords: { display: "grid", gap: grasp.space1, minWidth: 0 },
+  // The description: the library's small muted text.
+  description: {
+    margin: 0,
+    maxWidth: "100%",
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.muted,
+  },
+  nameSm: {
+    margin: 0,
+    fontFamily: grasp.fontSerif,
+    fontSize: grasp.titleSm,
+    lineHeight: grasp.titleSmLine,
+    fontWeight: grasp.weightRegular,
+    color: grasp.ink,
+  },
+  // The search beside the card's title, narrower on a phone so the title keeps its line.
+  search: {
+    display: "block",
+    width: { default: "14rem", "@container (width < 28rem)": "100cqi" },
+  },
   // A control at the row's edge.
   edge: {
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
-    gap: grasp.space1,
+    gap: grasp.space2,
+  },
+  // A text select at a row's end: past its own end padding and the chevron's side bearing, so its
+  // chevron's ink ends on the card's inset with the values in the rows around it.
+  pull: {
+    display: "inline-flex",
+    marginInlineEnd: `calc(-1 * (${grasp.space1} + ${grasp.iconSm} * 5 / 24))`,
   },
   // A row of one line: its words at the start, its control at the end, at any width.
   line: {
@@ -96,6 +148,14 @@ const styles = stylex.create({
     alignItems: "center",
     columnGap: grasp.space4,
   },
+  // A group and what it opened, a line between it and the group before.
+  group: {
+    borderBlockStartWidth: { default: grasp.hairline, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: grasp.line,
+  },
+  // An open group's row: the ground of what it opened, so the two read as one.
+  lineOpen: { backgroundColor: grasp.soft },
   // A group's name side: the disclosure's chevron before its name and counts, the whole of it the toggle.
   toggle: {
     display: "flex",
@@ -126,7 +186,7 @@ const styles = stylex.create({
     transform: { default: "rotate(90deg)", ":dir(rtl)": "rotate(-90deg)" },
   },
   words: { display: "grid", minWidth: 0 },
-  name: {
+  label: {
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,
@@ -138,8 +198,51 @@ const styles = stylex.create({
     color: grasp.muted,
   },
   kind: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
-  // A group's tools, opened under it, a step in.
-  tools: { paddingInlineStart: grasp.space6 },
+  // An open group's tools: one line each on the open group's ground, their names on the group's
+  // name's line, a hairline between them, the last closing the group.
+  tools: {
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+    backgroundColor: grasp.soft,
+    borderBlockStart: `${grasp.hairline} solid ${grasp.line}`,
+  },
+  tool: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    columnGap: grasp.space4,
+    minHeight: grasp.space10,
+    paddingBlock: grasp.space1,
+    paddingInlineStart: `calc(${grasp.tableCellInline} + ${grasp.iconSm} + ${grasp.space2})`,
+    paddingInlineEnd: grasp.tableCellInline,
+    borderBlockStart: {
+      default: `${grasp.hairline} solid ${grasp.line}`,
+      ":first-child": "none",
+    },
+  },
+  toolName: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.ink,
+  },
+  toolText: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    minWidth: 0,
+  },
+  toolKind: {
+    display: "inline-flex",
+    flexShrink: 0,
+    color: grasp.muted,
+    [iconVars.size]: grasp.iconSm,
+    [iconVars.stroke]: grasp.iconStroke,
+  },
   quiet: {
     margin: 0,
     paddingBlock: grasp.space3,
@@ -163,6 +266,10 @@ export interface AppPageProps extends AppActions {
   ) => void;
   /** A change of who may use it: the host keeps it. Without it, who may use it is shown as words. */
   onForWhomChange?: (forWhom: AppConnection["forWhom"]) => void;
+  /** Whether the app is offered in the organization. With `onOfferedChange`, a compact switch under the head's action (an admin). */
+  offered?: boolean;
+  /** A change of whether it is offered: the host keeps it. */
+  onOfferedChange?: (offered: boolean) => void;
   /** This instance's own words, over the catalogue's, key by key. */
   words?: Partial<AppIntegrationWords>;
 }
@@ -171,27 +278,41 @@ export interface AppPageProps extends AppActions {
 const ToolLine = ({
   tool,
   editable,
+  connected,
   words,
   onChange,
 }: {
   tool: AppTool;
   editable: boolean;
+  connected: boolean;
   words: AppIntegrationWords;
   onChange: (choice: AppToolChoice) => void;
-}) => (
-  <SettingRow
-    label={tool.name}
-    help={tool.kind === "read" ? words.readsWord : words.changesWord}
-  >
-    <span {...stylex.props(styles.edge)}>
-      {editable ? (
-        <ToolSelect tool={tool} words={words} onChange={onChange} />
-      ) : (
-        <ChoiceWord choice={tool.choice} words={words} />
-      )}
-    </span>
-  </SettingRow>
-);
+}) => {
+  const kind = tool.kind === "read" ? words.readsWord : words.changesWord;
+  let control: ReactNode = null;
+  if (connected) {
+    control = editable ? (
+      <ToolSelect tool={tool} words={words} onChange={onChange} />
+    ) : (
+      <ChoiceWord choice={tool.choice} words={words} />
+    );
+  }
+  return (
+    <li data-slot="app-tool" {...stylex.props(styles.tool)}>
+      <span {...stylex.props(styles.toolName)} title={tool.description}>
+        <span {...stylex.props(styles.toolKind)}>
+          <Icon icon={tool.kind === "read" ? Show : Edit} label={kind} />
+        </span>
+        <span {...stylex.props(styles.toolText)}>{tool.name}</span>
+      </span>
+      <span
+        {...stylex.props(styles.edge, editable && connected && styles.pull)}
+      >
+        {control}
+      </span>
+    </li>
+  );
+};
 
 /** One group: a setting row with its Select and its disclosure, and its tools under it when open. */
 const GroupLine = ({
@@ -231,8 +352,16 @@ const GroupLine = ({
   const choice = connected ? control : null;
   const toolsId = useId();
   return (
-    <>
-      <RowFrame slot="setting-row" inner={styles.line}>
+    <div
+      data-slot="app-group"
+      data-open={open ? "" : undefined}
+      {...stylex.props(styles.group)}
+    >
+      <RowFrame
+        slot="setting-row"
+        inner={[styles.line]}
+        data-state={open ? "open" : undefined}
+      >
         <button
           type="button"
           aria-expanded={open}
@@ -249,44 +378,35 @@ const GroupLine = ({
             <Icon icon={ChevronRight} />
           </span>
           <span {...stylex.props(styles.words)}>
-            <span {...stylex.props(styles.name)}>{name}</span>
+            <span {...stylex.props(styles.label)}>{name}</span>
             <span {...stylex.props(styles.help)}>
               {words.counts(group.reads, group.writes)}
             </span>
           </span>
         </button>
-        <span {...stylex.props(styles.edge)}>{choice}</span>
+        <span
+          {...stylex.props(styles.edge, editable && connected && styles.pull)}
+        >
+          {choice}
+        </span>
       </RowFrame>
       {open ? (
-        <div id={toolsId} {...stylex.props(styles.tools)}>
-          <SettingsRows>
-            {shown.map((tool) =>
-              connected ? (
-                <ToolLine
-                  key={tool.id}
-                  tool={tool}
-                  editable={editable}
-                  words={words}
-                  onChange={(next) => {
-                    onChange([{ id: tool.id, choice: next }]);
-                  }}
-                />
-              ) : (
-                <SettingRow
-                  key={tool.id}
-                  label={tool.name}
-                  help={
-                    tool.kind === "read" ? words.readsWord : words.changesWord
-                  }
-                >
-                  {null}
-                </SettingRow>
-              )
-            )}
-          </SettingsRows>
-        </div>
+        <ul id={toolsId} aria-label={name} {...stylex.props(styles.tools)}>
+          {shown.map((tool) => (
+            <ToolLine
+              key={tool.id}
+              tool={tool}
+              editable={editable}
+              connected={connected}
+              words={words}
+              onChange={(next) => {
+                onChange([{ id: tool.id, choice: next }]);
+              }}
+            />
+          ))}
+        </ul>
       ) : null}
-    </>
+    </div>
   );
 };
 
@@ -403,170 +523,8 @@ const MayDo = ({
   );
 };
 
-/** Connection: its facts, then Sign in again and Disconnect at the edge; Not connected before it is. */
-const Connection = ({
-  app,
-  actions,
-  words,
-}: {
-  app: App;
-  actions: AppActions;
-  words: AppIntegrationWords;
-}) => {
-  const { connection } = app;
-  if (connection === undefined) {
-    return (
-      <SectionCard title={words.connection} density="compact">
-        <StateWord state={undefined} words={words} />
-      </SectionCard>
-    );
-  }
-  const quiet = [
-    actions.onSignIn === undefined ? null : (
-      <Button
-        key="sign-in"
-        variant="quiet"
-        size="sm"
-        onClick={() => {
-          actions.onSignIn?.(app);
-        }}
-      >
-        {words.signInAgain}
-      </Button>
-    ),
-    actions.onDisconnect === undefined ? null : (
-      <Button
-        key="disconnect"
-        variant="quiet"
-        size="sm"
-        onClick={() => {
-          actions.onDisconnect?.(app);
-        }}
-      >
-        {words.disconnect}
-      </Button>
-    ),
-  ].filter((button) => button !== null);
-  return (
-    <SectionCard
-      title={words.connection}
-      density="compact"
-      footer={
-        quiet.length === 0 ? undefined : (
-          <span {...stylex.props(styles.foot)}>{quiet}</span>
-        )
-      }
-    >
-      <KeyValueList
-        variant="inline"
-        divided
-        items={[
-          {
-            key: words.signedInAs,
-            value: connection.signedInAs ?? connection.account,
-          },
-          {
-            key: words.connectedBy,
-            value: `${connection.by}, ${connection.on}`,
-          },
-          {
-            key: words.status,
-            value: <StateWord state={connection.state} words={words} />,
-          },
-        ]}
-      />
-    </SectionCard>
-  );
-};
-
-/** Who can use it: one line, its name at the start and a Select (a member: the word) at the end. */
-const WhoCanUse = ({
-  connection,
-  editable,
-  words,
-  onChange,
-}: {
-  connection: AppConnection;
-  editable: boolean;
-  words: AppIntegrationWords;
-  onChange: AppPageProps["onForWhomChange"];
-}) => (
-  <SectionCard
-    variant="boxed"
-    flush
-    density="compact"
-    aria-label={words.whoCanUse}
-  >
-    <RowFrame slot="setting-row" inner={styles.line}>
-      <span {...stylex.props(styles.name)}>{words.whoCanUse}</span>
-      {editable ? (
-        <Select
-          value={connection.forWhom}
-          items={[
-            { value: "everyone", label: words.forEveryone },
-            { value: "you", label: words.forYou },
-          ]}
-          onValueChange={(next) => {
-            if (next === "everyone" || next === "you") {
-              onChange?.(next);
-            }
-          }}
-        >
-          <SelectTrigger variant="text" size="sm" aria-label={words.whoCanUse}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent />
-        </Select>
-      ) : (
-        <span {...stylex.props(styles.help)}>
-          {connection.forWhom === "everyone" ? words.forEveryone : words.forYou}
-        </span>
-      )}
-    </RowFrame>
-  </SectionCard>
-);
-
-/** Used by: the workflows and agents that use it, else one quiet line. */
-const UsedBy = ({ app, words }: { app: App; words: AppIntegrationWords }) => {
-  const users = app.workflows ?? [];
-  return (
-    <SectionCard title={words.usedBy} density="compact" flush>
-      {users.length === 0 ? (
-        <p {...stylex.props(styles.quiet)}>{words.notUsed}</p>
-      ) : (
-        <RowList aria-label={words.usedBy}>
-          {users.map((user) => (
-            <RowListItem
-              key={user.name}
-              icon={user.kind === "agent" ? Agent : Workflow}
-              name={user.name}
-              detail={
-                <span {...stylex.props(styles.kind)}>
-                  {user.kind === "agent" ? words.agent : words.workflow}
-                  {user.href === undefined ? null : (
-                    <span aria-hidden="true" {...stylex.props(styles.chevron)}>
-                      <Icon icon={ChevronRight} />
-                    </span>
-                  )}
-                </span>
-              }
-              onPress={
-                user.href === undefined
-                  ? undefined
-                  : () => {
-                      window.location.assign(user.href ?? "");
-                    }
-              }
-            />
-          ))}
-        </RowList>
-      )}
-    </SectionCard>
-  );
-};
-
-/** The head's action: Connect (or, for a member, why not), or Manage. */
-const HeadAction = ({
+/** The one action that moves the connection on: Connect (for a member, who can), or Manage. */
+const MainAction = ({
   app,
   actions,
   words,
@@ -576,64 +534,207 @@ const HeadAction = ({
   words: AppIntegrationWords;
 }) => {
   if (!asksConnect(app)) {
-    return <ManageMenu app={app} actions={actions} words={words} size="sm" />;
+    return (
+      <ManageMenu app={app} actions={actions} words={words} size="sm" asState />
+    );
+  }
+  if (actions.member === true) {
+    return <span {...stylex.props(styles.help)}>{words.adminConnects}</span>;
   }
   return canConnect(actions) ? (
     <ConnectAction app={app} actions={actions} words={words} size="sm" />
-  ) : (
-    <span {...stylex.props(styles.help)}>{words.adminConnects}</span>
-  );
+  ) : null;
 };
 
-/** An app's own page: its tinted head, what Grasp may do, and its connection beside it. */
+/** Who can use it: a Select where the person may change it and the host keeps it, else its word. */
+const WhoValue = ({
+  connection,
+  editable,
+  words,
+  onChange,
+}: {
+  connection: AppConnection;
+  editable: boolean;
+  words: AppIntegrationWords;
+  onChange: AppPageProps["onForWhomChange"];
+}) =>
+  editable ? (
+    <span {...stylex.props(styles.pull)}>
+      <Select
+        value={connection.forWhom}
+        items={[
+          { value: "everyone", label: words.forEveryone },
+          { value: "you", label: words.forYou },
+        ]}
+        onValueChange={(next) => {
+          if (next === "everyone" || next === "you") {
+            onChange?.(next);
+          }
+        }}
+      >
+        <SelectTrigger variant="text" size="sm" aria-label={words.whoCanUse}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent />
+      </Select>
+    </span>
+  ) : (
+    <span {...stylex.props(styles.help)}>
+      {connection.forWhom === "everyone" ? words.forEveryone : words.forYou}
+    </span>
+  );
+
+/** Sign in again, where the host offers it: under the connection, quiet. */
+const signInFoot = (
+  app: App,
+  actions: AppActions,
+  words: AppIntegrationWords
+) =>
+  actions.onSignIn === undefined ||
+  app.connection?.state !== "sign-in" ? undefined : (
+    <span {...stylex.props(styles.foot)}>
+      <Button
+        variant="quiet"
+        size="sm"
+        onClick={() => {
+          actions.onSignIn?.(app);
+        }}
+      >
+        {words.signInAgain}
+      </Button>
+    </span>
+  );
+
+/** Used by: the workflows and agents that use it; nothing at all while nothing does. */
+const UsedByRows = ({
+  app,
+  words,
+}: {
+  app: App;
+  words: AppIntegrationWords;
+}) => (
+  <RowList aria-label={words.usedBy}>
+    {(app.workflows ?? []).map((user) => (
+      <RowListItem
+        key={user.name}
+        icon={user.kind === "agent" ? Agent : Workflow}
+        name={user.name}
+        detail={
+          <span {...stylex.props(styles.kind)}>
+            {user.kind === "agent" ? words.agent : words.workflow}
+            {user.href === undefined ? null : (
+              <span aria-hidden="true" {...stylex.props(styles.chevron)}>
+                <Icon icon={ChevronRight} />
+              </span>
+            )}
+          </span>
+        }
+        onPress={
+          user.href === undefined
+            ? undefined
+            : () => {
+                window.location.assign(user.href ?? "");
+              }
+        }
+      />
+    ))}
+  </RowList>
+);
+
+/** An app's own page: its head, its connection, what uses it, what Grasp may do, and whether it is offered. */
 export const AppPage = ({
   app,
   editable = false,
   onToolsChange,
   onForWhomChange,
+  offered,
+  onOfferedChange,
   words: given,
   ...actions
 }: AppPageProps) => {
   const words = useWords("appIntegration", appIntegrationWords, given);
   const tint = useAppTint(app);
+  const { connection } = app;
+  const used = (app.workflows ?? []).length > 0;
+  const tools =
+    app.tools === undefined || app.tools.length === 0 ? null : (
+      <MayDo
+        app={app}
+        editable={editable}
+        words={words}
+        onToolsChange={onToolsChange}
+      />
+    );
+  const offer =
+    offered === undefined || onOfferedChange === undefined ? null : (
+      <OfferSwitch offered={offered} onChange={onOfferedChange} words={words} />
+    );
+  const foot = signInFoot(app, actions, words);
   return (
     <div data-slot="app-page" {...stylex.props(styles.page)}>
-      <PageHeader
-        variant="band"
-        tint={tint}
-        mark={<AppMark app={app} size="lg" />}
-        title={app.name}
-        description={
-          <span {...stylex.props(styles.description)}>{app.description}</span>
-        }
-        actions={<HeadAction app={app} actions={actions} words={words} />}
-      />
-      <div {...stylex.props(styles.body)}>
-        <div {...stylex.props(styles.grid)}>
-          <div {...stylex.props(styles.main)}>
-            {app.tools === undefined || app.tools.length === 0 ? null : (
-              <MayDo
-                app={app}
-                editable={editable}
-                words={words}
-                onToolsChange={onToolsChange}
-              />
-            )}
+      <div {...stylex.props(styles.column)}>
+        <header {...stylex.props(styles.headCard)}>
+          <Texture tint={tint} layout={styles.headCardTexture} />
+          <AppMark app={app} size="lg" />
+          <div {...stylex.props(styles.headWords)}>
+            <h1 {...stylex.props(styles.nameSm)}>{app.name}</h1>
+            <p {...stylex.props(styles.description)}>
+              <Clamped text={app.description} words={words} />
+            </p>
           </div>
-          <div {...stylex.props(styles.side)}>
-            <Connection app={app} actions={actions} words={words} />
-            {app.connection === undefined ? null : (
-              <WhoCanUse
-                connection={app.connection}
-                // Changed only where the host can keep the change.
-                editable={editable && onForWhomChange !== undefined}
-                words={words}
-                onChange={onForWhomChange}
-              />
-            )}
-            <UsedBy app={app} words={words} />
-          </div>
-        </div>
+          <span {...stylex.props(styles.headCardAction)}>
+            <MainAction app={app} actions={actions} words={words} />
+          </span>
+          {offer === null ? null : (
+            <span {...stylex.props(styles.headCardOffer)}>{offer}</span>
+          )}
+        </header>
+        {connection === undefined ? null : (
+          <SectionCard
+            variant="boxed"
+            flush
+            density="compact"
+            aria-label={words.connection}
+            footer={foot}
+          >
+            <SettingsRows>
+              {connection === undefined ? null : (
+                <>
+                  <SettingRow label={words.signedInAs}>
+                    <span {...stylex.props(styles.help)}>
+                      {connection.signedInAs ?? connection.account}
+                    </span>
+                  </SettingRow>
+                  <SettingRow label={words.connectedBy}>
+                    <span
+                      {...stylex.props(styles.help)}
+                    >{`${connection.by}, ${connection.on}`}</span>
+                  </SettingRow>
+                  <SettingRow label={words.whoCanUse}>
+                    {/* Changed only where the host can keep the change. */}
+                    <WhoValue
+                      connection={connection}
+                      editable={editable && onForWhomChange !== undefined}
+                      words={words}
+                      onChange={onForWhomChange}
+                    />
+                  </SettingRow>
+                </>
+              )}
+            </SettingsRows>
+          </SectionCard>
+        )}
+        {used ? (
+          <SectionCard
+            variant="grouped"
+            flush
+            density="compact"
+            title={words.usedBy}
+          >
+            <UsedByRows app={app} words={words} />
+          </SectionCard>
+        ) : null}
+        {tools}
       </div>
     </div>
   );

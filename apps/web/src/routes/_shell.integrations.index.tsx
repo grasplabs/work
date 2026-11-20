@@ -98,15 +98,24 @@ const perKind = 8;
 /** How many apps are drawn at first, and with every step further down. */
 const step = 80;
 
+const PHONE = "@container page-header (width < 40rem)";
+
 const styles = stylex.create({
+  // On a phone (the header under 40rem) the row is the column's width: the field takes what Request
+  // app leaves, and under 9rem of it Request app goes to the next line (ui#93).
   actions: {
     display: "flex",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: grasp.space2,
+    width: { default: "auto", [PHONE]: "100cqi" },
   },
-  // Narrow on a phone, so "Request app" fits beside it.
   search: {
-    width: { default: "9.5rem", "@media (min-width: 40rem)": "15rem" },
+    width: { default: "16rem", [PHONE]: "auto" },
+    flexGrow: { default: 0, [PHONE]: 1 },
+    flexShrink: { default: 0, [PHONE]: 1 },
+    flexBasis: { default: "auto", [PHONE]: 0 },
+    minWidth: { default: null, [PHONE]: "9rem" },
   },
   lists: {
     display: "flex",

@@ -3311,7 +3311,6 @@ msgstr "Mit der Freigabe ersetzt er den eigenen Skill {name} des Teams {team} f�
 #: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
-#: src/connections/integrations-skeleton.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
@@ -3753,6 +3752,10 @@ msgstr "Polarlicht"
 msgctxt "what the Brain remembers about something"
 msgid "Availability"
 msgstr "Verfügbarkeit"
+
+#: src/frame/part-words.tsx
+msgid "Available in your organization"
+msgstr "In Ihrer Organisation verfügbar"
 
 #: src/brain/brain.ts
 msgid "Available, direct"
@@ -5149,7 +5152,6 @@ msgstr "Verbinde die Apps, mit denen du arbeitest"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
-#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Connected"
@@ -5635,10 +5637,6 @@ msgstr "Entfernen fehlgeschlagen"
 #: src/connections/http-connections.tsx
 msgid "Couldn't revoke"
 msgstr "Widerruf fehlgeschlagen"
-
-#: src/connections/offer-switch.tsx
-msgid "Couldn't save"
-msgstr "Speichern fehlgeschlagen"
 
 #: src/drafts/sharing.tsx
 msgid "Couldn't share"
@@ -8507,6 +8505,10 @@ msgid "Hidden for every admin until their evidence changes, or until one of you 
 msgstr "Für alle Admins ausgeblendet, bis sich ihre Belege ändern oder einer von euch sie wieder anzeigt."
 
 #: src/frame/part-words.tsx
+msgid "Hidden from members, and no one can connect it."
+msgstr "Für Mitglieder ausgeblendet, und niemand kann es verbinden."
+
+#: src/frame/part-words.tsx
 msgid "Hide column"
 msgstr "Spalte ausblenden"
 
@@ -10336,6 +10338,10 @@ msgstr "{many} werden geladen"
 msgid "Loading chats"
 msgstr "Chats werden geladen"
 
+#: src/connections/integrations-skeleton.tsx
+msgid "Loading integrations"
+msgstr "Integrationen werden geladen"
+
 #: src/frame/part-words.tsx
 msgid "Loading more {many}"
 msgstr "Weitere {many} werden geladen"
@@ -10344,6 +10350,7 @@ msgstr "Weitere {many} werden geladen"
 msgid "Loading older messages"
 msgstr "Ältere Nachrichten werden geladen"
 
+#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 msgid "Loading the app"
 msgstr "Die App wird geladen"
@@ -10669,6 +10676,10 @@ msgstr "Mitglieder und Rollen"
 #: src/apps/draft-changes.tsx
 msgid "members of the team in {field}"
 msgstr "Mitgliedern des Teams in {field}"
+
+#: src/frame/part-words.tsx
+msgid "Members see it in Integrations."
+msgstr "Mitglieder sehen es unter Integrationen."
 
 #: src/brain/brain-section.tsx
 #: src/brain/memories-page.tsx
@@ -12418,10 +12429,6 @@ msgstr "Aus, antwortet er hier niemandem. Ein Ort schränkt immer nur ein, wen e
 msgid "Off, he only answers here: he holds no change for people to confirm."
 msgstr "Aus, antwortet er hier nur: Er hält keine Änderung zum Bestätigen bereit."
 
-#: src/connections/offer-switch.tsx
-msgid "Off, nobody can connect it, admins included. Connections already made go on."
-msgstr "Aus: Niemand kann es verbinden, auch Admins nicht. Bestehende Verbindungen laufen weiter."
-
 #: src/agents/agent-share.tsx
 msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
 msgstr "Biete {name} den Admins deines Unternehmens an. Übernehmen sie ihn, wird er ein Agent des Unternehmens: Sie legen fest, wer ihn fragen darf und was er tun darf, und du änderst ihn nicht mehr."
@@ -12430,10 +12437,6 @@ msgstr "Biete {name} den Admins deines Unternehmens an. Übernehmen sie ihn, wir
 msgid "Offer to the company"
 msgstr "Dem Unternehmen anbieten"
 
-#: src/connections/offer-switch.tsx
-msgid "Offered"
-msgstr "Angeboten"
-
 #: src/agents/agent-share.tsx
 msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
 msgstr "Angeboten am {since}. Die Admins eurer Firma können {name} übernehmen. Was du ihm gesagt hast, geht nicht mit, und sobald sie es übernommen haben, kannst du es nicht mehr öffnen."
@@ -12441,10 +12444,6 @@ msgstr "Angeboten am {since}. Die Admins eurer Firma können {name} übernehmen.
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
 msgstr "Dem Unternehmen angeboten"
-
-#: src/connections/offer-switch.tsx
-msgid "Offered to your organization"
-msgstr "Ihrer Organisation angeboten"
 
 #: src/activity/audit-log.tsx
 msgid "Older"
@@ -19826,10 +19825,6 @@ msgstr "Was bei fünf oder mehr Personen des Teams zu sehen war:"
 #: src/brain/work-knowledge.tsx
 msgid "What gets in the way"
 msgstr "Was im Weg steht"
-
-#: src/frame/part-words.tsx
-msgid "What Grasp can do"
-msgstr "Was Grasp kann"
 
 #: src/brain/opportunities-page.tsx
 msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."

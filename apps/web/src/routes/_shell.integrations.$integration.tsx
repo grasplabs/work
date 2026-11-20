@@ -1,4 +1,3 @@
-import { isAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
@@ -18,7 +17,6 @@ import {
   parseIntegrationKey,
 } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
-import { OfferSwitch } from "../connections/offer-switch.tsx";
 import { NotFound, PageNotLoaded } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -159,9 +157,6 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           uses={used}
         />
         <Notices catalog={catalog} integration={integration} tools={read} />
-        {isAdmin(identity.role) && integration.listed ? (
-          <OfferSwitch integration={integration} staff={identity.staff} />
-        ) : null}
         <HeldNotLoaded held={held} />
         {/* One connection: the app page says it, and this what it holds
             besides. More: each a card of its own. */}

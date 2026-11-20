@@ -369,7 +369,7 @@ const Inspector = ({
         <ItemDetail item={selected} key={selected.id} onSaid={onSaid} />
         {selected.facts.length === 0 ? null : (
           <PanelSection label={t`Facts`}>
-            <RowList aria-label={t`Facts`}>
+            <RowList aria-label={t`Facts`} noActions>
               {selected.facts.map(({ label, value }) => (
                 <RowListItem detail={label} key={label} name={value} />
               ))}

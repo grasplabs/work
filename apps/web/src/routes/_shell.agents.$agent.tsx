@@ -125,7 +125,7 @@ const AgentLoading = () => {
         crumbs={[{ label: t`Agents`, to: "/agents" }, { label: t`Agent` }]}
       />
       <Page>
-        <PageColumn align="center" measure="settings">
+        <PageColumn measure="settings">
           <PageSkeletonSettings sections={[7, 1]} />
         </PageColumn>
       </Page>

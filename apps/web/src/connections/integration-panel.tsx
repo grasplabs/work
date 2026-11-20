@@ -1,5 +1,4 @@
 import type { CatalogTool } from "@grasp-os/shared/connect";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -9,6 +8,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { useAppActions } from "./app-actions.tsx";
 import { useAppOf, useSettled } from "./app-of.tsx";
+import { waitsForAdmin } from "./connect-dialog.tsx";
 import { FollowLinks } from "./follow-links.tsx";
 import type { Integration } from "./integrations.ts";
 import type { ConnectionUses } from "./workflows-using.tsx";
@@ -95,9 +95,7 @@ export const IntegrationPanel = ({
         open
         settingsHref={`/integrations/${integration.key}`}
         {...actions}
-        // The library takes no Connect for a member's app; an admin's is only
-        // missing while its tools load, or where none can connect it.
-        {...(isMemberAdmin(identity) ? { words: { adminConnects: "" } } : {})}
+        member={waitsForAdmin(integration, identity)}
       />
       {dialogs}
     </FollowLinks>

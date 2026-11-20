@@ -270,10 +270,10 @@ const ownStyles = stylex.create({
     },
     color: grasp.ink,
     fontFamily: grasp.fontSans,
-    // Its size's own text at every width. An Input takes 16px on a phone so the phone does not zoom
-    // when it is focused to type; a Select's trigger is a button and takes no typing, so in a table
-    // row it stays the size of the words beside it.
-    fontSize: grasp.textSm,
+    // The words of every field at its size: text-sm, and field-text-touch on a phone or a touch
+    // screen (media.typing), as Input, Combobox and Input group take there so the phone does not
+    // zoom. A trigger takes no typing, but beside an Input it reads as one of a row of fields.
+    fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightRegular,
     textAlign: "start",

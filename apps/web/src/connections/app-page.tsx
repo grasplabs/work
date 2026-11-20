@@ -10,6 +10,7 @@ import { toast } from "../grasp/toast/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useAppActions } from "./app-actions.tsx";
 import { useAppOf } from "./app-of.tsx";
+import { waitsForAdmin } from "./connect-dialog.tsx";
 import { FollowLinks } from "./follow-links.tsx";
 import type { Integration } from "./integrations.ts";
 import {
@@ -89,6 +90,25 @@ export const IntegrationAppPage = ({
       }
     );
   };
+  // Whether the app is offered: the organization's own admins choose, never Grasp staff (core refuses them).
+  const offers = integration.listed && isMemberAdmin(identity);
+  const changeOffered = (offered: boolean): void => {
+    if (busy) {
+      return;
+    }
+    void change(
+      async (session) => {
+        await session.connections.setOffered(
+          integration.source,
+          integration.id,
+          offered
+        );
+      },
+      (reason) => {
+        toast.error(reason);
+      }
+    );
+  };
   return (
     <FollowLinks>
       <AppPage
@@ -96,9 +116,10 @@ export const IntegrationAppPage = ({
         editable={changeable !== undefined}
         onToolsChange={changeTools}
         {...actions}
-        // The library takes no Connect for a member's app; an admin's is only
-        // missing while its tools load, or where none can connect it.
-        {...(isMemberAdmin(identity) ? { words: { adminConnects: "" } } : {})}
+        member={waitsForAdmin(integration, identity)}
+        {...(offers
+          ? { offered: integration.offered, onOfferedChange: changeOffered }
+          : {})}
       />
       {dialogs}
     </FollowLinks>
