@@ -9243,7 +9243,6 @@ msgstr "Anweisung"
 #: src/agents/agent-section.tsx
 #: src/agents/setup/instructions-step.tsx
 #: src/apps/app-settings.tsx
-#: src/routes/_shell.settings.instructions.tsx
 #: src/settings/sections.ts
 msgid "Instructions"
 msgstr "Anweisungen"

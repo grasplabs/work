@@ -54,7 +54,8 @@ const Instructions = () => {
             <SettingsStack>
               <InstructionFileEditor
                 file={companyInstructions}
-                label={t`Instructions`}
+                label={t`Company instructions`}
+                labelHidden
                 saved={company.data.instructions}
               />
               <InstructionFileEditor
