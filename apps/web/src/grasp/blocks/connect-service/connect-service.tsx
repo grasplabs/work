@@ -159,13 +159,55 @@ const grow = stylex.keyframes({
   to: { opacity: 1, transform: "scale(1)" },
 });
 
+const two = "@container (min-width: 22.75rem)";
+const three = "@container (min-width: 34.5rem)";
+
 const styles = stylex.create({
-  // The tiles: equal, four in a row in a card of the product's width (about 52rem), fewer as the card
-  // narrows (by its own width); every tile in a row as tall as the tallest, a long name wrapping inside.
+  // The tiles: equal, one row when they all fit at 11rem in the card's own width, else rows that come out
+  // even (four as 2×2, five and six as rows of three), one a row on a phone, an odd last tile spanning
+  // both; every tile in a row as tall as the tallest, a long name wrapping inside.
+  fit: { containerType: "inline-size", minWidth: 0 },
   tiles: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(10rem, 100%), 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(11rem, 100%), 1fr))",
     gap: grasp.space3,
+  },
+  three: {
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [two]: "repeat(2, minmax(0, 1fr))",
+      [three]: "repeat(3, minmax(0, 1fr))",
+    },
+  },
+  four: {
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [two]: "repeat(2, minmax(0, 1fr))",
+      "@container (min-width: 46.25rem)": "repeat(4, minmax(0, 1fr))",
+    },
+  },
+  five: {
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [two]: "repeat(2, minmax(0, 1fr))",
+      [three]: "repeat(3, minmax(0, 1fr))",
+      "@container (min-width: 58rem)": "repeat(5, minmax(0, 1fr))",
+    },
+  },
+  six: {
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [two]: "repeat(2, minmax(0, 1fr))",
+      [three]: "repeat(3, minmax(0, 1fr))",
+      "@container (min-width: 69.75rem)": "repeat(6, minmax(0, 1fr))",
+    },
+  },
+  // An odd last tile while two stand in a row: the row's whole width.
+  span: {
+    gridColumn: {
+      default: null,
+      "@container (min-width: 22.75rem) and (max-width: 34.4375rem)": "1 / -1",
+    },
   },
   // A tile's box: the row's height, the tile filling it.
   tile: { display: "grid", minWidth: 0 },
@@ -291,35 +333,51 @@ const Tiles = ({
   tiles: RefObject<Map<string, HTMLElement>>;
 }) => (
   <>
-    <div {...stylex.props(styles.tiles)}>
-      {services.map((service) => (
-        <div
-          key={service.id}
-          {...stylex.props(styles.tile)}
-          ref={(element) => {
-            const button = element?.querySelector("button") ?? null;
-            if (button === null) {
-              tiles.current.delete(service.id);
-            } else {
-              tiles.current.set(service.id, button);
-            }
-          }}
-        >
-          <Item
-            variant="outline"
-            size="sm"
-            onPress={() => {
-              onChoose(service.id, tiles.current.get(service.id) ?? null);
+    <div {...stylex.props(styles.fit)}>
+      <div
+        {...stylex.props(
+          styles.tiles,
+          [styles.three, styles.four, styles.five, styles.six][
+            services.length - 3
+          ]
+        )}
+      >
+        {services.map((service, index) => (
+          <div
+            key={service.id}
+            {...stylex.props(
+              styles.tile,
+              services.length % 2 === 1 &&
+                services.length >= 3 &&
+                services.length <= 6 &&
+                index === services.length - 1 &&
+                styles.span
+            )}
+            ref={(element) => {
+              const button = element?.querySelector("button") ?? null;
+              if (button === null) {
+                tiles.current.delete(service.id);
+              } else {
+                tiles.current.set(service.id, button);
+              }
             }}
           >
-            <Lead service={service} />
-            <ItemContent>
-              <ItemTitle>{service.name}</ItemTitle>
-              <Region service={service} />
-            </ItemContent>
-          </Item>
-        </div>
-      ))}
+            <Item
+              variant="outline"
+              size="sm"
+              onPress={() => {
+                onChoose(service.id, tiles.current.get(service.id) ?? null);
+              }}
+            >
+              <Lead service={service} />
+              <ItemContent>
+                <ItemTitle>{service.name}</ItemTitle>
+                <Region service={service} />
+              </ItemContent>
+            </Item>
+          </div>
+        ))}
+      </div>
     </div>
     {custom !== undefined && (
       <div
