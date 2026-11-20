@@ -6,9 +6,10 @@ import type {
 } from "@grasp-os/shared/brain";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
+import { formatList } from "../format.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Trash } from "../grasp/icons/index.ts";
@@ -57,6 +58,9 @@ const kindTone: Record<StatementKind, InterviewTone> = {
   wish: "leaf",
   goal: "pine",
 };
+
+/** What a CSS anchor name may not hold, out of React's id. */
+const notIdent = /[^\w-]/gu;
 
 /** The milliseconds of "12:26", where a transcript counts in minutes. */
 const msOf = (transcript: Transcript, at: string): number | undefined =>
@@ -308,25 +312,26 @@ export const SourceDocument = ({
   const { i18n } = useLingui();
   const { turns, chapters } = source.transcript;
   const chapterOf = chapterOfTurns(source.transcript);
+  const own = useId().replaceAll(notIdent, "");
   // Its passages in order, each with its own note under the one before when
   // the two would meet, so one margin holds them all. A statement that starts
-  // inside the passage before it is read there: its id stands at that
-  // passage, so a link to it still lands.
+  // inside the passage before it is read there: its kind joins the note and
+  // its id stands at that passage, so a link to it still lands.
   const passages: (Highlight & {
-    also: string[];
+    also: Statement[];
     name: string;
     after: string | undefined;
   })[] = [];
   for (const each of highlightsOf(source, statements)) {
     const last = passages.at(-1);
     if (last?.turn === each.turn && each.start < last.end) {
-      last.also.push(each.statement.id);
+      last.also.push(each.statement);
       continue;
     }
     passages.push({
       ...each,
       also: [],
-      name: `--document-note-${passages.length}`,
+      name: `--document-${own}-note-${passages.length}`,
       after: last?.name,
     });
   }
@@ -344,7 +349,9 @@ export const SourceDocument = ({
           )) {
             pieces.push(
               turn.text.slice(from, passage.start),
-              ...passage.also.map((id) => <span id={id} key={id} />),
+              ...passage.also.map(({ id }) => (
+                <span id={id} key={id} {...stylex.props(styles.passage)} />
+              )),
               <span
                 id={passage.statement.id}
                 key={passage.statement.id}
@@ -353,7 +360,13 @@ export const SourceDocument = ({
                 <MarginPassage
                   after={passage.after}
                   name={passage.name}
-                  note={i18n._(statementKindLabel[passage.statement.kind])}
+                  note={formatList([
+                    ...new Set(
+                      [passage.statement, ...passage.also].map(({ kind }) =>
+                        i18n._(statementKindLabel[kind])
+                      )
+                    ),
+                  ])}
                 >
                   {turn.text.slice(passage.start, passage.end)}
                 </MarginPassage>

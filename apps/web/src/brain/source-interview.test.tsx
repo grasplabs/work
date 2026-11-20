@@ -115,89 +115,81 @@ describe("a source's own words", () => {
     document.body.replaceChildren();
   });
 
-  describe("a conversation's page", () => {
-    it("opens on the transcript at the statement a link named", () => {
-      const host = shown(conversationPage("st-wish"));
-      expect(tab(host, "Transcript").getAttribute("aria-selected")).toBe(
-        "true"
-      );
-      expect(currentTurn(host)).toContain("Invoices matched for us.");
-    });
-
-    it("brings the transcript back from the summary at a quote's moment", () => {
-      const host = shown(conversationPage());
-      act(() => {
-        tab(host, "Summary").click();
-      });
-      expect(tab(host, "Summary").getAttribute("aria-selected")).toBe("true");
-      expect(host.textContent).toContain("Month end is slow.");
-      const [, wish] = host.querySelectorAll<HTMLElement>(
-        '[data-slot="interview-cite"]'
-      );
-      act(() => {
-        wish?.click();
-      });
-      expect(tab(host, "Transcript").getAttribute("aria-selected")).toBe(
-        "true"
-      );
-      expect(currentTurn(host)).toContain("Invoices matched for us.");
-    });
-
-    it("opens the transcript again when a link names another statement", () => {
-      const host = shown(conversationPage());
-      act(() => {
-        tab(host, "Summary").click();
-      });
-      act(() => {
-        root?.render(
-          <I18nProvider i18n={i18n}>
-            <PartWords>{conversationPage("st-sink")}</PartWords>
-          </I18nProvider>
-        );
-      });
-      expect(tab(host, "Transcript").getAttribute("aria-selected")).toBe(
-        "true"
-      );
-      expect(currentTurn(host)).toContain("Month end takes three days.");
-    });
+  it("opens on the transcript at the statement a link named", () => {
+    const host = shown(conversationPage("st-wish"));
+    expect(tab(host, "Transcript").getAttribute("aria-selected")).toBe("true");
+    expect(currentTurn(host)).toContain("Invoices matched for us.");
   });
 
-  describe("a document", () => {
-    const document_: TranscribedSource = {
-      ...conversation,
-      kind: "document",
-      title: "Handbook",
-      transcript: {
-        unit: "passage",
-        turns: [
-          {
-            at: "1",
-            speaker: "Payments",
-            text: "Invoices are paid on Fridays. Late ones wait a week.",
-          },
-        ],
-        chapters: [{ title: "Payments", at: "1" }],
-      },
-    };
-    const tagged = [
-      said("st-rule", "rule", "Invoices are paid on Fridays."),
-      said("st-inside", "rule", "paid on Fridays"),
-      said("st-sink", "timeSink", "Late ones wait a week."),
-    ];
-
-    it("reads as a page, each statement once beside its kind's word", () => {
-      const host = shown(
-        <SourceDocument source={document_} statements={tagged} />
-      );
-      expect(host.querySelector('[data-slot="interview-turn"]')).toBeNull();
-      expect(
-        host.textContent?.split("Invoices are paid on Fridays.")
-      ).toHaveLength(2);
-      expect(host.querySelector("#st-rule")?.textContent).toContain("Rule");
-      expect(host.querySelector("#st-sink")?.textContent).toContain(
-        "Late ones wait a week."
-      );
-      expect(host.querySelector("#st-inside")).not.toBeNull();
+  it("brings the transcript back from the summary at a quote's moment", () => {
+    const host = shown(conversationPage());
+    act(() => {
+      tab(host, "Summary").click();
     });
+    expect(tab(host, "Summary").getAttribute("aria-selected")).toBe("true");
+    expect(host.textContent).toContain("Month end is slow.");
+    const [, wish] = host.querySelectorAll<HTMLElement>(
+      '[data-slot="interview-cite"]'
+    );
+    act(() => {
+      wish?.click();
+    });
+    expect(tab(host, "Transcript").getAttribute("aria-selected")).toBe("true");
+    expect(currentTurn(host)).toContain("Invoices matched for us.");
+  });
+
+  it("opens the transcript again when a link names another statement", () => {
+    const host = shown(conversationPage());
+    act(() => {
+      tab(host, "Summary").click();
+    });
+    act(() => {
+      root?.render(
+        <I18nProvider i18n={i18n}>
+          <PartWords>{conversationPage("st-sink")}</PartWords>
+        </I18nProvider>
+      );
+    });
+    expect(tab(host, "Transcript").getAttribute("aria-selected")).toBe("true");
+    expect(currentTurn(host)).toContain("Month end takes three days.");
+  });
+
+  const document_: TranscribedSource = {
+    ...conversation,
+    kind: "document",
+    title: "Handbook",
+    transcript: {
+      unit: "passage",
+      turns: [
+        {
+          at: "1",
+          speaker: "Payments",
+          text: "Invoices are paid on Fridays. Late ones wait a week.",
+        },
+      ],
+      chapters: [{ title: "Payments", at: "1" }],
+    },
+  };
+  const tagged = [
+    said("st-rule", "rule", "Invoices are paid on Fridays."),
+    said("st-inside", "blocker", "paid on Fridays"),
+    said("st-sink", "timeSink", "Late ones wait a week."),
+  ];
+
+  it("reads a document as a page, each passage once beside its statements' kinds", () => {
+    const host = shown(
+      <SourceDocument source={document_} statements={tagged} />
+    );
+    expect(host.querySelector('[data-slot="interview-turn"]')).toBeNull();
+    expect(
+      host.textContent?.split("Invoices are paid on Fridays.")
+    ).toHaveLength(2);
+    expect(host.querySelector("#st-rule")?.textContent).toContain(
+      "Rule and Blocker"
+    );
+    expect(host.querySelector("#st-sink")?.textContent).toContain(
+      "Late ones wait a week."
+    );
+    expect(host.querySelector("#st-inside")).not.toBeNull();
   });
 });
