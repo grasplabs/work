@@ -1335,8 +1335,8 @@ msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {Se muestra # integración} other {Se muestran # integraciones}}"
 
 #: src/brain/activity-page.tsx
-msgid "{shown, plural, one {You last looked on {when}. The newest change since is shown.} other {You last looked on {when}. The newest # changes since are shown.}}"
-msgstr "{shown, plural, one {Miraste por última vez el {when}. Se muestra el cambio más reciente desde entonces.} other {Miraste por última vez el {when}. Se muestran los # cambios más recientes desde entonces.}}"
+msgid "{shown, plural, one {What came in since {when}: the newest change is shown.} other {What came in since {when}: the newest # changes are shown.}}"
+msgstr "{shown, plural, one {Lo que llegó desde el {when}: se muestra el cambio más reciente.} other {Lo que llegó desde el {when}: se muestran los # cambios más recientes.}}"
 
 #: src/workflows/listed-count.tsx
 msgid "{shown} entries or more"
@@ -11698,8 +11698,8 @@ msgid "Nothing found"
 msgstr "No se encontró nada"
 
 #: src/brain/activity-page.tsx
-msgid "Nothing has changed since you last looked, {when}."
-msgstr "Nada ha cambiado desde la última vez que miraste, {when}."
+msgid "Nothing has changed since {when}."
+msgstr "Nada ha cambiado desde el {when}."
 
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -19092,6 +19092,10 @@ msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
 msgstr "Lo que llegó"
 
+#: src/brain/activity-page.tsx
+msgid "What came in since {when}."
+msgstr "Lo que llegó desde el {when}."
+
 #: src/agents/setup/abilities-step.tsx
 msgid "What can {name} do?"
 msgstr "¿Qué puede hacer {name}?"
@@ -20309,10 +20313,6 @@ msgstr "No tienes chats que añadir."
 #: src/workflows/item-test.tsx
 msgid "You have no recent runs whose input is still kept, so there was nothing to test on."
 msgstr "No tienes ejecuciones recientes cuya entrada se conserve, así que no había nada con qué probar."
-
-#: src/brain/activity-page.tsx
-msgid "You last looked on {when}."
-msgstr "Miraste por última vez el {when}."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."

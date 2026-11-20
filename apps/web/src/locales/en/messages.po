@@ -1335,8 +1335,8 @@ msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {# integration shown} other {# integrations shown}}"
 
 #: src/brain/activity-page.tsx
-msgid "{shown, plural, one {You last looked on {when}. The newest change since is shown.} other {You last looked on {when}. The newest # changes since are shown.}}"
-msgstr "{shown, plural, one {You last looked on {when}. The newest change since is shown.} other {You last looked on {when}. The newest # changes since are shown.}}"
+msgid "{shown, plural, one {What came in since {when}: the newest change is shown.} other {What came in since {when}: the newest # changes are shown.}}"
+msgstr "{shown, plural, one {What came in since {when}: the newest change is shown.} other {What came in since {when}: the newest # changes are shown.}}"
 
 #: src/workflows/listed-count.tsx
 msgid "{shown} entries or more"
@@ -11698,8 +11698,8 @@ msgid "Nothing found"
 msgstr "Nothing found"
 
 #: src/brain/activity-page.tsx
-msgid "Nothing has changed since you last looked, {when}."
-msgstr "Nothing has changed since you last looked, {when}."
+msgid "Nothing has changed since {when}."
+msgstr "Nothing has changed since {when}."
 
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -19092,6 +19092,10 @@ msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
 msgstr "What came in"
 
+#: src/brain/activity-page.tsx
+msgid "What came in since {when}."
+msgstr "What came in since {when}."
+
 #: src/agents/setup/abilities-step.tsx
 msgid "What can {name} do?"
 msgstr "What can {name} do?"
@@ -20309,10 +20313,6 @@ msgstr "You have no chats to add."
 #: src/workflows/item-test.tsx
 msgid "You have no recent runs whose input is still kept, so there was nothing to test on."
 msgstr "You have no recent runs whose input is still kept, so there was nothing to test on."
-
-#: src/brain/activity-page.tsx
-msgid "You last looked on {when}."
-msgstr "You last looked on {when}."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."

@@ -202,7 +202,15 @@ export const ActivityPage = () => {
   const [open, setOpen] = useState<string>();
   // Where the reader was in the log: on a phone the open line takes the page's place, and closing it comes back here.
   const pane = useRef<HTMLDivElement>(null);
+  const page = useRef<HTMLDivElement>(null);
   const readAt = useRef(0);
+  const inspector = useRef<HTMLDivElement>(null);
+  // The line in hand takes focus as it opens, so a screen reader is where it opened.
+  useEffect(() => {
+    if (open !== undefined) {
+      inspector.current?.focus();
+    }
+  }, [open]);
 
   const notes = new Map(brain.notes.map((note) => [note.id, note]));
   const sources = new Map(
@@ -376,13 +384,13 @@ export const ActivityPage = () => {
   } else if (fresh.state === "ready") {
     const when = formatDateTime(fresh.since);
     const shown = fresh.changes.length;
-    description = t`You last looked on ${when}.`;
+    description = t`What came in since ${when}.`;
     if (shown === 0) {
-      description = t`Nothing has changed since you last looked, ${when}.`;
+      description = t`Nothing has changed since ${when}.`;
     } else if (fresh.more) {
       description = plural(shown, {
-        one: `You last looked on ${when}. The newest change since is shown.`,
-        other: `You last looked on ${when}. The newest # changes since are shown.`,
+        one: `What came in since ${when}: the newest change is shown.`,
+        other: `What came in since ${when}: the newest # changes are shown.`,
       });
     }
   }
@@ -427,7 +435,10 @@ export const ActivityPage = () => {
           inHand !== undefined && styles.splitOpen
         )}
       >
-        <div {...stylex.props(inHand !== undefined && styles.pageBeside)}>
+        <div
+          ref={page}
+          {...stylex.props(inHand !== undefined && styles.pageBeside)}
+        >
           <PageBrainActivity
             description={description}
             fresh={freshListed.map(({ line }) => line)}
@@ -446,11 +457,7 @@ export const ActivityPage = () => {
         </div>
         {inHand === undefined ? null : (
           <div
-            // The line in hand takes focus, so a screen reader is where it opened.
-            ref={(node) => {
-              node?.focus();
-            }}
-            key={open}
+            ref={inspector}
             tabIndex={-1}
             {...stylex.props(styles.inspector)}
           >
@@ -498,10 +505,15 @@ export const ActivityPage = () => {
                   : inHand.meta
               }
               onClose={() => {
+                // Only a phone hid the log; beside it, the reader may have scrolled on.
+                const hidden = page.current?.checkVisibility() === false;
                 setOpen(undefined);
-                requestAnimationFrame(() => {
-                  pane.current?.scrollTo({ top: readAt.current });
-                });
+                setFailed(undefined);
+                if (hidden) {
+                  requestAnimationFrame(() => {
+                    pane.current?.scrollTo({ top: readAt.current });
+                  });
+                }
               }}
               onOpenPage={(id) => {
                 go({ to: "note", id });
