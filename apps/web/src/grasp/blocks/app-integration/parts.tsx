@@ -116,6 +116,21 @@ const styles = stylex.create({
     borderRadius: "2px",
     forcedColorAdjust: "none",
   },
+  // A band's apps: their marks overlapping a little, each on its own raised tile, then the line.
+  stack: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
+  stackMarks: { display: "flex" },
+  stackMark: {
+    display: "inline-flex",
+    padding: grasp.space1,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.raised,
+    boxShadow: `0 0 0 ${grasp.hairline} ${grasp.line}`,
+    marginInlineStart: {
+      default: `calc(-1 * ${grasp.space2})`,
+      ":first-child": 0,
+    },
+  },
   // A connection's state: a dot and its word.
   state: {
     display: "inline-flex",
@@ -420,24 +435,35 @@ export interface AppsStateProps {
 }
 
 /**
- * The connected apps summed up in one line, as a page's band says it: how many need someone, in
- * amber, else how many are connected.
+ * The connected apps summed up, as a page's band says it: the marks of the apps it speaks of, then
+ * one line. Where some need someone, their marks and how many, in amber; else every connected app's
+ * marks and how many are connected.
  */
 export const AppsState = ({ apps, words: given }: AppsStateProps) => {
   const words = useWords("appIntegration", appIntegrationWords, given);
-  const waiting = apps.filter(needsYou).length;
+  const waiting = apps.filter(needsYou);
+  const shown = waiting.length > 0 ? waiting : apps;
   return (
-    <span {...stylex.props(styles.state)}>
-      <span
-        aria-hidden="true"
-        {...stylex.props(
-          styles.dot,
-          waiting > 0 ? styles.attention : styles.works
-        )}
-      />
-      {waiting > 0
-        ? words.appsNeedYou(waiting)
-        : words.connectedCount(apps.length)}
+    <span data-slot="apps-state" {...stylex.props(styles.stack)}>
+      <span aria-hidden="true" {...stylex.props(styles.stackMarks)}>
+        {shown.map((app) => (
+          <span key={app.id} {...stylex.props(styles.stackMark)}>
+            <AppMark app={app} size="sm" />
+          </span>
+        ))}
+      </span>
+      <span {...stylex.props(styles.state)}>
+        <span
+          aria-hidden="true"
+          {...stylex.props(
+            styles.dot,
+            waiting.length > 0 ? styles.attention : styles.works
+          )}
+        />
+        {waiting.length > 0
+          ? words.appsNeedYou(waiting.length)
+          : words.connectedCount(apps.length)}
+      </span>
     </span>
   );
 };
