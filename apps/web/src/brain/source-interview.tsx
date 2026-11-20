@@ -10,15 +10,19 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { Button } from "../grasp/button/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
 import { Trash } from "../grasp/icons/index.ts";
 import {
   Interview,
   InterviewQuote,
   InterviewTimeline,
   InterviewTranscript,
+  MarginPassage,
+  MarginProse,
   useInterview,
 } from "../grasp/interview/index.ts";
 import type { InterviewKind, InterviewTone } from "../grasp/interview/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { statementKindLabel } from "./brain.ts";
 import { kindIcon } from "./statement-kind.tsx";
@@ -27,7 +31,8 @@ import { chapterOfTurns, highlightsOf, position } from "./transcript.ts";
 // One source's own words on the library's Interview: the transcript with
 // its chapters, its search and what was said marked in its margin, the
 // conversation as a timeline above it when its turns have times, and
-// beside it, each statement as a quote that goes to its moment.
+// beside it, each statement as a quote that goes to its moment. A
+// document is read as a page instead, its statements in the same margin.
 
 /** A source that has its conversation word for word. */
 export type TranscribedSource = Source & { transcript: Transcript };
@@ -70,6 +75,15 @@ const styles = stylex.create({
     minWidth: 0,
   },
   grow: { flexGrow: 1, minWidth: 0 },
+  document: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space4,
+    minWidth: 0,
+  },
+  chapter: { marginBlockStart: grasp.space4 },
+  // A statement a link may point at, clear of the bar above it.
+  passage: { scrollMarginBlockStart: grasp.space24 },
 });
 
 /** The statement kinds as Interview takes them: a word, a tone and an icon each. */
@@ -206,5 +220,70 @@ export const SourceQuotes = ({
         </div>
       ))}
     </div>
+  );
+};
+
+/**
+ * A document as a page to read: its headings and its passages, with what
+ * was said in it beside its lines in the margin, the kind's word at each.
+ * A link to a statement (its id) brings it into view.
+ */
+export const SourceDocument = ({
+  source,
+  statements,
+}: {
+  source: TranscribedSource;
+  statements: Statement[];
+}) => {
+  const { i18n } = useLingui();
+  const { turns, chapters } = source.transcript;
+  const placed = highlightsOf(source, statements);
+  const chapterOf = chapterOfTurns(source.transcript);
+  return (
+    <MarginProse>
+      <div {...stylex.props(styles.document)}>
+        {turns.map((turn, index) => {
+          const chapter = chapters[chapterOf[index] ?? 0];
+          const opens =
+            index === 0 || chapterOf[index] !== chapterOf[index - 1];
+          // Its passages in order, each after the one before it ends.
+          let from = 0;
+          const pieces: ReactNode[] = [];
+          for (const { statement, start, end } of placed.filter(
+            (each) => each.turn === index
+          )) {
+            if (start < from) {
+              continue;
+            }
+            pieces.push(
+              turn.text.slice(from, start),
+              <span
+                id={statement.id}
+                key={statement.id}
+                {...stylex.props(styles.passage)}
+              >
+                <MarginPassage
+                  note={i18n._(statementKindLabel[statement.kind])}
+                >
+                  {turn.text.slice(start, end)}
+                </MarginPassage>
+              </span>
+            );
+            from = end;
+          }
+          pieces.push(turn.text.slice(from));
+          return (
+            <div key={turn.at} {...stylex.props(styles.document)}>
+              {opens && chapter !== undefined ? (
+                <Heading layout={styles.chapter} level={2} size="ui">
+                  {chapter.title}
+                </Heading>
+              ) : null}
+              <Text>{pieces}</Text>
+            </div>
+          );
+        })}
+      </div>
+    </MarginProse>
   );
 };

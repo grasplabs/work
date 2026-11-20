@@ -215,7 +215,7 @@ const SearchResults = ({
       kind: producerKind[item.source.producer],
       title: given(first) ? first : producer,
       origin: [
-        producer,
+        given(first) ? producer : undefined,
         t`Version ${version}`,
         foundLabel(item.found),
         item.whole ? undefined : t`The best part of its passage`,
@@ -638,8 +638,14 @@ export const SourcesPage = ({
       };
     }),
   ];
+  // While core has older kept sources to give, the Brain's own sources
+  // older than the last one given wait for them, so "Show more" only adds
+  // at the end.
   const rows: Row[] = [
-    ...dated.toSorted((a, b) => b.at.localeCompare(a.at)).map(({ row }) => row),
+    ...dated
+      .filter(({ at }) => next === null || at >= next.addedAt)
+      .toSorted((a, b) => Number(a.at < b.at) - Number(a.at > b.at))
+      .map(({ row }) => row),
     ...connections.map(({ name }) => ({
       item: {
         kind: "record" as const,
@@ -674,7 +680,8 @@ export const SourcesPage = ({
             </EmptyHeader>
           </Empty>
         ) : null}
-        {listed.state === "loading" || rows.length === 0 ? null : (
+        {opened === undefined &&
+        (listed.state === "loading" || rows.length === 0) ? null : (
           <div
             {...stylex.props(
               styles.split,
@@ -682,20 +689,22 @@ export const SourcesPage = ({
             )}
           >
             <div {...stylex.props(styles.list)}>
-              <Sources
-                items={rows.map(({ item }) => item)}
-                labels={{ byRelevance: t`Newest first` }}
-                onOpen={(_, index) => {
-                  rows[index]?.open();
-                }}
-              >
-                <SourceList
-                  defaultOpen
-                  fold={rows.length}
-                  heading={t`Sources you may read`}
-                  headingLevel={2}
-                />
-              </Sources>
+              {rows.length === 0 ? null : (
+                <Sources
+                  items={rows.map(({ item }) => item)}
+                  labels={{ byRelevance: t`Newest first` }}
+                  onOpen={(_, index) => {
+                    rows[index]?.open();
+                  }}
+                >
+                  <SourceList
+                    defaultOpen
+                    fold={rows.length}
+                    heading={t`Sources you may read`}
+                    headingLevel={2}
+                  />
+                </Sources>
+              )}
               {kept.some((each) => each.personal) ? (
                 <Text size="sm" tone="muted">
                   <Trans>

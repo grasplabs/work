@@ -37,12 +37,13 @@ import { ForgetButton, useCanForget, useForget } from "../brain/forget.tsx";
 import { GapActions } from "../brain/gap-actions.tsx";
 import { loadTranscript, withTranscript } from "../brain/note-transcript.ts";
 import {
+  SourceDocument,
   SourceInterview,
   SourceQuotes,
   SourceTranscript,
 } from "../brain/source-interview.tsx";
 import type { TranscribedSource } from "../brain/source-interview.tsx";
-import { placeOf } from "../brain/transcript.ts";
+import { highlightsOf, placeOf } from "../brain/transcript.ts";
 import { labelOf } from "../brain/witness.ts";
 import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
@@ -55,6 +56,7 @@ import { Collapsible } from "../grasp/collapsible/index.ts";
 import { focus } from "../grasp/focus/focus.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Brain as BrainMark } from "../grasp/icons/index.ts";
+import { useInterview } from "../grasp/interview/index.ts";
 import {
   Tabs,
   TabsContent,
@@ -271,6 +273,13 @@ const SourceTabs = ({
   const { t } = useLingui();
   const [tab, setTab] = useState("transcript");
   const [opened, setOpened] = useState(activeId);
+  // A quote at the side that goes to its moment brings the transcript back too.
+  const asked = useInterview()?.asked ?? 0;
+  const [seen, setSeen] = useState(asked);
+  if (asked !== seen) {
+    setSeen(asked);
+    setTab("transcript");
+  }
   // A link to another statement opens the transcript again, even after the reader went to the summary.
   if (activeId !== opened) {
     setOpened(activeId);
@@ -800,8 +809,14 @@ const NoteBody = ({
   const article = (
     <Article byId={byId} nameable={nameable} paragraphs={note.article} />
   );
+  if (transcribed?.transcript.unit === "passage") {
+    // A document is read as a page: its own text, with what was tagged in it in the margin.
+    return (
+      <SourceDocument source={transcribed} statements={workspace.statements} />
+    );
+  }
   if (transcribed && note.article === undefined) {
-    // A document, or a short conversation without a write-up such as an employee's chat interview: only its words.
+    // A short conversation without a write-up, such as an employee's chat interview: only its words.
     return <SourceTranscript />;
   }
   if (transcribed) {
@@ -895,7 +910,8 @@ const NoteContent = ({
   const timeline = events > 0 || note.open.length > 0;
   const tabs: SideTab[] = [
     ...(transcribed === undefined ||
-    !workspace.statements.some(({ sourceId }) => sourceId === transcribed.id)
+    transcribed.transcript.unit === "passage" ||
+    highlightsOf(transcribed, workspace.statements).length === 0
       ? []
       : [
           {

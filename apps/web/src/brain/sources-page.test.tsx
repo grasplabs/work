@@ -439,7 +439,7 @@ describe(SourcesPage, () => {
     }).toStrictEqual({ connections: [true, true], last: true });
   });
 
-  it("lists the Brain's own sources among the kept ones, newest first, and opens one on its own page", async () => {
+  it("lists the Brain's own sources among the kept ones, newest first, the older ones once core's pages reach them, and opens one on its own page", async () => {
     const { router } = await shown([], {
       sources: [
         {
@@ -459,33 +459,38 @@ describe(SourcesPage, () => {
         {
           id: "src-gone",
           kind: "chat",
-          title: "",
+          title: "Forgotten chat",
           date: "2026-11-11",
           removedAt: "2026-11-13",
         },
       ],
     });
+    const firstPage = section("Sources you may read");
+    await press("Show more");
     const listedText = section("Sources you may read");
+    const order = [
+      "Finance lead interview",
+      "Handbook",
+      "Board minutes",
+      "No first line",
+      "Directory",
+    ].map((title) => listedText.indexOf(title));
     await press("Finance lead interview");
 
     expect({
-      order: [
-        "Finance lead interview",
-        "Handbook",
-        "Board minutes",
-        "Directory",
-      ].map((title) => listedText.indexOf(title)),
+      waited: firstPage.includes("Directory"),
+      found: order.every((at) => at >= 0),
+      order: order.toSorted((a, b) => a - b),
+      gone: listedText.includes("Forgotten chat"),
       origin: listedText.includes(
         "Interview · Finance lead · Live, 45 minutes"
       ),
       at: router.state.location.pathname,
     }).toStrictEqual({
-      order: [
-        listedText.indexOf("Finance lead interview"),
-        listedText.indexOf("Handbook"),
-        listedText.indexOf("Board minutes"),
-        listedText.indexOf("Directory"),
-      ].toSorted((a, b) => a - b),
+      waited: false,
+      found: true,
+      order,
+      gone: false,
       origin: true,
       at: "/brain/src-finance",
     });
