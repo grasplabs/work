@@ -38,8 +38,8 @@ import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import {
   formatBytes,
-  formatDateTime,
   formatDate,
+  formatDateTime,
   formatDay,
   formatList,
 } from "../format.ts";
