@@ -24,8 +24,6 @@ import { useBrainData } from "../brain/brain-data.ts";
 import { useCompanyText } from "../brain/brain-home.tsx";
 import { noteFileName, noteMarkdown } from "../brain/brain-markdown.ts";
 import { SourceContentsTable } from "../brain/brain-source-contents.tsx";
-import { DocumentView, TranscriptView } from "../brain/brain-transcript.tsx";
-import type { TranscribedSource } from "../brain/brain-transcript.tsx";
 import {
   given,
   kindLabel,
@@ -38,6 +36,12 @@ import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
 import { useCanForget, useForget } from "../brain/forget.tsx";
 import { nameableFrom, NoteBrainPage, onArticle } from "../brain/note-page.tsx";
 import { loadTranscript, withTranscript } from "../brain/note-transcript.ts";
+import {
+  SourceDocument,
+  SourceInterview,
+  SourceTranscript,
+} from "../brain/source-interview.tsx";
+import type { TranscribedSource } from "../brain/source-interview.tsx";
 import { placeOf } from "../brain/transcript.ts";
 import { labelOf } from "../brain/witness.ts";
 import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
@@ -778,24 +782,13 @@ const SourceBody = ({
   onRemove,
 }: NoteParts) => {
   if (transcribed?.transcript.unit === "passage") {
-    // A document is read as a page: its own text, with what was tagged in it highlighted.
+    // A document is read as a page: its own text, with what was tagged in it in the margin.
     return (
-      <DocumentView
-        activeId={activeId}
-        source={transcribed}
-        statements={workspace.statements}
-      />
+      <SourceDocument source={transcribed} statements={workspace.statements} />
     );
   }
   if (transcribed) {
-    return (
-      <TranscriptView
-        activeId={activeId}
-        onRemove={onRemove}
-        source={transcribed}
-        statements={workspace.statements}
-      />
-    );
+    return <SourceTranscript />;
   }
   // An import has no text of its own: what it brought in is its content.
   const contents = workspace.sources.some((source) => source.id === note.id)
@@ -1017,7 +1010,7 @@ const NoteContent = ({
       : undefined,
     onRemove,
   };
-  return (
+  const page = (
     <>
       {onArticle(note) ? (
         <ArticleNote {...parts} />
@@ -1026,6 +1019,18 @@ const NoteContent = ({
       )}
       {forget.element}
     </>
+  );
+  // A conversation's parts, in the body and at the side, share one Interview.
+  return transcribed === undefined ? (
+    page
+  ) : (
+    <SourceInterview
+      activeId={parts.activeId}
+      source={transcribed}
+      statements={workspace.statements}
+    >
+      {page}
+    </SourceInterview>
   );
 };
 

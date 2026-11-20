@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { Connection } from "@grasp-os/shared/brain";
+import type { Connection, Source } from "@grasp-os/shared/brain";
 import type {
   BrainSearchPack,
   BrainSourceListed,
@@ -25,10 +25,12 @@ import { SourcesPage } from "./sources-page.tsx";
 
 // The Brain's Sources page, against core's `brainSources` as the page
 // reaches it over RPC, faked: the sources core lists, a page at a time,
-// one opened at its newest version and then an older one; search shows
-// recall's pack as core gives it, in its order, with what it didn't find
-// and that it was cut short, and opens a result's source at its version;
-// each connection says how it feeds the Brain; a refusal is said.
+// one opened at its newest version and then an older one, among the
+// Brain's own sources, newest first, each of which opens its own page;
+// search shows recall's pack as core gives it, in its order, with what it
+// didn't find and that it was cut short, and opens a result's source at
+// its version; each connection says how it feeds the Brain; a refusal is
+// said.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -101,6 +103,8 @@ interface Faked {
   firstRead?: Promise<boolean>;
   /** Lists no source at all. */
   empty?: boolean;
+  /** The Brain's own sources, as `brain.read` gives them. */
+  sources?: Source[];
 }
 
 /** A question nothing the person may read holds: its pack is empty. */
@@ -109,7 +113,7 @@ const unmatched = "zeppelin";
 /** Shows the page on a faked core, answering as `faked` says. */
 const shown = async (
   connections: Connection[],
-  { refusal, searched, firstRead, empty = false }: Faked = {}
+  { refusal, searched, firstRead, empty = false, sources = [] }: Faked = {}
 ) => {
   const calls: string[] = [];
   const brainSources = {
@@ -176,10 +180,17 @@ const shown = async (
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <SourcesPage connections={connections} />,
+    component: () => (
+      <SourcesPage connections={connections} sources={sources} />
+    ),
+  });
+  const note = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/brain/$noteId",
+    component: () => <p>A note</p>,
   });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([page]),
+    routeTree: rootRoute.addChildren([page, note]),
     history: createMemoryHistory(),
     context: { core },
   });
@@ -195,7 +206,7 @@ const shown = async (
     await router.load();
   });
   await settle();
-  return { calls };
+  return { calls, router };
 };
 
 /** Presses the button whose text starts with `label`. */
@@ -239,12 +250,13 @@ const search = async (question: string): Promise<void> => {
 const panel = (): string =>
   document.querySelector("[data-slot=card]")?.textContent ?? "";
 
-/** The text of the section whose heading is `heading`. */
+/** The text of the list whose heading is `heading`, counted ("Results · 2"). */
 const section = (heading: string): string =>
   [...document.querySelectorAll("section[aria-labelledby]")].find(
     (each) =>
-      document.querySelector(`[id="${each.getAttribute("aria-labelledby")}"]`)
-        ?.textContent === heading
+      document
+        .querySelector(`[id="${each.getAttribute("aria-labelledby")}"]`)
+        ?.textContent.startsWith(`${heading} · `) === true
   )?.textContent ?? "";
 
 describe(SourcesPage, () => {
@@ -297,7 +309,8 @@ describe(SourcesPage, () => {
     const { calls } = await shown([]);
     await search("  invoices refunds  ");
     const resultText = section("Results");
-    await press("Invoices are paid monthly.");
+    const pageText = document.body.textContent;
+    await press("Handbook");
 
     expect({
       order:
@@ -306,10 +319,10 @@ describe(SourcesPage, () => {
       found: ["Exact match", "By meaning", "The best part of its passage"].map(
         (text) => resultText.includes(text)
       ),
-      notFound: resultText.includes(
+      notFound: pageText.includes(
         "Nothing you may read holds refunds and INV-7."
       ),
-      truncated: resultText.includes("More was found than fits"),
+      truncated: pageText.includes("More was found than fits"),
       opened: panel().includes("Invoices are paid monthly."),
       calls,
     }).toStrictEqual({
@@ -325,11 +338,11 @@ describe(SourcesPage, () => {
   it("opens a result at the version it cites, even after another version was picked in its panel", async () => {
     await shown([]);
     await search("invoices");
-    await press("Invoices are paid monthly.");
+    await press("Handbook");
     const cited = panel();
     await press("Version 2");
     const picked = panel();
-    await press("Invoices are paid monthly.");
+    await press("Handbook");
 
     expect({
       cited: cited.includes("Invoices are paid monthly."),
@@ -358,9 +371,9 @@ describe(SourcesPage, () => {
   it("says once that a search found nothing, and what wasn't found only beside what was", async () => {
     await shown([]);
     await search(unmatched);
-    const nothing = section("Results");
+    const nothing = document.body.textContent;
     await search("invoices refunds");
-    const some = section("Results");
+    const some = document.body.textContent;
 
     expect({
       nothing: [
@@ -373,13 +386,13 @@ describe(SourcesPage, () => {
 
   it("says what Only you means only when there are sources to mark", async () => {
     await shown([], { empty: true });
-    const empty = section("Sources you may read");
+    const empty = document.body.textContent;
     act(() => {
       root?.unmount();
     });
     document.body.replaceChildren();
     await shown([]);
-    const listedText = section("Sources you may read");
+    const listedText = document.body.textContent;
 
     expect({
       empty: {
@@ -407,25 +420,79 @@ describe(SourcesPage, () => {
     }).toStrictEqual({ calls: ["list", "search invoices"], shown: true });
   });
 
-  it("says for each connection that agents search it live and the Brain keeps nothing, and leaves the section out when there are none", async () => {
+  it("lists each connection, which agents search live and the Brain keeps nothing of, after the sources", async () => {
     await shown([
       { name: "Gmail", status: "connected", via: "direct", matches: [] },
       { name: "HubSpot", status: "connected", via: "composio", matches: [] },
     ]);
-    const feeds = section("How your connections feed the Brain");
-    act(() => {
-      root?.unmount();
-    });
-    document.body.replaceChildren();
-    await shown([]);
-    const none = section("How your connections feed the Brain");
+    const listedText = section("Sources you may read");
+    const live = "Agents search it live. The Brain keeps nothing.";
 
-    expect({ feeds, none }).toStrictEqual({
-      feeds:
-        "How your connections feed the Brain" +
-        "Gmail: agents search it live when you ask. The Brain keeps nothing from it." +
-        "HubSpot: agents search it live when you ask. The Brain keeps nothing from it.",
-      none: "",
+    expect({
+      connections: ["Gmail", "HubSpot"].map((name) =>
+        [...document.querySelectorAll("[data-slot=source-row]")].some(
+          ({ textContent }) =>
+            textContent.startsWith(name) && textContent.includes(live)
+        )
+      ),
+      last: listedText.indexOf("Board minutes") < listedText.indexOf("Gmail"),
+    }).toStrictEqual({ connections: [true, true], last: true });
+  });
+
+  it("lists the Brain's own sources among the kept ones, newest first, the older ones once core's pages reach them, and opens one on its own page", async () => {
+    const { router } = await shown([], {
+      sources: [
+        {
+          id: "src-finance",
+          kind: "interview",
+          title: "Finance lead interview",
+          date: "2026-11-12",
+          who: "Finance lead",
+          how: "Live, 45 minutes",
+        },
+        {
+          id: "src-directory",
+          kind: "import",
+          title: "Directory",
+          date: "2026-11-01",
+        },
+        {
+          id: "src-gone",
+          kind: "chat",
+          title: "Forgotten chat",
+          date: "2026-11-11",
+          removedAt: "2026-11-13",
+        },
+      ],
+    });
+    const firstPage = section("Sources you may read");
+    await press("Show more");
+    const listedText = section("Sources you may read");
+    const order = [
+      "Finance lead interview",
+      "Handbook",
+      "Board minutes",
+      "No first line",
+      "Directory",
+    ].map((title) => listedText.indexOf(title));
+    await press("Finance lead interview");
+
+    expect({
+      waited: firstPage.includes("Directory"),
+      found: order.every((at) => at >= 0),
+      order: order.toSorted((a, b) => a - b),
+      gone: listedText.includes("Forgotten chat"),
+      origin: listedText.includes(
+        "Interview · Finance lead · Live, 45 minutes"
+      ),
+      at: router.state.location.pathname,
+    }).toStrictEqual({
+      waited: false,
+      found: true,
+      order,
+      gone: false,
+      origin: true,
+      at: "/brain/src-finance",
     });
   });
 
