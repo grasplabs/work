@@ -4867,6 +4867,7 @@ msgid "Close it"
 msgstr "Cerrarla"
 
 #: src/frame/app-frame.tsx
+#: src/frame/part-words.tsx
 msgid "Close the chat"
 msgstr "Cerrar el chat"
 
@@ -11206,6 +11207,7 @@ msgstr "Nuevo objetivo del consejo"
 
 #: src/chat/chat-panel.tsx
 #: src/chat/chat-window.tsx
+#: src/frame/part-words.tsx
 msgid "New chat"
 msgstr "Nuevo chat"
 
@@ -13484,6 +13486,10 @@ msgstr "Teléfono"
 msgctxt "a screen width"
 msgid "Phone"
 msgstr "Teléfono"
+
+#: src/frame/part-words.tsx
+msgid "Pick a part of the page. Escape to stop."
+msgstr "Elige una parte de la página. Escape para salir."
 
 #: src/apps/field-editor.tsx
 msgid "Pick a table"
@@ -17050,6 +17056,11 @@ msgstr "Hablando con tu equipo"
 #: src/projects/project-dialog.tsx
 msgid "Target"
 msgstr "Diana"
+
+#: src/frame/part-words.tsx
+msgctxt "pick a part of the page"
+msgid "Target"
+msgstr "Señalar"
 
 #: src/brain/brain.ts
 msgid "Target design agreed"

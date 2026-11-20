@@ -19,6 +19,7 @@ import type {
   SubmitEvent,
 } from "react";
 
+import { BarActions, BarClose } from "../bar-actions/bar-actions";
 import { Button } from "../button";
 import { DropdownMenuMore } from "../dropdown-menu";
 import type { DropdownMenuAction } from "../dropdown-menu";
@@ -26,7 +27,6 @@ import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import {
   AppWindow,
-  Cross,
   Edit,
   ExitFullScreen,
   Expand,
@@ -95,12 +95,6 @@ const styles = stylex.create({
   // Floating, a press on the name's room (not on its words) goes through to the handle under it.
   passThrough: { pointerEvents: "none" },
   title: { display: "flex", flexGrow: 1, minWidth: 0 },
-  actions: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space1,
-    flexShrink: 0,
-  },
   // The name itself takes presses again inside the room that passes them through.
   takesPresses: { pointerEvents: "auto" },
   // The name: one line, never wrapped, faded out at its end when it runs past its room.
@@ -391,35 +385,34 @@ export const AppShellPanelHead = ({
       >
         <RenameAsked value={renameAsked}>{title}</RenameAsked>
       </div>
-      <div {...stylex.props(styles.actions, styles.above)}>
-        <HeadControls
-          setPlacement={setPlacement}
-          next={next}
-          pageHref={pageHref}
-          pageRender={pageRender}
-          expanded={expanded}
-          onExpandedChange={onExpandedChange}
-          narrow={narrow}
-          onRename={
-            renamable(title)
-              ? () => {
-                  setRenameAsked(renameAsked + 1);
-                }
-              : undefined
+      <div {...stylex.props(styles.above)}>
+        <BarActions
+          close={
+            onClose === undefined ? undefined : (
+              <BarClose label={words.close} onClick={onClose} />
+            )
           }
-          menu={menu}
-          words={words}
-        />
-        {actions}
-        {onClose === undefined ? null : (
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={Cross}
-            aria-label={words.close}
-            onClick={onClose}
+        >
+          <HeadControls
+            setPlacement={setPlacement}
+            next={next}
+            pageHref={pageHref}
+            pageRender={pageRender}
+            expanded={expanded}
+            onExpandedChange={onExpandedChange}
+            narrow={narrow}
+            onRename={
+              renamable(title)
+                ? () => {
+                    setRenameAsked(renameAsked + 1);
+                  }
+                : undefined
+            }
+            menu={menu}
+            words={words}
           />
-        )}
+          {actions}
+        </BarActions>
       </div>
     </div>
   );

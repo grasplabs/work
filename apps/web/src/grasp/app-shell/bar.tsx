@@ -573,7 +573,7 @@ const styles = stylex.create({
     marginInlineStart: 0,
     minWidth: "auto",
   },
-  // The bar's end, at its end: the page's actions, then the shell's own button, the bar's gap apart.
+  // The bar's end, at its end: the page's actions, then the shell's own button, Bar actions' gap apart.
   // Once the crumbs have given way and the bar is still too narrow (`data-tight`, fitBar), the end
   // gives way before it leaves the window: the actions shrink in their own row (a TabsNav there
   // folds; buttons scroll sideways, Tab still reaching each), and what the shell puts after them
@@ -583,7 +583,7 @@ const styles = stylex.create({
     flexShrink: { default: 0, [stylex.when.ancestor("[data-tight]")]: 1 },
     minWidth: { default: null, [stylex.when.ancestor("[data-tight]")]: 0 },
     alignItems: "center",
-    gap: grasp.space3,
+    gap: grasp.space2,
     marginInlineStart: "auto",
   },
   // The action items: never shrinking, each whole or folded away into More, which shows once any has.

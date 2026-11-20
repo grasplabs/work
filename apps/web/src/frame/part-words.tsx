@@ -20,6 +20,7 @@ import {
   artifactViewerBoxWords,
   englishLabels as artifactViewerWords,
 } from "../grasp/artifact-viewer/words.ts";
+import { askBarWords } from "../grasp/ask-bar/words.ts";
 import { audioPlayerWords } from "../grasp/audio-player/words.ts";
 import { avatarGroupWords } from "../grasp/avatar/words.ts";
 import {
@@ -143,6 +144,7 @@ const englishDraftWords: DraftWords = {
 export const englishPartWords: GraspWordsCatalog = {
   "app-shell-panel": appShellPanelWords,
   agentActivity: agentActivityWords,
+  askBar: askBarWords,
   alert: alertWords,
   appBuilding: appBuildingWords,
   artifactViewer: artifactViewerWords,
@@ -361,6 +363,18 @@ export const usePartWords = (): GraspWordsCatalog => {
       retry: t`Try again`,
       how: t`Click or drop a picture.`,
       refused: (name, reason) => refusedFile(name, reason, true),
+    },
+    askBar: {
+      failed: t`Could not send`,
+      working: t`Working`,
+      target: t({ message: "Target", context: "pick a part of the page" }),
+      dictate: t`Dictate`,
+      pick: t`Pick a part of the page. Escape to stop.`,
+      untitled: t`New chat`,
+      newChat: t`New chat`,
+      expand: t`Full screen`,
+      dock: t`Dock beside the page`,
+      close: t`Close the chat`,
     },
     agentActivity: {
       states: {

@@ -4867,6 +4867,7 @@ msgid "Close it"
 msgstr "Close it"
 
 #: src/frame/app-frame.tsx
+#: src/frame/part-words.tsx
 msgid "Close the chat"
 msgstr "Close the chat"
 
@@ -11206,6 +11207,7 @@ msgstr "New board goal"
 
 #: src/chat/chat-panel.tsx
 #: src/chat/chat-window.tsx
+#: src/frame/part-words.tsx
 msgid "New chat"
 msgstr "New chat"
 
@@ -13484,6 +13486,10 @@ msgstr "Phone"
 msgctxt "a screen width"
 msgid "Phone"
 msgstr "Phone"
+
+#: src/frame/part-words.tsx
+msgid "Pick a part of the page. Escape to stop."
+msgstr "Pick a part of the page. Escape to stop."
 
 #: src/apps/field-editor.tsx
 msgid "Pick a table"
@@ -17048,6 +17054,11 @@ msgid "Talking to your team"
 msgstr "Talking to your team"
 
 #: src/projects/project-dialog.tsx
+msgid "Target"
+msgstr "Target"
+
+#: src/frame/part-words.tsx
+msgctxt "pick a part of the page"
 msgid "Target"
 msgstr "Target"
 

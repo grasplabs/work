@@ -32,7 +32,8 @@ interface PanelSectionBase {
   label: string;
   /**
    * One sentence that says what the section is for, in a tooltip on the label, which then wears a
-   * dashed underline ("What starts this agent: a schedule, an event or a person.").
+   * dashed underline ("What starts this agent: a schedule, an event or a person."). In one panel,
+   * every section has a hint or none does, so a lone dashed title never stands out.
    */
   hint?: string;
   /** At the end of the label's row: one quiet action, a RowListAction ("Add") or a two-way ToggleGroup. */

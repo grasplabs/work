@@ -14,6 +14,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 
+import { barActionSize } from "../../bar-actions/bar-actions";
 import { Button } from "../../button";
 import { Agent, Workflow } from "../../icons";
 import { InspectorPanel } from "../../inspector-panel";
@@ -41,7 +42,6 @@ import type { AppIntegrationWords } from "./words";
 
 const styles = stylex.create({
   fill: { height: "100%" },
-  actions: { display: "flex", alignItems: "center", gap: grasp.space2 },
   // What Grasp can do: the bar at the panel's inset, then the groups.
   can: { display: "grid", gap: grasp.space2 },
   // The bar, then a line across the panel's inset, then the groups.
@@ -187,7 +187,7 @@ export const AppPanel = ({
   const settings = (
     <Button
       variant="quiet"
-      size="xs"
+      size={barActionSize}
       render={<a href={settingsHref} aria-label={words.settings} />}
     >
       {words.settings}
@@ -222,25 +222,25 @@ export const AppPanel = ({
                 : undefined
             }
             actions={
-              <span {...stylex.props(styles.actions)}>
+              <>
                 {asksConnect(app) ? (
                   <ConnectAction
                     app={app}
                     actions={actions}
                     words={words}
-                    size="xs"
+                    size={barActionSize}
                   />
                 ) : (
                   <ManageMenu
                     app={app}
                     actions={actions}
                     words={words}
-                    size="xs"
+                    size={barActionSize}
                     asState
                   />
                 )}
                 {settings}
-              </span>
+              </>
             }
             onClose={close}
             sections={sectionsOf(app, settingsHref, words)}
