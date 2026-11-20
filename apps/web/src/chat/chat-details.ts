@@ -1,6 +1,8 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import { useEffect, useState } from "react";
 
+import { integrationKey } from "../connections/integrations.ts";
+import { brandOf } from "../connections/provider-mark.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -19,6 +21,13 @@ export interface ChatNames {
 }
 
 /**
+ * The Memory collection's ID, which core gives no other collection
+ * (apps/core/src/knowledge/memory-files.ts `memoryCollectionId`): what the
+ * chat read there is the company's memory.
+ */
+const memoryCollectionId = "memory";
+
+/**
  * The names of the collections and connections the person can see, by
  * ID: a list refused only leaves those IDs unnamed.
  */
@@ -32,14 +41,22 @@ const readSourceNames = async (
   const names = new Map<string, SourceName>();
   if (collections.status === "fulfilled") {
     for (const { id, name } of collections.value) {
-      names.set(id, { name, kind: "collection" });
+      names.set(id, {
+        name,
+        kind: id === memoryCollectionId ? "memory" : "collection",
+      });
     }
   }
   if (connections.status === "fulfilled") {
-    for (const { id, provider, accountName } of connections.value) {
+    for (const { id, source, provider, accountName } of connections.value) {
+      const brand = brandOf(provider, provider);
       names.set(id, {
         name: accountName === null ? provider : `${provider} (${accountName})`,
         kind: "connection",
+        ...(source === "http"
+          ? {}
+          : { integration: integrationKey(source, provider) }),
+        ...(brand === undefined ? {} : { brand }),
       });
     }
   }

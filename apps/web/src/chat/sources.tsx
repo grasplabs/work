@@ -2,58 +2,53 @@ import type { ChatCitedDocument, ChatProvenance } from "@grasp-os/shared/chat";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link as RouterLink } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { createContext, use, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Badge } from "../grasp/badge/index.ts";
-import { Collapsible } from "../grasp/collapsible/index.ts";
-import { Cable, Folder, Icon } from "../grasp/icons/index.ts";
-import { Link } from "../grasp/link/index.ts";
-import { Text } from "../grasp/text/index.ts";
+import type { Brand } from "../grasp/brand-icon/index.ts";
+import { Folder } from "../grasp/icons/index.ts";
+import { SourceList, Sources } from "../grasp/sources/index.ts";
+import type { Source, SourcesLabels } from "../grasp/sources/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
 // What the chat's answers may hold, on Grasp UI's parts: the
-// collections and connections core says the chat read from, each
-// collection one link away in Knowledge; and what each stored answer
-// cites (`AnswerCited`), which chat/answer-words.tsx lists under it. Only
-// what core reports: the page never guesses a source.
+// collections and connections core says the chat read from, as the
+// library's SourceList, each opening where Grasp shows it; and what each
+// stored answer cites (`AnswerCited`), which chat/answer-words.tsx lists
+// under it. Only what core reports: the page never guesses a source.
 
 /** A source the chat read, as the page names it. */
 export interface SourceName {
   name: string;
-  /** A collection opens in Knowledge; a connection is only named. */
-  kind: "collection" | "connection";
+  /**
+   * A collection opens in Knowledge, and so does Memory, the company's
+   * memory files; a connection opens on its integration's page.
+   */
+  kind: "collection" | "memory" | "connection";
+  /** A connection's integration, as the address names it (`native:microsoft`); none for an HTTP connection. */
+  integration?: string;
+  /** A connection's app, whose mark it wears. */
+  brand?: Brand;
 }
 
 const styles = stylex.create({
   // What the chat read, under its last answer, before the box.
-  row: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "flex-start",
-    gap: grasp.space2,
-  },
-  list: {
+  sources: {
     display: "grid",
     gap: grasp.space2,
-    margin: 0,
-    padding: 0,
-    listStyle: "none",
   },
-  item: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-  },
+  // The badge at its own width, over the list's full one.
+  restricted: { display: "flex" },
 });
 
 /**
  * What the chat's answers drew on, as core says: whether the chat's agent
- * was restricted, and the collections and connections it read, folded, a
- * collection one link away in Knowledge.
+ * was restricted, and the collections and connections it read, as the
+ * library's pile of sources, opened into its list.
  */
 export const ChatSources = ({
   provenance,
@@ -62,52 +57,83 @@ export const ChatSources = ({
 }: {
   provenance: ChatProvenance;
   names: ReadonlyMap<string, SourceName>;
-  /** Whether the fold of sources shows: not where something nearer says it, or wants the eye. */
+  /** Whether the sources show: not where something nearer says it, or wants the eye. */
   sourcesShown?: boolean;
 }) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
   const { restricted } = provenance;
-  const sources = sourcesShown ? provenance.sources : [];
-  const count = sources.length;
-  if (count === 0 && !restricted) {
+  const read = (sourcesShown ? provenance.sources : []).map((id) => ({
+    id,
+    name: names.get(id) ?? { name: id, kind: "connection" as const },
+  }));
+  if (read.length === 0 && !restricted) {
     return null;
   }
+  const items = read.map(({ name }): Source => {
+    if (name.kind === "connection") {
+      return {
+        kind: "record",
+        title: name.name,
+        origin: t`Connection`,
+        ...(name.brand === undefined ? {} : { brand: name.brand }),
+      };
+    }
+    return {
+      kind: name.kind === "memory" ? "memory" : "file",
+      title: name.name,
+      origin: t`Knowledge`,
+      ...(name.kind === "memory" ? {} : { icon: Folder }),
+    };
+  });
+  // What the chat reads are collections and connections, not single
+  // files and records: the pile and the groups say so.
+  const labels: Partial<SourcesLabels> = {
+    kind: (kind, count) => {
+      if (kind === "memory") {
+        return t`${plural(count, { one: "# memory", other: "# memories" })}`;
+      }
+      if (kind === "record") {
+        return t`${plural(count, { one: "# connection", other: "# connections" })}`;
+      }
+      return t`${plural(count, { one: "# collection", other: "# collections" })}`;
+    },
+  };
   return (
-    <div {...stylex.props(styles.row)}>
-      {restricted ? <Badge tone="attention">{t`Restricted`}</Badge> : null}
-      {count === 0 ? null : (
-        <Collapsible
-          fit
-          title={t`${plural(count, { one: "Answers draw on # source", other: "Answers draw on # sources" })}`}
+    <div {...stylex.props(styles.sources)}>
+      {restricted ? (
+        <div {...stylex.props(styles.restricted)}>
+          <Badge tone="attention">{t`Restricted`}</Badge>
+        </div>
+      ) : null}
+      {items.length === 0 ? null : (
+        <Sources
+          items={items}
+          labels={labels}
+          onOpen={(_source, index) => {
+            const source = read[index];
+            if (source === undefined) {
+              return;
+            }
+            if (source.name.kind !== "connection") {
+              void navigate({
+                to: "/knowledge/$collection",
+                params: { collection: source.id },
+                search: {},
+              });
+            } else if (source.name.integration === undefined) {
+              void navigate({ to: "/integrations", search: {} });
+            } else {
+              void navigate({
+                to: "/integrations/$integration",
+                params: { integration: source.name.integration },
+                search: {},
+              });
+            }
+          }}
         >
-          <ul {...stylex.props(styles.list)}>
-            {sources.map((id) => {
-              const source = names.get(id);
-              const name = source?.name ?? id;
-              return (
-                <li key={id} {...stylex.props(styles.item)}>
-                  <Icon icon={source?.kind === "collection" ? Folder : Cable} />
-                  {source?.kind === "collection" ? (
-                    <Link
-                      render={
-                        <RouterLink
-                          params={{ collection: id }}
-                          search={{}}
-                          to="/knowledge/$collection"
-                        />
-                      }
-                      variant="standalone"
-                    >
-                      {name}
-                    </Link>
-                  ) : (
-                    <Text size="sm">{name}</Text>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </Collapsible>
+          <SourceList />
+        </Sources>
       )}
     </div>
   );
