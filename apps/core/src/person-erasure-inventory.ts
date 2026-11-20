@@ -54,6 +54,14 @@ export type ErasureClass =
 /** A table that holds no person at all. */
 export const noPerson = { none: "holds no person" } as const;
 
+/**
+ * The tables App visitors left (GRA-2235): a migration emptied them, and
+ * nothing writes them, until a later release drops them (GRA-2253).
+ */
+const appVisitorsGone = {
+  none: "emptied when App visitors went, and nothing writes it",
+} as const;
+
 /** Every table of core's and the Brain's databases, by `<database>.<table>`. */
 export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // Core's database.
@@ -85,7 +93,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.sign_in_addresses": { erased: "identity" },
   "core.members": { erased: "removal" },
   "core.member_removals": { kept: "keeps someone removed out" },
-  "core.person_erasures": { kept: "the erasure's own record, by ID" },
+  "core.person_erasures": {
+    kept: "the erasure's own record, by ID, with the name they had; a guest has none, and their address is never kept",
+  },
   "core.person_erasure_areas": { kept: "the erasure's own record, by ID" },
   "core.erased_subjects": {
     kept: "keeps someone erased out, as keyed hashes of their sign-in subjects",
@@ -296,27 +306,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   // Unused since GRA-2234, kept for a rollback to the release before.
   "core.guest_chats": { company: "guest chats they opened for an App" },
-  // An App's visitor list (app-visitors.ts): the company's, as its builders
-  // keep it, with the builder who listed each entry (`added_by`). An entry
-  // may be a member's own address; it stays, the list's to change, never
-  // the erasure's (a decision for Nick: see the PR).
-  "core.app_visitor_entries": {
-    company: "an App's visitor list, and the builder who listed each",
-  },
-  // The App functions a version grants its visitors (app-visitor-grants.ts),
-  // with the builder who granted each (`granted_by`): the App's own
-  // settings, as other settings a builder changed are.
-  "core.app_visitor_grants": {
-    company: "the functions builders granted an App's visitors",
-  },
-  // A visitor's codes and sessions name them only by address, mostly an
-  // outside visitor's, and are short-lived: a code works 10 minutes and
-  // its row goes an hour after, a session lasts 8 hours at most, and the
-  // sweep deletes both. A member's own address may be listed (or their
-  // domain), so the rows under the address that was theirs go with their
-  // email, in the identity area's batch.
-  "core.app_visitor_codes": { erased: "identity" },
-  "core.app_visitor_sessions": { erased: "identity" },
+  // Unused since GRA-2235, kept for a rollback to the release before.
+  "core.app_visitor_entries": appVisitorsGone,
+  "core.app_visitor_grants": appVisitorsGone,
+  "core.app_visitor_codes": appVisitorsGone,
+  "core.app_visitor_sessions": appVisitorsGone,
   // An App's webhooks (app-webhooks.ts): the company's settings, naming
   // the builder who added each and the admin who approved its URL, as
   // other settings name who changed them.
@@ -393,7 +387,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
   },
   "core.verifications": {
-    kept: "a sign-in's state for its minutes, by a random identifier",
+    kept: "a sign-in's state for its minutes, by a random identifier; a guest's codes sent, by their ID; a guest's outstanding code, by their address, deleted with their removal and erasure",
   },
   "core.audit_outbox": { kept: "audit events on their way to the log (D2)" },
   "core.audit_outbox_rejected": { kept: "audit events the log refused (D2)" },

@@ -70,6 +70,7 @@ import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { DirectoryReads } from "../settings/directory-reads.tsx";
 import { RemovedActions, useRemovedPeople } from "../settings/erasures.tsx";
+import { Guests } from "../settings/guests.tsx";
 import {
   copyEmail,
   InvitationActions,
@@ -734,12 +735,15 @@ const MembersPage = () => {
   return (
     <div {...stylex.props(styles.page)}>
       {page.state === "ready" ? (
-        <PeopleTable
-          invitations={page.data.invitations}
-          me={identity.userId}
-          members={page.data.members}
-          removed={page.data.removed}
-        />
+        <>
+          <PeopleTable
+            invitations={page.data.invitations}
+            me={identity.userId}
+            members={page.data.members}
+            removed={page.data.removed}
+          />
+          <Guests guests={page.data.guests} />
+        </>
       ) : (
         <SectionCard variant="grouped" density="compact" title={t`Members`}>
           <SectionNotLoaded page={page} />
@@ -818,11 +822,12 @@ export const Route = createFileRoute("/_shell/settings/members")({
   component: MembersPage,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [members, invitations, removed] = await Promise.all([
+      const [members, invitations, guests, removed] = await Promise.all([
         session.members.list(),
         session.members.invitations(),
+        session.members.guests(),
         session.members.removed(),
       ]);
-      return { members, invitations, removed };
+      return { members, invitations, guests, removed };
     }),
 });

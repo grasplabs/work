@@ -2017,10 +2017,6 @@ msgstr "Un type que déclare le code de l’App"
 msgid "A version's definition and source"
 msgstr "Définition et source d’une version"
 
-#: src/apps/app-data.tsx
-msgid "A visitor"
-msgstr "Un visiteur"
-
 #: src/apps/draft-changes.tsx
 #: src/settings/event-sources.tsx
 msgid "A workflow"
@@ -3344,6 +3340,10 @@ msgstr "Apps qu’il utilise"
 msgid "Apps it works in"
 msgstr "Applications dans lesquelles il travaille"
 
+#: src/routes/guest.tsx
+msgid "Apps shared with you"
+msgstr "Apps partagées avec vous"
+
 #: src/chat/agent-change-card.tsx
 msgid "Apps taken off"
 msgstr "Apps retirées"
@@ -3499,6 +3499,10 @@ msgstr "Demander {app}"
 #: src/chat/chat-subject.ts
 msgid "Ask for a change"
 msgstr "Demander une modification"
+
+#: src/guest-sign-in.tsx
+msgid "Ask for a new code"
+msgstr "Demander un nouveau code"
 
 #: src/apps/app-access-requests.tsx
 msgid "Ask for access"
@@ -3790,6 +3794,7 @@ msgstr "Disponible, via Composio"
 #: src/connections/integrations-sidebar.tsx
 #: src/frame/part-words.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
+#: src/guest-sign-in.tsx
 #: src/inbox/item-detail.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Back"
@@ -4969,6 +4974,7 @@ msgstr "Clôturer les comptes et produire les chiffres que regarde la direction.
 
 #: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
+#: src/guest-sign-in.tsx
 msgid "Code"
 msgstr "Code"
 
@@ -6841,6 +6847,10 @@ msgstr "E-mail et connexions"
 msgid "Email invoices"
 msgstr "Factures par e-mail"
 
+#: src/guest-sign-in.tsx
+msgid "Email me a code"
+msgstr "M’envoyer un code par e-mail"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Email payment receipts"
 msgstr "Reçus de paiement par e-mail"
@@ -8340,6 +8350,10 @@ msgstr "Grasp y travaille encore…"
 msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 msgstr "Grasp écrit votre export. Cela prend une minute ou deux ; il s’affiche ici dès qu’il est prêt, et vous pouvez quitter cette page en attendant."
 
+#: src/guest-sign-in.tsx
+msgid "Grasp isn't open yet. Try again later."
+msgstr "Grasp n’est pas encore ouvert. Réessayez plus tard."
+
 #: src/apps/draft-changes.tsx
 msgid "Grasp itself"
 msgstr "Grasp lui-même"
@@ -8504,6 +8518,12 @@ msgstr "L'équipe de Grasp peut aider ici jusque-là"
 msgid "Grid"
 msgstr "Grille"
 
+#: src/drafts/sharing.tsx
+#: src/settings/erasures.tsx
+#: src/settings/guests.tsx
+msgid "Guest"
+msgstr "Invité"
+
 #: src/frame/part-words.tsx
 msgid "Guest accounts can't sign in."
 msgstr "Les comptes invités ne peuvent pas se connecter."
@@ -8511,6 +8531,10 @@ msgstr "Les comptes invités ne peuvent pas se connecter."
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Les comptes invités ne peuvent pas se connecter. Utilisez un compte propre à votre organisation."
+
+#: src/settings/guests.tsx
+msgid "Guests"
+msgstr "Invités"
 
 #: src/activity/audit-words.ts
 msgid "Had the Brain forget a record"
@@ -9065,6 +9089,10 @@ msgstr "S’il n’y a rien à faire, dis-le en une ligne et arrête-toi."
 msgid "If you can't find the answer, say so and say who might know."
 msgstr "Si tu ne trouves pas la réponse, dis-le et indique qui pourrait savoir."
 
+#: src/guest-sign-in.tsx
+msgid "If you were invited, a code is on its way to you. It works for five minutes."
+msgstr "Si vous avez été invité, un code est en route. Il est valable cinq minutes."
+
 #: src/frame/part-words.tsx
 msgid "Image {number}"
 msgstr "Image {number}"
@@ -9350,9 +9378,21 @@ msgstr "Invité"
 msgid "Invited {date}"
 msgstr "Invité le {date}"
 
+#: src/activity/audit-words.ts
+msgid "Invited a guest"
+msgstr "A ajouté un invité"
+
+#: src/routes/sign-in.tsx
+msgid "Invited as a guest?"
+msgstr "Vous êtes invité ?"
+
 #: src/brain/brain.ts
 msgid "Invited for step 2"
 msgstr "Équipes invitées à l’étape 2"
+
+#: src/settings/guests.tsx
+msgid "Invited on {date}"
+msgstr "Invité le {date}"
 
 #: src/activity/audit-words.ts
 msgid "Invited someone"
@@ -10203,10 +10243,6 @@ msgid "Let an App's data go to a webhook"
 msgstr "A autorisé les données d'une application à aller vers un webhook"
 
 #: src/activity/audit-words.ts
-msgid "Let an App's visitors use one of its functions"
-msgstr "A autorisé les visiteurs d’une application à utiliser l’une de ses fonctions"
-
-#: src/activity/audit-words.ts
 msgid "Let an erased member's old address in again"
 msgstr "A réadmis l'ancienne adresse d'un membre effacé"
 
@@ -10237,10 +10273,6 @@ msgstr "Permettre aux personnes de créer leurs propres agents"
 #: src/agents/agent-templates.ts
 msgid "Let someone understand a long document in two minutes."
 msgstr "Permets de comprendre un long document en deux minutes."
-
-#: src/activity/audit-words.ts
-msgid "Let someone visit an App"
-msgstr "A autorisé quelqu’un à visiter une application"
 
 #: src/settings/directory-placement.tsx
 msgid "Let the directory decide"
@@ -12397,6 +12429,14 @@ msgstr "Rien n’est envoyé ni modifié sur {connection} tant que vous ne l’a
 msgid "Nothing is shared with the project, so they lose no access."
 msgstr "Rien n’est partagé avec le projet, donc ils ne perdent aucun accès."
 
+#: src/guest-sign-in.tsx
+msgid "Nothing is shared with you yet"
+msgstr "Rien n’est encore partagé avec vous"
+
+#: src/routes/guest.tsx
+msgid "Nothing is shared with you yet."
+msgstr "Rien n’est encore partagé avec vous."
+
 #: src/frame/part-words.tsx
 msgid "Nothing matches “{query}”."
 msgstr "Rien ne correspond à « {query} »."
@@ -13584,6 +13624,10 @@ msgstr "Personnes dedans : {count}"
 msgid "People in these teams: {named}"
 msgstr "Les personnes de ces équipes : {named}"
 
+#: src/settings/guests.tsx
+msgid "People outside your organization, invited to what is shared with them. They reach nothing else."
+msgstr "Des personnes extérieures à votre organisation, invitées à ce qui est partagé avec elles. Elles n’accèdent à rien d’autre."
+
 #: src/onboarding/setup-steps.tsx
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "Les gens répondent plus volontiers quand ils savent pourquoi je les contacte. J’ai rédigé un message que vous pouvez envoyer vous-même. Choisissez ensuite le jour où les entretiens commencent."
@@ -14465,6 +14509,7 @@ msgstr "Recharger"
 #: src/interview/transcript.tsx
 #: src/onboarding/document-drop.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 msgid "Remove"
 msgstr "Retirer"
 
@@ -14476,6 +14521,10 @@ msgstr "Retirer"
 #: src/agents/setup/apps-step.tsx
 msgid "Remove {appName}"
 msgstr "Retirer {appName}"
+
+#: src/settings/guests.tsx
+msgid "Remove {email}?"
+msgstr "Retirer {email} ?"
 
 #: src/agents/agent-documents.tsx
 #: src/onboarding/document-drop.tsx
@@ -14553,6 +14602,10 @@ msgstr "Supprimer les espaces au début et à la fin"
 #: src/apps/app-data-model.tsx
 msgid "Remove table"
 msgstr "Supprimer la table"
+
+#: src/settings/guests.tsx
+msgid "Remove the guest {email}"
+msgstr "Retirer l’invité {email}"
 
 #: src/apps/indexes-view.tsx
 msgid "Remove the index {indexName}"
@@ -16319,6 +16372,7 @@ msgid "Sidebar"
 msgstr "Barre latérale"
 
 #: src/connections/connect-dialog.tsx
+#: src/guest-sign-in.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Sign in"
 msgstr "Se connecter"
@@ -16366,12 +16420,18 @@ msgstr "Connectez-vous pour ouvrir votre entretien"
 msgid "Sign in with {label}"
 msgstr "Se connecter avec {label}"
 
+#: src/routes/sign-in.tsx
+msgid "Sign in with a code"
+msgstr "Se connecter avec un code"
+
 #: src/sign-in-errors.ts
 msgid "Sign in with your organization's account."
 msgstr "Connectez-vous avec le compte de votre organisation."
 
 #: src/grasp/frame/grasp-sidebar.tsx
+#: src/guest-sign-in.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
@@ -16427,16 +16487,16 @@ msgid "Signed in as"
 msgstr "Connecté en tant que"
 
 #: src/activity/audit-words.ts
+msgid "Signed in as a guest"
+msgstr "S’est connecté en tant qu’invité"
+
+#: src/activity/audit-words.ts
 msgid "Signed in for the first time, after joining from the directory"
 msgstr "S’est connecté pour la première fois, après avoir rejoint depuis l’annuaire"
 
 #: src/activity/audit-words.ts
 msgid "Signed in to a connection again"
 msgstr "S’est reconnecté à une connexion"
-
-#: src/activity/audit-words.ts
-msgid "Signed in to an App as a visitor"
-msgstr "S’est connecté à une application en tant que visiteur"
 
 #: src/frame/part-words.tsx
 msgctxt "state of one app"
@@ -16446,10 +16506,6 @@ msgstr "Déconnecté"
 #: src/activity/audit-words.ts
 msgid "Signed out a device"
 msgstr "A déconnecté un appareil"
-
-#: src/activity/audit-words.ts
-msgid "Signed out of an App as a visitor"
-msgstr "S’est déconnecté d’une application en tant que visiteur"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -16471,6 +16527,10 @@ msgstr "La connexion est enregistrée par le service de connexion de votre entre
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "La déconnexion n'a pas abouti"
+
+#: src/guest-sign-in.tsx
+msgid "Signing out didn't work. Try again."
+msgstr "La déconnexion n’a pas fonctionné. Réessayez."
 
 #: src/settings/staff-access.tsx
 msgid "Signs everyone from Grasp out of this workspace"
@@ -17057,10 +17117,6 @@ msgid "Stopped a schedule that kept failing"
 msgstr "A arrêté une planification qui échouait sans cesse"
 
 #: src/activity/audit-words.ts
-msgid "Stopped an App's visitors using one of its functions"
-msgstr "A retiré aux visiteurs d’une application l’une de ses fonctions"
-
-#: src/activity/audit-words.ts
 msgid "Stopped following what changes at a connection"
 msgstr "A arrêté de suivre ce qui change sur une connexion"
 
@@ -17072,10 +17128,6 @@ msgstr "A cessé d’associer un groupe de l’annuaire à une équipe"
 msgctxt "inbox item kind"
 msgid "Stopped schedule"
 msgstr "Planification arrêtée"
-
-#: src/activity/audit-words.ts
-msgid "Stopped someone visiting an App"
-msgstr "A retiré à quelqu’un l’accès visiteur à une application"
 
 #: src/activity/audit-words.ts
 msgid "Stopped the Brain using someone's workflow results, as they lost the workflow"
@@ -17541,9 +17593,17 @@ msgstr "L’adresse e-mail de ce compte n’est pas vérifiée."
 msgid "That address wasn’t kept out."
 msgstr "Cette adresse n’était pas bloquée."
 
+#: src/guest-sign-in.tsx
+msgid "That code didn't work. Check it, or ask for a new one."
+msgstr "Ce code n’a pas fonctionné. Vérifiez-le ou demandez-en un nouveau."
+
 #: src/interview/api.ts
 msgid "That didn't work. Try again in a moment."
 msgstr "Cela n’a pas fonctionné. Réessayez dans un instant."
+
+#: src/guest-sign-in.tsx
+msgid "That didn't work. Try again."
+msgstr "Cela n’a pas fonctionné. Réessayez."
 
 #: src/sign-in-errors.ts
 msgid "That email address already signs in with another account."
@@ -18451,6 +18511,10 @@ msgstr "Ces notes ne reposent sur rien d'autre et partent aussi : {named} et {mo
 msgid "These notes rest on nothing else and go too: {named}."
 msgstr "Ces notes ne reposent sur rien d'autre et partent aussi : {named}."
 
+#: src/settings/guests.tsx
+msgid "They are signed out everywhere and cannot sign in again."
+msgstr "Ils sont déconnectés partout et ne peuvent plus se reconnecter."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "La personne est déconnectée partout, ses connexions personnelles sont coupées et elle ne peut plus se connecter."
@@ -18977,6 +19041,10 @@ msgstr "Trop volumineux : {most} au maximum"
 msgid "Too many files are moving at once. Try again shortly."
 msgstr "Trop de fichiers sont transférés en même temps. Réessayez dans un instant."
 
+#: src/guest-sign-in.tsx
+msgid "Too many tries. Wait a minute, then try again."
+msgstr "Trop d’essais. Attendez une minute, puis réessayez."
+
 #: src/activity/audit-words.ts
 msgid "Took a reply to a run's email"
 msgstr "A reçu une réponse à l’e-mail d’une exécution"
@@ -19499,10 +19567,6 @@ msgstr "{tool} utilisé"
 msgid "Used a connected tool"
 msgstr "A utilisé un outil connecté"
 
-#: src/activity/audit-words.ts
-msgid "Used an App's function as a visitor"
-msgstr "A utilisé une fonction d’une application en tant que visiteur"
-
 #: src/frame/part-words.tsx
 msgid "Used by"
 msgstr "Utilisé par"
@@ -19726,14 +19790,6 @@ msgstr "Page Vision"
 msgid "Vision page confirmed"
 msgstr "Page Vision confirmée"
 
-#: src/activity/audit-event.tsx
-msgid "Visitor"
-msgstr "Visiteur"
-
-#: src/activity/audit-log.tsx
-msgid "Visitor of {app}"
-msgstr "Visiteur de {app}"
-
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volume"
@@ -19898,16 +19954,12 @@ msgid "Was refused approving packages that couldn't be checked"
 msgstr "N'a pas pu approuver des paquets qui n'ont pas pu être vérifiés"
 
 #: src/activity/audit-words.ts
-msgid "Was refused as an App's visitor"
-msgstr "A été refusé comme visiteur d’une application"
-
-#: src/activity/audit-words.ts
 msgid "Was refused packages known as malware"
 msgstr "Paquets refusés car connus comme logiciels malveillants"
 
 #: src/activity/audit-words.ts
-msgid "Was sent a code to visit an App"
-msgstr "A reçu un code pour visiter une application"
+msgid "Was sent a code to sign in as a guest"
+msgstr "A reçu un code pour se connecter en tant qu’invité"
 
 #: src/brain/brain.ts
 msgid "Was the {role}"
@@ -21418,6 +21470,10 @@ msgstr "Vous êtes hors ligne. Connectez-vous une fois de retour en ligne."
 msgid "You’re seeing your version."
 msgstr "Vous voyez votre version."
 
+#: src/guest-sign-in.tsx
+msgid "You’re signed in as a guest with {email}. What someone shares with you shows here."
+msgstr "Vous êtes connecté en tant qu’invité avec {email}. Ce que l’on partage avec vous s’affiche ici."
+
 #: src/frame/person-menu.tsx
 msgid "You're still signed in. Try again in a moment."
 msgstr "Vous êtes toujours connecté. Réessayez dans un instant."
@@ -21524,6 +21580,10 @@ msgstr "Vos conversations dans les applications de chat"
 #: src/brain/memories-page.tsx
 msgid "Your correction is kept as your own word, for you alone, and shown beside what the Brain holds. What others read stays as it is."
 msgstr "Votre correction est conservée comme votre propre parole, pour vous seul, et affichée à côté de ce que retient le Brain. Ce que lisent les autres reste inchangé."
+
+#: src/guest-sign-in.tsx
+msgid "Your email address"
+msgstr "Votre adresse e-mail"
 
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's model"

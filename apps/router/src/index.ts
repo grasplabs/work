@@ -1,4 +1,3 @@
-import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { channelsApiPath } from "@grasp-os/shared/channels";
 import { requestErrors } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
@@ -157,8 +156,8 @@ const authBasePath = "/api/auth";
 
 /**
  * The limits' window, as `AUTH_RATE_LIMIT`, `INTERVIEW_RATE_LIMIT`,
- * `CHANNELS_RATE_LIMIT`, `VISITOR_RATE_LIMIT` and `WEBHOOK_RATE_LIMIT` all
- * have it in wrangler.jsonc.
+ * `CHANNELS_RATE_LIMIT` and `WEBHOOK_RATE_LIMIT` all have it in
+ * wrangler.jsonc.
  */
 const limitPeriodS = 60;
 
@@ -264,7 +263,6 @@ const interviewLinkPaths: ReadonlySet<string> = new Set([
 /** The rate limiter bindings, in wrangler.jsonc. */
 type LimitBinding =
   | "AUTH_RATE_LIMIT"
-  | "VISITOR_RATE_LIMIT"
   | "CHANNELS_RATE_LIMIT"
   | "INTERVIEW_RATE_LIMIT"
   | "WEBHOOK_RATE_LIMIT"
@@ -281,11 +279,6 @@ const limitFor = (pathname: string): LimitBinding | undefined => {
     pathname === authBasePath || pathname.startsWith(`${authBasePath}/`);
   if (isAuth && pathname !== signOutPath) {
     return "AUTH_RATE_LIMIT";
-  }
-  // A visitor's endpoint (core's src/app-visitors.ts), where anyone can
-  // ask for a code or try one.
-  if (pathname === appVisitorApiPath) {
-    return "VISITOR_RATE_LIMIT";
   }
   // A chat platform's webhook (core's src/channels/door.ts), which anyone
   // can post to; core checks each request is the platform's own.

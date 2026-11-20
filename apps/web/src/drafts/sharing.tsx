@@ -115,6 +115,8 @@ interface MemberWords {
   project: (name: string) => string;
   /** A project the viewer isn't in, whose name is its members' alone. */
   unnamedProject: string;
+  /** Marks a guest, someone from outside the company, wherever they are listed. */
+  guest: string;
 }
 
 /** Who `member` is, in words: a person told apart from a namesake. */
@@ -166,6 +168,7 @@ const useMemberWords = (): MemberWords => {
     team: (team) => t`${team} (team)`,
     project: (project) => t`Everyone in ${project}`,
     unnamedProject: t`Everyone in a project you aren’t in`,
+    guest: t`Guest`,
   };
 };
 
@@ -192,7 +195,7 @@ const candidatesOf = (
   ...offered.people
     .filter(({ id }) => id !== owner)
     .map((person) => {
-      const note = apart.hint(person);
+      const note = person.guest === true ? words.guest : apart.hint(person);
       return {
         id: keyOf({ type: "person", id: person.id }),
         name: person.name,
@@ -309,6 +312,7 @@ const ShareWith = ({
         members={members.map((member) => ({
           id: keyOf(member),
           name: named(member),
+          ...(member.guest === true ? { note: words.guest } : {}),
           kind: member.type === "team" ? "group" : member.type,
           level: member.role,
         }))}

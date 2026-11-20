@@ -2,7 +2,6 @@ import { adminCommandPath } from "@grasp-os/shared/admin-command";
 import { adminKickoffPath } from "@grasp-os/shared/admin-kickoff";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { aiStatusReportPath } from "@grasp-os/shared/ai-status-report";
-import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import {
   brainActionPath,
@@ -39,7 +38,6 @@ import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { aiStatusReportResponse } from "./ai-status-report.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
-import { appVisitorResponse } from "./app-visitors.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -218,9 +216,6 @@ const linkResponse = async (
   requestId: string,
   ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response | undefined> => {
-  if (pathname === appVisitorApiPath) {
-    return await appVisitorResponse(request, env, requestId, ctx);
-  }
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);
   }
@@ -450,7 +445,7 @@ const route = async (
     return frameCode;
   }
   if (isUnder(pathname, authBasePath)) {
-    return await handleAuthRequest(request, env, requestId);
+    return await handleAuthRequest(request, env, requestId, ctx);
   }
   const connection = await connectionRouteResponse(
     request,

@@ -14,6 +14,7 @@ import { DataPolicyRpc } from "./data-policy-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DirectoryGroupsRpc } from "./directory-groups.ts";
 import { DraftsRpc } from "./drafts-rpc.ts";
+import { membersOnly, openToGuests } from "./guest-access.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
 import { InstructionsRpc } from "./instructions-rpc.ts";
 import { MembersRpc } from "./members.ts";
@@ -58,7 +59,7 @@ import { WorkflowsRpc } from "./workflows/rpc.ts";
  */
 export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #env: Env;
-  readonly #check: SessionCheck;
+  readonly #whoami: SessionCheck;
   /** The check for what only the client's own members do. */
   readonly #full: SessionCheck;
   readonly #apps: AppsRpc;
@@ -106,9 +107,12 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     super();
     // Every view and action of Grasp's staff, on every namespace, is in
     // the client's audit log (staff-audit.ts): the one check they all ask.
-    const check = staffAudited(env, connectionCheck);
+    const audited = staffAudited(env, connectionCheck);
+    // A guest's connection is answered as nobody's everywhere but where
+    // guest-access.ts opens it to them (`openToGuests`).
+    const check = membersOnly(audited);
+    this.#whoami = openToGuests(audited, "whoami");
     this.#env = env;
-    this.#check = check;
     // Everything but the onboarding refuses Grasp staff (session-check.ts).
     const full = fullAccess(check);
     this.#full = full;
@@ -130,7 +134,9 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#decisions = new DecisionsRpc(env, full);
     this.#heldStarts = new HeldStartsRpc(env, full);
     this.#dependencies = new DependenciesRpc(env, full);
-    this.#pages = new PagesRpc(env, full);
+    this.#pages = new PagesRpc(env, full, (method) =>
+      fullAccess(openToGuests(audited, method))
+    );
     this.#dataPolicy = new DataPolicyRpc(env, full);
     this.#members = new MembersRpc(env, full);
     this.#directoryGroups = new DirectoryGroupsRpc(env, full);
@@ -328,7 +334,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   }
 
   async whoami(): Promise<Identity> {
-    return await withPerson(this.#check, (identity) => identity);
+    return await withPerson(this.#whoami, (identity) => identity);
   }
 
   async setName(name: string): Promise<void> {

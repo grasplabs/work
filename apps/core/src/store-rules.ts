@@ -21,13 +21,9 @@ import type { Fragment } from "./store-expressions.ts";
 //   for each invocation from core's own D1, the teams with them), and the
 //   rules come from the store's own record of the pinned schema, never
 //   from a request.
-// - A visitor (someone outside the organization an App was shared with)
-//   matches a person or team rule: they hold no App role and are in no
-//   team, and a person or team rule is only ever a condition for a member
-//   (`appMember` or `appBuilder`), so a visitor's session ID written into a
-//   person field reaches nothing. Visitors reach a ruled row only through
-//   `owner`. (A table with rules is `appMembers` or `appBuilders`
-//   besides, which admits no visitor in the first place.)
+// - A guest (app-access.ts) matches a team rule: they call as a user of
+//   the App by their own user ID, and are in no team, so no team rule
+//   admits them.
 // - A field's value is not what the rule expects (a number, an object,
 //   null, left out): only text compares, as `textExpression` reads it,
 //   and SQL NULL is folded to false term by term (`IFNULL`), so no
@@ -144,7 +140,7 @@ export const audienceKey = (
     ),
   ]);
 
-/** Whether the caller is a member of the App, never a visitor. */
+/** Whether the caller holds a role in the App. */
 const isMember = (caller: RuleCaller): boolean =>
   caller.appMember || caller.appBuilder;
 

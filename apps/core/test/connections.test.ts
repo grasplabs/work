@@ -869,4 +869,42 @@ describe("the revokes to make by hand", () => {
       removed: [{ ownerName: owner.name, ownerIsMember: false }],
     });
   });
+
+  it("shows a guest's stuck revoke as no member's (GRA-2235)", async () => {
+    const admin = await person("admin");
+    const owner = await person();
+    const connectionId = `connection-${crypto.randomUUID()}`;
+    const now = Date.now();
+    await connectDb().batch([
+      connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, account_id, account_email, created_at, updated_at) VALUES (?, 'sample-oauth', 'personal', ?, 'disconnected', 'native', 'sample-oauth', ?, ?, ?, ?)"
+        )
+        .bind(
+          connectionId,
+          owner.userId,
+          `acct-${connectionId}`,
+          "their@app.test",
+          now,
+          now
+        ),
+      connectDb()
+        .prepare(
+          "INSERT INTO token_revocations (id, connection_id, sealed, reason, attempts, retry_at, created_at) VALUES (?, ?, 'sealed', 'disconnected', 9, ?, ?)"
+        )
+        .bind(crypto.randomUUID(), connectionId, now + 3_600_000, now),
+    ]);
+    // A guest's membership: nobody becomes one from a member, so set by hand.
+    await env.DB.prepare("UPDATE members SET role = 'guest' WHERE user_id = ?")
+      .bind(owner.userId)
+      .run();
+
+    const toDo = await admin.connections.revocationsByHand();
+
+    expect(
+      toDo
+        .filter((each) => each.connectionId === connectionId)
+        .map(({ ownerIsMember }) => ownerIsMember)
+    ).toStrictEqual([false]);
+  });
 });

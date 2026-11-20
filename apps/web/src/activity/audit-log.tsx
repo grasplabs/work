@@ -585,13 +585,6 @@ export const actorOf = (
       id: actor.runId,
     };
   }
-  if (actor.type === "visitor") {
-    const app = appName(directory, actor.appId);
-    return {
-      label: i18n._(msg`Visitor of ${ph({ app })}`),
-      id: actor.sessionId ?? actor.appId,
-    };
-  }
   // The platform itself: a name, the same in every language.
   return { label: "Grasp" };
 };
@@ -637,8 +630,7 @@ export const actorIcon = (actor: AuditActor): IconData => {
     case "agent": {
       return Agent;
     }
-    case "app":
-    case "visitor": {
+    case "app": {
       return AppWindow;
     }
     case "workflow": {

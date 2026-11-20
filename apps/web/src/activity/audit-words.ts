@@ -215,45 +215,6 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     // Recorded for refusals and failures too, as a channel call is.
     text: msg`Sent an App's event to a webhook`,
   },
-  // A published App's visitors (core's src/app-visitors.ts), each
-  // action by name: an `app.visitor_*` action has no dotted prefix of its
-  // own, so it would otherwise read as `app`.
-  {
-    action: "app.visitor_listed",
-    text: msg`Let someone visit an App`,
-  },
-  {
-    action: "app.visitor_unlisted",
-    text: msg`Stopped someone visiting an App`,
-  },
-  {
-    action: "app.visitor_code_sent",
-    text: msg`Was sent a code to visit an App`,
-  },
-  {
-    action: "app.visitor_signed_in",
-    text: msg`Signed in to an App as a visitor`,
-  },
-  {
-    action: "app.visitor_signed_out",
-    text: msg`Signed out of an App as a visitor`,
-  },
-  {
-    action: "app.visitor_refused",
-    text: msg`Was refused as an App's visitor`,
-  },
-  {
-    action: "app.visitor_granted",
-    text: msg`Let an App's visitors use one of its functions`,
-  },
-  {
-    action: "app.visitor_ungranted",
-    text: msg`Stopped an App's visitors using one of its functions`,
-  },
-  {
-    action: "app.visitor_called",
-    text: msg`Used an App's function as a visitor`,
-  },
   { action: "app", text: msg`Changed an App` },
   { action: "session.ended", text: msg`Signed out a device` },
   { action: "organization.renamed", text: msg`Renamed the organization` },
@@ -297,6 +258,12 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "member.signed_in_from_directory",
     text: msg`Signed in for the first time, after joining from the directory`,
   },
+  { action: "member.guest_invited", text: msg`Invited a guest` },
+  {
+    action: "member.guest_code_sent",
+    text: msg`Was sent a code to sign in as a guest`,
+  },
+  { action: "member.guest_signed_in", text: msg`Signed in as a guest` },
   { action: "member", text: msg`Changed a member` },
   { action: "team.created", text: msg`Created a team` },
   { action: "team.deleted", text: msg`Deleted a team` },

@@ -78,9 +78,6 @@ const useKindWord = () => {
       case "workflow": {
         return t`Workflow run`;
       }
-      case "visitor": {
-        return t`Visitor`;
-      }
       case "system": {
         return "Grasp";
       }

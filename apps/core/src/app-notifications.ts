@@ -39,7 +39,7 @@ import {
 import type { AppSources } from "./app-provenance.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import { activeMember, mayAct, organizationId } from "./auth/auth.ts";
-import { memberOf } from "./auth/identity.ts";
+import { appUserOf } from "./auth/identity.ts";
 import {
   appMembers,
   apps,
@@ -73,11 +73,9 @@ import type { CallingAgent } from "./workflow-start-intents.ts";
 //   it names was told: only members call the App, and only they can ask.
 //   The row goes in only while they still are one (`activeMember`), and
 //   is listed only while they can still open the App.
-// - A visitor, or a run, telling people: a visitor's call (someone who
-//   is no member, opening a published App) and a call from a workflow's
-//   run have no `people` on their invocation (app-functions.ts), so their send is
-//   refused (`permission.unavailable`), never narrowed: the safer of the two,
-//   as nothing a visitor does reaches a member through the App.
+// - A run telling people: a call from a workflow's run has no `people`
+//   on its invocation (app-functions.ts), so its send is refused
+//   (`permission.unavailable`), never narrowed.
 // - Flooding: a title and body within their limits (checked as it is
 //   made, or staged), at most `appNotificationMaxRecipients` people a send
 //   (a larger team's rest skipped), and at most `appNotificationsPerHour`
@@ -540,11 +538,12 @@ export const dispatchAppNotifyIntent = async (
     requireLive(entry.signal);
     // The person it acts for, the release and an agent's permission, now.
     await requireNotRevoked(env, intent.app, intent.appVersion);
-    const member = await memberOf(env.DB, intent.principal);
-    if (member === undefined) {
+    // A member or a guest, as the call that staged it was let in.
+    const person = await appUserOf(env.DB, intent.principal);
+    if (person === undefined) {
       throw appErrors.create("app.not_found");
     }
-    await functionRoles(env, member, intent.app);
+    await functionRoles(env, person, intent.app);
     await requireAgentAllowed(env, intent.app, intent.principal, intent.agent);
     requireLive(entry.signal);
     await deliver(env, send);

@@ -7,11 +7,13 @@ import { forgetActiveChats } from "../chat/active-chat.ts";
 import { loadCoreStatus } from "../core-connection.ts";
 import { leaveToSignIn, signInAddress } from "../core.ts";
 import { languageOptions } from "../frame/language-options.ts";
+import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
 import { BrandGoogle, BrandMicrosoft, Lock } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { LanguageSwitch } from "../grasp/language-switch/index.ts";
 import { SignIn as SignInDoor } from "../grasp/sign-in/index.ts";
 import type { SignInNotice } from "../grasp/sign-in/index.ts";
+import { GuestCodeSignIn, NothingShared } from "../guest-sign-in.tsx";
 import { chooseLocale, isLocale } from "../i18n.ts";
 import { signInErrorMessage, signInErrorSearch } from "../sign-in-errors.ts";
 
@@ -93,25 +95,44 @@ const Language = () => {
   );
 };
 
-/** A session core made for someone's interview alone (GRA-1790), as Better Auth tells it. */
-const interviewSessionSchema = z.object({
-  session: z.object({ interview: z.literal(true) }),
+/**
+ * A session core made that is no member's, as Better Auth tells it: for
+ * someone's interview alone (GRA-1790), or a guest's (GRA-2235).
+ */
+const otherSessionSchema = z.object({
+  session: z
+    .object({
+      interview: z.boolean().optional(),
+      guest: z.boolean().optional(),
+    })
+    .loose(),
+  user: z.object({ email: z.string() }).loose(),
 });
 
 /**
- * Whether this browser is signed in for an interview alone: while the
- * gate is closed, someone a link went to who signed in here gets such a
- * session, which opens nothing but their interview. They are told Grasp
- * isn't open yet, as anyone the gate turns away is, and where their link
- * is, rather than asked to sign in again and again.
+ * Whom this browser is signed in for, when not a member. While the gate is
+ * closed, someone a link went to who signed in here gets a session for
+ * their interview alone: they are told Grasp isn't open yet, as anyone the
+ * gate turns away is, and where their link is, rather than asked to sign
+ * in again and again. A guest is told nothing is shared with them yet.
  */
-const isInterviewOnly = async (): Promise<boolean> => {
+const otherSession = async (): Promise<{
+  interviewOnly: boolean;
+  guest: string | null;
+}> => {
   try {
     const response = await fetch("/api/auth/get-session");
     const body: unknown = response.ok ? await response.json() : null;
-    return interviewSessionSchema.safeParse(body).success;
+    const parsed = otherSessionSchema.safeParse(body);
+    return {
+      interviewOnly: parsed.success && parsed.data.session.interview === true,
+      guest:
+        parsed.success && parsed.data.session.guest === true
+          ? parsed.data.user.email
+          : null,
+    };
   } catch {
-    return false;
+    return { interviewOnly: false, guest: null };
   }
 };
 
@@ -123,12 +144,36 @@ const isInterviewOnly = async (): Promise<boolean> => {
  * once the door has opened, coming back to `returnTo`.
  */
 const SignIn = () => {
-  const { connected, signInOptions, interviewOnly } = Route.useLoaderData();
-  const { error, returnTo } = Route.useSearch();
+  const { connected, signInOptions, interviewOnly, guest } =
+    Route.useLoaderData();
+  const { error, returnTo, by } = Route.useSearch();
+  const { core } = Route.useRouteContext();
+  const navigate = Route.useNavigate();
+  const { t } = useLingui();
   // The way being left for, so the others are out of use meanwhile.
   const [leaving, setLeaving] = useState<string>();
   // Where to leave for, asked of core at the press.
   const asked = useRef<Promise<string> | null>(null);
+  // A guest, from outside the company, is in with nothing of theirs to see
+  // yet, or signs in with an emailed code: main's own pages (guest-sign-in.tsx).
+  if (guest !== null) {
+    return (
+      <OnboardingFrame>
+        <NothingShared core={core} email={guest} />
+      </OnboardingFrame>
+    );
+  }
+  if (by === "code" && connected) {
+    return (
+      <OnboardingFrame>
+        <GuestCodeSignIn
+          onBack={() => {
+            void navigate({ search: { returnTo } });
+          }}
+        />
+      </OnboardingFrame>
+    );
+  }
   const ask = async (id: string): Promise<string> =>
     await signInAddress(id === "staff" ? staffProvider : id, returnTo);
   const ways = connected ? signInOptions : [];
@@ -158,6 +203,15 @@ const SignIn = () => {
           icon: marks[providerId] ?? Lock,
         }))}
       staff={ways.some(({ providerId }) => providerId === staffProvider)}
+      {...(connected
+        ? {
+            footHref: `${signInPath}?by=code&returnTo=${encodeURIComponent(returnTo)}`,
+            words: {
+              foot: t`Invited as a guest?`,
+              footAction: t`Sign in with a code`,
+            },
+          }
+        : {})}
       {...(leaving === undefined ? {} : { leaving })}
       {...(notice === undefined ? {} : { notice })}
     />
@@ -167,8 +221,9 @@ const SignIn = () => {
 export const Route = createFileRoute("/sign-in")({
   validateSearch: (
     search: Record<string, unknown>
-  ): { returnTo: string; error?: string } => ({
+  ): { returnTo: string; error?: string; by?: "code" } => ({
     returnTo: returnPathOf(search.returnTo),
+    ...(search.by === "code" ? { by: "code" as const } : {}),
     ...signInErrorSearch(search),
   }),
   loaderDeps: ({ search }) => ({ returnTo: search.returnTo }),
@@ -184,7 +239,7 @@ export const Route = createFileRoute("/sign-in")({
     if (status.connected) {
       forgetActiveChats();
     }
-    return { ...status, interviewOnly: await isInterviewOnly() };
+    return { ...status, ...(await otherSession()) };
   },
   component: SignIn,
 });

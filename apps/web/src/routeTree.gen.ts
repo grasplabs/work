@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as ChatLinkRouteImport } from './routes/chat-link'
+import { Route as GuestRouteImport } from './routes/guest'
 import { Route as InterviewRouteImport } from './routes/interview'
 import { Route as KitRouteImport } from './routes/kit'
 import { Route as SetupRouteImport } from './routes/setup'
@@ -77,6 +78,11 @@ const ShellRoute = ShellRouteImport.update({
 const ChatLinkRoute = ChatLinkRouteImport.update({
   id: '/chat-link',
   path: '/chat-link',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuestRoute = GuestRouteImport.update({
+  id: '/guest',
+  path: '/guest',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InterviewRoute = InterviewRouteImport.update({
@@ -377,6 +383,7 @@ const ShellAppsAppPagesSplatRoute = ShellAppsAppPagesSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/chat-link': typeof ChatLinkRoute
+  '/guest': typeof GuestRoute
   '/interview': typeof InterviewRoute
   '/kit': typeof KitRoute
   '/setup': typeof SetupRoute
@@ -437,6 +444,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/chat-link': typeof ChatLinkRoute
+  '/guest': typeof GuestRoute
   '/interview': typeof InterviewRoute
   '/kit': typeof KitRoute
   '/setup': typeof SetupRoute
@@ -498,6 +506,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_shell': typeof ShellRouteWithChildren
   '/chat-link': typeof ChatLinkRoute
+  '/guest': typeof GuestRoute
   '/interview': typeof InterviewRoute
   '/kit': typeof KitRoute
   '/setup': typeof SetupRoute
@@ -562,6 +571,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/chat-link'
+    | '/guest'
     | '/interview'
     | '/kit'
     | '/setup'
@@ -622,6 +632,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/chat-link'
+    | '/guest'
     | '/interview'
     | '/kit'
     | '/setup'
@@ -682,6 +693,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_shell'
     | '/chat-link'
+    | '/guest'
     | '/interview'
     | '/kit'
     | '/setup'
@@ -745,6 +757,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   ShellRoute: typeof ShellRouteWithChildren
   ChatLinkRoute: typeof ChatLinkRoute
+  GuestRoute: typeof GuestRoute
   InterviewRoute: typeof InterviewRoute
   KitRoute: typeof KitRoute
   SetupRoute: typeof SetupRoute
@@ -771,6 +784,13 @@ declare module '@tanstack/react-router' {
       path: '/chat-link'
       fullPath: '/chat-link'
       preLoaderRoute: typeof ChatLinkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guest': {
+      id: '/guest'
+      path: '/guest'
+      fullPath: '/guest'
+      preLoaderRoute: typeof GuestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/interview': {
@@ -1339,6 +1359,7 @@ const AppsAppFullRouteWithChildren = AppsAppFullRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   ShellRoute: ShellRouteWithChildren,
   ChatLinkRoute: ChatLinkRoute,
+  GuestRoute: GuestRoute,
   InterviewRoute: InterviewRoute,
   KitRoute: KitRoute,
   SetupRoute: SetupRoute,

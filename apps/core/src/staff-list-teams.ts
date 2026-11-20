@@ -1,6 +1,6 @@
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import type { Roster } from "@grasp-os/shared/onboarding";
-import { teamNameKey } from "@grasp-os/shared/onboarding";
+import { noTeamId, teamNameKey } from "@grasp-os/shared/onboarding";
 import { eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -108,7 +108,9 @@ export const intoMembersTeams = async (
   const idOf = new Map<string, string>();
   const mintedNow = new Set<string>();
   for (const team of roster.teams) {
-    if (kept.has(team.id)) {
+    // The list's team for people it gives no team keeps its own id: it is
+    // never a members' team (`syncTeams`), whatever its name.
+    if (team.id === noTeamId || kept.has(team.id)) {
       idOf.set(team.id, team.id);
       continue;
     }
@@ -131,7 +133,11 @@ export const intoMembersTeams = async (
   // the confirm makes it.
   const listed = roster.teams.map((team) => {
     const id = idOf.get(team.id) ?? team.id;
-    return { ...team, id, name: known.get(id) ?? team.name };
+    return {
+      ...team,
+      id,
+      name: id === noTeamId ? team.name : (known.get(id) ?? team.name),
+    };
   });
   const wasMinted = new Set(mintedHeld.map(({ id }) => id));
   return {
@@ -161,12 +167,17 @@ export const intoMembersTeams = async (
  * one transaction: it claims the store's version (`staff_list_synced`)
  * only when it is newer than the one claimed, and every insert in it holds
  * only while the row names that version, so an older confirm makes nothing
- * after a newer one. Idempotent.
+ * after a newer one. Idempotent. Never the list's team for people it
+ * gives no team (`noTeamId`): no directory fills it. Answers whether it
+ * made any.
  */
-export const syncTeams = async (env: Env, actor: AuditActor): Promise<void> => {
+export const syncTeams = async (
+  env: Env,
+  actor: AuditActor
+): Promise<boolean> => {
   const confirmed = await onboardingStore(env).confirmedTeams();
   if (confirmed === null) {
-    return;
+    return false;
   }
   const { version } = confirmed;
   const db = drizzle(env.DB);
@@ -185,7 +196,7 @@ export const syncTeams = async (env: Env, actor: AuditActor): Promise<void> => {
   });
   const writes = confirmed.teams.flatMap(
     ({ id, name }): BatchItem<"sqlite">[] =>
-      known.has(id)
+      known.has(id) || id === noTeamId
         ? []
         : [
             db
@@ -195,11 +206,12 @@ export const syncTeams = async (env: Env, actor: AuditActor): Promise<void> => {
                   WHERE ${holds}
                     AND NOT EXISTS (SELECT 1 FROM ${retiredTeamIds} WHERE ${retiredTeamIds.id} = ${id})`
               )
-              .onConflictDoNothing(),
+              .onConflictDoNothing()
+              .returning({ id: teams.id }),
             outboxedIfChanged(db, entry("team.created", id)),
           ]
   );
-  await auditedBatch(env, db, [
+  const results = await auditedBatch(env, db, [
     db
       .insert(staffListSynced)
       .values({ organizationId, version })
@@ -210,6 +222,8 @@ export const syncTeams = async (env: Env, actor: AuditActor): Promise<void> => {
       }),
     ...writes,
   ]);
+  // Each team's insert answers the row it made, if it made one.
+  return results.some((result) => Array.isArray(result) && result.length > 0);
 };
 
 /**
@@ -229,7 +243,7 @@ export const namedOnListUnmade = async (
   ]);
   const key = teamNameKey(name);
   const named = [...held, ...(confirmed?.teams ?? [])].filter(
-    (team) => teamNameKey(team.name) === key
+    (team) => team.id !== noTeamId && teamNameKey(team.name) === key
   );
   if (named.length === 0) {
     return false;

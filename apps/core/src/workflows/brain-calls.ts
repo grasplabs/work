@@ -159,8 +159,8 @@ export const callBrain = async (
   const permissionId = permissionIdSchema.parse(target.permissionId);
   // Which reads the Brain by default, with no grant, as the company alone:
   // the workflow marked first, for good, as an App is
-  // (resource-brain.ts `brainByDefault`), so an App it reaches answers no
-  // visitor (app-provenance.ts `recallsTheBrain`).
+  // (resource-brain.ts `brainByDefault`), so an App it reaches takes no
+  // guests (app-provenance.ts `holdsAnySource`).
   const byDefault = target.permissionId === brainDefaultId;
   if (byDefault) {
     await drizzle(env.DB)

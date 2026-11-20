@@ -24,7 +24,7 @@ import { recordChanges, store } from "./db/data-store/schema.ts";
 //
 // - A change nobody can attribute: each names the actor core resolved for
 //   the call that made it (`Commit.actor`: the person, the agent acting
-//   for them, the visitor, the workflow run or the App), never one App
+//   for them, the workflow run or the App), never one App
 //   code or a request could name; a cascade job's deletions name its
 //   commit's actor, kept with the job; an import names its importer.
 // - Sensitive values copied into a second place that outlives the record:

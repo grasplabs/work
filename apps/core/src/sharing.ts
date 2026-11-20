@@ -11,7 +11,8 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
-import { activeMember, mayAct, organizationId } from "./auth/auth.ts";
+import { activeMember, guestNow, mayAct, organizationId } from "./auth/auth.ts";
+import { isGuestNow } from "./auth/guest-codes.ts";
 import { memberRole } from "./auth/identity.ts";
 import { members, projects, teams, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -115,7 +116,34 @@ export interface SharingRules {
   ownerIssue: string;
   /** The issue for sharing with someone whose role doesn't build. */
   buildsIssue: string;
+  /**
+   * The issue for sharing with a guest (roles.ts `guestRole`) in a role
+   * that builds, where the kind may be shared with guests at all (Apps,
+   * as their users); a kind without it isn't shared with guests.
+   */
+  guestIssue?: string;
 }
+
+/**
+ * The organization's guests now, each by ID and named by their address
+ * (a guest is made without a name, guest-members.ts), by address, each
+ * marked so: whom an App's builders may share it with besides its people
+ * (app-members.ts), never anything else. An erased guest is never one
+ * now: erasure comes after removal.
+ */
+export const organizationGuests = async (
+  env: Env
+): Promise<{ id: string; name: string; guest: true }[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: users.id, name: users.email })
+    .from(members)
+    .innerJoin(users, eq(users.id, members.userId))
+    .where(
+      and(eq(members.organizationId, organizationId), guestNow(members.userId))
+    )
+    .orderBy(asc(users.email), asc(users.id));
+  return rows.map((row) => ({ ...row, guest: true }));
+};
 
 /**
  * Refuses sharing with `member`: only with someone in the organization
@@ -160,6 +188,17 @@ export const requireSharable = async (
     throw rules.invalid(rules.ownerIssue);
   }
   const role = await memberRole(env.DB, member.id);
+  if (
+    role === undefined &&
+    rules.guestIssue !== undefined &&
+    (await isGuestNow(env, member.id))
+  ) {
+    // A guest is only ever its user.
+    if (rules.builds) {
+      throw rules.invalid(rules.guestIssue);
+    }
+    return;
+  }
   if (role === undefined) {
     throw rules.invalid("id: There's no such member of the organization.");
   }

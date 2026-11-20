@@ -31,6 +31,8 @@ export interface Pickable {
   id: string;
   name: string;
   email?: string;
+  /** A guest, from outside the company: marked so where they are offered. */
+  guest?: true;
 }
 
 /**

@@ -17,12 +17,12 @@ import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { WriterRoles } from "@grasp-os/shared/stores";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { currentMembership, mayAct, organizationId } from "./auth/auth.ts";
+import { guestNow, mayAct, organizationId } from "./auth/auth.ts";
 import { realEmail } from "./auth/directory-members.ts";
 import { members, teamMembers, teams, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -34,7 +34,7 @@ import { inList } from "./db/d1.ts";
 //
 // - A page or App code makes up who calls: the user is read here from
 //   core's own record of the call (the member's verified session, the
-//   person a run acts for, the visitor's session), never from a request;
+//   person a run acts for), never from a request;
 //   no read takes a person to be. A page that shows another name fools
 //   only itself: the App's server code decides with
 //   `ctx.auth.getUser()`, which no page reaches.
@@ -43,10 +43,10 @@ import { inList } from "./db/d1.ts";
 //   which its versions' review shows); any other read is refused
 //   (`permission.denied`) and recorded (`app.people.refused`). An agent
 //   reads it only through such an App.
-// - A visitor reads the directory: a visitor's call has no directory,
-//   only who they are (their session's ID and address). Asking for it is
-//   refused as a function the App doesn't grant them, and recorded
-//   (`app.visitor_refused`), from a page and from App code alike.
+// - A guest reads the directory: a guest is told who they are, and every
+//   directory read is refused (`permission.denied`) and recorded
+//   (`app.people.refused`, reason `guest`), from a page and from App code
+//   alike.
 // - Someone removed, or not a member, is read or reads: every read is of
 //   the organization's current members only (a membership, and no removal
 //   recorded); a caller who lost theirs is refused
@@ -362,20 +362,31 @@ const rolesOf = (builder: boolean): User["roles"] =>
   builder ? ["builder", "user"] : ["user"];
 
 /**
- * Who `userId` is, as a member calling the App: one read of their name
- * and address, with the App roles the call already has. Refused once
- * they are no member.
+ * Who `userId` is, as a member or a guest calling the App: one read of
+ * their name and address, with the App roles the call already has, and
+ * whether they are a member (`member`), who alone reads the directory.
+ * Refused once they are neither.
  */
 const personUser = async (
   env: Env,
   { userId, roles }: MemberReader
-): Promise<User> => {
+): Promise<{ user: User; member: boolean }> => {
   const [row, appRoles] = await Promise.all([
     drizzle(env.DB)
-      .select({ name: users.name, email: users.email })
+      .select({
+        name: users.name,
+        email: users.email,
+        member: sql<number>`${mayAct(userId)}`,
+      })
       .from(users)
       .innerJoin(members, eq(members.userId, users.id))
-      .where(currentMembership(userId))
+      .where(
+        and(
+          eq(members.organizationId, organizationId),
+          eq(members.userId, userId),
+          or(mayAct(userId), guestNow(userId))
+        )
+      )
       .get(),
     roles(),
   ]);
@@ -383,10 +394,13 @@ const personUser = async (
     throw permissionErrors.create("permission.person_inactive");
   }
   return {
-    id: userId,
-    name: row.name,
-    email: realEmail(row.email),
-    roles: rolesOf(appRoles.appBuilder),
+    user: {
+      id: userId,
+      name: row.name,
+      email: realEmail(row.email),
+      roles: rolesOf(appRoles.appBuilder),
+    },
+    member: row.member === 1,
   };
 };
 
@@ -405,7 +419,11 @@ const once = <Answer>(read: () => Promise<Answer>): (() => Promise<Answer>) => {
  * that doesn't is refused each read, recorded as `app.people.refused`.
  */
 export const memberPeople = (env: Env, reader: MemberReader): PeopleAccess => {
-  const user = once(async () => await personUser(env, reader));
+  const caller = once(async () => await personUser(env, reader));
+  const user = async (): Promise<User> => {
+    const { user: found } = await caller();
+    return found;
+  };
   const audit = async (action: string, detail: Record<string, Json>) => {
     await keepAuditEvent(env, drizzle(env.DB), {
       actor: reader.actor,
@@ -427,32 +445,21 @@ export const memberPeople = (env: Env, reader: MemberReader): PeopleAccess => {
   return {
     user,
     directory: async (name, args) => {
-      // A member, with a role in the App, as the call found them.
-      await user();
+      // A member, with a role in the App, as the call found them. A
+      // guest (guest-access.ts) is told who they are, and never anyone
+      // else: no colleague's name or address reaches someone outside the
+      // company.
+      const { member } = await caller();
+      if (!member) {
+        await audit("app.people.refused", { read: name, reason: "guest" });
+        throw permissionErrors.create("permission.denied");
+      }
       const answer = await directoryReads[name](env, args);
       await audit("app.people.read", { read: name, count: countOf(answer) });
       return answer;
     },
   };
 };
-
-/**
- * A visitor's access: who they are (their session's principal and
- * address), and no directory: `refuse` records and refuses each read.
- */
-export const visitorPeople = ({
-  principal,
-  email,
-  refuse,
-}: {
-  readonly principal: string;
-  readonly email: string;
-  readonly refuse: (name: PeopleFunctionName) => Promise<never>;
-}): PeopleAccess => ({
-  user: async () =>
-    await Promise.resolve({ id: principal, name: email, email, roles: [] }),
-  refuse,
-});
 
 /**
  * What an App's tests are told of people (app-tests.ts): the fixture
