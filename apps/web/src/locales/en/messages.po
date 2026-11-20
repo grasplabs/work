@@ -15437,8 +15437,8 @@ msgid "This chat has reached its length. Press Finish to end it."
 msgstr "This chat has reached its length. Press Finish to end it."
 
 #: src/chat/held-writes.tsx
-msgid "This chat read restricted data: this may send it out"
-msgstr "This chat read restricted data: this may send it out"
+msgid "This chat read private or restricted data: this may send it out"
+msgstr "This chat read private or restricted data: this may send it out"
 
 #: src/onboarding/place-picker.tsx
 msgid "This connection needs to be connected again."

@@ -414,7 +414,10 @@ export const verifyCapability = async (
     claims.resource === (scope.resource ?? null) &&
     claims.action === scope.action &&
     claims.idempotencyKey === (scope.idempotencyKey ?? null);
-  if (!matches) {
+  // A call no grant allows may only read: whatever signed it, connect
+  // takes nothing else from it.
+  const grantless = claims.origin.permissionId === null;
+  if (!matches || (grantless && !claims.readOnly)) {
     throw invalid("scope");
   }
   return claims;

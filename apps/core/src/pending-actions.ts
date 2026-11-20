@@ -180,7 +180,7 @@ const requireHeldRunCallAllowed = async (
     readonly subject: CodeSubject;
     readonly context: WorkContext;
     readonly idempotencyKey: string;
-    readonly permissionId: string;
+    readonly permissionId: string | null;
     readonly attachments?: readonly unknown[] | undefined;
   },
   person: string
