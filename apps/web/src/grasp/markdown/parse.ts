@@ -1,19 +1,11 @@
 // Markdown to a syntax tree (markdown.tsx), with GitHub's additions (tables, task lists,
-// strikethrough, autolinks, footnotes). Never HTML: raw HTML in the source stays a text node,
-// drawn as text. Pinned as the product resolves them: mdast-util-from-markdown 2.0.3,
-// micromark-extension-gfm 3.0.0, mdast-util-gfm 3.1.0.
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { gfmFromMarkdown } from "mdast-util-gfm";
-import { gfm } from "micromark-extension-gfm";
-
+// strikethrough, autolinks, footnotes): the one parse the Artifact viewer's Markdown shares
+// (src/markdown-parse). Never HTML: raw HTML in the source stays a text node, drawn as text.
+import { parseMarkdown } from "../markdown-parse/parse";
 import type { Root } from "./types";
 
 /** The tree of `source`. */
-export const parse = (source: string): Root =>
-  fromMarkdown(source, {
-    extensions: [gfm()],
-    mdastExtensions: [gfmFromMarkdown()],
-  });
+export const parse = (source: string): Root => parseMarkdown(source);
 
 /** Only these lead anywhere: a link to another scheme (javascript:, data:, a relative path) is text. */
 export const safeHref = (url: string): string | null => {

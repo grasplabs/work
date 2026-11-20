@@ -1018,7 +1018,7 @@ const Section = ({
   context: Context;
   children: ReactNode;
 }) => {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(drawn.open);
   const id = useId().replaceAll(":", "");
   const { base } = drawn.key;
   return (
