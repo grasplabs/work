@@ -666,7 +666,7 @@ const AddProviderDialog = ({
         onClick={() => {
           setOpen(true);
         }}
-        size="xs"
+        size="sm"
         variant="ink"
       >
         {t`Add a provider`}

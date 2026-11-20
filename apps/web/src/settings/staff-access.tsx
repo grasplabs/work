@@ -70,7 +70,7 @@ const EndStaffAccess = ({
   };
   return (
     <AlertDialog>
-      <AlertDialogTrigger size="xs">{t`End now`}</AlertDialogTrigger>
+      <AlertDialogTrigger size="sm">{t`End now`}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogTitle>{t`End Grasp staff access now?`}</AlertDialogTitle>
         <AlertDialogDescription>

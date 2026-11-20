@@ -213,8 +213,8 @@ const NewTeamButton = ({
         onClick={() => {
           setOpen(true);
         }}
-        size="xs"
-        // Quiet: Invite is the page's one main action.
+        size="sm"
+        // Quiet and at the fields' height, as Invite beside the people.
         variant="quiet"
       >
         {t`New team`}
@@ -324,7 +324,7 @@ const TeamRow = ({
               aria-label={t`Actions for ${name}`}
               disabled={busy}
               icon={More}
-              size="xs"
+              size="sm"
               variant="ghost"
             />
             <DropdownMenuContent align="end">

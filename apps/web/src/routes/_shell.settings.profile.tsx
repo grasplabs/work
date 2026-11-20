@@ -3,16 +3,23 @@ import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { Badge } from "../grasp/badge/index.ts";
-import { DE, ES, FR, GB, NL } from "../grasp/flags/index.ts";
+import { DE, ES, FR, Flag, GB, NL } from "../grasp/flags/index.ts";
 import type { FlagData } from "../grasp/flags/index.ts";
 import {
   InputGroup,
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
-import { LanguageSwitch } from "../grasp/language-switch/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
 import { roleLabel } from "../labels.ts";
@@ -31,6 +38,7 @@ import { SettingsError } from "../settings/section.tsx";
 const styles = stylex.create({
   // Every control fills the rows' shared control column.
   control: { width: "100%" },
+  language: { display: "flex", alignItems: "center", gap: grasp.space2 },
 });
 
 /** The flag that stands for each language Grasp speaks: its home region's. */
@@ -70,19 +78,42 @@ const EmailRow = ({ email, role }: { email: string; role: string }) => {
 const LanguageRow = () => {
   const { t, i18n } = useLingui();
   const label = t`Language`;
+  const chosen = languages.find(({ code }) => code === i18n.locale);
   return (
     <SettingRow help={t`The language Grasp speaks to you`} label={label}>
-      <LanguageSwitch
-        layout={styles.control}
-        size="sm"
-        onValueChange={(code) => {
-          if (isLocale(code)) {
-            void chooseLocale(code);
-          }
-        }}
-        options={languages}
-        value={i18n.locale}
-      />
+      {(field) => (
+        // The rows' own Select at their fields' height and words, the
+        // chosen language's flag before its name.
+        <Select
+          items={languages.map(({ code, name }) => ({
+            value: code,
+            label: name,
+          }))}
+          onValueChange={(code) => {
+            if (code !== null && isLocale(code)) {
+              void chooseLocale(code);
+            }
+          }}
+          value={i18n.locale}
+        >
+          <SelectTrigger {...field} layout={styles.control} size="sm">
+            {chosen === undefined ? null : (
+              <Flag flag={chosen.flag} size="sm" />
+            )}
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {languages.map(({ code, name, flag }) => (
+              <SelectItem key={code} label={name} value={code}>
+                <span {...stylex.props(styles.language)}>
+                  <Flag flag={flag} size="sm" />
+                  {name}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </SettingRow>
   );
 };
