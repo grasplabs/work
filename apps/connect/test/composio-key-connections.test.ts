@@ -97,6 +97,42 @@ describe("connecting a Composio toolkit with a key", () => {
     ]);
   });
 
+  it("serves Composio's fields however long their text, without an optional one it can't read, and nothing for a toolkit whose required field it can't read", async () => {
+    const admin = someone("admin");
+    const wordy = await exports.default.toolkitKeyFields({
+      person: admin,
+      toolkit: "wordydesk",
+    });
+    const ends = await Promise.all([
+      outcome(
+        exports.default.toolkitKeyFields({
+          person: admin,
+          toolkit: "brokendesk",
+        })
+      ),
+      outcome(
+        connectWithKey(admin, {
+          toolkit: "brokendesk",
+          tools: ["BROKENDESK_LIST"],
+          values: { username: "someone" },
+        })
+      ),
+    ]);
+    expect({ wordy, ends, writes: composioWrites() }).toStrictEqual({
+      wordy: [
+        {
+          name: "token",
+          label: `Token ${"t".repeat(300)}`,
+          description: "d".repeat(5000),
+          required: true,
+          secret: true,
+        },
+      ],
+      ends: ["connect.catalog_unavailable", "connect.catalog_unavailable"],
+      writes: [],
+    });
+  });
+
   it("serves no fields for a toolkit that signs in, or takes an app nobody registered, nor to anyone but an admin", async () => {
     const admin = someone("admin");
     const asked = [

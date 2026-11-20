@@ -52,6 +52,11 @@ export interface FakeKeyAuth {
    * rejected.
    */
   accepts: Record<string, string>;
+  /**
+   * A field of the list named that connect can't read (its `displayName`
+   * isn't text), described after the others, if any.
+   */
+  unreadable?: "required" | "optional";
 }
 
 export interface FakeToolkit {
@@ -210,8 +215,12 @@ const toolkitItem = ({
   slug,
   name,
   type: "native",
-  auth_schemes: keyAuth === undefined ? ["OAUTH2"] : ["OAUTH2", keyAuth.scheme],
-  composio_managed_auth_schemes: managed === false ? [] : ["OAUTH2"],
+  // In lower case, as Composio's toolkit list names schemes.
+  auth_schemes:
+    keyAuth === undefined
+      ? ["oauth2"]
+      : ["oauth2", keyAuth.scheme.toLowerCase()],
+  composio_managed_auth_schemes: managed === false ? [] : ["oauth2"],
   no_auth: false,
   meta: {
     ...(description === null ? {} : { description }),
@@ -279,9 +288,21 @@ const authDetail = (
   },
 });
 
+/** A field connect can't read: its `displayName` isn't text. */
+const unreadableField = {
+  name: "unreadable",
+  displayName: 42,
+  type: "string",
+  description: "Not one connect can read",
+  required: true,
+  user_visible: true,
+};
+
 /** A toolkit, as Composio describes it alone: its auth, scheme by scheme. */
 const toolkitDetail = ({ slug, name, keyAuth }: FakeToolkit) => {
   const fields = keyAuth?.fields ?? [];
+  const unreadable = (list: "required" | "optional") =>
+    keyAuth?.unreadable === list ? [unreadableField] : [];
   return {
     slug,
     name,
@@ -291,12 +312,18 @@ const toolkitDetail = ({ slug, name, keyAuth }: FakeToolkit) => {
         ? []
         : [
             authDetail(keyAuth.scheme, {
-              required: fields
-                .filter(({ required }) => required !== false)
-                .map(fieldItem),
-              optional: fields
-                .filter(({ required }) => required === false)
-                .map(fieldItem),
+              required: [
+                ...fields
+                  .filter(({ required }) => required !== false)
+                  .map(fieldItem),
+                ...unreadable("required"),
+              ],
+              optional: [
+                ...fields
+                  .filter(({ required }) => required === false)
+                  .map(fieldItem),
+                ...unreadable("optional"),
+              ],
             }),
           ]),
     ],

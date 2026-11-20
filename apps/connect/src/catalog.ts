@@ -359,8 +359,13 @@ export const keySchemes = ["API_KEY", "BEARER_TOKEN", "BASIC"] as const;
 
 export type KeyScheme = (typeof keySchemes)[number];
 
-const isKeyScheme = (scheme: string): scheme is KeyScheme =>
-  keySchemes.some((each) => each === scheme);
+/**
+ * Which of {@link keySchemes} Composio's `scheme` names, if any, whatever
+ * its case: its toolkit list names schemes in lower case (`api_key`), its
+ * toolkit descriptions in upper case (`API_KEY`).
+ */
+const keySchemeOf = (scheme: string): KeyScheme | undefined =>
+  keySchemes.find((each) => each === scheme.toUpperCase());
 
 /**
  * What connecting a toolkit takes: signing in with Composio's app, where
@@ -375,7 +380,9 @@ const authOf = ({
   if (managed.length > 0) {
     return "managed";
   }
-  return schemes.some(isKeyScheme) ? "key" : "own";
+  return schemes.some((scheme) => keySchemeOf(scheme) !== undefined)
+    ? "key"
+    : "own";
 };
 
 /** Composio's toolkits in the catalog (`isListed`). */
@@ -564,16 +571,20 @@ export const catalogTools = async (
 
 /**
  * One field of a toolkit's auth, as Composio describes it
- * (`GET /toolkits/{slug}`). One people never see (`user_visible`) takes
- * Composio's default, so it isn't asked for.
+ * (`GET /toolkits/{slug}`), with no limits of connect's own: Composio sets
+ * none. One people never see (`user_visible`) takes Composio's default, so
+ * it isn't asked for.
  */
 const keyFieldSchema = z.object({
-  name: z.string().regex(/^[A-Za-z_][\w.-]{0,127}$/u),
-  displayName: z.string().min(1).max(256),
-  description: z.string().max(4096).nullish(),
+  name: z.string().min(1),
+  displayName: z.string(),
+  description: z.string().nullish(),
   is_secret: z.boolean().nullish(),
   user_visible: z.boolean().default(true),
 });
+
+/** A field Composio says people never see, whatever else it says of it. */
+const hiddenFieldSchema = z.object({ user_visible: z.literal(false) });
 
 const fieldListSchema = z.object({
   required: z.array(z.unknown()).default([]),
@@ -599,13 +610,22 @@ export interface KeyAuth {
 }
 
 /**
- * The fields of `list`, those connect can read and people see, each
- * `required` as its list says, and secret unless Composio says it isn't.
+ * The fields of `list` people see, each `required` as its list says, and
+ * secret unless Composio says it isn't. A required one connect can't read
+ * is `connect.catalog_unavailable`: left out, it would be missing from
+ * every try. An optional one connect can't read is left out.
  */
 const fieldsOf = (list: readonly unknown[], required: boolean) =>
   list.flatMap((item) => {
     const parsed = keyFieldSchema.safeParse(item);
-    if (!parsed.success || !parsed.data.user_visible) {
+    if (!parsed.success) {
+      if (required && !hiddenFieldSchema.safeParse(item).success) {
+        log.warn("catalog.key_field_unreadable", { list: "required" });
+        throw connectErrors.create("connect.catalog_unavailable");
+      }
+      return [];
+    }
+    if (!parsed.data.user_visible) {
       return [];
     }
     const { name, displayName, description, is_secret: secret } = parsed.data;
@@ -628,7 +648,8 @@ const fieldsOf = (list: readonly unknown[], required: boolean) =>
  * that moment. `connection.invalid` for one that signs in with Composio's
  * app; `connection.own_auth_required` for one that takes an app of its
  * own, or whose description has no such scheme;
- * `connect.catalog_unavailable` when Composio doesn't answer.
+ * `connect.catalog_unavailable` when Composio doesn't answer, or describes
+ * a required field connect can't read.
  */
 export const keyAuthOf = async (
   key: string,
@@ -648,7 +669,7 @@ export const keyAuthOf = async (
       })
   );
   for (const scheme of keySchemes) {
-    const detail = details.find(({ mode }) => mode === scheme);
+    const detail = details.find(({ mode }) => keySchemeOf(mode) === scheme);
     if (detail !== undefined) {
       const { required, optional } = detail.fields.connected_account_initiation;
       return {

@@ -57,6 +57,39 @@ export const composio = fakeComposioApi(
       },
       tools: [{ slug: "PIPEDESK_LIST_DEALS" }, { slug: "PIPEDESK_ADD_NOTE" }],
     },
+    // Takes a key, described at length, with an optional field connect
+    // can't read.
+    {
+      slug: "wordydesk",
+      name: "Wordydesk",
+      managed: false,
+      keyAuth: {
+        scheme: "BEARER_TOKEN",
+        fields: [
+          {
+            name: "token",
+            displayName: `Token ${"t".repeat(300)}`,
+            description: "d".repeat(5000),
+          },
+        ],
+        accepts: {},
+        unreadable: "optional",
+      },
+      tools: [{ slug: "WORDYDESK_LIST" }],
+    },
+    // Takes a key, but describes a required field connect can't read.
+    {
+      slug: "brokendesk",
+      name: "Brokendesk",
+      managed: false,
+      keyAuth: {
+        scheme: "BASIC",
+        fields: [{ name: "username", displayName: "Username" }],
+        accepts: {},
+        unreadable: "required",
+      },
+      tools: [{ slug: "BROKENDESK_LIST" }],
+    },
     // Composio holds no app for it: it would take the organization's own.
     {
       slug: "acme_erp",

@@ -36,7 +36,8 @@ export const composioToolkits = [
   {
     slug: "acme_crm",
     name: "Acme CRM",
-    auth_schemes: ["API_KEY"],
+    // In lower case, as Composio's toolkit list names schemes.
+    auth_schemes: ["api_key"],
     composio_managed_auth_schemes: [],
     meta: { categories: [{ id: "crm", name: "CRM" }], tools_count: 1 },
   },
