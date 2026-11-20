@@ -5,7 +5,7 @@ import {
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   call,
@@ -67,6 +67,14 @@ const errorText = (error: unknown): string =>
     : JSON.stringify(error);
 
 describe("connecting a Composio toolkit with a key", () => {
+  // Each test connects Pipedesk afresh: its one shared connection from an
+  // earlier test of the file is gone.
+  beforeEach(async () => {
+    await env.DB.prepare(
+      "UPDATE connections SET status = 'disconnected' WHERE provider = 'pipedesk'"
+    ).run();
+  });
+
   it("serves the fields Composio describes, each secret unless Composio says it isn't, and none it hides", async () => {
     const fields = await exports.default.toolkitKeyFields({
       person: someone("admin"),
@@ -369,6 +377,55 @@ describe("connecting a Composio toolkit with a key", () => {
     expect(
       recorded.map(({ action, detail }) => [action, detail.reason])
     ).toStrictEqual([["connection.connect", "connection.provider_refused"]]);
+  });
+
+  it("keeps one shared connection per toolkit: of two connects at once, one is stored and the other leaves nothing at Composio", async () => {
+    const admin = someone("admin");
+    // Both get past everything before making their server, then go on.
+    let arrived = 0;
+    const both = Promise.withResolvers<boolean>();
+    composio.state.serverGate = async () => {
+      arrived += 1;
+      if (arrived === 2) {
+        both.resolve(true);
+      }
+      await both.promise;
+    };
+    const ends = await Promise.all([
+      outcome(connectWithKey(admin)),
+      outcome(connectWithKey(admin)),
+    ]);
+    composio.state.serverGate = undefined;
+    // And once one is there, another connect makes nothing.
+    const writes = composioWrites().length;
+    const again = await outcome(connectWithKey(admin));
+    const { results: live } = await env.DB.prepare(
+      "SELECT id FROM connections WHERE provider = 'pipedesk' AND status <> 'disconnected'"
+    ).all();
+    const recorded = await events();
+    expect({
+      ends: ends.toSorted(),
+      again,
+      madeAgain: composioWrites().length - writes,
+      live: live.length,
+      held: heldAtComposio(),
+      cleanups: await cleanupsLeft(),
+      connected: recorded.filter(
+        ({ action, detail }) =>
+          action === "connection.connect" && detail.outcome === "ok"
+      ).length,
+      consents: recorded.filter(({ action }) => action === "connection.consent")
+        .length,
+    }).toStrictEqual({
+      ends: ["connection.already_connected", "ok"],
+      again: "connection.already_connected",
+      madeAgain: 0,
+      live: 1,
+      held: { authConfigs: 1, accounts: 1, servers: 1 },
+      cleanups: 0,
+      connected: 1,
+      consents: 1,
+    });
   });
 
   it("is deleted at Composio, key and all, when disconnected", async () => {

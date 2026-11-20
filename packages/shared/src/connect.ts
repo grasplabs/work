@@ -423,6 +423,13 @@ export interface ConnectionSummary {
   /** ISO 8601. */
   createdAt: string;
   /**
+   * How a Composio connection was made, and so which consent was given:
+   * signing in (`managed`, {@link composioConsentText}) or with a key
+   * (`key`, {@link composioKeyConsentText}). Absent for a native
+   * connection, and for one where it wasn't recorded.
+   */
+  composioAuth?: "managed" | "key";
+  /**
    * A Composio connection's allowed tools, by name, as the admin who
    * connected it consented to them. Absent for a native connection, and
    * from a connect that predates it.

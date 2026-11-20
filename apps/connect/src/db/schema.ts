@@ -159,6 +159,12 @@ export const connections = sqliteTable(
      */
     composioServerId: text("composio_server_id"),
     composioAuthConfigId: text("composio_auth_config_id"),
+    /**
+     * How a Composio connection was made, and so which consent the admin
+     * gave: signing in with Composio's app (`managed`), or with a key they
+     * typed in (`key`). Null where it wasn't recorded.
+     */
+    composioAuth: text("composio_auth", { enum: ["managed", "key"] }),
     tools: text(),
     /**
      * Sends of a tool list to Composio, counted: the count goes up before
@@ -193,6 +199,13 @@ export const connections = sqliteTable(
       .on(table.provider, table.accountId)
       .where(
         sql`${table.accountId} IS NOT NULL AND ${table.status} <> 'disconnected'`
+      ),
+    // One live key connection per toolkit (composio-connections.ts
+    // `serveAndStore`): of two connects at once, the second fails whole.
+    uniqueIndex("connections_key_toolkit_idx")
+      .on(table.provider)
+      .where(
+        sql`${table.composioAuth} = 'key' AND ${table.status} <> 'disconnected'`
       ),
     // Offboarding disconnects a removed person's personal connections.
     index("connections_owner_user_id_idx").on(table.ownerUserId),

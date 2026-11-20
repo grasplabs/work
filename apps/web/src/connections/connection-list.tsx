@@ -170,33 +170,39 @@ const Holders = ({
  * log keeps the SHA-256 of the exact text they were shown
  * (`connection.consent`).
  */
-const ConsentRecord = ({
-  connection,
-  keyed,
-}: {
-  connection: ListedConnection;
-  /** Whether it was connected with a key the admin typed in. */
-  keyed: boolean;
-}) => {
+const ConsentRecord = ({ connection }: { connection: ListedConnection }) => {
   const { t } = useLingui();
   const who = connection.connectedByName ?? t`An admin`;
+  // The consent for how it was made, as connect recorded it; none where it
+  // wasn't recorded.
+  const consent =
+    connection.composioAuth === undefined
+      ? undefined
+      : {
+          managed: composioConsentText,
+          key: composioKeyConsentText,
+        }[connection.composioAuth];
   return (
     <div className="flex flex-col gap-1 text-sm">
       <h4 className="font-medium">
         <Trans>Consent</Trans>
       </h4>
-      <p>
-        <Trans>{who} consented to this before connecting it:</Trans>
-      </p>
-      <blockquote className="text-muted-foreground border-l-2 pl-3">
-        {keyed ? composioKeyConsentText : composioConsentText}
-      </blockquote>
-      <p className="text-muted-foreground">
-        <Trans>
-          This is the consent as Grasp words it now. The audit log keeps a hash
-          of the exact text they were shown.
-        </Trans>
-      </p>
+      {consent === undefined ? null : (
+        <>
+          <p>
+            <Trans>{who} consented to this before connecting it:</Trans>
+          </p>
+          <blockquote className="text-muted-foreground border-l-2 pl-3">
+            {consent}
+          </blockquote>
+          <p className="text-muted-foreground">
+            <Trans>
+              This is the consent as Grasp words it now. The audit log keeps a
+              hash of the exact text they were shown.
+            </Trans>
+          </p>
+        </>
+      )}
       <p>
         {connection.tools === undefined || connection.tools.length === 0
           ? t`Tools allowed: none recorded`
@@ -462,10 +468,7 @@ const ConnectionItem = ({
         </p>
       ) : null}
       {connection.source === "composio" ? (
-        <ConsentRecord
-          connection={connection}
-          keyed={integration.auth === "key"}
-        />
+        <ConsentRecord connection={connection} />
       ) : null}
       {choosesBrainAudience(connection, identity) ? (
         <BrainAudience

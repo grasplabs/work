@@ -243,7 +243,8 @@ const Starting = ({
 }: {
   app: string;
   disabled: boolean;
-  onRetry: () => void;
+  /** Trying again; none offered without it. */
+  onRetry: (() => void) | undefined;
 }) => {
   const [long, setLong] = useState(false);
   useEffect(() => {
@@ -262,7 +263,7 @@ const Starting = ({
         </span>
         <Trans>Waiting for {app}</Trans>
       </output>
-      {long ? (
+      {long && onRetry !== undefined ? (
         <p className="text-muted-foreground">
           <Trans>
             Taking long?{" "}
@@ -290,6 +291,7 @@ const Actions = ({
   attempt,
   busy,
   disabled = false,
+  retries = true,
   onClose,
   onStart,
   children,
@@ -299,6 +301,12 @@ const Actions = ({
   attempt: number;
   busy: boolean;
   disabled?: boolean;
+  /**
+   * Whether a start that takes long may be tried again meanwhile. Not
+   * where each start makes something of its own, which the first, still
+   * under way, would make too.
+   */
+  retries?: boolean;
   onClose: () => void;
   onStart: () => void;
   children: ReactNode;
@@ -307,7 +315,11 @@ const Actions = ({
   // attempt's waiting row starts over), rather than swapping in place.
   busy ? (
     <FadeIn key={`starting-${attempt}`}>
-      <Starting app={app} disabled={disabled} onRetry={onStart} />
+      <Starting
+        app={app}
+        disabled={disabled}
+        onRetry={retries ? onStart : undefined}
+      />
     </FadeIn>
   ) : (
     <FadeIn key="ready">
@@ -659,6 +671,7 @@ const KeyStep = ({
         busy={busy}
         disabled={allowed.length === 0 || !filled}
         onClose={onClose}
+        retries={false}
         onStart={() => {
           void connect();
         }}

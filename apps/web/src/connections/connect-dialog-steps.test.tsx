@@ -417,6 +417,48 @@ describe("the connect dialog's steps", () => {
     });
   });
 
+  it("offers no retry while a key is on its way, however long it takes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const [pipedesk] = integrationsOf(
+      [{ ...entry("composio", "pipedesk", "Pipedesk"), auth: "key" }],
+      []
+    );
+    let sent = 0;
+    await opened(
+      someone("admin"),
+      async () => await waitingForever(),
+      pipedesk,
+      {
+        keyFields: async () =>
+          await Promise.resolve([
+            {
+              name: "generic_api_key",
+              label: "API key",
+              description: null,
+              required: true,
+              secret: true,
+            },
+          ]),
+        connectToolkitWithKey: async () => {
+          sent += 1;
+          return await waitingForever();
+        },
+      }
+    );
+    await press(allow());
+    await type(field("API key"), "pd_secret");
+    await press(button("Consent and connect"));
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+      await Promise.resolve();
+    });
+    expect({
+      waiting: document.body.textContent?.includes("Waiting for Pipedesk"),
+      retry: button("Try again"),
+      sent,
+    }).toStrictEqual({ waiting: true, retry: undefined, sent: 1 });
+  });
+
   it("starts the wait over with each attempt", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     await opened(someone("user"), async () => await waitingForever());

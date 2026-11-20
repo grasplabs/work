@@ -33,6 +33,7 @@ import {
   isNull,
   lt,
   lte,
+  ne,
   or,
   sql,
 } from "drizzle-orm";
@@ -841,6 +842,23 @@ const isServerFor = (
   );
 };
 
+/** Whether `toolkit` has a shared Composio connection that isn't disconnected. */
+const hasLiveShared = async (env: Env, toolkit: string): Promise<boolean> => {
+  const [live] = await drizzle(env.DB)
+    .select({ id: connections.id })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.provider, toolkit),
+        eq(connections.serverKind, "composio"),
+        eq(connections.scope, "shared"),
+        ne(connections.status, "disconnected")
+      )
+    )
+    .limit(1);
+  return live !== undefined;
+};
+
 /** A connected account connect made at Composio, to serve as a connection. */
 interface Made {
   flowId: string;
@@ -867,7 +885,8 @@ const serveAndStore = async (
   person: ConnectionPerson,
   account: Made,
   made: AtComposio,
-  events: (connectionId: string) => [AuditEntry, ...AuditEntry[]]
+  events: (connectionId: string) => [AuditEntry, ...AuditEntry[]],
+  auth: "managed" | "key"
 ): Promise<string | undefined> => {
   const held = await composioRequest(key, {
     path: `/connected_accounts/${encodeURIComponent(account.connectedAccountId)}`,
@@ -917,28 +936,40 @@ const serveAndStore = async (
   }
   const connectionId = crypto.randomUUID();
   const now = new Date();
-  await recordEvents(env, events(connectionId), [
-    // The connection takes over what the cleanup row held.
-    drizzle(env.DB)
-      .delete(composioCleanups)
-      .where(eq(composioCleanups.id, account.flowId)),
-    drizzle(env.DB).insert(connections).values({
-      id: connectionId,
-      provider: account.toolkit,
-      scope: "shared",
-      ownerUserId: null,
-      status: "active",
-      serverKind: "composio",
-      server: url,
-      accountId: account.connectedAccountId,
-      connectedBy: person.userId,
-      composioServerId: server.id,
-      composioAuthConfigId: account.authConfigId,
-      tools: account.tools,
-      createdAt: now,
-      updatedAt: now,
-    }),
-  ]);
+  const db = drizzle(env.DB);
+  try {
+    await recordEvents(env, events(connectionId), [
+      // The connection takes over what the cleanup row held.
+      db
+        .delete(composioCleanups)
+        .where(eq(composioCleanups.id, account.flowId)),
+      db.insert(connections).values({
+        id: connectionId,
+        provider: account.toolkit,
+        scope: "shared",
+        ownerUserId: null,
+        status: "active",
+        serverKind: "composio",
+        server: url,
+        accountId: account.connectedAccountId,
+        connectedBy: person.userId,
+        composioServerId: server.id,
+        composioAuthConfigId: account.authConfigId,
+        composioAuth: auth,
+        tools: account.tools,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ]);
+  } catch (error) {
+    // A key connection is its toolkit's one live one (the schema's
+    // `connections_key_toolkit_idx`): of two stored at once, one fails
+    // whole, its events with it, and its caller deletes what it made.
+    if (auth === "key" && (await hasLiveShared(env, account.toolkit))) {
+      throw connectionErrors.create("connection.already_connected");
+    }
+    throw error;
+  }
   return connectionId;
 };
 
@@ -998,7 +1029,8 @@ const finishToolkitConnection = async (
           toolCount: tools.length,
           readCount: readToolsOf(tools).length,
         }),
-      ]
+      ],
+      "managed"
     );
     if (connectionId === undefined) {
       await refuse("connection.provider_refused", "failed");
@@ -1137,6 +1169,12 @@ export const connectToolkitWithKey = async (
   if (val === undefined || !fits) {
     throw connectionErrors.create("connection.invalid");
   }
+  // Its one shared connection is there already: nothing is made. Two
+  // connects at once both pass this; storing keeps one (`serveAndStore`).
+  if (await hasLiveShared(env, toolkit)) {
+    await refuse("connection.already_connected");
+    throw connectionErrors.create("connection.already_connected");
+  }
   const fieldNames = Object.keys(val).toSorted().join(",");
   const flowId = crypto.randomUUID();
   const marker = markerOf(flowId);
@@ -1224,7 +1262,8 @@ export const connectToolkitWithKey = async (
           toolCount: tools.length,
           readCount: readToolsOf(tools).length,
         }),
-      ]
+      ],
+      "key"
     );
     if (connectionId === undefined) {
       throw new ComposioError("Composio's account isn't the one made");
@@ -1232,6 +1271,10 @@ export const connectToolkitWithKey = async (
     return { connectionId };
   } catch (error) {
     await carryOutCleanup(env, flowId, made, marker);
+    if (connectionErrors.codeOf(error) === "connection.already_connected") {
+      // Another connect of the toolkit was stored first.
+      await refuse("connection.already_connected");
+    }
     if (!(error instanceof ComposioError)) {
       throw error;
     }
