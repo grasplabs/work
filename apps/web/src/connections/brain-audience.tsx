@@ -266,22 +266,25 @@ const WidenDialog = ({
               <Trans>
                 Everyone in the company will be able to find what agents read
                 through {label} and what is copied from it, including what was
-                kept before, whatever their permissions in {label}. Choose a
-                team if not everyone should see it.
+                kept before, whatever their permissions in {label}. Their
+                assistants will also read {label} directly, in their own chats.
+                Choose a team if not everyone should have this.
               </Trans>
             ) : null}
             {next.kind === "team" && team !== undefined ? (
               <Trans>
                 Everyone in {team} will be able to find what agents read through{" "}
                 {label} and what is copied from it, including what was kept
-                before, whatever their permissions in {label}.
+                before, whatever their permissions in {label}. Their assistants
+                will also read {label} directly, in their own chats.
               </Trans>
             ) : null}
             {next.kind === "team" && team === undefined ? (
               <Trans>
                 Everyone in this team will be able to find what agents read
                 through {label} and what is copied from it, including what was
-                kept before, whatever their permissions in {label}.
+                kept before, whatever their permissions in {label}. Their
+                assistants will also read {label} directly, in their own chats.
               </Trans>
             ) : null}
           </DialogDescription>
@@ -462,8 +465,9 @@ export const BrainAudience = ({
       </Field>
       <p className="text-muted-foreground">
         <Trans>
-          Who may read it is decided inside Grasp, not by the permissions in{" "}
-          {label}: choose a team if not everyone should see it.
+          Who may read it, in the Brain and through their assistant in their own
+          chat, is decided inside Grasp, not by the permissions in {label}:
+          choose a team if not everyone should have it.
         </Trans>
       </p>
       {erasing ? (
