@@ -6,14 +6,13 @@
 import { Button as PressPrimitive } from "@ui-sdk/react/button";
 import type { ButtonState } from "@ui-sdk/react/button";
 import { PopoverClose as ClosePrimitive } from "@ui-sdk/react/popover";
-import { useEffect, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 
-import { Button } from "../button";
-import type { ActionState, ButtonVariant, ButtonWords } from "../button";
+import type { ButtonVariant, ButtonWords } from "../button";
+// The closing action's Button, shared with Dialog's and Drawer's; a popover's gives it no place of its own.
+import { CloseActionButton } from "../button/action-core";
 import { buttonWords } from "../button/words";
 import type { IconData } from "../icons";
-import { ms } from "../tokens/tokens.values";
 import { useWords } from "../words/words";
 import { usePopoverController } from "./popover";
 import { useStill } from "./still-context";
@@ -70,93 +69,12 @@ interface WithWork {
 /** Every prop a PopoverAction takes: these, and the rest of UI SDK's PopoverClose. */
 export type PopoverActionProps = ActionBase & (WithoutWork | WithWork);
 
-/** Who sees a failure: shown on the button for a moment, then the button is ready again. */
-const useFailed = (error: unknown) => {
-  const [shown, setShown] = useState(false);
-  // The failure last shown, boxed, so "none" is not a value the work could have thrown.
-  const last = useRef<{ error: unknown } | null>(null);
-  useEffect(() => {
-    // A press clears the error, so the same failure twice is shown twice.
-    let timer = 0;
-    if (error === undefined) {
-      last.current = null;
-    } else if (last.current?.error !== error) {
-      last.current = { error };
-      setShown(true);
-      timer = window.setTimeout(() => {
-        setShown(false);
-      }, ms.durationHold);
-    }
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [error]);
-  return shown;
-};
-
 type Look = Pick<
   ActionBase,
   "children" | "variant" | "icon" | "agentConfirm"
 > & {
   workingLabel?: string | undefined;
   failedLabel: string;
-};
-
-interface ActionButtonProps {
-  props: Record<string, unknown>;
-  state: ActionState;
-  error: unknown;
-  look: Look;
-  /** It has work to do, so it shows the work's life: Cancel has none, and keeps its own width. */
-  life: boolean;
-}
-
-/** What the button shows: working while the work runs, failed for a moment after it failed. */
-const currentOf = (state: ActionState, failed: boolean): ActionState => {
-  if (state === "working") {
-    return "working";
-  }
-  return failed ? "failed" : "idle";
-};
-
-const ActionButton = ({
-  props,
-  state,
-  error,
-  look,
-  life,
-}: ActionButtonProps) => {
-  const failed = useFailed(error);
-  const {
-    variant = "quiet",
-    icon,
-    children,
-    workingLabel,
-    failedLabel,
-    agentConfirm,
-  } = look;
-  const words = typeof children === "string" ? children : undefined;
-  const confirm = agentConfirm ?? (variant === "danger" ? words : undefined);
-  const lifeProps = life
-    ? {
-        state: currentOf(state, failed),
-        workingLabel,
-        doneLabel: words ?? "",
-        failedLabel,
-      }
-    : {};
-  return (
-    <Button
-      {...props}
-      {...lifeProps}
-      data-agent-confirm={confirm}
-      variant={variant}
-      icon={icon}
-      size="sm"
-    >
-      {children}
-    </Button>
-  );
 };
 
 interface WorkActionProps {
@@ -200,7 +118,7 @@ const WorkAction = ({ rest, action, look }: WorkActionProps) => {
       pendingAnnouncement=""
       onClick={work}
       render={(pressProps: Record<string, unknown>, state: ButtonState) => (
-        <ActionButton
+        <CloseActionButton
           props={pressProps}
           state={state.pending ? "working" : "idle"}
           error={state.error}
@@ -239,7 +157,7 @@ export const PopoverAction = (props: PopoverActionProps) => {
   };
   if (still) {
     return (
-      <ActionButton
+      <CloseActionButton
         props={{ type: "button" }}
         state="idle"
         error={undefined}
@@ -253,7 +171,7 @@ export const PopoverAction = (props: PopoverActionProps) => {
       <ClosePrimitive
         {...rest}
         render={(closeProps: Record<string, unknown>) => (
-          <ActionButton
+          <CloseActionButton
             props={closeProps}
             state="idle"
             error={undefined}

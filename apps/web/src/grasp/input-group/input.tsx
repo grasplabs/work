@@ -19,10 +19,10 @@ export interface InputGroupInputProps extends Omit<
 > {
   /**
    * What kind of text: `text`, `email`, `search`, `tel` or `url`. It brings the right keyboard on
-   * a phone and the browser's own check.
+   * a phone and the browser's own check. `password` masks it, for a key with a show button beside it.
    * @default "text"
    */
-  type?: "text" | "email" | "search" | "tel" | "url";
+  type?: "text" | "email" | "search" | "tel" | "url" | "password";
   /** The value it starts with. A form reset returns here. */
   defaultValue?: string;
   /** The value, when you keep it in state. Pair it with `onValueChange`. */

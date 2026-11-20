@@ -1204,6 +1204,10 @@ msgstr "{place, selectordinal, one {, trié en #er} other {, trié en #e}}"
 msgid "{place} of {count}"
 msgstr "{place} sur {count}"
 
+#: src/frame/part-words.tsx
+msgid "{provider} is connected"
+msgstr "{provider} est connecté"
+
 #: src/apps/indexes-view.tsx
 msgid "{query} (on {routes})"
 msgstr "{query} (sur {routes})"
@@ -2224,6 +2228,10 @@ msgstr "Ajouter {what}"
 msgid "Add a chat"
 msgstr "Ajouter un chat"
 
+#: src/frame/part-words.tsx
+msgid "Add a connection"
+msgstr "Ajouter une connexion"
+
 #: src/agents/setup/apps-picker.tsx
 msgid "Add a connector"
 msgstr "Ajouter un connecteur"
@@ -2301,6 +2309,10 @@ msgstr "Ajouter un index"
 #: src/apps/app-integrations.tsx
 msgid "Add an integration"
 msgstr "Ajouter une intégration"
+
+#: src/frame/part-words.tsx
+msgid "Add another"
+msgstr "En ajouter une autre"
 
 #: src/agents/setup/apps-step.tsx
 msgid "Add connector"
@@ -2619,6 +2631,10 @@ msgstr "Toutes les langues"
 #: src/workflows/requests/request-filters.tsx
 msgid "All places"
 msgstr "Tous les lieux"
+
+#: src/frame/part-words.tsx
+msgid "All providers"
+msgstr "Tous les fournisseurs"
 
 #: src/frame/part-words.tsx
 msgid "All steps done"
@@ -7426,6 +7442,10 @@ msgctxt "an app's settings section"
 msgid "General"
 msgstr "Général"
 
+#: src/frame/part-words.tsx
+msgid "Get a key from {provider}"
+msgstr "Obtenir une clé chez {provider}"
+
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
 msgstr "Donner une valeur"
@@ -7991,6 +8011,10 @@ msgstr "Masquer exactement ce qui a été envoyé"
 #: src/chat/held-writes.tsx
 msgid "Hide exactly what will be sent"
 msgstr "Masquer exactement ce qui sera envoyé"
+
+#: src/frame/part-words.tsx
+msgid "Hide key"
+msgstr "Masquer la clé"
 
 #: src/frame/part-words.tsx
 msgid "Hide password"
@@ -8990,6 +9014,10 @@ msgstr "Son lien"
 #: src/chat/delete-chat-dialog.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Ses messages sont supprimés définitivement, et chaque modification que son agent retient pour vous est rejetée. Ce que l’agent a fait reste dans le journal d’audit."
+
+#: src/frame/part-words.tsx
+msgid "Its models are ready to use."
+msgstr "Ses modèles sont prêts à l'emploi."
 
 #: src/workflows/files-and-apps.tsx
 msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
@@ -10334,6 +10362,7 @@ msgstr "Ma version de l’App n’a pas démarré. Trouve pourquoi et corrige-le
 #: src/apps/app-settings.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/http-connections.tsx
+#: src/frame/part-words.tsx
 #: src/inbox/interviews-item.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
@@ -11514,6 +11543,10 @@ msgstr "Rien n’est partagé avec le projet, donc ils ne perdent aucun accès."
 msgid "Nothing matched."
 msgstr "Aucun résultat."
 
+#: src/frame/part-words.tsx
+msgid "Nothing matches “{query}”."
+msgstr "Rien ne correspond à « {query} »."
+
 #: src/agents/new-agent.tsx
 msgid "Nothing more"
 msgstr "Rien de plus"
@@ -12201,6 +12234,11 @@ msgstr "Opportunity-to-Cash"
 msgid "Option {place}"
 msgstr "Option {place}"
 
+#: src/frame/part-words.tsx
+msgctxt "a field that may stay empty"
+msgid "Optional"
+msgstr "Facultatif"
+
 #: src/apps/field-editor.tsx
 msgid "Options"
 msgstr "Options"
@@ -12491,6 +12529,11 @@ msgstr "Passation"
 #: src/routes/_shell.settings.security.tsx
 msgid "Passwords and two-step sign-in live with your organization"
 msgstr "Les mots de passe et la connexion en deux étapes relèvent de votre organisation"
+
+#: src/frame/part-words.tsx
+msgctxt "put the copied key in the field"
+msgid "Paste"
+msgstr "Coller"
 
 #: src/settings/invitations.tsx
 msgid "Paste several at once, split by commas or lines."
@@ -14662,6 +14705,10 @@ msgstr "Rechercher des personnes et des équipes"
 msgid "Search people, teams and roles"
 msgstr "Rechercher des personnes, des équipes et des rôles"
 
+#: src/frame/part-words.tsx
+msgid "Search providers"
+msgstr "Rechercher des fournisseurs"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La recherche parcourt toutes les collections que vous pouvez lire. Essayez d’autres mots, ou moins de mots."
@@ -15168,6 +15215,10 @@ msgstr "Afficher dans le journal"
 #: src/workflows/version-source.tsx
 msgid "Show its definition"
 msgstr "Afficher sa définition"
+
+#: src/frame/part-words.tsx
+msgid "Show key"
+msgstr "Afficher la clé"
 
 #: src/chat/held-writes.tsx
 #: src/frame/part-words.tsx
@@ -16414,6 +16465,10 @@ msgstr "Ce n’est pas un lien qui peut être ouvert."
 #: src/workflows/resource-params.tsx
 msgid "That isn't a value this parameter takes."
 msgstr "Ce paramètre n’accepte pas cette valeur."
+
+#: src/frame/part-words.tsx
+msgid "That key didn't work."
+msgstr "Cette clé n'a pas fonctionné."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
@@ -17701,6 +17756,10 @@ msgstr "À tous chez {company}"
 #: src/agents/agent-page.tsx
 msgid "To stop it for a while, turn it off instead."
 msgstr "Pour l'arrêter un temps, désactivez-le plutôt."
+
+#: src/frame/part-words.tsx
+msgid "To tell this key from others."
+msgstr "Pour distinguer cette clé des autres."
 
 #: src/onboarding/send-plan-form.tsx
 msgid "To the team leads. Everyone else follows once their lead has talked."
