@@ -1280,10 +1280,6 @@ msgstr "{shared, plural, one {# document was shared or found, and read.} other {
 msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {# integration shown} other {# integrations shown}}"
 
-#: src/brain/activity-page.tsx
-msgid "{shown, plural, one {What came in since {when}: the newest change is shown.} other {What came in since {when}: the newest # changes are shown.}}"
-msgstr "{shown, plural, one {What came in since {when}: the newest change is shown.} other {What came in since {when}: the newest # changes are shown.}}"
-
 #: src/workflows/listed-count.tsx
 msgid "{shown} entries or more"
 msgstr "{shown} entries or more"
@@ -3421,6 +3417,10 @@ msgstr "Asking"
 msgctxt "a question going out"
 msgid "Asking"
 msgstr "Asking"
+
+#: src/brain/activity-page.tsx
+msgid "Asking failed: {cannotAsk}"
+msgstr "Asking failed: {cannotAsk}"
 
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
@@ -11027,6 +11027,10 @@ msgstr "Not a PNG, JPEG or WebP picture"
 msgid "Not added"
 msgstr "Not added"
 
+#: src/brain/activity-page.tsx
+msgid "Not all of what changed since you last looked could be read: {reason}"
+msgstr "Not all of what changed since you last looked could be read: {reason}"
+
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
 msgstr "Not allowed"
@@ -15017,6 +15021,7 @@ msgstr "Should it work on its own?"
 msgid "Show"
 msgstr "Show"
 
+#: src/brain/activity-page.tsx
 #: src/frame/part-words.tsx
 msgid "Show {count} more"
 msgstr "Show {count} more"

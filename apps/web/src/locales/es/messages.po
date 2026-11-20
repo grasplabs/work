@@ -1280,10 +1280,6 @@ msgstr "{shared, plural, one {# documento se compartió o se encontró, y se ley
 msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {Se muestra # integración} other {Se muestran # integraciones}}"
 
-#: src/brain/activity-page.tsx
-msgid "{shown, plural, one {What came in since {when}: the newest change is shown.} other {What came in since {when}: the newest # changes are shown.}}"
-msgstr "{shown, plural, one {Lo que llegó desde el {when}: se muestra el cambio más reciente.} other {Lo que llegó desde el {when}: se muestran los # cambios más recientes.}}"
-
 #: src/workflows/listed-count.tsx
 msgid "{shown} entries or more"
 msgstr "{shown} entradas o más"
@@ -3421,6 +3417,10 @@ msgstr "Preguntando"
 msgctxt "a question going out"
 msgid "Asking"
 msgstr "Preguntando"
+
+#: src/brain/activity-page.tsx
+msgid "Asking failed: {cannotAsk}"
+msgstr "No se pudo preguntar: {cannotAsk}"
 
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
@@ -11027,6 +11027,10 @@ msgstr "No es una imagen PNG, JPEG o WebP"
 msgid "Not added"
 msgstr "No añadido"
 
+#: src/brain/activity-page.tsx
+msgid "Not all of what changed since you last looked could be read: {reason}"
+msgstr "No se pudo leer todo lo que cambió desde la última vez que miraste: {reason}"
+
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
 msgstr "No permitida"
@@ -15017,6 +15021,7 @@ msgstr "¿Debe trabajar por su cuenta?"
 msgid "Show"
 msgstr "Mostrar"
 
+#: src/brain/activity-page.tsx
 #: src/frame/part-words.tsx
 msgid "Show {count} more"
 msgstr "Mostrar {count} más"

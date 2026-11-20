@@ -90,32 +90,63 @@ const styles = stylex.create({
   },
 });
 
-/** What changed since the last look, or why it couldn't be read. */
+/**
+ * What changed since the last look, or why it couldn't be read. The page
+ * after the shown changes is read ahead, so "Show more" can say how many
+ * it brings; `next` is where the page after that starts, and `failed`
+ * why it couldn't be read.
+ */
 type Fresh =
   | { state: "loading" }
   | { state: "failed"; reason: string }
-  | { state: "ready"; since: string; changes: BrainChange[]; more: boolean };
+  | {
+      state: "ready";
+      since: string;
+      changes: BrainChange[];
+      ahead: BrainChange[];
+      next: string | null;
+      failed?: string;
+    };
 
-/** How many of the changes since the last look the page lists: the newest, so the log stays in view. */
+/** How many changes since the last look a page brings: the newest first, so the log stays in view. */
 const freshShown = 10;
 
 /**
- * The newest changes after `since`. Outside the component, as the React
- * Compiler can't compile `try`/`catch` around a value it returns.
+ * A page of the changes after `since`, from `cursor`. Outside the component,
+ * as the React Compiler can't compile `try`/`catch` around a value it returns.
  */
 const readChanges = async (
   core: Pick<CoreConnection, "withSession">,
-  since: string
+  since: string,
+  cursor?: string
 ): Promise<{ page: BrainChangePage } | { reason: string }> => {
   try {
     const page = await core.withSession(
       async (session) =>
-        await session.brain.changes({ since, limit: freshShown })
+        await session.brain.changes({ since, cursor, limit: freshShown })
     );
     return { page };
   } catch (error) {
     return { reason: failureText(error) };
   }
+};
+
+/** Reads the page after the shown changes into `fresh`, unless the page has moved on to another look. */
+const readAhead = async (
+  core: Pick<CoreConnection, "withSession">,
+  since: string,
+  cursor: string,
+  setFresh: (change: (now: Fresh) => Fresh) => void
+): Promise<void> => {
+  const answer = await readChanges(core, since, cursor);
+  setFresh((now) => {
+    if (now.state !== "ready" || now.since !== since) {
+      return now;
+    }
+    return "reason" in answer
+      ? { ...now, next: null, failed: answer.reason }
+      : { ...now, ahead: answer.page.changes, next: answer.page.next };
+  });
 };
 
 /** Today, as an ISO date where the reader is. */
@@ -156,8 +187,11 @@ const listed = (
   name = opened.title
 ): Listed => ({ line: { id, icon: opened.icon, name, detail }, opened });
 
-/** What changed since the last look, read as the page opens; the look then counts as seen. */
-const useFresh = (): Fresh => {
+/**
+ * What changed since the last look, read as the page opens; the look then
+ * counts as seen. `more` shows the page read ahead and reads the one after.
+ */
+const useFresh = (): { fresh: Fresh; more: () => void } => {
   const core = useCore();
   const { identity } = useRouteContext({ from: "/_shell" });
   const [fresh, setFresh] = useState<Fresh>({ state: "loading" });
@@ -174,20 +208,33 @@ const useFresh = (): Fresh => {
         setFresh({ state: "failed", reason: answer.reason });
         return;
       }
-      setFresh({
-        state: "ready",
-        since,
-        changes: answer.page.changes,
-        more: answer.page.next !== null,
-      });
+      const { changes, next } = answer.page;
+      setFresh({ state: "ready", since, changes, ahead: [], next });
       keepLooked(identity.userId, asked);
+      if (next !== null) {
+        await readAhead(core, since, next, setFresh);
+      }
     };
     void load();
     return () => {
       left = true;
     };
   }, [core, identity.userId]);
-  return fresh;
+  const more = (): void => {
+    if (fresh.state !== "ready") {
+      return;
+    }
+    const { since, next } = fresh;
+    setFresh({
+      ...fresh,
+      changes: [...fresh.changes, ...fresh.ahead],
+      ahead: [],
+    });
+    if (next !== null) {
+      void readAhead(core, since, next, setFresh);
+    }
+  };
+  return { fresh, more };
 };
 
 export const ActivityPage = () => {
@@ -199,7 +246,7 @@ export const ActivityPage = () => {
   const { busy, run } = useCoreAction();
   // Why asking failed, beside the question it was about.
   const [failed, setFailed] = useState<{ gap: string; reason: string }>();
-  const fresh = useFresh();
+  const { fresh, more } = useFresh();
   const [open, setOpen] = useState<string>();
   // Where the reader was in the log: on a phone the open line takes the page's place, and closing it comes back here.
   const pane = useRef<HTMLDivElement>(null);
@@ -402,24 +449,27 @@ export const ActivityPage = () => {
   );
 
   let description: string | undefined;
+  let error: string | undefined;
   if (fresh.state === "failed") {
     const { reason } = fresh;
-    description = t`What changed since you last looked couldn't be read: ${reason}`;
+    error = t`What changed since you last looked couldn't be read: ${reason}`;
   } else if (fresh.state === "ready") {
     const when = formatDateTime(fresh.since);
-    const shown = fresh.changes.length;
-    description = t`What came in since ${when}.`;
-    if (shown === 0) {
-      description = t`Nothing has changed since ${when}.`;
-    } else if (fresh.more) {
-      description = plural(shown, {
-        one: `What came in since ${when}: the newest change is shown.`,
-        other: `What came in since ${when}: the newest # changes are shown.`,
-      });
+    const reason = fresh.failed;
+    description =
+      fresh.changes.length === 0
+        ? t`Nothing has changed since ${when}.`
+        : t`What came in since ${when}.`;
+    if (reason !== undefined) {
+      error = t`Not all of what changed since you last looked could be read: ${reason}`;
     }
   }
 
   const inHand = open === undefined ? undefined : opened.get(open);
+  const cannotAsk =
+    failed !== undefined && failed.gap === inHand?.ask?.id
+      ? failed.reason
+      : undefined;
   const go = (goes: Goes): void => {
     if (goes.to === "note") {
       void navigate({ to: "/brain/$noteId", params: { noteId: goes.id } });
@@ -450,6 +500,7 @@ export const ActivityPage = () => {
     waiting: t`Waiting for an answer`,
     kept: t`What the brain kept`,
     changed: t`Pages it changed`,
+    showMore: (count: number) => t`Show ${count} more`,
   };
   return (
     <div ref={pane} {...stylex.props(styles.pane)}>
@@ -465,16 +516,20 @@ export const ActivityPage = () => {
         >
           <PageBrainActivity
             description={description}
+            error={error}
             fresh={freshListed.map(({ line }) => line)}
+            freshMore={fresh.state === "ready" ? fresh.ahead.length : 0}
             groups={stretches.map(({ id, label, listed: lines }) => ({
               id,
               label,
               lines: lines.map(({ line }) => line),
             }))}
+            onMore={more}
             onOpen={(id) => {
               readAt.current = pane.current?.scrollTop ?? 0;
               setOpen(id);
             }}
+            open={open}
             waiting={waitingListed.map(({ line }) => line)}
             words={words}
           />
@@ -523,11 +578,12 @@ export const ActivityPage = () => {
               changed={inHand.changed}
               icon={inHand.icon}
               kept={inHand.kept}
-              meta={
-                failed !== undefined && failed.gap === inHand.ask?.id
-                  ? [...inHand.meta, failed.reason]
-                  : inHand.meta
+              error={
+                cannotAsk === undefined
+                  ? undefined
+                  : t`Asking failed: ${cannotAsk}`
               }
+              meta={inHand.meta}
               onClose={() => {
                 // Only a phone hid the log; beside it, the reader may have scrolled on.
                 const hidden = page.current?.checkVisibility() === false;

@@ -4,12 +4,14 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { use } from "react";
 import type { ReactNode } from "react";
 
 import { focus } from "../focus/focus";
 import { Icon } from "../icons";
 import type { IconData } from "../icons";
 import { arrive } from "../motion/arrive";
+import { NoActions } from "./no-actions";
 import { band, styles } from "./styles";
 
 /** Every prop a RowListItem takes. */
@@ -41,6 +43,10 @@ const given = (node: ReactNode): boolean =>
 
 /** The row's end: its actions, or the room they would take when other rows have them. */
 const End = ({ actions }: { actions: ReactNode }) => {
+  const none = use(NoActions);
+  if (none) {
+    return null;
+  }
   if (given(actions)) {
     return (
       <span data-row-actions="" {...stylex.props(styles.actions)}>

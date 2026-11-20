@@ -1280,10 +1280,6 @@ msgstr "{shared, plural, one {# document werd gedeeld of gevonden, en gelezen.} 
 msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {# integratie getoond} other {# integraties getoond}}"
 
-#: src/brain/activity-page.tsx
-msgid "{shown, plural, one {What came in since {when}: the newest change is shown.} other {What came in since {when}: the newest # changes are shown.}}"
-msgstr "{shown, plural, one {Wat er sinds {when} binnenkwam: de nieuwste wijziging staat hier.} other {Wat er sinds {when} binnenkwam: de # nieuwste wijzigingen staan hier.}}"
-
 #: src/workflows/listed-count.tsx
 msgid "{shown} entries or more"
 msgstr "{shown} regels of meer"
@@ -3421,6 +3417,10 @@ msgstr "Vragen"
 msgctxt "a question going out"
 msgid "Asking"
 msgstr "Bezig met vragen"
+
+#: src/brain/activity-page.tsx
+msgid "Asking failed: {cannotAsk}"
+msgstr "Vragen is mislukt: {cannotAsk}"
 
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
@@ -11027,6 +11027,10 @@ msgstr "Geen PNG-, JPEG- of WebP-afbeelding"
 msgid "Not added"
 msgstr "Niet toegevoegd"
 
+#: src/brain/activity-page.tsx
+msgid "Not all of what changed since you last looked could be read: {reason}"
+msgstr "Niet alles wat er veranderde sinds je laatst keek, kon worden gelezen: {reason}"
+
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
 msgstr "Niet toegestaan"
@@ -15017,6 +15021,7 @@ msgstr "Moet hij zelfstandig werken?"
 msgid "Show"
 msgstr "Tonen"
 
+#: src/brain/activity-page.tsx
 #: src/frame/part-words.tsx
 msgid "Show {count} more"
 msgstr "Toon er nog {count}"
