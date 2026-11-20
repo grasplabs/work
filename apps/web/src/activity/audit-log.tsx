@@ -74,10 +74,10 @@ import {
   SelectValue,
   SelectContent,
 } from "../grasp/select/index.ts";
+import { RowAlert } from "../grasp/setting-row/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { RowAlert } from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { actionWords } from "./audit-words.ts";
 import { logSearchOf } from "./log-search.ts";

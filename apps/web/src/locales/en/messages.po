@@ -7104,10 +7104,6 @@ msgstr "Find people"
 msgid "Find similar"
 msgstr "Find similar"
 
-#: src/settings/where-stephen.tsx
-msgid "Find Stephen under Apps in your Slack workspace."
-msgstr "Find Stephen under Apps in your Slack workspace."
-
 #: src/agents/agent-templates.ts
 msgid "Find the parts of the company's knowledge that answer the question."
 msgstr "Find the parts of the company's knowledge that answer the question."
@@ -12000,7 +11996,6 @@ msgstr "Only you see this"
 #: src/inbox/item-detail.tsx
 #: src/knowledge/uploads.tsx
 #: src/onboarding/setup-frame.tsx
-#: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Open"
 
@@ -12027,10 +12022,6 @@ msgstr "Open {lapsedApp}"
 #: src/frame/part-words.tsx
 msgid "Open {name}"
 msgstr "Open {name}"
-
-#: src/settings/where-stephen.tsx
-msgid "Open a chat with Stephen, or search for him in Teams’ apps."
-msgstr "Open a chat with Stephen, or search for him in Teams’ apps."
 
 #: src/link-confirmation.tsx
 msgid "Open a link outside Grasp?"
@@ -12095,10 +12086,6 @@ msgstr "Open questions"
 #: src/brain/brain.ts
 msgid "Open since {date}. Until it is answered, this stays unknown, never zero."
 msgstr "Open since {date}. Until it is answered, this stays unknown, never zero."
-
-#: src/settings/where-stephen.tsx
-msgid "Open Stephen in {app}, in a new tab"
-msgstr "Open Stephen in {app}, in a new tab"
 
 #: src/agents/agent-templates.ts
 msgid "Open tasks and their due dates."
@@ -19215,10 +19202,6 @@ msgstr "Where the work passes on"
 #: src/inbox/report-view.tsx
 msgid "Where this week's {total} runs went."
 msgstr "Where this week's {total} runs went."
-
-#: src/settings/where-stephen.tsx
-msgid "Where to reach Stephen"
-msgstr "Where to reach Stephen"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"

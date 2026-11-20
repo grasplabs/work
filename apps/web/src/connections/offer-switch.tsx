@@ -1,14 +1,8 @@
 import { useLingui } from "@lingui/react/macro";
 
-import {
-  Field,
-  FieldLabel,
-  FieldDescription,
-  FieldContent,
-} from "../grasp/field/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
-import { SettingsRows, SwitchRow } from "../settings/section.tsx";
 import type { Integration } from "./integrations.ts";
 import { useChange } from "./use-change.ts";
 
@@ -31,32 +25,32 @@ export const OfferSwitch = ({
     // No title: the switch's label says it, and a title would repeat it.
     <SectionCard aria-label={t`Offered`} density="compact" flush>
       <SettingsRows>
-        <SwitchRow>
-          <Field orientation="horizontal" disabled={staff}>
-            <FieldContent>
-              <FieldLabel>{t`Offered to your organization`}</FieldLabel>
-              <FieldDescription>{t`Off, nobody can connect it, admins included. Connections already made go on.`}</FieldDescription>
-            </FieldContent>
-            <Switch
-              checked={integration.offered}
-              failedLabel={t`Couldn't save`}
-              onSave={async (offered) => {
-                let saved = false;
-                await change(async (session) => {
-                  await session.connections.setOffered(
-                    integration.source,
-                    integration.id,
-                    offered
-                  );
-                  saved = true;
-                });
-                if (!saved) {
-                  throw new Error("Not saved");
-                }
-              }}
-            />
-          </Field>
-        </SwitchRow>
+        {/* The library's setting row: its name and what off means, the switch on the rows' edge. */}
+        <SettingRow
+          help={t`Off, nobody can connect it, admins included. Connections already made go on.`}
+          label={t`Offered to your organization`}
+        >
+          <Switch
+            checked={integration.offered}
+            disabled={staff}
+            failedLabel={t`Couldn't save`}
+            aria-label={t`Offered to your organization`}
+            onSave={async (offered) => {
+              let saved = false;
+              await change(async (session) => {
+                await session.connections.setOffered(
+                  integration.source,
+                  integration.id,
+                  offered
+                );
+                saved = true;
+              });
+              if (!saved) {
+                throw new Error("Not saved");
+              }
+            }}
+          />
+        </SettingRow>
       </SettingsRows>
     </SectionCard>
   );
