@@ -472,13 +472,13 @@ const recallingWorkflow = async (
   {
     hold,
     byDefault = false,
-  }: { hold?: "before" | "after"; byDefault?: boolean } = {}
+    alias = byDefault ? "brain" : "docs",
+  }: { hold?: "before" | "after"; byDefault?: boolean; alias?: string } = {}
 ) => {
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
   const workflow = await createWorkflowResource(env, by, `recall-${unique()}`);
   // Declaring no permission, it reads by the Brain's own alias (GRA-2228).
-  const alias = byDefault ? "brain" : "docs";
   await publishDefinition(
     env,
     by,
@@ -493,7 +493,7 @@ const recallingWorkflow = async (
       result: { $expr: "recalled" },
       ...(byDefault
         ? {}
-        : { permissions: { brain: { docs: { contract: key } } } }),
+        : { permissions: { brain: { [alias]: { contract: key } } } }),
       steps: [
         // A pause before the recall or the run's output, for a test to act
         // in.
@@ -521,7 +521,7 @@ const recallingWorkflow = async (
     brainGrant({ type: "workflow", workflowId: workflow.id })
   );
   await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "docs",
+    alias,
     target: { kind: "brain", permissionId },
     reviewed: { version: 1 },
   });
@@ -1555,6 +1555,38 @@ describe(
         texts: [`For everyone: ${word} is in the handbook.`],
         recalledLater: [`Salary band: ${erasedWord} is 70k.`],
         withheld: { result: null, error: "brain.revoked" },
+      });
+    });
+
+    it("reads through a permission declared under the Brain's alias, never by default: unmarked, its reads pinned under its grant", async () => {
+      const { word, admin, ada } = await company();
+      const { workflow, permissionId } = await recallingWorkflow(ada, admin, {
+        alias: "brain",
+      });
+      const runId = await startedRun(ada, workflow.id, {
+        question: word,
+        tokens: 800,
+      });
+      const pack = await endOf(ada, workflow.id, runId);
+      const pins = await env.DB.prepare(
+        "SELECT DISTINCT permission_id AS permission FROM run_brain_versions WHERE run_id = ?"
+      )
+        .bind(runId)
+        .all<{ permission: string }>();
+      const marked = await env.DB.prepare(
+        "SELECT 1 FROM brain_default_reads WHERE subject_type = 'workflow' AND subject_id = ?"
+      )
+        .bind(workflow.id)
+        .first();
+
+      expect({
+        texts: textsOf(pack).filter((text) => text.includes(word)),
+        pinnedUnder: pins.results.map(({ permission }) => permission),
+        marked,
+      }).toStrictEqual({
+        texts: [`For everyone: ${word} is in the handbook.`],
+        pinnedUnder: [permissionId],
+        marked: null,
       });
     });
 
