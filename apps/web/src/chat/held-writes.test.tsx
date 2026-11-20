@@ -422,11 +422,18 @@ describe("a write to an App held for the person", () => {
 
   it("tells the chat nothing after a rejection, or a confirmation that didn't go through", async () => {
     const refusal = permissionErrors.create("permission.denied");
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.archive",
+    };
     await shown({
+      calls: { "chat-1": [held, second] },
       actions: [mail],
-      refusing: { [mail.id]: refusal },
+      refusing: { [mail.id]: refusal, [second.id]: refusal },
     });
     await press("Reject notes.create in Notes");
+    await press("Confirm notes.archive in Notes");
     await press("Confirm mail.send on Outlook");
 
     expect(carriedOn).toStrictEqual([]);
