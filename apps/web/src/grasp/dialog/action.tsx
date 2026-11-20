@@ -6,20 +6,15 @@
 import { Button as PressPrimitive } from "@ui-sdk/react/button";
 import { DialogClose as ClosePrimitive } from "@ui-sdk/react/dialog";
 import type { DialogCloseState } from "@ui-sdk/react/dialog";
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import type { ComponentProps, MouseEvent } from "react";
 
-import { Button } from "../button";
-import type {
-  ActionState,
-  ButtonLayoutStyle,
-  ButtonVariant,
-  ButtonWords,
-} from "../button";
+import type { ButtonLayoutStyle, ButtonVariant, ButtonWords } from "../button";
+import { CloseActionButton, runCloseWork } from "../button/action-core";
+import type { CloseActionButtonProps } from "../button/action-core";
 import { buttonWords } from "../button/words";
 import type { ButtonOwnWords } from "../button/words";
 import type { IconData } from "../icons";
-import { ms } from "../tokens/tokens.values";
 import { useWords } from "../words/words";
 import { useStill } from "./still-context";
 import { dialogStyles as styles } from "./styles";
@@ -83,35 +78,11 @@ interface WithWork {
 /** Every prop a DialogAction takes: these, and the rest of UI SDK's DialogClose. */
 export type DialogActionProps = ActionBase & (WithoutWork | WithWork);
 
-/** Who sees a failure: shown on the button for a moment, then the button is ready again. */
-const useFailed = (error: unknown) => {
-  const [shown, setShown] = useState(false);
-  // The failure last shown, boxed, so "none" is not a value the work could have thrown.
-  const last = useRef<{ error: unknown } | null>(null);
-  useEffect(() => {
-    // A press clears the error, so the same failure twice is shown twice.
-    let timer = 0;
-    if (error === undefined) {
-      last.current = null;
-    } else if (last.current?.error !== error) {
-      last.current = { error };
-      setShown(true);
-      timer = window.setTimeout(() => {
-        setShown(false);
-      }, ms.durationHold);
-    }
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [error]);
-  return shown;
-};
-
 /** An action's Button, as a dialog's footer draws it. Alert dialog (src/components/alert-dialog) draws its actions with it too. */
-export interface ActionButtonProps {
-  props: Record<string, unknown>;
-  state: ActionState;
-  error: unknown;
+export interface ActionButtonProps extends Omit<
+  CloseActionButtonProps,
+  "place" | "look"
+> {
   look: Pick<ActionBase, "children" | "variant" | "icon" | "agentConfirm"> & {
     workingLabel?: string;
     failedLabel?: string;
@@ -120,83 +91,18 @@ export interface ActionButtonProps {
   };
   /** Its place in a still drawing for the docs (still.styles.ts), in place of its own. */
   still?: ButtonLayoutStyle;
-  /** It has work to do, so it shows the work's life: Cancel has none, and keeps its own width. */
-  life: boolean;
 }
 
-/** Its place: the still drawing's, or its own. Layout only, as a Button's style is. */
-const placedFor = (still: ButtonLayoutStyle | undefined) => ({
-  style: still ?? styles.action,
-});
-
-/** What the button shows: working while the work runs, failed for a moment after it failed. */
-const currentOf = (state: ActionState, failed: boolean): ActionState => {
-  if (state === "working") {
-    return "working";
-  }
-  return failed ? "failed" : "idle";
-};
-
-export const ActionButton = ({
-  props,
-  state,
-  error,
-  look,
-  still,
-  life,
-}: ActionButtonProps) => {
-  const failed = useFailed(error);
-  const { actionFailed } = useWords("button", buttonWords, look.words);
-  const {
-    variant = "quiet",
-    icon,
-    children,
-    workingLabel,
-    failedLabel = actionFailed,
-    agentConfirm,
-  } = look;
-  const words = typeof children === "string" ? children : undefined;
-  const confirm = agentConfirm ?? (variant === "danger" ? words : undefined);
-  const lifeProps = life
-    ? {
-        state: currentOf(state, failed),
-        workingLabel,
-        doneLabel: words ?? "",
-        failedLabel,
-      }
-    : {};
-  return (
-    <Button
-      {...props}
-      {...lifeProps}
-      {...placedFor(still)}
-      data-agent-confirm={confirm}
-      variant={variant}
-      icon={icon}
-      size="sm"
-    >
-      {children}
-    </Button>
-  );
-};
+/** The closing action's Button (src/components/button/action-core.tsx), in its place: the still drawing's, or its own. */
+export const ActionButton = ({ still, ...rest }: ActionButtonProps) => (
+  <CloseActionButton {...rest} place={still ?? styles.action} />
+);
 
 /**
  * Runs an action's work after the press, a moment later, as UI SDK settles it. A failure rejects
  * with the failure words, so an agent's press fails with them.
  */
-export const runWork = async (
-  action: WithWork["action"],
-  event: Event | undefined,
-  details: { source: string },
-  failedLabel: string | undefined
-) => {
-  await Promise.resolve();
-  try {
-    return await action(event, details);
-  } catch {
-    throw new Error(failedLabel);
-  }
-};
+export const runWork = runCloseWork;
 
 interface LiveActionProps {
   rest: Omit<ActionBase, "children" | "variant" | "icon" | "agentConfirm">;

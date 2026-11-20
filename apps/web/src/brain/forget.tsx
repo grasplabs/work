@@ -21,7 +21,6 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Trash } from "../grasp/icons/index.ts";
 import { Progress } from "../grasp/progress/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -342,20 +341,3 @@ export const useForget = (
   );
   return { ask, element };
 };
-
-/** The button that asks to take something out of the brain. */
-export const ForgetButton = ({
-  label,
-  onClick,
-}: {
-  label: string;
-  onClick: () => void;
-}) => (
-  <Button
-    aria-label={label}
-    icon={Trash}
-    onClick={onClick}
-    size="sm"
-    variant="ghost"
-  />
-);

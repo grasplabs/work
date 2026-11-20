@@ -27,6 +27,7 @@ import {
   AppMark,
   asksConnect,
   Balance,
+  canConnect,
   ChoiceWord,
   ConnectAction,
   groupChoice,
@@ -257,6 +258,12 @@ export const AppPanel = ({
               <span {...stylex.props(styles.description)}>
                 {app.description}
               </span>
+            }
+            // A member, where the app waits to be connected: why there is no Connect.
+            meta={
+              asksConnect(app) && !canConnect(actions)
+                ? [words.adminConnects]
+                : undefined
             }
             actions={
               <span {...stylex.props(styles.actions)}>

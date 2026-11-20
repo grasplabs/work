@@ -49,8 +49,11 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
           placeholder={t`Ask Grasp`}
         />
       </div>
-      <SettingsRows>
-        <SettingRow label={t`Colour`}>
+      <SettingsRows controls="fit">
+        <SettingRow
+          help={t`The light around the box while Grasp works`}
+          label={t`Colour`}
+        >
           <ToggleGroup
             aria-label={t`Colour`}
             onValueChange={(value) => {
@@ -59,7 +62,6 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
                 chooseComposerLook(userId, { ...look, accent });
               }
             }}
-            size="sm"
             value={[look.accent]}
           >
             {composerAccents.map((accent) => (
@@ -69,7 +71,7 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
             ))}
           </ToggleGroup>
         </SettingRow>
-        <SettingRow label={t`Edge`}>
+        <SettingRow help={t`How that light is drawn`} label={t`Edge`}>
           <ToggleGroup
             aria-label={t`Edge`}
             onValueChange={(value) => {
@@ -78,7 +80,6 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
                 chooseComposerLook(userId, { ...look, edge });
               }
             }}
-            size="sm"
             value={[look.edge]}
           >
             {composerEdges.map((edge) => (

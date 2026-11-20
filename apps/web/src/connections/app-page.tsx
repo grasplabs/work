@@ -1,4 +1,5 @@
 import type { CatalogTool } from "@grasp-os/shared/connect";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { useLingui } from "@lingui/react/macro";
@@ -95,6 +96,9 @@ export const IntegrationAppPage = ({
         editable={changeable !== undefined}
         onToolsChange={changeTools}
         {...actions}
+        // The library takes no Connect for a member's app; an admin's is only
+        // missing while its tools load, or where none can connect it.
+        {...(isMemberAdmin(identity) ? { words: { adminConnects: "" } } : {})}
       />
       {dialogs}
     </FollowLinks>

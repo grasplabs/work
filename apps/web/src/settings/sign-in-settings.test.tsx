@@ -124,14 +124,15 @@ describe("Settings › Workspace › Sign-in", () => {
     document.body.innerHTML = "";
   });
 
-  // Whose accounts each takes stands in the row's info tip, which doesn't
-  // open in happy-dom; the page's own look checks it.
   it("shows an admin each way people sign in and whether the sign-in page offers it", async () => {
     const { session } = fakeOrgSettings(both);
     await shown(session);
 
     expect({
       ways: document.querySelector("input")?.value,
+      accounts: text().includes(
+        "Only your organization’s work accounts and work accounts at acme.test"
+      ),
       // The one whose secret isn't set says so; the other says nothing.
       notOffered: {
         microsoft: text().includes("Microsoft 365 isn’t on the sign-in page"),
@@ -141,6 +142,7 @@ describe("Settings › Workspace › Sign-in", () => {
         text().includes("client-ms") || text().includes("client-google"),
     }).toStrictEqual({
       ways: "Microsoft 365 and Google Workspace",
+      accounts: true,
       notOffered: { microsoft: false, google: true },
       noSecret: false,
     });

@@ -608,7 +608,7 @@ const SourceInspector = ({
         onClick={() => {
           changes.handleAsk("rotate");
         }}
-        size="xs"
+        size="sm"
         variant="ghost"
       >
         {changes.revoked ? t`Make a new secret` : t`Rotate the secret`}

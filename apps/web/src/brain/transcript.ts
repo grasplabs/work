@@ -26,6 +26,12 @@ export const placeLabel = (
   at: string
 ): string => (transcript.unit === "passage" ? `§ ${at}` : at);
 
+/** A place in a transcript as a number to compare: "12:26" in seconds, an answer or passage number as it is. */
+export const position = (at: string): number => {
+  const [whole = 0, rest] = at.split(":").map(Number);
+  return rest === undefined ? whole : whole * 60 + rest;
+};
+
 /**
  * Where each of a source's statements was said, in the order of the conversation. The match ignores
  * case, since a statement may start mid-sentence. A statement that cannot be found is left out.
@@ -50,6 +56,21 @@ export const highlightsOf = (
       return [{ statement, turn, start, end: start + statement.text.length }];
     })
     .toSorted((a, b) => a.turn - b.turn || a.start - b.start);
+};
+
+/** The chapter each turn falls in: a chapter holds the turns from its minute until the next one starts. */
+export const chapterOfTurns = (transcript: Transcript): number[] => {
+  const starts = transcript.chapters.map((chapter) => position(chapter.at));
+  return transcript.turns.map((turn) => {
+    const at = position(turn.at);
+    let chapter = 0;
+    for (const [index, start] of starts.entries()) {
+      if (at >= start) {
+        chapter = index;
+      }
+    }
+    return chapter;
+  });
 };
 
 /** Where a statement was said, for a link to it: its source and, in a transcript, the minute and the turns around it. */

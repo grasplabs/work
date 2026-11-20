@@ -183,7 +183,7 @@ export const InviteButton = () => {
         }
       }}
     >
-      <DialogTrigger icon={Plus} size="xs" variant="ink">
+      <DialogTrigger icon={Plus} size="sm" variant="quiet">
         {t`Invite`}
       </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
@@ -301,7 +301,7 @@ export const InvitationActions = ({
           aria-label={t`Actions for ${email}`}
           disabled={busy}
           icon={More}
-          size="xs"
+          size="sm"
           variant="ghost"
         />
         <DropdownMenuContent align="end">

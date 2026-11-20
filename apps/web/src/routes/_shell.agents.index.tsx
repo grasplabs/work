@@ -3,8 +3,8 @@ import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { AgentsOverview } from "../agents/agents-overview.tsx";
-import type { ManagedAgents } from "../agents/agents-overview.tsx";
+import { AgentsOverview, agentsTabOf } from "../agents/agents-overview.tsx";
+import type { AgentsTab, ManagedAgents } from "../agents/agents-overview.tsx";
 import type { OwnAgentsAdmin } from "../agents/own-agents-admin.tsx";
 import type { Session } from "../core.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
@@ -19,7 +19,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 // the company's own admins every agent of the company
 // with what core keeps of it. Only admins read the rest, as core checks
 // on every call; the first agent's reach is Settings › Stephen's, so only
-// the others' is read here.
+// the others' is read here. The tab an admin is on is in the address
+// (`?tab=`), so a link or a reload leads back to it.
 
 /** What an admin reads of every agent: its reach, its classes and its wake-ups. */
 export const readManaged = async (session: Session): Promise<ManagedAgents> => {
@@ -104,6 +105,8 @@ const readOwnAdmin = async (
 const AgentsPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  const { tab } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Agents` }]} page={page} />;
@@ -116,8 +119,13 @@ const AgentsPage = () => {
         makesOwn={!identity.staff && page.data.ownOn}
         managed={page.data.managed}
         offered={page.data.offered}
+        onTab={(chosen) => {
+          // In place of the address it leaves: Back goes to the page before Agents.
+          void navigate({ search: { tab: chosen }, replace: true });
+        }}
         ownAdmin={page.data.ownAdmin}
         own={page.data.own}
+        tab={tab}
         usable={page.data.usable}
       />
     </>
@@ -154,6 +162,12 @@ const AgentsLoading = () => {
 export const Route = createFileRoute("/_shell/agents/")({
   pendingComponent: AgentsLoading,
   component: AgentsPage,
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { tab?: AgentsTab | undefined } => {
+    const tab = agentsTabOf(search.tab);
+    return tab === undefined ? {} : { tab };
+  },
   loader: async ({ context: { core, identity } }) =>
     await loadFromCore(core, async (session) => {
       const admin = isAdmin(identity.role);

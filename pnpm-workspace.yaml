@@ -216,6 +216,14 @@ catalog:
   "@tiptap/pm": 3.33.0
   "@tiptap/react": 3.33.0
   "@tiptap/suggestion": 3.33.0
+  # The library's DocumentEditor (apps/web/src/grasp/document-editor): Brain
+  # and Knowledge pages written in place, kept as Markdown, with GFM tables,
+  # collapsible sections and text styles.
+  "@tiptap/extension-details": 3.33.0
+  "@tiptap/extension-table": 3.33.0
+  "@tiptap/extension-text-style": 3.33.0
+  "@tiptap/markdown": 3.33.0
+  "@tiptap/starter-kit": 3.33.0
   # The kit's SortableList: drag, with a keyboard and a screen reader too.
   "@dnd-kit/core": 6.3.1
   "@dnd-kit/sortable": 10.0.0

@@ -155,11 +155,12 @@ const grow = stylex.keyframes({
 });
 
 const styles = stylex.create({
-  // The tiles: equal, four in a row in a card of the product's width (about 52rem), fewer as the card
-  // narrows (by its own width); every tile in a row as tall as the tallest, a long name wrapping inside.
+  // The tiles: equal, two in a row in a settings column (45rem), more in a wider card, fewer as the
+  // card narrows (by its own width); every tile in a row as tall as the tallest, a long name wrapping
+  // inside.
   tiles: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(10rem, 100%), 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(15rem, 100%), 1fr))",
     gap: grasp.space3,
   },
   // A tile's box: the row's height, the tile filling it.

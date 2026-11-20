@@ -1,4 +1,3 @@
-import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -107,8 +106,6 @@ const useGroups = (
   // The address being loaded, not the last one loaded: a page's pending state
   // already marks its own row (main.tsx shows it at once).
   const at = (to: RouteTo, fuzzy = true) => matchRoute({ to, fuzzy }) !== false;
-  const inWorkflows = at("/workflows");
-  const onRequests = at("/workflows/requests");
   const sections: SidebarGroupEntry = {
     rows: [
       {
@@ -133,24 +130,9 @@ const useGroups = (
         label: t`Workflows`,
         icon: Cycle,
         render: <Link to="/workflows" />,
-        current: inWorkflows && !onRequests,
+        current: at("/workflows"),
         count: workflowsWaiting,
         countLabel: workflowsWaitingLabel(workflowsWaiting ?? 0),
-        // Stephen's requests, under Workflows while the person is in them.
-        ...(isAdmin(identity.role) && inWorkflows
-          ? {
-              rows: [
-                {
-                  label: t({
-                    message: "Requests",
-                    context: "Stephen's requests: the page",
-                  }),
-                  render: <Link to="/workflows/requests" />,
-                  current: onRequests,
-                },
-              ],
-            }
-          : {}),
       },
       {
         label: t`Agents`,

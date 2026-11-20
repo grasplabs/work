@@ -258,7 +258,6 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
-    // In Workflows, where an admin's Requests is under it.
     await page.goto("/workflows");
     const links = page
       .getByRole("navigation", { name: "Main" })
@@ -305,11 +304,6 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   };
   const [chat, ...rest] = everyone;
   const nav = [chat, "Dashboard", ...rest];
-  // Stephen's requests sit under Workflows for admins only, while they are
-  // in Workflows.
-  const adminNav = nav.flatMap((section) =>
-    section === "Workflows" ? [section, "Requests"] : [section]
-  );
   const menu = ["Sign out"];
   // Each person's own instruction file is theirs to write, whatever their
   // role: in every person's Settings.
@@ -320,7 +314,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     user: await sidebarOf(user),
   }).toStrictEqual({
     admin: {
-      nav: adminNav,
+      nav,
       menu,
       settings: [
         "Workspace",
@@ -346,12 +340,6 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     builder: { nav, menu, settings: account },
     user: { nav, menu, settings: account },
   });
-  // Outside Workflows, Requests isn't under it.
-  const page = await pageOf(admin);
-  await page.goto("/");
-  const main = page.getByRole("navigation", { name: "Main" });
-  await expect(main.getByRole("link", { name: "Chat" })).toBeVisible();
-  await expect(main.getByRole("link", { name: "Requests" })).toHaveCount(0);
 });
 
 test("a link to an app, opened signed out, leads through sign-in to the app in the frame", async ({

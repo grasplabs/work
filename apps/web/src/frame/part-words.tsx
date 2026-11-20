@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { useApprovalWords } from "../chat/approval-words.ts";
 import { formatBytes, formatList, formatNumber } from "../format.ts";
+import { addConnectionWords } from "../grasp/add-connection/words.ts";
 import { agentActivityWords } from "../grasp/agent-activity/words.ts";
 import { alertWords } from "../grasp/alert/words.ts";
 import { appBuildingWords } from "../grasp/app-building/words.ts";
@@ -38,7 +39,6 @@ import { codeBlockWords } from "../grasp/code-block/words.ts";
 import { comboboxWords } from "../grasp/combobox/words.ts";
 import { commandWords } from "../grasp/command/words.ts";
 import { composerWords } from "../grasp/composer/words.ts";
-import { connectionRowWords } from "../grasp/connection-row/words.ts";
 import { contextMenuWords } from "../grasp/context-menu/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
 import { englishWords as dataGridWords } from "../grasp/data-grid/words.ts";
@@ -51,6 +51,7 @@ import { dateRangePickerWords } from "../grasp/date-range-picker/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
 import { diffFilesWords } from "../grasp/diff-files/words.ts";
 import { diffWords } from "../grasp/diff/words.ts";
+import { documentEditorWords } from "../grasp/document-editor/words.ts";
 import { draftWords } from "../grasp/draft/words.ts";
 import type { DraftWords } from "../grasp/draft/words.ts";
 import { drawerWords } from "../grasp/drawer/words.ts";
@@ -67,11 +68,16 @@ import { linkWords } from "../grasp/link/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
 import { multiStepFormWords } from "../grasp/multi-step-form/words.ts";
 import { ownerPickerWords } from "../grasp/owner-picker/words.ts";
+import { pageHistoryWords } from "../grasp/page-history/words.ts";
+import { pagePropertiesWords } from "../grasp/page-properties/words.ts";
 import { paginationWords } from "../grasp/pagination/words.ts";
 import { panelWords } from "../grasp/panel/words.ts";
 import { questionToolWords } from "../grasp/question-tool/words.ts";
 import { sectionCardWords } from "../grasp/section-card/words.ts";
-import { settingRowWords } from "../grasp/setting-row/words.ts";
+import {
+  connectionRowWords,
+  settingRowWords,
+} from "../grasp/setting-row/words.ts";
 import { shareAccessWords } from "../grasp/share-access/words.ts";
 import { sheetWords } from "../grasp/sheet/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
@@ -174,6 +180,7 @@ export const englishPartWords: GraspWordsCatalog = {
   diff: diffWords,
   diffFiles: diffFilesWords,
   dialog: dialogWords,
+  documentEditor: documentEditorWords,
   stepBar: stepBarWords,
   stepFoot: stepFootWords,
   draft: englishDraftWords,
@@ -189,6 +196,8 @@ export const englishPartWords: GraspWordsCatalog = {
   link: linkWords,
   markdown: markdownWords,
   ownerPicker: ownerPickerWords,
+  pageHistory: pageHistoryWords,
+  pageProperties: pagePropertiesWords,
   pagination: paginationWords,
   panel: panelWords,
   questionTool: questionToolWords,
@@ -209,6 +218,7 @@ export const englishPartWords: GraspWordsCatalog = {
   carousel: carouselWords,
   connectionRow: connectionRowWords,
   connectService: connectServiceWords,
+  addConnection: addConnectionWords,
   appIntegration: appIntegrationWords,
   connectApp: connectAppWords,
   signIn: signInWords,
@@ -1172,6 +1182,92 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
 
     sheet: { close: t`Close` },
+    documentEditor: {
+      label: t({ message: "Document", context: "a document's text, named" }),
+      placeholder: t`Write here. Use # for a heading, 1. for steps and - for a list.`,
+      headingPlaceholder: t({
+        message: "Heading",
+        context: "an empty heading",
+      }),
+      summaryPlaceholder: t`Section title`,
+      formatBar: t({ message: "Format", context: "a document's format bar" }),
+      bold: t`Bold`,
+      italic: t`Italic`,
+      code: t({ message: "Code", context: "text formatted as code" }),
+      link: t({ message: "Link", context: "make text a link" }),
+      linkAddress: t`Link address`,
+      heading: t({ message: "Heading", context: "a kind of block" }),
+      numberedList: t`Numbered list`,
+      bulletList: t`Bulleted list`,
+      quote: t({ message: "Quote", context: "a kind of block" }),
+      collapsible: t`Collapsible section`,
+      expand: t`Show section`,
+      collapse: t`Hide section`,
+      rewriting: t`Grasp is rewriting`,
+      rewritten: t`Rewritten by Grasp`,
+      undoRewrite: t`Undo rewrite`,
+      embedKinds: {
+        Interview: t({ message: "Interview", context: "what an embed opens" }),
+        Document: t({ message: "Document", context: "what an embed opens" }),
+        Note: t({ message: "Note", context: "what an embed opens" }),
+        App: t({ message: "App", context: "what an embed opens" }),
+      },
+      askedFromChat: t`Asked from chat`,
+      askedHere: t`Asked in this page`,
+      askAgain: t`Ask again`,
+      askingAgain: t`Grasp is asking again`,
+      askedAgain: t`Asked again. Undo brings the last answer back.`,
+      askFailed: t`Grasp couldn't answer again. The last answer stays.`,
+      sources: t({ message: "Sources", context: "where an answer comes from" }),
+      blockMenu: t`Block menu`,
+      addBlock: t`Add a block below`,
+      turnInto: t`Turn into`,
+      insert: t({ message: "Insert", context: "a menu of blocks to add" }),
+      kinds: {
+        paragraph: t({ message: "Text", context: "a kind of block" }),
+        heading: t({ message: "Heading", context: "a kind of block" }),
+        bulletList: t`Bulleted list`,
+        orderedList: t`Numbered list`,
+        blockquote: t({ message: "Quote", context: "a kind of block" }),
+        callout: t({ message: "Callout", context: "a kind of block" }),
+        details: t`Collapsible section`,
+        table: t({ message: "Table", context: "a kind of block" }),
+      },
+      noBlock: (query) => t`No block called “${query}”`,
+      blocksFound: (count) =>
+        t`${plural(count, { one: "# block", other: "# blocks" })}`,
+      duplicate: t`Duplicate`,
+      moveUp: t`Move up`,
+      moveDown: t`Move down`,
+      deleteBlock: t({ message: "Delete", context: "a block in a document" }),
+    },
+    pageHistory: {
+      title: t({ message: "History", context: "a page's saved versions" }),
+      description: t`Every change, with who made it. Restore brings a version back as a new one; nothing is lost.`,
+      versions: t({ message: "Versions", context: "a page's saved versions" }),
+      now: t({ message: "now", context: "the page's newest version" }),
+      isNow: t`This is the page now`,
+      since: (who, when) => t`What changed since ${who}, ${when}`,
+      changes: t({ message: "Changes", context: "a diff's name" }),
+      restore: t`Restore this version`,
+    },
+    pageProperties: {
+      properties: t({ message: "Properties", context: "a page's facts" }),
+      open: (count) =>
+        t({
+          message: plural(count, { one: "# open", other: "# open" }),
+          context: "questions waiting for an answer",
+        }),
+      notAnswered: t({
+        message: "Not answered yet",
+        context: "a page's open question",
+      }),
+      ask: t({ message: "Ask", context: "ask someone a page's question" }),
+      askLabel: (who, question) => t`Ask ${who}: ${question}`,
+      asking: t({ message: "Asking", context: "a question going out" }),
+      asked: t({ message: "Asked", context: "a question gone out" }),
+      askFailed: t`Not asked`,
+    },
     pagination: {
       name: t`Pagination`,
       previous: t`Previous page`,
@@ -1253,6 +1349,45 @@ export const usePartWords = (): GraspWordsCatalog => {
         region === undefined ? t`Key …${last}` : t`Key …${last} · ${region}`,
       connectName: (label) => t`Connect ${label}`,
     },
+    addConnection: {
+      trigger: t`Add a connection`,
+      title: t`Add a connection`,
+      close: t`Close`,
+      search: t`Search providers`,
+      clearSearch: t`Clear search`,
+      noResults: (query) => t`Nothing matches “${query}”.`,
+      addAnother: t`Add another`,
+      connected: t`Connected`,
+      back: t`All providers`,
+      stepName: (label) => t`Connect ${label}`,
+      key: t`Key`,
+      keyMissing: t`Paste the key.`,
+      showKey: t`Show key`,
+      hideKey: t`Hide key`,
+      paste: t({
+        message: "Paste",
+        context: "put the copied key in the field",
+      }),
+      name: t`Name`,
+      nameOptional: t({
+        message: "(optional)",
+        context: "a field that may stay empty",
+      }),
+      nameNote: t`To tell this key from others.`,
+      address: t`Address`,
+      // An address, the same in every language.
+      addressPlaceholder: "https://models.example.com/v1",
+      addressMissing: t`Enter your endpoint's address.`,
+      addressWrong: t`Enter an address that starts with https://.`,
+      getKey: (provider) => t`Get a key from ${provider}`,
+      cancel: t`Cancel`,
+      connect: t`Connect`,
+      connecting: t`Connecting`,
+      refused: t`That key didn't work.`,
+      connectedTitle: (provider) => t`${provider} is connected`,
+      connectedDetail: t`Its models are ready to use.`,
+      done: t`Done`,
+    },
     appIntegration: {
       connect: t`Connect`,
       connectAgain: t`Connect again`,
@@ -1280,6 +1415,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       signedOut: t({ message: "Signed out", context: "state of one app" }),
       stopped: t({ message: "Stopped working", context: "state of one app" }),
       notConnected: t`Not connected`,
+      adminConnects: t`An admin connects this`,
       canDo: t`What Grasp can do`,
       mayDo: t`What Grasp may do`,
       counts: (reads, writes) =>

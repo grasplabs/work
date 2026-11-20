@@ -1,6 +1,8 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import { useEffect, useState } from "react";
 
+import { integrationKey } from "../connections/integrations.ts";
+import { brandOf } from "../connections/provider-mark.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -29,11 +31,17 @@ const readSourceNames = async (
   try {
     for (const {
       id,
+      source,
       provider,
       accountName,
     } of await session.connections.list()) {
+      const brand = brandOf(provider, provider);
       names.set(id, {
         name: accountName === null ? provider : `${provider} (${accountName})`,
+        ...(source === "http"
+          ? {}
+          : { integration: integrationKey(source, provider) }),
+        ...(brand === undefined ? {} : { brand }),
       });
     }
   } catch {

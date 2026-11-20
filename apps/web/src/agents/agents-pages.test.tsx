@@ -16,8 +16,8 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
-import type { ReactNode } from "react";
+import { act, useState } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -25,14 +25,15 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { AgentPage } from "./agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
 import { AgentsOverview } from "./agents-overview.tsx";
-import type { ManagedAgents } from "./agents-overview.tsx";
+import type { AgentsTab, ManagedAgents } from "./agents-overview.tsx";
 
 // The Agents page and one agent's page, on what their routes read from
 // core. These start from the ways the pages can fail: someone who isn't an
 // admin shown agents that aren't theirs, or a way to change one; a chat
 // offered with an agent that won't answer the person; a paused agent
-// passed off as on; a change that sends core less than the whole agent
-// and so wipes what wasn't on the card; a person's own agent shown to
+// passed off as on; an agent that answers nobody else listed among the
+// organization's, or the other way round; a change that sends core less
+// than the whole agent and so wipes what wasn't on the card; a person's own agent shown to
 // anyone else, or what it is told shown to an admin.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -125,6 +126,15 @@ const managed: ManagedAgents = {
     },
   },
   teams,
+};
+
+/** Every agent answers someone: none is only the admin's. */
+const allShared: ManagedAgents = {
+  ...managed,
+  settings: {
+    ...managed.settings,
+    [milan.id]: settingsOf({ who: "everyone" }, 0),
+  },
 };
 
 /** The first agent's access, as core keeps it for a company that changed nothing. */
@@ -293,6 +303,50 @@ const cards = () =>
     };
   });
 
+/** No agents of the person's own. */
+const noneOwn: readonly Agent[] = [];
+
+/**
+ * The Agents page as its route shows it: the tab chosen is kept, as the
+ * address keeps it, starting from the one the address names (`at`).
+ */
+const Overview = ({
+  at,
+  own = noneOwn,
+  makesOwn = false,
+  ...page
+}: Omit<
+  ComponentProps<typeof AgentsOverview>,
+  "tab" | "onTab" | "own" | "makesOwn"
+> &
+  Partial<Pick<ComponentProps<typeof AgentsOverview>, "own" | "makesOwn">> & {
+    at?: AgentsTab;
+  }) => {
+  const [tab, setTab] = useState(at);
+  return (
+    <AgentsOverview
+      {...page}
+      makesOwn={makesOwn}
+      onTab={setTab}
+      own={own}
+      tab={tab}
+    />
+  );
+};
+
+/** The overview's tabs, by their words, and which is chosen. */
+const tabs = () =>
+  [...document.querySelectorAll("[role='tab']")].map((tab) => ({
+    name: tab.textContent,
+    chosen: tab.getAttribute("aria-selected") === "true",
+  }));
+
+/** The overview's tab named `name`. */
+const tabNamed = (name: string) =>
+  [...document.querySelectorAll("[role='tab']")].find(
+    (tab) => tab.textContent === name
+  );
+
 /** The button named `name` on the open tab, or outside the tabs. */
 const buttonNamed = (name: string) =>
   [...document.querySelectorAll("button")].find(
@@ -341,7 +395,7 @@ describe("the company's agents, on pages of their own", () => {
   describe("the Agents page", () => {
     it("shows someone who isn't an admin only their agents, each opening a chat with it and nothing to change", async () => {
       await mounted(
-        <AgentsOverview
+        <Overview
           makes={false}
           makesOwn={false}
           managed={undefined}
@@ -358,7 +412,9 @@ describe("the company's agents, on pages of their own", () => {
       expect({
         newAgent: document.querySelector("a[href='/agents/new']") !== null,
         says: document.body.textContent?.includes("Paused"),
-      }).toStrictEqual({ newAgent: false, says: false });
+        // Every agent they see is shared with them: nothing to tell apart.
+        tabs: tabs(),
+      }).toStrictEqual({ newAgent: false, says: false, tabs: [] });
     });
 
     it("shows a person their own agents apart from the company's, each opening its page, and offers to make one", async () => {
@@ -368,7 +424,7 @@ describe("the company's agents, on pages of their own", () => {
         state: "paused",
       });
       await mounted(
-        <AgentsOverview
+        <Overview
           makes={false}
           makesOwn
           managed={undefined}
@@ -405,7 +461,7 @@ describe("the company's agents, on pages of their own", () => {
     it("offers no chat with one of a person's own the company turned off, and still opens its page", async () => {
       const scribe = agentOf("agent-scribe", "Scribe", { ownerId: "user-me" });
       await mounted(
-        <AgentsOverview
+        <Overview
           makes={false}
           makesOwn={false}
           managed={undefined}
@@ -422,7 +478,7 @@ describe("the company's agents, on pages of their own", () => {
 
     it("tells someone who may make an agent of their own that they can, where they have none", async () => {
       await mounted(
-        <AgentsOverview
+        <Overview
           makes={false}
           makesOwn
           managed={undefined}
@@ -440,7 +496,8 @@ describe("the company's agents, on pages of their own", () => {
 
     it("shows an admin how many agents of their own each person has and what they cost, never their names, and turns them off", async () => {
       const asked = await mounted(
-        <AgentsOverview
+        <Overview
+          at="organization"
           makes
           makesOwn
           managed={managed}
@@ -490,7 +547,8 @@ describe("the company's agents, on pages of their own", () => {
 
     it("names nobody as gone where the company's people couldn't be read", async () => {
       await mounted(
-        <AgentsOverview
+        <Overview
+          at="organization"
           makes
           makesOwn
           managed={managed}
@@ -521,7 +579,8 @@ describe("the company's agents, on pages of their own", () => {
 
     it("gives an admin among Grasp's staff no way to turn people's own agents off", async () => {
       const asked = await mounted(
-        <AgentsOverview
+        <Overview
+          at="organization"
           makes={false}
           makesOwn={false}
           managed={managed}
@@ -556,7 +615,8 @@ describe("the company's agents, on pages of their own", () => {
         }),
       ];
       const asked = await mounted(
-        <AgentsOverview
+        <Overview
+          at="organization"
           makes
           makesOwn
           managed={managed}
@@ -589,7 +649,8 @@ describe("the company's agents, on pages of their own", () => {
 
     it("gives an admin among Grasp's staff no way to take an offered agent on", async () => {
       await mounted(
-        <AgentsOverview
+        <Overview
+          at="organization"
           makes={false}
           makesOwn={false}
           managed={managed}
@@ -614,12 +675,10 @@ describe("the company's agents, on pages of their own", () => {
       }).toStrictEqual({ listed: true, takeOn: null });
     });
 
-    it("shows an admin every agent, each card opening its page with one fact at its foot", async () => {
+    it("shows an admin every agent under the tab for whom it answers, each card opening its page with one fact at its foot", async () => {
       await mounted(
-        <AgentsOverview
+        <Overview
           makes
-          makesOwn={false}
-          own={[]}
           managed={{
             ...managed,
             wakes: { ...managed.wakes, [stephen.id]: [failedWake] },
@@ -628,14 +687,40 @@ describe("the company's agents, on pages of their own", () => {
           usable={[chatAgent(stephen)]}
         />
       );
-      expect(
-        cards().map(({ name, to, chat }) => ({ name, to, chat }))
-      ).toStrictEqual([
-        { name: "Stephen", to: "/agents/organization", chat: [] },
-        { name: "Claire", to: "/agents/agent-claire", chat: [] },
-        { name: "Milan", to: "/agents/agent-milan", chat: [] },
-      ]);
-      const [stephensCard, clairesCard, milansCard] = cards();
+      // With no tab in the address, the first with agents in it: Milan
+      // answers nobody else yet.
+      const mine = { tabs: tabs(), cards: cards() };
+      await press(tabNamed("Organization"));
+      expect({
+        mine: {
+          tabs: mine.tabs,
+          cards: mine.cards.map(({ name, to, chat }) => ({ name, to, chat })),
+        },
+        organization: {
+          tabs: tabs(),
+          cards: cards().map(({ name, to, chat }) => ({ name, to, chat })),
+        },
+      }).toStrictEqual({
+        mine: {
+          tabs: [
+            { name: "My agents", chosen: true },
+            { name: "Organization", chosen: false },
+          ],
+          cards: [{ name: "Milan", to: "/agents/agent-milan", chat: [] }],
+        },
+        organization: {
+          tabs: [
+            { name: "My agents", chosen: false },
+            { name: "Organization", chosen: true },
+          ],
+          cards: [
+            { name: "Stephen", to: "/agents/organization", chat: [] },
+            { name: "Claire", to: "/agents/agent-claire", chat: [] },
+          ],
+        },
+      });
+      const [milansCard] = mine.cards;
+      const [stephensCard, clairesCard] = cards();
       expect({
         // Its next run at its foot, and whom it answers for a touch screen.
         claire: ["Next", "Finance"].map((words) =>
@@ -654,9 +739,79 @@ describe("the company's agents, on pages of their own", () => {
       });
     });
 
+    it("opens an admin with no agent of their own on the organization's, with no tab in the address", async () => {
+      await mounted(
+        <Overview makes managed={allShared} usable={[chatAgent(stephen)]} />
+      );
+      expect({
+        tabs: tabs(),
+        cards: cards().map(({ name }) => name),
+      }).toStrictEqual({
+        tabs: [
+          { name: "My agents", chosen: false },
+          { name: "Organization", chosen: true },
+        ],
+        cards: ["Stephen", "Claire", "Milan"],
+      });
+    });
+
+    it("opens on the tab the address names, and says so where it has no agents", async () => {
+      await mounted(
+        <Overview
+          at="mine"
+          makes
+          managed={allShared}
+          usable={[chatAgent(stephen)]}
+        />
+      );
+      expect({
+        tabs: tabs(),
+        cards: cards().map(({ name }) => name),
+        says: document.body.textContent?.includes(
+          "Agents only you can use stand here."
+        ),
+      }).toStrictEqual({
+        tabs: [
+          { name: "My agents", chosen: true },
+          { name: "Organization", chosen: false },
+        ],
+        cards: [],
+        says: true,
+      });
+    });
+
+    it("puts an admin's own agents under My agents, before the company's that answer nobody else", async () => {
+      const scribe = agentOf("agent-scribe", "Scribe", { ownerId: "user-me" });
+      await mounted(
+        <Overview
+          makes
+          managed={managed}
+          own={[scribe]}
+          usable={[chatAgent(stephen), chatAgent(scribe)]}
+        />
+      );
+      const [scribesCard] = cards();
+      expect({
+        tabs: tabs(),
+        cards: cards().map(({ name, to, chat }) => ({ name, to, chat })),
+        alone: scribesCard?.text.includes("Only you"),
+      }).toStrictEqual({
+        tabs: [
+          { name: "My agents", chosen: true },
+          { name: "Organization", chosen: false },
+        ],
+        cards: [
+          { name: "Scribe", to: "/agents/agent-scribe", chat: [] },
+          { name: "Milan", to: "/agents/agent-milan", chat: [] },
+        ],
+        alone: true,
+      });
+    });
+
     it("tells an admin resting on a card what is worth knowing before opening it", async () => {
       await mounted(
-        <AgentsOverview
+        <Overview
+          at="organization"
           makes
           makesOwn={false}
           managed={managed}
@@ -816,7 +971,7 @@ describe("the company's agents, on pages of their own", () => {
       // As for an admin among Grasp's staff, whom core refuses the read.
       const unread: ManagedAgents = { ...managed, settings: {} };
       await mounted(
-        <AgentsOverview
+        <Overview
           makes={false}
           makesOwn={false}
           managed={unread}

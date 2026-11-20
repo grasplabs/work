@@ -21,6 +21,14 @@ export const intent = {
   ],
   variants: [
     {
+      name: 'measure="settings"',
+      when: 'A settings page: its title and groups of rows 640px wide (with align="center").',
+    },
+    {
+      name: 'align="center"',
+      when: "The column in the page's middle, the room past it shared on both sides: a settings page.",
+    },
+    {
       name: 'measure="page"',
       when: "Wider things, up to the page's own measure (64rem).",
     },

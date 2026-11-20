@@ -705,6 +705,7 @@ export const grasp = stylex.defineConsts({
   pageMeasure: "var(--grasp-page-measure)",
   pickerTile: "var(--grasp-picker-tile)",
   pageColumnMeasure: "var(--grasp-page-column-measure)",
+  pageSettingsMeasure: "var(--grasp-page-settings-measure)",
   pageMeasureWide: "var(--grasp-page-measure-wide)",
   pageGap: "var(--grasp-page-gap)",
   // Carousel: carousel.

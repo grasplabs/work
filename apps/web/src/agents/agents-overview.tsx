@@ -39,6 +39,12 @@ import { AgentPerson, Plus } from "../grasp/icons/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import type { KeyValueItem } from "../grasp/key-value/key-value.tsx";
 import { SectionHeader } from "../grasp/section-header/index.ts";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { dollars } from "../settings/money.ts";
@@ -68,8 +74,23 @@ import type { OwnAgentsAdmin } from "./own-agents-admin.tsx";
 // on one, or reaching it with the keys, opens the library's HoverCard with what is worth knowing
 // before opening it: whom it answers, what it may do, whether it works on its own and when next,
 // this month's use and its last run. A touch screen has no hover, and a tap follows the link: there
-// the facts that matter most stand on the card itself. Under the cards, for admins: the agents
-// people offered the company (agent-share.tsx) and people's own agents (own-agents-admin.tsx).
+// the facts that matter most stand on the card itself.
+//
+// An admin's agents stand under two tabs, by whom each answers: My agents, their own agents and
+// the company's that answer nobody else yet, and Organization, the ones that answer everyone or
+// some teams, the company's first among them, with the agents people offered the company
+// (agent-share.tsx) and people's own agents (own-agents-admin.tsx) under them. Core keeps no maker
+// of the company's agents, so one that answers nobody else is every admin's. The tab is in the
+// address (`?tab=`). Anyone else has only their own and the agents shared with them, and so no
+// tabs.
+
+/** The overview's tabs, by the names its address carries. */
+export const agentsTabs = ["mine", "organization"] as const;
+export type AgentsTab = (typeof agentsTabs)[number];
+
+/** The tab an address names; none for any other. */
+export const agentsTabOf = (value: unknown): AgentsTab | undefined =>
+  agentsTabs.find((tab) => tab === value);
 
 /** What an admin's read adds to the agents: every agent, and what core keeps of each. */
 export interface ManagedAgents {
@@ -88,6 +109,8 @@ const styles = stylex.create({
   // The person's own and the company's, a group each.
   groups: { display: "grid", gap: grasp.space7 },
   group: { display: "grid", gap: grasp.space4 },
+  // The room between the tabs and the cards: with the tab panel's own 16px, the page gap (24px).
+  tabsRoom: { marginBlockEnd: grasp.space2 },
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 16rem), 1fr))",
@@ -223,6 +246,16 @@ const shownOf = (
     },
   }));
 };
+
+/**
+ * The tab an agent stands under: My agents while it answers nobody else, Organization once it
+ * answers everyone or some teams, as the company's first always does and one whose access core
+ * didn't say.
+ */
+const tabOf = ({ managed }: Shown): AgentsTab =>
+  managed?.first === false && managed.settings?.audience.who === "nobody"
+    ? "mine"
+    : "organization";
 
 /** The wake-up that ran last, if any did. */
 const lastRunOf = (wakes: readonly AgentWake[]): AgentWake | undefined =>
@@ -504,7 +537,7 @@ const AgentCard = ({
 };
 
 /** A group of agents' cards. */
-const Cards = ({
+const AgentGrid = ({
   agents,
   facts,
   label,
@@ -522,9 +555,119 @@ const Cards = ({
   </ul>
 );
 
+/** The person's own agents first, then the company's, told apart only where there are both. */
+const AgentGroups = ({
+  mine,
+  agents,
+  facts,
+}: {
+  mine: readonly Shown[];
+  agents: readonly Shown[];
+  facts: (shown: Shown) => Facts | undefined;
+}) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.groups)}>
+      {mine.length === 0 ? null : (
+        <section {...stylex.props(styles.group)}>
+          <SectionHeader
+            description={t`Only you see and ask these.`}
+            size="sm"
+            title={t`Yours`}
+          />
+          <AgentGrid agents={mine} facts={facts} label={t`Your agents`} />
+        </section>
+      )}
+      {agents.length === 0 ? null : (
+        <section {...stylex.props(styles.group)}>
+          {mine.length === 0 ? null : (
+            <SectionHeader size="sm" title={t`Your company's`} />
+          )}
+          <AgentGrid agents={agents} facts={facts} label={t`Agents`} />
+        </section>
+      )}
+    </div>
+  );
+};
+
 /**
- * The Agents page's body: the person's `own` agents, the company's they
- * may `usable`, and what an admin `managed`.
+ * An admin's agents under their two tabs, the chosen one's shown: their `mine` and the company's
+ * that answer nobody else under My agents, and what an admin keeps of the company's (`company`)
+ * under Organization.
+ */
+const AgentTabs = ({
+  mine,
+  agents,
+  facts,
+  company,
+  tab,
+  onTab,
+}: {
+  mine: readonly Shown[];
+  agents: readonly Shown[];
+  facts: (shown: Shown) => Facts | undefined;
+  company: ReactNode;
+  tab: AgentsTab | undefined;
+  onTab: (tab: AgentsTab) => void;
+}) => {
+  const { t } = useLingui();
+  const under = (each: AgentsTab) =>
+    agents.filter((agent) => tabOf(agent) === each);
+  const count = (each: AgentsTab) =>
+    under(each).length + (each === "mine" ? mine.length : 0);
+  const tabName = { mine: t`My agents`, organization: t`Organization` };
+  return (
+    <Tabs
+      onValueChange={(value) => {
+        const chosen = agentsTabOf(value);
+        if (chosen !== undefined) {
+          onTab(chosen);
+        }
+      }}
+      // With no tab in the address, the first with agents in it.
+      value={tab ?? agentsTabs.find((each) => count(each) > 0) ?? "mine"}
+    >
+      <div {...stylex.props(styles.tabsRoom)}>
+        <TabsList aria-label={t`Agents`}>
+          {agentsTabs.map((each) => (
+            <TabsTrigger key={each} value={each}>
+              {tabName[each]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
+      <TabsContent value="mine">
+        {count("mine") === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia picture="nothing" />
+              <EmptyDescription>
+                {t`Agents only you can use stand here.`}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <AgentGroups agents={under("mine")} facts={facts} mine={mine} />
+        )}
+      </TabsContent>
+      <TabsContent value="organization">
+        {/* Never empty: the company's first agent is always the organization's. */}
+        <div {...stylex.props(styles.groups)}>
+          <AgentGrid
+            agents={under("organization")}
+            facts={facts}
+            label={t`Agents`}
+          />
+          {company}
+        </div>
+      </TabsContent>
+    </Tabs>
+  );
+};
+
+/**
+ * The Agents page's body: the person's `own` agents, the company's they may `usable`, and what an
+ * admin `managed`, under the `tab` the address names.
  */
 export const AgentsOverview = ({
   usable,
@@ -534,6 +677,8 @@ export const AgentsOverview = ({
   makesOwn,
   offered,
   ownAdmin,
+  tab,
+  onTab,
 }: {
   usable: readonly ChatAgent[];
   managed: ManagedAgents | undefined;
@@ -547,6 +692,10 @@ export const AgentsOverview = ({
   offered?: { agents: readonly Agent[]; people: readonly Member[] } | undefined;
   /** What an admin reads of people's own agents; undefined for anyone else. */
   ownAdmin?: OwnAgentsAdmin | undefined;
+  /** The tab the address names; none shows the first with agents in it. */
+  tab: AgentsTab | undefined;
+  /** Puts the tab chosen in the address. */
+  onTab: (tab: AgentsTab) => void;
 }) => {
   const { t } = useLingui();
   const factsOf = useFacts(managed?.teams ?? []);
@@ -573,10 +722,25 @@ export const AgentsOverview = ({
   } else if (makesOwn) {
     emptyLine = t`The agents your company sets up for you show here. You can also make one of your own.`;
   }
+  const none = agents.length === 0 && mine.length === 0;
+  const company = (
+    <>
+      {offered === undefined ? null : (
+        <OfferedAgents
+          editable={makes}
+          offered={offered.agents}
+          people={offered.people}
+        />
+      )}
+      {ownAdmin === undefined ? null : (
+        <OwnAgentsCard admin={ownAdmin} editable={makes} />
+      )}
+    </>
+  );
   return (
     <Page>
       <PageHeading action={newAgent} title={t`Agents`} />
-      {agents.length === 0 && mine.length === 0 ? (
+      {none ? (
         <Empty size="page">
           <EmptyHeader>
             <EmptyMedia icon={AgentPerson} />
@@ -590,40 +754,22 @@ export const AgentsOverview = ({
             <EmptyContent>{newAgent}</EmptyContent>
           )}
         </Empty>
-      ) : (
-        <div {...stylex.props(styles.groups)}>
-          {/* The person's own first, told apart from the company's only
-              where they have some. */}
-          {mine.length === 0 ? null : (
-            <section {...stylex.props(styles.group)}>
-              <SectionHeader
-                description={t`Only you see and ask these.`}
-                size="sm"
-                title={t`Yours`}
-              />
-              <Cards agents={mine} facts={facts} label={t`Your agents`} />
-            </section>
-          )}
-          {agents.length === 0 ? null : (
-            <section {...stylex.props(styles.group)}>
-              {mine.length === 0 ? null : (
-                <SectionHeader size="sm" title={t`Your company's`} />
-              )}
-              <Cards agents={agents} facts={facts} label={t`Agents`} />
-            </section>
-          )}
-        </div>
-      )}
-      {offered === undefined ? null : (
-        <OfferedAgents
-          editable={makes}
-          offered={offered.agents}
-          people={offered.people}
+      ) : null}
+      {!none && managed !== undefined ? (
+        <AgentTabs
+          agents={agents}
+          company={company}
+          facts={facts}
+          mine={mine}
+          onTab={onTab}
+          tab={tab}
         />
-      )}
-      {ownAdmin === undefined ? null : (
-        <OwnAgentsCard admin={ownAdmin} editable={makes} />
-      )}
+      ) : null}
+      {!none && managed === undefined ? (
+        <AgentGroups agents={agents} facts={facts} mine={mine} />
+      ) : null}
+      {/* Without tabs, what an admin keeps of the company stands under the cards. */}
+      {none || managed === undefined ? company : null}
     </Page>
   );
 };

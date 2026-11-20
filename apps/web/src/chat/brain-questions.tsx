@@ -10,7 +10,14 @@ import { useState } from "react";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { Button } from "../grasp/button/index.ts";
-import { Text } from "../grasp/text/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
@@ -40,23 +47,6 @@ const styles = stylex.create({
     borderBlockStartWidth: 1,
     borderBlockStartStyle: "solid",
     borderBlockStartColor: grasp.line,
-  },
-  heading: {
-    margin: 0,
-    color: grasp.muted,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
-    fontWeight: grasp.weightMedium,
-  },
-  list: { margin: 0, padding: 0, listStyle: "none" },
-  question: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space1,
-    paddingBlock: grasp.space2,
-    borderBlockEndWidth: { default: 1, ":last-child": 0 },
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: grasp.line,
   },
   writing: { display: "flex", flexDirection: "column", gap: grasp.space1 },
   row: { display: "flex", flexWrap: "wrap", gap: grasp.space1 },
@@ -95,89 +85,91 @@ const Question = ({
     }
   };
   return (
-    <li {...stylex.props(styles.question)}>
-      <Text>{gap.question}</Text>
-      <Text size="xs" tone="muted">
-        {asked ? (
-          <Trans>For {gap.owner}, who was asked</Trans>
-        ) : (
-          <Trans>For {gap.owner}</Trans>
-        )}
-      </Text>
-      {writing ? (
-        <div {...stylex.props(styles.writing)}>
-          <Textarea
-            aria-label={t`Your answer`}
-            disabled={busy}
-            maxLength={brainGapTextMaxLength}
-            onValueChange={setDraft}
-            rows={3}
-            value={draft}
-          />
-          <div {...stylex.props(styles.row)}>
-            <Button
-              disabled={busy || draft.trim() === ""}
-              onClick={() => {
-                void send();
-              }}
-              size="xs"
-              variant="ink"
-            >
-              <Trans>Send answer</Trans>
-            </Button>
-            <Button
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>{gap.question}</ItemTitle>
+        <ItemDescription>
+          {asked ? (
+            <Trans>For {gap.owner}, who was asked</Trans>
+          ) : (
+            <Trans>For {gap.owner}</Trans>
+          )}
+        </ItemDescription>
+        {writing ? (
+          <div {...stylex.props(styles.writing)}>
+            <Textarea
+              aria-label={t`Your answer`}
               disabled={busy}
-              onClick={() => {
-                setWriting(false);
-              }}
-              size="xs"
-              variant="ghost"
-            >
-              <Trans>Cancel</Trans>
-            </Button>
+              maxLength={brainGapTextMaxLength}
+              onValueChange={setDraft}
+              rows={3}
+              value={draft}
+            />
+            <div {...stylex.props(styles.row)}>
+              <Button
+                disabled={busy || draft.trim() === ""}
+                onClick={() => {
+                  void send();
+                }}
+                size="xs"
+                variant="ink"
+              >
+                <Trans>Send answer</Trans>
+              </Button>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setWriting(false);
+                }}
+                size="xs"
+                variant="ghost"
+              >
+                <Trans>Cancel</Trans>
+              </Button>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div {...stylex.props(styles.row)}>
-          {canAnswer ? (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                setWriting(true);
-              }}
-              size="xs"
-              variant="quiet"
-            >
-              <Trans>Answer</Trans>
-            </Button>
-          ) : null}
-          {canAsk && !asked ? (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void onAsk();
-              }}
-              size="xs"
-              variant="quiet"
-            >
-              <Trans>Ask {gap.owner}</Trans>
-            </Button>
-          ) : null}
-          {canAsk ? (
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void onClose();
-              }}
-              size="xs"
-              variant="ghost"
-            >
-              <Trans>Close without an answer</Trans>
-            </Button>
-          ) : null}
-        </div>
-      )}
-    </li>
+        ) : (
+          <div {...stylex.props(styles.row)}>
+            {canAnswer ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setWriting(true);
+                }}
+                size="xs"
+                variant="quiet"
+              >
+                <Trans>Answer</Trans>
+              </Button>
+            ) : null}
+            {canAsk && !asked ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  void onAsk();
+                }}
+                size="xs"
+                variant="quiet"
+              >
+                <Trans>Ask {gap.owner}</Trans>
+              </Button>
+            ) : null}
+            {canAsk ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  void onClose();
+                }}
+                size="xs"
+                variant="ghost"
+              >
+                <Trans>Close without an answer</Trans>
+              </Button>
+            ) : null}
+          </div>
+        )}
+      </ItemContent>
+    </Item>
   );
 };
 
@@ -221,10 +213,10 @@ export const BrainQuestions = ({
   };
   return (
     <section aria-label={t`Open questions`} {...stylex.props(styles.section)}>
-      <h3 {...stylex.props(styles.heading)}>
+      <Heading level={3} size="ui-sm">
         <Trans>Open questions</Trans>
-      </h3>
-      <ul {...stylex.props(styles.list)}>
+      </Heading>
+      <ItemGroup separated>
         {open.map((gap) => (
           <Question
             busy={busy}
@@ -249,7 +241,7 @@ export const BrainQuestions = ({
             }}
           />
         ))}
-      </ul>
+      </ItemGroup>
       <ErrorText>{failure}</ErrorText>
     </section>
   );
