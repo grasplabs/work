@@ -319,13 +319,6 @@ export const actorOf = (
       id: actor.runId,
     };
   }
-  if (actor.type === "visitor") {
-    const app = appName(directory, actor.appId);
-    return {
-      label: i18n._(msg`Visitor of ${ph({ app })}`),
-      id: actor.sessionId ?? actor.appId,
-    };
-  }
   // The platform itself: a name, the same in every language.
   return { label: "Grasp" };
 };

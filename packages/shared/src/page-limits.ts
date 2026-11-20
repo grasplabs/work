@@ -27,9 +27,9 @@ export const pageLanguageOf = (value: unknown): PageLanguage =>
 
 /**
  * Where every page calls one of its App's functions (core's
- * page-calls.ts): a running App's, a builder's preview of a draft, and a
- * visitor's page of a public App alike, `POST <path>/<app ID>`, the
- * request as the body; the lease says what it runs on.
+ * page-calls.ts): a running App's and a builder's preview of a draft
+ * alike, `POST <path>/<app ID>`, the request as the body; the lease says
+ * what it runs on.
  */
 export const appFunctionPath = "/api/app-functions";
 
@@ -54,13 +54,6 @@ export const pageLeaseHeader = "x-grasp-page-lease";
  * someone else's (`auth.principal_changed`).
  */
 export const pagePersonHeader = "x-grasp-page-person";
-
-/**
- * The header that carries a visitor's session token on a function call of
- * a public App's page (core's app-visitors.ts): never a cookie, so no
- * other site's request carries it.
- */
-export const pageVisitorHeader = "x-grasp-page-visitor";
 
 /** Where core serves a page's modules to its frame, each by its hash. */
 export const pageModulePath = "/page-modules";

@@ -215,45 +215,6 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     // Recorded for refusals and failures too, as a channel call is.
     text: msg`Sent an App's event to a webhook`,
   },
-  // A published App's visitors (core's src/app-visitors.ts), each
-  // action by name: an `app.visitor_*` action has no dotted prefix of its
-  // own, so it would otherwise read as `app`.
-  {
-    action: "app.visitor_listed",
-    text: msg`Let someone visit an App`,
-  },
-  {
-    action: "app.visitor_unlisted",
-    text: msg`Stopped someone visiting an App`,
-  },
-  {
-    action: "app.visitor_code_sent",
-    text: msg`Was sent a code to visit an App`,
-  },
-  {
-    action: "app.visitor_signed_in",
-    text: msg`Signed in to an App as a visitor`,
-  },
-  {
-    action: "app.visitor_signed_out",
-    text: msg`Signed out of an App as a visitor`,
-  },
-  {
-    action: "app.visitor_refused",
-    text: msg`Was refused as an App's visitor`,
-  },
-  {
-    action: "app.visitor_granted",
-    text: msg`Let an App's visitors use one of its functions`,
-  },
-  {
-    action: "app.visitor_ungranted",
-    text: msg`Stopped an App's visitors using one of its functions`,
-  },
-  {
-    action: "app.visitor_called",
-    text: msg`Used an App's function as a visitor`,
-  },
   { action: "app", text: msg`Changed an App` },
   { action: "member.removed", text: msg`Removed a member` },
   {

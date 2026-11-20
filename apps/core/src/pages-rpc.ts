@@ -39,7 +39,6 @@ import {
   appFor,
   findVersion,
   getApp,
-  hasPages,
   listApps,
   usableApp,
   versionFiles,
@@ -209,46 +208,6 @@ const openPage = async (
     artifact,
     frameToken: await frameAccess(env, artifact),
     lease: await leaseFor(env, by.userId, id, { kind: "release", build }),
-  };
-};
-
-/**
- * The pages of a published App's current version, for a visitor
- * (app-visitors.ts), which open at `/`: built and staged as `openPage`
- * does, once their build gets the App's data now, and leased to `visitor`
- * (`visitor:<session>`), a name no member's session has, so it opens the
- * App's functions only as that visitor, with their session's token
- * (page-calls.ts). Null while the App runs no version or has no pages.
- */
-export const visitorPage = async (
-  env: Env,
-  found: Pick<App, "id" | "name" | "currentVersion">,
-  visitor: string
-): Promise<PageBundle | null> => {
-  const { id, name: appName, currentVersion: version } = found;
-  if (version === null) {
-    return null;
-  }
-  const raw = await versionFiles(env, id, version);
-  if (!hasPages(new Map(Object.entries(raw)))) {
-    return null;
-  }
-  const built = await versionPageCodes(env, id, version, raw, {
-    unsealed: "refuse",
-  });
-  const { artifact } = built;
-  const build = { artifact, version };
-  if (deliveryOf(await standingOf(env, id, build)) !== "open") {
-    throw pageErrors.create("page.revoked");
-  }
-  await stageFrame(env, artifact, built.code);
-  return {
-    app: id,
-    name: appName,
-    version,
-    artifact,
-    frameToken: await frameAccess(env, artifact),
-    lease: await leaseFor(env, visitor, id, { kind: "release", build }),
   };
 };
 

@@ -136,9 +136,6 @@ const actorText = (actor: AuditActor): string => {
       const person = actor.onBehalfOf;
       return i18n._(msg`Agent for ${person}`);
     }
-    case "visitor": {
-      return i18n._(msg`A visitor`);
-    }
     case "workflow": {
       const workflow = actor.workflowId;
       return i18n._(msg`Workflow ${workflow}`);

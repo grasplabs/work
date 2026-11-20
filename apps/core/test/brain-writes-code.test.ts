@@ -10,7 +10,7 @@ import {
 } from "../../../packages/brain-next/test/export-reads.ts";
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
 import { addMember, removeMember } from "../src/app-members.ts";
-import { holdingsOf, recallsTheBrain } from "../src/app-provenance.ts";
+import { holdingsOf, holdsAnySource } from "../src/app-provenance.ts";
 import { removeApp } from "../src/app-removal.ts";
 import { resetAppData } from "../src/app-schema.ts";
 import { setArchived } from "../src/app-status.ts";
@@ -535,14 +535,14 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
         codeMode: true,
       }),
       found: idsOf(await onPage(app, ada, "find", { name })),
-      // It declares no recall, yet holds the Brain: it answers no visitor
-      // (app-visitor-calls.test.ts holds a visitor to that).
-      answersNoVisitor: await recallsTheBrain(env, app.app),
+      // It declares no recall, yet holds the Brain: it takes no guests
+      // (guest-apps.test.ts holds a guest to that).
+      takesNoGuests: await holdsAnySource(env, app.app),
     }).toStrictEqual({
       agent: { failed: "permission.brain_write_caller" },
       codeMode: { failed: "permission.brain_write_caller" },
       found: [],
-      answersNoVisitor: true,
+      takesNoGuests: true,
     });
   });
 

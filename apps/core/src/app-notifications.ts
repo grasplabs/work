@@ -73,11 +73,9 @@ import type { CallingAgent } from "./workflow-start-intents.ts";
 //   it names was told: only members call the App, and only they can ask.
 //   The row goes in only while they still are one (`activeMember`), and
 //   is listed only while they can still open the App.
-// - A visitor, or a run, telling people: a visitor's call (someone who
-//   is no member, opening a published App) and a call from a workflow's
-//   run have no `people` on their invocation (app-functions.ts), so their send is
-//   refused (`permission.unavailable`), never narrowed: the safer of the two,
-//   as nothing a visitor does reaches a member through the App.
+// - A run telling people: a call from a workflow's run has no `people`
+//   on its invocation (app-functions.ts), so its send is refused
+//   (`permission.unavailable`), never narrowed.
 // - Flooding: a title and body within their limits (checked as it is
 //   made, or staged), at most `appNotificationMaxRecipients` people a send
 //   (a larger team's rest skipped), and at most `appNotificationsPerHour`

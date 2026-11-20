@@ -41,7 +41,7 @@ import {
 // a builder's preview of the App's draft on that same path: its calls on
 // the preview's test store and never the App's, and another person's, a
 // forged or another App's draft lease, someone who no longer builds the
-// App and a flood all refused. A visitor's attacks on it are in app-visitor-calls.test.ts.
+// App and a flood all refused.
 
 const idp = mockIdp();
 

@@ -33,7 +33,7 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { invocationFor, visitorInvocation } from "../src/app-functions.ts";
+import { invocationFor } from "../src/app-functions.ts";
 import {
   appPeopleNotifications,
   dispatchAppNotifyIntent,
@@ -92,20 +92,10 @@ const place = mutation({
   },
 });
 
-/** Tells `to` once it commits, writing nothing: what a visitor may call. */
-const ping = mutation({
-  args: { to: v.string() },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    await ctx.notifyPeople(args.to, { title: "Ping" });
-    return null;
-  },
-});
-
 const ordersApp = registerApp({
   config: defineApp({ name: "Orders" }),
   schema,
-  modules: { orders: { tell, place, ping } },
+  modules: { orders: { tell, place } },
   migrations: [],
 });
 
@@ -120,7 +110,6 @@ const hosted: HostedApp = {
 const kinds = {
   "orders.tell": "action",
   "orders.place": "mutation",
-  "orders.ping": "mutation",
 } as const;
 
 /** A member of the organization in `role`. */
@@ -850,35 +839,5 @@ describe("a mutation's ctx.notifyPeople", () => {
       ada: await titlesTo(fx.ada),
       sent: await countOf("app.notification.sent", fx.app),
     }).toStrictEqual({ answer: "delivered", ada: ["Dispatched"], sent: 1 });
-  });
-
-  it("refuses a visitor's send, so a visitor reaches no member", async () => {
-    const fx = await fixture();
-    const session = crypto.randomUUID();
-    const invocation = await visitorInvocation(
-      env,
-      fx.release,
-      {
-        app: fx.app,
-        version: 1,
-        principal: `visitor:${session}`,
-        email: "visitor@example.test",
-        actor: { type: "visitor", appId: fx.app, sessionId: session },
-        stillAllowed: async () => {},
-        notGranted: async () => await Promise.reject(new Error("Not granted")),
-        admitted: async () => {},
-      },
-      "orders.ping",
-      crypto.randomUUID(),
-      Date.now() + 30_000
-    );
-    const pinged = await callWith(invocation, "orders.ping", {
-      to: fx.ada.userId,
-    });
-    await drain(fx);
-    expect({
-      answer: answerOf(pinged),
-      told: await toldTo(fx.ada),
-    }).toStrictEqual({ answer: "permission.unavailable", told: [] });
   });
 });

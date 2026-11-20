@@ -175,7 +175,7 @@ describe("sign-in rate limit", () => {
   });
 });
 
-describe("visitor and event source rate limits", () => {
+describe("event source rate limits", () => {
   const cores = fakeCores();
 
   beforeAll(async () => {
@@ -187,26 +187,6 @@ describe("visitor and event source rate limits", () => {
       clientId: "acme",
       generation: 1,
     });
-  });
-
-  it("limits a visitor's endpoint, where codes are asked for and tried, per client address and by its own limit", async () => {
-    const limiter = limiterAllowing(2);
-    const visit = async (ip: string) =>
-      await worker.fetch(
-        new Request("https://acme.public.test/api/app-visitor", {
-          method: "POST",
-          headers: { "cf-connecting-ip": ip },
-          body: "{}",
-        }),
-        { ...env, VISITOR_RATE_LIMIT: limiter }
-      );
-    const statuses = [
-      await visit("192.0.2.21"),
-      await visit("192.0.2.21"),
-      await visit("192.0.2.21"),
-      await visit("192.0.2.22"),
-    ].map(({ status }) => status);
-    expect(statuses).toStrictEqual([200, 200, 429, 200]);
   });
 
   it("limits an event source's URL per client address and per URL, each by its own limit, without reaching core", async () => {
@@ -288,11 +268,11 @@ describe("visitor and event source rate limits", () => {
 
   it("refuses a limited endpoint whose limiter a stage doesn't bind, never letting it through unlimited", async () => {
     const before = cores.received.length;
-    // A stage whose config left the visitor's limit out.
+    // A stage whose config left the event sources' limit out.
     const stage = { ...env };
-    Reflect.deleteProperty(stage, "VISITOR_RATE_LIMIT");
+    Reflect.deleteProperty(stage, "WEBHOOK_RATE_LIMIT");
     const unbound = await worker.fetch(
-      new Request("https://acme.public.test/api/app-visitor", {
+      new Request(`https://acme.public.test/api/hooks/${"f".repeat(32)}`, {
         method: "POST",
         headers: { "cf-connecting-ip": "192.0.2.23" },
         body: "{}",

@@ -1866,10 +1866,6 @@ msgstr "A type the App's code declares"
 msgid "A version's definition and source"
 msgstr "A version's definition and source"
 
-#: src/apps/app-data.tsx
-msgid "A visitor"
-msgstr "A visitor"
-
 #: src/dashboard/widget-board.tsx
 msgid "A widget Grasp made"
 msgstr "A widget Grasp made"
@@ -8413,10 +8409,6 @@ msgid "Let an App's data go to a webhook"
 msgstr "Let an App's data go to a webhook"
 
 #: src/activity/audit-words.ts
-msgid "Let an App's visitors use one of its functions"
-msgstr "Let an App's visitors use one of its functions"
-
-#: src/activity/audit-words.ts
 msgid "Let an erased member's old address in again"
 msgstr "Let an erased member's old address in again"
 
@@ -8443,10 +8435,6 @@ msgstr "Let people ask Stephen to start it"
 #: src/agents/own-agents-admin.tsx
 msgid "Let people make agents of their own"
 msgstr "Let people make agents of their own"
-
-#: src/activity/audit-words.ts
-msgid "Let someone visit an App"
-msgstr "Let someone visit an App"
 
 #: src/settings/directory-placement.tsx
 msgid "Let the directory decide"
@@ -13519,17 +13507,9 @@ msgstr "Signed in for the first time, after joining from the directory"
 msgid "Signed in to a connection again"
 msgstr "Signed in to a connection again"
 
-#: src/activity/audit-words.ts
-msgid "Signed in to an App as a visitor"
-msgstr "Signed in to an App as a visitor"
-
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in with"
 msgstr "Signed in with"
-
-#: src/activity/audit-words.ts
-msgid "Signed out of an App as a visitor"
-msgstr "Signed out of an App as a visitor"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -14046,10 +14026,6 @@ msgid "Stopped a schedule that kept failing"
 msgstr "Stopped a schedule that kept failing"
 
 #: src/activity/audit-words.ts
-msgid "Stopped an App's visitors using one of its functions"
-msgstr "Stopped an App's visitors using one of its functions"
-
-#: src/activity/audit-words.ts
 msgid "Stopped following what changes at a connection"
 msgstr "Stopped following what changes at a connection"
 
@@ -14057,10 +14033,6 @@ msgstr "Stopped following what changes at a connection"
 msgctxt "inbox item kind"
 msgid "Stopped schedule"
 msgstr "Stopped schedule"
-
-#: src/activity/audit-words.ts
-msgid "Stopped someone visiting an App"
-msgstr "Stopped someone visiting an App"
 
 #: src/activity/audit-words.ts
 msgid "Stopped the Brain using someone's workflow results, as they lost the workflow"
@@ -16323,10 +16295,6 @@ msgstr "Used {tool}"
 msgid "Used a connected tool"
 msgstr "Used a connected tool"
 
-#: src/activity/audit-words.ts
-msgid "Used an App's function as a visitor"
-msgstr "Used an App's function as a visitor"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Used by"
@@ -16494,10 +16462,6 @@ msgstr "Vision page"
 msgid "Vision page confirmed"
 msgstr "Vision page confirmed"
 
-#: src/activity/audit-log.tsx
-msgid "Visitor of {app}"
-msgstr "Visitor of {app}"
-
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volume"
@@ -16656,20 +16620,12 @@ msgid "Was refused approving packages that couldn't be checked"
 msgstr "Was refused approving packages that couldn't be checked"
 
 #: src/activity/audit-words.ts
-msgid "Was refused as an App's visitor"
-msgstr "Was refused as an App's visitor"
-
-#: src/activity/audit-words.ts
 msgid "Was refused packages known as malware"
 msgstr "Was refused packages known as malware"
 
 #: src/activity/audit-words.ts
 msgid "Was sent a code to sign in as a guest"
 msgstr "Was sent a code to sign in as a guest"
-
-#: src/activity/audit-words.ts
-msgid "Was sent a code to visit an App"
-msgstr "Was sent a code to visit an App"
 
 #: src/brain/brain.ts
 msgid "Was the {role}"
