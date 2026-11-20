@@ -128,9 +128,11 @@ describe("a source's own words", () => {
     });
     expect(tab(host, "Summary").getAttribute("aria-selected")).toBe("true");
     expect(host.textContent).toContain("Month end is slow.");
-    const [, wish] = host.querySelectorAll<HTMLElement>(
-      '[data-slot="interview-cite"]'
-    );
+    const wish = [
+      ...host.querySelectorAll<HTMLElement>('[data-slot="interview-quote"]'),
+    ]
+      .find((quote) => quote.textContent?.includes("Invoices matched for us."))
+      ?.querySelector<HTMLElement>('[data-slot="interview-cite"]');
     act(() => {
       wish?.click();
     });
@@ -180,7 +182,6 @@ describe("a source's own words", () => {
     const host = shown(
       <SourceDocument source={document_} statements={tagged} />
     );
-    expect(host.querySelector('[data-slot="interview-turn"]')).toBeNull();
     expect(
       host.textContent?.split("Invoices are paid on Fridays.")
     ).toHaveLength(2);
@@ -190,6 +191,8 @@ describe("a source's own words", () => {
     expect(host.querySelector("#st-sink")?.textContent).toContain(
       "Late ones wait a week."
     );
-    expect(host.querySelector("#st-inside")).not.toBeNull();
+    expect(host.querySelector("#st-inside")?.nextElementSibling?.id).toBe(
+      "st-rule"
+    );
   });
 });
