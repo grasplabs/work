@@ -111,9 +111,10 @@ const styles = stylex.create({
     paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
     paddingBlockEnd: grasp.space24,
   },
+  // What was said in a conversation, under its transcript.
+  quotes: { display: "flex", flexDirection: "column", gap: grasp.space3 },
   // What the note holds beyond its text, in the page's reading column (page-brain's own measure,
   // its gutter's room before it on a wider window).
-  quotes: { display: "flex", flexDirection: "column", gap: grasp.space3 },
   rest: {
     display: "flex",
     flexDirection: "column",
@@ -1040,8 +1041,9 @@ const NoteContent = ({
       {forget.element}
     </>
   );
-  // A conversation's parts, in the body and at the side, share one Interview.
-  return transcribed === undefined ? (
+  // A conversation's parts, in the body and at the side, share one Interview; a document reads as a page.
+  return transcribed === undefined ||
+    transcribed.transcript.unit === "passage" ? (
     page
   ) : (
     <SourceInterview

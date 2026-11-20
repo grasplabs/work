@@ -591,7 +591,10 @@ export const SourcesPage = ({
             origin: [
               source.transcriptTurns === undefined
                 ? sourceWord[source.kind]
-                : t`Transcript`,
+                : t({
+                    message: "Transcript",
+                    context: "a source of the Brain",
+                  }),
               source.who,
               source.how,
             ]

@@ -16320,6 +16320,11 @@ msgstr "Suggérées"
 msgid "Summarise documents"
 msgstr "Résumer des documents"
 
+#: src/brain/source-interview.tsx
+msgctxt "tab: an interview written up short"
+msgid "Summary"
+msgstr "Résumé"
+
 #: src/agents/agent-templates.ts
 msgid "Summary writer"
 msgstr "Rédacteur de résumés"
@@ -18119,10 +18124,19 @@ msgid "Track the month-end close"
 msgstr "Suivre la clôture mensuelle"
 
 #: src/brain/brain-markdown.ts
-#: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
 #: src/interview/page.tsx
 #: src/interview/transcript.tsx
+msgid "Transcript"
+msgstr "Transcription"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Transcript"
+msgstr "Transcription"
+
+#: src/brain/source-interview.tsx
+msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcription"
 
