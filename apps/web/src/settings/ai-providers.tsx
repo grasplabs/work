@@ -543,19 +543,6 @@ type Connect = (
   baseUrl: string
 ) => Promise<void>;
 
-/** `work`, with `onBusy` told while it runs. Outside components, as the React Compiler can't compile `finally`. */
-const whileBusy = async (
-  work: () => Promise<void>,
-  onBusy: (busy: boolean) => void
-): Promise<void> => {
-  onBusy(true);
-  try {
-    await work();
-  } finally {
-    onBusy(false);
-  }
-};
-
 /**
  * Adding a provider once one is connected: the library's Add connection
  * sheet, the providers not connected yet as tiles, grouped by where they
@@ -563,8 +550,7 @@ const whileBusy = async (
  * `connect` adds and tests it, and throws with the provider's reason, which
  * the sheet says under the key. The tiles stay as they were when the sheet
  * opened, so the provider just connected keeps its sheet open on its
- * connected step while the page reads again. While a key is checked the
- * sheet stays open, so its answer always lands on the provider it is for.
+ * connected step while the page reads again.
  */
 const AddProviderSheet = ({
   offered,
@@ -576,7 +562,6 @@ const AddProviderSheet = ({
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(offered);
-  const [checking, setChecking] = useState(false);
   if (!open && offered.length === 0) {
     return null;
   }
@@ -627,14 +612,9 @@ const AddProviderSheet = ({
               : providerName(tile.provider, tile.label);
           throw new Error(t`${name} is connected already.`);
         }
-        await whileBusy(async () => {
-          await withReason(connect(addable.provider, key, address ?? ""));
-        }, setChecking);
+        await withReason(connect(addable.provider, key, address ?? ""));
       }}
       onOpenChange={(next) => {
-        if (!next && checking) {
-          return;
-        }
         if (next) {
           setShown(offered);
         }

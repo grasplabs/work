@@ -13,7 +13,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 
 import type { ButtonSize, ButtonVariant } from "../button";
 import { Plus } from "../icons";
@@ -145,10 +145,18 @@ export const AddConnection = ({
   const [revealed, setRevealed] = useState(false);
   const [status, setStatus] = useState<AddConnectionStatus>("idle");
   const [refusal, setRefusal] = useState("");
+  // Each opening and each provider's step is its own: a connect or a paste that resolves after the
+  // sheet closed, opened again or moved to another provider is dropped, so it cannot fill another step.
+  const [step, setStep] = useState(() => ({}));
+  const live = useRef({ step, values });
+  useLayoutEffect(() => {
+    live.current = { step, values };
+  }, [step, values]);
   // Each opening starts at the tiles, the search empty.
   const [seen, setSeen] = useState(open);
   if (seen !== open) {
     setSeen(open);
+    setStep({});
     if (open) {
       setQuery("");
       setChosen(null);
@@ -177,6 +185,7 @@ export const AddConnection = ({
     setRevealed(false);
     setStatus("idle");
     setChosen(picked.id);
+    setStep({});
     focusLater(box.current, "[data-first]");
   };
   const back = () => {
@@ -189,6 +198,7 @@ export const AddConnection = ({
     setChosen(null);
     setStatus("idle");
     setValues(empty);
+    setStep({});
   };
   const connect = async () => {
     if (provider === undefined) {
@@ -201,6 +211,9 @@ export const AddConnection = ({
       name: values.name.trim(),
       ...(provider.address === true ? { address: values.address } : {}),
     });
+    if (live.current.step !== step) {
+      return;
+    }
     if (refused === null) {
       setValues(empty);
       setStatus("done");
@@ -215,6 +228,10 @@ export const AddConnection = ({
   };
   const paste = async () => {
     const clip = await readClipboard();
+    // A permission prompt can stand a while: what changed under it wins over the clipboard.
+    if (live.current.step !== step || live.current.values !== values) {
+      return;
+    }
     if (clip !== null && clip.trim() !== "") {
       setValues({ ...values, key: clip.trim() });
       setStatus("idle");
