@@ -47,6 +47,7 @@ import {
 import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import { More, Trash } from "../grasp/icons/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
 import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
@@ -69,14 +70,6 @@ const reasonLabels: Readonly<Record<PurgeReason, MessageDescriptor>> = {
 
 const styles = stylex.create({
   stack: { display: "flex", flexDirection: "column", gap: grasp.space4 },
-  counts: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space1,
-    margin: 0,
-    padding: 0,
-    listStyle: "none",
-  },
 });
 
 /** The terms as typed, one a line: each once, in the order typed. */
@@ -105,57 +98,23 @@ const PlanCounts = ({
   plan: { documents, versions, occurrences, memories, originals },
 }: {
   plan: PurgePlan;
-}) => (
-  <ul {...stylex.props(styles.counts)}>
-    <li>
-      <Text element="span" size="sm">
-        <Plural
-          one="# document rewritten"
-          other="# documents rewritten"
-          value={documents}
-        />
-      </Text>
-    </li>
-    <li>
-      <Text element="span" size="sm">
-        <Plural
-          one="# version rewritten"
-          other="# versions rewritten"
-          value={versions}
-        />
-      </Text>
-    </li>
-    <li>
-      <Text element="span" size="sm">
-        <Plural
-          one="# occurrence removed"
-          other="# occurrences removed"
-          value={occurrences}
-        />
-      </Text>
-    </li>
-    {memories === undefined ? null : (
-      <li>
-        <Text element="span" size="sm">
-          <Plural
-            one="# memory record redacted or deleted"
-            other="# memory records redacted or deleted"
-            value={memories}
-          />
-        </Text>
-      </li>
-    )}
-    <li>
-      <Text element="span" size="sm">
-        <Plural
-          one="# uploaded original deleted"
-          other="# uploaded originals deleted"
-          value={originals}
-        />
-      </Text>
-    </li>
-  </ul>
-);
+}) => {
+  const { t } = useLingui();
+  return (
+    <KeyValueList
+      items={[
+        { key: t`Documents rewritten`, value: documents },
+        { key: t`Versions rewritten`, value: versions },
+        { key: t`Occurrences removed`, value: occurrences },
+        ...(memories === undefined
+          ? []
+          : [{ key: t`Memory records redacted or deleted`, value: memories }]),
+        { key: t`Uploaded originals deleted`, value: originals },
+      ]}
+      variant="inline"
+    />
+  );
+};
 
 /** The terms, the reason and the documents: what to ask core about. */
 const PurgeForm = ({
@@ -282,26 +241,13 @@ const ResultView = ({ result }: { result: PurgeResult }) => {
   const still = result.stillFound ?? 0;
   return (
     <div {...stylex.props(styles.stack)}>
-      <ul {...stylex.props(styles.counts)}>
-        <li>
-          <Text element="span" size="sm">
-            <Plural
-              one="# document purged"
-              other="# documents purged"
-              value={documents}
-            />
-          </Text>
-        </li>
-        <li>
-          <Text element="span" size="sm">
-            <Plural
-              one="# version purged"
-              other="# versions purged"
-              value={versions}
-            />
-          </Text>
-        </li>
-      </ul>
+      <KeyValueList
+        items={[
+          { key: t`Documents purged`, value: documents },
+          { key: t`Versions purged`, value: versions },
+        ]}
+        variant="inline"
+      />
       {still > 0 ? (
         <Alert
           title={t`${plural(still, {

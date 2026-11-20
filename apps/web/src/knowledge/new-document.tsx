@@ -20,12 +20,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../grasp/dialog/index.ts";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "../grasp/field/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import { File as FileMark } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
@@ -142,9 +137,6 @@ const DocumentForm = ({
               placeholder={t`handbook/leave`}
               value={name}
             />
-            <FieldDescription>
-              {t`Put it in folders with a slash, as in handbook/leave.`}
-            </FieldDescription>
             {invalid ? (
               <FieldError match>
                 {t`A name has no [, ], # or |, and no empty folders.`}

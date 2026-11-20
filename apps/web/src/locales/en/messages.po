@@ -591,14 +591,6 @@ msgstr "{documentKinds}, and whatever explains how you work. Share what you have
 msgid "{documentKinds}. Connect where they live, and I’ll only read what you share with me."
 msgstr "{documentKinds}. Connect where they live, and I’ll only read what you share with me."
 
-#: src/knowledge/purge.tsx
-msgid "{documents, plural, one {# document purged} other {# documents purged}}"
-msgstr "{documents, plural, one {# document purged} other {# documents purged}}"
-
-#: src/knowledge/purge.tsx
-msgid "{documents, plural, one {# document rewritten} other {# documents rewritten}}"
-msgstr "{documents, plural, one {# document rewritten} other {# documents rewritten}}"
-
 #: src/brain/brain-atlas.ts
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# document} other {# documents}}"
@@ -870,10 +862,6 @@ msgstr "{match} of {matches}"
 msgid "{memberName} (team)"
 msgstr "{memberName} (team)"
 
-#: src/knowledge/purge.tsx
-msgid "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
-msgstr "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
-
 #: src/workflows/saved-ago.tsx
 msgid "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
 msgstr "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
@@ -1122,10 +1110,6 @@ msgstr "{needs, plural, one {# needs you} other {# need you}}"
 msgid "{number} of {count}"
 msgstr "{number} of {count}"
 
-#: src/knowledge/purge.tsx
-msgid "{occurrences, plural, one {# occurrence removed} other {# occurrences removed}}"
-msgstr "{occurrences, plural, one {# occurrence removed} other {# occurrences removed}}"
-
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
 msgstr "{one} and {other} both name the same handover, each from their own side."
@@ -1157,10 +1141,6 @@ msgstr "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} o
 #: src/connections/http-connections.tsx
 msgid "{origin} · {methods} under {paths} · sent in {header} · added {added}"
 msgstr "{origin} · {methods} under {paths} · sent in {header} · added {added}"
-
-#: src/knowledge/purge.tsx
-msgid "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
-msgstr "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
 
 #: src/connections/integrations-header.tsx
 msgid "{others, plural, one {{app} and # other app need someone to sign in again.} other {{app} and # other apps need someone to sign in again.}}"
@@ -1573,14 +1553,6 @@ msgstr "{unseen} of {total} named, not seen in use"
 msgid "{value} is already added."
 msgstr "{value} is already added."
 
-#: src/knowledge/purge.tsx
-msgid "{versions, plural, one {# version purged} other {# versions purged}}"
-msgstr "{versions, plural, one {# version purged} other {# versions purged}}"
-
-#: src/knowledge/purge.tsx
-msgid "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
-msgstr "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
-
 #: src/brain/sources-page.tsx
 msgid "{versions, plural, one {# version} other {# versions}}"
 msgstr "{versions, plural, one {# version} other {# versions}}"
@@ -1906,10 +1878,6 @@ msgstr "A preference"
 #: src/pages/page-files.ts
 msgid "A preview keeps no files."
 msgstr "A preview keeps no files."
-
-#: src/knowledge/new-collection.tsx
-msgid "A private collection: nobody else reads it, nor their agents."
-msgstr "A private collection: nobody else reads it, nor their agents."
 
 #: src/projects/project-dialog.tsx
 msgid "A project groups apps and workflows for a process, a team or a goal. Putting something in it shares it with nobody."
@@ -4749,7 +4717,6 @@ msgid "Colleagues talked"
 msgstr "Colleagues talked"
 
 #: src/apps/app-access-requests.tsx
-#: src/knowledge/document.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection"
 msgstr "Collection"
@@ -5855,7 +5822,6 @@ msgstr "Desktop"
 #: src/agents/agent-page.tsx
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
-#: src/knowledge/document.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/workflows/run-detail.tsx
 msgid "Details"
@@ -6044,6 +6010,14 @@ msgstr "Document not found"
 msgid "Documents"
 msgstr "Documents"
 
+#: src/knowledge/purge.tsx
+msgid "Documents purged"
+msgstr "Documents purged"
+
+#: src/knowledge/purge.tsx
+msgid "Documents rewritten"
+msgstr "Documents rewritten"
+
 #: src/frame/part-words.tsx
 msgctxt "a filter's operator"
 msgid "does not contain"
@@ -6162,6 +6136,7 @@ msgstr "Dots"
 msgid "Double-click or press F2 to rename"
 msgstr "Double-click or press F2 to rename"
 
+#: src/knowledge/uploads.tsx
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
@@ -6169,7 +6144,6 @@ msgid "Download"
 msgstr "Download"
 
 #: src/frame/part-words.tsx
-#: src/knowledge/uploads.tsx
 #: src/workflows/run-files.tsx
 msgid "Download {name}"
 msgstr "Download {name}"
@@ -6739,10 +6713,6 @@ msgstr "Everyone in the company reads your answer, with your name."
 #: src/connections/integration-inspector.tsx
 msgid "Everyone in the organization"
 msgstr "Everyone in the organization"
-
-#: src/knowledge/new-collection.tsx
-msgid "Everyone in the organization, and their agents."
-msgstr "Everyone in the organization, and their agents."
 
 #: src/apps/publish.tsx
 msgid "Everyone it is shared with can open it once it is published."
@@ -10004,6 +9974,10 @@ msgstr "members of the team in {field}"
 msgid "Memory"
 msgstr "Memory"
 
+#: src/knowledge/purge.tsx
+msgid "Memory records redacted or deleted"
+msgstr "Memory records redacted or deleted"
+
 #: src/frame/part-words.tsx
 msgctxt "the mention menu"
 msgid "Mention"
@@ -11654,6 +11628,10 @@ msgctxt "a kind of field"
 msgid "Number"
 msgstr "Number"
 
+#: src/knowledge/purge.tsx
+msgid "Occurrences removed"
+msgstr "Occurrences removed"
+
 #: src/agents/new-agent.tsx
 msgid "Ocean"
 msgstr "Ocean"
@@ -12012,6 +11990,7 @@ msgstr "Only you see this"
 #: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
+#: src/knowledge/uploads.tsx
 #: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Open"
@@ -12048,7 +12027,6 @@ msgid "Open {lapsedApp}"
 msgstr "Open {lapsedApp}"
 
 #: src/frame/part-words.tsx
-#: src/knowledge/uploads.tsx
 msgid "Open {name}"
 msgstr "Open {name}"
 
@@ -12536,10 +12514,6 @@ msgstr "Paste the key."
 #: src/settings/ai-providers.tsx
 msgid "Paste the new key."
 msgstr "Paste the new key."
-
-#: src/knowledge/document.tsx
-msgid "Path"
-msgstr "Path"
 
 #: src/connections/http-connections.tsx
 msgid "Path prefixes it allows, one per line"
@@ -13106,10 +13080,6 @@ msgstr "Purging"
 #: src/interview/read-back.tsx
 msgid "Put back"
 msgstr "Put back"
-
-#: src/knowledge/new-document.tsx
-msgid "Put it in folders with a slash, as in handbook/leave."
-msgstr "Put it in folders with a slash, as in handbook/leave."
 
 #: src/apps/app-settings.tsx
 msgid "Putting it away"
@@ -14015,8 +13985,8 @@ msgid "Review and answer"
 msgstr "Review and answer"
 
 #: src/knowledge/document.tsx
-msgid "Review by"
-msgstr "Review by"
+msgid "Review by {review}"
+msgstr "Review by {review}"
 
 #. placeholder {0}: lesson.revision
 #. placeholder {0}: record.revision
@@ -16851,10 +16821,6 @@ msgstr "The logo could not be put back"
 msgid "The logo could not be removed"
 msgstr "The logo could not be removed"
 
-#: src/knowledge/new-collection.tsx
-msgid "The members of the teams you choose, and their agents."
-msgstr "The members of the teams you choose, and their agents."
-
 #: src/brain/brain-home.tsx
 msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
 msgstr "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
@@ -18160,6 +18126,10 @@ msgctxt "a file"
 msgid "Uploaded"
 msgstr "Uploaded"
 
+#: src/knowledge/purge.tsx
+msgid "Uploaded originals deleted"
+msgstr "Uploaded originals deleted"
+
 #: src/activity/audit-words.ts
 msgid "Uploaded to knowledge"
 msgstr "Uploaded to knowledge"
@@ -18317,7 +18287,6 @@ msgstr "Verified through {entries}"
 
 #: src/apps/app-workflows.tsx
 #: src/inbox/items.ts
-#: src/knowledge/document.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/traces.tsx
@@ -18352,6 +18321,7 @@ msgstr "Version {number}, current"
 #: src/apps/app-workflows.tsx
 #: src/brain/brain.ts
 #: src/brain/sources-page.tsx
+#: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -18415,6 +18385,14 @@ msgstr "Versions"
 msgctxt "a workflow's settings section"
 msgid "Versions"
 msgstr "Versions"
+
+#: src/knowledge/purge.tsx
+msgid "Versions purged"
+msgstr "Versions purged"
+
+#: src/knowledge/purge.tsx
+msgid "Versions rewritten"
+msgstr "Versions rewritten"
 
 #: src/interview/closed.tsx
 msgctxt "highest end of a rating of the interview"

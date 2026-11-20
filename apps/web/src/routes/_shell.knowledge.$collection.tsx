@@ -14,7 +14,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import type { Session } from "../core.ts";
 import { formatDate } from "../format.ts";
 import { NotFoundState, NotLoadedState } from "../frame/page-states.tsx";
-import { PageHeading, SectionTitle } from "../frame/page.tsx";
+import { PageHeading } from "../frame/page.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import {
   Empty,
@@ -26,7 +26,6 @@ import {
   Doc as DocMark,
   File,
   Folder as FolderMark,
-  Icon,
 } from "../grasp/icons/index.ts";
 import {
   Item,
@@ -36,6 +35,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { Section, SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
@@ -121,32 +121,8 @@ const styles = stylex.create({
     gap: grasp.space8,
     boxSizing: "border-box",
     width: "100%",
-    maxWidth: grasp.pageMeasure,
-    marginInline: "auto",
     paddingBlock: grasp.space8,
     paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
-  },
-  section: { display: "flex", flexDirection: "column", gap: grasp.space2 },
-  sectionHead: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: grasp.space3,
-  },
-  folders: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space2,
-    margin: 0,
-    padding: 0,
-    listStyleType: "none",
-  },
-  folder: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-    minWidth: 0,
-    paddingBlockStart: grasp.space3,
   },
 });
 
@@ -159,7 +135,11 @@ const foldersOf = (tree: Folder): Folder[] => [
   ...tree.folders.flatMap((folder) => foldersOf(folder)),
 ];
 
-/** The collection's files, each a row that opens it, by folder. */
+/**
+ * The collection's files in path order (the collection's own first, then
+ * each folder's), each a row that opens it: its title, then the folder it
+ * is in and when it last changed.
+ */
 const FileList = ({ documents }: { documents: DocumentSummary[] }) => {
   if (documents.length === 0) {
     return (
@@ -175,48 +155,36 @@ const FileList = ({ documents }: { documents: DocumentSummary[] }) => {
   }
   return (
     <>
-      <ul {...stylex.props(styles.folders)}>
-        {foldersOf(folderTree(documents)).map((folder) => (
-          <li key={folder.path}>
-            {folder.path === "" ? null : (
-              <span {...stylex.props(styles.folder)}>
-                <Icon icon={FolderMark} />
-                <Text
-                  element="span"
-                  size="xs"
-                  tone="muted"
-                  weight="medium"
-                  wrap="truncate"
-                >
-                  {folder.path}
-                </Text>
-              </span>
-            )}
-            <ItemGroup>
-              {folder.documents.map((document) => (
-                <Item
-                  key={document.id}
-                  render={
-                    <Link
-                      from="/knowledge/$collection"
-                      search={{ doc: document.id }}
-                    />
-                  }
-                  size="xs"
-                >
-                  <ItemMedia icon={File} iconLook="inline" />
-                  <ItemContent>
-                    <ItemTitle>
-                      {document.path.split("/").at(-1)}
-                      <ItemDetail>{formatDate(document.updatedAt)}</ItemDetail>
-                    </ItemTitle>
-                  </ItemContent>
-                </Item>
-              ))}
-            </ItemGroup>
-          </li>
-        ))}
-      </ul>
+      <ItemGroup separated>
+        {foldersOf(folderTree(documents)).flatMap((folder) =>
+          folder.documents.map((document) => (
+            <Item
+              key={document.id}
+              render={
+                <Link
+                  from="/knowledge/$collection"
+                  search={{ doc: document.id }}
+                />
+              }
+              size="sm"
+            >
+              <ItemMedia icon={File} iconLook="inline" />
+              <ItemContent>
+                <ItemTitle>
+                  {document.title}
+                  <ItemDetail>
+                    {/* A folder that only repeats the title (a skill's
+                        `<name>/SKILL.md`) says nothing more. */}
+                    {folder.path === "" || folder.path === document.title
+                      ? formatDate(document.updatedAt)
+                      : `${folder.path} · ${formatDate(document.updatedAt)}`}
+                  </ItemDetail>
+                </ItemTitle>
+              </ItemContent>
+            </Item>
+          ))
+        )}
+      </ItemGroup>
       {documents.length === pageMaxLimit ? (
         <Text size="sm" tone="muted">
           <Trans>Showing the first {pageMaxLimit} files.</Trans>
@@ -379,6 +347,18 @@ const CollectionView = () => {
                 }
                 title={collection.data.collection.name}
               />
+              <Section aria-labelledby="files">
+                <SectionHeader
+                  actions={
+                    writable ? (
+                      <NewDocument collectionId={collectionId} />
+                    ) : undefined
+                  }
+                  id="files"
+                  title={<Trans>Files</Trans>}
+                />
+                <FileList documents={collection.data.documents} />
+              </Section>
               {writable ? (
                 <Uploads
                   // Another collection starts with no uploads to follow.
@@ -387,20 +367,6 @@ const CollectionView = () => {
                   listed={new Set(paths.values())}
                 />
               ) : null}
-              <section
-                aria-labelledby="files"
-                {...stylex.props(styles.section)}
-              >
-                <div {...stylex.props(styles.sectionHead)}>
-                  <SectionTitle id="files">
-                    <Trans>Files</Trans>
-                  </SectionTitle>
-                  {writable ? (
-                    <NewDocument collectionId={collectionId} />
-                  ) : null}
-                </div>
-                <FileList documents={collection.data.documents} />
-              </section>
             </>
           ) : null}
         </div>
