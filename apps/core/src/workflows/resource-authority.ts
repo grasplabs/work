@@ -11,6 +11,7 @@ import {
   workflowBindingTargetSchema,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
+import { brainDefaultAlias } from "@grasp-os/workflow-schema/format";
 import { eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -64,6 +65,30 @@ const catalogBindingSchema = z.strictObject({
 /** A catalog binding of a run's start, its approval and target frozen. */
 export type FrozenCatalogBinding = z.infer<typeof catalogBindingSchema>;
 
+/**
+ * The approval and permission a run's default Brain reads go through
+ * (GRA-2228): no row's. Every row's ID is a UUID core made, so neither
+ * names one, and no request or grant can make one. A call through it
+ * needs no approval nor grant (`requireCallAuthority`); what it read is
+ * pinned under it and checked again as every pin is, its grant aside
+ * (resource-reads.ts).
+ */
+export const brainDefaultId = "brain:default";
+
+/**
+ * The Brain's reads of a run whose version declares no `brain` permission
+ * under the Brain's alias (`brainDefaultAlias`): of what everyone in the
+ * company may read, with no grant (workflows/brain-calls.ts).
+ */
+const brainByDefault: FrozenCatalogBinding = {
+  alias: brainDefaultAlias,
+  kind: "brain",
+  contractId: brainDefaultId,
+  fingerprint: brainDefaultId,
+  approval: brainDefaultId,
+  target: { kind: "brain", permissionId: brainDefaultId },
+};
+
 const frozenBindingsSchema = z.array(catalogBindingSchema);
 
 /**
@@ -80,9 +105,12 @@ export const frozenBindingsOf = (
   if (!frozen.success) {
     throw workflowResourceErrors.create("workflow.format_unsupported");
   }
-  return new Map(
-    frozen.data.map((binding) => [binding.alias, binding] as const)
-  );
+  // And the Brain's reads by default, unless the start froze a binding
+  // under its alias, which always wins.
+  return new Map([
+    [brainDefaultAlias, brainByDefault] as const,
+    ...frozen.data.map((binding) => [binding.alias, binding] as const),
+  ]);
 };
 
 /** What a call of a run needs to know of it, from its row and receipt. */
@@ -249,21 +277,26 @@ export const requireCallAuthority = async (
   const { workflowId: id } = run;
   const permission =
     "permissionId" in binding.target ? binding.target.permissionId : null;
+  // The Brain's reads by default: no approval nor grant to hold.
+  const byDefault = binding.approval === brainDefaultId;
   const permissionHolds =
-    permission === null
+    permission === null || byDefault
       ? sql`1`
       : sql`EXISTS (SELECT 1 FROM permissions AS held
           WHERE held.id = ${permission} AND held.status = 'active'
             AND held.subject_type = 'workflow' AND held.subject_id = ${id})`;
+  const approvalHolds = byDefault
+    ? sql`1`
+    : sql`EXISTS (SELECT 1 FROM workflow_binding_approvals AS approval
+        WHERE approval.id = ${binding.approval}
+          AND approval.workflow_resource_id = ${id}
+          AND approval.alias = ${binding.alias}
+          AND approval.status = 'active')`;
   const { holds } = await drizzle(env.DB).get<{ holds: number }>(
     sql`SELECT (${workflowRoleSql(run.principal, id)}
       AND EXISTS (SELECT 1 FROM workflow_resources AS live
         WHERE live.id = ${id} AND live.deleted_at IS NULL)
-      AND EXISTS (SELECT 1 FROM workflow_binding_approvals AS approval
-        WHERE approval.id = ${binding.approval}
-          AND approval.workflow_resource_id = ${id}
-          AND approval.alias = ${binding.alias}
-          AND approval.status = 'active')
+      AND ${approvalHolds}
       AND ${permissionHolds}
       AND ${invokerSql(run)}) AS holds`
   );

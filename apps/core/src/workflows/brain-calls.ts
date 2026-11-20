@@ -3,6 +3,7 @@ import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { BrainAction } from "@grasp-os/workflow-schema/format";
+import { drizzle } from "drizzle-orm/d1";
 
 import {
   brainCardSchema,
@@ -20,7 +21,12 @@ import {
   recallFor,
   skillsCallFor,
 } from "../brain-recall.ts";
-import { runAuthority, runContext } from "./resource-authority.ts";
+import { brainDefaultReads } from "../db/core/schema.ts";
+import {
+  brainDefaultId,
+  runAuthority,
+  runContext,
+} from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 import { recordRunMemories, recordRunVersions } from "./run-evidence.ts";
 
@@ -148,14 +154,34 @@ export const callBrain = async (
     throw workflowResourceErrors.create("workflow.call_denied");
   }
   const authority = runAuthority(run);
+  // What is read is pinned under the permission it came through: the
+  // reserved one for the Brain's reads by default (GRA-2228).
   const permissionId = permissionIdSchema.parse(target.permissionId);
+  // Which reads the Brain by default, with no grant, as the company alone:
+  // the workflow marked first, for good, as an App is
+  // (resource-brain.ts `brainByDefault`), so an App it reaches answers no
+  // visitor (app-provenance.ts `recallsTheBrain`).
+  const byDefault = target.permissionId === brainDefaultId;
+  if (byDefault) {
+    await drizzle(env.DB)
+      .insert(brainDefaultReads)
+      .values({
+        subjectType: "workflow",
+        subjectId: run.workflowId,
+        firstReadAt: new Date(),
+      })
+      .onConflictDoNothing();
+  }
+  const reader = byDefault
+    ? { permissionId: null, byDefault: true as const }
+    : { permissionId };
   if (call.operation === "entities.get" || call.operation === "entities.find") {
     return await entitiesCallFor(
       env,
       {
         authority,
         context: runContext(run),
-        permissionId,
+        ...reader,
         actor: delegateActorOf(authority),
         target: { type: "workflow_run", id: run.runId },
         // Pinned with the run before it gets them, as a recall's pack: each
@@ -183,7 +209,7 @@ export const callBrain = async (
       {
         authority,
         context: runContext(run),
-        permissionId,
+        ...reader,
         actor: delegateActorOf(authority),
         target: { type: "workflow_run", id: run.runId },
         // Pinned with the run as a recall's pack is, so the skills are
@@ -205,7 +231,7 @@ export const callBrain = async (
     {
       authority,
       context: runContext(run),
-      permissionId,
+      ...reader,
       actor: delegateActorOf(authority),
       target: { type: "workflow_run", id: run.runId },
       // Pinned with the run before the run gets it, so what it recalled

@@ -177,6 +177,14 @@ export type BindingKind = (typeof bindingKinds)[number];
 /** The alias of the workflow's one `ai` permission. */
 export const aiAlias = "ai";
 
+/**
+ * The alias a `call` step names the Brain by with no `brain` permission
+ * declared under it: the Brain's reads of what everyone in the company
+ * may read, with no grant (GRA-2228), as `ctx.brain.brain.<action>`.
+ * A permission declared under it, of any kind, wins.
+ */
+export const brainDefaultAlias = "brain";
+
 /** A permission: the contract an admin approves, and its label. */
 export interface Permission {
   readonly contract: string;
