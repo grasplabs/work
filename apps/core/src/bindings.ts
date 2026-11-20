@@ -19,6 +19,7 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
+import { ownReadConnection } from "./own-connection-reads.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
@@ -79,18 +80,11 @@ export interface CallGrant {
 }
 
 /**
- * Checks the permission of an App or agent working in `context` for one
- * call, then signs the capability connect needs for exactly this call,
- * saying whether `context` is in restricted mode (connect then holds its
- * side effects for the person), whether the call may only read, and the
- * permission and context to check again should connect hold it for them.
- * `decision` is what a person decided of a call waiting for them: a held
- * action confirmed, or a call of unknown outcome resolved, only ever
- * signed through `reauthorizedCapability` (decided-calls.ts).
- * Core makes capabilities here and nowhere else, and nothing outside core
- * reaches this function.
+ * The capability for one call already allowed (`signedCall`, or with no
+ * grant `signedOwnRead`): its context's restricted mode, its class on for
+ * the person, then signed.
  */
-export const signedCall = async (
+const capabilityFor = async (
   env: Env,
   {
     authority,
@@ -104,11 +98,10 @@ export const signedCall = async (
     heldUntil,
     chatApp,
     binding,
-  }: CallGrant,
+  }: Omit<CallGrant, "permissionId"> & { permissionId: PermissionId | null },
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
   decision?: CapabilityDecision
 ) => {
-  await authorize(env, authority, connection, action, permissionId, context);
   // The context is checked first: a call from a chat or App that isn't
   // there is refused as that, whatever its class.
   const restricted = await isRestricted(env, authority, context);
@@ -157,6 +150,61 @@ export const signedCall = async (
     }
   );
   return { capability, scope };
+};
+
+/**
+ * Checks the permission of an App or agent working in `context` for one
+ * call, then signs the capability connect needs for exactly this call,
+ * saying whether `context` is in restricted mode (connect then holds its
+ * side effects for the person), whether the call may only read, and the
+ * permission and context to check again should connect hold it for them.
+ * `decision` is what a person decided of a call waiting for them: a held
+ * action confirmed, or a call of unknown outcome resolved, only ever
+ * signed through `reauthorizedCapability` (decided-calls.ts).
+ * Core makes capabilities here and nowhere else, and nothing outside core
+ * reaches this function.
+ */
+export const signedCall = async (
+  env: Env,
+  grant: CallGrant,
+  call: Pick<ConnectCall, "action" | "idempotencyKey">,
+  decision?: CapabilityDecision
+) => {
+  const { authority, connection, permissionId, context } = grant;
+  await authorize(
+    env,
+    authority,
+    connection,
+    call.action,
+    permissionId,
+    context
+  );
+  return await capabilityFor(env, grant, call, decision);
+};
+
+/**
+ * Signs the capability for a read of the chat's person's own connection
+ * that needs no grant (own-connection-reads.ts): only their own, active,
+ * and only a tool whose class reads, checked here again whoever asks, and
+ * signed read-only, so connect refuses any side effect of it. The caller
+ * holds it to a turn whose answer reaches its person alone.
+ */
+export const signedOwnRead = async (
+  env: Env,
+  grant: Omit<CallGrant, "permissionId" | "readOnly" | "binding" | "sensitive">,
+  { action }: Pick<ConnectCall, "action">
+) => {
+  await ownReadConnection(
+    env,
+    grant.authority,
+    grant.connection.connectionId,
+    action
+  );
+  return await capabilityFor(
+    env,
+    { ...grant, permissionId: null, readOnly: true },
+    { action, idempotencyKey: undefined }
+  );
 };
 
 /**
@@ -209,6 +257,17 @@ export interface ConnectionGrant {
   context: WorkContext;
   /** The permission the stub was built from: only it counts on each call. */
   permissionId: PermissionId;
+  connection: ConnectionObject;
+}
+
+/**
+ * A read of the chat's person's own connection with no grant
+ * (own-connection-reads.ts): signed by `signedOwnRead`, never authorized
+ * by a permission.
+ */
+export interface OwnRead {
+  context: WorkContext;
+  permissionId: null;
   connection: ConnectionObject;
 }
 
@@ -278,7 +337,7 @@ export type StubAuthority =
 const signedStub = async (
   env: Env,
   authority: StubAuthority,
-  { context, permissionId, connection }: ConnectionGrant,
+  { context, permissionId, connection }: ConnectionGrant | OwnRead,
   call: unknown[]
 ): Promise<{
   request: ConnectCall;
@@ -295,22 +354,28 @@ const signedStub = async (
       typeof authority === "function"
         ? await authority(options?.idempotencyKey)
         : { authority };
-    const { capability, scope } = await signedCall(
-      env,
-      {
-        authority: caller.authority,
-        readOnly: caller.readOnly,
-        unattended: caller.unattended,
-        sensitive: caller.sensitive,
-        notAfter: caller.notAfter,
-        heldUntil: caller.heldUntil,
-        chatApp: caller.chatApp,
-        context,
-        connection,
-        permissionId,
-      },
-      { action, idempotencyKey: options?.idempotencyKey }
-    );
+    const allowed = {
+      authority: caller.authority,
+      unattended: caller.unattended,
+      notAfter: caller.notAfter,
+      heldUntil: caller.heldUntil,
+      chatApp: caller.chatApp,
+      context,
+      connection,
+    };
+    const { capability, scope } =
+      permissionId === null
+        ? await signedOwnRead(env, allowed, { action })
+        : await signedCall(
+            env,
+            {
+              ...allowed,
+              readOnly: caller.readOnly,
+              sensitive: caller.sensitive,
+              permissionId,
+            },
+            { action, idempotencyKey: options?.idempotencyKey }
+          );
     return {
       request: { capability, ...scope, input },
       ...(caller.stillAllowed === undefined
@@ -327,7 +392,7 @@ const signedStub = async (
 export const signedStubCall = async (
   env: Env,
   authority: StubAuthority,
-  grant: ConnectionGrant,
+  grant: ConnectionGrant | OwnRead,
   call: unknown[]
 ): Promise<ConnectCall> => {
   const { request } = await signedStub(env, authority, grant, call);

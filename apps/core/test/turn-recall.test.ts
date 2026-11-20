@@ -1429,6 +1429,32 @@ describe("what the recall before a question may reach", setUpTime, () => {
     });
   });
 
+  it("names the person's own connection, which they read with no grant, as where else to look in their own chat, and none in a turn nobody started", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const depot = word();
+    await added(`Depot ${depot} opens at seven`, owner(person.userId));
+    const mail = await mailConnection([], searches, { owner: person.userId });
+    /** The `lookElsewhere` the recall in the first request of `ask` named. */
+    const named = async (
+      ask: (chat: Awaited<ReturnType<typeof chatOf>>) => Promise<unknown>
+    ) => {
+      const chat = await chatOf(person.userId, says("Noted."));
+      await ask(chat);
+      const recall = recallIn(chat.provider.requests[0]?.body) ?? "";
+      return /"lookElsewhere":\[(?<names>[^\]]*)\]/u.exec(recall)?.groups
+        ?.names;
+    };
+    const question = `When does depot ${depot} open?`;
+
+    expect({
+      own: await named(async (chat) => await chat.ask(question)),
+      woken: await named(
+        async (chat) =>
+          await chat.stub.askUnattended(chat.chat.id, { text: question, model })
+      ),
+    }).toStrictEqual({ own: JSON.stringify(mail.id), woken: undefined });
+  });
+
   it("never holds the turn for where else to look: hands over without it while connect hasn't answered, or when it failed, and says why", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInWithRole(idp, "user");

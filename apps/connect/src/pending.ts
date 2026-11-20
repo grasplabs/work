@@ -601,6 +601,12 @@ export const hold = async (
   }
 ): Promise<PendingReference> => {
   const { authority, origin } = claims;
+  // A capability with no grant (a read of its person's own connection) is
+  // always read-only, so never held: refused as invalid if one gets here.
+  const { permissionId } = origin;
+  if (permissionId === null) {
+    throw capabilityErrors.create("capability.invalid");
+  }
   const db = drizzle(env.DB);
   const { subject } = authority;
   const subjectType = subject.type;
@@ -657,7 +663,7 @@ export const hold = async (
           ),
           input: value(JSON.stringify(input), "input"),
           inputHash: value(inputHash, "input_hash"),
-          permissionId: value(origin.permissionId, "permission_id"),
+          permissionId: value(permissionId, "permission_id"),
           context: value(context, "context"),
           restricted: value(claims.restricted ? 1 : 0, "restricted"),
           createdAt: value(heldAt, "created_at"),
