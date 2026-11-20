@@ -272,7 +272,7 @@ export const StephenCard = ({
         </span>
       }
     >
-      <SettingsRows>
+      <SettingsRows controls="fit">
         <SettingRow label={t`Who can talk to him`}>
           <AudienceControl
             editable={can}

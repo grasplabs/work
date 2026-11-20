@@ -18,16 +18,6 @@ import type { Brain } from "./brain.ts";
 /** What a line is about, and so its icon: talking, reading, looking through a connection, or a question. */
 export type LogKind = "interview" | "reading" | "scanning" | "question";
 
-/** The log's tabs: everything, or one kind of work. Grasp's own work is its questions. */
-export const logTabs = [
-  "all",
-  "interview",
-  "reading",
-  "scanning",
-  "grasp",
-] as const;
-export type LogTab = (typeof logTabs)[number];
-
 /** One line of the log. */
 export interface LogEntry {
   id: string;
@@ -36,31 +26,17 @@ export interface LogEntry {
   day: string;
   /** What it was, as the source names it; for a question, the question. Empty for a week's interviews. */
   title: string;
-  /** Who gave it, and how, as a role: "Head of finance · Live, 45 minutes". */
-  by?: string;
-  /** What the brain keeps of it: one for each thing said in it. */
-  said: number;
   /** The note it opens. */
   opens?: string;
   /** The interviews of one week, which are one line with how many there were: never who talked, nor on which day. */
   interviews?: { count: number; week: number };
-  /** For a question: noticed, sent to who can answer it, or answered, and whether it is still open. */
+  /** For a question: noticed, sent to who can answer it, or answered. */
   question?: {
+    /** The gap it is. */
+    gap: string;
     step: "noticed" | "asked" | "answered";
-    open: boolean;
-    answer?: string;
   };
 }
-
-/** A day of the log, newest first. */
-export interface LogDay {
-  day: string;
-  entries: LogEntry[];
-}
-
-/** The tab a line is under. */
-export const tabOf = (entry: LogEntry): Exclude<LogTab, "all"> =>
-  entry.kind === "question" ? "grasp" : entry.kind;
 
 /** What a source's kind is as work: talking, reading, or looking through a connection. */
 const sourceKind: Record<Source["kind"], LogKind> = {
@@ -77,16 +53,11 @@ const conversations = "sources-conversations";
 /** Every line of the log, unordered. */
 const entriesOf = (ws: Workspace, brain: Brain): LogEntry[] => {
   const inBrain = new Set(brain.notes.map((note) => note.id));
-  const said = new Map<string, number>();
-  for (const statement of ws.statements) {
-    said.set(statement.sourceId, (said.get(statement.sourceId) ?? 0) + 1);
-  }
   const entries: LogEntry[] = ws.interviewWeeks.map(({ week, interviews }) => ({
     id: `interviews:${week}`,
     kind: "interview",
     day: week,
     title: "",
-    said: 0,
     ...(inBrain.has(conversations) ? { opens: conversations } : {}),
     interviews: { count: interviews, week: isoWeek(week) },
   }));
@@ -96,31 +67,27 @@ const entriesOf = (ws: Workspace, brain: Brain): LogEntry[] => {
     if (kind === "interview" || !inBrain.has(source.id)) {
       continue;
     }
-    const by = [source.who, source.how].filter(Boolean).join(" · ");
     entries.push({
       id: source.id,
       kind,
       day: source.date,
       title: source.title,
-      ...(by === "" ? {} : { by }),
-      said: said.get(source.id) ?? 0,
       opens: source.id,
     });
   }
   // Grasp's questions: noticed in a source, sent to who can answer it, answered.
   const dated = new Map(ws.sources.map((source) => [source.id, source.date]));
   for (const gap of ws.gaps) {
-    const open = gap.closedAt === undefined;
     const opens = inBrain.has(gap.id) ? { opens: gap.id } : {};
     const noticed = dated.get(gap.sourceId);
-    const line = { kind: "question" as const, title: gap.question, said: 0 };
+    const line = { kind: "question" as const, title: gap.question };
     if (noticed !== undefined) {
       entries.push({
         ...line,
         id: `${gap.id}:noticed`,
         day: noticed,
         ...opens,
-        question: { step: "noticed", open },
+        question: { gap: gap.id, step: "noticed" },
       });
     }
     if (gap.askedAt !== undefined) {
@@ -128,93 +95,64 @@ const entriesOf = (ws: Workspace, brain: Brain): LogEntry[] => {
         ...line,
         id: `${gap.id}:asked`,
         day: gap.askedAt.slice(0, 10),
-        by: gap.owner,
         ...opens,
-        question: { step: "asked", open },
+        question: { gap: gap.id, step: "asked" },
       });
     }
     if (gap.closedAt !== undefined) {
-      // Answered by the role it was asked of: never the name of whoever typed the answer.
       entries.push({
         ...line,
         id: `${gap.id}:answered`,
         day: gap.closedAt.slice(0, 10),
-        by: gap.owner,
         ...opens,
-        question: {
-          step: "answered",
-          open: false,
-          ...(gap.answer === undefined ? {} : { answer: gap.answer }),
-        },
+        question: { gap: gap.id, step: "answered" },
       });
     }
   }
   return entries;
 };
 
-/** The whole log, day by day, newest first, for one tab. */
+/** The log's stretches, newest first: this week, last week, and before. */
+export interface LogStretches {
+  thisWeek: LogEntry[];
+  lastWeek: LogEntry[];
+  earlier: LogEntry[];
+}
+
+const weekMs = 7 * 86_400_000;
+
+/** The Monday of the week `day` (an ISO date) is in, in milliseconds since the epoch. */
+const mondayOf = (day: string): number => {
+  const at = Date.parse(`${day}T12:00:00Z`);
+  return at - ((new Date(at).getUTCDay() + 6) % 7) * 86_400_000;
+};
+
+/**
+ * The whole log, newest first, in its stretches as of `today` (an ISO date where the reader is):
+ * within a day, in the reverse of the order it came in.
+ */
 export const brainLog = (
   ws: Workspace,
   brain: Brain,
-  tab: LogTab = "all"
-): LogDay[] => {
+  today: string
+): LogStretches => {
   const all = entriesOf(ws, brain);
   const order = new Map(all.map((entry, index) => [entry.id, index]));
-  // Newest day first; within a day, in the reverse of the order it came in.
-  const shown = all
-    .filter((entry) => tab === "all" || tabOf(entry) === tab)
-    .toSorted(
-      (one, other) =>
-        other.day.localeCompare(one.day) ||
-        (order.get(other.id) ?? 0) - (order.get(one.id) ?? 0)
-    );
-  const days: LogDay[] = [];
-  for (const entry of shown) {
-    const last = days.at(-1);
-    if (last?.day === entry.day) {
-      last.entries.push(entry);
+  const thisWeek = mondayOf(today);
+  const stretches: LogStretches = { thisWeek: [], lastWeek: [], earlier: [] };
+  for (const entry of all.toSorted(
+    (one, other) =>
+      other.day.localeCompare(one.day) ||
+      (order.get(other.id) ?? 0) - (order.get(one.id) ?? 0)
+  )) {
+    const monday = mondayOf(entry.day);
+    if (monday >= thisWeek) {
+      stretches.thisWeek.push(entry);
+    } else if (monday >= thisWeek - weekMs) {
+      stretches.lastWeek.push(entry);
     } else {
-      days.push({ day: entry.day, entries: [entry] });
+      stretches.earlier.push(entry);
     }
   }
-  return days;
-};
-
-/** How a dot of the chart is drawn: taken in, or a question still open. */
-export type LogDot = "known" | "open";
-
-/** One day of the chart and its dots. */
-export interface LogColumn {
-  day: string;
-  dots: LogDot[];
-}
-
-const dayMs = 86_400_000;
-
-/**
- * The log as a chart: a column for every day from the first to today, empty days included, with a
- * dot for everything that came in or happened that day; a week's interviews stand on its Monday,
- * a dot each.
- */
-export const logColumns = (days: LogDay[], today: string): LogColumn[] => {
-  const first = days.at(-1)?.day;
-  const newest = days[0]?.day;
-  if (first === undefined || newest === undefined) {
-    return [];
-  }
-  const byDay = new Map(days.map((each) => [each.day, each.entries]));
-  const last = today > newest ? today : newest;
-  const columns: LogColumn[] = [];
-  for (let at = Date.parse(`${first}T12:00:00Z`); ; at += dayMs) {
-    const day = new Date(at).toISOString().slice(0, 10);
-    if (day > last) {
-      break;
-    }
-    const dots = (byDay.get(day) ?? []).flatMap((entry): LogDot[] => {
-      const dot: LogDot = entry.question?.open === true ? "open" : "known";
-      return Array.from({ length: entry.interviews?.count ?? 1 }, () => dot);
-    });
-    columns.push({ day, dots });
-  }
-  return columns;
+  return stretches;
 };

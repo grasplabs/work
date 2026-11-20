@@ -244,10 +244,6 @@ msgstr "{count, plural, =0 {Aucun document} one {# document} other {# documents}
 msgid "{count, plural, =0 {No sources} one {# source} other {# sources}}"
 msgstr "{count, plural, =0 {Aucune source} one {# source} other {# sources}}"
 
-#: src/brain/brain-log.tsx
-msgid "{count, plural, one {{label}: # thing} other {{label}: # things}}"
-msgstr "{count, plural, one {{label} : # élément} other {{label} : # éléments}}"
-
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
 msgstr "{count, plural, one {{names} travaillent ici, sur # travail apparu dans ce que les gens ont dit.} other {{names} travaillent ici, sur # travaux apparus dans ce que les gens ont dit.}}"
@@ -340,7 +336,7 @@ msgstr "{count, plural, one {# objectif} other {# objectifs}}"
 msgid "{count, plural, one {# handover} other {# handovers}}"
 msgstr "{count, plural, one {# passation} other {# passations}}"
 
-#: src/brain/brain-log.tsx
+#: src/brain/activity-page.tsx
 msgid "{count, plural, one {# interview in week {week}} other {# interviews in week {week}}}"
 msgstr "{count, plural, one {# entretien en semaine {week}} other {# entretiens en semaine {week}}}"
 
@@ -1213,6 +1209,10 @@ msgstr "{outCount, plural, one {# envoyé, en liste} other {# envoyés, en liste
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
 msgstr "{outCount, plural, one {Le lien disponible, sous forme de liste} other {Les # liens disponibles, sous forme de liste}}"
 
+#: src/brain/activity-page.tsx
+msgid "{owner}: “{answer}”"
+msgstr "{owner} : « {answer} »"
+
 #: src/frame/part-words.tsx
 msgid "{page} of {total}"
 msgstr "{page} sur {total}"
@@ -1224,6 +1224,10 @@ msgstr "{people, plural, one {{name} a été lu pour la dernière fois le {readA
 #: src/brain/brain.ts
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # personne.} other {{sector}, # personnes.}}"
+
+#: src/brain/activity-page.tsx
+msgid "{people, plural, one {{team}: # person} other {{team}: # people}}"
+msgstr "{people, plural, one {{team} : # personne} other {{team} : # personnes}}"
 
 #: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
@@ -1358,10 +1362,6 @@ msgstr "{role}, ni invitation ni entretien pour l’instant"
 #: src/apps/app-data.tsx
 msgid "{rows, plural, one {# row to import.} other {# rows to import.}}"
 msgstr "{rows, plural, one {# ligne à importer.} other {# lignes à importer.}}"
-
-#: src/brain/brain-log.tsx
-msgid "{said, plural, one {# thing said} other {# things said}}"
-msgstr "{said, plural, one {# chose dite} other {# choses dites}}"
 
 #: src/agents/agents-overview.tsx
 msgid "{scheduled, plural, one {# schedule} other {# schedules}}"
@@ -1715,10 +1715,6 @@ msgstr "{who}, qui relit."
 #: src/interview/talk.tsx
 msgid "{who}, thinking."
 msgstr "{who}, qui réfléchit."
-
-#: src/brain/brain-log.tsx
-msgid "{who}: “{answer}”"
-msgstr "{who} : « {answer} »"
 
 #: src/frame/part-words.tsx
 msgid "{words}?"
@@ -2192,7 +2188,7 @@ msgstr "Active, pour toute l’entreprise"
 msgid "Active, only for you"
 msgstr "Active, uniquement pour vous"
 
-#: src/brain/brain-log.tsx
+#: src/brain/activity-page.tsx
 #: src/brain/brain-section.tsx
 #: src/frame/page-skeletons-b.tsx
 #: src/routes/_shell.brain.tsx
@@ -2675,7 +2671,6 @@ msgctxt "inbox item kind"
 msgid "AI tool"
 msgstr "Outil d’IA"
 
-#: src/brain/brain-log.tsx
 #: src/routes/_shell.workflows.runs.tsx
 msgid "All"
 msgstr "Tout"
@@ -3066,7 +3061,7 @@ msgstr "Réponse apportée le {date}."
 msgid "Answered: {question}"
 msgstr "Réponse apportée : {question}"
 
-#: src/brain/brain-log.tsx
+#: src/brain/activity-page.tsx
 msgid "Answered: {title}"
 msgstr "Répondu : {title}"
 
@@ -3469,6 +3464,11 @@ msgstr "Tel que votre endpoint le nomme, par exemple llama-3.3-70b."
 msgid "Ask"
 msgstr "Demander"
 
+#: src/brain/activity-page.tsx
+msgctxt "a question of the brain"
+msgid "Ask"
+msgstr "Demander"
+
 #: src/frame/part-words.tsx
 msgctxt "ask someone a page's question"
 msgid "Ask"
@@ -3678,7 +3678,7 @@ msgstr "A demandé d'envoyer, de modifier ou de supprimer un message d'app de ch
 msgid "Asked you about {list}"
 msgstr "Vous a demandé : {list}"
 
-#: src/brain/brain-log.tsx
+#: src/brain/activity-page.tsx
 msgid "Asked: {title}"
 msgstr "Demandé : {title}"
 
@@ -4906,6 +4906,10 @@ msgstr "Fermer la voix"
 msgid "Close without an answer"
 msgstr "Fermer sans réponse"
 
+#: src/brain/activity-page.tsx
+msgid "Closed without an answer"
+msgstr "Fermée sans réponse"
+
 #: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Closes {closes}"
@@ -5264,7 +5268,6 @@ msgstr "Demandes de connexion"
 msgid "Connection trigger"
 msgstr "Déclencheur de connexion"
 
-#: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/projects/project-connections.tsx
 #: src/projects/project-view.tsx
@@ -5822,10 +5825,6 @@ msgstr "Jour {day} sur {days}"
 msgid "Day {day} of every month at {time}"
 msgstr "Le {day} de chaque mois à {time}"
 
-#: src/brain/brain-log.tsx
-msgid "Day by day"
-msgstr "Jour après jour"
-
 #: src/agents/setup/schedule-step.tsx
 msgid "Day of the month"
 msgstr "Jour du mois"
@@ -6359,7 +6358,6 @@ msgid "Document"
 msgstr "Document"
 
 #: src/agents/agent-documents.tsx
-#: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/onboarding/document-drop.tsx
 #: src/onboarding/setup-frame.tsx
@@ -6663,6 +6661,10 @@ msgstr "Chaque préfixe de chemin commence par /, sur sa propre ligne, sans requ
 #: src/settings/stephen-settings.tsx
 msgid "Each place only narrows who reaches him there, and whether he does things for people there or only answers."
 msgstr "Chaque lieu restreint seulement qui le joint là-bas, et s’il agit pour les gens ou se contente de répondre."
+
+#: src/brain/activity-page.tsx
+msgid "Earlier"
+msgstr "Plus tôt"
 
 #: src/agents/agent-templates.ts
 msgid "Earlier answers to the same question."
@@ -8091,9 +8093,7 @@ msgstr "L’accorder"
 msgid "Granted a permission"
 msgstr "A accordé une autorisation"
 
-#. tab: what Grasp did itself, its questions
 #: src/apps/app-data.tsx
-#: src/brain/brain-log.tsx
 msgid "Grasp"
 msgstr "Grasp"
 
@@ -8274,10 +8274,6 @@ msgstr "Grasp ne peut utiliser {app} qu’avec les outils que vous avez autoris�
 #: src/chat/saved-memory.tsx
 msgid "Grasp no longer remembers this."
 msgstr "Grasp ne retient plus ceci."
-
-#: src/brain/brain-log.tsx
-msgid "Grasp noticed it did not know"
-msgstr "Grasp a remarqué qu’il ne le savait pas"
 
 #: src/sign-in-errors.ts
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
@@ -9189,7 +9185,6 @@ msgstr "Entretien"
 msgid "Interviewed: the {role}"
 msgstr "Entretien : {role}"
 
-#: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/inbox/interviews-item.tsx
 #: src/inbox/items.ts
@@ -9988,6 +9983,10 @@ msgstr "Dernière exécution échouée"
 #: src/frame/part-words.tsx
 msgid "Last used"
 msgstr "Dernier utilisé"
+
+#: src/brain/activity-page.tsx
+msgid "Last week"
+msgstr "La semaine dernière"
 
 #: src/interview/words.ts
 msgid "Last, the numbers and the result."
@@ -12282,10 +12281,6 @@ msgstr "Rien de nouveau à publier"
 msgid "Nothing new: it needs no admin."
 msgstr "Rien de nouveau : aucun administrateur n’est nécessaire."
 
-#: src/brain/brain-log.tsx
-msgid "Nothing of this kind yet."
-msgstr "Rien de ce type pour l’instant."
-
 #: src/brain/memories-page.tsx
 msgid "Nothing of this kind you may read yet"
 msgstr "Rien de ce type que vous puissiez lire pour l’instant"
@@ -12382,6 +12377,7 @@ msgctxt "note property"
 msgid "Noticed in"
 msgstr "Repéré dans"
 
+#: src/brain/activity-page.tsx
 #: src/brain/brain.ts
 msgid "Noticed in {source}"
 msgstr "Repéré dans {source}"
@@ -12797,6 +12793,7 @@ msgid "Only you see this"
 msgstr "Vous seul voyez ceci"
 
 #: src/apps/apps-overview.tsx
+#: src/brain/activity-page.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
@@ -13214,6 +13211,10 @@ msgstr "Page {page}"
 msgctxt "files of an App"
 msgid "Pages"
 msgstr "Pages"
+
+#: src/brain/activity-page.tsx
+msgid "Pages it changed"
+msgstr "Pages modifiées"
 
 #: src/frame/part-words.tsx
 msgid "Pages of {label}"
@@ -15689,9 +15690,9 @@ msgstr "Envoyé par l'app"
 msgid "Sent in <0>{header}</0>, never shown"
 msgstr "Envoyé dans <0>{header}</0>, jamais affiché"
 
-#: src/brain/brain-log.tsx
-msgid "Sent to the {who}"
-msgstr "Envoyé à : {who}"
+#: src/brain/activity-page.tsx
+msgid "Sent to the {owner} on {day}"
+msgstr "Envoyée à {owner} le {day}"
 
 #: src/brain/brain.ts
 msgid "Served by"
@@ -15980,10 +15981,6 @@ msgstr "Afficher les niveaux masqués"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Show in the brain"
 msgstr "Afficher dans le cerveau"
-
-#: src/brain/brain-log.tsx
-msgid "Show in the log"
-msgstr "Afficher dans le journal"
 
 #: src/workflows/version-source.tsx
 msgid "Show its definition"
@@ -16295,6 +16292,10 @@ msgstr "Depuis le {date} : son compte a été supprimé dans l’annuaire."
 #: src/settings/member-suspension.tsx
 msgid "Since {date}. The directory has turned their account on again, so its next daily read lifts this."
 msgstr "Depuis le {date}. L’annuaire a réactivé son compte : sa prochaine lecture quotidienne lève donc la suspension."
+
+#: src/brain/activity-page.tsx
+msgid "Since you last looked"
+msgstr "Depuis votre dernière visite"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
@@ -18636,6 +18637,10 @@ msgstr "Cette version a été révoquée"
 msgid "This version, read-only"
 msgstr "Cette version, en lecture seule"
 
+#: src/brain/activity-page.tsx
+msgid "This week"
+msgstr "Cette semaine"
+
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 msgid "Those marked Only you are yours alone: nobody else sees them, admins included."
@@ -18736,7 +18741,6 @@ msgstr "Aux responsables d’équipe. Les autres suivent dès que leur responsab
 msgid "To these teams"
 msgstr "À ces équipes"
 
-#: src/brain/brain-log.tsx
 #: src/frame/part-words.tsx
 msgid "Today"
 msgstr "Aujourd’hui"
@@ -19591,6 +19595,10 @@ msgstr "En attente d'un administrateur"
 msgid "Waiting for an admin's approval"
 msgstr "En attente de l’approbation d’un administrateur"
 
+#: src/brain/activity-page.tsx
+msgid "Waiting for an answer"
+msgstr "En attente d’une réponse"
+
 #: src/brain/work-knowledge.tsx
 msgid "Waiting for more voices"
 msgstr "En attente de plus de voix"
@@ -19619,6 +19627,10 @@ msgstr "Attend qu’un administrateur l’accorde"
 #: src/workflows/today-lanes.tsx
 msgid "waits on someone"
 msgstr "attend quelqu’un"
+
+#: src/brain/activity-page.tsx
+msgid "Waits on the {owner}, nobody asked yet"
+msgstr "Attend {owner}, personne n’a encore été sollicité"
 
 #: src/workflows/today-lanes.tsx
 msgid "waits on you"
@@ -20083,13 +20095,13 @@ msgstr "Ce que l’application peut en faire"
 msgid "What the Brain keeps that only they may read"
 msgstr "Ce que le Cerveau conserve et que seule cette personne peut lire"
 
+#: src/brain/activity-page.tsx
+msgid "What the brain kept"
+msgstr "Ce que le cerveau a retenu"
+
 #: src/connections/brain-audience.tsx
 msgid "What the Brain kept from {label} is being erased. You can choose who may read it again once that is done."
 msgstr "Ce que le Brain a conservé de {label} est en cours d’effacement. Vous pourrez de nouveau choisir qui peut le lire une fois l’effacement terminé."
-
-#: src/brain/brain-log.tsx
-msgid "What the brain kept of it"
-msgstr "Ce que le cerveau en a gardé"
 
 #: src/settings/erasures.tsx
 msgid "What the Brain learned about them under the address they signed in with, and what they said, where others may read it"
@@ -20225,7 +20237,7 @@ msgstr "ce qui a été dit"
 msgid "What was said"
 msgstr "Ce qui a été dit"
 
-#: src/brain/brain-log.tsx
+#: src/brain/activity-page.tsx
 msgid "What was said is on the work it was about"
 msgstr "Ce qui a été dit figure sur le travail concerné"
 

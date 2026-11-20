@@ -1,17 +1,19 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { brainLog, logColumns } from "./brain-log.ts";
+import { brainLog } from "./brain-log.ts";
 import { buildBrain } from "./brain.ts";
 import { testWorkspace } from "./test-workspace.ts";
 
 // The brain's log, on the brain's test company: what came in and what
-// Grasp asked, day by day; interviews only as a week's count.
+// Grasp asked, newest first, this week, last week and before; interviews
+// only as a week's count.
 
 describe(brainLog, () => {
   const ws = testWorkspace();
   const brain = buildBrain(ws);
-  const all = brainLog(ws, brain);
-  const entries = all.flatMap((day) => day.entries);
+  // A Wednesday: its week started on Monday 31 August.
+  const log = brainLog(ws, brain, "2026-09-02");
+  const entries = [...log.thisWeek, ...log.lastWeek, ...log.earlier];
 
   it("counts a week's interviews on its Monday, and never shows one conversation, its day or who gave it", () => {
     const conversations = new Set(
@@ -22,12 +24,7 @@ describe(brainLog, () => {
     expect({
       weeks: entries
         .filter((entry) => entry.interviews !== undefined)
-        .map(({ day, interviews, title, by }) => ({
-          day,
-          interviews,
-          title,
-          by,
-        })),
+        .map(({ day, interviews, title }) => ({ day, interviews, title })),
       conversations: entries.filter(({ id }) => conversations.has(id)),
     }).toStrictEqual({
       weeks: [
@@ -35,46 +32,66 @@ describe(brainLog, () => {
           day: "2026-08-31",
           interviews: { count: 12, week: 36 },
           title: "",
-          by: undefined,
         },
         {
           day: "2026-08-24",
           interviews: { count: 9, week: 35 },
           title: "",
-          by: undefined,
         },
       ],
       conversations: [],
     });
   });
 
-  it("names an answered question by the role it was asked of, and keeps the days newest first", () => {
+  it("dates an answered question on the day it was closed, and keeps the days newest first", () => {
+    const closed = ws.gaps.find((gap) => gap.closedAt === "2026-09-15");
     const answered = entries.find(
-      (entry) => entry.question?.step === "answered"
+      (entry) =>
+        entry.question?.step === "answered" && entry.question.gap === closed?.id
     );
     expect({
-      by: answered?.by,
-      newestFirst: all
+      day: answered?.day,
+      newestFirst: entries
         .map(({ day }) => day)
         .every((day, index, days) => (days[index - 1] ?? day) >= day),
-      documentsOnly: brainLog(ws, brain, "reading")
-        .flatMap((day) => day.entries)
-        .every(({ kind }) => kind === "reading"),
     }).toStrictEqual({
-      by: "CFO",
+      day: "2026-09-15",
       newestFirst: true,
-      documentsOnly: true,
     });
   });
 
-  it("draws every day up to today as a column, a dot for each interview of a week", () => {
-    const columns = logColumns(all, "2026-10-29");
-    const monday = columns.find(({ day }) => day === "2026-08-31");
+  it("counts a Sunday in the week that began on the Monday before it", () => {
+    const sunday = brainLog(ws, brain, "2026-09-06");
+    expect(
+      [sunday.thisWeek, sunday.lastWeek].map(
+        (stretch) =>
+          stretch.find((entry) => entry.interviews !== undefined)?.interviews
+            ?.week
+      )
+    ).toStrictEqual([36, 35]);
+  });
+
+  it("puts each line in its week: this week from Monday, last week, and before", () => {
     expect({
-      last: columns.at(-1)?.day,
-      first: columns[0]?.day,
-    }).toStrictEqual({ last: "2026-10-29", first: all.at(-1)?.day });
-    // The week's twelve interviews, and whatever else came in that Monday.
-    expect(monday?.dots.length ?? 0).toBeGreaterThanOrEqual(12);
+      thisWeek: log.thisWeek.every(({ day }) => day >= "2026-08-31"),
+      lastWeek: log.lastWeek.every(
+        ({ day }) => day >= "2026-08-24" && day < "2026-08-31"
+      ),
+      earlier:
+        log.earlier.length > 0 &&
+        log.earlier.every(({ day }) => day < "2026-08-24"),
+      weeks: [log.thisWeek, log.lastWeek].map(
+        (stretch) =>
+          stretch.find((entry) => entry.interviews !== undefined)?.interviews
+      ),
+    }).toStrictEqual({
+      thisWeek: true,
+      lastWeek: true,
+      earlier: true,
+      weeks: [
+        { count: 12, week: 36 },
+        { count: 9, week: 35 },
+      ],
+    });
   });
 });

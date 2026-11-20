@@ -189,7 +189,7 @@ export const ScheduleStep = ({ setup, change, name }: StepProps) => {
             }}
             value={schedule.frequency}
           >
-            <SelectTrigger aria-label={t`How often`} variant="text">
+            <SelectTrigger aria-label={t`How often`} size="sm" variant="text">
               <SelectValue />
             </SelectTrigger>
             <SelectContent />
@@ -237,6 +237,7 @@ export const ScheduleStep = ({ setup, change, name }: StepProps) => {
                 >
                   <SelectTrigger
                     aria-label={t`Day of the month`}
+                    size="sm"
                     variant="text"
                   >
                     <SelectValue />
@@ -259,7 +260,7 @@ export const ScheduleStep = ({ setup, change, name }: StepProps) => {
                 }}
                 value={schedule.time}
               >
-                <SelectTrigger aria-label={t`Time`} variant="text">
+                <SelectTrigger aria-label={t`Time`} size="sm" variant="text">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent />

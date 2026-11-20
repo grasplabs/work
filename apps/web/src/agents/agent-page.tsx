@@ -59,6 +59,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
@@ -96,7 +97,9 @@ import { AgentWakes, useLast } from "./agent-wakes.tsx";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page, for the company's admins, or a person's own agent's,
-// for them alone, on Grasp UI: its Page
+// for them alone, on Grasp UI, in the library's settings column: one
+// column in the page's middle, a card of rows per topic, the controls on
+// one edge. Its Page
 // header holds the agent (picture, name, what it is for, whether it is
 // on) and the things done most: turning it off and on, Chat, and Edit,
 // which changes its name, job, picture and model in a dialog. Its parts
@@ -104,7 +107,7 @@ import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 // (agent-section.tsx), the part in the address (`?tab=`) so a link can
 // lead to an agent's access or its schedule:
 //
-// - Overview: its facts as a rail (whom it answers, what it may do, when
+// - Overview: its facts as rows (whom it answers, what it may do, when
 //   it works on its own, its model, this month's use) and what it did
 //   lately (its scheduled runs, and when it was last asked); Delete.
 // - Instructions: what it is told (its instruction file, as every
@@ -147,7 +150,8 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space3,
   },
-  stack: { display: "grid", gap: grasp.space6 },
+  // A part's cards, as far apart as the column sets its own.
+  stack: { display: "grid", gap: grasp.space8 },
   // The `hidden` attribute alone loses to the stack's own display.
   hidden: { display: "none" },
 });
@@ -261,6 +265,8 @@ const Facts = ({
   const nextMoment = next === undefined ? "" : moment(next);
   return (
     <SectionCard variant="grouped" density="compact" flush title={t`Details`}>
+      {/* The control column, not each value's own width: a job is a
+          sentence, which would leave its name no room on a phone. */}
       <SettingsRows>
         <FactRow label={t`What it is for`}>
           {agent.job === "" ? t`No job written yet` : agent.job}
@@ -404,7 +410,7 @@ const Access = ({
         flush
         title={t`Who may use it`}
       >
-        <SettingsRows>
+        <SettingsRows controls="fit">
           <SettingRow
             info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
             label={t`Answers`}
@@ -438,7 +444,7 @@ const Access = ({
         info={t`Each as the company has it, or for fewer people. Never more.`}
         title={t`What it may do`}
       >
-        <SettingsRows>
+        <SettingsRows controls="fit">
           {settings.classes.map(({ toolClass, audience }) => {
             const className = i18n._(classNames[toolClass]);
             return (
@@ -542,6 +548,7 @@ const EditAgent = ({
         onClick={() => {
           setOpen(true);
         }}
+        size="sm"
       >
         {t`Edit`}
       </Button>
@@ -567,7 +574,13 @@ const EditAgent = ({
           </DialogBody>
           <DialogFooter>
             <DialogAction>{t`Cancel`}</DialogAction>
-            <Button disabled={!can} form={formId} type="submit" variant="ink">
+            <Button
+              disabled={!can}
+              form={formId}
+              size="sm"
+              type="submit"
+              variant="ink"
+            >
               {t`Save`}
             </Button>
           </DialogFooter>
@@ -750,145 +763,152 @@ export const AgentPage = ({
     own && (tab === "access" || tab === "schedule") ? "overview" : tab;
   return (
     <Page>
-      <PageHeader
-        actions={
-          <div {...stylex.props(styles.actions)}>
-            <Field orientation="horizontal" disabled={!can}>
-              <FieldLabel>{t`On`}</FieldLabel>
-              <Switch
-                checked={on}
-                onCheckedChange={(next) => {
-                  void change(async (session) => {
-                    await session.connections.setAgentPaused(agent.id, !next);
-                  });
-                }}
+      <PageColumn align="center" measure="settings">
+        <PageHeader
+          actions={
+            <div {...stylex.props(styles.actions)}>
+              <Field orientation="horizontal" disabled={!can}>
+                <FieldLabel>{t`On`}</FieldLabel>
+                <Switch
+                  checked={on}
+                  onCheckedChange={(next) => {
+                    void change(async (session) => {
+                      await session.connections.setAgentPaused(agent.id, !next);
+                    });
+                  }}
+                />
+              </Field>
+              <EditAgent
+                agent={agent}
+                can={can}
+                models={models}
+                save={save}
+                typed={typed}
               />
-            </Field>
-            <EditAgent
-              agent={agent}
-              can={can}
-              models={models}
-              save={save}
-              typed={typed}
-            />
-            {usable && on ? (
-              <Button
-                icon={Conversation}
-                render={<Link search={{ agent: agent.id }} to="/" />}
-                variant="ink"
-              >
-                {t`Chat`}
-              </Button>
-            ) : null}
-          </div>
-        }
-        {...(own
-          ? { description: t`Yours alone: nobody else sees or asks it` }
-          : {})}
-        // The agent's name on every part: the side nav marks which part.
-        title={name}
-      />
-      <AgentFailure>{failure}</AgentFailure>
-      {/* Every tab stays mounted, the others hidden: what is typed and
+              {usable && on ? (
+                <Button
+                  icon={Conversation}
+                  render={<Link search={{ agent: agent.id }} to="/" />}
+                  size="sm"
+                  variant="ink"
+                >
+                  {t`Chat`}
+                </Button>
+              ) : null}
+            </div>
+          }
+          {...(own
+            ? { description: t`Yours alone: nobody else sees or asks it` }
+            : {})}
+          size="md"
+          // The agent's name on every part: the side nav marks which part.
+          title={name}
+        />
+        <AgentFailure>{failure}</AgentFailure>
+        {/* Every tab stays mounted, the others hidden: what is typed and
           not yet saved on one stays while another is looked at. */}
-      <div
-        hidden={shownTab !== "overview"}
-        {...stylex.props(
-          styles.stack,
-          shownTab !== "overview" && styles.hidden
-        )}
-      >
-        <Facts
-          agent={agent}
-          first={first}
-          settings={settings}
-          teams={teams}
-          usage={usage}
-          wakes={wakes}
-        />
-        <RecentActivity usage={usage} wakes={wakes} />
-        <ShareAgent agent={agent} can={can} change={change} />
-        {first ? null : <DeleteAgent can={can} name={name} remove={remove} />}
-      </div>
-      <div
-        hidden={shownTab !== "instructions"}
-        {...stylex.props(
-          styles.stack,
-          shownTab !== "instructions" && styles.hidden
-        )}
-      >
-        {/* No title: the side nav says "Instructions" already. */}
-        <SectionCard
-          variant="grouped"
-          aria-label={t`Instructions`}
-          density="compact"
+        <div
+          hidden={shownTab !== "overview"}
+          {...stylex.props(
+            styles.stack,
+            shownTab !== "overview" && styles.hidden
+          )}
         >
-          <AgentInstructions
-            agentId={agent.id}
+          <Facts
+            agent={agent}
             first={first}
-            saved={instructions}
-            unsaved={unsaved}
+            settings={settings}
+            teams={teams}
+            usage={usage}
+            wakes={wakes}
           />
-        </SectionCard>
-        <AgentAppsPanel
-          agent={agent}
-          apps={apps}
-          can={can}
-          change={change}
-          editable={editable}
-          first={first}
-          people={people}
-          wakes={wakes}
-        />
-        <AgentDocuments
-          agent={agent}
-          can={can}
-          change={change}
-          documents={documents}
-          editable={editable}
-        />
-      </div>
-      <div
-        hidden={shownTab !== "access"}
-        {...stylex.props(styles.stack, shownTab !== "access" && styles.hidden)}
-      >
-        {firstAccess === undefined ? (
-          <Access
+          <RecentActivity usage={usage} wakes={wakes} />
+          <ShareAgent agent={agent} can={can} change={change} />
+          {first ? null : <DeleteAgent can={can} name={name} remove={remove} />}
+        </div>
+        <div
+          hidden={shownTab !== "instructions"}
+          {...stylex.props(
+            styles.stack,
+            shownTab !== "instructions" && styles.hidden
+          )}
+        >
+          {/* No title: the side nav says "Instructions" already. */}
+          <SectionCard
+            variant="grouped"
+            aria-label={t`Instructions`}
+            density="compact"
+          >
+            <AgentInstructions
+              agentId={agent.id}
+              first={first}
+              saved={instructions}
+              unsaved={unsaved}
+            />
+          </SectionCard>
+          <AgentAppsPanel
+            agent={agent}
+            apps={apps}
+            can={can}
+            change={change}
+            editable={editable}
+            first={first}
+            people={people}
+            wakes={wakes}
+          />
+          <AgentDocuments
             agent={agent}
             can={can}
             change={change}
-            settings={settings}
-            teams={teams}
-          />
-        ) : (
-          // The first agent's reach is the company's own, with a place
-          // for each chat app and a row for each app: its settings
-          // whole, as Settings › Stephen had them.
-          <StephenSettings
-            classes={firstAccess.classes}
+            documents={documents}
             editable={editable}
-            reach={firstAccess.reach}
-            week={firstAccess.week}
-            workflows={firstAccess.workflows}
           />
-        )}
-      </div>
-      <div
-        hidden={shownTab !== "schedule"}
-        {...stylex.props(
-          styles.stack,
-          shownTab !== "schedule" && styles.hidden
-        )}
-      >
-        <AgentWakes
-          agent={agent}
-          can={can}
-          change={change}
-          editable={editable}
-          people={people}
-          wakes={wakes}
-        />
-      </div>
+        </div>
+        <div
+          hidden={shownTab !== "access"}
+          {...stylex.props(
+            styles.stack,
+            shownTab !== "access" && styles.hidden
+          )}
+        >
+          {firstAccess === undefined ? (
+            <Access
+              agent={agent}
+              can={can}
+              change={change}
+              settings={settings}
+              teams={teams}
+            />
+          ) : (
+            // The first agent's reach is the company's own, with a place
+            // for each chat app and a row for each app: its settings
+            // whole, as Settings › Stephen had them.
+            <StephenSettings
+              classes={firstAccess.classes}
+              editable={editable}
+              reach={firstAccess.reach}
+              week={firstAccess.week}
+              workflows={firstAccess.workflows}
+            />
+          )}
+        </div>
+        <div
+          hidden={shownTab !== "schedule"}
+          {...stylex.props(
+            styles.stack,
+            shownTab !== "schedule" && styles.hidden
+          )}
+        >
+          <AgentWakes
+            agent={agent}
+            can={can}
+            change={change}
+            editable={editable}
+            people={people}
+            wakes={wakes}
+          />
+        </div>
+      </PageColumn>
     </Page>
   );
 };

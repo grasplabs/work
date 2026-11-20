@@ -9,7 +9,6 @@ import { AppShellBar } from "../grasp/app-shell/index.ts";
 import { PageSkeletonBand } from "../grasp/blocks/page-skeleton-band/page-skeleton-band.tsx";
 import { PageSkeletonCards } from "../grasp/blocks/page-skeleton-cards/page-skeleton-cards.tsx";
 import { PageSkeletonList } from "../grasp/blocks/page-skeleton-list/page-skeleton-list.tsx";
-import { PageSkeletonRecord } from "../grasp/blocks/page-skeleton-record/page-skeleton-record.tsx";
 import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { PageSkeletonToolbar } from "../grasp/blocks/page-skeleton-toolbar/page-skeleton-toolbar.tsx";
 import { PageHeader } from "../grasp/page-header/index.ts";
@@ -47,7 +46,7 @@ const styles = stylex.create({
     marginInline: "auto",
     paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
   },
-  // The Brain's log is narrower (brain-log.tsx).
+  // The Brain's activity is narrower (the library's PageColumn, brain/activity-page.tsx).
   logColumn: {
     boxSizing: "border-box",
     width: "100%",
@@ -192,8 +191,8 @@ const BrainBody = ({ page }: { page: BrainPage }) => {
     <div {...stylex.props(styles.pane)}>
       <div {...stylex.props(column)}>
         {page === "activity" ? (
-          // Since you last looked, as a card of what came in.
-          <PageSkeletonRecord descriptionLines={0} rows={5} />
+          // What came in since the last look, as a list of rows.
+          <PageSkeletonList descriptionLines={1} rows={8} />
         ) : null}
         {page === "memory" || page === "opportunities" ? (
           // Its kinds of record as tabs under the title, its records as Items.
