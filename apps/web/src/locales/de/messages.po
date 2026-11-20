@@ -5665,6 +5665,7 @@ msgstr "Ihre Teams aus Ihrem Brain löschen?"
 msgid "Erase…"
 msgstr "Löschen…"
 
+#: src/onboarding/setup-steps.tsx
 #: src/settings/erasures.tsx
 msgid "Erased"
 msgstr "Gelöscht"

@@ -5665,6 +5665,7 @@ msgstr "Effacer vos équipes de votre Brain ?"
 msgid "Erase…"
 msgstr "Effacer…"
 
+#: src/onboarding/setup-steps.tsx
 #: src/settings/erasures.tsx
 msgid "Erased"
 msgstr "Effacé"
