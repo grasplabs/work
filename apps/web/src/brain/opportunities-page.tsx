@@ -17,14 +17,10 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDecimal, formatList } from "../format.ts";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Badge } from "../grasp/badge/index.ts";
+import { PageSkeletonList } from "../grasp/blocks/page-skeleton-list/page-skeleton-list.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { Card } from "../grasp/card/index.ts";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyTitle } from "../grasp/empty/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import {
   Item,
@@ -590,18 +586,15 @@ export const OpportunitiesPage = () => {
             </Button>
           </div>
         )}
+        {read.state === "loading" ? (
+          <PageSkeletonList header={false} rows={6} variant="items" />
+        ) : null}
         {read.state === "ready" && all.length === 0 ? (
           <Empty size="section">
             <EmptyHeader>
               <EmptyTitle headingLevel={2}>
-                <Trans>No opportunities yet</Trans>
+                <Trans>Nothing to automate yet</Trans>
               </EmptyTitle>
-              <EmptyDescription>
-                <Trans>
-                  They appear once your teams&apos; interviews describe how
-                  their work runs.
-                </Trans>
-              </EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : null}

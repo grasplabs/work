@@ -921,10 +921,11 @@ describe(SourcesPage, () => {
         "Only you",
       ].map((text) => listedText.includes(text)),
       moreGone: listedText.includes("Show more"),
-      // Once, for the one source core gave a read time, in the page's
-      // own date format.
-      lastRead: listedText.split(`Last read ${formatDateTime(lastReadAt)}`)
-        .length,
+      // Once, for the one source core gave a read time, as the day only.
+      lastRead: [
+        listedText.split(`Last read ${formatDate(lastReadAt)}`).length,
+        listedText.includes(formatDateTime(lastReadAt)),
+      ],
       // Each row says the day it was added, without the time.
       added: [formatDate(addedAt), formatDateTime(addedAt)].map((text) =>
         listedText.includes(text)
@@ -935,7 +936,7 @@ describe(SourcesPage, () => {
     }).toStrictEqual({
       listed: [true, true, true, true, true],
       moreGone: false,
-      lastRead: 2,
+      lastRead: [2, false],
       added: [true, false],
       newest: true,
       oldest: true,

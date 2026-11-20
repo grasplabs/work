@@ -23,7 +23,7 @@ import type { ReactNode } from "react";
 
 import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDate, formatDateTime } from "../format.ts";
+import { formatDate } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Card } from "../grasp/card/index.ts";
@@ -771,8 +771,8 @@ const ShareDialog = ({
   const aboutShown = shownVisibly(about);
   const held = value === null ? null : shownVisibly(value);
   const said = shownVisibly(statement);
-  const from = validFrom === null ? null : formatDateTime(validFrom);
-  const until = validUntil === null ? null : formatDateTime(validUntil);
+  const from = validFrom === null ? null : formatDate(validFrom);
+  const until = validUntil === null ? null : formatDate(validUntil);
   const share = async (to: string): Promise<void> => {
     setTried(to);
     await ask(
@@ -1002,7 +1002,7 @@ const OnlyYou = () => {
 const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
   const { endedAt, confirmed } = memory;
   const learned = formatDate(memory.learnedAt);
-  const ended = endedAt === null ? null : formatDateTime(endedAt);
+  const ended = endedAt === null ? null : formatDate(endedAt);
   const current = endedAt === null;
   return (
     <span {...stylex.props(styles.row)}>
@@ -1578,7 +1578,7 @@ const SharedLine = ({
   read: number;
   onChanged: () => void;
 }) => {
-  const when = formatDateTime(sharedAt);
+  const when = formatDate(sharedAt);
   return (
     <Item size="sm">
       <ItemContent>

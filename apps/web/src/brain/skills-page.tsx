@@ -23,7 +23,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+import { formatDate } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -532,7 +532,7 @@ const ShareRequest = ({
 }) => {
   const { t } = useLingui();
   const asker = request.requestedBy.name ?? request.requestedBy.userId;
-  const asked = formatDateTime(request.requestedAt);
+  const asked = formatDate(request.requestedAt);
   const { name } = request;
   return (
     <Card element="li" padding="md">
@@ -784,7 +784,7 @@ const AskedShares = ({ data }: { data: SkillsOverview | undefined }) => {
                 <ShareAudience audience={share.audience} />
               </Text>
               <Text element="span" size="xs" tone="muted">
-                {formatDateTime(share.requestedAt)}
+                {formatDate(share.requestedAt)}
               </Text>
             </ItemContent>
             <ItemActions>
@@ -840,7 +840,7 @@ const ProposedSkill = ({
   const { version } = basis;
   const count = basis.runs.length;
   const [latest] = basis.runs;
-  const ended = latest === undefined ? "" : formatDateTime(latest.endedAt);
+  const ended = latest === undefined ? "" : formatDate(latest.endedAt);
   return (
     <Card element="li" padding="md">
       <div {...stylex.props(styles.stack)}>

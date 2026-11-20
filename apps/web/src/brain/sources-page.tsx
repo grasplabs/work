@@ -36,13 +36,7 @@ import type { ReactNode } from "react";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import {
-  formatBytes,
-  formatDate,
-  formatDateTime,
-  formatDay,
-  formatList,
-} from "../format.ts";
+import { formatBytes, formatDate, formatDay, formatList } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1134,7 +1128,7 @@ const SharedConnectionReads = ({
       <ItemGroup separated>
         {connected.map(
           ({ connectionId, name, account, records, lastReadAt }) => {
-            const lastRead = formatDateTime(lastReadAt);
+            const lastRead = formatDate(lastReadAt);
             const brand = brandOf(name);
             return (
               <Item key={connectionId} size="xs">
@@ -1196,7 +1190,7 @@ const ReadFrom = ({
   names: ReadonlyMap<string, string>;
 }) => {
   const name = names.get(connectionId);
-  const readOn = formatDateTime(read.addedAt);
+  const readOn = formatDate(read.addedAt);
   return name === undefined ? (
     <Trans>Read from a shared connection on {readOn}</Trans>
   ) : (
@@ -1227,7 +1221,7 @@ const VersionList = ({
     <div {...stylex.props(styles.versions)}>
       <ItemGroup>
         {page.versions.map(({ version, addedAt }) => {
-          const added = formatDateTime(addedAt);
+          const added = formatDate(addedAt);
           return (
             <Item
               current={version === shown}
@@ -1924,7 +1918,7 @@ export const SourcesPage = ({
     ...kept.map((each) => {
       const { versions } = each;
       const lastRead =
-        each.readAt === undefined ? undefined : formatDateTime(each.readAt);
+        each.readAt === undefined ? undefined : formatDate(each.readAt);
       return {
         at: each.addedAt,
         row: {
