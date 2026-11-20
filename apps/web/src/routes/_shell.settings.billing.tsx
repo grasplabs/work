@@ -82,7 +82,7 @@ const BillingPage = () => {
         flush
         title={t`Billing emails`}
       >
-        <SettingsRows>
+        <SettingsRows controls="fit">
           {failure === undefined ? null : (
             <RowAlert variant="danger">{failure}</RowAlert>
           )}

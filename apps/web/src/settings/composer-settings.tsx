@@ -49,7 +49,7 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
           placeholder={t`Ask Grasp`}
         />
       </div>
-      <SettingsRows>
+      <SettingsRows controls="fit">
         <SettingRow
           help={t`The light around the box while Grasp works`}
           label={t`Colour`}

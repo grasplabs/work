@@ -202,7 +202,12 @@ const WorkspaceSettings = ({
   return (
     <>
       <OrgCard canChange={canChange} organization={organization} />
-      <SectionCard aria-label={t`Settings`} density="compact" flush>
+      <SectionCard
+        variant="grouped"
+        density="compact"
+        flush
+        title={t`Settings`}
+      >
         <SettingsRows>
           <TimeZoneField
             canChange={canChange}
