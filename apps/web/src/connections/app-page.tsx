@@ -1,5 +1,5 @@
 import type { CatalogTool } from "@grasp-os/shared/connect";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { useLingui } from "@lingui/react/macro";
@@ -89,6 +89,23 @@ export const IntegrationAppPage = ({
       }
     );
   };
+  // Whether the app is offered: the organization's own admins choose, never Grasp staff (core refuses them).
+  const offers =
+    integration.listed && isAdmin(identity.role) && !identity.staff;
+  const changeOffered = (offered: boolean): void => {
+    void change(
+      async (session) => {
+        await session.connections.setOffered(
+          integration.source,
+          integration.id,
+          offered
+        );
+      },
+      (reason) => {
+        toast.error(reason);
+      }
+    );
+  };
   return (
     <FollowLinks>
       <AppPage
@@ -97,6 +114,9 @@ export const IntegrationAppPage = ({
         onToolsChange={changeTools}
         {...actions}
         member={!isMemberAdmin(identity)}
+        {...(offers
+          ? { offered: integration.offered, onOfferedChange: changeOffered }
+          : {})}
       />
       {dialogs}
     </FollowLinks>

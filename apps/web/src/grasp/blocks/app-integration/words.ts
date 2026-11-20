@@ -75,7 +75,7 @@ export interface AppIntegrationWords {
   /** A description cut at its lines: show it whole, then cut it again. */
   showMore: string;
   showLess: string;
-  /** Whether people in the organization may connect the app: the row's name, and its line on and off. */
+  /** Whether the app is offered in the organization: the switch's name, and the one line that says what its state means. */
   offered: string;
   offeredOn: string;
   offeredOff: string;
@@ -139,8 +139,8 @@ export const appIntegrationWords: AppIntegrationWords = {
   showMore: "Show more",
   showLess: "Show less",
   offered: "Available in your organization",
-  offeredOn: "Anyone here can connect it.",
-  offeredOff: "No one can connect it. Connections already made keep working.",
+  offeredOn: "Members see it in Integrations.",
+  offeredOff: "Hidden from members, and no one can connect it.",
 };
 
 declare module "../../words/words" {

@@ -16,7 +16,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../dropdown-menu";
-import { Field, FieldContent, FieldDescription, FieldLabel } from "../../field";
 import { focus } from "../../focus/focus";
 import { Edit, Icon, Lock, Rows, Show } from "../../icons";
 import type { IconData } from "../../icons";
@@ -39,6 +38,20 @@ import type { AppIntegrationWords } from "./words";
 export type GroupChoice = AppToolChoice | "mixed";
 
 const styles = stylex.create({
+  // Whether it is offered: the switch, then the one line for its state, small and muted.
+  offer: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+  offerSwitch: { display: "inline-flex", flexShrink: 0 },
+  offerLine: {
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.muted,
+  },
   // A host's action, laid out as if it stood there itself.
   slot: { display: "contents" },
   // A mark the host gave, in its own box at the size asked.
@@ -447,7 +460,7 @@ export const Clamped = ({
   );
 };
 
-/** Whether people in the organization may connect the app: its name, one quiet line, and a switch. */
+/** Whether the app is offered in the organization: a compact switch, named by `offered`, and one line for its state. */
 export const OfferSwitch = ({
   offered,
   onChange,
@@ -457,15 +470,18 @@ export const OfferSwitch = ({
   onChange: (offered: boolean) => void;
   words: AppIntegrationWords;
 }) => (
-  <Field orientation="horizontal">
-    <FieldContent>
-      <FieldLabel>{words.offered}</FieldLabel>
-      <FieldDescription>
-        {offered ? words.offeredOn : words.offeredOff}
-      </FieldDescription>
-    </FieldContent>
-    <Switch checked={offered} onCheckedChange={onChange} />
-  </Field>
+  <span {...stylex.props(styles.offer)}>
+    <span {...stylex.props(styles.offerSwitch)}>
+      <Switch
+        aria-label={words.offered}
+        checked={offered}
+        onCheckedChange={onChange}
+      />
+    </span>
+    <span {...stylex.props(styles.offerLine)}>
+      {offered ? words.offeredOn : words.offeredOff}
+    </span>
+  </span>
 );
 
 /** What the host does for the app's actions; each left out is not offered. */

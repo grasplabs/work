@@ -3753,6 +3753,10 @@ msgctxt "what the Brain remembers about something"
 msgid "Availability"
 msgstr "Beschikbaarheid"
 
+#: src/frame/part-words.tsx
+msgid "Available in your organization"
+msgstr "Beschikbaar in je organisatie"
+
 #: src/brain/brain.ts
 msgid "Available, direct"
 msgstr "Beschikbaar, direct"
@@ -5630,10 +5634,6 @@ msgstr "Verwijderen mislukt"
 #: src/connections/http-connections.tsx
 msgid "Couldn't revoke"
 msgstr "Intrekken mislukt"
-
-#: src/connections/offer-switch.tsx
-msgid "Couldn't save"
-msgstr "Opslaan mislukt"
 
 #: src/drafts/sharing.tsx
 msgid "Couldn't share"
@@ -8498,6 +8498,10 @@ msgid "Hidden for every admin until their evidence changes, or until one of you 
 msgstr "Verborgen voor alle beheerders tot het bewijs ervoor verandert, of tot een van jullie ze weer toont."
 
 #: src/frame/part-words.tsx
+msgid "Hidden from members, and no one can connect it."
+msgstr "Verborgen voor leden, en niemand kan het koppelen."
+
+#: src/frame/part-words.tsx
 msgid "Hide column"
 msgstr "Kolom verbergen"
 
@@ -10670,6 +10674,10 @@ msgstr "Leden en rollen"
 msgid "members of the team in {field}"
 msgstr "leden van het team in {field}"
 
+#: src/frame/part-words.tsx
+msgid "Members see it in Integrations."
+msgstr "Leden zien het bij Integraties."
+
 #: src/brain/brain-section.tsx
 #: src/brain/memories-page.tsx
 msgctxt "the Brain's memories page"
@@ -12418,10 +12426,6 @@ msgstr "Uit, antwoordt hij hier niemand. Een plek beperkt alleen wie hij bereikt
 msgid "Off, he only answers here: he holds no change for people to confirm."
 msgstr "Uit, antwoordt hij hier alleen: hij zet geen wijziging klaar om te bevestigen."
 
-#: src/connections/offer-switch.tsx
-msgid "Off, nobody can connect it, admins included. Connections already made go on."
-msgstr "Uit: niemand kan het koppelen, beheerders ook niet. Bestaande koppelingen blijven werken."
-
 #: src/agents/agent-share.tsx
 msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
 msgstr "Bied {name} aan de beheerders van je bedrijf aan. Nemen zij hem over, dan wordt hij een agent van het bedrijf: zij kiezen wie hem iets mag vragen en wat hij mag doen, en jij wijzigt hem niet meer."
@@ -12430,10 +12434,6 @@ msgstr "Bied {name} aan de beheerders van je bedrijf aan. Nemen zij hem over, da
 msgid "Offer to the company"
 msgstr "Aan het bedrijf aanbieden"
 
-#: src/connections/offer-switch.tsx
-msgid "Offered"
-msgstr "Aangeboden"
-
 #: src/agents/agent-share.tsx
 msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
 msgstr "Aangeboden op {since}. De beheerders van jullie bedrijf kunnen {name} overnemen. Wat je het hebt verteld, gaat niet mee, en zodra ze het hebben overgenomen, kun je het niet meer openen."
@@ -12441,10 +12441,6 @@ msgstr "Aangeboden op {since}. De beheerders van jullie bedrijf kunnen {name} ov
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
 msgstr "Aan het bedrijf aangeboden"
-
-#: src/connections/offer-switch.tsx
-msgid "Offered to your organization"
-msgstr "Aangeboden aan je organisatie"
 
 #: src/activity/audit-log.tsx
 msgid "Older"
@@ -19826,10 +19822,6 @@ msgstr "Wat vijf of meer mensen van het team zijn zien doen:"
 #: src/brain/work-knowledge.tsx
 msgid "What gets in the way"
 msgstr "Wat in de weg zit"
-
-#: src/frame/part-words.tsx
-msgid "What Grasp can do"
-msgstr "Wat Grasp kan"
 
 #: src/brain/opportunities-page.tsx
 msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."

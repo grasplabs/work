@@ -3753,6 +3753,10 @@ msgctxt "what the Brain remembers about something"
 msgid "Availability"
 msgstr "Availability"
 
+#: src/frame/part-words.tsx
+msgid "Available in your organization"
+msgstr "Available in your organization"
+
 #: src/brain/brain.ts
 msgid "Available, direct"
 msgstr "Available, direct"
@@ -5630,10 +5634,6 @@ msgstr "Couldn't remove"
 #: src/connections/http-connections.tsx
 msgid "Couldn't revoke"
 msgstr "Couldn't revoke"
-
-#: src/connections/offer-switch.tsx
-msgid "Couldn't save"
-msgstr "Couldn't save"
 
 #: src/drafts/sharing.tsx
 msgid "Couldn't share"
@@ -8498,6 +8498,10 @@ msgid "Hidden for every admin until their evidence changes, or until one of you 
 msgstr "Hidden for every admin until their evidence changes, or until one of you shows them again."
 
 #: src/frame/part-words.tsx
+msgid "Hidden from members, and no one can connect it."
+msgstr "Hidden from members, and no one can connect it."
+
+#: src/frame/part-words.tsx
 msgid "Hide column"
 msgstr "Hide column"
 
@@ -10670,6 +10674,10 @@ msgstr "Members and roles"
 msgid "members of the team in {field}"
 msgstr "members of the team in {field}"
 
+#: src/frame/part-words.tsx
+msgid "Members see it in Integrations."
+msgstr "Members see it in Integrations."
+
 #: src/brain/brain-section.tsx
 #: src/brain/memories-page.tsx
 msgctxt "the Brain's memories page"
@@ -12418,10 +12426,6 @@ msgstr "Off, he answers nobody here. A place only ever narrows who he reaches."
 msgid "Off, he only answers here: he holds no change for people to confirm."
 msgstr "Off, he only answers here: he holds no change for people to confirm."
 
-#: src/connections/offer-switch.tsx
-msgid "Off, nobody can connect it, admins included. Connections already made go on."
-msgstr "Off, nobody can connect it, admins included. Connections already made go on."
-
 #: src/agents/agent-share.tsx
 msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
 msgstr "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
@@ -12430,10 +12434,6 @@ msgstr "Offer {name} to your company's admins. If they take it on, it becomes on
 msgid "Offer to the company"
 msgstr "Offer to the company"
 
-#: src/connections/offer-switch.tsx
-msgid "Offered"
-msgstr "Offered"
-
 #: src/agents/agent-share.tsx
 msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
 msgstr "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
@@ -12441,10 +12441,6 @@ msgstr "Offered on {since}. Your company's admins may take {name} on. What you t
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
 msgstr "Offered to the company"
-
-#: src/connections/offer-switch.tsx
-msgid "Offered to your organization"
-msgstr "Offered to your organization"
 
 #: src/activity/audit-log.tsx
 msgid "Older"
@@ -19826,10 +19822,6 @@ msgstr "What five or more of the team were seen doing:"
 #: src/brain/work-knowledge.tsx
 msgid "What gets in the way"
 msgstr "What gets in the way"
-
-#: src/frame/part-words.tsx
-msgid "What Grasp can do"
-msgstr "What Grasp can do"
 
 #: src/brain/opportunities-page.tsx
 msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."

@@ -103,6 +103,8 @@ const styles = stylex.create({
     gridColumn: { default: "auto", [media.belowPhone]: "2" },
     justifySelf: "start",
   },
+  // Whether it is offered (an admin): a compact switch and its one line, under the words, at their start.
+  headCardOffer: { gridColumn: "2 / -1", justifySelf: "start", minWidth: 0 },
   headWords: { display: "grid", gap: grasp.space1, minWidth: 0 },
   // The description: the library's small muted text.
   description: {
@@ -146,8 +148,6 @@ const styles = stylex.create({
     alignItems: "center",
     columnGap: grasp.space4,
   },
-  // A row that is one thing from inset to inset, its own end on the card's (the offer switch).
-  whole: { display: "grid" },
   // A group and what it opened, a line between it and the group before.
   group: {
     borderBlockStartWidth: { default: grasp.hairline, ":first-child": 0 },
@@ -266,7 +266,7 @@ export interface AppPageProps extends AppActions {
   ) => void;
   /** A change of who may use it: the host keeps it. Without it, who may use it is shown as words. */
   onForWhomChange?: (forWhom: AppConnection["forWhom"]) => void;
-  /** Whether people in the organization may connect it. With `onOfferedChange`, a switch at the page's end (an admin). */
+  /** Whether the app is offered in the organization. With `onOfferedChange`, a compact switch under the head's action (an admin). */
   offered?: boolean;
   /** A change of whether it is offered: the host keeps it. */
   onOfferedChange?: (offered: boolean) => void;
@@ -685,8 +685,11 @@ export const AppPage = ({
           <span {...stylex.props(styles.headCardAction)}>
             <MainAction app={app} actions={actions} words={words} />
           </span>
+          {offer === null ? null : (
+            <span {...stylex.props(styles.headCardOffer)}>{offer}</span>
+          )}
         </header>
-        {connection === undefined && offer === null ? null : (
+        {connection === undefined ? null : (
           <SectionCard
             variant="boxed"
             flush
@@ -717,11 +720,6 @@ export const AppPage = ({
                     />
                   </SettingRow>
                 </>
-              )}
-              {offer === null ? null : (
-                <RowFrame slot="setting-row" inner={styles.whole}>
-                  {offer}
-                </RowFrame>
               )}
             </SettingsRows>
           </SectionCard>

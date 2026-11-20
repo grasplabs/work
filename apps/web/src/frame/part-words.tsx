@@ -1466,8 +1466,8 @@ export const usePartWords = (): GraspWordsCatalog => {
       showMore: t`Show more`,
       showLess: t`Show less`,
       offered: t`Available in your organization`,
-      offeredOn: t`Anyone here can connect it.`,
-      offeredOff: t`No one can connect it. Connections already made keep working.`,
+      offeredOn: t`Members see it in Integrations.`,
+      offeredOff: t`Hidden from members, and no one can connect it.`,
     },
     connectApp: {
       title: (app) => t`Connect ${app}`,
