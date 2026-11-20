@@ -1967,7 +1967,7 @@ msgstr "Ein Skill"
 
 #: src/brain/skills-page.tsx
 msgid "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
-msgstr "Eine SKILL.md: ein Name aus Kleinbuchstaben, Ziffern und Bindestrichen und eine Beschreibung, wann er gilt, dann die Schritte. Speichern Sie einen Skill mit einem Namen, den Sie schon haben, wird das seine nächste Version."
+msgstr "Eine SKILL.md: ein Name aus Kleinbuchstaben, Ziffern und Bindestrichen und eine Beschreibung, wann er gilt, dann die Schritte. Wenn Sie einen Skill unter einem Namen speichern, den Sie schon haben, wird das seine nächste Version."
 
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
@@ -8707,7 +8707,7 @@ msgstr "Woran sie es merken würden: noch nicht genannt."
 
 #: src/brain/skills-page.tsx
 msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company or one of your teams waits for an admin, and from then on the agents of everyone in it use it. A skill is guidance: it never grants access."
-msgstr "Wie hier gearbeitet wird. Ihre eigenen Skills werden nur in Ihren eigenen Chats genutzt. Teilen Sie einen mit dem Unternehmen oder einem Ihrer Teams, wartet das auf einen Admin, danach nutzen ihn die Agenten aller darin. Ein Skill ist eine Anleitung: Er gewährt nie Zugriff."
+msgstr "Wie hier gearbeitet wird. Ihre eigenen Skills werden nur in Ihren eigenen Chats genutzt. Wenn Sie einen mit dem Unternehmen oder einem Ihrer Teams teilen, wartet das auf einen Admin, danach nutzen ihn die Agenten aller darin. Ein Skill ist eine Anleitung: Er gewährt nie Zugriff."
 
 #: src/apps/app-settings.tsx
 msgid "How this App is built and what to keep in mind when changing it."
@@ -8896,19 +8896,19 @@ msgstr "Ideen für den Anfang"
 
 #: src/agents/agent-templates.ts
 msgid "If a message is unclear, put it under to do and say why."
-msgstr "Ist eine Nachricht unklar, ordne sie unter „zu erledigen“ ein und sag, warum."
+msgstr "Ist eine Nachricht unklar, ordnen Sie sie unter „zu erledigen“ ein und sagen Sie, warum."
 
 #: src/agents/agent-templates.ts
 msgid "If a part is unreadable, say which part."
-msgstr "Ist ein Teil unlesbar, sag, welcher."
+msgstr "Ist ein Teil unlesbar, sagen Sie, welcher."
 
 #: src/agents/agent-templates.ts
 msgid "If a week was quiet, say so in a short report."
-msgstr "War die Woche ruhig, sag das in einem kurzen Bericht."
+msgstr "War die Woche ruhig, sagen Sie das in einem kurzen Bericht."
 
 #: src/agents/agent-templates.ts
 msgid "If an amount or a client is unclear, say so instead of guessing."
-msgstr "Ist ein Betrag oder ein Kunde unklar, sag das, statt zu raten."
+msgstr "Ist ein Betrag oder ein Kunde unklar, sagen Sie das, statt zu raten."
 
 #: src/workflows/workflow-diagram.tsx
 msgid "If it fails"
@@ -8924,15 +8924,15 @@ msgstr "Wenn es anhält, wechseln Sie den Anbieter."
 
 #: src/agents/agent-templates.ts
 msgid "If nothing is overdue, say that in one line and stop."
-msgstr "Ist nichts überfällig, sag das in einer Zeile und hör auf."
+msgstr "Ist nichts überfällig, sagen Sie das in einer Zeile und hören Sie auf."
 
 #: src/agents/agent-brief.ts
 msgid "If something is unclear, ask one short question instead of guessing."
-msgstr "Ist etwas unklar, stell eine kurze Frage, statt zu raten."
+msgstr "Ist etwas unklar, stellen Sie eine kurze Frage, statt zu raten."
 
 #: src/agents/agent-templates.ts
 msgid "If the day is empty, say so."
-msgstr "Ist der Tag leer, sag das."
+msgstr "Ist der Tag leer, sagen Sie das."
 
 #: src/agents/agent-templates.ts
 msgid "If there is nothing on someone, say so instead of guessing."
@@ -8940,7 +8940,7 @@ msgstr "Finden Sie zu jemandem nichts, sagen Sie das, statt zu raten."
 
 #: src/agents/agent-brief.ts
 msgid "If there is nothing to do, say so in one line and stop."
-msgstr "Gibt es nichts zu tun, sag das in einer Zeile und hör auf."
+msgstr "Gibt es nichts zu tun, sagen Sie das in einer Zeile und hören Sie auf."
 
 #: src/agents/agent-templates.ts
 msgid "If you can't find the answer, say so and say who might know."
