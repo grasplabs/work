@@ -6,13 +6,13 @@ import type { ReactNode } from "react";
 
 import { Button } from "../button";
 import { visuallyHidden } from "../hidden/hidden";
-import { Alert as Warning, Icon, Info } from "../icons";
+import { Alert as Warning, Icon } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { Switch } from "../switch";
 import type { SwitchChange } from "../switch";
 import { grasp } from "../tokens/tokens.stylex";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
 import { useWords, withGiven } from "../words/words";
+import { InfoMark, RowFrame } from "./frame";
 import { connectionRowWords } from "./words";
 import type { ConnectionRowWords } from "./words";
 
@@ -64,27 +64,15 @@ export interface ConnectionRowProps {
   words?: Partial<ConnectionRowWords>;
 }
 
-/** A row narrower than this puts its action under its sentence (the row's own width). */
-const NARROW = "@container connection-row (width < 28rem)";
+/** A row narrower than this puts its action under its sentence (the row's own width, its frame's). */
+const NARROW = "@container setting-row (width < 28rem)";
 
 const styles = stylex.create({
-  box: {
-    containerType: "inline-size",
-    containerName: "connection-row",
-    // A hairline over every row but the first, as Setting row's rows.
-    borderTopStyle: "solid",
-    borderTopColor: grasp.line,
-    borderTopWidth: { default: grasp.hairline, ":first-child": 0 },
-    fontFamily: grasp.fontSans,
-  },
+  // Inside the row's frame (frame.tsx): one row of words and control, centred in its height.
   pad: {
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
-    boxSizing: "border-box",
-    minHeight: grasp.settingRow,
-    paddingBlock: grasp.space2,
-    paddingInline: grasp.tableCellInline,
   },
   // Words that never hyphenate, set on the words themselves: Label hyphenates its own.
   whole: { hyphens: "manual", overflowWrap: "break-word" },
@@ -111,12 +99,6 @@ const styles = stylex.create({
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,
     color: grasp.ink,
-  },
-  // The info mark, in a box one line tall: its button may be taller, the row never is.
-  info: {
-    display: "inline-flex",
-    alignItems: "center",
-    height: grasp.textSmLine,
   },
   line: {
     margin: 0,
@@ -202,20 +184,9 @@ const Problem = ({
         <span {...stylex.props(styles.name)}>
           {label}
           {hasWords(actionHelp) && (
-            <span
-              data-slot="connection-row-action-help"
-              {...stylex.props(styles.info)}
-            >
-              <Tooltip>
-                <TooltipTrigger
-                  icon={Info}
-                  aria-label={text.whoCanFix}
-                  variant="ghost"
-                  size="xs"
-                />
-                <TooltipContent>{actionHelp}</TooltipContent>
-              </Tooltip>
-            </span>
+            <InfoMark slot="connection-row-action-help" label={text.whoCanFix}>
+              {actionHelp}
+            </InfoMark>
           )}
         </span>
         {problem !== undefined && (
@@ -319,37 +290,31 @@ export const ConnectionRow = ({
   const broken =
     status === "broken" && (problem !== undefined || actionLabel !== undefined);
   return (
-    <div
-      data-slot="connection-row"
-      data-status={status}
-      {...stylex.props(styles.box)}
-    >
-      <div {...stylex.props(styles.pad)}>
-        {status === "missing" || broken ? (
-          <Problem
-            label={label}
-            problem={problem}
-            actionLabel={actionLabel}
-            onAction={onAction}
-            actionHelp={actionHelp}
-            actionHelpLabel={actionHelpLabel}
-            brokenLabel={brokenLabel}
-            words={words}
-            broken={broken}
-          />
-        ) : (
-          // Broken: off and out of use, whatever it was, until it is fixed; a new status mounts the
-          // switch afresh, so after Reconnect it shows the page's own choice again.
-          <On
-            key={status}
-            label={label}
-            help={help}
-            state={
-              status === "broken" ? { checked: false, disabled: true } : state
-            }
-          />
-        )}
-      </div>
-    </div>
+    <RowFrame slot="connection-row" data-status={status} inner={styles.pad}>
+      {status === "missing" || broken ? (
+        <Problem
+          label={label}
+          problem={problem}
+          actionLabel={actionLabel}
+          onAction={onAction}
+          actionHelp={actionHelp}
+          actionHelpLabel={actionHelpLabel}
+          brokenLabel={brokenLabel}
+          words={words}
+          broken={broken}
+        />
+      ) : (
+        // Broken: off and out of use, whatever it was, until it is fixed; a new status mounts the
+        // switch afresh, so after Reconnect it shows the page's own choice again.
+        <On
+          key={status}
+          label={label}
+          help={help}
+          state={
+            status === "broken" ? { checked: false, disabled: true } : state
+          }
+        />
+      )}
+    </RowFrame>
   );
 };

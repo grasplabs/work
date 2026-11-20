@@ -31,6 +31,8 @@ export interface AppIntegrationWords {
   signedOut: string;
   stopped: string;
   notConnected: string;
+  /** Why a member sees no Connect: only an admin may connect the app. */
+  adminConnects: string;
   /** The panel's section: what the app's tools can do. */
   canDo: string;
   /** The page's main card: what Grasp may do with them. */
@@ -96,6 +98,7 @@ export const appIntegrationWords: AppIntegrationWords = {
   signedOut: "Signed out",
   stopped: "Stopped working",
   notConnected: "Not connected",
+  adminConnects: "An admin connects this",
   canDo: "What Grasp can do",
   mayDo: "What Grasp may do",
   counts: (reads, writes) => `${reads} read · ${writes} change`,

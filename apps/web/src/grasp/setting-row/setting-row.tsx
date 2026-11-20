@@ -9,14 +9,15 @@ import { Alert } from "../alert";
 import type { AlertVariant } from "../alert";
 import { Button } from "../button";
 import { visuallyHidden } from "../hidden/hidden";
-import { Icon, Info, Tick } from "../icons";
+import { Icon, Tick } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { Skeleton } from "../skeleton";
 import { Spinner } from "../spinner";
 import { grasp } from "../tokens/tokens.stylex";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
 import { useWords, withGiven } from "../words/words";
+import { InfoMark, RowFrame, rowFrame } from "./frame";
 import { RowProblem } from "./line-context";
+import { settingRowVars } from "./setting-row.stylex";
 import { settingRowWords } from "./words";
 import type { SettingRowWords } from "./words";
 
@@ -125,6 +126,13 @@ export interface SettingsRowsProps {
    * @default 3
    */
   headingLevel?: 2 | 3 | 4;
+  /**
+   * How wide the rows' controls are: `column`, each fills the shared control column (20rem) and
+   * goes under its words in a narrow row; `fit`, each its own width on the end edge, beside its
+   * words at any width, as a settings page of selects, switches and quiet actions has it.
+   * @default "column"
+   */
+  controls?: "column" | "fit";
   /** @deprecated Use `layout`. */
   style?: SettingsRowsLayoutStyle;
   /** Layout only. */
@@ -160,6 +168,11 @@ const styles = stylex.create({
     borderTopWidth: { default: 0, ":not(:first-child)": grasp.hairline },
     paddingBlockStart: { default: 0, ":not(:first-child)": grasp.space4 },
   },
+  // Each control its own width, beside its words at any width.
+  fit: {
+    [settingRowVars.columns]: "minmax(0, 1fr) auto",
+    [settingRowVars.columnsNarrow]: "minmax(0, 1fr) auto",
+  },
   groupLabel: {
     margin: 0,
     paddingInline: grasp.tableCellInline,
@@ -169,28 +182,16 @@ const styles = stylex.create({
     fontWeight: grasp.weightMedium,
     color: grasp.muted,
   },
-  box: {
-    containerType: "inline-size",
-    containerName: "setting-row",
-    // A hairline over every row but the first: the rows of one card, apart.
-    borderTopStyle: "solid",
-    borderTopColor: grasp.line,
-    borderTopWidth: { default: grasp.hairline, ":first-child": 0 },
-  },
+  // Inside the row's frame (frame.tsx): the words, and the control on the shared end edge.
   row: {
     display: "grid",
     gridTemplateColumns: {
-      default: `minmax(0, 1fr) ${grasp.controlColumn}`,
-      [NARROW]: "minmax(0, 1fr)",
+      default: settingRowVars.columns,
+      [NARROW]: settingRowVars.columnsNarrow,
     },
     alignItems: "center",
     columnGap: grasp.space6,
     rowGap: grasp.space2,
-    boxSizing: "border-box",
-    minHeight: grasp.settingRow,
-    paddingBlock: grasp.space2,
-    paddingInline: grasp.tableCellInline,
-    fontFamily: grasp.fontSans,
   },
   words: { display: "grid", minWidth: 0 },
   name: {
@@ -204,8 +205,8 @@ const styles = stylex.create({
     fontWeight: grasp.weightMedium,
     color: grasp.ink,
   },
-  // The info mark, and Try again, in a box one line tall: its button may be taller, the row never is.
-  info: {
+  // Try again, in a box one line tall, as the info mark's (frame.tsx): its button may be taller, the row never is.
+  retry: {
     display: "inline-flex",
     alignItems: "center",
     height: grasp.textSmLine,
@@ -324,7 +325,7 @@ const Line = ({
         <span id={id} {...stylex.props(styles.failed)}>
           {failedLabel}
         </span>
-        <span {...stylex.props(styles.info)}>
+        <span {...stylex.props(styles.retry)}>
           <Button size="xs" variant="ghost" onClick={onRetry}>
             {retryLabel}
           </Button>
@@ -386,76 +387,62 @@ export const SettingRow = ({
       ? { id }
       : { id, "aria-describedby": helpId };
   return (
-    <div
-      data-slot="setting-row"
+    <RowFrame
+      slot="setting-row"
       data-state={state}
       aria-hidden={loading ? true : undefined}
-      {...stylex.props(styles.box)}
+      inner={styles.row}
     >
-      <div {...stylex.props(styles.row)}>
-        <div {...stylex.props(styles.words)}>
-          <label htmlFor={id} {...stylex.props(styles.name)}>
-            {loading ? <Skeleton text="sm" layout={styles.nameWait} /> : label}
-            {info !== undefined && (
-              <span {...stylex.props(styles.info)}>
-                <Tooltip>
-                  <TooltipTrigger
-                    icon={Info}
-                    aria-label={infoLabel}
-                    variant="ghost"
-                    size="xs"
-                  />
-                  <TooltipContent>{info}</TooltipContent>
-                </Tooltip>
-              </span>
-            )}
-          </label>
-          {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region */}
-          <p role="status" {...stylex.props(styles.help)}>
-            <Line
-              id={helpId}
-              help={help}
-              loading={loading}
-              state={state}
-              onRetry={onRetry}
-              savingLabel={savingLabel}
-              savedLabel={savedLabel}
-              failedLabel={failedLabel}
-              retryLabel={retryLabel}
-              problem={problem}
-            />
-          </p>
-        </div>
-        <div {...stylex.props(styles.control)}>
-          {state === "saving" && (
-            <span
-              aria-hidden="true"
-              data-slot="setting-row-mark"
-              {...stylex.props(styles.mark)}
-            >
-              <Spinner size="sm" />
-            </span>
-          )}
-          {state === "saved" && (
-            <span
-              aria-hidden="true"
-              data-slot="setting-row-mark"
-              {...stylex.props(styles.mark, styles.markLeaves)}
-            >
-              <Icon icon={Tick} />
-            </span>
-          )}
-          <RowProblem value={setProblem}>
-            {typeof children === "function" ? children(field) : children}
-          </RowProblem>
-        </div>
-        {error !== undefined && (
-          <div {...stylex.props(styles.across)}>
-            <Alert tone="danger">{error}</Alert>
-          </div>
-        )}
+      <div {...stylex.props(styles.words)}>
+        <label htmlFor={id} {...stylex.props(styles.name)}>
+          {loading ? <Skeleton text="sm" layout={styles.nameWait} /> : label}
+          {info !== undefined && <InfoMark label={infoLabel}>{info}</InfoMark>}
+        </label>
+        {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region */}
+        <p role="status" {...stylex.props(styles.help)}>
+          <Line
+            id={helpId}
+            help={help}
+            loading={loading}
+            state={state}
+            onRetry={onRetry}
+            savingLabel={savingLabel}
+            savedLabel={savedLabel}
+            failedLabel={failedLabel}
+            retryLabel={retryLabel}
+            problem={problem}
+          />
+        </p>
       </div>
-    </div>
+      <div {...stylex.props(styles.control)}>
+        {state === "saving" && (
+          <span
+            aria-hidden="true"
+            data-slot="setting-row-mark"
+            {...stylex.props(styles.mark)}
+          >
+            <Spinner size="sm" />
+          </span>
+        )}
+        {state === "saved" && (
+          <span
+            aria-hidden="true"
+            data-slot="setting-row-mark"
+            {...stylex.props(styles.mark, styles.markLeaves)}
+          >
+            <Icon icon={Tick} />
+          </span>
+        )}
+        <RowProblem value={setProblem}>
+          {typeof children === "function" ? children(field) : children}
+        </RowProblem>
+      </div>
+      {error !== undefined && (
+        <div {...stylex.props(styles.across)}>
+          <Alert tone="danger">{error}</Alert>
+        </div>
+      )}
+    </RowFrame>
   );
 };
 
@@ -473,36 +460,22 @@ export const FactRow = ({
     { info: infoLabelGiven }
   );
   return (
-    <div data-slot="fact-row" {...stylex.props(styles.box)}>
-      <div {...stylex.props(styles.row)}>
-        <div {...stylex.props(styles.words)}>
-          <span {...stylex.props(styles.name)}>
-            {label}
-            {info !== undefined && (
-              <span {...stylex.props(styles.info)}>
-                <Tooltip>
-                  <TooltipTrigger
-                    icon={Info}
-                    aria-label={infoLabel}
-                    variant="ghost"
-                    size="xs"
-                  />
-                  <TooltipContent>{info}</TooltipContent>
-                </Tooltip>
-              </span>
-            )}
-          </span>
-          {help !== undefined && <p {...stylex.props(styles.help)}>{help}</p>}
-        </div>
-        <div {...stylex.props(styles.value)}>{children}</div>
+    <RowFrame slot="fact-row" inner={styles.row}>
+      <div {...stylex.props(styles.words)}>
+        <span {...stylex.props(styles.name)}>
+          {label}
+          {info !== undefined && <InfoMark label={infoLabel}>{info}</InfoMark>}
+        </span>
+        {help !== undefined && <p {...stylex.props(styles.help)}>{help}</p>}
       </div>
-    </div>
+      <div {...stylex.props(styles.value)}>{children}</div>
+    </RowFrame>
   );
 };
 
 /** Something to know about a card's rows, a failure or a warning, as a row of its own. */
 export const RowAlert = ({ variant = "neutral", children }: RowAlertProps) => (
-  <div data-slot="row-alert" {...stylex.props(styles.box, styles.alertRow)}>
+  <div data-slot="row-alert" {...stylex.props(rowFrame.box, styles.alertRow)}>
     <Alert tone={variant}>{children}</Alert>
   </div>
 );
@@ -517,15 +490,18 @@ export const SettingsRows = ({
   children,
   label,
   headingLevel = 3,
+  controls = "column",
   style,
   layout,
 }: SettingsRowsProps) => {
   const labelId = useId();
+  const fit = controls === "fit";
   if (label === undefined) {
     return (
       <div
         data-slot="settings-rows"
-        {...stylex.props(styles.rows, layout ?? style)}
+        data-controls={controls}
+        {...stylex.props(styles.rows, fit && styles.fit, layout ?? style)}
       >
         {children}
       </div>
@@ -535,8 +511,14 @@ export const SettingsRows = ({
   return (
     <section
       data-slot="settings-rows"
+      data-controls={controls}
       aria-labelledby={labelId}
-      {...stylex.props(styles.group, styles.groupAfter, layout ?? style)}
+      {...stylex.props(
+        styles.group,
+        styles.groupAfter,
+        fit && styles.fit,
+        layout ?? style
+      )}
     >
       <Heading
         id={labelId}

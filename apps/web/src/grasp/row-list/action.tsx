@@ -13,6 +13,7 @@ import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { Tip, withTip } from "../tooltip/tip";
 
 /**
  * Words after the icon.
@@ -129,13 +130,13 @@ export const RowListAction = ({
   disabled = false,
 }: RowListActionProps) => {
   const square = children === undefined || children === "";
-  return (
+  const drawn = (tip: Record<string, unknown>) => (
     <ButtonPrimitive
+      {...withTip({ onClick: onPress }, tip)}
       type="button"
       aria-label={label}
       aria-expanded={expanded}
       aria-controls={controls}
-      onClick={onPress}
       disabled={disabled}
       data-slot="row-list-action"
       {...stylex.props(
@@ -148,5 +149,12 @@ export const RowListAction = ({
       <Icon icon={icon} />
       {children}
     </ButtonPrimitive>
+  );
+  // An icon alone shows its name in a tooltip, as an icon-only Button does: no description, so the
+  // name is heard once.
+  return square && label !== undefined && label !== "" ? (
+    <Tip name tooltip={label} render={drawn} />
+  ) : (
+    drawn({})
   );
 };

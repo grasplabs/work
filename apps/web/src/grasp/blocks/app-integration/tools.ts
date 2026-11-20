@@ -3,75 +3,248 @@
 // of what the app can do, from its largest groups. Words for the sentences are the host's (words.ts).
 import type { AppTool, AppToolChoice } from "./model";
 
-/** The verbs a tool's name may start with, before what it acts on ("Batch read", "List"). */
+/** The verbs a tool's name may start with, before what it acts on ("Batch read", "List", "Append"). */
 const VERBS = new Set([
   "add",
+  "append",
+  "apply",
+  "approve",
   "archive",
+  "assign",
   "associate",
+  "attach",
   "batch",
   "cancel",
+  "check",
   "clone",
   "close",
   "complete",
+  "convert",
   "copy",
   "count",
   "create",
   "delete",
+  "describe",
+  "detach",
+  "disable",
   "download",
   "duplicate",
   "edit",
+  "enable",
   "enroll",
+  "execute",
   "export",
   "fetch",
   "find",
+  "follow",
+  "generate",
   "get",
   "import",
+  "insert",
   "invite",
+  "join",
+  "kick",
+  "leave",
   "link",
   "list",
   "lookup",
   "mark",
   "merge",
+  "modify",
   "move",
+  "open",
+  "patch",
+  "pause",
+  "pin",
   "post",
+  "prepend",
   "publish",
+  "put",
+  "query",
+  "react",
   "read",
+  "reject",
   "remove",
   "rename",
   "reply",
+  "reopen",
+  "resolve",
   "restore",
+  "resume",
   "retrieve",
+  "revoke",
   "run",
+  "save",
+  "schedule",
   "search",
   "send",
+  "sends",
   "set",
   "share",
+  "star",
   "start",
   "stop",
   "submit",
+  "subscribe",
   "sync",
+  "transfer",
+  "trigger",
+  "unarchive",
+  "unassign",
+  "unenroll",
+  "unfollow",
   "unlink",
+  "unpin",
+  "unstar",
+  "unsubscribe",
   "update",
   "upload",
   "upsert",
+  "validate",
+  "verify",
   "view",
+  "watch",
+]);
+
+/** Words that are not what a tool acts on: articles, prepositions, qualifiers. They are skipped. */
+const SKIPPED = new Set([
   "a",
   "an",
-  "all",
   "the",
+  "all",
+  "any",
+  "each",
+  "every",
   "new",
   "many",
   "multiple",
   "one",
+  "single",
   "and",
   "or",
+  "of",
+  "for",
+  "to",
+  "from",
+  "in",
+  "into",
+  "on",
+  "onto",
+  "by",
+  "with",
+  "without",
+  "at",
+  "as",
+  "via",
+  "per",
+  "about",
+  "my",
+  "your",
+  "its",
+  "their",
+  "own",
+  "current",
+  "default",
+  "custom",
+  "legacy",
+  "bulk",
+  "recent",
+  "latest",
+  "specific",
+  "given",
+  "existing",
+  "authenticated",
+  "user's",
+  "details",
+  "info",
+  "using",
+  "v1",
+  "v2",
+  "v3",
+  "free",
+  "quick",
+  "open",
+  "active",
+  "available",
+  "various",
+  "other",
+  "me",
+  "you",
+  "us",
+  "them",
+  "it",
+  "him",
+  "her",
+  "myself",
 ]);
 
-/** A word as a group's name: capitalised, in the plural ("contact" → "Contacts"). */
-const plural = (word: string) => {
+/** Two words that name one thing, kept together: "Pull requests", not "Pulls". */
+const COMPOUNDS = new Map([
+  ["pull request", "Pull requests"],
+  ["merge request", "Merge requests"],
+  ["direct message", "Direct messages"],
+  ["access token", "Access tokens"],
+]);
+
+/** Short words written as letters (CRM, API): kept as they are, never made plural. */
+const ACRONYMS = new Set([
+  "ai",
+  "api",
+  "crm",
+  "csv",
+  "dm",
+  "dns",
+  "faq",
+  "id",
+  "ip",
+  "kb",
+  "pdf",
+  "seo",
+  "sms",
+  "soql",
+  "sql",
+  "ssl",
+  "url",
+  "utm",
+]);
+
+/** Nouns whose plural is not made with an s. */
+const IRREGULAR = new Map([
+  ["child", "children"],
+  ["person", "people"],
+]);
+
+/** Words with no plural of their own, or whose singular already reads as a group ("Data", "Media"). */
+const UNCOUNTED = new Set([
+  "children",
+  "people",
+  "data",
+  "metadata",
+  "media",
+  "analytics",
+  "information",
+  "content",
+  "mail",
+  "feedback",
+  "inventory",
+  "software",
+]);
+
+/** A word as a group's name: an acronym as it is, else capitalised and, where it is a noun's singular, made plural. */
+const groupName = (word: string, cased: boolean) => {
   const lower = word.toLowerCase();
-  let many = `${lower}s`;
-  if (lower.endsWith("s")) {
+  if (
+    ACRONYMS.has(lower) ||
+    (cased &&
+      word.length > 1 &&
+      word === word.toUpperCase() &&
+      /\p{Lu}/u.test(word))
+  ) {
+    return word.toUpperCase();
+  }
+  let many = IRREGULAR.get(lower) ?? `${lower}s`;
+  // Already plural, or ending in s (Settings, Access), or with no plural: as it is.
+  if ((lower.endsWith("s") && !IRREGULAR.has(lower)) || UNCOUNTED.has(lower)) {
     many = lower;
   } else if (/[^aeiou]y$/u.test(lower)) {
     many = `${lower.slice(0, -1)}ies`;
@@ -81,16 +254,84 @@ const plural = (word: string) => {
   return many.charAt(0).toUpperCase() + many.slice(1);
 };
 
-/** What a tool acts on, from its name: the first word after its verbs ("Batch read companies" → "Companies"). */
+/** Whether a word can name what a tool acts on: letters, not a verb's form (scheduled, pending), not a skipped word. */
+const nounLike = (word: string) => {
+  const lower = word.toLowerCase();
+  return (
+    /^\p{L}[\p{L}']*$/u.test(word) &&
+    lower.length > 1 &&
+    !VERBS.has(lower) &&
+    !SKIPPED.has(lower) &&
+    !/(?:ed|ing)$/u.test(lower)
+  );
+};
+
+/** A verb, or as a name's first word in the third person ("Schedules", "Fetches", "Replies"). */
+const verbAt = (word: string, at: number) => {
+  const lower = word.toLowerCase();
+  return (
+    VERBS.has(lower) ||
+    (at === 0 &&
+      [
+        lower.replace(/s$/u, ""),
+        lower.replace(/es$/u, ""),
+        lower.replace(/ies$/u, "y"),
+      ].some((stem) => stem !== lower && VERBS.has(stem)))
+  );
+};
+
+/** The app's own name in a tool's id ("HUBSPOT_LIST_CONTACTS" → "hubspot"), skipped where its name repeats it. */
+const appOf = (tool: AppTool) => {
+  const [prefix] = tool.id.split("_");
+  return prefix === undefined || prefix === tool.id ? "" : prefix.toLowerCase();
+};
+
+/**
+ * What a tool acts on, from its name: after its verbs, the app's own name and the words that only
+ * qualify, the first noun ("Batch read companies" → "Companies", "HubSpot create CRM object" → "CRM").
+ * Where no word can name it, null: the tool goes to Other, rather than to an invented word.
+ */
 export const groupOf = (tool: AppTool) => {
   if (tool.group !== undefined && tool.group !== "") {
     return tool.group;
   }
+  const app = appOf(tool);
   const words = tool.name
-    .split(/[\s_-]+/u)
-    .filter((word) => /\p{L}/u.test(word));
-  const object = words.find((word) => !VERBS.has(word.toLowerCase()));
-  return object === undefined ? null : plural(object);
+    .split(/[\s_/-]+/u)
+    .filter((word) => word !== "" && word.toLowerCase() !== app);
+  // Past the verbs and the words that only qualify at its start: then the first word that can name it.
+  const start = words.findIndex(
+    (word, index) => !verbAt(word, index) && !SKIPPED.has(word.toLowerCase())
+  );
+  const rest = start === -1 ? [] : words.slice(start);
+  const at = rest.findIndex(
+    (word) => nounLike(word) || ACRONYMS.has(word.toLowerCase())
+  );
+  const object = rest[at];
+  if (object === undefined) {
+    return null;
+  }
+  // A name written all in capitals (a raw slug) says nothing by its case.
+  const cased = /\p{Ll}/u.test(tool.name);
+  const next = rest[at + 1];
+  const pair =
+    next === undefined
+      ? ""
+      : `${object} ${next.replace(/s$/u, "")}`.toLowerCase();
+  if (COMPOUNDS.has(pair)) {
+    return COMPOUNDS.get(pair) ?? null;
+  }
+  // A singular noun before a plural one only says which kind ("team channels"): the plural names it.
+  if (
+    next !== undefined &&
+    nounLike(next) &&
+    next.toLowerCase().endsWith("s") &&
+    !object.toLowerCase().endsWith("s") &&
+    !ACRONYMS.has(object.toLowerCase())
+  ) {
+    return groupName(next, cased);
+  }
+  return groupName(object, cased);
 };
 
 /** One group of tools, with its counts. */

@@ -9,6 +9,15 @@
 //   </Card>
 //   <Card ground="soft" padding="lg" element="article">…</Card>
 //   <Card fill>…</Card>                          the height of its grid cell, what does not fit clipped
+//   <Card>
+//     <CardHeader>                                  shadcn's parts: a header, its action, a footer
+//       <CardTitle>Usage</CardTitle>
+//       <CardDescription>Seats and storage this month.</CardDescription>
+//       <CardAction><Button size="sm">Export</Button></CardAction>   at the header's end, beside the words
+//     </CardHeader>
+//     …
+//     <CardFooter><Button>Upgrade</Button></CardFooter>
+//   </Card>
 //   <CardLink href="/knowledge/pricing">                 the whole card one link
 //     <CardMedia><img src={drawing} alt="" /></CardMedia>  dims to 0.85 on hover and focus
 //     <CardTitle>Pricing</CardTitle>                    underlined on hover and focus
@@ -85,6 +94,28 @@ export interface CardTitleProps {
   level?: 2 | 3 | 4;
 }
 
+/** Every prop a CardHeader takes. */
+export interface CardHeaderProps {
+  /** A CardTitle and a CardDescription, and a CardAction at its end. */
+  children: ReactNode;
+  /** Layout only: margins, alignment and width. */
+  layout?: CardLayoutStyle;
+}
+
+/** Every prop a CardAction takes. */
+export interface CardActionProps {
+  /** The card's own button or menu: one or two small controls. */
+  children: ReactNode;
+}
+
+/** Every prop a CardFooter takes. */
+export interface CardFooterProps {
+  /** What closes the card: its buttons, a total, a link to all. */
+  children: ReactNode;
+  /** Layout only: margins, alignment and width. */
+  layout?: CardLayoutStyle;
+}
+
 /** Every prop a CardDescription takes. */
 export interface CardDescriptionProps {
   /** One or two sentences under the title. */
@@ -96,7 +127,12 @@ const styles = stylex.create({
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
     alignContent: "start",
-    rowGap: grasp.space1,
+    // A title and its line stand 4px apart; a card made of parts (a CardHeader, what it holds, a
+    // CardFooter) parts them by 16px.
+    rowGap: {
+      default: grasp.space1,
+      ":has(> [data-slot=card-header])": grasp.space4,
+    },
     boxSizing: "border-box",
     minWidth: 0,
     margin: 0,
@@ -182,6 +218,37 @@ const styles = stylex.create({
     textUnderlineOffset: "0.2em",
     textDecorationThickness: grasp.hairline,
   },
+  // The header: the title and the line under it in one column, an action at its end beside both,
+  // as shadcn's CardHeader and CardAction stand. Without an action the words take the whole width.
+  header: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      ":has(> [data-slot=card-action])": "minmax(0, 1fr) auto",
+    },
+    gridAutoRows: "min-content",
+    alignItems: "start",
+    columnGap: grasp.space4,
+    rowGap: grasp.space1,
+    minWidth: 0,
+  },
+  action: {
+    gridColumn: 2,
+    gridRow: "1 / span 2",
+    alignSelf: "start",
+    justifySelf: "end",
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  // The footer: its parts in a row, on their middle.
+  footer: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+  },
   description: {
     margin: 0,
     fontSize: grasp.textMd,
@@ -246,6 +313,48 @@ export const CardDescription = ({ children }: CardDescriptionProps) => (
   <p data-slot="card-description" {...stylex.props(styles.description)}>
     {children}
   </p>
+);
+
+/**
+ * The header and what a part built on a card gives it (Section card's room and container): its
+ * look stays the card's, so no caller sets one.
+ */
+export const CardHeaderBox = ({
+  children,
+  layout,
+  look,
+}: CardHeaderProps & { look?: stylex.StyleXStyles }) => (
+  <div data-slot="card-header" {...stylex.props(styles.header, look, layout)}>
+    {children}
+  </div>
+);
+
+/** The card's header: its title and the line under it, and a CardAction at its end. */
+export const CardHeader = ({ children, layout }: CardHeaderProps) => (
+  <CardHeaderBox layout={layout}>{children}</CardHeaderBox>
+);
+
+/** The card's own button or menu, at the end of its header beside the title and the line under it. */
+export const CardAction = ({ children }: CardActionProps) => (
+  <div data-slot="card-action" {...stylex.props(styles.action)}>
+    {children}
+  </div>
+);
+
+/** The footer and what a part built on a card gives it (Section card's room and words' look). */
+export const CardFooterBox = ({
+  children,
+  layout,
+  look,
+}: CardFooterProps & { look?: stylex.StyleXStyles }) => (
+  <div data-slot="card-footer" {...stylex.props(styles.footer, look, layout)}>
+    {children}
+  </div>
+);
+
+/** The card's footer: its buttons, a total or a link, in a row at its foot. */
+export const CardFooter = ({ children, layout }: CardFooterProps) => (
+  <CardFooterBox layout={layout}>{children}</CardFooterBox>
 );
 
 /** Every prop a CardLink takes. */

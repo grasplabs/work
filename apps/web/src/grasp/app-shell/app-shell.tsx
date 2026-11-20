@@ -23,7 +23,7 @@ import { Cross, Icon, PanelToggle, SidebarToggle } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { pageBandVars } from "../page-header/band.stylex";
-import { PanelSeated } from "../panel/seat";
+import { PanelSeated } from "../seat/seat";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "../sheet";
 import { SidebarShellProvider } from "../sidebar/shell";
 import { grasp, media } from "../tokens/tokens.stylex";

@@ -2741,6 +2741,10 @@ msgstr "Een beheerder heeft de gegevenswijziging die deze versie nodig heeft lat
 msgid "An admin approves its access again before it works for your team."
 msgstr "Een beheerder keurt de toegang opnieuw goed voordat het voor je team werkt."
 
+#: src/frame/part-words.tsx
+msgid "An admin connects this"
+msgstr "Een beheerder koppelt dit"
+
 #: src/connections/integration-facts.ts
 msgid "An admin connects this for everyone."
 msgstr "Een beheerder koppelt dit voor iedereen."

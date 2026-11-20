@@ -39,7 +39,6 @@ import { codeBlockWords } from "../grasp/code-block/words.ts";
 import { comboboxWords } from "../grasp/combobox/words.ts";
 import { commandWords } from "../grasp/command/words.ts";
 import { composerWords } from "../grasp/composer/words.ts";
-import { connectionRowWords } from "../grasp/connection-row/words.ts";
 import { contextMenuWords } from "../grasp/context-menu/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
 import { englishWords as dataGridWords } from "../grasp/data-grid/words.ts";
@@ -75,7 +74,10 @@ import { paginationWords } from "../grasp/pagination/words.ts";
 import { panelWords } from "../grasp/panel/words.ts";
 import { questionToolWords } from "../grasp/question-tool/words.ts";
 import { sectionCardWords } from "../grasp/section-card/words.ts";
-import { settingRowWords } from "../grasp/setting-row/words.ts";
+import {
+  connectionRowWords,
+  settingRowWords,
+} from "../grasp/setting-row/words.ts";
 import { shareAccessWords } from "../grasp/share-access/words.ts";
 import { sheetWords } from "../grasp/sheet/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
@@ -1413,6 +1415,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       signedOut: t({ message: "Signed out", context: "state of one app" }),
       stopped: t({ message: "Stopped working", context: "state of one app" }),
       notConnected: t`Not connected`,
+      adminConnects: t`An admin connects this`,
       canDo: t`What Grasp can do`,
       mayDo: t`What Grasp may do`,
       counts: (reads, writes) =>

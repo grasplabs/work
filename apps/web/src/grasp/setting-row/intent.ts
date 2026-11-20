@@ -11,6 +11,10 @@ export const intent = {
     {
       when: "A setting that saves when it changes: its state says Saving, Saved, or that it failed.",
     },
+    {
+      when: "Choosing where an agent answers: its channels and direct messages, each a switch, or one sentence and one fix when a place is not connected or broken: ConnectionRow.",
+      source: "handover/agents/DESIGN.md",
+    },
   ],
   notWhen: [
     { when: "A form someone fills in and sends at once.", instead: ["field"] },
@@ -19,6 +23,10 @@ export const intent = {
   variants: [
     { name: "FactRow", when: "A value nobody changes here." },
     { name: "RowAlert", when: "A failure or a warning about the card's rows." },
+    {
+      name: "ConnectionRow",
+      when: 'A place an agent answers in: on, not connected (`status="missing"`) or broken (`status="broken"`).',
+    },
     {
       name: 'state="failed"',
       when: "The save failed: the value is kept and Try again saves it.",

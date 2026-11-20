@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import type { LayoutStyle } from "../layout/layout";
 import { arrive } from "../motion/arrive";
 import { Skeleton } from "../skeleton/skeleton";
+import { textStyles } from "../text/styles";
 import { grasp } from "../tokens/tokens.stylex";
 import { sectionHeaderVars } from "./section-header.stylex";
 
@@ -93,41 +94,22 @@ const styles = stylex.create({
     gap: grasp.space2,
     minWidth: 0,
   },
+  // The title is Text's lg at medium in ink (textStyles), balanced; a link to the section lands
+  // with room above it.
   title: {
-    margin: 0,
     minWidth: 0,
-    fontFamily: grasp.fontSans,
-    fontSize: grasp.textLg,
-    lineHeight: grasp.textLgLine,
-    fontWeight: grasp.weightMedium,
-    color: grasp.ink,
     textWrap: "balance",
-    overflowWrap: "break-word",
-    // A link to the section lands with room above it.
     scrollMarginTop: grasp.space6,
   },
   // Dense: the title and the sentence at text-sm, one 20px line each, no room between them.
   wordsSm: { rowGap: 0 },
   // A dense head with a title alone: the title on the actions' middle, not 12px above it.
   headerCentred: { alignItems: "center" },
-  titleSm: { fontSize: grasp.textSm, lineHeight: grasp.textSmLine },
   // A group's name over its card: a step over the rows' labels (text-sm), and a weight over theirs
   // (weight-semibold's one use), so "Plan" over a row named Plan reads as the group's name.
-  titleGroup: {
-    fontSize: grasp.textMd,
-    lineHeight: grasp.textMdLine,
-    fontWeight: grasp.weightSemibold,
-  },
-  descriptionSm: { fontSize: grasp.textSm, lineHeight: grasp.textSmLine },
-  description: {
-    margin: 0,
-    fontFamily: grasp.fontSans,
-    fontSize: grasp.textMd,
-    lineHeight: grasp.textMdLine,
-    color: grasp.muted,
-    textWrap: "pretty",
-    overflowWrap: "break-word",
-  },
+  titleGroup: { fontWeight: grasp.weightSemibold },
+  // The sentence is Text's md in muted (textStyles), its lines evened.
+  description: { textWrap: "pretty" },
   actions: {
     display: "flex",
     flexWrap: "wrap",
@@ -174,9 +156,13 @@ const lookOf = (
   return {
     small,
     title: [
+      textStyles.text,
+      textStyles.lg,
+      textStyles.medium,
+      textStyles.ink,
       styles.title,
-      size === "sm" && styles.titleSm,
-      group && styles.titleGroup,
+      size === "sm" && textStyles.sm,
+      group && [textStyles.md, styles.titleGroup],
     ],
     // While loading, the placeholders take the lines the words will: a group's title is text-md,
     // a small one text-sm, else text-lg; a small head's sentence text-sm, else text-md.
@@ -253,8 +239,11 @@ export const SectionHeader = ({
             {description !== undefined && (
               <p
                 {...stylex.props(
+                  textStyles.text,
+                  textStyles.md,
+                  textStyles.muted,
                   styles.description,
-                  small && styles.descriptionSm,
+                  small && textStyles.sm,
                   arrived && arrive.in
                 )}
               >

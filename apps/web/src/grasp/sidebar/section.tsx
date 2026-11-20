@@ -182,7 +182,7 @@ const styles = stylex.create({
   },
   // Back and the home as one segment: raised out of the track as a chosen tab, its two parts each a
   // press of its own, a row's height (a fingertip's on a touch screen), with its own hover fill and
-  // focus ring inside the shape, and a hairline between them.
+  // focus ring inside the shape, with no line between them.
   homeSegment: {
     display: "flex",
     flexGrow: 1,
@@ -190,11 +190,15 @@ const styles = stylex.create({
     minWidth: 0,
     borderRadius: TAB_CORNER,
     cornerShape: grasp.cornerShape,
-    backgroundColor: { default: grasp.shellCard, [FORCED]: "Canvas" },
-    backgroundImage: { default: VEIL, [FORCED]: "none" },
-    boxShadow: { default: grasp.liftLow, [FORCED]: "none" },
+    backgroundColor: { default: grasp.quietFill, [FORCED]: "Canvas" },
+    boxShadow: {
+      default: `inset 0 0 0 ${grasp.hairline} ${grasp.edgeTone}`,
+      [FORCED]: "none",
+    },
     outline: { default: null, [FORCED]: `${grasp.hairline} solid CanvasText` },
   },
+  // The head's track holds its room but draws nothing: the segment stands flat on the sidebar.
+  headTrack: { backgroundColor: "transparent" },
   homePart: {
     position: "relative",
     display: "flex",
@@ -229,13 +233,6 @@ const styles = stylex.create({
       [HOVER]: { default: grasp.shellTextSecondary, ":hover": grasp.shellText },
       [FORCED]: "LinkText",
     },
-  },
-  homeRule: {
-    flexShrink: 0,
-    alignSelf: "center",
-    width: grasp.hairline,
-    height: grasp.space4,
-    backgroundColor: { default: grasp.shellRule, [FORCED]: "CanvasText" },
   },
   // The section's name: a heading that holds its link, with no room of its own.
   homeHeading: {
@@ -425,7 +422,8 @@ export const SectionHead = ({
             rowMarker,
             tabStyles.list,
             tabStyles.listSegmented,
-            styles.tabs
+            styles.tabs,
+            styles.headTrack
           )}
         >
           <div
@@ -459,7 +457,6 @@ export const SectionHead = ({
                 )
               }
             />
-            <span aria-hidden="true" {...stylex.props(styles.homeRule)} />
             <h2
               data-slot="sidebar-section-title"
               {...stylex.props(styles.homeHeading)}
