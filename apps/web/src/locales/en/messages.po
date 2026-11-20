@@ -5718,6 +5718,10 @@ msgstr "Couldn't stop sharing"
 msgid "Couldn't take that answer"
 msgstr "Couldn't take that answer"
 
+#: src/brain/sources-page.tsx
+msgid "Couldn't upload"
+msgstr "Couldn't upload"
+
 #: src/frame/part-words.tsx
 msgid "Couldn't write that down. What you typed is kept."
 msgstr "Couldn't write that down. What you typed is kept."

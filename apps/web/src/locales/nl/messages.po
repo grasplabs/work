@@ -5718,6 +5718,10 @@ msgstr "Kon delen niet stoppen"
 msgid "Couldn't take that answer"
 msgstr "Dat antwoord kon niet worden overgenomen"
 
+#: src/brain/sources-page.tsx
+msgid "Couldn't upload"
+msgstr "Uploaden mislukt"
+
 #: src/frame/part-words.tsx
 msgid "Couldn't write that down. What you typed is kept."
 msgstr "Dat kon niet worden uitgeschreven. Wat je typte blijft staan."

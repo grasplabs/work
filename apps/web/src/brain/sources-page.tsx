@@ -684,17 +684,13 @@ const SearchResults = ({
 /** Uploading a file into the Brain: the file, and who may read it, then Upload. */
 const UploadForm = ({
   teams,
-  onUploading,
   onUploaded,
 }: {
   teams: Team[];
-  /** Whether a file is uploading now: the dialog stays open meanwhile. */
-  onUploading: (uploading: boolean) => void;
   onUploaded: (source: BrainSourceRef) => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
-  const formId = useId();
   // The upload's id, minted for the file chosen and sent again when it is
   // retried, so a retry after a lost answer is the same upload.
   const [file, setFile] = useState<{ chosen: File; uploadId: string }>();
@@ -714,33 +710,7 @@ const UploadForm = ({
         <Trans>Upload a file</Trans>
       </DialogTitle>
       <DialogBody>
-        <Form
-          id={formId}
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (file === undefined || busy) {
-              return;
-            }
-            setSent({ state: "loading" });
-            onUploading(true);
-            void (async () => {
-              const answer = await readFrom(
-                core,
-                async (sources) =>
-                  await sources.upload(
-                    await fileOf(file.chosen),
-                    readersOf(choice),
-                    file.uploadId
-                  )
-              );
-              setSent(answer);
-              onUploading(false);
-              if (answer.state === "ready") {
-                onUploaded(answer.data.source);
-              }
-            })();
-          }}
-        >
+        <Form>
           <Field>
             <FieldLabel>
               <Trans>File</Trans>
@@ -789,15 +759,37 @@ const UploadForm = ({
       </DialogBody>
       <DialogFooter>
         <DialogAction>{t`Cancel`}</DialogAction>
-        <Button
+        {/* While it uploads the dialog stays open, whatever closes it
+            otherwise, so the form keeps the file, the upload's id and
+            what core answers. */}
+        <DialogAction
+          action={async () => {
+            if (file === undefined) {
+              return;
+            }
+            setSent({ state: "loading" });
+            const answer = await readFrom(
+              core,
+              async (sources) =>
+                await sources.upload(
+                  await fileOf(file.chosen),
+                  readersOf(choice),
+                  file.uploadId
+                )
+            );
+            setSent(answer);
+            if (answer.state !== "ready") {
+              throw new Error("Not uploaded");
+            }
+            onUploaded(answer.data.source);
+          }}
           disabled={file === undefined || busy}
-          form={formId}
-          size="sm"
-          type="submit"
+          failedLabel={t`Couldn't upload`}
           variant="ink"
+          workingLabel={t`Uploading…`}
         >
-          {busy ? t`Uploading…` : t`Upload`}
-        </Button>
+          {t`Upload`}
+        </DialogAction>
       </DialogFooter>
     </>
   );
@@ -815,30 +807,11 @@ const UploadDialog = ({
   onUploaded: (source: BrainSourceRef) => void;
 }) => {
   const { t } = useLingui();
-  const [open, setOpen] = useState(false);
-  // While a file uploads the dialog stays open, so its form keeps the
-  // file, the upload's id and what core answers.
-  const [uploading, setUploading] = useState(false);
   return (
-    <Dialog
-      onOpenChange={(next: boolean) => {
-        if (!next && uploading) {
-          return;
-        }
-        setOpen(next);
-      }}
-      open={open}
-    >
+    <Dialog>
       <DialogTrigger>{t`Upload`}</DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
-        <UploadForm
-          onUploading={setUploading}
-          onUploaded={(source) => {
-            setOpen(false);
-            onUploaded(source);
-          }}
-          teams={teams}
-        />
+        <UploadForm onUploaded={onUploaded} teams={teams} />
       </DialogContent>
     </Dialog>
   );

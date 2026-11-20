@@ -5718,6 +5718,10 @@ msgstr "Konnte Teilen nicht beenden"
 msgid "Couldn't take that answer"
 msgstr "Diese Antwort konnte nicht übernommen werden"
 
+#: src/brain/sources-page.tsx
+msgid "Couldn't upload"
+msgstr "Hochladen fehlgeschlagen"
+
 #: src/frame/part-words.tsx
 msgid "Couldn't write that down. What you typed is kept."
 msgstr "Das ließ sich nicht aufschreiben. Was Sie getippt haben, bleibt erhalten."

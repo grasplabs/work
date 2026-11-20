@@ -5718,6 +5718,10 @@ msgstr "Impossible d’arrêter le partage"
 msgid "Couldn't take that answer"
 msgstr "Impossible de prendre cette réponse"
 
+#: src/brain/sources-page.tsx
+msgid "Couldn't upload"
+msgstr "Échec de l'envoi"
+
 #: src/frame/part-words.tsx
 msgid "Couldn't write that down. What you typed is kept."
 msgstr "Impossible de transcrire cela. Ce que vous avez tapé est conservé."

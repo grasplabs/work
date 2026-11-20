@@ -37,6 +37,7 @@ import {
 } from "vite-plus/test";
 
 import { formatDateTime, formatDay } from "../format.ts";
+import { ms } from "../grasp/tokens/tokens.values.ts";
 import { SourcesPage } from "./sources-page.tsx";
 
 // The Brain's Sources page, against core's `brainSources` as the page
@@ -529,6 +530,21 @@ const uploadDialog = (): Element | null =>
 /** The text of the upload's dialog, or nothing while it is closed. */
 const uploadText = (): string => uploadDialog()?.textContent ?? "";
 
+/** Presses the upload's dialog's Upload. */
+const uploadPressed = async (): Promise<void> => {
+  const upload = [...(uploadDialog()?.querySelectorAll("button") ?? [])].find(
+    (each) => each.textContent.trim().startsWith("Upload")
+  );
+  if (upload === undefined) {
+    throw new TypeError("No Upload in the upload's dialog");
+  }
+  await act(async () => {
+    upload.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
 /** Opens the upload's dialog by the page head's Upload, unless it is open. */
 const openUpload = async (): Promise<void> => {
   if (uploadDialog() !== null) {
@@ -884,6 +900,7 @@ describe(SourcesPage, () => {
     root = undefined;
     document.body.replaceChildren();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("lists the sources core gives a page at a time, says when one read through a connection was last read, and opens one at its newest version, then an older one", async () => {
@@ -1257,7 +1274,7 @@ describe(SourcesPage, () => {
       await Promise.resolve();
     });
     await settle();
-    await submitted(uploadForm());
+    await uploadPressed();
     await settle();
     const dialogClosed = uploadDialog() === null;
     await press("Handbook");
@@ -1303,7 +1320,7 @@ describe(SourcesPage, () => {
     const picker = uploadPicker();
     const chosen = readersChosen();
     await pick(picker, new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" }));
-    await submitted(uploadForm());
+    await uploadPressed();
     const refusedText = uploadText();
     await cancelUpload();
     await press("Handbook");
@@ -1328,6 +1345,8 @@ describe(SourcesPage, () => {
   });
 
   it("says it uploads while it does, says a file's text is too long in the person's words, and retries with the same upload's id", async () => {
+    // A refused Upload shows so for a moment, and takes no press meanwhile.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const held = Promise.withResolvers<boolean>();
     const { uploadIds } = await shown([], {
       uploading: held.promise,
@@ -1346,20 +1365,24 @@ describe(SourcesPage, () => {
       );
     };
     const submit = async () => {
-      await submitted(uploadForm());
+      await uploadPressed();
     };
     await choose("long.vtt");
     await submit();
-    const whileHeld = uploadText();
+    const whileHeld =
+      uploadDialog()?.querySelector('[aria-busy="true"]') !== null;
     held.resolve(true);
     await settle();
     const refusedText = uploadText();
+    act(() => {
+      vi.advanceTimersByTime(ms.durationHold);
+    });
     await submit();
     await choose("other.vtt");
     await submit();
 
     expect({
-      whileHeld: whileHeld.includes("Uploading…"),
+      whileHeld,
       refused: [
         refusedText.includes(
           "This file's text is too long for the Brain to keep."
@@ -1387,11 +1410,13 @@ describe(SourcesPage, () => {
       new File(["WEBVTT"], "first.vtt", { type: "text/vtt" })
     );
     const before = uploadPicker().disabled;
-    await submitted(uploadForm());
+    await uploadPressed();
     const whileUploading = uploadPicker().disabled;
     // Cancel can't take the form, and the file it holds, away meanwhile.
     await cancelUpload();
-    const stillOpen = uploadDialog() !== null;
+    const stillOpen =
+      uploadDialog()?.querySelector('[aria-busy="true"]') !== null &&
+      uploadDialog() !== null;
     held.resolve(true);
     await settle();
     await openUpload();
@@ -1559,7 +1584,7 @@ describe(SourcesPage, () => {
     const tooLarge = uploadMaxBytes + 1;
     await openUpload();
     await pick(uploadPicker(), fileSized("large.vtt", tooLarge));
-    await submitted(uploadForm());
+    await uploadPressed();
     const refusedText = uploadText();
     await cancelUpload();
     await press("Handbook");
@@ -1651,7 +1676,7 @@ describe(SourcesPage, () => {
       uploadPicker(),
       new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" })
     );
-    await submitted(uploadForm());
+    await uploadPressed();
     await settle();
 
     expect(

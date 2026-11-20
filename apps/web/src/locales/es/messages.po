@@ -5718,6 +5718,10 @@ msgstr "No se pudo dejar de compartir"
 msgid "Couldn't take that answer"
 msgstr "No se pudo aceptar esa respuesta"
 
+#: src/brain/sources-page.tsx
+msgid "Couldn't upload"
+msgstr "No se pudo subir"
+
 #: src/frame/part-words.tsx
 msgid "Couldn't write that down. What you typed is kept."
 msgstr "No se pudo transcribir. Lo que escribiste se conserva."
