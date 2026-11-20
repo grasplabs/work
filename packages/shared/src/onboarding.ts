@@ -136,7 +136,11 @@ export type RosterTeam = z.output<typeof rosterTeamSchema>;
 /** Someone who works there. */
 export const rosterPersonSchema = z.strictObject({
   id: idSchema,
-  name: nameSchema,
+  /**
+   * Empty once core erased them: their entry stays in its team, for the
+   * counts, without their name, job or address.
+   */
+  name: z.string().trim().max(80),
   /**
    * Empty when they have none: their link can be handed to them on paper,
    * and opens once the list has an address they sign in with (GRA-1790).

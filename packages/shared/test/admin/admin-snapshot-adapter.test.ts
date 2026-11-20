@@ -723,6 +723,27 @@ describe("an organization from core's admin snapshot", () => {
     );
   });
 
+  it("shows staff someone core erased as erased, still in their team", () => {
+    const erased = adminSnapshotSchema.parse({
+      ...answer,
+      roster: {
+        ...answer.roster,
+        people: answer.roster.people.map((person) =>
+          person.id === "tom"
+            ? { ...person, name: "", title: "", email: "" }
+            : person
+        ),
+      },
+    });
+
+    const { org } = adminOrgOf(erased, client);
+    const tom = org.real.people.find((person) => person.id === "tom");
+    expect({ name: tom?.name, team: tom?.team }).toStrictEqual({
+      name: "Erased",
+      team: "sales",
+    });
+  });
+
   it("shows staff a drawn piece of work with each person's numbers apart, its open questions, under the organization's rules", () => {
     const rules = { ...STARTING_ORG_RULES, people: 2 };
     const { org, state } = adminOrgOf(

@@ -518,18 +518,22 @@ const teamKnown = (
   leadName: string,
   team: string,
   members: readonly Roster["people"][number][]
-): string[] => [
-  `${firstName(leadName)} leads ${team}, a team of ${members.length + 1}.`,
-  ...(members.length === 0
-    ? []
-    : [
-        `The people in the team, by name and job: ${members
-          .map(({ name, title }) =>
-            title === "" ? name : `${name} (${title})`
-          )
-          .join("; ")}.`,
-      ]),
-];
+): string[] => {
+  // Someone erased counts, without a name or job to give (`eraseEntries`).
+  const named = members.filter(({ name }) => name !== "");
+  return [
+    `${firstName(leadName)} leads ${team}, a team of ${members.length + 1}.`,
+    ...(named.length === 0
+      ? []
+      : [
+          `The people in the team, by name and job: ${named
+            .map(({ name, title }) =>
+              title === "" ? name : `${name} (${title})`
+            )
+            .join("; ")}.`,
+        ]),
+  ];
+};
 
 /**
  * Waits for `promise`, and logs it failing instead of throwing: for the
@@ -2177,7 +2181,8 @@ export class Onboarding extends DurableObject<Env> {
     const { person, link, roster, plan } = found.value;
     const team = roster.teams.find(({ id }) => id === person.team);
     const lead = roster.people.find(
-      ({ id }) => id === team?.lead && id !== person.id
+      // An erased lead has no name to give (`eraseEntries`): as if none.
+      ({ id, name }) => id === team?.lead && id !== person.id && name !== ""
     );
     const closes = closesOn(plan);
     return answered({
@@ -2661,7 +2666,8 @@ export class Onboarding extends DurableObject<Env> {
   ): TurnContext {
     const team = roster.teams.find(({ id }) => id === person.team);
     const lead = roster.people.find(
-      ({ id }) => id === team?.lead && id !== person.id
+      // An erased lead has no name to give (`eraseEntries`): as if none.
+      ({ id, name }) => id === team?.lead && id !== person.id && name !== ""
     );
     const kind = leads(roster, person.id) ? "lead" : "own";
     const members =
@@ -2686,7 +2692,9 @@ export class Onboarding extends DurableObject<Env> {
     ].filter((part) => part !== "");
     const terms = [
       ...(lead === undefined ? [] : [firstName(lead.name)]),
-      ...members.map((each) => firstName(each.name)),
+      ...members
+        .filter(({ name }) => name !== "")
+        .map((each) => firstName(each.name)),
       ...(this.#stephen()?.terms ?? []),
       ...this.documents().flatMap(({ reading }) => reading.tools),
     ];
@@ -3961,7 +3969,8 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Everyone who takes part, or whose link is out, in the roster's order,
    * with their link once it is out: for the company's admin to send
-   * themselves. A link is new to them until they take it.
+   * themselves. A link is new to them until they take it. Not whoever
+   * core erased: their link is closed for good (`#erasedPeople`).
    */
   async linksToSend(): Promise<LinkToSend[]> {
     const roster = this.#roster();
@@ -3976,8 +3985,11 @@ export class Onboarding extends DurableObject<Env> {
         .map(({ person, takenAt }) => [person, takenAt])
     );
     const teamName = new Map(roster.teams.map(({ id, name }) => [id, name]));
+    const erased = this.#erasedPeople();
     const listed = roster.people.filter(
-      (person) => takingPart(roster, person) || out.has(person.id)
+      (person) =>
+        !erased.has(person.id) &&
+        (takingPart(roster, person) || out.has(person.id))
     );
     return await Promise.all(
       listed.map(async (person) => {
@@ -5684,6 +5696,15 @@ export class Onboarding extends DurableObject<Env> {
       for (const { id, email } of listed) {
         if (id === owned || theirs(email)) {
           found += 1;
+          // Their erasure takes their name and job off the entry too; it
+          // stays in its team, so the counts stay right. Only here: an
+          // entry a save gives an address kept out (`#keptOff`) keeps the
+          // name the list gave it.
+          this.#db
+            .update(people)
+            .set({ name: "", title: "" })
+            .where(eq(people.id, id))
+            .run();
           closed += this.#eraseEntry(id, account, now) === "closed" ? 1 : 0;
         }
       }

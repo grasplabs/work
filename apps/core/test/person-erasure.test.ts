@@ -1658,10 +1658,24 @@ describe("erasing a person", () => {
     });
   });
 
-  it("holds the address that was theirs nowhere in the onboarding store: not on their entry, a link or any mail, sent or not", async () => {
+  it("holds the address, name and job that were theirs nowhere in the onboarding store: not on their entry, which stays in its team, a link or any mail, sent or not", async () => {
     const { admin, person } = await removedPerson();
     const email = String(person.person.email);
     const { theirs, others } = await onTheList(email);
+    for (const [id, title] of [
+      [theirs, "Rota planner"],
+      [others, "Buyer"],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+      await onList("UPDATE people SET title = ? WHERE id = ?", title, id);
+    }
+    const entryOf = async (id: string) =>
+      await onList(
+        "SELECT name, title, team, email FROM people WHERE id = ?",
+        id
+      );
+    // Removed from the company, not erased: their entry is as it was.
+    const [left] = await entryOf(theirs);
     // Mail sent to their address about nobody in particular, and someone
     // else's link that once went to it.
     await onList(
@@ -1699,29 +1713,77 @@ describe("erasing a person", () => {
           })),
         ];
         return kept
-          .filter(({ rows }) =>
-            JSON.stringify(rows).toLowerCase().includes(email.toLowerCase())
-          )
+          .filter(({ rows }) => {
+            const held = JSON.stringify(rows).toLowerCase();
+            return (
+              held.includes(email.toLowerCase()) ||
+              held.includes("rota planner")
+            );
+          })
           .map(({ name }) => name);
       }
-    );
-    const entry = await onList(
-      "SELECT name, email FROM people WHERE id = ?",
-      theirs
     );
     const otherMail = await onList(
       "SELECT key FROM mail_outbox WHERE about = ?",
       others
     );
+    // The admin saves the list as it stands now, their entry in it.
+    const { roster } = await admin.api.onboarding.view();
+    if (roster === null) {
+      throw new Error("Expected the list");
+    }
+    await admin.api.onboarding.saveRoster(roster);
+    const [entry] = await entryOf(theirs);
+    const [other] = await entryOf(others);
     expect({
+      left: { name: left?.name, title: left?.title },
       holding,
-      entry,
+      entry: { ...entry, team: entry?.team === other?.team },
+      other: { name: other?.name, title: other?.title },
       otherMail: otherMail.length > 0,
     }).toStrictEqual({
+      left: { name: "Them", title: "Rota planner" },
       holding: [],
-      // Their entry is the company's: it stays, without the address.
-      entry: [{ name: "Them", email: "" }],
+      // Their entry is the company's: it stays in its team, so the counts
+      // stay right, without their address, name or job.
+      entry: { name: "", title: "", team: true, email: "" },
+      other: { name: "Someone else", title: "Buyer" },
       otherMail: true,
+    });
+  });
+
+  it("leaves them out of what a colleague's interview is told of the team, by name, while counting them", async () => {
+    const { admin, person } = await removedPerson();
+    const { theirs, others } = await onTheList(String(person.person.email));
+    const store = onboardingStore(env);
+    const leadIs = async (id: string) => {
+      await onList(
+        "UPDATE teams SET lead = ? WHERE id = (SELECT team FROM people WHERE id = ?)",
+        id,
+        id
+      );
+    };
+    await leadIs(theirs);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    // They led the team: their colleague's interview knows no lead.
+    const led = await store.contextOf(others);
+    // The colleague leads it: a team of two, nobody else in it by name.
+    await leadIs(others);
+    const leading = await store.contextOf(others);
+    expect({
+      lead: led?.lead,
+      leadTerms: led?.terms.includes(""),
+      team: leading?.known.includes("a team of 2"),
+      named: leading?.known.includes("by name and job"),
+      terms: leading?.terms.includes(""),
+    }).toStrictEqual({
+      lead: null,
+      leadTerms: false,
+      team: true,
+      named: false,
+      terms: false,
     });
   });
 
@@ -2780,15 +2842,18 @@ describe("erasing a person", () => {
       "SELECT person FROM link_codes WHERE person = ?",
       theirs
     );
+    const theirsIn = (rows: readonly { person: string }[]) =>
+      rows.some((row) => row.person === theirs);
     expect({
-      listed: pathOf(listed, theirs),
-      again: pathOf(again, theirs),
+      listed: theirsIn(listed),
+      again: theirsIn(again),
       other: typeof pathOf(again, others),
       codes: codes.length,
       link: await sessionWith(theirSecret, String(person.person.email)),
     }).toStrictEqual({
-      listed: null,
-      again: null,
+      // Not on the admin's links at all: theirs is closed for good.
+      listed: false,
+      again: false,
       other: "string",
       codes: 0,
       link: "interview.link_invalid",
