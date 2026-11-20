@@ -81,6 +81,7 @@ export const IntegrationPanel = ({
     app,
     tools,
     size: "xs",
+    accountRows: false,
   });
   const disconnect = useMenuDisconnect(integration, identity);
   return (

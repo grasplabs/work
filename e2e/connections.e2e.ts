@@ -105,7 +105,17 @@ test("a person comes back from connecting Microsoft 365, sees each account on it
     "Connecting this provider isn't set up for this deployment."
   );
   await page.keyboard.press("Escape");
-  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("dialog", { includeHidden: true })).toHaveCount(
+    0
+  );
+  // The head's Manage menu leaves signing in again and disconnecting to the
+  // rows.
+  await page.getByRole("button", { name: "Manage", exact: true }).click();
+  await expect(
+    page.getByRole("menuitem", { name: "Connect another account" })
+  ).toBeVisible();
+  await expect(page.getByRole("menuitem")).toHaveCount(1);
+  await page.keyboard.press("Escape");
   // While an admin doesn't offer Microsoft 365, core refuses every start:
   // its row offers no sign-in, and the page says what has to happen first. The
   // catalog no longer lists the entry to this person, so its ID stands in
@@ -149,18 +159,11 @@ test("a person comes back from connecting Microsoft 365, sees each account on it
   await expect(expiredRow).toHaveCount(0);
   await expect(mineRow).toBeVisible();
 
-  // Connecting another account, from the head's Manage menu, which leaves
-  // disconnecting to each account's row: the test stack has no Microsoft
-  // tenant set up, so core refuses the start, and the dialog says so.
+  // Connecting another account, from the head's Manage menu: the test
+  // stack has no Microsoft tenant set up, so core refuses the start, and the
+  // dialog says so.
   await page.getByRole("button", { name: "Manage", exact: true }).click();
-  const another = page.getByRole("menuitem", {
-    name: "Connect another account",
-  });
-  await expect(another).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "Disconnect" })).toHaveCount(
-    0
-  );
-  await another.click();
+  await page.getByRole("menuitem", { name: "Connect another account" }).click();
   const connecting = page.getByRole("dialog", {
     name: "Connect Microsoft 365",
   });

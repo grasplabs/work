@@ -437,14 +437,14 @@ describe("changing what Grasp may do in a connected app", () => {
     ]);
   });
 
-  it("leaves disconnecting its one account to its row, not to the head's Manage menu", async () => {
+  it("leaves signing in again and disconnecting to the account's row, not to the head's Manage menu", async () => {
     await shown(
       {
         id: "connection-1",
         source: "native",
         provider: "microsoft",
         scope: "personal",
-        status: "active",
+        status: "needs_reauth",
         ownerUserId: "u1",
         connectedBy: "u1",
         connectedByName: "Ada",
@@ -473,7 +473,10 @@ describe("changing what Grasp may do in a connected app", () => {
       row: [...(row?.querySelectorAll("button") ?? [])].map(labelOf),
       menu: [...document.querySelectorAll('[role="menuitem"]')].map(wordsOf),
     }).toStrictEqual({
-      row: ["Disconnect Microsoft 365 (sales@acme.test)"],
+      row: [
+        "Sign in to Microsoft 365 (sales@acme.test) again",
+        "Disconnect Microsoft 365 (sales@acme.test)",
+      ],
       menu: ["Connect another account"],
     });
   });

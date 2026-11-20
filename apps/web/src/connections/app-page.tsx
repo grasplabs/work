@@ -66,6 +66,7 @@ export const IntegrationAppPage = ({
     app,
     tools,
     size: "sm",
+    accountRows: true,
   });
   // Each account row's own Sign in again and Disconnect, so their dialogs
   // grow from them.
