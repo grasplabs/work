@@ -103,6 +103,9 @@ interface Held {
   waiting?: Record<string, Promise<unknown>>;
 }
 
+/** The chats told to go on, one for each confirmation that went through. */
+const carriedOn: string[] = [];
+
 /** A chat's held writes, with a way to open another chat in the same place. */
 const Switching = () => {
   const [chatId, setChatId] = useState("chat-1");
@@ -115,7 +118,13 @@ const Switching = () => {
         }}
         type="button"
       />
-      <HeldWrites chatId={chatId} version={0} />
+      <HeldWrites
+        chatId={chatId}
+        onConfirmed={() => {
+          carriedOn.push(chatId);
+        }}
+        version={0}
+      />
     </>
   );
 };
@@ -136,6 +145,7 @@ const shown = async ({
   const confirmed: { chatId: string; id: string; requestHash: string }[] = [];
   const declined: { chatId: string; id: string }[] = [];
   const decided = new Set<string>();
+  carriedOn.length = 0;
   /** Decides `id`: ended either way, refused when `refusing` says so. */
   const decide = async (id: string): Promise<void> => {
     await slow[id];
@@ -390,6 +400,43 @@ describe("a write to an App held for the person", () => {
       item: text.includes(String.raw`c\u{202E}leo@acme.test`),
       unseen: /[\u200B\u202E]/u.test(text),
     }).toStrictEqual({ value: true, item: true, unseen: false });
+  });
+
+  it("tells the chat to go on once a confirmation went through, a read connect held and an App write alike", async () => {
+    // A search connect held in a chat that read something only the
+    // person may read (GRA-1928): it needs no grant.
+    const search: PendingAction = {
+      ...mail,
+      id: "pending-2",
+      action: "mail.search",
+      restricted: true,
+      permissionId: null,
+      input: JSON.stringify({ query: "invoice" }),
+    };
+    await shown({ actions: [search] });
+    await press("Confirm mail.search on Outlook");
+    await press("Confirm notes.create in Notes");
+
+    expect(carriedOn).toStrictEqual(["chat-1", "chat-1"]);
+  });
+
+  it("tells the chat nothing after a rejection, or a confirmation that didn't go through", async () => {
+    const refusal = permissionErrors.create("permission.denied");
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.archive",
+    };
+    await shown({
+      calls: { "chat-1": [held, second] },
+      actions: [mail],
+      refusing: { [mail.id]: refusal, [second.id]: refusal },
+    });
+    await press("Reject notes.create in Notes");
+    await press("Confirm notes.archive in Notes");
+    await press("Confirm mail.send on Outlook");
+
+    expect(carriedOn).toStrictEqual([]);
   });
 
   it("runs nothing once it is rejected", async () => {

@@ -462,6 +462,7 @@ export const HeldWriteDetails = ({
 export const HeldWrite = ({
   action,
   onDecided,
+  onConfirmed,
 }: {
   action: PendingAction;
   /**
@@ -470,6 +471,8 @@ export const HeldWrite = ({
    * fails is gone, its card with it, and only the list can say why.
    */
   onDecided: (failed?: DecisionFailed) => void;
+  /** Told once the person's confirmation went through. */
+  onConfirmed: () => void;
 }) => {
   const { busy, run } = useCoreAction();
   const router = useRouter();
@@ -480,13 +483,17 @@ export const HeldWrite = ({
   // Read again however it went: a failed decision may have changed
   // something too (the action gone already, say).
   const decide = async (
-    decision: (session: Session) => Promise<unknown>
+    decision: (session: Session) => Promise<unknown>,
+    confirming: boolean
   ): Promise<void> => {
     let reason: string | undefined;
     await run(decision, (failed) => {
       reason = failed;
     });
     onDecided(reason === undefined ? undefined : { what, reason });
+    if (confirming && reason === undefined) {
+      onConfirmed();
+    }
     // Core notes the decision in the chat, which moves it up the chat
     // list: the list is read again so it shows under its new time.
     await router.invalidate();
@@ -514,7 +521,7 @@ export const HeldWrite = ({
           aria-label={t`Confirm ${what}`}
           disabled={busy || shown.unseen}
           onClick={() => {
-            void decide(confirmHeld(action));
+            void decide(confirmHeld(action), true);
           }}
         >
           <Trans>Confirm</Trans>
@@ -523,7 +530,7 @@ export const HeldWrite = ({
           aria-label={t`Reject ${what}`}
           disabled={busy}
           onClick={() => {
-            void decide(declineHeld(action));
+            void decide(declineHeld(action), false);
           }}
           variant="outline"
         >
@@ -568,6 +575,7 @@ const HeldAppCallCard = ({
   chatId,
   call,
   onDecided,
+  onConfirmed,
 }: {
   chatId: string;
   call: HeldAppCall;
@@ -577,6 +585,8 @@ const HeldAppCallCard = ({
    * goes, and only the list it was in can keep saying why.
    */
   onDecided: (failed?: DecisionFailed) => void;
+  /** Told once the person's confirmation went through. */
+  onConfirmed: () => void;
 }) => {
   const { busy, run } = useCoreAction();
   const router = useRouter();
@@ -590,13 +600,17 @@ const HeldAppCallCard = ({
   const where = app;
   const asked = formatDateTime(call.heldAt);
   const decide = async (
-    decision: (session: Session) => Promise<unknown>
+    decision: (session: Session) => Promise<unknown>,
+    confirming: boolean
   ): Promise<void> => {
     let reason: string | undefined;
     await run(decision, (failed) => {
       reason = failed;
     });
     onDecided(reason === undefined ? undefined : { what, reason });
+    if (confirming && reason === undefined) {
+      onConfirmed();
+    }
     await router.invalidate();
   };
   return (
@@ -644,7 +658,7 @@ const HeldAppCallCard = ({
                 call.id,
                 call.requestHash
               );
-            });
+            }, true);
           }}
         >
           <Trans>Confirm</Trans>
@@ -655,7 +669,7 @@ const HeldAppCallCard = ({
           onClick={() => {
             void decide(async (session) => {
               await session.chats.declineHeldCall(chatId, call.id);
-            });
+            }, false);
           }}
           variant="outline"
         >
@@ -761,9 +775,11 @@ const RejectAll = ({
 const ChatHeldWrites = ({
   chatId,
   version,
+  onConfirmed,
 }: {
   chatId: string;
   version: number;
+  onConfirmed: () => void;
 }) => {
   const [held, setHeld] = useState<Held>({ state: "loading" });
   const core = useCore();
@@ -814,6 +830,7 @@ const ChatHeldWrites = ({
           call={call}
           chatId={chatId}
           key={call.id}
+          onConfirmed={onConfirmed}
           onDecided={(failure) => {
             setFailed(failure);
             setReads((read) => read + 1);
@@ -824,6 +841,7 @@ const ChatHeldWrites = ({
         <HeldWrite
           action={action}
           key={action.id}
+          onConfirmed={onConfirmed}
           onDecided={(failure) => {
             setFailed(failure);
             setReads((read) => read + 1);
@@ -837,16 +855,24 @@ const ChatHeldWrites = ({
 /**
  * The chat's held writes, each with confirm and reject. Read again when
  * `version` changes (core says the agent had a write held: `ChatUpdate.held`) and after each
- * decision.
+ * decision. `onConfirmed` is told each time a confirmation went through:
+ * a rejection, or one that failed, tells it nothing.
  */
 export const HeldWrites = ({
   chatId,
   version,
+  onConfirmed,
 }: {
   chatId: string;
   version: number;
+  onConfirmed: () => void;
 }) => (
   // One list per chat: what it read and why a decision failed are that
   // chat's, never shown, announced or pressed in the next one opened.
-  <ChatHeldWrites chatId={chatId} key={chatId} version={version} />
+  <ChatHeldWrites
+    chatId={chatId}
+    key={chatId}
+    onConfirmed={onConfirmed}
+    version={version}
+  />
 );
