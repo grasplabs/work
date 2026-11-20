@@ -302,7 +302,18 @@ const Thread = ({ focusBox }: { focusBox: () => void }) => {
             ) : null}
           </div>
         )}
-        <HeldWrites chatId={chatId} version={view.held} />
+        <HeldWrites
+          chatId={chatId}
+          // Confirmed, the agent reads how it ended and goes on, in a turn
+          // the person's own message starts, as for approved packages
+          // below: the decision itself reaches it as a note (GRA-2224).
+          onConfirmed={() => {
+            if (!view.running) {
+              void ask(t`Confirmed. Carry on.`);
+            }
+          }}
+          version={view.held}
+        />
         <ConnectionRequests chatId={chatId} version={view.held} />
         <PackageRequests
           chatId={chatId}
