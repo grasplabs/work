@@ -185,6 +185,14 @@ const holding = async (text: string): Promise<string[]> => {
   return found;
 };
 
+/** How many erasures are recorded of `userIds`. */
+const erasuresOf = async (...userIds: string[]): Promise<number> =>
+  (await env.DB.prepare(
+    `SELECT count(*) AS n FROM person_erasures WHERE user_id IN (${userIds.map(() => "?").join(", ")})`
+  )
+    .bind(...userIds)
+    .first<number>("n")) ?? 0;
+
 /** Users under `email`, and their accounts. */
 const heldBy = async (email: string) => ({
   users:
@@ -492,9 +500,32 @@ describe("a guest signing in with a code", () => {
     const guests = await guest.admin.api.members.guests();
     const storedRemoved = await storedFor(guest.address);
     const code = await codeSignIn(guest.address, outstanding);
+    // A guest, who has no name, is confirmed by their address alone; a
+    // member, by their name alone.
+    const member = await signedInApi(idp, "user");
+    await guest.admin.api.members.remove(member.userId);
+    const wrongConfirmations = {
+      otherAddress: await outcome(
+        guest.admin.api.members.erase(guest.userId, outsider())
+      ),
+      empty: await outcome(guest.admin.api.members.erase(guest.userId, "")),
+      memberName: await outcome(
+        guest.admin.api.members.erase(guest.userId, String(member.person.name))
+      ),
+      memberByAddress: await outcome(
+        guest.admin.api.members.erase(
+          member.userId,
+          String(member.person.email).toLowerCase()
+        )
+      ),
+    };
+    const recordedBefore = await erasuresOf(guest.userId, member.userId);
     await guest.admin.api.members.erase(guest.userId, guest.address);
 
     expect({
+      wrongConfirmations,
+      recordedBefore,
+      recordedAfter: await erasuresOf(guest.userId),
       session: await sessionOf(guest.cookie),
       code,
       listed: guests.some(({ userId }) => userId === guest.userId),
@@ -504,6 +535,14 @@ describe("a guest signing in with a code", () => {
       held: await heldBy(guest.address),
       holding: await holding(guest.address),
     }).toStrictEqual({
+      wrongConfirmations: {
+        otherAddress: "member.erase_name_mismatch",
+        empty: "member.erase_name_mismatch",
+        memberName: "member.erase_name_mismatch",
+        memberByAddress: "member.erase_name_mismatch",
+      },
+      recordedBefore: 0,
+      recordedAfter: 1,
       session: null,
       code: refused,
       listed: false,
