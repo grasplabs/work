@@ -363,7 +363,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
 
     expect({
       asking: asking.includes(
-        "Everyone in the company will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Choose a team if not everyone should see it."
+        "Everyone in the company will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Their assistants will also read Notes directly, in their own chats. Choose a team if not everyone should have this."
       ),
       afterCancel,
       asked,
@@ -407,7 +407,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       asked,
       erasing: erasing.includes("This can't be undone."),
       toTeam: toTeam.includes(
-        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes."
+        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Their assistants will also read Notes directly, in their own chats."
       ),
       fromNobody,
     }).toStrictEqual({
@@ -466,7 +466,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     expect({
       whileErasing,
       asking: dialogText().includes(
-        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes."
+        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Their assistants will also read Notes directly, in their own chats."
       ),
       asked,
     }).toStrictEqual({
@@ -554,7 +554,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     expect({
       after,
       asking: dialogText().includes(
-        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes."
+        "Everyone in Sales will be able to find what agents read through Notes and what is copied from it, including what was kept before, whatever their permissions in Notes. Their assistants will also read Notes directly, in their own chats."
       ),
     }).toStrictEqual({
       after: { says: true, shown: "nobody", held: { kind: "nobody" } },

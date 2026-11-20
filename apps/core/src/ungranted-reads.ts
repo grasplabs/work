@@ -100,8 +100,7 @@ export const ungrantedReadConnection = async (
   return owner;
 };
 
-// The prefix as #2501 first wrote it: a pin already kept means the same.
-const ungrantedReadPrefix = "own-connection-read:";
+const ungrantedReadPrefix = "ungranted-read:";
 
 /**
  * The source a read of connection `connectionId` with no grant is recorded

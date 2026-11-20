@@ -816,7 +816,7 @@ const calling = (name: string, action: string, input: unknown) =>
   );
 
 // A person's own connections, read with no grant in their own chat
-// (GRA-2203, own-connection-reads.ts). The ways it can fail, first: a
+// (GRA-2203, ungranted-reads.ts). The ways it can fail, first: a
 // write goes out with no grant; a turn nobody started, or another
 // person's connection, is read; a tool nobody classed counts as a read;
 // what was read stays in the chat once the connection is no longer theirs.
@@ -1133,7 +1133,10 @@ describe(
         kind: "team",
         teamId: await newTeam(admin, [member]),
       });
-      /** Whether `personId`'s code read `connectionId`, the turn asked by `ask`. */
+      /**
+       * Whether `personId`'s code found `connectionId` listed, and read it,
+       * the turn asked by `ask`.
+       */
       const readBy = async (
         personId: string,
         connectionId: string,
@@ -1143,14 +1146,21 @@ describe(
       ) => {
         const chat = await chatOf(
           personId,
+          codeStep(
+            "export default async (self, env) => await env.connections.list();"
+          ),
           calling(connectionId, "mail.search", { query: "invoice" }),
           says("Done.")
         );
         await ask(chat);
-        const [result] = await codeResults(chat.stub, chat.chat.id);
-        return result?.text.includes("connect.connection_not_found") !== true;
+        const [listed, read] = await codeResults(chat.stub, chat.chat.id);
+        return {
+          listed: listed?.text.includes(connectionId) === true,
+          read: read?.text.includes("connect.connection_not_found") !== true,
+        };
       };
 
+      const none = { listed: false, read: false };
       expect({
         member: await readBy(member.userId, team.id),
         outsider: await readBy(outsider.userId, team.id),
@@ -1165,10 +1175,10 @@ describe(
             })
         ),
       }).toStrictEqual({
-        member: true,
-        outsider: false,
-        nobodys: false,
-        woken: false,
+        member: { listed: true, read: true },
+        outsider: none,
+        nobodys: none,
+        woken: none,
       });
     });
 

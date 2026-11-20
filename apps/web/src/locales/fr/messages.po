@@ -5810,8 +5810,8 @@ msgid "Everyone in {project}"
 msgstr "Tout le monde dans {project}"
 
 #: src/connections/brain-audience.tsx
-msgid "Everyone in {team} will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}."
-msgstr "Tout le monde dans {team} pourra trouver ce que les agents lisent via {label} et ce qui en est copié, y compris ce qui a été conservé avant, quels que soient ses droits dans {label}."
+msgid "Everyone in {team} will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats."
+msgstr "Tout le monde dans {team} pourra trouver ce que les agents lisent via {label} et ce qui en est copié, y compris ce qui a été conservé avant, quels que soient ses droits dans {label}. Les assistants de chacun liront aussi {label} directement, dans leurs propres chats."
 
 #: src/drafts/sharing.tsx
 msgid "Everyone in a project you aren’t in"
@@ -5827,8 +5827,8 @@ msgid "Everyone in the company"
 msgstr "Tout le monde dans l’entreprise"
 
 #: src/connections/brain-audience.tsx
-msgid "Everyone in the company will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Choose a team if not everyone should see it."
-msgstr "Tout le monde dans l’entreprise pourra trouver ce que les agents lisent via {label} et ce qui en est copié, y compris ce qui a été conservé avant, quels que soient ses droits dans {label}. Choisissez une équipe si tout le monde ne doit pas le voir."
+msgid "Everyone in the company will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats. Choose a team if not everyone should have this."
+msgstr "Tout le monde dans l’entreprise pourra trouver ce que les agents lisent via {label} et ce qui en est copié, y compris ce qui a été conservé avant, quels que soient ses droits dans {label}. Les assistants de chacun liront aussi {label} directement, dans leurs propres chats. Choisissez une équipe si tout le monde ne doit pas y avoir accès."
 
 #: src/connections/sync-places.tsx
 msgid "Everyone in the company will be able to read everything in the places you pick, whatever their permissions in {label}."
@@ -5843,8 +5843,8 @@ msgid "Everyone in the team {team} will be able to read everything in the places
 msgstr "Tout le monde dans l’équipe {team} pourra lire tout ce que contiennent les emplacements que vous choisissez, quels que soient ses droits dans {label}."
 
 #: src/connections/brain-audience.tsx
-msgid "Everyone in this team will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}."
-msgstr "Tout le monde dans cette équipe pourra trouver ce que les agents lisent via {label} et ce qui en est copié, y compris ce qui a été conservé avant, quels que soient ses droits dans {label}."
+msgid "Everyone in this team will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats."
+msgstr "Tout le monde dans cette équipe pourra trouver ce que les agents lisent via {label} et ce qui en est copié, y compris ce qui a été conservé avant, quels que soient ses droits dans {label}. Les assistants de chacun liront aussi {label} directement, dans leurs propres chats."
 
 #: src/connections/sync-places.tsx
 msgid "Everyone in this team will be able to read everything in the places you pick, whatever their permissions in {label}."
@@ -17436,8 +17436,8 @@ msgid "Who may read it"
 msgstr "Qui peut le lire"
 
 #: src/connections/brain-audience.tsx
-msgid "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
-msgstr "Qui peut le lire se décide dans Grasp, pas par les droits dans {label} : choisissez une équipe si tout le monde ne doit pas le voir."
+msgid "Who may read it, in the Brain and through their assistant in their own chat, is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should have it."
+msgstr "Qui peut le lire, dans le Brain et via son assistant dans son propre chat, se décide dans Grasp, pas par les droits dans {label} : choisissez une équipe si tout le monde ne doit pas y avoir accès."
 
 #: src/connections/brain-audience.tsx
 msgid "Who may read what agents read through {label} was changed in the meantime. This is who may read it now: choose again if you still want to change it."
