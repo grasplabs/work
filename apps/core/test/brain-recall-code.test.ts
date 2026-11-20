@@ -351,8 +351,12 @@ const refusal = z.object({ failed: z.unknown() });
 
 // An App.
 
-/** An App whose action recalls what its caller asks, as asked. */
-const askApp = () =>
+/**
+ * An App whose action recalls what its caller asks, as asked: through its
+ * declared permission to read the Brain, or, `declared` false, declaring
+ * none (GRA-2218).
+ */
+const askApp = (declared = true) =>
   testApp(
     {
       name: "Ask",
@@ -362,7 +366,9 @@ const askApp = () =>
           access: { read: "owner", write: "owner" },
         },
       },
-      permissions: ['permission.brain({ operations: ["recall"] })'],
+      permissions: declared
+        ? ['permission.brain({ operations: ["recall"] })']
+        : [],
     },
     {
       "server/brain.ts": `import { v } from "@grasp-os/sdk";
@@ -382,8 +388,8 @@ export const ask = action({
   );
 
 /** The Ask App, sealed and current; its users `users`. */
-const askOf = async (owner: Member, users: Member[]) => {
-  const fixture: Fixture = await appWith(askApp(), "Ask", owner);
+const askOf = async (owner: Member, users: Member[], declared = true) => {
+  const fixture: Fixture = await appWith(askApp(declared), "Ask", owner);
   const release: Release = await seal(fixture);
   await rollback(env, appKind, fixture.owner, fixture.app, 1);
   for (const user of users) {
@@ -1442,6 +1448,45 @@ const recallingThen = async (
   });
   return workflow;
 };
+
+describe(
+  "an App that declares no permission to read the Brain",
+  setUpTime,
+  () => {
+    it("recalls what everyone in the company may read with no grant, never a team's nor anyone's own, marked from its first read on, a refused one too", async () => {
+      const { word, ada } = await company();
+      const app = await askOf(ada, [], false);
+      /** Whether the App is marked as having read the Brain by default. */
+      const marked = async () =>
+        (await env.DB.prepare(
+          "SELECT 1 FROM brain_default_reads WHERE subject_type = 'app' AND subject_id = ?"
+        )
+          .bind(app.app)
+          .first()) !== null;
+      const before = await marked();
+      // Refused by the recall itself, after the mark.
+      const refused = await askedOf(app, ada, { question: word, tokens: 0 });
+      const afterRefused = await marked();
+      const pack = await askedOf(app, ada, { question: word, tokens: 800 });
+      const [event] = await recallEvents(ada.userId, 2);
+
+      expect({
+        before,
+        refused,
+        afterRefused,
+        // Of this company's notes, each holding `word`: the one for everyone.
+        texts: textsOf(pack).filter((text) => text.includes(word)),
+        audited: event?.target,
+      }).toStrictEqual({
+        before: false,
+        refused: { failed: "permission.invalid_args" },
+        afterRefused: true,
+        texts: [`For everyone: ${word} is in the handbook.`],
+        audited: { type: "app", id: app.app },
+      });
+    });
+  }
+);
 
 describe("what code recalls, passed on", setUpTime, () => {
   it("reaches a shared App as what everyone in the company may read: never the team text of the person the run was for", async () => {

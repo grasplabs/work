@@ -2,7 +2,10 @@ import { httpContract } from "@grasp-os/shared/http-contract";
 import { isPlainObject } from "@grasp-os/shared/json";
 
 import type { FunctionChannel } from "./function-channel.ts";
-import { isActionPermission } from "./manifest-permissions.ts";
+import {
+  defaultPermission,
+  isActionPermission,
+} from "./manifest-permissions.ts";
 import { memberName, membersOf } from "./member-names.ts";
 import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
@@ -220,7 +223,8 @@ const clientOf = (
 /**
  * The App's permissions as an action's context holds them: `ai`,
  * `brain`, `grasp` and `guests` when declared, and the connections by
- * alias.
+ * alias; and the Brain's reads when it declares none
+ * (`defaultPermission`).
  */
 export const permissionsOf = (
   permissions: readonly AppPermission[],
@@ -228,6 +232,13 @@ export const permissionsOf = (
 ): Record<string, unknown> => {
   const connections: [string, unknown][] = [];
   const clients: Record<string, unknown> = {};
+  const byDefault = defaultPermission(
+    Object.fromEntries(permissions.map((declared) => [declared.alias, true])),
+    "brain"
+  );
+  if (byDefault !== undefined) {
+    clients.brain = clientOf(byDefault, channel);
+  }
   for (const declared of permissions) {
     if (!isActionPermission(declared)) {
       continue;

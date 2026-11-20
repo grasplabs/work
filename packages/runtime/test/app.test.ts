@@ -585,7 +585,7 @@ describe("the App's permissions in a function's context", () => {
     returns: v.object({ done: v.boolean() }),
   });
 
-  test("an action has every permission the App declares, and nothing else", async () => {
+  test("an action has every permission the App declares, the Brain's reads, and nothing else", async () => {
     const reach = server.action({
       args: {},
       returns: v.array(v.string()),
@@ -602,9 +602,10 @@ describe("the App's permissions in a function's context", () => {
       { notes: { list, reach } }
     );
     const { channel } = recordingChannel();
+    // The Brain's reads, which every App has (GRA-2218).
     await expect(
       runFunction(registered, "notes.reach", {}, channel)
-    ).resolves.toStrictEqual(["mail", "followUp"]);
+    ).resolves.toStrictEqual(["mail", "followUp", "brain"]);
   });
 
   test("a mutation stages the App's workflows, a query has none, and neither reaches a connection", async () => {

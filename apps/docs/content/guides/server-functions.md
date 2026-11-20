@@ -100,7 +100,24 @@ Every function of your App may use what the App's permissions declare, as its ki
 
 ## Recalling from the Brain
 
-An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Declare the Brain in `grasp.config.ts` with the operations your code uses: `recall` here, and its skills, entities and memories (below). Like every permission it grants nothing until an admin binds it to the App's permission to read the Brain.
+An action recalls what the company's Brain holds about a question with `ctx.brain.recall`. Every App reads the Brain without declaring anything: `recall`, its skills and its entities (below), of only what everyone in the company may read.
+
+```ts server/answers.ts
+import { v } from "@grasp-os/sdk";
+import type { BrainPack } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
+
+export const ask = action({
+  args: { question: v.string().trim().min(1).max(2000) },
+  handler: async (ctx, args): Promise<BrainPack> =>
+    await ctx.brain.recall({
+      question: args.question,
+      budget: { tokens: 2000 },
+    }),
+});
+```
+
+Declare the Brain in `grasp.config.ts` only for more: to remember and forget (below), or to recall what some teams may read. A declaration then decides: the App reaches the operations it lists, and nothing of the Brain until an admin binds it to the App's permission to read the Brain. A version that declares the Brain doesn't also read it by default.
 
 ```ts grasp.config.ts
 import { defineApp, permission } from "@grasp-os/sdk";
@@ -123,22 +140,7 @@ export default defineApp({
 });
 ```
 
-```ts server/answers.ts
-import { v } from "@grasp-os/sdk";
-import type { BrainPack } from "@grasp-os/sdk";
-import { action } from "@server/_generated/server";
-
-export const ask = action({
-  args: { question: v.string().trim().min(1).max(2000) },
-  handler: async (ctx, args): Promise<BrainPack> =>
-    await ctx.brain.recall({
-      question: args.question,
-      budget: { tokens: 2000 },
-    }),
-});
-```
-
-A recall from an App answers from what everyone in the company may read, and never from anyone's private chats or personal files, whoever calls. To recall what only some teams may read, the App's permission to read the Brain names those teams, by ID, when it is asked for (`{ type: "platform", teams: [...] }`). A recall then also answers from each of those teams that the person the call is for is in now, never from a team the permission doesn't name or the person isn't in. Only teams the person asking for the permission is in can be named. What an App recalls may end up in its data or on its Pages, so an App whose permission names teams is used only by people in all of them, its owner and the company's admins too: sharing it with anyone else is refused, and anyone who isn't in all of them, or leaves one, is refused every call (`app.unreadable`). Its owner and admins can still archive, remove or reset it. Renaming a team changes nothing. Such an App can't be called from a workflow, and an App a workflow may call can't name teams (`permission.team_brain_workflow`): a workflow's runs are read by whoever follows them. Only an App's permission names teams: a workflow's own recall reads what everyone in the company may read. The person the call is for must still be a member of the company. An App that recalls the Brain, directly or through a workflow it starts or follows or that calls its functions, answers no visitor and invites no guest.
+A recall from an App answers from what everyone in the company may read, and never from anyone's private chats or personal files, whoever calls. To recall what only some teams may read, the App's permission to read the Brain names those teams, by ID, when it is asked for (`{ type: "platform", teams: [...] }`). A recall then also answers from each of those teams that the person the call is for is in now, never from a team the permission doesn't name or the person isn't in. Only teams the person asking for the permission is in can be named. What an App recalls may end up in its data or on its Pages, so an App whose permission names teams is used only by people in all of them, its owner and the company's admins too: sharing it with anyone else is refused, and anyone who isn't in all of them, or leaves one, is refused every call (`app.unreadable`). Its owner and admins can still archive, remove or reset it. Renaming a team changes nothing. Such an App can't be called from a workflow, and an App a workflow may call can't name teams (`permission.team_brain_workflow`): a workflow's runs are read by whoever follows them. Only an App's permission names teams: a workflow's own recall reads what everyone in the company may read. The person the call is for must still be a member of the company. An App that reads the Brain, by default or through its permission, directly or through a workflow it starts or follows or that calls its functions, answers no visitor and invites no guest: from its first read on, for good, as what it read may stay in its data.
 
 An App's recall finds what everyone in the company may read: uploads shared with everyone, the company's vision once Grasp's first conversation with the company is in, its teams once the admin confirmed them, and what agents read through a shared connection an admin opened to everyone; and, with a permission that names teams, uploads shared with those teams and what agents read through a shared connection an admin opened to one of them. A company new to Grasp may have none of that yet, so a recall can return an empty pack (no `items`): build for one, and don't make a feature that works only when recall finds something.
 

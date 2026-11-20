@@ -55,7 +55,7 @@ import type {
   ResourceAdapter,
   ServedBinding,
 } from "./resource-adapter.ts";
-import { brainAdapter } from "./resource-brain.ts";
+import { brainAdapter, brainByDefault } from "./resource-brain.ts";
 import { connectorAdapter, contractReader } from "./resource-connector.ts";
 import type {
   ConnectionGrantRow,
@@ -907,8 +907,13 @@ export const resourceBindingsFor = (
     counts: given.counts ?? new Map<string, number>(),
   };
   return async (
-    declaration: AnyPermission
+    declaration: AnyPermission,
+    byDefault: boolean
   ): Promise<BoundResource | undefined> => {
+    // The Brain's reads of an App that declares none: no binding to find.
+    if (byDefault) {
+      return brainByDefault(env, caller);
+    }
     const row = await activeRow(env, caller.app, declaration.alias);
     if (row === undefined) {
       return undefined;
