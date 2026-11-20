@@ -4867,6 +4867,7 @@ msgid "Close it"
 msgstr "Schließen"
 
 #: src/frame/app-frame.tsx
+#: src/frame/part-words.tsx
 msgid "Close the chat"
 msgstr "Chat schließen"
 
@@ -11214,6 +11215,7 @@ msgstr "Neues Ziel der Geschäftsführung"
 
 #: src/chat/chat-panel.tsx
 #: src/chat/chat-window.tsx
+#: src/frame/part-words.tsx
 msgid "New chat"
 msgstr "Neuer Chat"
 
@@ -13493,6 +13495,10 @@ msgstr "Smartphone"
 msgctxt "a screen width"
 msgid "Phone"
 msgstr "Telefon"
+
+#: src/frame/part-words.tsx
+msgid "Pick a part of the page. Escape to stop."
+msgstr "Wähle einen Teil der Seite. Escape zum Beenden."
 
 #: src/apps/field-editor.tsx
 msgid "Pick a table"
@@ -17067,6 +17073,7 @@ msgstr "Besprochen in {source}"
 msgid "Talking to your team"
 msgstr "Im Gespräch mit Ihrem Team"
 
+#: src/frame/part-words.tsx
 #: src/projects/project-dialog.tsx
 msgid "Target"
 msgstr "Ziel"
