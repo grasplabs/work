@@ -66,7 +66,6 @@ const styles = stylex.create({
   inspector: {
     position: { default: "static", [media.fromSidebar]: "sticky" },
     insetBlockStart: 0,
-    paddingBlock: grasp.space8,
     paddingInline: { default: grasp.space4, [media.fromSidebar]: 0 },
     paddingInlineEnd: {
       default: grasp.space4,
