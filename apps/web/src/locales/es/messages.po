@@ -12,8 +12,8 @@ msgid "“{action}” doesn't exist yet"
 msgstr "«{action}» aún no existe"
 
 #: src/settings/directory-placement.tsx
-msgid "“{department}” couldn't be linked to that team. A team that follows the directory’s groups takes no department."
-msgstr "No se pudo vincular «{department}» a ese equipo. Un equipo que sigue los grupos del directorio no admite departamentos."
+msgid "“{department}” couldn't be linked to that team."
+msgstr "No se pudo vincular «{department}» a ese equipo."
 
 #: src/settings/directory-placement.tsx
 msgid "“{department}” is linked to {team}."
@@ -1064,6 +1064,10 @@ msgstr "{people, plural, one {{sector}, # persona.} other {{sector}, # personas.
 #: src/routes/_shell.settings.members.tsx
 msgid "{people, plural, one {# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start.} other {# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start.}}"
 msgstr "{people, plural, one {# persona tiene acceso. Las personas se unen iniciando sesión con la cuenta de tu organización; invítalas para darles un rol desde el principio.} other {# personas tienen acceso. Las personas se unen iniciando sesión con la cuenta de tu organización; invítalas para darles un rol desde el principio.}}"
+
+#: src/settings/directory-placement.tsx
+msgid "{people, plural, one {# person in the directory} other {# people in the directory}}"
+msgstr "{people, plural, one {# persona en el directorio} other {# personas en el directorio}}"
 
 #: src/brain/brain.ts
 #: src/workflows/requests/request-table.tsx
@@ -5094,6 +5098,10 @@ msgstr "Denegar los paquetes para {subject}"
 #: src/settings/directory-placement.tsx
 msgid "Departments linked by hand"
 msgstr "Departamentos vinculados a mano"
+
+#: src/settings/directory-placement.tsx
+msgid "Departments no team is linked to"
+msgstr "Departamentos sin equipo vinculado"
 
 #: src/apps/app-start.tsx
 msgid "Describe the App"
@@ -14898,6 +14906,10 @@ msgstr "El directorio se negó a listarlas, así que nadie fue suspendido por un
 #: src/settings/directory-placement.tsx
 msgid "The directory’s daily read puts everyone in each department in its team, except anyone an admin took off it by hand. Undoing a link takes nobody off."
 msgstr "La lectura diaria del directorio pone a todas las personas de cada departamento en su equipo, salvo a quien un administrador haya quitado a mano. Deshacer un vínculo no quita a nadie."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory’s daily read puts nobody from these departments in a team. Link each to a team, and its next read puts everyone in the department there, except anyone an admin took off it by hand."
+msgstr "La lectura diaria del directorio no pone a nadie de estos departamentos en un equipo. Vincula cada uno a un equipo y la siguiente lectura pondrá allí a todas las personas del departamento, salvo a quien un administrador haya quitado a mano."
 
 #: src/settings/directory-reads.tsx
 msgid "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."

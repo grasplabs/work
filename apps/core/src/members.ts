@@ -6,7 +6,7 @@ import {
 } from "@grasp-os/shared/connect";
 import { directoryErrors } from "@grasp-os/shared/directory";
 import type { CodedError } from "@grasp-os/shared/errors";
-import { identifierSchema } from "@grasp-os/shared/ids";
+import { identifierMaxLength, identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
@@ -59,7 +59,6 @@ import { personOf } from "./connections.ts";
 import {
   channelAccounts,
   directoryDepartments,
-  directoryGroupTeams,
   directoryPeople,
   directoryReads,
   invitations,
@@ -77,6 +76,7 @@ import {
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { directoryPlacementOf } from "./directory-placement.ts";
+import { followsGroupsOf } from "./directory-teams.ts";
 import { directoryKinds } from "./directory-ties.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
 import { guestsOf, inviteGuest } from "./guest-members.ts";
@@ -589,8 +589,12 @@ const releaseTeamPin = async (
   return { released: released.length > 0 };
 };
 
-/** A department as the directory keeps it: none is empty. */
-const departmentSchema = z.string().min(1);
+/**
+ * A department as the directory keeps it: none is empty. At most what an
+ * audit event's detail holds (`identifierMaxLength`), since its link and
+ * undo are recorded with it; Entra's own bound is 64.
+ */
+const departmentSchema = z.string().min(1).max(identifierMaxLength);
 
 /**
  * Links the directory's `department` to team `teamId` by hand (GRA-2247;
@@ -600,8 +604,10 @@ const departmentSchema = z.string().min(1);
  * admins set them. Nobody is placed here. Written only where, as the
  * statement runs, the admin still is one, the team is the organization's
  * and follows none of that directory's groups (no department fills such
- * a team), and no team is linked to the department yet: a link is never
- * overwritten, the read's by name or another admin's. Audited once.
+ * a team), and the department fills no team yet: a link that names a team
+ * following groups fills nothing and is replaced; any other, the read's
+ * by name or another admin's, is never overwritten. Audited once, with
+ * the department.
  */
 const linkDepartment = async (
   env: Env,
@@ -632,21 +638,27 @@ const linkDepartment = async (
               SELECT 1 FROM ${teams}
               WHERE ${teams.id} = ${team.data} AND ${teams.organizationId} = ${organizationId}
             )
-            AND NOT EXISTS (
-              SELECT 1 FROM ${directoryGroupTeams}
-              WHERE ${directoryGroupTeams.provider} = ${directoryPeople.provider}
-                AND ${directoryGroupTeams.teamId} = ${team.data}
-                AND ${directoryGroupTeams.readAt} IS NOT NULL
-            )
+            AND NOT ${followsGroupsOf(sql`${directoryPeople.provider}`, sql`${team.data}`)}
             AND ${isActiveAdmin(by.userId)}`
       )
-      // A department linked already keeps its link.
-      .onConflictDoNothing()
+      // In the update, the columns name the link there already.
+      .onConflictDoUpdate({
+        target: [
+          directoryDepartments.provider,
+          directoryDepartments.department,
+        ],
+        set: { teamId: sql`excluded.team_id`, byHand: true },
+        setWhere: followsGroupsOf(
+          sql`${directoryDepartments.provider}`,
+          sql`${directoryDepartments.teamId}`
+        ),
+      })
       .returning({ provider: directoryDepartments.provider }),
     outboxedIfChanged(db, {
       actor: actorOf(by),
       action: "directory.department_linked",
       target: { type: "team", id: team.data },
+      detail: { department: named.data },
     }),
   ]);
   if (linked.length > 0) {
@@ -694,6 +706,7 @@ const unlinkDepartment = async (
       actor: actorOf(by),
       action: "directory.department_unlinked",
       target: { type: "team", id: team.data },
+      detail: { department: named.data },
     }),
   ]);
   if (unlinked.length === 0 && !(await stillAdmin(env, by.userId))) {

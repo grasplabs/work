@@ -377,7 +377,7 @@ export const directoryErrors = defineErrorFamily({
     "That group can't be a team's: anyone can join it, its members can't all be read, or Microsoft didn't say which.",
   "directory.team_not_found": "There's no such team.",
   "directory.department_not_linked":
-    "That department can't be linked to that team: the directory no longer lists it, a team is linked to it already, or the team is gone or follows the directory's groups.",
+    "That department wasn't linked to that team.",
 });
 
 /** A code of the directory's errors (`directoryErrors`). */

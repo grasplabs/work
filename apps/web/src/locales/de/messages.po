@@ -12,8 +12,8 @@ msgid "“{action}” doesn't exist yet"
 msgstr "„{action}“ gibt es noch nicht"
 
 #: src/settings/directory-placement.tsx
-msgid "“{department}” couldn't be linked to that team. A team that follows the directory’s groups takes no department."
-msgstr "„{department}“ konnte nicht mit diesem Team verknüpft werden. Ein Team, das den Gruppen des Verzeichnisses folgt, nimmt keine Abteilung auf."
+msgid "“{department}” couldn't be linked to that team."
+msgstr "„{department}“ konnte nicht mit diesem Team verknüpft werden."
 
 #: src/settings/directory-placement.tsx
 msgid "“{department}” is linked to {team}."
@@ -1064,6 +1064,10 @@ msgstr "{people, plural, one {{sector}, # Person.} other {{sector}, # Personen.}
 #: src/routes/_shell.settings.members.tsx
 msgid "{people, plural, one {# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start.} other {# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start.}}"
 msgstr "{people, plural, one {# Person hat Zugriff. Man tritt bei, indem man sich mit dem Konto Ihrer Organisation anmeldet; laden Sie jemanden ein, um ihm von Anfang an eine Rolle zu geben.} other {# Personen haben Zugriff. Man tritt bei, indem man sich mit dem Konto Ihrer Organisation anmeldet; laden Sie jemanden ein, um ihm von Anfang an eine Rolle zu geben.}}"
+
+#: src/settings/directory-placement.tsx
+msgid "{people, plural, one {# person in the directory} other {# people in the directory}}"
+msgstr "{people, plural, one {# Person im Verzeichnis} other {# Personen im Verzeichnis}}"
 
 #: src/brain/brain.ts
 #: src/workflows/requests/request-table.tsx
@@ -5094,6 +5098,10 @@ msgstr "Pakete für {subject} ablehnen"
 #: src/settings/directory-placement.tsx
 msgid "Departments linked by hand"
 msgstr "Von Hand verknüpfte Abteilungen"
+
+#: src/settings/directory-placement.tsx
+msgid "Departments no team is linked to"
+msgstr "Abteilungen, mit denen kein Team verknüpft ist"
 
 #: src/apps/app-start.tsx
 msgid "Describe the App"
@@ -14898,6 +14906,10 @@ msgstr "Das Verzeichnis hat die Auflistung verweigert, also wurde niemand wegen 
 #: src/settings/directory-placement.tsx
 msgid "The directory’s daily read puts everyone in each department in its team, except anyone an admin took off it by hand. Undoing a link takes nobody off."
 msgstr "Der tägliche Abgleich des Verzeichnisses nimmt alle aus jeder Abteilung in ihr Team auf, außer wen ein Admin von Hand daraus entfernt hat. Wer eine Verknüpfung aufhebt, entfernt niemanden."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory’s daily read puts nobody from these departments in a team. Link each to a team, and its next read puts everyone in the department there, except anyone an admin took off it by hand."
+msgstr "Der tägliche Abgleich des Verzeichnisses nimmt niemanden aus diesen Abteilungen in ein Team auf. Verknüpfen Sie jede mit einem Team, dann nimmt der nächste Abgleich alle aus der Abteilung dort auf, außer wen ein Admin von Hand daraus entfernt hat."
 
 #: src/settings/directory-reads.tsx
 msgid "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."

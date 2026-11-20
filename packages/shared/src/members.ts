@@ -126,6 +126,13 @@ export interface DirectoryPlacement {
   pins: TeamPin[];
   /** The departments admins linked to a team by hand. */
   departmentLinks: DepartmentLink[];
+  /**
+   * Each department of the people the directory lists that fills no team,
+   * with how many it lists in it: the read places none of them.
+   */
+  unlinkedDepartments: { department: string; people: number }[];
+  /** The teams that follow the directory's groups, which no department fills. */
+  teamsFollowingGroups: string[];
 }
 
 /**
@@ -352,11 +359,11 @@ export interface MembersApi {
    */
   directoryPlacement: () => Promise<DirectoryPlacement>;
   /**
-   * Links the directory's `department`, which no team is linked to, to
-   * the team `teamId`, audited: the directory's next daily read places
-   * everyone in it there, leaving an admin's hand changes as they are.
-   * For each of the organization's directories that lists the
-   * department. Refused for a team that follows the directory's groups.
+   * Links the directory's `department`, which fills no team, to the team
+   * `teamId`, audited: the directory's next daily read places everyone in
+   * it there, leaving an admin's hand changes as they are. For each of
+   * the organization's directories that lists the department. Refused for
+   * a team that follows the directory's groups.
    */
   linkDepartment: (department: string, teamId: string) => Promise<void>;
   /**

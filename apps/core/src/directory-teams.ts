@@ -306,18 +306,22 @@ const memberPlacementOf = async (
 };
 
 /**
- * That `team` follows the directory's groups, as SQL: a group mapped to
- * it was read whole since. No department fills such a team.
+ * `followsGroups` for the directory `provider` names, as SQL: for a
+ * statement over several directories' rows.
  */
-export const followsGroups = (
-  kind: DirectoryKind,
-  team: SQL
-): SQL => sql`EXISTS (
+export const followsGroupsOf = (provider: SQL, team: SQL): SQL => sql`EXISTS (
   SELECT 1 FROM ${directoryGroupTeams}
-  WHERE ${directoryGroupTeams.provider} = ${kind.provider}
+  WHERE ${directoryGroupTeams.provider} = ${provider}
     AND ${directoryGroupTeams.teamId} = ${team}
     AND ${directoryGroupTeams.readAt} IS NOT NULL
 )`;
+
+/**
+ * That `team` follows the directory's groups, as SQL: a group mapped to
+ * it was read whole since. No department fills such a team.
+ */
+export const followsGroups = (kind: DirectoryKind, team: SQL): SQL =>
+  followsGroupsOf(sql`${kind.provider}`, team);
 
 /**
  * That `kind` ties `user` to a person a group of `team`'s lists, that
@@ -432,8 +436,10 @@ export const placementStatements = (
     AND EXISTS (
       SELECT 1 FROM ${teams} WHERE ${teams.id} = value ->> 1 AND ${teams.name} = value ->> 2
     )
+    AND NOT ${followsGroups(kind, sql`value ->> 1`)}
     AND ${linking}`;
-  // A link names only a team that exists, which takes its links with it.
+  // A link names only a team that exists, which takes its links with it,
+  // and never one that follows groups, which no department fills.
   // A tie names an active member, but at sign-in the tie is a batch of its
   // own: whether they still are one is asked again here.
   const joinable = sql`${directoryWants(kind, user, team)}
