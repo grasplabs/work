@@ -380,8 +380,8 @@ const audienceSelect = (): {
   };
 };
 
-/** Chooses `value` in the card's Brain audience: opens it and picks that option. */
-const choose = async (value: string): Promise<void> => {
+/** Chooses the option named `name` in the card's Brain audience: opens it and picks it. */
+const choose = async (name: string): Promise<void> => {
   const trigger = document.querySelector<HTMLElement>('[role="combobox"]');
   await act(async () => {
     trigger?.click();
@@ -390,9 +390,9 @@ const choose = async (value: string): Promise<void> => {
   await act(async () => {
     await Promise.resolve();
   });
-  const option = document.querySelector<HTMLElement>(
-    `[role="option"][id$="-option-${value}"]`
-  );
+  const option = [
+    ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+  ].find((each) => each.textContent.trim() === name);
   await act(async () => {
     option?.click();
     await Promise.resolve();
@@ -440,11 +440,11 @@ describe("a shared connection's Brain audience, for an admin", () => {
 
   it("asks before it opens to everyone, saying what was kept before is shown too, and changes nothing when cancelled", async () => {
     const asked = await asAdmin(shared);
-    await choose("everyone");
+    await choose("Everyone in the company");
     const asking = dialogText();
     await press("Cancel");
     const afterCancel = [...asked];
-    await choose("everyone");
+    await choose("Everyone in the company");
     await press("Keep it for them");
 
     expect({
@@ -476,8 +476,8 @@ describe("a shared connection's Brain audience, for an admin", () => {
       { kind: "everyone" }
     );
     // Narrowing from everyone to a team shows it to fewer: no question.
-    await choose("t1");
-    await choose("nobody");
+    await choose("Team Sales");
+    await choose("Nobody");
     await press("Erase what the Brain kept");
     const erasing = dialogText();
     await press("Erase for good");
@@ -486,7 +486,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     });
     document.body.replaceChildren();
     const fromNobody = await asAdmin(shared);
-    await choose("t1");
+    await choose("Team Sales");
     const toTeam = dialogText();
 
     expect({
@@ -547,7 +547,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     });
     document.body.replaceChildren();
     const asked = await asAdmin(kept, undefined, held);
-    await choose("t1");
+    await choose("Team Sales");
 
     expect({
       whileErasing,
@@ -585,7 +585,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     await asAdmin(kept, { kind: "everyone" }, undefined, {
       refusing: "change",
     });
-    await choose("nobody");
+    await choose("Nobody");
     await act(async () => {
       await Promise.resolve();
     });
@@ -607,7 +607,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     });
     const opened = { ...reads };
     // The first card's choice: narrowing, so no question.
-    await choose("nobody");
+    await choose("Nobody");
     await act(async () => {
       await Promise.resolve();
     });
@@ -624,7 +624,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     // Another admin closes it to nobody; this card still shows everyone.
     held.audience = { kind: "nobody" };
     // From everyone, a team narrows: no question, and core refuses it.
-    await choose("t1");
+    await choose("Team Sales");
     await act(async () => {
       await Promise.resolve();
     });
@@ -635,7 +635,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       shown: audienceSelect()?.value,
       held: held.audience,
     };
-    await choose("t1");
+    await choose("Team Sales");
 
     expect({
       after,
@@ -667,7 +667,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
   it("refuses a widening confirmed after another admin changed the audience behind the open question", async () => {
     const held: Held = { audience: { kind: "nobody" }, erasing: false };
     const asked = await asAdmin(shared, undefined, held);
-    await choose("everyone");
+    await choose("Everyone in the company");
     const asking = dialogText() !== "";
     // Another admin opens it to Sales; the window comes back and the
     // card reads it again behind the question.

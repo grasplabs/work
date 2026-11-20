@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Checkbox, CheckboxGroup } from "../grasp/checkbox/index.ts";
 import {
@@ -27,6 +28,7 @@ import {
   FieldDescription,
   FieldLabel,
 } from "../grasp/field/index.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -273,9 +275,8 @@ const PlacesForm = ({
   const confirmed = confirmedFor === keyOf(audience);
   return (
     <>
-      {/* In a group, each box is named by its title and described by its
-          site: every site has its own "Documents". */}
       <CheckboxGroup
+        aria-label={t`Copy into the Brain from ${label}`}
         disabled={busy}
         onValueChange={(value: string[]) => {
           setPicked([
@@ -289,7 +290,14 @@ const PlacesForm = ({
           <Field key={place} orientation="horizontal">
             <Checkbox value={place} />
             <FieldContent>
-              <FieldLabel>{title}</FieldLabel>
+              {/* Named by the place and its site: every site has its own
+                  "Documents". */}
+              <FieldLabel>
+                {title}
+                {within === null ? null : (
+                  <span {...stylex.props(visuallyHidden)}> {within}</span>
+                )}
+              </FieldLabel>
               {within === null ? null : (
                 <FieldDescription>{within}</FieldDescription>
               )}
@@ -425,7 +433,7 @@ export const SyncPlaces = ({
     if (read.state === "refused") {
       return (
         <>
-          <ErrorText>{read.message}</ErrorText>
+          <Alert tone="danger">{read.message}</Alert>
           <Button
             disabled={retrying}
             onClick={() => {
@@ -484,6 +492,7 @@ export const SyncPlaces = ({
   return (
     <section>
       <SectionHeader
+        headingLevel={3}
         layout={styles.head}
         size="sm"
         title={t`Copy into the Brain from ${label}`}

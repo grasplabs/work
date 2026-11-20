@@ -211,18 +211,10 @@ const shown = async (
   return asked;
 };
 
-/**
- * What a screen reader says of an element: its name, as its
- * `aria-labelledby` makes it, then its description.
- */
+/** An element's accessible name, as its `aria-labelledby` makes it. */
 const nameOf = (element: Element): string =>
-  [
-    element.getAttribute("aria-labelledby") ?? "",
-    element.getAttribute("aria-describedby") ?? "",
-  ]
-    .join(" ")
+  (element.getAttribute("aria-labelledby") ?? "")
     .split(" ")
-    .filter((id) => id !== "")
     .map((id) => document.querySelector(`#${id}`)?.textContent ?? "")
     .join(" ")
     .trim();

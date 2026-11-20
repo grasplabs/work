@@ -342,7 +342,7 @@ const EraseKept = ({
         <AlertDialogDescription>
           {t`Everything the Brain kept from it is erased for good, and nobody reads it from now on. This can't be undone. To keep anything from it again, choose who may read it once the erasure is done.`}
         </AlertDialogDescription>
-        {failure === undefined ? null : <Alert title={failure} tone="danger" />}
+        {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
         <AlertDialogFooter>
           <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
           <AlertDialogAction
