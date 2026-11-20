@@ -40,7 +40,7 @@ const Plan = () => {
           value={t`None yet`}
         />
         {/* What AI costs this month stands on its own page: the way there. */}
-        <SettingRow label={t`AI spend`}>
+        <SettingRow help={t`What AI costs this month`} label={t`AI spend`}>
           <Button
             render={<Link to="/settings/ai-providers" />}
             size="sm"
@@ -86,7 +86,10 @@ const BillingPage = () => {
           {failure === undefined ? null : (
             <RowAlert variant="danger">{failure}</RowAlert>
           )}
-          <SettingRow label={t`Email invoices`}>
+          <SettingRow
+            help={t`Each invoice to your billing email`}
+            label={t`Email invoices`}
+          >
             <Switch
               checked={billing.emailInvoices}
               aria-label={t`Email invoices`}
@@ -96,7 +99,10 @@ const BillingPage = () => {
               readOnly={readOnly}
             />
           </SettingRow>
-          <SettingRow label={t`Email payment receipts`}>
+          <SettingRow
+            help={t`A receipt for each payment`}
+            label={t`Email payment receipts`}
+          >
             <Switch
               checked={billing.emailReceipts}
               aria-label={t`Email payment receipts`}
@@ -116,7 +122,6 @@ const BillingPage = () => {
 const BillingPending = () => (
   <PageSkeletonSettings
     header={false}
-    help={false}
     sections={[{ rows: 2, title: false }, 2, 2]}
   />
 );
