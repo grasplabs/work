@@ -359,22 +359,54 @@ const asAdmin = async (
   return asked;
 };
 
-/** Chooses `value` in the card's Brain audience. */
+/**
+ * The card's choice of Brain audience, a library Select: the value it
+ * shows as chosen, and whether it may be changed; null when there is none.
+ */
+const audienceSelect = (): {
+  value: string | undefined;
+  disabled: boolean;
+} | null => {
+  const trigger =
+    document.querySelector<HTMLButtonElement>('[role="combobox"]');
+  if (trigger === null) {
+    return null;
+  }
+  return {
+    value: document.querySelector<HTMLInputElement>(
+      '[data-slot="select-form-input"]'
+    )?.value,
+    disabled: trigger.disabled || Object.hasOwn(trigger.dataset, "disabled"),
+  };
+};
+
+/** Chooses `value` in the card's Brain audience: opens it and picks that option. */
 const choose = async (value: string): Promise<void> => {
-  const select = document.querySelector("select");
+  const trigger = document.querySelector<HTMLElement>('[role="combobox"]');
   await act(async () => {
-    if (select !== null) {
-      select.value = value;
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    }
+    trigger?.click();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const option = document.querySelector<HTMLElement>(
+    `[role="option"][id$="-option-${value}"]`
+  );
+  await act(async () => {
+    option?.click();
     await Promise.resolve();
   });
 };
 
-/** Presses the button whose text is `text`, in the dialog when there is one. */
+/**
+ * Presses the button whose text starts with `text`, in the dialog when
+ * there is one: an alert dialog's answer also holds its working and
+ * failed words, to keep its width.
+ */
 const press = async (text: string): Promise<void> => {
-  const button = [...document.querySelectorAll("button")].findLast(
-    (each) => each.textContent === text
+  const button = [...document.querySelectorAll("button")].findLast((each) =>
+    each.textContent.startsWith(text)
   );
   await act(async () => {
     button?.click();
@@ -395,7 +427,7 @@ const returnToWindow = async (): Promise<void> => {
 
 /** The open dialog's text, or nothing. */
 const dialogText = (): string =>
-  document.querySelector('[role="dialog"]')?.textContent ?? "";
+  document.querySelector('[role="alertdialog"]')?.textContent ?? "";
 
 describe("a shared connection's Brain audience, for an admin", () => {
   afterEach(() => {
@@ -500,7 +532,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    const select = document.querySelector("select");
+    const select = audienceSelect();
     const whileErasing = {
       shown: select?.value,
       disabled: select?.disabled,
@@ -600,7 +632,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       says: document.body.textContent.includes(
         "Who may read what agents read through Notes was changed in the meantime. This is who may read it now: choose again if you still want to change it."
       ),
-      shown: document.querySelector("select")?.value,
+      shown: audienceSelect()?.value,
       held: held.audience,
     };
     await choose("t1");
@@ -619,7 +651,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
   it("reads the audience again when the window comes back, so an erasure that ended frees the choice", async () => {
     const held: Held = { audience: { kind: "nobody" }, erasing: true };
     await asAdmin(shared, undefined, held);
-    const whileErasing = document.querySelector("select")?.disabled;
+    const whileErasing = audienceSelect()?.disabled;
     held.erasing = false;
     await act(async () => {
       window.dispatchEvent(new Event("focus"));
@@ -628,7 +660,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
 
     expect({
       whileErasing,
-      back: document.querySelector("select")?.disabled,
+      back: audienceSelect()?.disabled,
     }).toStrictEqual({ whileErasing: true, back: false });
   });
 
@@ -676,14 +708,14 @@ describe("a shared connection's Brain audience, for an admin", () => {
     held.refusingReads = true;
     await returnToWindow();
     const refused = {
-      shown: document.querySelector("select")?.value,
+      shown: audienceSelect()?.value,
       says: document.body.textContent.includes(refusal),
     };
     held.refusingReads = false;
     held.audience = { kind: "team", teamId: "t1" };
     await returnToWindow();
     const back = {
-      shown: document.querySelector("select")?.value,
+      shown: audienceSelect()?.value,
       says: document.body.textContent.includes(refusal),
       // After the refusal, a whole read: the teams too.
       teamsRead: reads.teams,
@@ -698,7 +730,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       refusingReads: true,
     };
     await asAdmin(shared, undefined, firstRefused);
-    const opened = document.querySelector("select");
+    const opened = audienceSelect();
     firstRefused.refusingReads = false;
     await returnToWindow();
 
@@ -706,7 +738,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       refused,
       back,
       opened,
-      later: document.querySelector("select")?.value,
+      later: audienceSelect()?.value,
     }).toStrictEqual({
       refused: { shown: "everyone", says: true },
       back: { shown: "t1", says: false, teamsRead: 2 },
@@ -733,14 +765,14 @@ describe("a shared connection's Brain audience, for an admin", () => {
 
   it("is never shown to someone who isn't an admin, nor on a person's own connection", async () => {
     await asAdmin(connection({}));
-    const own = document.querySelector("select");
+    const own = audienceSelect();
     act(() => {
       root?.unmount();
     });
     document.body.replaceChildren();
     // The person, not an admin, on a shared connection.
     await disconnectDialog(shared);
-    const member = document.querySelector("select");
+    const member = audienceSelect();
 
     expect({ own, member }).toStrictEqual({ own: null, member: null });
   });

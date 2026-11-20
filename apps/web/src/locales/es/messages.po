@@ -4825,7 +4825,6 @@ msgstr "Acantilados"
 #: src/brain/forget.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/memories-page.tsx
-#: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
@@ -5619,6 +5618,10 @@ msgstr "No se pudo eliminar"
 #: src/connections/connection-list.tsx
 msgid "Couldn't disconnect"
 msgstr "No se pudo desconectar"
+
+#: src/connections/brain-audience.tsx
+msgid "Couldn't erase"
+msgstr "No se pudo borrar"
 
 #: src/activity/audit-words.ts
 msgid "Couldn't erase an upload from the Brain"
