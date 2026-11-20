@@ -942,7 +942,7 @@ export class PagesRpc extends CoreRpcTarget implements PagesApi {
     at: { version: number; path: string },
     problem: unknown
   ): Promise<void> {
-    await withPerson(this.#check, async (by) => {
+    await withPerson(this.#open("pages.report"), async (by) => {
       await reportProblem(this.#env, by, app, at, problem);
     });
   }

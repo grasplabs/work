@@ -124,21 +124,23 @@ export interface SharingRules {
 }
 
 /**
- * The organization's guests now, by name and ID alone, by name, each
+ * The organization's guests now, each by ID and named by their address
+ * (a guest is made without a name, guest-members.ts), by address, each
  * marked so: whom an App's builders may share it with besides its people
- * (app-members.ts), never anything else.
+ * (app-members.ts), never anything else. An erased guest is never one
+ * now: erasure comes after removal.
  */
 export const organizationGuests = async (
   env: Env
 ): Promise<{ id: string; name: string; guest: true }[]> => {
   const rows = await drizzle(env.DB)
-    .select({ id: users.id, name: users.name })
+    .select({ id: users.id, name: users.email })
     .from(members)
     .innerJoin(users, eq(users.id, members.userId))
     .where(
       and(eq(members.organizationId, organizationId), guestNow(members.userId))
     )
-    .orderBy(asc(users.name), asc(users.id));
+    .orderBy(asc(users.email), asc(users.id));
   return rows.map((row) => ({ ...row, guest: true }));
 };
 

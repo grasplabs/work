@@ -749,7 +749,7 @@ export const appErrors = defineErrorFamily({
   "app.share_unreadable":
     "This App has read data they can't read where it comes from, such as someone else's mailbox, so it can't be shared with them.",
   "app.guest_sources":
-    "This App reads company data, from a connection or the Brain, so only an admin can share it with a guest.",
+    "This App reads company data, from a connection or the Brain, so it can't be shared with a guest.",
   "app.unreadable":
     "This App has read data you can't read where it comes from, so it isn't open to you. Ask whoever shared it.",
   "app.blueprint_not_found": "There's no such blueprint.",

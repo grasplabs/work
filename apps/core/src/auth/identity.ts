@@ -144,6 +144,26 @@ export const memberOf = async (
 };
 
 /**
+ * Who `userId` is now as someone an App may act for after their call
+ * (a committed mutation's notification, app-notifications.ts): a member
+ * (`memberOf`), or a guest (guest-access.ts), an App's user in no team.
+ * `undefined` for neither. What they may do in the App is then
+ * `functionRoles`' to decide, as for their call itself.
+ */
+export const appUserOf = async (
+  database: D1Database,
+  userId: string
+): Promise<(Member & Pick<Identity, "guest">) | undefined> => {
+  const member = await memberOf(database, userId);
+  if (member !== undefined) {
+    return member;
+  }
+  return (await isGuest({ DB: database }, userId))
+    ? { userId, role: "user", teams: [], staff: false, guest: true }
+    : undefined;
+};
+
+/**
  * A Grasp staff member's role now, from the sign-in config:
  * `undefined` once the staff window has closed, they are no longer on the
  * staff list the admin keeps, the company's admin ended staff access,

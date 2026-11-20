@@ -6,7 +6,7 @@ import {
   createAuditEvent,
 } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { guestRole, isAdmin, roleSchema } from "@grasp-os/shared/roles";
+import { roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   newSubjectMemberSchema,
@@ -24,7 +24,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
-import { holdsAnySource } from "./app-access.ts";
+import { appsBuiltBy, holdsAnySource } from "./app-access.ts";
 import {
   hasSources,
   readerOf,
@@ -110,17 +110,22 @@ const rowOf = (app: App, member: SubjectMemberRef) =>
 /**
  * The member rows `where` picks, each with the name of its person, team
  * or project, in the order they were shared or last changed. A project's
- * name only for someone in it (`by`): to anyone else it stays unnamed.
+ * name only for someone in it (`by`): to anyone else it stays unnamed. A
+ * guest, made without a name (guest-members.ts), is named by their
+ * address, only to whoever may share the App (`sharer`); to anyone else
+ * by their name as it is.
  */
 const namedMembers = async (
   env: Env,
   by: Identity,
-  where: SQL | undefined
+  where: SQL | undefined,
+  sharer: boolean
 ): Promise<SubjectMember[]> => {
   const rows = await drizzle(env.DB)
     .select({
       row: appMembers,
       person: users.name,
+      address: users.email,
       team: teams.name,
       guest: sql<number>`${guestRow}`,
     })
@@ -171,12 +176,12 @@ const namedMembers = async (
       .filter(({ row }) => row.memberType === "project")
       .map(({ row }) => row.memberId)
   );
-  return rows.map(({ row, person, team, guest }) =>
+  return rows.map(({ row, person, address, team, guest }) =>
     toMember(
       row,
       row.memberType === "project"
         ? (projectNames.get(row.memberId) ?? null)
-        : (person ?? team),
+        : ((guest === 1 && sharer ? address : person) ?? team),
       guest === 1
     )
   );
@@ -256,7 +261,7 @@ const checkedPeople = async (
         and(
           eq(members.organizationId, organizationId),
           inList(members.userId, others),
-          or(mayAct(members.userId), guestNow(members.userId))
+          mayAct(members.userId)
         )
       ),
     db
@@ -277,10 +282,6 @@ const checkedPeople = async (
     teamsByPerson.set(userId, teamIds);
   }
   return roles.flatMap(({ userId, role }) => {
-    // A guest reads as an App's user, in no team (guest-access.ts).
-    if (role === guestRole) {
-      return [readerOf(userId, [], "user")];
-    }
     // A role that isn't one of ours is no access, as auth/identity.ts has it.
     const known = roleSchema.safeParse(role);
     if (!known.success) {
@@ -350,8 +351,8 @@ const requireReadable = async (
 };
 
 /**
- * Refuses sharing `app` with a guest unless `by` is an admin, when the
- * App holds any source (`holdsAnySource`, GRA-2235), with
+ * Refuses sharing `app` with a guest, whoever shares it, when the App
+ * holds any source (`holdsAnySource`, GRA-2235), with
  * `app.guest_sources`; the refusal is audited. The same rule holds on
  * each of the guest's requests (app-access.ts `requireAppRole`).
  */
@@ -361,7 +362,7 @@ const requireGuestShareable = async (
   app: App,
   member: NewSubjectMember
 ): Promise<void> => {
-  if (isAdmin(by.role) || !(await holdsAnySource(env, app.id))) {
+  if (!(await holdsAnySource(env, app.id))) {
     return;
   }
   const db = drizzle(env.DB);
@@ -390,7 +391,10 @@ export const listMembers = async (
   // Whom it is shared with is none of its data: its owner and admins see
   // it outside a team its Brain grants name (GRA-1842).
   const { id } = await appFor(env, by, app, "user", { managing: true });
-  return await namedMembers(env, by, eq(appMembers.appId, id));
+  // Whoever may share it: its builders and the admins, never Grasp staff.
+  const builds = await appsBuiltBy(env, by, [id]);
+  const sharer = !by.staff && builds.has(id);
+  return await namedMembers(env, by, eq(appMembers.appId, id), sharer);
 };
 
 /**
@@ -457,12 +461,7 @@ export const addMember = async (
       .onConflictDoUpdate({
         target: [appMembers.appId, appMembers.memberType, appMembers.memberId],
         set: { role: row.role, addedBy: row.addedBy, addedAt: row.addedAt },
-        // A guest's share records who made it too: an admin's sharing
-        // again is what gives them back an App that gained a source
-        // (app-access.ts `requireAppRole`).
-        setWhere: guest
-          ? or(ne(appMembers.role, row.role), ne(appMembers.addedBy, by.userId))
-          : ne(appMembers.role, row.role),
+        setWhere: ne(appMembers.role, row.role),
       }),
     outboxedEventWhere(db, event, sql`changes() > 0`),
     // Shared in the lowest role: a builder may have just become a user,
@@ -484,7 +483,7 @@ export const addMember = async (
       await requireStillBuilt(env, member.id, by.userId);
     }
   }
-  const [added] = await namedMembers(env, by, rowOf(found, member));
+  const [added] = await namedMembers(env, by, rowOf(found, member), true);
   // Unshared since the batch above: nothing of it stands.
   if (!added) {
     throw appErrors.create("app.conflict");

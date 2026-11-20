@@ -22,7 +22,7 @@ import {
 } from "./app-provenance.ts";
 import type { AppSources } from "./app-provenance.ts";
 import { teamsOf } from "./auth/identity.ts";
-import { activeMember, guestNow } from "./auth/membership-sql.ts";
+import { guestNow } from "./auth/membership-sql.ts";
 import { apps, appMembers, teamMembers } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { viaProjectSql } from "./project-sql.ts";
@@ -179,7 +179,6 @@ const appRole = async (
       shared: boolean;
       /** Whether they are a guest, as their identity or the database says. */
       guest: boolean;
-      sharedByAdmin: boolean;
     }
   | undefined
 > => {
@@ -188,15 +187,13 @@ const appRole = async (
   const admin = !guest && isAdmin(by.role);
   const owns = !guest && app.owner === by.userId;
   // Whom it is shared with matters only to someone neither admin nor
-  // owner; to a guest, only a share with them as a person counts, and
-  // whether an admin who may act now made it (`requireAppRole`).
+  // owner; to a guest, only a share with them as a person counts.
   const rows =
     admin || owns
       ? []
       : await drizzle(env.DB)
           .select({
             role: appMembers.role,
-            byAdmin: sql<number>`${activeMember(appMembers.addedBy, ["admin"])}`,
             // Read too, so a guest's identity that lost its mark is still
             // held to a guest's rule.
             guestNow: sql<number>`${guestNow(by.userId)}`,
@@ -223,7 +220,6 @@ const appRole = async (
     : {
         ...found,
         guest: guest || rows.some((row) => row.guestNow === 1),
-        sharedByAdmin: rows.some(({ byAdmin }) => byAdmin === 1),
       };
 };
 
@@ -231,8 +227,9 @@ const appRole = async (
  * Whether App `app` holds any source (GRA-2235): a connection it was
  * ever granted, shared ones too, a grant to read the Brain, or a Brain
  * read by default, itself or through the workflows and Apps it reaches
- * (app-provenance.ts). What decides whether a guest may have it only
- * from an admin; `sources` when the caller read them already.
+ * (app-provenance.ts). A source once held counts for good. Such an App
+ * takes no guests, whoever shares it (app-members.ts, `requireAppRole`);
+ * `sources` when the caller read them already.
  */
 export const holdsAnySource = async (
   env: Env,
@@ -275,16 +272,16 @@ export const requireAppRole = async (
   if (found === undefined) {
     throw appErrors.create("app.not_found");
   }
-  const { role, shared, guest, sharedByAdmin } = found;
+  const { role, shared, guest } = found;
   if (needed === "builder" && role !== "builder") {
     throw roleErrors.create("role.forbidden");
   }
   if (shared) {
     const held = sources ?? (await sourcesOf(env, app.id));
-    // A guest has an App that holds a source only from an admin's share
-    // (GRA-2235): one a builder made lapses once it gains one, read on
-    // every request, until an admin shares it with them again.
-    if (guest && !sharedByAdmin && (await holdsAnySource(env, app.id, held))) {
+    // An App that holds a source takes no guests (GRA-2235): read on
+    // every request, at a call's start and before each commit, so a
+    // guest's share lapses for good the moment the App gains one.
+    if (guest && (await holdsAnySource(env, app.id, held))) {
       throw appErrors.create("app.unreadable");
     }
     const unreadable = unreadableBy(

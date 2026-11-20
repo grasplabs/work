@@ -48,9 +48,14 @@ const idp = mockIdp();
 
 /** Makes the member `userId` a guest, as nothing in the product does yet. */
 const makeGuest = async (userId: string): Promise<void> => {
-  await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
-    .bind(guestRole, userId)
-    .run();
+  // Nameless, as guest-members.ts makes a guest.
+  await env.DB.batch([
+    env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?").bind(
+      guestRole,
+      userId
+    ),
+    env.DB.prepare("UPDATE users SET name = '' WHERE id = ?").bind(userId),
+  ]);
 };
 
 /** Someone signed in as a member, made a guest since. */
@@ -221,7 +226,7 @@ describe("a guest", { timeout: 60_000 }, () => {
       inTeams,
     }).toStrictEqual({
       colleague: { id: colleague.userId, name: colleague.person.name },
-      guest: { id: guest.userId, name: guest.person.name, guest: true },
+      guest: { id: guest.userId, name: guest.person.email, guest: true },
       added: 403,
       inTeams: 0,
     });

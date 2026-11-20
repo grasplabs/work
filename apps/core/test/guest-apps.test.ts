@@ -26,6 +26,8 @@ import {
   signedInWithRole,
   unique,
 } from "./sign-in.ts";
+import { storedGrant } from "./stored-grants.ts";
+import { connectDb } from "./test-env.ts";
 
 // A guest (GRA-2235) shared an App and using it, from the threat model
 // on the issue: what a guest's session reaches (an App shared with them,
@@ -41,11 +43,18 @@ const idp = mockIdp();
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
-/** Makes the member `userId` a guest, as nothing in the product does yet. */
+/**
+ * Makes the member `userId` a guest, as nothing in this pull request does
+ * yet: nameless, as guest-members.ts makes one.
+ */
 const makeGuest = async (userId: string): Promise<void> => {
-  await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
-    .bind(guestRole, userId)
-    .run();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?").bind(
+      guestRole,
+      userId
+    ),
+    env.DB.prepare("UPDATE users SET name = '' WHERE id = ?").bind(userId),
+  ]);
 };
 
 /** Someone signed in as a member, made a guest, on a connection of their own. */
@@ -88,6 +97,10 @@ const deskFiles = testApp(
             write: [{ kind: "team", field: "team" }],
           },
         },
+      },
+      gates: {
+        fields: { text: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
       },
       tasks: {
         fields: { text: "v.string()", who: "v.person()" },
@@ -183,6 +196,48 @@ export const tasks = query({
   args: {},
   returns: v.string(),
   handler: async (ctx) => await reading(() => ctx.db.query("tasks").take(100)),
+});
+
+export const openGate = mutation({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => await writing(() => ctx.db.insert("gates", { text: "open" })),
+});
+
+export const gateOpen = query({
+  args: {},
+  returns: v.boolean(),
+  handler: async (ctx) => (await ctx.db.query("gates").take(1)).length > 0,
+});
+
+/**
+ * Writes "before" to the members' table and reads it, waits for the gate
+ * to open (or a read to be refused), then tries to write "after", its
+ * refusal swallowed: answers what it read.
+ */
+export const waitThenShare = action({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => {
+    await ctx.runMutation(putShared, { text: "before" });
+    const read = await ctx.runQuery(shared, {});
+    for (let polls = 0; polls < 100; polls += 1) {
+      try {
+        if (await ctx.runQuery(gateOpen, {})) {
+          break;
+        }
+      } catch {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    try {
+      await ctx.runMutation(putShared, { text: "after" });
+    } catch {
+      // Refused: what it read is still its answer.
+    }
+    return read;
+  },
 });
 
 /** Who calls, as the function sees it. */
@@ -337,6 +392,40 @@ const listed = async (who: Person): Promise<string[]> => {
   return apps.map(({ app }) => app);
 };
 
+/**
+ * An App or a workflow marked as having read the Brain by default, as
+ * core's default read marks it (resource-brain.ts).
+ */
+const readByDefault = (subject: "app" | "workflow", id: string) =>
+  env.DB.prepare(
+    "INSERT INTO brain_default_reads (subject_type, subject_id, first_read_at) VALUES (?, ?, ?)"
+  ).bind(subject, id, Date.now());
+
+/** A grant of `subject` on `object`, active, as an admin's grant writes it. */
+const grantedRow = (
+  subjectType: "app" | "workflow",
+  subject: string,
+  objectType: "app" | "workflow",
+  object: string,
+  actions: string[]
+) =>
+  env.DB.prepare(
+    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+      actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'test', 0, 'test', 0)`
+  ).bind(
+    crypto.randomUUID(),
+    subjectType,
+    subject,
+    objectType,
+    object,
+    JSON.stringify(actions),
+    `GRANT_${unique().toUpperCase().replaceAll(/\W/gu, "_")}`
+  );
+
+/** A workflow's ID no other test has. */
+const workflowId = (): string => `workflow_${unique().replaceAll("-", "")}`;
+
 /** Marks App `app` as having read the Brain by default (resource-brain.ts). */
 const readsTheBrain = async (app: string): Promise<void> => {
   await env.DB.prepare(
@@ -403,9 +492,11 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
     });
   });
 
-  it("is shared it only as its user, offered to whoever shares it and marked as a guest", async () => {
+  it("is shared it only as its user, named by their address to whoever shares it, and marked as a guest", async () => {
     const { builder, app } = await desk();
+    const member = await signedInApi(idp, "user");
     const guest = await signedInGuest();
+    await share(builder, app, member);
 
     const offered = await builder.api.apps.members.candidates(app);
     const asBuilder = await outcome(
@@ -416,82 +507,194 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
       })
     );
     const asUser = await share(builder, app, guest);
-    const listedMembers = await builder.api.apps.members.list(app);
-    const member = listedMembers.find(({ id }) => id === guest.userId);
+    const guestIn = async (who: Person) => {
+      const members = await who.api.apps.members.list(app);
+      const found = members.find(({ id }) => id === guest.userId);
+      return { name: found?.name, role: found?.role, guest: found?.guest };
+    };
 
     expect({
       offered: offered.people.find(({ id }) => id === guest.userId),
       asBuilder,
       asUser,
-      member: { role: member?.role, guest: member?.guest },
+      toBuilder: await guestIn(builder),
+      // Someone who only uses it isn't told the guest's address.
+      toMember: await guestIn(member),
     }).toStrictEqual({
-      offered: { id: guest.userId, name: guest.person.name, guest: true },
+      offered: { id: guest.userId, name: guest.person.email, guest: true },
       asBuilder: "app.member_invalid",
       asUser: "ok",
-      member: { role: "user", guest: true },
+      toBuilder: { name: guest.person.email, role: "user", guest: true },
+      toMember: { name: "", role: "user", guest: true },
     });
   });
 
-  it("is shared one holding a source by an admin alone: a builder is refused, and the refusal recorded", async () => {
+  it("is never shared one that holds a source, by an admin or a builder alike, and each refusal is recorded", async () => {
     const shared = await desk();
     const { builder, app } = shared;
     const admin = await signedInApi(idp, "admin");
     const guest = await signedInGuest();
     await readsTheBrain(app);
 
-    const refused = await share(builder, app, guest);
     const events = await auditedDuring(async () => {
-      await share(builder, app, guest);
+      expect([
+        await share(builder, app, guest),
+        await share(admin, app, guest),
+      ]).toStrictEqual(["app.guest_sources", "app.guest_sources"]);
     });
-    const byAdmin = await share(admin, app, guest);
 
     expect({
-      refused,
-      events: events.map(({ action, detail }) => ({ action, detail })),
-      byAdmin,
+      events: events.map(({ action, actor, detail }) => ({
+        action,
+        actor,
+        detail,
+      })),
       call: await call(shared, guest, "desk.notes"),
     }).toStrictEqual({
-      refused: "app.guest_sources",
-      events: [
-        {
-          action: "app.member.refused",
-          detail: {
-            memberType: "person",
-            member: guest.userId,
-            role: "user",
-            reason: "app.guest_sources",
-          },
+      events: [builder, admin].map(({ userId }) => ({
+        action: "app.member.refused",
+        actor: { type: "person", userId },
+        detail: {
+          memberType: "person",
+          member: guest.userId,
+          role: "user",
+          reason: "app.guest_sources",
         },
-      ],
-      byAdmin: "ok",
-      call: [],
+      })),
+      call: "app.not_found",
     });
   });
 
-  it("loses one a builder shared once it gains a source, on their next request, until an admin shares it again", async () => {
-    const shared = await desk();
-    const { builder, app } = shared;
+  it("loses it for good on their next request once it gains a source of any kind", async () => {
+    const builder = await signedInApi(idp, "builder");
     const admin = await signedInApi(idp, "admin");
     const guest = await signedInGuest();
-    await share(builder, app, guest);
-    const before = await call(shared, guest, "desk.notes");
-
-    await readsTheBrain(app);
-    const after = await call(shared, guest, "desk.notes");
-    const home = await listed(guest);
-    // A builder sharing it again gives nothing back.
-    const again = await share(builder, app, guest);
-    const byAdmin = await share(admin, app, guest);
-    const restored = await call(shared, guest, "desk.notes");
-
-    expect({ before, after, home, again, byAdmin, restored }).toStrictEqual({
+    const now = Date.now();
+    // Each kind of source, as a grant, connect's record of a connection
+    // or core's mark of a default read leaves it.
+    const kinds: Record<string, (app: string) => Promise<void>> = {
+      personalConnection: async (app) => {
+        const id = `connection-mailbox-${unique()}`;
+        await connectDb()
+          .prepare(
+            "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', ?, ?)"
+          )
+          .bind(id, builder.userId, now, now)
+          .run();
+        await storedGrant(
+          { type: "app", id: app },
+          { type: "connection", id },
+          ["mail.list"],
+          `MAIL_${unique().replaceAll("-", "_").toUpperCase()}`
+        );
+      },
+      sharedConnection: async (app) => {
+        const id = `connection-shared-${unique()}`;
+        await connectDb()
+          .prepare(
+            "INSERT INTO connections (id, provider, scope, status, server_kind, server, created_at, updated_at) VALUES (?, 'mail', 'shared', 'active', 'composio', 'https://backend.composio.dev/v3/mcp/none', ?, ?)"
+          )
+          .bind(id, now, now)
+          .run();
+        await storedGrant(
+          { type: "app", id: app },
+          { type: "connection", id },
+          ["mail.list"],
+          `MAIL_${unique().replaceAll("-", "_").toUpperCase()}`
+        );
+      },
+      brainGrant: async (app) => {
+        await storedGrant(
+          { type: "app", id: app },
+          { type: "platform", id: "platform" },
+          ["brain"],
+          `BRAIN_${unique().replaceAll("-", "_").toUpperCase()}`
+        );
+      },
+      brainByDefault: async (app) => {
+        await readsTheBrain(app);
+      },
+      // A workflow that reads the Brain by default calls the App's
+      // functions.
+      throughAWorkflow: async (app) => {
+        const workflow = workflowId();
+        await env.DB.batch([
+          readByDefault("workflow", workflow),
+          grantedRow("workflow", workflow, "app", app, ["call"]),
+        ]);
+      },
+      // Another App that reads the Brain by default starts a workflow
+      // that calls this one's functions.
+      throughAnotherApp: async (app) => {
+        const [other, workflow] = [crypto.randomUUID(), workflowId()];
+        await env.DB.batch([
+          readByDefault("app", other),
+          grantedRow("app", other, "workflow", workflow, ["start"]),
+          grantedRow("workflow", workflow, "app", app, ["call"]),
+        ]);
+      },
+    };
+    const answers: Record<string, unknown> = {};
+    for (const [kind, gain] of Object.entries(kinds)) {
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      const shared = await desk(builder);
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      await share(builder, shared.app, guest);
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      const before = await call(shared, guest, "desk.notes");
+      // oxlint-disable-next-line no-await-in-loop -- one App after the other
+      await gain(shared.app);
+      answers[kind] = {
+        before,
+        // oxlint-disable-next-line no-await-in-loop -- one App after the other
+        after: await call(shared, guest, "desk.notes"),
+        // Nobody gives it back, an admin included.
+        // oxlint-disable-next-line no-await-in-loop -- one App after the other
+        again: await share(admin, shared.app, guest),
+      };
+    }
+    const expected = {
       before: [],
       after: "app.unreadable",
-      home: [],
       again: "app.guest_sources",
-      byAdmin: "ok",
-      restored: [],
+    };
+
+    expect({ answers, home: await listed(guest) }).toStrictEqual({
+      answers: Object.fromEntries(
+        Object.keys(kinds).map((kind) => [kind, expected])
+      ),
+      home: [],
     });
+  });
+
+  it("keeps what a call already running read once the App gains a source: its next commit and its answer are refused", async () => {
+    const shared = await desk();
+    const { builder, app } = shared;
+    const member = await signedInApi(idp, "user");
+    const guest = await signedInGuest();
+    await share(builder, app, member);
+    await share(builder, app, guest);
+    await call(shared, member, "desk.shared");
+
+    const running = call(shared, guest, "desk.waitThenShare");
+    // Once its first write is in, the App gains a source, then the
+    // action is let go on.
+    for (let polls = 0; polls < 100; polls += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- until the first write is in
+      const rows = await call(shared, member, "desk.shared");
+      if (Array.isArray(rows) && rows.includes("before")) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- until the first write is in
+      await scheduler.wait(100);
+    }
+    await readsTheBrain(app);
+    await call(shared, member, "desk.openGate");
+
+    expect({
+      answer: await running,
+      rows: await call(shared, member, "desk.shared"),
+    }).toStrictEqual({ answer: "app.unreadable", rows: ["before"] });
   });
 
   it("is its user inside it: told who they are, never the directory or the Brain, and a user's rows of its store", async () => {
@@ -537,6 +740,8 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
       }),
       tasks: await call(shared, guest, "desk.tasks"),
       brain: await call(shared, guest, "desk.ask"),
+      // Reading the Brain by default marked the App as holding a source.
+      afterBrain: await call(shared, guest, "desk.notes"),
       memberBrain: await call(shared, member, "desk.ask"),
     };
 
@@ -546,7 +751,7 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
       written: ["ok", "ok", "ok", "data.write_denied", "ok"],
       user: {
         id: guest.userId,
-        name: guest.person.name,
+        name: "",
         email: guest.person.email,
         roles: ["user"],
       },
@@ -559,8 +764,10 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
       accounts: [],
       emptyTeam: "data.write_denied",
       tasks: [],
-      // In the function host's words for a Brain read refused.
-      brain: "permission.unavailable",
+      // The read marks the App as holding a source, so the answer goes
+      // to no guest.
+      brain: "app.unreadable",
+      afterBrain: "app.unreadable",
       memberBrain: "ok",
     });
   });

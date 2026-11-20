@@ -34,6 +34,8 @@ export const guestRpc = [
   "pages.open",
   "pages.frame",
   "pages.watchVersion",
+  // A problem in that page, to the App's error log its builders read.
+  "pages.report",
 ] as const;
 
 /** One of `guestRpc`. */

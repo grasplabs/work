@@ -684,6 +684,40 @@ describe("a mutation's ctx.notifyPeople", () => {
     });
   });
 
+  it("tells for a guest the App is shared with, from a commit as from an action", async () => {
+    const fx = await fixture();
+    const outsider = await person("user");
+    // A guest (GRA-2235): an App's user from outside the company, whose
+    // identity only the routes open to guests make (guest-access.ts).
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE members SET role = 'guest' WHERE user_id = ?"
+      ).bind(outsider.userId),
+      env.DB.prepare(
+        "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+      ).bind(fx.app, outsider.userId, fx.ada.userId, Date.now()),
+    ]);
+    const guest: Identity = { ...outsider, role: "user", guest: true };
+
+    const told = await call(fx, guest, "orders.tell", {
+      to: fx.ada.userId,
+      title: "From a guest's action",
+    });
+    const placed = await call(fx, guest, "orders.place", { to: fx.ada.userId });
+    await drain(fx);
+    const titles = await titlesTo(fx.ada);
+
+    expect({
+      told: answerOf(told),
+      placed: answerOf(placed),
+      titles: titles.toSorted(),
+    }).toStrictEqual({
+      told: { delivered: 1 },
+      placed: null,
+      titles: ["An order was placed", "From a guest's action"],
+    });
+  });
+
   it("tells nobody for a mutation that fails", async () => {
     const fx = await fixture();
     const placed = await call(fx, fx.bob, "orders.place", {
