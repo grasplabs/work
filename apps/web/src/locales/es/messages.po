@@ -3419,8 +3419,8 @@ msgid "Asking"
 msgstr "Preguntando"
 
 #: src/brain/activity-page.tsx
-msgid "Asking failed: {cannotAsk}"
-msgstr "No se pudo preguntar: {cannotAsk}"
+msgid "Asking failed: {reason}"
+msgstr "No se pudo preguntar: {reason}"
 
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx

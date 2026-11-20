@@ -3419,8 +3419,8 @@ msgid "Asking"
 msgstr "Envoi de la question"
 
 #: src/brain/activity-page.tsx
-msgid "Asking failed: {cannotAsk}"
-msgstr "Impossible de poser la question : {cannotAsk}"
+msgid "Asking failed: {reason}"
+msgstr "Impossible de poser la question : {reason}"
 
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx

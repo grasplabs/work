@@ -466,7 +466,7 @@ export const ActivityPage = () => {
   }
 
   const inHand = open === undefined ? undefined : opened.get(open);
-  const cannotAsk =
+  const reason =
     failed !== undefined && failed.gap === inHand?.ask?.id
       ? failed.reason
       : undefined;
@@ -489,8 +489,8 @@ export const ActivityPage = () => {
         await session.brain.askAboutGap(gap.id);
         await router.invalidate();
       },
-      (reason) => {
-        setFailed({ gap: gap.id, reason });
+      (why) => {
+        setFailed({ gap: gap.id, reason: why });
       }
     );
   };
@@ -524,7 +524,11 @@ export const ActivityPage = () => {
               label,
               lines: lines.map(({ line }) => line),
             }))}
-            onMore={more}
+            onMore={(section) => {
+              if (section === "fresh") {
+                more();
+              }
+            }}
             onOpen={(id) => {
               readAt.current = pane.current?.scrollTop ?? 0;
               setOpen(id);
@@ -579,9 +583,7 @@ export const ActivityPage = () => {
               icon={inHand.icon}
               kept={inHand.kept}
               error={
-                cannotAsk === undefined
-                  ? undefined
-                  : t`Asking failed: ${cannotAsk}`
+                reason === undefined ? undefined : t`Asking failed: ${reason}`
               }
               meta={inHand.meta}
               onClose={() => {
