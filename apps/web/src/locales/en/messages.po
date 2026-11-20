@@ -19950,6 +19950,10 @@ msgstr "What it should know and how it should work. Grasp's own rules always hol
 msgid "What it starts with"
 msgstr "What it starts with"
 
+#: src/brain/opportunities-page.tsx
+msgid "What it takes now"
+msgstr "What it takes now"
+
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"
 msgstr "What its calls answer"

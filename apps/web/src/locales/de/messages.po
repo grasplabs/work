@@ -19950,6 +19950,10 @@ msgstr "Was er wissen und wie er arbeiten soll. Die Regeln von Grasp gelten imme
 msgid "What it starts with"
 msgstr "Womit er startet"
 
+#: src/brain/opportunities-page.tsx
+msgid "What it takes now"
+msgstr "Was es jetzt kostet"
+
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"
 msgstr "Was seine Aufrufe antworten"

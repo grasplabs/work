@@ -19950,6 +19950,10 @@ msgstr "Ce qu’il doit savoir et comment il doit travailler. Les règles de Gra
 msgid "What it starts with"
 msgstr "Ce avec quoi il démarre"
 
+#: src/brain/opportunities-page.tsx
+msgid "What it takes now"
+msgstr "Ce que cela demande aujourd’hui"
+
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"
 msgstr "Ce que répondent ses appels"
