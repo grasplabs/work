@@ -1204,14 +1204,14 @@ const EntityName = ({ entity }: { entity: BrainEntityListed }) => {
   }
   if (entity.unreadable) {
     return (
-      <Text element="span" size="sm" tone="muted">
+      <Text element="span" size="sm" tone="muted" weight="medium">
         <Trans>Something you corrected, which you can no longer read</Trans>
       </Text>
     );
   }
   return (
     entity.name ?? (
-      <Text element="span" size="sm" tone="muted">
+      <Text element="span" size="sm" tone="muted" weight="medium">
         <Trans>Without a name</Trans>
       </Text>
     )
@@ -1490,7 +1490,7 @@ const EntityPanel = ({
         <div {...stylex.props(styles.row)}>
           <Heading id={heading} level={3} size="ui-sm">
             {entity === null ? (
-              <Text element="span" size="sm" tone="muted">
+              <Text element="span" size="sm" tone="muted" weight="medium">
                 {items.length > 0 ? (
                   <Trans>Forgotten, kept as history</Trans>
                 ) : (
