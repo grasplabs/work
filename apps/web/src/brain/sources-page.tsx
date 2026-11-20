@@ -684,9 +684,12 @@ const SearchResults = ({
 /** Uploading a file into the Brain: the file, and who may read it, then Upload. */
 const UploadForm = ({
   teams,
+  onUploading,
   onUploaded,
 }: {
   teams: Team[];
+  /** Whether a file is uploading now: the dialog stays open meanwhile. */
+  onUploading: (uploading: boolean) => void;
   onUploaded: (source: BrainSourceRef) => void;
 }) => {
   const { t } = useLingui();
@@ -719,6 +722,7 @@ const UploadForm = ({
               return;
             }
             setSent({ state: "loading" });
+            onUploading(true);
             void (async () => {
               const answer = await readFrom(
                 core,
@@ -730,6 +734,7 @@ const UploadForm = ({
                   )
               );
               setSent(answer);
+              onUploading(false);
               if (answer.state === "ready") {
                 onUploaded(answer.data.source);
               }
@@ -787,6 +792,7 @@ const UploadForm = ({
         <Button
           disabled={file === undefined || busy}
           form={formId}
+          size="sm"
           type="submit"
           variant="ink"
         >
@@ -810,11 +816,23 @@ const UploadDialog = ({
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
+  // While a file uploads the dialog stays open, so its form keeps the
+  // file, the upload's id and what core answers.
+  const [uploading, setUploading] = useState(false);
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
+    <Dialog
+      onOpenChange={(next: boolean) => {
+        if (!next && uploading) {
+          return;
+        }
+        setOpen(next);
+      }}
+      open={open}
+    >
       <DialogTrigger>{t`Upload`}</DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
         <UploadForm
+          onUploading={setUploading}
           onUploaded={(source) => {
             setOpen(false);
             onUploaded(source);

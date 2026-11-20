@@ -1389,6 +1389,9 @@ describe(SourcesPage, () => {
     const before = uploadPicker().disabled;
     await submitted(uploadForm());
     const whileUploading = uploadPicker().disabled;
+    // Cancel can't take the form, and the file it holds, away meanwhile.
+    await cancelUpload();
+    const stillOpen = uploadDialog() !== null;
     held.resolve(true);
     await settle();
     await openUpload();
@@ -1396,10 +1399,12 @@ describe(SourcesPage, () => {
     expect({
       before,
       whileUploading,
+      stillOpen,
       after: uploadPicker().disabled,
     }).toStrictEqual({
       before: false,
       whileUploading: true,
+      stillOpen: true,
       after: false,
     });
   });
