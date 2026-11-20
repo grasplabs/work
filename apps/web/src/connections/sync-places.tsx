@@ -305,7 +305,6 @@ const PlacesForm = ({
             onCheckedChange={(checked) => {
               setConfirmedFor(checked === true ? keyOf(audience) : undefined);
             }}
-            required
           />
           <FieldContent>
             <FieldLabel>
