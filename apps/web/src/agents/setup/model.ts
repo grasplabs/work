@@ -10,6 +10,7 @@ import type { AgentTemplate } from "../agent-templates.ts";
 
 /** The steps, in the order they are asked. */
 export const steps = [
+  "audience",
   "name",
   "job",
   "instructions",
@@ -17,20 +18,18 @@ export const steps = [
   "abilities",
   "thinking",
   "schedule",
-  "audience",
   "review",
 ] as const;
 export type Step = (typeof steps)[number];
 
 /**
  * The steps only one of the company's agents is asked: an agent of the
- * person's own reaches them alone, has no kinds of work of its own and
- * never works on its own (core's agents.ts).
+ * person's own has no kinds of work of its own and never works on its own
+ * (core's agents.ts).
  */
 export const companySteps: ReadonlySet<Step> = new Set([
   "abilities",
   "schedule",
-  "audience",
 ]);
 
 /** What it may do: three reaches of its own, and three kinds of work. */

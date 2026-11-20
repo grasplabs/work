@@ -20,9 +20,10 @@ import type { Audience, StepProps } from "./model.ts";
 import { Question } from "./question.tsx";
 import { useSetupWords } from "./words.ts";
 
-// Who may use it, as three cards side by side: just the maker (an agent
-// of their own, which they may offer the company later), some teams, or
-// everyone. Just me only while the company lets people have their own. One Radio group; each card is a Field row with its
+// Who may use it, the first question, as three cards side by side: just
+// the maker (an agent of their own, which they may offer the company
+// later), some teams, or everyone. Just me only while the company lets
+// people have their own. One Radio group; each card is a Field row with its
 // radio, so a press anywhere on it chooses it. The chosen card stands
 // raised with the view's one gradient mark, the others lie soft. Some
 // teams opens the teams to tick under the cards.
@@ -82,7 +83,6 @@ const TeamsChoice = ({
 export const AudienceStep = ({
   setup,
   change,
-  name,
   teams,
   audiences,
 }: StepProps) => {
@@ -94,9 +94,9 @@ export const AudienceStep = ({
     everyone: t`Anyone in your company.`,
   };
   return (
-    <Question title={t`Who can use ${name}?`}>
+    <Question title={t`Who can use it?`}>
       <RadioGroup
-        aria-label={t`Who can use ${name}`}
+        aria-label={t`Who can use it`}
         onValueChange={(value) => {
           const audience = audiences.find((each) => each === value);
           if (audience !== undefined) {
