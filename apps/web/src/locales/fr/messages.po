@@ -17073,10 +17073,14 @@ msgstr "Abordé dans {source}"
 msgid "Talking to your team"
 msgstr "En échange avec votre équipe"
 
-#: src/frame/part-words.tsx
 #: src/projects/project-dialog.tsx
 msgid "Target"
 msgstr "Cible"
+
+#: src/frame/part-words.tsx
+msgctxt "pick a part of the page"
+msgid "Target"
+msgstr "Cibler"
 
 #: src/brain/brain.ts
 msgid "Target design agreed"

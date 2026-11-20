@@ -17073,10 +17073,14 @@ msgstr "Besprochen in {source}"
 msgid "Talking to your team"
 msgstr "Im Gespräch mit Ihrem Team"
 
-#: src/frame/part-words.tsx
 #: src/projects/project-dialog.tsx
 msgid "Target"
 msgstr "Ziel"
+
+#: src/frame/part-words.tsx
+msgctxt "pick a part of the page"
+msgid "Target"
+msgstr "Auswählen"
 
 #: src/brain/brain.ts
 msgid "Target design agreed"

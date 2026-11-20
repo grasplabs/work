@@ -367,7 +367,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     askBar: {
       failed: t`Could not send`,
       working: t`Working`,
-      target: t`Target`,
+      target: t({ message: "Target", context: "pick a part of the page" }),
       dictate: t`Dictate`,
       pick: t`Pick a part of the page. Escape to stop.`,
       untitled: t`New chat`,
