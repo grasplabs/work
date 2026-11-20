@@ -16179,7 +16179,6 @@ msgid "Sign out this device?"
 msgstr "Sign out this device?"
 
 #: src/brain/brain-atlas.ts
-#: src/routes/_shell.settings.security.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in"
 msgstr "Sign-in"
@@ -16227,10 +16226,6 @@ msgstr "Signed in to a connection again"
 #: src/activity/audit-words.ts
 msgid "Signed in to an App as a visitor"
 msgstr "Signed in to an App as a visitor"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Signed in with"
-msgstr "Signed in with"
 
 #: src/frame/part-words.tsx
 msgctxt "state of one app"
@@ -21315,18 +21310,10 @@ msgstr "Your instructions"
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Your organization doesn't allow this model. Pick another one."
 
-#: src/routes/_shell.settings.security.tsx
-msgid "Your organization manages your password"
-msgstr "Your organization manages your password"
-
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Your organization uses it through the permissions you grant."
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Your organization’s account"
-msgstr "Your organization’s account"
 
 #: src/settings/sign-in-settings.tsx
 msgid "your organization’s work accounts"
