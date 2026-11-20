@@ -129,7 +129,8 @@ const styles = stylex.create({
   middle: {
     boxSizing: "content-box",
     width: "100%",
-    maxWidth: "40rem",
+    // The settings column's width, as an agent's page has it.
+    maxWidth: grasp.pageSettingsMeasure,
     minHeight: 0,
     overflowY: "auto",
     scrollbarWidth: "none",
@@ -142,7 +143,7 @@ const styles = stylex.create({
   away: { display: "none" },
   // The foot under the answer, as wide as its column.
   // The bar at the top, as wide as the answer's column.
-  bar: { width: "100%", maxWidth: "40rem" },
+  bar: { width: "100%", maxWidth: grasp.pageSettingsMeasure },
 });
 
 /** The pose the figure takes at a step: listening while it is told about itself, done at the end. */

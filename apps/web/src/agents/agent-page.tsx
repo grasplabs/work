@@ -254,7 +254,9 @@ const Facts = ({
   const nextMoment = next === undefined ? "" : moment(next);
   return (
     <SectionCard variant="grouped" density="compact" flush title={t`Details`}>
-      <SettingsRows controls="fit">
+      {/* The control column, not each value's own width: a job is a
+          sentence, which would leave its name no room on a phone. */}
+      <SettingsRows>
         <FactRow label={t`What it is for`}>
           {agent.job === "" ? t`No job written yet` : agent.job}
         </FactRow>
@@ -508,7 +510,13 @@ const EditAgent = ({
           </DialogBody>
           <DialogFooter>
             <DialogAction>{t`Cancel`}</DialogAction>
-            <Button disabled={!can} form={formId} type="submit" variant="ink">
+            <Button
+              disabled={!can}
+              form={formId}
+              size="sm"
+              type="submit"
+              variant="ink"
+            >
               {t`Save`}
             </Button>
           </DialogFooter>
