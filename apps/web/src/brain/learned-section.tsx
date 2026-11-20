@@ -8,17 +8,21 @@ import type {
   BrainSourceRef,
 } from "@grasp-os/shared/brain-sources";
 import { failureText } from "@grasp-os/shared/errors";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Item, ItemContent, ItemGroup } from "@grasp-os/ui/components/item";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Plural, Trans } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import { plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useState } from "react";
-import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { Item, ItemContent, ItemGroup } from "../grasp/item/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 
 // What the Brain learned from one version of a source (GRA-1991), on the
@@ -65,6 +69,20 @@ const pageOf = async (
   }
 };
 
+const styles = stylex.create({
+  section: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  list: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  said: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space3,
+  },
+  entity: { display: "flex", alignItems: "center", gap: grasp.space1 },
+  start: { alignSelf: "flex-start" },
+});
+
 /** An entity a memory names, as a link to its page, marked New when this version made it seen. */
 const EntityLink = ({
   id,
@@ -78,26 +96,20 @@ const EntityLink = ({
     return null;
   }
   return (
-    <span className="flex items-center gap-1.5">
-      <Button
-        nativeButton={false}
-        render={
-          <Link
-            search={{
-              store: about.entity.store,
-              entity: about.entity.id,
-              kind: about.kind,
-            }}
-            to="/brain/memories"
-          />
-        }
-        size="inline"
-        variant="link"
+    <span {...stylex.props(styles.entity)}>
+      <RouterLink
+        search={{
+          store: about.entity.store,
+          entity: about.entity.id,
+          kind: about.kind,
+        }}
+        to="/brain/memories"
+        variant="standalone"
       >
         {about.name}
-      </Button>
+      </RouterLink>
       {about.firstSeen ? (
-        <Badge variant="secondary">
+        <Badge size="sm">
           <Trans context="an entity the Brain first saw in this version">
             New
           </Trans>
@@ -115,12 +127,14 @@ const EntityLinks = ({
   memory: BrainMemoryShown;
   entities: ReadonlyMap<string, BrainEntityListed & { firstSeen: boolean }>;
 }) => (
-  <span className="flex flex-wrap items-center gap-3">
-    <EntityLink entities={entities} id={memory.about} />
-    {memory.object === null ? null : (
-      <EntityLink entities={entities} id={memory.object.id} />
-    )}
-  </span>
+  <Text element="span" size="sm">
+    <span {...stylex.props(styles.row)}>
+      <EntityLink entities={entities} id={memory.about} />
+      {memory.object === null ? null : (
+        <EntityLink entities={entities} id={memory.object.id} />
+      )}
+    </span>
+  </Text>
 );
 
 /** One list of the change: memories with their entities, and for a contested one what another source says. */
@@ -130,119 +144,97 @@ const LearnedList = ({
   entities,
   withRivals = false,
 }: {
-  heading: ReactNode;
+  heading: string;
   memories: BrainLearnedMemory[];
   entities: ReadonlyMap<string, BrainEntityListed & { firstSeen: boolean }>;
   withRivals?: boolean;
-}) => {
-  const id = useId();
-  return (
-    <div className="flex flex-col gap-1">
-      <h5 className="text-sm" id={id}>
-        {heading}
-      </h5>
-      <ItemGroup aria-labelledby={id} render={<ul />} spacing="tight">
-        {memories.map(({ memory, rivals, moreRivals }) => (
-          <li key={`${memory.store}:${memory.id}`}>
-            <Item size="xs" variant="outline">
-              <ItemContent>
-                <span className="text-sm">{memory.statement}</span>
-                <EntityLinks entities={entities} memory={memory} />
-                {withRivals
-                  ? rivals.map((rival) => {
-                      const said = rival.statement;
-                      return (
-                        <span className="flex flex-col gap-1" key={rival.id}>
-                          <span className="text-muted-foreground text-xs">
-                            <Trans>Contradicted by: {said}</Trans>
-                          </span>
-                          <EntityLinks entities={entities} memory={rival} />
-                        </span>
-                      );
-                    })
-                  : null}
-                {withRivals && moreRivals ? (
-                  <span className="text-muted-foreground text-xs">
-                    <Trans>More memories contradict it.</Trans>
-                  </span>
-                ) : null}
-              </ItemContent>
-            </Item>
-          </li>
-        ))}
-      </ItemGroup>
-    </div>
-  );
-};
+}) => (
+  <div {...stylex.props(styles.list)}>
+    <Text size="sm" weight="medium">
+      {heading}
+    </Text>
+    <ItemGroup aria-label={heading}>
+      {memories.map(({ memory, rivals, moreRivals }) => (
+        <Item key={`${memory.store}:${memory.id}`} size="sm" variant="outline">
+          <ItemContent>
+            <Text element="span" size="sm">
+              {memory.statement}
+            </Text>
+            <EntityLinks entities={entities} memory={memory} />
+            {withRivals
+              ? rivals.map((rival) => {
+                  const said = rival.statement;
+                  return (
+                    <span key={rival.id} {...stylex.props(styles.said)}>
+                      <Text element="span" size="xs" tone="muted">
+                        <Trans>Contradicted by: {said}</Trans>
+                      </Text>
+                      <EntityLinks entities={entities} memory={rival} />
+                    </span>
+                  );
+                })
+              : null}
+            {withRivals && moreRivals ? (
+              <Text element="span" size="xs" tone="muted">
+                <Trans>More memories contradict it.</Trans>
+              </Text>
+            ) : null}
+          </ItemContent>
+        </Item>
+      ))}
+    </ItemGroup>
+  </div>
+);
 
-/** The heading of one list of the change, counting what is shown: "so far" while more pages follow. */
-const ListHeading = ({
-  list,
-  memories,
-  partial,
-}: {
-  list: "added" | "ended" | "out" | "contested";
-  memories: number;
-  partial: boolean;
-}) => {
-  if (list === "added") {
-    return partial ? (
-      <Plural
-        one="So far, this version added # memory."
-        other="So far, this version added # memories."
-        value={memories}
-      />
-    ) : (
-      <Plural
-        one="This version added # memory."
-        other="This version added # memories."
-        value={memories}
-      />
-    );
-  }
-  if (list === "ended") {
-    return partial ? (
-      <Plural
-        one="So far, this version replaced # memory from an earlier version."
-        other="So far, this version replaced # memories from earlier versions."
-        value={memories}
-      />
-    ) : (
-      <Plural
-        one="This version replaced # memory from an earlier version."
-        other="This version replaced # memories from earlier versions."
-        value={memories}
-      />
-    );
-  }
-  if (list === "out") {
-    return partial ? (
-      <Plural
-        one="So far, # memory from an earlier version is no longer in this source."
-        other="So far, # memories from earlier versions are no longer in this source."
-        value={memories}
-      />
-    ) : (
-      <Plural
-        one="# memory from an earlier version is no longer in this source."
-        other="# memories from earlier versions are no longer in this source."
-        value={memories}
-      />
-    );
-  }
-  return partial ? (
-    <Plural
-      one="So far, # memory this version added is contradicted elsewhere."
-      other="So far, # memories this version added are contradicted elsewhere."
-      value={memories}
-    />
-  ) : (
-    <Plural
-      one="# memory this version added is contradicted elsewhere."
-      other="# memories this version added are contradicted elsewhere."
-      value={memories}
-    />
-  );
+/** The headings of the lists of the change, counting what is shown: "so far" while more pages follow. */
+const useListHeadings = () => {
+  const { t } = useLingui();
+  return {
+    added: (memories: number, partial: boolean): string =>
+      partial
+        ? t`${plural(memories, {
+            one: "So far, this version added # memory.",
+            other: "So far, this version added # memories.",
+          })}`
+        : t`${plural(memories, {
+            one: "This version added # memory.",
+            other: "This version added # memories.",
+          })}`,
+    ended: (memories: number, partial: boolean): string =>
+      partial
+        ? t`${plural(memories, {
+            one: "So far, this version replaced # memory from an earlier version.",
+            other:
+              "So far, this version replaced # memories from earlier versions.",
+          })}`
+        : t`${plural(memories, {
+            one: "This version replaced # memory from an earlier version.",
+            other: "This version replaced # memories from earlier versions.",
+          })}`,
+    out: (memories: number, partial: boolean): string =>
+      partial
+        ? t`${plural(memories, {
+            one: "So far, # memory from an earlier version is no longer in this source.",
+            other:
+              "So far, # memories from earlier versions are no longer in this source.",
+          })}`
+        : t`${plural(memories, {
+            one: "# memory from an earlier version is no longer in this source.",
+            other:
+              "# memories from earlier versions are no longer in this source.",
+          })}`,
+    contested: (memories: number, partial: boolean): string =>
+      partial
+        ? t`${plural(memories, {
+            one: "So far, # memory this version added is contradicted elsewhere.",
+            other:
+              "So far, # memories this version added are contradicted elsewhere.",
+          })}`
+        : t`${plural(memories, {
+            one: "# memory this version added is contradicted elsewhere.",
+            other: "# memories this version added are contradicted elsewhere.",
+          })}`,
+  };
 };
 
 /** What the Brain learned from `version` of `source`, as the person may read it. */
@@ -253,6 +245,8 @@ export const LearnedSection = ({
   source: BrainSourceRef;
   version: number;
 }) => {
+  const { t } = useLingui();
+  const headings = useListHeadings();
   const core = useCore();
   const heading = useId();
   const [learned, setLearned] = useState<Learned>({ state: "loading" });
@@ -300,73 +294,53 @@ export const LearnedSection = ({
   // says so.
   const partial = next !== null;
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-2">
-      <h4 className="text-muted-foreground text-xs font-medium" id={heading}>
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      <Heading id={heading} level={4} size="ui-sm">
         <Trans>What the Brain learned from this version</Trans>
-      </h4>
+      </Heading>
       {learned.state === "gone" ? (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" tone="muted">
           <Trans>
             You can no longer read what the Brain learned from this version.
           </Trans>
-        </p>
+        </Text>
       ) : null}
-      {learned.state === "loading" ? <Spinner /> : null}
+      {learned.state === "loading" ? <Spinner aria-label={t`Loading`} /> : null}
       {learned.state === "refused" ? (
         <ErrorText>{learned.message}</ErrorText>
       ) : null}
       {learned.state === "ready" && memories.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" tone="muted">
           <Trans>
             The Brain hasn&apos;t learned anything from this version.
           </Trans>
-        </p>
+        </Text>
       ) : null}
       {added.length > 0 ? (
         <LearnedList
           entities={entities}
-          heading={
-            <ListHeading
-              list="added"
-              memories={added.length}
-              partial={partial}
-            />
-          }
+          heading={headings.added(added.length, partial)}
           memories={added}
         />
       ) : null}
       {ended.length > 0 ? (
         <LearnedList
           entities={entities}
-          heading={
-            <ListHeading
-              list="ended"
-              memories={ended.length}
-              partial={partial}
-            />
-          }
+          heading={headings.ended(ended.length, partial)}
           memories={ended}
         />
       ) : null}
       {out.length > 0 ? (
         <LearnedList
           entities={entities}
-          heading={
-            <ListHeading list="out" memories={out.length} partial={partial} />
-          }
+          heading={headings.out(out.length, partial)}
           memories={out}
         />
       ) : null}
       {contested.length > 0 ? (
         <LearnedList
           entities={entities}
-          heading={
-            <ListHeading
-              list="contested"
-              memories={contested.length}
-              partial={partial}
-            />
-          }
+          heading={headings.contested(contested.length, partial)}
           memories={contested}
           withRivals
         />
@@ -374,8 +348,8 @@ export const LearnedSection = ({
       {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
       {next === null ? null : (
         <Button
-          className="self-start"
           disabled={more?.state === "loading"}
+          layout={styles.start}
           onClick={() => {
             setMore({ state: "loading" });
             void (async () => {
@@ -399,10 +373,10 @@ export const LearnedSection = ({
               });
             })();
           }}
-          type="button"
-          variant="outline"
+          size="sm"
+          variant="ghost"
         >
-          <Trans>Show more</Trans>
+          {t`Show more`}
         </Button>
       )}
     </section>

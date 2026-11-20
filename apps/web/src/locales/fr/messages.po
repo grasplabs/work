@@ -10474,6 +10474,7 @@ msgid "Loaded"
 msgstr "Chargé"
 
 #: src/brain/forget.tsx
+#: src/brain/learned-section.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
@@ -14596,7 +14597,6 @@ msgid "Remove the webhook to {url}?"
 msgstr "Supprimer le webhook vers {url} ?"
 
 #: src/brain/brain-article/kern.tsx
-#: src/brain/source-interview.tsx
 msgid "Remove this from the brain"
 msgstr "Retirer ceci du cerveau"
 
@@ -17134,11 +17134,6 @@ msgstr "Suggérées"
 msgid "Summarise documents"
 msgstr "Résumer des documents"
 
-#: src/brain/source-interview.tsx
-msgctxt "tab: an interview written up short"
-msgid "Summary"
-msgstr "Résumé"
-
 #: src/agents/agent-templates.ts
 msgid "Summary writer"
 msgstr "Rédacteur de résumés"
@@ -19081,11 +19076,6 @@ msgctxt "a source of the Brain"
 msgid "Transcript"
 msgstr "Transcription"
 
-#: src/brain/source-interview.tsx
-msgctxt "tab: the whole conversation word for word"
-msgid "Transcript"
-msgstr "Transcription"
-
 #: src/agents/new-agent.tsx
 msgid "Triangle"
 msgstr "Triangle"
@@ -20261,6 +20251,10 @@ msgstr "Ce qu’il doit savoir et comment il doit travailler. Les règles de Gra
 #: src/inbox/item-detail.tsx
 msgid "What it starts with"
 msgstr "Ce avec quoi il démarre"
+
+#: src/brain/opportunities-page.tsx
+msgid "What it takes now"
+msgstr "Ce que cela demande aujourd’hui"
 
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"

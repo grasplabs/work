@@ -10474,6 +10474,7 @@ msgid "Loaded"
 msgstr "Cargado"
 
 #: src/brain/forget.tsx
+#: src/brain/learned-section.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
@@ -14596,7 +14597,6 @@ msgid "Remove the webhook to {url}?"
 msgstr "¿Quitar el webhook a {url}?"
 
 #: src/brain/brain-article/kern.tsx
-#: src/brain/source-interview.tsx
 msgid "Remove this from the brain"
 msgstr "Eliminar esto del cerebro"
 
@@ -17134,11 +17134,6 @@ msgstr "Sugeridos"
 msgid "Summarise documents"
 msgstr "Resumir documentos"
 
-#: src/brain/source-interview.tsx
-msgctxt "tab: an interview written up short"
-msgid "Summary"
-msgstr "Resumen"
-
 #: src/agents/agent-templates.ts
 msgid "Summary writer"
 msgstr "Redactor de resúmenes"
@@ -19081,11 +19076,6 @@ msgctxt "a source of the Brain"
 msgid "Transcript"
 msgstr "Transcripción"
 
-#: src/brain/source-interview.tsx
-msgctxt "tab: the whole conversation word for word"
-msgid "Transcript"
-msgstr "Transcripción"
-
 #: src/agents/new-agent.tsx
 msgid "Triangle"
 msgstr "Triángulo"
@@ -20261,6 +20251,10 @@ msgstr "Qué debe saber y cómo debe trabajar. Las reglas de Grasp siempre está
 #: src/inbox/item-detail.tsx
 msgid "What it starts with"
 msgstr "Con qué se inicia"
+
+#: src/brain/opportunities-page.tsx
+msgid "What it takes now"
+msgstr "Lo que cuesta ahora"
 
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"
