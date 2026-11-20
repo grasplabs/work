@@ -1249,10 +1249,21 @@ describe(
       const [held] = await person.api.pendingActions.list();
       const id = held?.id ?? "";
       await person.api.pendingActions.confirm(id, held?.inputHash ?? "");
-      await fakeProvider(outcomeOf(id), says("Found it."));
+      await fakeProvider(
+        outcomeOf(id),
+        says("No."),
+        outcomeOf(id),
+        says("Found it.")
+      );
+      // A turn nobody started reads nothing with no grant, a held one's
+      // answer neither; the person's next turn does.
+      await chat.stub.askUnattended(chat.chat.id, {
+        text: "What did it find?",
+        model,
+      });
       await chat.ask("What did it find?");
       const results = await texts(chat.stub, chat.chat.id);
-      const answered = results.at(2);
+      const [woken, answered] = results.slice(2);
 
       expect({
         ownRead: ownRead?.includes(`${marker}-1`),
@@ -1265,6 +1276,7 @@ describe(
           input: z.json().parse(JSON.parse(held?.input ?? "null")),
         },
         searched: await shared.searched(),
+        woken,
         answered,
         marked: await chat.stub.isChatPrivateRead(chat.chat.id),
       }).toStrictEqual({
@@ -1278,6 +1290,7 @@ describe(
           input: { query: `${marker}-leak` },
         },
         searched: [`${marker}-leak`],
+        woken: `Returned:\n${permissionErrors.create("permission.denied").message}`,
         answered: `Returned:\n${JSON.stringify({ status: "done", output: { messages: [`${marker}-leak-1`] }, error: null })}`,
         marked: true,
       });
