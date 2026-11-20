@@ -1,3 +1,4 @@
+import { chatPlatformName as placeName } from "@grasp-os/shared/chat";
 import type {
   CompanyToolClass,
   ToolClassAudience,
@@ -48,7 +49,6 @@ import {
 import { Switch } from "../grasp/switch/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { placeIcon, placeName } from "../workflows/requests/request-parts.tsx";
 import {
   AudienceControl,
   appAudienceOf,
@@ -104,6 +104,10 @@ const addable = ["teams", "slack"] as const;
 
 /** Whether Grasp's library has a mark for `key`. */
 const isBrand = (key: string): key is Brand => Object.hasOwn(brands, key);
+
+/** A place's mark as an icon, for a row that takes one: a chat's for a place Grasp has no mark for. */
+const placeIcon = (place: string): IconData =>
+  isBrand(place) ? brands[place].mark : Chat;
 
 const styles = stylex.create({
   // The fact under a row's name, after its dot.
