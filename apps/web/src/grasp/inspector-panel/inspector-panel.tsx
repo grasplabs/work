@@ -235,19 +235,20 @@ export const InspectorPanel = (props: InspectorPanelProps) => {
         tint={props.tint}
         loading={props.loading === true}
       />
-      {views === undefined ? (
+      {/* Without sections or a foot, no empty view under the header. */}
+      {views === undefined &&
+      ((sections?.length ?? 0) > 0 || props.foot !== undefined) ? (
         <PanelView>
           <Sections sections={sections ?? noSections} words={words} />
           {props.foot}
         </PanelView>
-      ) : (
-        views.map((view) => (
-          <PanelView key={view.value} value={view.value}>
-            <Sections sections={view.sections} words={words} />
-            {view.foot}
-          </PanelView>
-        ))
-      )}
+      ) : null}
+      {views?.map((view) => (
+        <PanelView key={view.value} value={view.value}>
+          <Sections sections={view.sections} words={words} />
+          {view.foot}
+        </PanelView>
+      ))}
     </Panel>
   );
 };

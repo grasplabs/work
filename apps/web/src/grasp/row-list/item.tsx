@@ -74,7 +74,7 @@ export const RowListItem = ({
       )}
     >
       {icon !== undefined && (
-        <span {...stylex.props(styles.kind)}>
+        <span data-row-kind="" {...stylex.props(styles.kind)}>
           <Icon icon={icon} />
         </span>
       )}

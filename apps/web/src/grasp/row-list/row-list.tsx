@@ -29,6 +29,12 @@ export interface RowListProps {
   "aria-label"?: string;
   /** The id of the words that name it, such as a Panel section's label. */
   "aria-labelledby"?: string;
+  /**
+   * Below 30rem of the list's own width, each row's detail goes on a second line under its name,
+   * so a long name keeps the whole row on a phone.
+   * @default false
+   */
+  stack?: boolean;
 }
 
 /**
@@ -39,12 +45,13 @@ export const RowList = ({
   children,
   "aria-label": label,
   "aria-labelledby": labelledBy,
+  stack = false,
 }: RowListProps) => (
   <ul
     aria-label={label}
     aria-labelledby={labelledBy}
     data-slot="row-list"
-    {...stylex.props(styles.list)}
+    {...stylex.props(styles.list, stack && styles.stack)}
   >
     {children}
   </ul>

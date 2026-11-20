@@ -77,7 +77,7 @@ type Read<T> =
   | { state: "ready"; data: T };
 
 const styles = stylex.create({
-  // A page of the brain as its log is (brain-log.tsx): in the brain's
+  // A page of the brain as its activity is (activity-page.tsx): in the brain's
   // column, scrolling on its own, with room at the foot for the chat.
   scroll: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
   column: {
