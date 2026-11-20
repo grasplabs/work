@@ -1,6 +1,8 @@
 // Whether the composer round a part is out of use, so its slot actions dim with it.
 import { createContext, useContext } from "react";
 
+import type { ComposerVoiceProps } from "./voice";
+
 export const DisabledContext = createContext(false);
 
 export const useComposerDisabled = () => useContext(DisabledContext);
@@ -29,3 +31,12 @@ export const useComposerListen = () => useContext(ListenContext);
 export const RowTallContext = createContext(false);
 
 export const useComposerRowTall = () => useContext(RowTallContext);
+
+// A cancelled dictation, as the card holds it while its words dissolve: given its props as Cancel
+// was pressed, so whatever arrives after is dropped, then null once they have dissolved. Lets a
+// dictation (voice.tsx) call onCancel at the press and still dissolve in the card.
+export const LeaveContext = createContext<
+  ((held: Omit<ComposerVoiceProps, "typed"> | null) => void) | null
+>(null);
+
+export const useComposerLeave = () => useContext(LeaveContext);

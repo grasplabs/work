@@ -61,6 +61,7 @@ import { ComposerAttachments } from "./attachments";
 import type { ComposerFile } from "./attachments";
 import {
   DisabledContext,
+  LeaveContext,
   ListenContext,
   MentionContext,
   RowTallContext,
@@ -2726,9 +2727,14 @@ const ownMicrophone = (props: Resolved, text: string) => {
  * The footer's microphone and the dictation it hands the card to, from `onDictate` and
  * `dictation`; the host's own `voice` and `takeover` come first. A problem that stops the
  * dictation hands the card back to its text and stands in the band over it, in `top`'s place.
+ * A cancelled dictation is the one kept as Cancel was pressed, until its words have dissolved.
  */
-const dictationParts = (props: Resolved, text: string) => {
-  const { dictation } = props;
+const dictationParts = (
+  props: Resolved,
+  gone: Resolved["dictation"] | null,
+  text: string
+) => {
+  const dictation = gone ?? props.dictation;
   const problem = stoppedBy(dictation);
   return {
     voice: props.voice ?? ownMicrophone(props, text),
@@ -2781,9 +2787,12 @@ const ComposerForm = (props: Resolved) => {
   const label = nameOf(props);
   const [own, setOwn] = useState(props.defaultValue);
   const text = value ?? own;
+  // A dictation cancelled: kept as it was while its words dissolve; what the host sends after is dropped.
+  const [gone, setGone] = useState<Resolved["dictation"] | null>(null);
   // A dictation's typed words, as the person reads them: a picture by its label.
   const { voice, takeover, top, dismiss } = dictationParts(
     props,
+    gone,
     readableText(text)
   );
   const area = useRef<HTMLTextAreaElement | null>(null);
@@ -3119,40 +3128,42 @@ const ComposerForm = (props: Resolved) => {
               </span>
             )}
             <ListenContext.Provider value={setListener}>
-              <RowTallContext.Provider value={compact && tall}>
-                <ChosenAgentContext.Provider value={setChosenAgent}>
-                  <DisabledContext.Provider value={disabled}>
-                    <MentionContext.Provider
-                      value={mentions.on ? mentions.openMentions : null}
-                    >
-                      <ComposerInside
-                        takeover={takeover}
-                        compact={compact}
-                        tall={tall}
-                        start={props.start}
-                        end={still.end}
-                        last={last}
-                        after={props.after}
-                        footer={props.footer}
-                        editor={still.editor}
-                        controls={still.controls}
-                        above={props.above}
-                        chosenAgent={chosenAgent}
-                        attachments={attachments.filter(
-                          (file) => !isInlinePicture(file)
-                        )}
-                        onAttach={props.onAttach}
-                        onRemoveAttachment={props.onRemoveAttachment}
-                        onRetryAttachment={props.onRetryAttachment}
-                        onOpenAttachment={props.onOpenAttachment}
-                        attachmentWords={props.attachmentWords}
-                        attachmentsLabel={props.attachmentsLabel}
-                        focusText={focusText}
-                      />
-                    </MentionContext.Provider>
-                  </DisabledContext.Provider>
-                </ChosenAgentContext.Provider>
-              </RowTallContext.Provider>
+              <LeaveContext.Provider value={setGone}>
+                <RowTallContext.Provider value={compact && tall}>
+                  <ChosenAgentContext.Provider value={setChosenAgent}>
+                    <DisabledContext.Provider value={disabled}>
+                      <MentionContext.Provider
+                        value={mentions.on ? mentions.openMentions : null}
+                      >
+                        <ComposerInside
+                          takeover={takeover}
+                          compact={compact}
+                          tall={tall}
+                          start={props.start}
+                          end={still.end}
+                          last={last}
+                          after={props.after}
+                          footer={props.footer}
+                          editor={still.editor}
+                          controls={still.controls}
+                          above={props.above}
+                          chosenAgent={chosenAgent}
+                          attachments={attachments.filter(
+                            (file) => !isInlinePicture(file)
+                          )}
+                          onAttach={props.onAttach}
+                          onRemoveAttachment={props.onRemoveAttachment}
+                          onRetryAttachment={props.onRetryAttachment}
+                          onOpenAttachment={props.onOpenAttachment}
+                          attachmentWords={props.attachmentWords}
+                          attachmentsLabel={props.attachmentsLabel}
+                          focusText={focusText}
+                        />
+                      </MentionContext.Provider>
+                    </DisabledContext.Provider>
+                  </ChosenAgentContext.Provider>
+                </RowTallContext.Provider>
+              </LeaveContext.Provider>
             </ListenContext.Provider>
           </fieldset>
         </div>

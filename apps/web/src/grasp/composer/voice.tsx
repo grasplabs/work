@@ -31,7 +31,11 @@ import { Button } from "../button";
 import { Alert, Cross, Icon, Mic, MicOff, Retry, Tick } from "../icons";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { useComposerListen, useComposerRowTall } from "./context";
+import {
+  useComposerLeave,
+  useComposerListen,
+  useComposerRowTall,
+} from "./context";
 import { useStill } from "./still-context";
 import { ComposerSurface } from "./surface";
 import { startVoiceField } from "./voice-field";
@@ -134,7 +138,11 @@ export interface ComposerVoiceProps {
   onClose?: () => void;
   /** Done, in a dictation. A conversation has no Done. */
   onDone?: () => void;
-  /** Cancel, in a dictation: runs once its words have dissolved (at once under reduced motion). A conversation has no Cancel. */
+  /**
+   * Cancel, in a dictation: runs at the press, so the host drops whatever arrives for it after. In
+   * a Composer its words still dissolve; the card keeps the dictation as it was until they have. A
+   * conversation has no Cancel.
+   */
   onCancel?: () => void;
   onMute: () => void;
   onRetry: () => void;
@@ -1131,28 +1139,29 @@ const heardOf = (
 ) => wordsOf(kept?.settled ?? settled, kept?.interim ?? interim);
 
 /** Dictation in a composer's place: the words arriving out of the light, the time, and the ways out. */
-export const ComposerVoice = ({
-  variant = "dictation",
-  phase,
-  typed = "",
-  settled,
-  interim,
-  elapsedMs,
-  muted = false,
-  silent = false,
-  problem,
-  sample,
-  level,
-  bands,
-  words,
-  speaker,
-  onDone,
-  onCancel,
-  onClose,
-  onMute,
-  onRetry,
-  compact = false,
-}: ComposerVoiceProps) => {
+export const ComposerVoice = (props: ComposerVoiceProps) => {
+  const {
+    variant = "dictation",
+    phase,
+    typed = "",
+    settled,
+    interim,
+    elapsedMs,
+    muted = false,
+    silent = false,
+    problem,
+    sample,
+    level,
+    bands,
+    words,
+    speaker,
+    onDone,
+    onCancel,
+    onClose,
+    onMute,
+    onRetry,
+    compact = false,
+  } = props;
   const conversation = variant === "conversation";
   const say = sayOf(useComposerWords("voice"), words);
   const still = useStill();
@@ -1170,6 +1179,7 @@ export const ComposerVoice = ({
   const meter = useRef<HTMLMeterElement>(null);
   // The latest of what the host gives, for the frame loop to read: kept in a ref by an effect.
   const reading = useRef<Reading>({});
+  const hold = useComposerLeave();
   const [leaving, setLeaving] = useState(false);
   // Cancelled: the words as they were, so no late word arrives while they dissolve.
   const [kept, setKept] = useState<{ settled: string; interim: string } | null>(
@@ -1187,16 +1197,21 @@ export const ComposerVoice = ({
   useRowInView(room, row, tallRoom);
 
   const cancel = () => {
+    if (leaving) {
+      return;
+    }
     const box = room.current ?? tallRoom.current;
-    if (box === null || still || reduced()) {
+    if (box === null || hold === null || still || reduced()) {
       onCancel?.();
       return;
     }
+    hold(props);
     setLeaving(true);
     setKept({ settled, interim });
+    onCancel?.();
     window.setTimeout(
       () => {
-        onCancel?.();
+        hold(null);
       },
       dissolve(box) ? DISSOLVE_MS : 160
     );
