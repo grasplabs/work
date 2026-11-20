@@ -29,6 +29,7 @@ import {
 import { iconVars } from "../grasp/icons/icon.stylex.ts";
 import { Brain as BrainMark, Icon } from "../grasp/icons/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
@@ -120,7 +121,7 @@ const SectionPage = () => {
 
   return (
     <div {...stylex.props(styles.scroll)}>
-      <div {...stylex.props(blockStyles.column)}>
+      <PageColumn measure="page">
         <PageHeader
           aside={<Badge icon={section.icon}>{shownCount(folder)}</Badge>}
           breadcrumb={<BackButton />}
@@ -162,7 +163,7 @@ const SectionPage = () => {
             </div>
           </section>
         ))}
-      </div>
+      </PageColumn>
     </div>
   );
 };

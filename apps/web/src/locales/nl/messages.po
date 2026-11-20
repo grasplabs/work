@@ -8825,8 +8825,8 @@ msgid "How they would notice: not said yet."
 msgstr "Hoe ze het zouden merken: nog niet gezegd."
 
 #: src/brain/skills-page.tsx
-msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company or one of your teams waits for an admin, and from then on the agents of everyone in it use it. A skill is guidance: it never grants access."
-msgstr "Hoe het hier gaat. Je eigen skills worden alleen in je eigen chats gebruikt. Deel je er een met het bedrijf of een van je teams, dan wacht dat op een admin, en daarna gebruiken de agents van iedereen daarin hem. Een skill is een handleiding: hij geeft nooit toegang."
+msgid "How things are done here: guidance that never grants access."
+msgstr "Hoe het hier gaat: handleidingen die nooit toegang geven."
 
 #: src/apps/app-settings.tsx
 msgid "How this App is built and what to keep in mind when changing it."
@@ -18838,10 +18838,6 @@ msgstr "Deze versie, alleen-lezen"
 msgid "This week"
 msgstr "Deze week"
 
-#: src/brain/memories-page.tsx
-msgid "Those marked Only you are yours alone: nobody else sees them, admins included."
-msgstr "Wat met Alleen jij is gemarkeerd, is van jou alleen: niemand anders ziet het, ook geen beheerders."
-
 #: src/agents/new-agent.tsx
 msgid "Three circling"
 msgstr "Drie cirkelend"
@@ -19436,8 +19432,8 @@ msgid "Uploading…"
 msgstr "Wordt geüpload…"
 
 #: src/brain/sources-page.tsx
-msgid "Uploads shared with a team or everyone, those their uploader removed among them. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
-msgstr "Uploads die met een team of iedereen gedeeld zijn, ook die de uploader heeft verwijderd. Alleen een beheerder kan er een wissen, voor iedereen en voorgoed. De tekst wordt hier niet getoond."
+msgid "Uploads shared with a team or everyone. Only an admin can erase one."
+msgstr "Uploads die met een team of iedereen gedeeld zijn. Alleen een beheerder kan er een wissen."
 
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"
@@ -20088,8 +20084,8 @@ msgid "What gets in the way"
 msgstr "Wat in de weg zit"
 
 #: src/brain/opportunities-page.tsx
-msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."
-msgstr "Wat Grasp kan automatiseren of verbeteren, op basis van hoe je teams hun werk beschrijven en hoe vijf of meer mensen van een team het zijn zien doen, het grootste eerst. Een verborgen kans komt terug zodra het bewijs verandert."
+msgid "What Grasp could automate, largest first."
+msgstr "Wat Grasp kan automatiseren, het grootste eerst."
 
 #: src/chat/thread.tsx
 msgid "What Grasp did"
@@ -20339,8 +20335,8 @@ msgid "What the Brain remembers"
 msgstr "Wat het Brain onthoudt"
 
 #: src/brain/memories-page.tsx
-msgid "What the Brain remembers that you may read, where each memory came from, and where sources disagree."
-msgstr "Wat het Brain onthoudt dat jij mag lezen, waar elke herinnering vandaan komt en waar bronnen elkaar tegenspreken."
+msgid "What the Brain remembers, and where sources disagree."
+msgstr "Wat het Brain onthoudt en waar bronnen elkaar tegenspreken."
 
 #: src/workflows/item-test.tsx
 msgid "What the calls answer isn't JSON."

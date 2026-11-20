@@ -230,7 +230,7 @@ export const PageBrainActivity = ({
       data-slot="page-brain-activity"
       {...stylex.props(styles.page)}
     >
-      <PageColumn>
+      <PageColumn measure="page">
         <PageHeader
           title={said.title}
           description={
