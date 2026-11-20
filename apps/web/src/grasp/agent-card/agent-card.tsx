@@ -61,16 +61,18 @@ export const agentCardStyles = stylex.create({
     gap: grasp.space2,
     maxWidth: "75%",
   },
-  // The foot, pinned to the card's start corner, clear of the figure.
+  // The foot, pinned to the card's start corner: its pills side by side on one line, wrapping only
+  // when they do not fit; over the figure's edge if they must, each on its own fill.
   foot: {
     position: "absolute",
     insetBlockEnd: grasp.space5,
     insetInlineStart: grasp.space5,
     zIndex: 1,
-    display: "grid",
-    justifyItems: "start",
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
     gap: grasp.space1,
-    maxWidth: "40%",
+    maxWidth: `calc(100% - 2 * ${grasp.space5})`,
   },
 });
 

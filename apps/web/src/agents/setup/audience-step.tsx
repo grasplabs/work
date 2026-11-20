@@ -110,7 +110,9 @@ export const AudienceStep = ({
             const chosen = setup.audience === audience;
             return (
               <Card key={audience} variant={chosen ? "raised" : "soft"}>
+                {/* The radio first, then its words, as a horizontal Field has them. */}
                 <Field orientation="horizontal">
+                  <RadioGroupItem value={audience} />
                   <FieldContent>
                     <span {...stylex.props(styles.inside)}>
                       <IconTile
@@ -121,7 +123,6 @@ export const AudienceStep = ({
                       <FieldDescription>{explained[audience]}</FieldDescription>
                     </span>
                   </FieldContent>
-                  <RadioGroupItem value={audience} />
                 </Field>
               </Card>
             );

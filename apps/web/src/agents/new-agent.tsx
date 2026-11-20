@@ -437,7 +437,7 @@ export const NewAgent = ({
           {
             value: "everyone",
             label: words.audienceNames.everyone,
-            description: t`It does nothing yet until you allow it`,
+            description: t`Everyone in the company can ask it.`,
             recommended: true,
           },
           {

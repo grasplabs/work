@@ -238,7 +238,7 @@ const TableView = ({
                 showings.find((each) => each === chosen[0]) ?? "records"
               );
             }}
-            size="sm"
+            size="xs"
             value={[showing]}
           >
             <Toggle icon={AppRecord} value="records">

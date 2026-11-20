@@ -114,7 +114,7 @@ export const AtlasToolbar = ({
             setPicked(next);
             onSpot(next);
           }}
-          size="sm"
+          size="xs"
           value={picked === undefined ? [] : [picked]}
         >
           {marks.map((mark) => (

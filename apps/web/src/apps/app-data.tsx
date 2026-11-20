@@ -1207,7 +1207,7 @@ export const AppData = ({
               setPicked({ app, table: value });
             }
           }}
-          size="sm"
+          size="xs"
           value={[table.name]}
         >
           {tables.map(({ name, records }) => (

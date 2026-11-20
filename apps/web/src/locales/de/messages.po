@@ -7145,6 +7145,10 @@ msgstr "Alle darin · {shownRole}"
 msgid "Everyone in the company"
 msgstr "Alle im Unternehmen"
 
+#: src/agents/new-agent.tsx
+msgid "Everyone in the company can ask it."
+msgstr "Alle im Unternehmen können ihn fragen."
+
 #: src/inbox/items.ts
 msgid "Everyone in the company reads your answer, with your name."
 msgstr "Alle im Unternehmen lesen deine Antwort, mit deinem Namen."
@@ -9308,10 +9312,6 @@ msgstr "Es ist nicht geschehen"
 #: src/inbox/item-detail.tsx
 msgid "It didn't happen: {who}"
 msgstr "Es ist nicht geschehen: {who}"
-
-#: src/agents/new-agent.tsx
-msgid "It does nothing yet until you allow it"
-msgstr "Er tut noch nichts, bis du es erlaubst"
 
 #: src/drafts/publish-errors.ts
 msgid "It doesn't pass its checks. Fix the problems, then share."
