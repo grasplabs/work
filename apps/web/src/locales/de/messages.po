@@ -5166,6 +5166,11 @@ msgctxt "a filter's operator"
 msgid "contains"
 msgstr "enthält"
 
+#: src/brain/brain-transcript.tsx
+msgctxt "heading: the headings of a document, as a table of contents"
+msgid "Contents"
+msgstr "Inhalt"
+
 #: src/brain/lessons-view.tsx
 msgctxt "lesson evidence"
 msgid "Contested"
@@ -16125,6 +16130,7 @@ msgstr "Startet Version {workflowVersion}"
 msgid "Statement"
 msgstr "Aussage"
 
+#: src/brain/brain-transcript.tsx
 #: src/brain/brain.ts
 msgid "Statements"
 msgstr "Aussagen"
@@ -18123,6 +18129,10 @@ msgstr "Thema"
 
 #: src/workflows/requests/request-table.tsx
 msgid "topics"
+msgstr "Themen"
+
+#: src/brain/brain-transcript.tsx
+msgid "Topics"
 msgstr "Themen"
 
 #: src/make/examples.ts
