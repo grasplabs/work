@@ -2029,7 +2029,6 @@ msgstr "Ein Workflow"
 
 #: src/activity/audit-event.tsx
 #: src/apps/app-settings.tsx
-#: src/settings/org-card.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "About"
 msgstr "Über die App"
@@ -3896,10 +3895,6 @@ msgid "Billing API"
 msgstr "Abrechnungs-API"
 
 #: src/settings/billing-card.tsx
-msgid "Billing details"
-msgstr "Rechnungsdaten"
-
-#: src/settings/billing-card.tsx
 msgid "Billing email"
 msgstr "Rechnungs-E-Mail"
 
@@ -4214,6 +4209,7 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
+#: src/settings/org-card.tsx
 #: src/settings/staff-access.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/team-members-dialog.tsx
@@ -4896,6 +4892,7 @@ msgstr "Klippen"
 #: src/settings/event-source-activity.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
+#: src/settings/org-card.tsx
 #: src/settings/stephen-settings.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
@@ -6240,6 +6237,7 @@ msgstr "Desktop"
 #: src/activity/audit-log.tsx
 #: src/agents/agent-page.tsx
 #: src/chat/approval-words.ts
+#: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/workflows/run-detail.tsx
@@ -6913,6 +6911,10 @@ msgstr "Endet"
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
 msgstr "Beendet den Workflow"
+
+#: src/settings/org-card.tsx
+msgid "Enter a name for the organization."
+msgstr "Geben Sie einen Namen für die Organisation ein."
 
 #: src/settings/teams.tsx
 msgid "Enter a name for the team."
@@ -13198,6 +13200,10 @@ msgstr "Reihenfolge"
 msgid "Organization"
 msgstr "Organisation"
 
+#: src/settings/org-card.tsx
+msgid "Organization name"
+msgstr "Name der Organisation"
+
 #: src/connections/http-connections.tsx
 msgid "Origin"
 msgstr "Origin"
@@ -15422,6 +15428,7 @@ msgstr "Sand"
 #: src/projects/project-dialog.tsx
 #: src/settings/billing-card.tsx
 #: src/settings/instruction-file.tsx
+#: src/settings/org-card.tsx
 #: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Speichern"

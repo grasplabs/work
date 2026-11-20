@@ -10,22 +10,17 @@ import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import { formatBytes } from "../format.ts";
-import {
-  organizationLogoChanged,
-  organizationRenamed,
-} from "../frame/organization-name.tsx";
+import { organizationLogoChanged } from "../frame/organization-name.tsx";
 import type { SettingRowState } from "../grasp/setting-row/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
 // Settings › Workspace's own changes: a change to the organization, saved
-// as it is made, its row or its card saying how its save stands (saving, saved, or
+// as it is made, its row saying how its save stands (saving, saved, or
 // failed with Try again), and the page read again behind it. A field is
 // held only while its own save runs, never while the page reads again, so
-// it can be changed again at once. The name tells the sidebar the moment
-// core saved it (frame/organization-name.tsx), so it never shows the name
-// just replaced.
+// it can be changed again at once.
 
 type Change = (
   organization: Session["organization"]
@@ -84,34 +79,6 @@ export const useSaveWords = () => {
     retryLabel: t`Try again`,
     savedLabel: t`Saved`,
     savingLabel: t`Saving`,
-  };
-};
-
-/**
- * The organization's name, renamed in place on its card: what core last
- * took, the reason core refused a rename, and how to rename. The sidebar
- * hears the new name the moment core saved it.
- */
-export const useOrganizationName = (name: string) => {
-  const { failure, status, change } = useOrganizationChange();
-  // What core last took: the page's read catches up behind it.
-  const [saved, setSaved] = useState(name);
-  const rename = (next: string): void => {
-    if (next === saved) {
-      return;
-    }
-    change(
-      async (api) => await api.update({ name: next }),
-      (organization) => {
-        setSaved(organization.name);
-        organizationRenamed(organization.name);
-      }
-    );
-  };
-  return {
-    name: saved,
-    refused: status === "failed" ? failure : undefined,
-    rename,
   };
 };
 

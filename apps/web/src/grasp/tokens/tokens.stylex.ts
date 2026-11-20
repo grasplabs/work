@@ -618,6 +618,7 @@ export const grasp = stylex.defineConsts({
   composerHeight: "var(--grasp-composer-height)",
   composerRowLeast: "var(--grasp-composer-row-least)",
   composerFieldLeast: "var(--grasp-composer-field-least)",
+  composerPlaceholderLeast: "var(--grasp-composer-placeholder-least)",
   composerLight: "var(--grasp-composer-light)",
   composerTint: "var(--grasp-composer-tint)",
   composerHalo: "var(--grasp-composer-halo)",
