@@ -92,6 +92,13 @@ export const hoverCardStyles = stylex.create({
     transitionTimingFunction: grasp.ease,
   },
 
+  // Sized to what it holds, between the least and the most width, and inside the window.
+  fit: {
+    width: "max-content",
+    minWidth: `min(${grasp.hoverCardMinWidth}, 100vw - 2 * ${grasp.popupGutter})`,
+    maxWidth: `min(${grasp.hoverCardMaxWidth}, 100vw - 2 * ${grasp.popupGutter})`,
+  },
+
   // What the link leads to: the interface's own type, a step up from its text.
   title: {
     margin: 0,

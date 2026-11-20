@@ -294,7 +294,12 @@ const Page = ({
 }) => {
   const tab: AgentTab = open === "new" ? "overview" : (open.tab ?? "overview");
   if (open === "new") {
-    return <NewAgent models={models} />;
+    return (
+      <NewAgent
+        personId={anna.userId}
+        taken={data.agents.map(({ name }) => name)}
+      />
+    );
   }
   const agent = data.agents.find(({ name }) => name === open.agent);
   if (agent === undefined) {
@@ -532,6 +537,44 @@ const set = async (
   await settled();
 };
 
+/** Whether the row a radio stands in, and no other radio's, says `words`. */
+const saysOnItsRow = (radio: HTMLElement, words: string): boolean => {
+  let row: HTMLElement | null = radio;
+  while (row !== null && row.querySelectorAll("[role='radio']").length <= 1) {
+    if (row.textContent?.includes(words)) {
+      return true;
+    }
+    row = row.parentElement;
+  }
+  return false;
+};
+
+/** The answer in the question Grasp asks now: the radio whose row says `words`. */
+const answer = (words: string): HTMLElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLElement>(
+      "[data-slot='question-tool'] [role='radio']"
+    ),
+  ].find((each) => saysOnItsRow(each, words));
+  if (found === undefined) {
+    throw new TypeError(`No answer ${words}`);
+  }
+  return found;
+};
+
+/** The box Grasp's question takes words in: its own text box, or its Other row's. */
+const answerBox = (): HTMLInputElement | HTMLTextAreaElement => {
+  const found = document.querySelector(
+    "[data-slot='question-tool'] input:not([type='radio']), [data-slot='question-tool'] textarea"
+  );
+  if (
+    !(found instanceof HTMLInputElement || found instanceof HTMLTextAreaElement)
+  ) {
+    throw new TypeError("No answer box");
+  }
+  return found;
+};
+
 /** The choice labelled `label` (a library Select's trigger), or none. */
 const choice = (label: string): HTMLElement | null =>
   document.querySelector<HTMLElement>(
@@ -647,15 +690,68 @@ describe("an agent's page", () => {
     expect(document.querySelector("a[href='/settings/stephen']")).toBeNull();
   });
 
-  it("makes an agent from what an admin types, and leads to its access", async () => {
+  it("makes an agent from the answers to Grasp's questions, in the look chosen, and leads to its access", async () => {
     const { connections, asked } = fakeConnections();
     const router = await shown(connections, "new");
-    await set(field("Name"), " Claire ", "input");
-    await set(field("What it is for"), "Chases unpaid invoices.", "input");
-    await set(field("Instructions"), "Answer only about invoices.", "input");
+    await press(answer("Something else"));
+    await set(answerBox(), "Chases unpaid invoices.", "input");
+    await press(button("Next"));
+    await set(answerBox(), " Claire ", "input");
+    await press(button("Next"));
+    await press(answer("Triangle"));
+    await press(button("Next"));
+    await press(answer("Ember"));
+    await press(button("Next"));
+    // Nobody yet, and only when asked: as offered.
+    await press(button("Next"));
+    await press(button("Next"));
+    await set(answerBox(), "Answer only about invoices.", "input");
+    await press(button("Review"));
     await press(button("Make agent"));
-    expect(asked).toStrictEqual([["make", claire]]);
+    expect(asked).toStrictEqual([
+      ["make", { ...claire, face: "figure-prism-ember" }],
+    ]);
     expect(router.state.location.href).toBe("/agents/agent-1?tab=access");
+  });
+
+  it("makes a starting point's agent for everyone, working on its own for the one who made it", async () => {
+    const { connections, asked } = fakeConnections();
+    const router = await shown(connections, "new");
+    await press(answer("Chase unpaid invoices"));
+    await press(button("Next"));
+    // Its suggested name, shape and colours, as offered.
+    await press(button("Next"));
+    await press(button("Next"));
+    await press(button("Next"));
+    await press(answer("Everyone in the company"));
+    await press(button("Next"));
+    await press(answer("Every weekday at 9:00"));
+    await press(button("Next"));
+    await press(button("Review"));
+    await press(button("Make agent"));
+    const [made] = asked;
+    expect(made?.[1]).toMatchObject({ name: "Invoice chaser" });
+    expect({
+      rest: asked.slice(1),
+    }).toStrictEqual({
+      rest: [
+        ["reach", "agent-1", true, { who: "everyone" }],
+        [
+          "wake",
+          "agent-1",
+          {
+            cron: "0 9 * * 1-5",
+            personId: anna.userId,
+            opening: "Chases unpaid invoices and drafts the reminders.",
+          },
+        ],
+      ],
+    });
+    // Its page opens where it was made, not on its access: that is chosen already.
+    expect({
+      page: router.state.location.pathname,
+      access: router.state.location.href.includes("tab=access"),
+    }).toStrictEqual({ page: "/agents/agent-1", access: false });
   });
 
   it("opens a new agent reaching nobody, and saves whom it answers and what it may do as an admin chooses them", async () => {
@@ -716,16 +812,19 @@ describe("an agent's page", () => {
     expect(asked).toStrictEqual([]);
   });
 
-  it("says why an agent wasn't made on the page it was typed on, and keeps what was typed", async () => {
-    const { connections } = fakeConnections();
-    const router = await shown(connections, "new");
-    await set(field("Name"), "Stephen", "input");
-    await press(button("Make agent"));
-    expect(document.body.textContent).toContain(
-      "Another agent already has that name."
-    );
-    expect(field("Name").value).toBe("Stephen");
-    expect(router.state.location.href).toBe("/");
+  it("takes no name another agent has, and says why where it was typed", async () => {
+    const { connections, asked } = fakeConnections();
+    await shown(connections, "new");
+    await press(answer("Something else"));
+    await set(answerBox(), "Answers questions about leave.", "input");
+    await press(button("Next"));
+    await set(answerBox(), "stephen", "input");
+    await press(button("Next"));
+    expect({
+      said: document.body.textContent?.includes("Another agent has this name"),
+      kept: answerBox().value,
+      asked,
+    }).toStrictEqual({ said: true, kept: "stephen", asked: [] });
   });
 
   it("keeps what is typed and not yet saved while the agent is paused, and while another tab is looked at", async () => {

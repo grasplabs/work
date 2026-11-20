@@ -13,13 +13,14 @@ import type { ComponentProps, ReactNode } from "react";
 
 import { Button } from "../button";
 import { Cross } from "../icons";
-import { useWords } from "../words/words";
+import { useWords, withGiven } from "../words/words";
 import { panelMarker } from "./dialog.stylex";
 import { useSize } from "./size-context";
 import { useStill } from "./still-context";
 import { dialogStyles as styles } from "./styles";
-import { sureClose } from "./sure-close";
+import { watchPanel } from "./sure-close";
 import { dialogWords } from "./words";
+import type { DialogWords } from "./words";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
@@ -36,6 +37,12 @@ export interface DialogContentProps extends Omit<
    * @default "Close"
    */
   closeLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ close: "Close the settings" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<DialogWords>;
 }
 
 /**
@@ -46,10 +53,13 @@ export interface DialogContentProps extends Omit<
 export const DialogContent = ({
   children,
   closeLabel: given,
+  words,
   ...rest
 }: DialogContentProps) => {
-  const words = useWords("dialog", dialogWords);
-  const closeLabel = given ?? words.close;
+  const { close: closeLabel } = withGiven(
+    useWords("dialog", dialogWords, words),
+    { close: given }
+  );
   const still = useStill();
   const full = useSize() === "full";
   const cross = (
@@ -84,7 +94,7 @@ export const DialogContent = ({
     <>
       <BackdropPrimitive {...stylex.props(styles.scrim)} />
       <ContentPrimitive
-        {...mergeProps(rest, { ref: sureClose })}
+        {...mergeProps(rest, { ref: watchPanel })}
         {...stylex.props(
           panelMarker,
           styles.panel,

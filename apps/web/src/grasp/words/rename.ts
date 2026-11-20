@@ -14,6 +14,8 @@ export const renameWords = {
   cancel: "Cancel",
   /** Said of a name that can be renamed, after its own words. */
   hint: "Double-click or press F2 to rename",
+  /** Said of a name that renames on a press (a panel's head), after its own words. */
+  hintPress: "Press or press F2 to rename",
 };
 
 export type RenameWords = typeof renameWords;

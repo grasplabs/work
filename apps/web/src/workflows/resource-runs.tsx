@@ -86,7 +86,7 @@ export const OpenRun = ({
 export const NoRuns = () => {
   const { t } = useLingui();
   return (
-    <Empty size="section">
+    <Empty size="md">
       <EmptyHeader>
         <EmptyDescription>{t`No runs yet.`}</EmptyDescription>
       </EmptyHeader>

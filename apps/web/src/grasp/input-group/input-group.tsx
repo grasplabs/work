@@ -39,8 +39,8 @@ export interface InputGroupProps {
    */
   children: ReactNode;
   /**
-   * The height, the same as Input's and Button's: `md` 36px, `lg` 44px. On a touch screen both
-   * have a 44px target and 16px words.
+   * The height, the same as Input's and Button's: `sm` 32px (a Settings row's field), `md` 36px,
+   * `lg` 44px. On a touch screen every size has a 44px target and 16px words.
    * @default "md"
    */
   size?: InputGroupSize;
@@ -95,15 +95,20 @@ const styles = stylex.create({
         },
       ":has(input:focus-visible)": grasp.fieldFocus,
       ":has(input[aria-invalid=true])": grasp.fieldInvalid,
-      // Read only: settled, its hairline and no lift.
+      // Read only: settled, its hairline and no lift; focus from the keys shows as the hairline one
+      // step stronger, no ring (Input's readOnly).
       ":has(input:read-only:not(:disabled))": `inset 0 0 0 1px ${grasp.fieldEdge}`,
-      ":has(input:read-only:not(:disabled):focus-visible)": grasp.fieldFocus,
+      ":has(input:read-only:not(:disabled):focus-visible:not([data-focus-pointer]))": `inset 0 0 0 1px ${grasp.fieldEdgeHover}`,
       ":has(input[aria-invalid=true]:focus-visible)": grasp.fieldFocusInvalid,
       ":has(input:disabled)": `inset 0 0 0 1px ${grasp.fieldEdge}`,
     },
     opacity: { default: 1, ":has(input:disabled)": grasp.dim },
-    cursor: { default: "text", ":has(input:disabled)": "not-allowed" },
-    // Focus, the ring for the keyboard and a real outline in forced colours: focus.fieldWithin.
+    cursor: {
+      default: "text",
+      ":has(input:read-only:not(:disabled))": "default",
+      ":has(input:disabled)": "not-allowed",
+    },
+    // Focus, the ring for the keyboard and a real outline in forced colours: focus.fieldWithinEditable.
     color: grasp.ink,
     fontFamily: grasp.fontSans,
     fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },
@@ -111,6 +116,10 @@ const styles = stylex.create({
     transitionProperty: "box-shadow, background-color",
     transitionDuration: grasp.durationHover,
     transitionTimingFunction: grasp.ease,
+  },
+  sm: {
+    minHeight: grasp.controlSm,
+    borderRadius: `min(${grasp.corner}, calc(${grasp.controlSm} / 2))`,
   },
   md: {
     minHeight: grasp.controlMd,
@@ -122,6 +131,12 @@ const styles = stylex.create({
     position: "absolute",
     insetInline: 0,
     insetBlock: 0,
+  },
+  targetSm: {
+    insetBlock: {
+      default: 0,
+      [COARSE]: `calc((${grasp.controlSm} - ${grasp.tap}) / 2)`,
+    },
   },
   targetMd: {
     insetBlock: {
@@ -147,14 +162,18 @@ export const InputGroup = ({
       {...stylex.props(
         styles.group,
         styles[size],
-        focus.fieldWithin,
+        focus.fieldWithinEditable,
         layout ?? styleProp
       )}
     >
       <span
         aria-hidden="true"
         data-input-group-target=""
-        {...stylex.props(styles.target, size === "md" && styles.targetMd)}
+        {...stylex.props(
+          styles.target,
+          size === "sm" && styles.targetSm,
+          size === "md" && styles.targetMd
+        )}
       />
       {children}
     </GroupPrimitive>

@@ -273,15 +273,18 @@ const CollectionForm = ({ admin }: { admin: boolean }) => {
                 onChange={setTeamIds}
                 teams={teams}
               />
-              <Switch
-                checked={sensitive}
-                description={t`The model gateway treats what agents read from it as sensitive.`}
-                disabled={busy}
-                label={t`Sensitive`}
-                onCheckedChange={(checked) => {
-                  setSensitive(checked);
-                }}
-              />
+              <Field orientation="horizontal" disabled={busy}>
+                <FieldContent>
+                  <FieldLabel>{t`Sensitive`}</FieldLabel>
+                  <FieldDescription>{t`The model gateway treats what agents read from it as sensitive.`}</FieldDescription>
+                </FieldContent>
+                <Switch
+                  checked={sensitive}
+                  onCheckedChange={(checked) => {
+                    setSensitive(checked);
+                  }}
+                />
+              </Field>
             </>
           ) : null}
           <ErrorText>{failure}</ErrorText>

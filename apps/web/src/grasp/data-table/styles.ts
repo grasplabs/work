@@ -77,15 +77,22 @@ export const styles = stylex.create({
     whiteSpace: "nowrap",
     color: "transparent",
   },
-  // A group's heading row: its toggle, its value, and how many rows it holds.
+  // A group's heading row: its toggle, its value as a heading, and how many rows it holds as a Badge.
+  // A step above a row in size and weight (the grouped Section card's title: 15 on 24 at semibold),
+  // with more room above it than below, so it belongs to the rows under it.
   group: {
     display: "inline-flex",
     alignItems: "center",
     gap: grasp.space2,
-    height: grasp.tableTextLine,
+    height: grasp.textMdLine,
+    marginBlockStart: grasp.space3,
     verticalAlign: "top",
+    fontSize: grasp.textMd,
+    lineHeight: grasp.textMdLine,
+    fontWeight: grasp.weightSemibold,
+    color: grasp.ink,
   },
-  groupCount: { color: grasp.muted, fontVariantNumeric: "tabular-nums" },
+  groupCount: { fontVariantNumeric: "tabular-nums" },
   // The first cell of a row that opens: its toggle, then its words.
   // Held to the line's height and top: an inline box of controls on the text's baseline would
   // take its baseline from a button's bottom edge and stretch the row.
@@ -111,12 +118,37 @@ export const styles = stylex.create({
   // An xs control in a cell takes no more height than the words: the row keeps its height.
   inRow: {
     display: "inline-flex",
+    position: "relative",
+    zIndex: 1,
     marginBlock: `calc((${grasp.tableTextLine} - ${grasp.controlXs}) / 2)`,
   },
+  // A row that opens: its name, a link or a button drawn as the cell's plain words, on the column's
+  // start line, wrapping in whole words; its press area stretched over the row (the row is the box,
+  // TableRow's \`opens\`). Its ring is the row's.
+  rowTarget: {
+    display: "inline",
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "inherit",
+    font: "inherit",
+    letterSpacing: "inherit",
+    textAlign: "start",
+    textDecoration: "none",
+    overflowWrap: "inherit",
+    cursor: "pointer",
+    outline: "none",
+    "::after": { content: '""', position: "absolute", inset: 0, zIndex: 0 },
+  },
+  // The row's other controls stand over the stretched press area, so they stay their own.
+  aboveTarget: { position: "relative", zIndex: 1 },
   // A control alone in a cell (a row's actions): held in a box as tall as the line, so it does not
   // sit on the text's baseline and add height to the row.
   cellControl: {
     display: "inline-flex",
+    position: "relative",
+    zIndex: 1,
     alignItems: "center",
     verticalAlign: "top",
     height: grasp.tableTextLine,
@@ -156,6 +188,10 @@ export const styles = stylex.create({
     width: "80%",
     overflow: "hidden",
   },
+  // On the column's side: an end column's placeholder (a number's) at the cell's end.
+  waitingEnd: { marginInlineStart: "auto" },
+  // The chosen count while the rows load: its room kept, not seen or said.
+  countWaiting: { visibility: "hidden" },
   // The column's menu, after its name.
   // On a touch screen it stands further off the name, so each keeps a finger's 44px.
   menu: {

@@ -10,7 +10,7 @@ import {
 import type { MenuRadioItemState } from "@ui-sdk/react/menu";
 import type { ComponentProps } from "react";
 
-import { menuStyles as styles } from "./styles";
+import { useMenuLook } from "./look";
 
 type RadioPrimitiveProps = ComponentProps<typeof RadioPrimitive>;
 
@@ -42,19 +42,22 @@ const className = (...parts: (stylex.StyleXStyles | false)[]) =>
 export const DropdownMenuRadioItem = ({
   children,
   ...rest
-}: DropdownMenuRadioItemProps) => (
-  <RadioPrimitive
-    {...rest}
-    label={children}
-    className={(state: MenuRadioItemState) =>
-      className(
-        styles.item,
-        state.highlighted && styles.highlighted,
-        state.disabled && styles.disabled
-      )
-    }
-  >
-    <span {...stylex.props(styles.words, styles.wordsBare)}>{children}</span>
-    <MenuItemIndicator {...stylex.props(styles.dot)} />
-  </RadioPrimitive>
-);
+}: DropdownMenuRadioItemProps) => {
+  const styles = useMenuLook();
+  return (
+    <RadioPrimitive
+      {...rest}
+      label={children}
+      className={(state: MenuRadioItemState) =>
+        className(
+          styles.item,
+          state.highlighted && styles.highlighted,
+          state.disabled && styles.disabled
+        )
+      }
+    >
+      <span {...stylex.props(styles.words, styles.wordsBare)}>{children}</span>
+      <MenuItemIndicator {...stylex.props(styles.dot)} />
+    </RadioPrimitive>
+  );
+};

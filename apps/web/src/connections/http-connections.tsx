@@ -291,7 +291,7 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
               {t`At least ${shortest} characters. Grasp keeps it sealed and never shows it again, not even to you. To change it, add another connection and revoke this one.`}
             </FieldDescription>
           </Field>
-          {said === undefined ? null : <Alert title={said} variant="danger" />}
+          {said === undefined ? null : <Alert title={said} tone="danger" />}
         </Form>
       </DialogBody>
       <DialogFooter>
@@ -380,9 +380,7 @@ const Revoke = ({
         <AlertDialogDescription>
           {t`Its credential is deleted, and every App and workflow loses it. Add it again to use it again.`}
         </AlertDialogDescription>
-        {failure === undefined ? null : (
-          <Alert title={failure} variant="danger" />
-        )}
+        {failure === undefined ? null : <Alert title={failure} tone="danger" />}
         <AlertDialogFooter>
           <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
           <AlertDialogAction

@@ -168,11 +168,6 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   const question = `Send Ben invoice ${tag}.`;
   const title = `Invoice ${tag}`;
   await page.goto("/");
-  // Offered the tour first, in the greeting's place: turned down, the box
-  // to ask in has the focus the gone button had.
-  await page.getByRole("button", { name: "Not now" }).click();
-  await expect(page.getByLabel("Your question")).toBeFocused();
-
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   // The chat's own page, at its own address, the question already in it.
@@ -342,7 +337,6 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   // Unique to the attempt; the scripted model answers what it opens with.
   const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
   await page.goto("/");
-  await page.getByRole("button", { name: "Not now" }).click();
 
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -412,9 +406,6 @@ test("a person starts a chat from one of the questions under the box", async ({
   const { user } = peopleIn("chat");
   const page = await pageOf(user);
   await page.goto("/");
-  // The questions wait while the tour is offered, as in the prototype:
-  // turned down, they are under the box.
-  await page.getByRole("button", { name: "Not now" }).click();
   const questions = page.getByRole("list", { name: "Questions to start with" });
   await expect(questions.getByRole("button")).toHaveCount(4);
   await questions
@@ -608,7 +599,6 @@ test("the chat on every other page carries on the open chat, which opens as its 
   await expect(messages.getByRole("article").first()).toHaveText(question);
   await chat.getByRole("button", { name: "New chat" }).click();
   await expect(messages).toHaveCount(0);
-  await expect(chat).toContainText("Ask anything, or describe a process");
   const second = `Another from another page ${tag}?`;
   await box.fill(second);
   // A page load reads the models again.

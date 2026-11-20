@@ -30,8 +30,10 @@ export interface ComposerFile {
   pages?: number;
   /** Its media type ("image/png"). */
   type?: string;
-  /** A picture of it, such as an image's own address. */
+  /** A picture of it, such as an image's own address. A picture's chip in the text shows it as its thumbnail. */
   preview?: string;
+  /** When it was added: a picture's line in the @ menu says the time. Without it, when the Composer first had it. */
+  addedAt?: Date | number;
   /** Where it is. */
   status?: ComposerAttachmentStatus;
   /** How far it has uploaded, from 0 to 1. */

@@ -10,6 +10,7 @@ import { useContext } from "react";
 import type { ComponentProps, ReactElement } from "react";
 
 import { ChoiceBox, ChoiceGrouped, choiceIds } from "../choice/row";
+import { wrap } from "../wrap/wrap";
 import { noteStyles } from "./field";
 
 /** Every prop a FieldError takes. */
@@ -59,7 +60,7 @@ export const FieldError = ({ children, ...rest }: FieldErrorProps) => {
     return (
       <p
         id={choiceIds(box).error}
-        {...stylex.props(noteStyles.note, noteStyles.error)}
+        {...stylex.props(noteStyles.note, wrap.words, noteStyles.error)}
       >
         {children}
       </p>
@@ -68,7 +69,7 @@ export const FieldError = ({ children, ...rest }: FieldErrorProps) => {
   return (
     <FieldErrorPrimitive
       {...rest}
-      {...stylex.props(noteStyles.note, noteStyles.error)}
+      {...stylex.props(noteStyles.note, wrap.words, noteStyles.error)}
     >
       {children}
     </FieldErrorPrimitive>

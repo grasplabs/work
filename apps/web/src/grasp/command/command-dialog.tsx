@@ -1,5 +1,7 @@
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 6: CommandDialog keeps its older shape working beside its parts until step 9 removes it (handover/audit/RELEASE.md §7). */
+
 import * as stylex from "@stylexjs/stylex";
 import type { CommandActionDetails } from "@ui-sdk/react/command";
 import {
@@ -9,6 +11,7 @@ import {
   DialogTitle,
 } from "@ui-sdk/react/dialog";
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { DialogTrigger } from "../dialog";
 import { dialogStyles } from "../dialog/styles";
@@ -34,19 +37,31 @@ type Passed = Pick<
   | "moreLabel"
   | "moreHint"
   | "failedLabel"
+  | "words"
 >;
 
 /** Every prop a CommandDialog takes. */
 export interface CommandDialogProps extends Passed {
-  /** The commands, as Command takes them: commands, groups and separators. */
-  items: CommandItems;
+  /**
+   * Command's parts: a CommandInput, a CommandEmpty and a CommandList. Leave it out only in the
+   * older shape, where the palette draws them itself.
+   */
+  children?: ReactNode;
+  /**
+   * The commands, as Command takes them: commands, groups and separators, drawn by a CommandList
+   * with no children. Leave it out when the CommandList holds CommandItem parts.
+   */
+  items?: CommandItems;
   /**
    * Runs the command with this value. The palette closes once it has run; when it returns a
    * Promise, once that settles, and it stays open showing the `failedLabel` if it rejects. Return
    * `false` to keep it open (a command that changes what the list shows, as Try the search again).
    */
   onAction?: (value: string, details: CommandActionDetails) => unknown;
-  /** The search field's name, and the palette's, as a screen reader and an agent say it ("Search actions"). */
+  /**
+   * The palette's name, and its search field's unless a CommandInput names it, as a screen reader
+   * and an agent say it ("Search actions").
+   */
   "aria-label": string;
   /**
    * The words on the trigger. `null` draws no trigger: the page opens it (`open`), from its own
@@ -67,15 +82,9 @@ export interface CommandDialogProps extends Passed {
    * @default "mod+k"
    */
   shortcut?: string | null;
-  /**
-   * What the empty field says: a verb and the thing.
-   * @default "Type a command or search"
-   */
+  /** @deprecated Use `CommandInput.placeholder`. */
   placeholder?: string;
-  /**
-   * What the list says when nothing matches.
-   * @default "No results"
-   */
+  /** @deprecated Use `CommandEmpty`. */
   empty?: string;
 }
 
@@ -173,6 +182,7 @@ const useOpenByShortcut = (
 
 /** The trigger and the palette it opens. */
 export const CommandDialog = ({
+  children,
   items,
   onAction,
   "aria-label": ariaLabel,
@@ -184,7 +194,7 @@ export const CommandDialog = ({
   onOpenChange,
   ...passed
 }: CommandDialogProps) => {
-  const words = useWords("command", commandWords);
+  const words = useWords("command", commandWords, passed.words);
   const [openHere, setOpenHere] = useState(false);
   const open = openGiven ?? openHere;
   const setOpen = (next: boolean) => {
@@ -251,7 +261,9 @@ export const CommandDialog = ({
           aria-label={ariaLabel}
           placeholder={placeholder ?? words.dialogPlaceholder}
           empty={empty}
-        />
+        >
+          {children}
+        </CommandView>
       </DialogContent>
     </DialogPrimitive>
   );

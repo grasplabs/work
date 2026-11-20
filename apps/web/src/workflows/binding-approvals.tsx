@@ -260,7 +260,7 @@ const DecidersChoice = ({
                     )
                   );
                 }}
-                removeLabel={t`Remove ${name}`}
+                words={{ remove: t`Remove ${name}` }}
               >
                 {name}
               </Tag>

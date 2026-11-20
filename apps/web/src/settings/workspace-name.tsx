@@ -14,16 +14,13 @@ import {
   organizationLogoChanged,
   organizationRenamed,
 } from "../frame/organization-name.tsx";
-import { ImageWell } from "../grasp/file-upload/index.ts";
-import { Input } from "../grasp/input/index.ts";
-import { SettingRow } from "../grasp/setting-row/index.ts";
 import type { SettingRowState } from "../grasp/setting-row/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
-// Settings › Workspace's own fields: a change to the organization, saved
-// as it is made, the row saying how its save stands (saving, saved, or
+// Settings › Workspace's own changes: a change to the organization, saved
+// as it is made, its row or its card saying how its save stands (saving, saved, or
 // failed with Try again), and the page read again behind it. A field is
 // held only while its own save runs, never while the page reads again, so
 // it can be changed again at once. The name tells the sidebar the moment
@@ -90,83 +87,32 @@ export const useSaveWords = () => {
   };
 };
 
-/** The organization's name, as a setting's row: saved when the field is left, or on Enter; Escape puts it back. */
-export const NameField = ({
-  name,
-  canChange,
-}: {
-  name: string;
-  canChange: boolean;
-}) => {
-  const { t } = useLingui();
-  const words = useSaveWords();
-  const { busy, failure, status, change, idle } = useOrganizationChange();
-  const [draft, setDraft] = useState<string | null>(null);
+/**
+ * The organization's name, renamed in place on its card: what core last
+ * took, the reason core refused a rename, and how to rename. The sidebar
+ * hears the new name the moment core saved it.
+ */
+export const useOrganizationName = (name: string) => {
+  const { failure, status, change } = useOrganizationChange();
   // What core last took: the page's read catches up behind it.
   const [saved, setSaved] = useState(name);
-  // The name a failed save tried, kept for Try again.
-  const [tried, setTried] = useState<string>();
-  const send = (next: string): void => {
-    setTried(next);
+  const rename = (next: string): void => {
+    if (next === saved) {
+      return;
+    }
     change(
       async (api) => await api.update({ name: next }),
       (organization) => {
         setSaved(organization.name);
-        setTried(undefined);
         organizationRenamed(organization.name);
       }
     );
   };
-  const save = (): void => {
-    const next = draft?.trim();
-    // A failed save keeps what was typed in the field, as the row says.
-    if (status !== "failed") {
-      setDraft(null);
-    }
-    if (next !== undefined && next !== "" && next !== saved) {
-      send(next);
-    }
+  return {
+    name: saved,
+    refused: status === "failed" ? failure : undefined,
+    rename,
   };
-  return (
-    <SettingRow
-      {...words}
-      {...(failure === undefined ? {} : { error: failure })}
-      {...(canChange ? {} : { info: t`An admin changes it.` })}
-      label={t`Name`}
-      onRetry={() => {
-        if (tried !== undefined) {
-          send(tried);
-        }
-      }}
-      status={status}
-    >
-      {(field) => (
-        <Input
-          {...field}
-          layout={controlStyles.fill}
-          maxLength={80}
-          onBlur={save}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.currentTarget.blur();
-            }
-            if (event.key === "Escape") {
-              setDraft(null);
-              idle();
-            }
-          }}
-          onValueChange={(value) => {
-            setDraft(value);
-            idle();
-          }}
-          // Read-only while its save runs, not disabled: a disabled field drops the keyboard's focus.
-          readOnly={!canChange || busy}
-          size="sm"
-          value={draft ?? saved}
-        />
-      )}
-    </SettingRow>
-  );
 };
 
 /** The logo's limits, in words, for the well's tooltip. */
@@ -225,21 +171,13 @@ const removeWithUndo = async (
 };
 
 /**
- * The organization's logo, as a row of the Organization card: the library's
- * image well, itself the control. A press or a dropped image saves it at
- * once (PNG, JPEG or WebP, at most 512 KB, which core checks again by its
- * bytes); the well shows the save, and a failure with Try again. Remove
- * takes it away at once, with Undo in a toast. The sidebar shows the new one at once.
+ * The organization's logo, for the library's image well on its card. A
+ * press or a dropped image saves it at once (PNG, JPEG or WebP, at most
+ * 512 KB, which core checks again by its bytes); the well shows the save,
+ * and a failure with Try again. Remove takes it away at once, with Undo in
+ * a toast. The sidebar shows the new one at once.
  */
-export const LogoField = ({
-  name,
-  logo,
-  canChange,
-}: {
-  name: string;
-  logo: string | null;
-  canChange: boolean;
-}) => {
+export const useOrganizationLogo = (logo: string | null) => {
   const { t } = useLingui();
   const core = useCore();
   const router = useRouter();
@@ -286,45 +224,35 @@ export const LogoField = ({
       }
     );
   };
-  return (
-    <SettingRow label={t`Logo`}>
-      {(field) => (
-        <ImageWell
-          {...field}
-          accept={organizationLogoTypes}
-          disabled={!canChange}
-          fit="contain"
-          hint={hint}
-          initials={name}
-          maxSize={organizationLogoMaxBytes}
-          onValueChange={(value) => {
-            if (value === null && saved !== null) {
-              void remove(saved);
-            }
-          }}
-          upload={upload}
-          value={saved}
-          words={{
-            change: t`Change the logo`,
-            add: t`Add a logo`,
-            remove: t`Remove the logo`,
-            saving: t`Saving`,
-            saved: t`Saved`,
-            failed: t`Not saved`,
-            retry: t`Try again`,
-            how: t`Click or drop a picture.`,
-            refused: (file, reason) =>
-              reason === "file-too-large"
-                ? t`${file} is too large.`
-                : t`${file} is not a kind of picture this takes.`,
-            // The row's own line, under its name: short, with the limit.
-            refusedInRow: (reason) =>
-              reason === "file-too-large"
-                ? t`Too large: at most ${most}`
-                : t`Not a PNG, JPEG or WebP picture`,
-          }}
-        />
-      )}
-    </SettingRow>
-  );
+  return {
+    accept: organizationLogoTypes,
+    hint,
+    maxSize: organizationLogoMaxBytes,
+    onValueChange: (value: string | null): void => {
+      if (value === null && saved !== null) {
+        void remove(saved);
+      }
+    },
+    upload,
+    value: saved,
+    words: {
+      change: t`Change the logo`,
+      add: t`Add a logo`,
+      remove: t`Remove the logo`,
+      saving: t`Saving`,
+      saved: t`Saved`,
+      failed: t`Not saved`,
+      retry: t`Try again`,
+      how: t`Click or drop a picture.`,
+      refused: (file: string, reason: string) =>
+        reason === "file-too-large"
+          ? t`${file} is too large.`
+          : t`${file} is not a kind of picture this takes.`,
+      // The card's own line, under the name: short, with the limit.
+      refusedInRow: (reason: string) =>
+        reason === "file-too-large"
+          ? t`Too large: at most ${most}`
+          : t`Not a PNG, JPEG or WebP picture`,
+    },
+  };
 };

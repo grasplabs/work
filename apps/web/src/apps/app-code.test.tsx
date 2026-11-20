@@ -21,8 +21,7 @@ import { AppCode } from "./app-code.tsx";
 
 // An App's Code, in its workspace, against core's Apps API as the page
 // reaches it over RPC, faked: version 2 is live, and the App's draft, while
-// it changes the App, is read from `apps.drafts`. What the page drew
-// (@pierre/diffs) is read from the shadow roots it draws in.
+// it changes the App, is read from `apps.drafts`.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -230,32 +229,16 @@ const named = (selector: string, name: string) =>
     (each) => entryName(each) === name
   );
 
-/**
- * The text `element` shows, the code @pierre/diffs draws in its shadow
- * roots included: what a person reads there.
- */
-const textShown = (node: Node | null | undefined): string => {
-  if (node === null || node === undefined) {
-    return "";
-  }
-  if (node.nodeType === Node.TEXT_NODE) {
-    return node.textContent ?? "";
-  }
-  const shadow = node instanceof Element ? node.shadowRoot : null;
-  return [...(shadow?.childNodes ?? []), ...node.childNodes]
-    .map((child) => textShown(child))
-    .join("");
-};
-
 /** The text of the open file's code, as the view shows it. */
 const codeShown = (): string =>
-  textShown(document.querySelector('section[aria-label^="Code of"]'));
+  document.querySelector('section[aria-label^="Code of"] code')?.textContent ??
+  "";
 
-/** Where the open file is, as its bar says it. */
-const pathShown = (): string[] =>
-  [...document.querySelectorAll('nav[aria-label="Open file"] li')].map((item) =>
-    item.textContent.trim()
-  );
+/** Where the open file is, as the head over its code says it. */
+const pathShown = (): string | undefined =>
+  document
+    .querySelector('section[aria-label^="Code of"] [title]')
+    ?.textContent.trim();
 
 /** The tree's folders and files as they stand, top to bottom. */
 const treeShown = (): string[] =>
@@ -281,7 +264,7 @@ describe("An App's Code", () => {
 
     await expect.poll(codeShown).toContain("export const limit = 25;");
     expect({ path: pathShown(), open: openInTree() }).toStrictEqual({
-      path: ["grasp.config.ts"],
+      path: "grasp.config.ts",
       open: "grasp.config.ts",
     });
   });
@@ -350,7 +333,7 @@ describe("An App's Code", () => {
     await expect.poll(codeShown).toContain("function Inbox()");
 
     expect({ path: pathShown(), open: openInTree() }).toStrictEqual({
-      path: ["src", "routes", "inbox.tsx"],
+      path: "src/routes/inbox.tsx",
       open: "inbox.tsx",
     });
   });

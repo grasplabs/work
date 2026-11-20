@@ -283,13 +283,15 @@ const AnswerInput = ({
   const label = t`Value for ${name}`;
   if (field.type.kind === "boolean") {
     return (
-      <Switch
-        checked={value === "true"}
-        label={field.name}
-        onCheckedChange={(checked) => {
-          onChange(checked ? "true" : "false");
-        }}
-      />
+      <Field orientation="horizontal">
+        <FieldLabel>{field.name}</FieldLabel>
+        <Switch
+          checked={value === "true"}
+          onCheckedChange={(checked) => {
+            onChange(checked ? "true" : "false");
+          }}
+        />
+      </Field>
     );
   }
   if (field.type.kind === "choice") {
@@ -475,7 +477,7 @@ const ReviewDialog = ({
               </Field>
             )}
             {failure === undefined ? null : (
-              <Alert title={failure} variant="danger" />
+              <Alert title={failure} tone="danger" />
             )}
           </Form>
         </DialogBody>

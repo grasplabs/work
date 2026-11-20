@@ -9,7 +9,13 @@
     <script src="/theme.js"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- The frame's ground until the app draws the frame: theme.js and src/styles.css. -->
+      <div class="frame-ground" aria-hidden="true">
+        <div></div>
+        <div></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

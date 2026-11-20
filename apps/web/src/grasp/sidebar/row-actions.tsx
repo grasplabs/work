@@ -12,14 +12,26 @@ import {
 import type { FocusEvent, KeyboardEvent, ReactElement } from "react";
 
 import { announce } from "../announce/announce";
-import { ContextMenu } from "../context-menu";
-import type { MenuAction, MenuEntries } from "../context-menu/menu-items";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "../context-menu";
+import type {
+  MenuAction,
+  MenuCheckbox,
+  MenuEntries,
+  MenuRadioGroupEntry,
+} from "../context-menu/menu-items";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../dropdown-menu";
@@ -30,6 +42,7 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { renameWords } from "../words/rename";
 import { useWords } from "../words/words";
 import { rowActionsMarker } from "./row-actions.stylex";
+import { useSidebarGivenWords } from "./shell";
 import { sidebarWords } from "./words";
 
 /** What a row with actions or a rename takes, beside its link (sidebar.tsx's `SidebarSubRow`). */
@@ -178,16 +191,53 @@ const DotsItem = ({
   </DropdownMenuItem>
 );
 
+/** A checkbox or a radio group, in the Context menu only: it turns over or chooses, and reports to nobody. */
+const SettingEntry = ({
+  entry,
+}: {
+  entry: MenuCheckbox | MenuRadioGroupEntry;
+}) => {
+  if (entry.type === "checkbox") {
+    return (
+      <DropdownMenuCheckboxItem
+        defaultChecked={entry.defaultChecked}
+        disabled={entry.disabled}
+      >
+        {entry.label}
+      </DropdownMenuCheckboxItem>
+    );
+  }
+  return (
+    <DropdownMenuRadioGroup defaultValue={entry.defaultValue}>
+      {entry.label !== undefined && entry.label !== "" && (
+        <DropdownMenuLabel>{entry.label}</DropdownMenuLabel>
+      )}
+      {entry.items.map((item) => (
+        <DropdownMenuRadioItem
+          key={item.value}
+          value={item.value}
+          disabled={item.disabled}
+        >
+          {item.label}
+        </DropdownMenuRadioItem>
+      ))}
+    </DropdownMenuRadioGroup>
+  );
+};
+
 /**
- * The entries in the dots' Dropdown menu: actions, groups and separators. A checkbox or a radio
- * group has nothing in a row to report its change to, so the dots leave them to the Context menu.
+ * The entries as Dropdown menu's parts: actions, groups and separators. A checkbox or a radio
+ * group has nothing in a row to report its change to, so the dots leave them out; the Context menu
+ * (`settings`) draws them.
  */
 const DotsEntries = ({
   items,
   onChoose,
+  settings = false,
 }: {
   items: MenuEntries;
   onChoose: (value: string) => void;
+  settings?: boolean;
 }) =>
   items.map((entry, index) => {
     if (!("type" in entry)) {
@@ -211,7 +261,12 @@ const DotsEntries = ({
         </Fragment>
       );
     }
-    return null;
+    return settings ? (
+      <SettingEntry
+        entry={entry}
+        key={entry.type === "checkbox" ? entry.value : entry.name}
+      />
+    ) : null;
   });
 
 /** The three dots and their menu. */
@@ -342,7 +397,7 @@ export const RowActions = ({
   /** Draws the row's link, with what it takes from its actions. */
   children: (extras: RowLinkExtras) => ReactElement;
 }): ReactElement => {
-  const words = useWords("sidebar", sidebarWords);
+  const words = useWords("sidebar", sidebarWords, useSidebarGivenWords());
   const said = useWords("rename", renameWords);
   const hint = useId();
   const [renaming, setRenaming] = useState(false);
@@ -471,14 +526,13 @@ export const RowActions = ({
   // The row's link is what the keys reach, so the area takes no tab stop; the menu gives focus back
   // to the link, or to nobody when its choice starts renaming (the field takes it).
   return hasActions ? (
-    <ContextMenu
-      aria-label={label}
-      items={actions}
-      onAction={choose}
-      tabStop={false}
-      finalFocus={renaming ? "none" : linkOf}
-    >
-      {held}
+    <ContextMenu>
+      <ContextMenuTrigger aria-label={label} tabStop={false}>
+        {held}
+      </ContextMenuTrigger>
+      <ContextMenuContent finalFocus={renaming ? "none" : linkOf}>
+        <DotsEntries items={actions} onChoose={choose} settings />
+      </ContextMenuContent>
     </ContextMenu>
   ) : (
     held

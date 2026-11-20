@@ -28,6 +28,12 @@ export interface HoverCardContentProps {
    * @default "center"
    */
   align?: ContentPrimitiveProps["align"];
+  /**
+   * `fixed`: the popover's width, whatever it holds. `content`: as wide as what it holds, from
+   * hover-card-min-width to hover-card-max-width, and never wider than the window less the gutter.
+   * @default "fixed"
+   */
+  width?: "fixed" | "content";
 }
 
 // Under the phone breakpoint the card takes the window's width less the gutter, so beside its link it
@@ -51,11 +57,12 @@ const across = new Set<HoverCardContentProps["side"]>([
   "end",
 ]);
 
-/** The card, beside its link. Under 640px it takes the window's width less the gutter, under or over the link. */
+/** The card, beside its link. Under 640px it takes the window's width less the gutter, under or over the link (sized to its content, up to that). */
 export const HoverCardContent = ({
   children,
   side,
   align,
+  width = "fixed",
 }: HoverCardContentProps) => {
   const phone = useSyncExternalStore(watchPhone, onPhone, notOnPhone);
   return (
@@ -64,7 +71,7 @@ export const HoverCardContent = ({
       align={align}
       sideOffset={popup.popoverGap}
       collisionPadding={popup.gutter}
-      {...stylex.props(styles.panel)}
+      {...stylex.props(styles.panel, width === "content" && styles.fit)}
     >
       {children}
     </ContentPrimitive>

@@ -255,7 +255,6 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const everyone = [
     "Chat",
     "Brain",
-    "Projects",
     "Apps",
     "Workflows",
     // The company's agents: the ones a person may ask, and for admins all of them.
@@ -394,7 +393,7 @@ test("signing in goes back to the page asked for, and only to a page of this sit
   ]) {
     // oxlint-disable-next-line no-await-in-loop -- one address at a time
     await page.goto(`/sign-in?returnTo=${encodeURIComponent(elsewhere)}`);
-    // Chat's box, whether its heading greets or offers the tour.
+    // Chat's box.
     // oxlint-disable-next-line no-await-in-loop -- one address at a time
     await expect(page.getByLabel("Your question")).toBeVisible();
     expect(page.url()).toBe(`${origin}/`);

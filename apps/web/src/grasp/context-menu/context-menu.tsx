@@ -1,27 +1,6 @@
-// ContextMenu: the actions for a thing, opened where it is right-clicked or long-pressed, from
-// shadcn's (registry/bases/base/ui/context-menu.tsx, on Base UI), converted from Tailwind to StyleX
-// and rebuilt on UI SDK's Menu with its context trigger, then made Grasp's: the popup Select and
-// Command share, with Palermo's menu items, a danger tone, and failure words on an action.
-//
-//   <ContextMenu
-//     aria-label="Q3 forecast"
-//     items={[
-//       { value: "open", label: "Open", icon: ArrowRight },
-//       { value: "rename", label: "Rename", shortcut: "f2" },
-//       { type: "separator" },
-//       { value: "delete", label: "Move to trash", icon: Trash, danger: true },
-//     ]}
-//     onAction={(value) => run(value)}
-//   >
-//     <FileRow />
-//   </ContextMenu>
-//
-// The area takes a tab stop, so Shift+F10 or the menu key opens it from the keyboard (with
-// `tabStop={false}` the thing inside it that takes the keys does, a row's link). Everything
-// in it must also be reachable another way: a context menu is a shortcut, never the only door.
-// Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 6: this file keeps the older shape working beside the parts until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Menu, MenuContent, MenuContextTrigger } from "@ui-sdk/react/menu";
 import type {
@@ -33,57 +12,92 @@ import { useState } from "react";
 import type { ComponentProps, KeyboardEvent, ReactNode } from "react";
 
 import { listStyles } from "../combobox/list.styles";
+import { MenuLookProvider } from "../dropdown-menu/look";
+import { DropdownMenu } from "../dropdown-menu/menu";
+import { menuMarker } from "../dropdown-menu/menu.stylex";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { scroll } from "../scroll/scroll";
 import { grasp } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
 import { useWords, withGiven } from "../words/words";
+import { contextMenuLook } from "./look";
 import { MenuEntriesView, actionsOf, withFailureWords } from "./menu-items";
 import type { MenuEntries } from "./menu-items";
 import { contextMenuWords } from "./words";
+import type { ContextMenuWords } from "./words";
+
+type FinalFocus = ComponentProps<typeof MenuContent>["finalFocus"];
 
 /** Every prop a ContextMenu takes. */
 export interface ContextMenuProps {
-  /** The area it opens on: a row, a card, a canvas. It takes a tab stop. */
-  children: ReactNode;
-  /** The area's name, as a screen reader and an agent say it: the thing the actions are for ("Q3 forecast"). */
-  "aria-label": string;
-  /** The actions, checkboxes, radio groups, groups and separators, in order. */
-  items: MenuEntries;
   /**
-   * Runs an action with its value. Return a Promise and the menu stays open while it works; if it
-   * throws or rejects, the action shows its `failedLabel`. An agent's press reports the menu's
-   * error and reads the same words on the action.
+   * A ContextMenuTrigger round the area and a ContextMenuContent with its items. In the older
+   * shape, with `items`, the area itself.
    */
+  children: ReactNode;
+  /** @deprecated Use `ContextMenuTrigger.aria-label`. */
+  "aria-label"?: string;
+  /** @deprecated Use the parts: `ContextMenuContent` holding Dropdown menu's items. */
+  items?: MenuEntries;
+  /** @deprecated Use `DropdownMenuItem`, with its own `onSelect`, or `action` for work that can fail. */
   onAction?: (value: string, details: MenuActionDetails) => unknown;
-  /** Runs when a checkbox turns on or off, with its value in `details.value`. */
+  /** @deprecated Use `DropdownMenuCheckboxItem.onCheckedChange`. */
   onCheckedChange?: (
     checked: boolean,
     details: MenuCheckedChangeDetails
   ) => void;
-  /** Runs when a radio group's choice changes, with the group's name in `details.group`. */
+  /** @deprecated Use `DropdownMenuRadioGroup.onValueChange`. */
   onValueChange?: (value: string, details: MenuValueChangeDetails) => void;
+  /** @deprecated Use `ContextMenuTrigger.disabled`. */
+  disabled?: boolean;
+  /** @deprecated Use `DropdownMenuItem`, whose `failedLabel` goes with its `action`. */
+  failedLabel?: string;
+  /** @deprecated Use `ContextMenuTrigger.tabStop`. */
+  tabStop?: boolean;
+  /** @deprecated Use `ContextMenuContent.finalFocus`. */
+  finalFocus?: FinalFocus;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ failed: "Could not do it" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<ContextMenuWords>;
+}
+
+/** Every prop a ContextMenuTrigger takes. */
+export interface ContextMenuTriggerProps {
+  /** The area it opens on: a row, a card, a canvas. It takes a tab stop. */
+  children: ReactNode;
+  /** The area's name, as a screen reader and an agent say it: the thing the actions are for ("Q3 forecast"). */
+  "aria-label": string;
   /**
    * The browser's own menu shows instead, and the area takes no tab stop.
    * @default false
    */
   disabled?: boolean;
-  /** What a failed action says when it has no `failedLabel` of its own. @default "Failed" */
-  failedLabel?: string;
   /**
    * Whether the area takes a tab stop of its own. `false` when the area holds the thing the keys
    * reach (a row's link): the menu key and Shift+F10 on it still open the menu, as they bubble.
    * @default true
    */
   tabStop?: boolean;
+}
+
+/** Every prop a ContextMenuContent takes. */
+export interface ContextMenuContentProps {
+  /**
+   * The items: Dropdown menu's DropdownMenuItem, DropdownMenuCheckboxItem, DropdownMenuRadioGroup
+   * with its DropdownMenuRadioItems, DropdownMenuGroup, DropdownMenuLabel and DropdownMenuSeparator.
+   */
+  children?: ReactNode;
   /**
    * Where focus goes as the menu closes: back to the area by default; an element, a function that
    * finds one (the row's link, when the area takes no tab stop), or `"none"` when the chosen action
    * moves focus itself (a rename field).
    * @default "trigger"
    */
-  finalFocus?: ComponentProps<typeof MenuContent>["finalFocus"];
+  finalFocus?: FinalFocus;
 }
 
 const styles = stylex.create({
@@ -116,9 +130,52 @@ const openByKey = (event: KeyboardEvent<HTMLElement>) => {
   );
 };
 
-export const ContextMenu = ({
+/** The area the menu opens on, with its tab stop and its name. */
+export const ContextMenuTrigger = ({
   children,
   "aria-label": ariaLabel,
+  disabled = false,
+  tabStop = true,
+}: ContextMenuTriggerProps) => (
+  <MenuContextTrigger
+    disabled={disabled}
+    tabIndex={disabled || !tabStop ? undefined : 0}
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- the area is any content the caller gives; a <fieldset> would bring its own border and padding
+    role="group"
+    aria-label={ariaLabel}
+    onKeyDown={disabled ? undefined : openByKey}
+    {...stylex.props(styles.area, focus.ring)}
+  >
+    {children}
+  </MenuContextTrigger>
+);
+
+/** The menu, at the pointer: Dropdown menu's items, drawn in Context menu's look. */
+export const ContextMenuContent = ({
+  children,
+  finalFocus,
+}: ContextMenuContentProps) => (
+  <MenuLookProvider value={contextMenuLook}>
+    <MenuContent
+      finalFocus={finalFocus}
+      sideOffset={popup.gap}
+      collisionPadding={popup.gutter}
+      {...stylex.props(
+        menuMarker,
+        listStyles.popup,
+        listStyles.menuPopup,
+        scroll.bar
+      )}
+    >
+      {children}
+    </MenuContent>
+  </MenuLookProvider>
+);
+
+// The older shape: the actions as data, the area as the root's children.
+const ContextMenuOfItems = ({
+  children,
+  "aria-label": ariaLabel = "",
   items,
   onAction,
   onCheckedChange,
@@ -127,9 +184,10 @@ export const ContextMenu = ({
   failedLabel: failedGiven,
   tabStop = true,
   finalFocus,
-}: ContextMenuProps) => {
+  words,
+}: ContextMenuProps & { items: MenuEntries }) => {
   const { failed: failedLabel } = withGiven(
-    useWords("contextMenu", contextMenuWords),
+    useWords("contextMenu", contextMenuWords, words),
     { failed: failedGiven }
   );
   // A failure is said aloud by a status line beside the menu, as well as shown on the action.
@@ -148,17 +206,13 @@ export const ContextMenu = ({
       pendingAnnouncement="Working"
       loop
     >
-      <MenuContextTrigger
-        disabled={disabled}
-        tabIndex={disabled || !tabStop ? undefined : 0}
-        // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- the area is any content the caller gives; a <fieldset> would bring its own border and padding
-        role="group"
+      <ContextMenuTrigger
         aria-label={ariaLabel}
-        onKeyDown={disabled ? undefined : openByKey}
-        {...stylex.props(styles.area, focus.ring)}
+        disabled={disabled}
+        tabStop={tabStop}
       >
         {children}
-      </MenuContextTrigger>
+      </ContextMenuTrigger>
       <MenuContent
         finalFocus={finalFocus}
         sideOffset={popup.gap}
@@ -176,4 +230,15 @@ export const ContextMenu = ({
       </div>
     </Menu>
   );
+};
+
+/**
+ * The root: holds a ContextMenuTrigger and a ContextMenuContent, and renders nothing of its own. An
+ * item with work keeps the menu open while it runs, as in Dropdown menu.
+ */
+export const ContextMenu = (props: ContextMenuProps) => {
+  if (props.items !== undefined) {
+    return <ContextMenuOfItems {...props} items={props.items} />;
+  }
+  return <DropdownMenu>{props.children}</DropdownMenu>;
 };

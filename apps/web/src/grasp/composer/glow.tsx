@@ -155,7 +155,8 @@ const styles = stylex.create({
     position: "absolute",
     inset: 0,
     zIndex: 0,
-    // The card's own corner, full or compact: one number, the card's.
+    // The card's own corner, full or compact: one number, the card's, from the card's room
+    // (composer.tsx cardRoom), so the halo follows the rounded shape and paints no square.
     borderRadius: "inherit",
     cornerShape: grasp.cornerShape,
     pointerEvents: "none",

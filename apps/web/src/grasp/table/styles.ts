@@ -103,8 +103,8 @@ export const tableStyles = stylex.create({
     borderCollapse: "collapse",
     borderSpacing: 0,
     fontFamily: grasp.fontSans,
-    fontSize: grasp.tableText,
-    lineHeight: grasp.tableTextLine,
+    fontSize: tableVars.text,
+    lineHeight: tableVars.line,
     color: grasp.text,
     // Figures line up from row to row.
     fontVariantNumeric: "tabular-nums",
@@ -151,6 +151,54 @@ export const tableStyles = stylex.create({
     borderBlockEndStyle: "solid",
     borderBlockEndColor: grasp.line,
   },
+  // A column that goes when the table's own box (the scroller, a container) is narrower than the
+  // library's phone or tablet breakpoint (tokens' media: 40rem and 48rem).
+  // A cell that stays in view under the table's head while the rows under it scroll (a group's
+  // heading), in a table whose rows scroll inside its box: on the table's paper, under the head.
+  stickyCell: {
+    position: "sticky",
+    top: grasp.tableHeadHeight,
+    zIndex: 1,
+    backgroundColor: grasp.paper,
+  },
+  stickyCompact: { top: grasp.tableHeadHeightCompact },
+  hideBelowPhone: {
+    display: { default: null, "@container (width < 40rem)": "none" },
+  },
+  hideBelowTablet: {
+    display: { default: null, "@container (width < 48rem)": "none" },
+  },
+  // A row's state drawn over the whole row, never per cell, so it does not break at a column: a
+  // veil of the table's paper laid on top. Pending (someone not yet here) fades from the start,
+  // where the row is whole, to its end, the words still readable; mirrored right to left. Removed
+  // lays the paper evenly over the whole row, pictures included. What must stay usable (a row's actions) stands above.
+  statusRow: {
+    position: "relative",
+    "--grasp-row-fade": { default: "to right", ":dir(rtl)": "to left" },
+    "::after": {
+      content: '""',
+      position: "absolute",
+      insetInline: 0,
+      insetBlockStart: 0,
+      // Clear of the hairline under the row, which keeps its own strength.
+      insetBlockEnd: grasp.hairline,
+      pointerEvents: "none",
+    },
+  },
+  statusPending: {
+    "::after": {
+      backgroundImage: `linear-gradient(var(--grasp-row-fade), transparent 20%, color-mix(in oklab, ${grasp.paper} 70%, transparent))`,
+    },
+  },
+  // A control in such a row that must stay usable (the row's actions): above the veil.
+  aboveStatus: { position: "relative", zIndex: 1 },
+  // Greyed by the paper itself, not a filter: a filter greyed the ground too, and in dark the row
+  // stood as a grey band on the green ground.
+  statusRemoved: {
+    "::after": {
+      backgroundColor: `color-mix(in oklab, ${grasp.paper} 55%, transparent)`,
+    },
+  },
   // A row kept for its widths: it takes no room and is not drawn, but its cells still size the columns.
   collapsed: { visibility: "collapse" },
   // A row of the body: lit under a pointer, and its last one leaves the hairline to the footer.
@@ -173,6 +221,32 @@ export const tableStyles = stylex.create({
     transitionProperty: "background-image",
     transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
+  },
+  // A row that opens (a Data table's rowHref or onRowOpen): the box its name's press area stretches
+  // over, and the keyboard's ring round the whole row while that name has focus, inside the table.
+  opens: {
+    position: "relative",
+    cursor: "pointer",
+    outlineStyle: {
+      default: "none",
+      ":has([data-row-target]:focus-visible:not([data-focus-pointer]))":
+        "solid",
+    },
+    outlineWidth: grasp.ringWidth,
+    outlineColor: { default: grasp.ring, [media.forced]: "Highlight" },
+    outlineOffset: `calc(-1 * ${grasp.ringWidth})`,
+  },
+  // The row open now (its panel shows): the pointer's quiet fill kept, so it is told from the rest
+  // without the selection's fill. In forced colours a line round it.
+  current: {
+    backgroundImage: `linear-gradient(${grasp.tableRowFillHover}, ${grasp.tableRowFillHover})`,
+    outlineStyle: { default: null, [media.forced]: "solid" },
+    outlineWidth: { default: null, [media.forced]: grasp.hairline },
+    outlineColor: { default: null, [media.forced]: "CanvasText" },
+    outlineOffset: {
+      default: null,
+      [media.forced]: `calc(-1 * ${grasp.hairline})`,
+    },
   },
   // The chosen looks other than the grey band (look.ts): a mint wash, or the band with a pine bar
   // at the row's start.
@@ -270,7 +344,7 @@ export const tableStyles = stylex.create({
     verticalAlign: "middle",
     fontSize: grasp.textSm,
     fontWeight: grasp.weightMedium,
-    color: grasp.muted,
+    color: grasp.tableHeadText,
     whiteSpace: "nowrap",
   },
   // A head with controls after its name (a column's menu, a resize handle): they sit at its end.

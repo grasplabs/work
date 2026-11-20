@@ -76,6 +76,19 @@ export const parseIntegrationKey = (
   return { source, id };
 };
 
+/**
+ * The products behind Grasp's own connectors that the catalog doesn't
+ * list, because an admin connects them while setting up (the directory,
+ * HR and documents): product names, so not translated.
+ */
+const unlistedNames: Readonly<Record<string, string>> = {
+  "microsoft-directory": "Microsoft Entra ID",
+  "google-directory": "Google Directory",
+  "hibob-hr": "HiBob",
+  "microsoft-documents": "SharePoint and OneDrive",
+  "google-documents": "Google Drive",
+};
+
 const byNewest = (one: ListedConnection, other: ListedConnection): number =>
   other.createdAt.localeCompare(one.createdAt);
 
@@ -124,8 +137,12 @@ export const integrationsOf = (
         key,
         source: connection.source,
         id: connection.provider,
-        // The catalog alone has its name: its ID stands in.
-        name: connection.provider,
+        // The catalog has its name, or the product we know it as; else its ID stands in.
+        name:
+          (connection.source === "native" &&
+          Object.hasOwn(unlistedNames, connection.provider)
+            ? unlistedNames[connection.provider]
+            : undefined) ?? connection.provider,
         categories: [],
         group: "Other",
         description: null,

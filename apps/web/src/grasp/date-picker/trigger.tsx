@@ -9,6 +9,7 @@ import { Button } from "../button";
 import { CalendarIcon } from "../icons";
 import { useWords, withGiven } from "../words/words";
 import { datePickerWords } from "./words";
+import type { DatePickerWords } from "./words";
 
 /** UI SDK's trigger props without its children: Button draws its own content. */
 const withoutChildren = (
@@ -48,6 +49,12 @@ export interface DateTriggerProps {
    * @default "md"
    */
   size?: "sm" | "md" | "lg";
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ choose: "Pick the due date" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<DatePickerWords>;
 }
 
 /** The calendar button of a date field. */
@@ -55,9 +62,10 @@ export const DateTrigger = ({
   label,
   fallbackLabel: fallbackGiven,
   size = "md",
+  words,
 }: DateTriggerProps) => {
   const { choose: fallbackLabel } = withGiven(
-    useWords("datePicker", datePickerWords),
+    useWords("datePicker", datePickerWords, words),
     { choose: fallbackGiven }
   );
   return (

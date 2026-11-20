@@ -1,6 +1,8 @@
 // Date range picker's own words, in English. The product gives them in its languages through GraspWords
 // (src/words); a caller's `presetsLabel` still win until the breaking release's step 5.
 export const dateRangePickerWords = {
+  /** The calendar button's name, with the chosen range said after it (`triggerLabel` replaces the whole name). */
+  trigger: "Choose date",
   /** The name of the group of preset ranges. Its months' buttons are Calendar's. */
   presets: "Presets",
   /** The four preset ranges' names, in order (`presetLabels` gives all four at once). */

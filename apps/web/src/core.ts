@@ -171,15 +171,16 @@ export const retrying = async <T>(
 export type Session = Awaited<ReturnType<RpcStub<CoreApi>["authenticate"]>>;
 
 /**
- * Starts signing in with the IdP `providerId`: core answers with the IdP's
- * address, and the IdP sends the person back to `returnTo` (a path of this
- * site), signed in or with `error=<code>` added to it. Better Auth keeps
- * `returnTo` with the sign-in state until the person is back.
+ * Asks core to start signing in with the IdP `providerId`: core answers
+ * with the IdP's address, and the IdP sends the person back to `returnTo`
+ * (a path of this site), signed in or with `error=<code>` added to it.
+ * Better Auth keeps `returnTo` with the sign-in state until the person is
+ * back.
  */
-export const signIn = async (
+export const signInAddress = async (
   providerId: string,
   returnTo = "/"
-): Promise<void> => {
+): Promise<string> => {
   const response = await fetch("/api/auth/sign-in/sso", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -199,7 +200,20 @@ export const signIn = async (
   ) {
     throw new Error(`Sign-in did not start (${response.status})`);
   }
+  return body.url;
+};
+
+/** Leaves for the IdP at `address` (from {@link signInAddress}). */
+export const leaveToSignIn = (address: string): void => {
   // Back from the IdP, the first page may be another (landing.ts).
   noteSigningIn();
-  window.location.assign(body.url);
+  window.location.assign(address);
+};
+
+/** Starts signing in with the IdP `providerId` and leaves for it. */
+export const signIn = async (
+  providerId: string,
+  returnTo = "/"
+): Promise<void> => {
+  leaveToSignIn(await signInAddress(providerId, returnTo));
 };

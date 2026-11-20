@@ -36,23 +36,6 @@ export const GraspWords = ({ locale, words, children }: GraspWordsProps) => (
 );
 
 /**
- * A part's words: the provider's for this part, else the part's own English. Each key falls back
- * on its own, so a catalog from before a part gained a key still works.
- */
-export const useWords = <P extends GraspPart>(
-  part: P,
-  english: GraspWordsCatalog[P]
-): GraspWordsCatalog[P] => {
-  const given = use(WordsContext)?.[part];
-  // Object.assign, as each entry's type is a part's own object, which a generic spread cannot know.
-  // oxlint-disable-next-line unicorn/prefer-object-spread, prefer-object-spread -- see above
-  return given === undefined ? english : Object.assign({}, english, given);
-};
-
-/** The page's language for numbers and dates: the provider's, else the browser's, else English. */
-export const useWordsLocale = (): string | undefined => use(LocaleContext);
-
-/**
  * A part's words with a caller's text props over them, where given (until the breaking release's
  * step 5 removes those props): `withGiven(words, { close: closeLabel })`.
  */
@@ -65,3 +48,29 @@ export const withGiven = <W extends object>(words: W, given: Partial<W>): W => {
   }
   return out;
 };
+
+/**
+ * A part's words: its own English, then the provider's for this part, then the instance's own
+ * (`given`, the part's `words` prop), key by key. A key left out (or undefined) at one layer falls
+ * back to the one before, so a catalog from before a part gained a key still works, and one instance
+ * can say its own word for its place ("Close the chat") without touching the catalogue.
+ *
+ *   const words = useWords("appShell", appShellWords, props.words);
+ */
+export const useWords = <P extends GraspPart>(
+  part: P,
+  english: GraspWordsCatalog[P],
+  given?: Partial<GraspWordsCatalog[P]>
+): GraspWordsCatalog[P] => {
+  const catalogue = use(WordsContext)?.[part];
+  if (catalogue === undefined) {
+    return given === undefined ? english : withGiven(english, given);
+  }
+  // Object.assign, as each entry's type is a part's own object, which a generic spread cannot know.
+  // oxlint-disable-next-line unicorn/prefer-object-spread, prefer-object-spread -- see above
+  const shared = Object.assign({}, english, catalogue);
+  return given === undefined ? shared : withGiven(shared, given);
+};
+
+/** The page's language for numbers and dates: the provider's, else the browser's, else English. */
+export const useWordsLocale = (): string | undefined => use(LocaleContext);

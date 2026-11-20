@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar } from "../grasp/avatar/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Folder, Icon, People } from "../grasp/icons/index.ts";
 import {
   Item,
@@ -105,7 +105,11 @@ const roles: readonly AppRole[] = ["user", "builder"];
 /** Whom a member is: a person's face, or a team's or project's mark. */
 const Mark = ({ type, name }: { type: AppMemberRef["type"]; name: string }) => {
   if (type === "person") {
-    return <Avatar decorative name={name} size="xs" />;
+    return (
+      <Avatar decorative name={name} size="xs">
+        <AvatarFallback />
+      </Avatar>
+    );
   }
   return <Icon icon={type === "team" ? People : Folder} />;
 };
@@ -174,7 +178,7 @@ const candidatesOf = (
 /** Someone the App is shared with, for whoever only looks: their name and role. */
 const MemberRow = ({ name, member }: { name: string; member: AppMember }) => (
   <Item size="sm">
-    <ItemMedia>
+    <ItemMedia align="center">
       <Mark name={member.name ?? name} type={member.type} />
     </ItemMedia>
     <ItemContent>
@@ -198,10 +202,13 @@ const ShareWith = ({
   app,
   members,
   named,
+  onChanged,
 }: {
   app: App;
   members: readonly AppMember[];
   named: (member: AppMember) => string;
+  /** Told once whom it is shared with changed. */
+  onChanged?: () => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -229,6 +236,9 @@ const ShareWith = ({
         }
       );
     });
+    if (done) {
+      onChanged?.();
+    }
     return done;
   };
   const gone = removing === undefined ? "" : named(removing);
@@ -240,9 +250,8 @@ const ShareWith = ({
             ? candidatesOf(offered.data, app.owner, apart, words)
             : []
         }
-        failedInviteLabel={t`Couldn't share`}
+        words={{ failedInvite: t`Couldn't share`, list: t`Shared with` }}
         levels={roles.map((role) => ({ value: role, label: roleLabel(role) }))}
-        listLabel={t`Shared with`}
         members={members.map((member) => ({
           id: keyOf(member),
           name: named(member),
@@ -282,12 +291,10 @@ const ShareWith = ({
       {offered !== undefined && offered.state !== "ready" ? (
         <Alert
           title={t`Who to share with couldn't be read. Try again in a moment.`}
-          variant="danger"
+          tone="danger"
         />
       ) : null}
-      {failure === undefined ? null : (
-        <Alert title={failure} variant="danger" />
-      )}
+      {failure === undefined ? null : <Alert title={failure} tone="danger" />}
       <AlertDialog
         onOpenChange={(open) => {
           if (!open) {
@@ -328,6 +335,35 @@ const ShareWith = ({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+};
+
+/**
+ * Sharing the App, as Share's dialog in its bar holds it: the same list as
+ * its Sharing settings. For its builders.
+ */
+export const AppShareAccess = ({
+  app,
+  members,
+  onChanged,
+}: {
+  app: App;
+  members: readonly AppMember[];
+  onChanged: () => void;
+}) => {
+  const words = useMemberWords();
+  const apart = usePeopleApart(
+    members.flatMap(({ type, id, name }) =>
+      type === "person" && name !== null ? [{ id, name }] : []
+    )
+  );
+  return (
+    <ShareWith
+      app={app}
+      members={members}
+      named={(member) => memberName(member, words, apart)}
+      onChanged={onChanged}
+    />
   );
 };
 

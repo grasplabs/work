@@ -3,7 +3,16 @@ export type {
   ComposerActivity,
   ComposerLayoutStyle,
   ComposerProps,
+  ComposerSendDetails,
 } from "./composer";
+export {
+  COMPOSER_CLIPBOARD,
+  composerPictureToken,
+  composerReference,
+  composerTextParts,
+  composerUnreferenced,
+} from "./pictures";
+export type { ComposerReference } from "./pictures";
 export type { ComposerAccent, ComposerEdge } from "./glow";
 export { ComposerAction } from "./action";
 export type { ComposerActionProps } from "./action";
@@ -44,6 +53,7 @@ export type {
   ComposerVoicePhase,
   ComposerVoiceProblem,
   ComposerVoiceProps,
+  ComposerVoiceVariant,
   ComposerVoiceWords,
   VoiceReading,
 } from "./voice";

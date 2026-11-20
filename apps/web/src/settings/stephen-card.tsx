@@ -15,6 +15,8 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Button } from "../grasp/button/index.ts";
+import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   FactRow,
   SettingRow,
@@ -24,9 +26,7 @@ import { Switch } from "../grasp/switch/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useAskGrasp } from "../workflows/requests/request-needs.tsx";
-import { SettingsSection } from "./settings-parts.tsx";
 import { AudienceControl, audienceOf, chosenOf } from "./stephen-audience.tsx";
-import { StephenAvatar } from "./stephen-avatar.tsx";
 
 // Stephen himself, on top of Settings › Stephen, as the prototype's
 // `components/stephen/stephen-card.tsx`: his name, whether he is on
@@ -107,7 +107,13 @@ const WeekBars = ({ weeks }: { weeks: StephenWeek["weeks"] }) => {
 const Usage = ({ week }: { week: StephenWeek }) => {
   const { t } = useLingui();
   if (week.questions === 0) {
-    return <FactRow label={t`Nobody asked him anything yet.`}>{null}</FactRow>;
+    return (
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`Nobody asked him anything yet.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
   const asked = formatNumber(week.asked);
   const reach = formatNumber(week.reach);
@@ -174,17 +180,20 @@ export const StephenCard = ({
   const { t } = useLingui();
   const [pausing, setPausing] = useState(false);
   return (
-    <SettingsSection
-      action={
+    <SectionCard
+      variant="grouped"
+      density="compact"
+      flush
+      title={t`Outside Grasp`}
+      actions={
         <span {...stylex.props(styles.state)}>
           <Text element="span" size="sm" tone="muted">
-            {reach.on ? t`On outside Grasp` : t`Paused outside Grasp`}
+            {reach.on ? t`On` : t`Paused`}
           </Text>
           <Switch
             checked={reach.on}
             disabled={!can}
-            label={t`Stephen outside Grasp`}
-            labelHidden
+            aria-label={t`Stephen outside Grasp`}
             onCheckedChange={(on) => {
               if (on) {
                 void onReach(true, reach.audience);
@@ -195,8 +204,6 @@ export const StephenCard = ({
           />
         </span>
       }
-      media={<StephenAvatar />}
-      title="Stephen"
     >
       <SettingsRows>
         <SettingRow label={t`Who can talk to him`}>
@@ -245,6 +252,6 @@ export const StephenCard = ({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SettingsSection>
+    </SectionCard>
   );
 };

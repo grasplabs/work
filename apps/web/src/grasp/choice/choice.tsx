@@ -28,9 +28,10 @@ import { FieldDescription, FieldError } from "../field";
 import type { FieldErrorWords } from "../field";
 import { noteStyles } from "../field/field";
 import { fieldMarker } from "../field/field.stylex";
-import { RequiredMark, labelStyles } from "../label/label";
+import { labelStyles } from "../label/label";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { wrap } from "../wrap/wrap";
 import { choiceMarker, choiceVars } from "./choice.stylex";
 import { rowStyles } from "./row";
 
@@ -92,7 +93,7 @@ interface GroupedRowProps extends Pick<
   | "children"
 > {
   end: boolean;
-  mark: ReactNode;
+  required: boolean;
   row: ReturnType<typeof stylex.props>;
 }
 
@@ -109,7 +110,7 @@ const GroupedRow = ({
   invalid,
   disabled,
   end,
-  mark,
+  required,
   row,
   children,
 }: GroupedRowProps) => {
@@ -134,22 +135,32 @@ const GroupedRow = ({
           id={name}
           htmlFor={box}
           data-disabled={off}
-          {...stylex.props(labelStyles.label)}
+          {...stylex.props(
+            labelStyles.label,
+            wrap.words,
+            required && labelStyles.required
+          )}
         >
           {label}
-          {mark}
         </LabelPrimitive>
         {description !== undefined && (
           <p
             id={said}
             data-disabled={off}
-            {...stylex.props(noteStyles.note, noteStyles.description)}
+            {...stylex.props(
+              noteStyles.note,
+              wrap.words,
+              noteStyles.description
+            )}
           >
             {description}
           </p>
         )}
         {says && (
-          <p id={wrong} {...stylex.props(noteStyles.note, noteStyles.error)}>
+          <p
+            id={wrong}
+            {...stylex.props(noteStyles.note, wrap.words, noteStyles.error)}
+          >
             {error}
           </p>
         )}
@@ -183,7 +194,6 @@ export const ChoiceRow = ({
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     ...((layout ?? style ?? []) as never[])
   );
-  const mark = required && <RequiredMark />;
 
   if (grouped) {
     return (
@@ -195,7 +205,7 @@ export const ChoiceRow = ({
         invalid={invalid}
         disabled={disabled}
         end={end}
-        mark={mark}
+        required={required}
         row={row}
       >
         {children}
@@ -211,10 +221,13 @@ export const ChoiceRow = ({
         <FieldLabelPrimitive
           id={name}
           htmlFor={box}
-          {...stylex.props(labelStyles.label)}
+          {...stylex.props(
+            labelStyles.label,
+            wrap.words,
+            required && labelStyles.required
+          )}
         >
           {label}
-          {mark}
         </FieldLabelPrimitive>
         {description !== undefined && (
           <FieldDescription>{description}</FieldDescription>

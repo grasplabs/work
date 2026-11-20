@@ -4,7 +4,12 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { AppSettings, settingsSectionOf } from "../apps/app-settings.tsx";
 import type { AppSettingsSection } from "../apps/app-settings.tsx";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import {
+  APP_GENERAL,
+  LoadingBar,
+  SettingsPending,
+} from "../frame/page-skeletons-b.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
 import { AppWindow as AppWindowMark } from "../grasp/icons/index.ts";
@@ -57,8 +62,16 @@ const AppSettingsPage = () => {
   );
 };
 
+/** The settings before the App is read: the bar, its name to come, and General's cards. */
+const AppSettingsPending = () => (
+  <>
+    <LoadingBar />
+    <SettingsPending sections={APP_GENERAL} />
+  </>
+);
+
 export const Route = createFileRoute("/_shell/apps/$app_/settings")({
-  pendingComponent: PageLoading,
+  pendingComponent: AppSettingsPending,
   component: AppSettingsPage,
   // The section to open; any other value (an old or hand-typed address)
   // opens General. Always set, as the address's own would otherwise pass

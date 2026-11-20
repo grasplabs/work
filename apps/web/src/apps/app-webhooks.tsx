@@ -12,7 +12,6 @@ import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
 import { formatList } from "../format.ts";
 import {
   AlertDialog,
@@ -56,6 +55,7 @@ import {
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
+import { decidesRequests } from "../inbox/waiting.ts";
 import { ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 

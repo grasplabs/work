@@ -13,6 +13,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Button } from "../button";
 import { CopyButton } from "../button/copy";
@@ -26,6 +27,7 @@ import { grammarOrNull, languageNames, linesOf } from "./prism";
 import type { Line } from "./prism";
 import { codeStyles as styles, tones } from "./styles";
 import { codeBlockWords } from "./words";
+import type { CodeBlockWords } from "./words";
 
 /** Every prop a CodeBlock takes. */
 export interface CodeBlockProps {
@@ -59,6 +61,12 @@ export interface CodeBlockProps {
    * @default 18
    */
   maxLines?: number | false;
+  /**
+   * More in the head beside the copy button, such as Download: ghost icon buttons the copy button's
+   * size (`<Button variant="ghost" size="sm" icon={Download} aria-label="Download" />`), in the order
+   * given, before it. On a phone they stay in the head; the file name gives way first.
+   */
+  actions?: ReactNode;
   /** An agent is still writing it: the head says so in words, copying waits, and the code grows in place. */
   streaming?: boolean;
   /**
@@ -96,6 +104,12 @@ export interface CodeBlockProps {
    * @default "Show less"
    */
   lessLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ copy: "Copy the definition" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<CodeBlockWords>;
 }
 
 const dynamic = stylex.create({
@@ -201,11 +215,13 @@ type HeadProps = Pick<
   CodeBlockProps,
   | "code"
   | "fileName"
+  | "actions"
   | "copyLabel"
   | "copiedLabel"
   | "copyFailedLabel"
   | "writingLabel"
   | "streamingMark"
+  | "words"
 > & {
   name: string;
   streaming: boolean;
@@ -214,6 +230,7 @@ type HeadProps = Pick<
 const Head = ({
   code,
   fileName,
+  actions,
   name,
   streaming,
   streamingMark = false,
@@ -221,13 +238,14 @@ const Head = ({
   copiedLabel: copiedLabelGiven,
   copyFailedLabel: copyFailedLabelGiven,
   writingLabel: writingLabelGiven,
+  words,
 }: HeadProps) => {
   const {
     copy: copyLabel,
     copied: copiedLabel,
     copyFailed: copyFailedLabel,
     writing: writingLabel,
-  } = withGiven(useWords("codeBlock", codeBlockWords), {
+  } = withGiven(useWords("codeBlock", codeBlockWords, words), {
     copy: copyLabelGiven,
     copied: copiedLabelGiven,
     copyFailed: copyFailedLabelGiven,
@@ -249,6 +267,7 @@ const Head = ({
         {streaming && streamingMark && <Spinner size="sm" />}
         {streaming ? writingLabel : ""}
       </output>
+      {actions}
       <CopyButton
         text={code}
         label={copyLabel}
@@ -379,7 +398,7 @@ const Lines = ({
   );
 };
 
-type FootProps = Pick<CodeBlockProps, "moreLabel" | "lessLabel"> & {
+type FootProps = Pick<CodeBlockProps, "moreLabel" | "lessLabel" | "words"> & {
   open: boolean;
   /** The id of what it folds. */
   controls: string;
@@ -392,11 +411,12 @@ const Foot = ({
   onToggle,
   moreLabel: moreGiven,
   lessLabel: lessGiven,
+  words,
 }: FootProps) => {
-  const { more, less } = withGiven(useWords("codeBlock", codeBlockWords), {
-    more: moreGiven,
-    less: lessGiven,
-  });
+  const { more, less } = withGiven(
+    useWords("codeBlock", codeBlockWords, words),
+    { more: moreGiven, less: lessGiven }
+  );
   return (
     <div {...stylex.props(styles.foot)}>
       <Button
@@ -422,6 +442,7 @@ export const CodeBlock = ({
   wrap = false,
   marked,
   maxLines = 18,
+  actions,
   streaming = false,
   copyLabel,
   copiedLabel,
@@ -430,6 +451,7 @@ export const CodeBlock = ({
   streamingMark,
   moreLabel,
   lessLabel,
+  words,
 }: CodeBlockProps) => {
   // Plain until Prism and the language have loaded; then highlighted.
   const highlight = useHighlight(language);
@@ -453,8 +475,10 @@ export const CodeBlock = ({
       {...stylex.props(styles.box)}
     >
       <Head
+        words={words}
         code={code}
         fileName={fileName}
+        actions={actions}
         name={name}
         streaming={streaming}
         copyLabel={copyLabel}
@@ -475,6 +499,7 @@ export const CodeBlock = ({
       />
       {folds && (
         <Foot
+          words={words}
           open={open}
           controls={scrollerId}
           moreLabel={moreLabel}

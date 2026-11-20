@@ -302,7 +302,9 @@ describe("the open chat's name and menu", () => {
     expect(copied[0]).toMatch(/^# Leave/u);
     expect(copied[0]).toContain(question);
     expect(copied[0]).toContain(answer);
-    expect(byRole("menuitem", "Copied")).toBeDefined();
+    // The menu closes as it is chosen; a notice says it is copied.
+    await settled();
+    expect(document.body.textContent).toContain("Copied");
   });
 
   it("renames the chat where its title stands, to the name typed", async () => {

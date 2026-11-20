@@ -8,7 +8,13 @@ import { Await, Link } from "@tanstack/react-router";
 
 import { formatNumber } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription,
+} from "../grasp/empty/index.ts";
 import { Workflow } from "../grasp/icons/index.ts";
 import {
   Item,
@@ -130,13 +136,23 @@ const WorkflowList = ({
   const { i18n, t } = useLingui();
   if (uses.state !== "ready") {
     return (
-      <Empty size="inline" tone="danger">
-        {notLoadedText(uses, i18n)}
+      <Empty size="sm" tone="danger">
+        <EmptyHeader>
+          <EmptyMedia />
+          <EmptyTitle />
+          <EmptyDescription>{notLoadedText(uses, i18n)}</EmptyDescription>
+        </EmptyHeader>
       </Empty>
     );
   }
   if (workflows.length === 0) {
-    return <Empty size="inline">{t`No workflow uses ${app} yet.`}</Empty>;
+    return (
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`No workflow uses ${app} yet.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
   return (
     <ItemGroup aria-label={t`Workflows`} separated>

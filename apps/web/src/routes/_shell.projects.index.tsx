@@ -4,9 +4,10 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { PageSkeletonList } from "../grasp/blocks/page-skeleton-list/page-skeleton-list.tsx";
 import { Button } from "../grasp/button/index.ts";
 import {
   Empty,
@@ -121,8 +122,26 @@ const Projects = () => {
   );
 };
 
+/**
+ * The projects before they are read: the library's page-skeleton-list under
+ * the page's own bar, its header without a description, as the page's is,
+ * and as many rows as fill the first screen, two lines high with the
+ * project's icon, as the page's Items are.
+ */
+const ProjectsPending = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <SiteHeader crumbs={[{ label: t`Projects` }]} />
+      <Page>
+        <PageSkeletonList descriptionLines={0} rows={8} variant="items" />
+      </Page>
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/projects/")({
-  pendingComponent: PageLoading,
+  pendingComponent: ProjectsPending,
   component: Projects,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => await session.projects.list()),

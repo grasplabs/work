@@ -25,7 +25,7 @@ import {
   DialogTrigger,
 } from "../grasp/dialog/index.ts";
 import { Info } from "../grasp/icons/index.ts";
-import { FactRow, RowAlert, SettingsRows } from "../grasp/setting-row/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -35,6 +35,9 @@ import { SectionNotLoaded } from "./section.tsx";
 
 const styles = stylex.create({
   running: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  // The check's fact and how long things are kept, read as one list: the
+  // same room between every name and value.
+  facts: { display: "grid", gap: grasp.space4 },
 });
 
 // Settings › Audit trail › Integrity and archive: verifies the whole hash
@@ -90,7 +93,12 @@ const verifyChain = async (
   }
 };
 
-/** What the last full pass found, or how far the running one got, as rows of the card. */
+/** One fact of the check, as the list's name and value. */
+const Fact = ({ name, children }: { name: string; children: ReactNode }) => (
+  <KeyValueList items={[{ key: name, value: children }]} variant="inline" />
+);
+
+/** What the last full pass found, or how far the running one got: the list's first fact, or why the chain broke. */
 const Outcome = ({
   running,
   through,
@@ -101,47 +109,51 @@ const Outcome = ({
   ended: FullVerification | null;
 }) => {
   const { t, i18n } = useLingui();
+  const last = t`Last check`;
   if (running) {
     return (
-      <FactRow label={t`Checking`}>
+      <Fact name={t`Checking`}>
         <span {...stylex.props(styles.running)}>
           <Spinner />
-          <Text element="span" size="sm">
-            {t`Through entry ${through}…`}
-          </Text>
+          {t`Through entry ${through}…`}
         </span>
-      </FactRow>
+      </Fact>
     );
   }
   if (ended === null) {
-    return <FactRow label={t`Last check`}>{t`Not checked yet`}</FactRow>;
+    return <Fact name={last}>{t`Not checked yet`}</Fact>;
   }
   const time = formatDateTime(ended.finishedAt);
   if (ended.ok && ended.through === 0) {
-    return <FactRow label={t`Last check`}>{t`Nothing to check yet`}</FactRow>;
+    return <Fact name={last}>{t`Nothing to check yet`}</Fact>;
   }
   if (ended.ok) {
     const entries = ended.through;
     const purged = ended.purgedThrough;
     return (
-      <FactRow
-        help={
-          purged === undefined
-            ? time
-            : t`${time}. Entries through ${purged} were removed when their retention ended; they still link up.`
-        }
-        label={t`Last check`}
-      >
-        <Badge tone="success">{t`Verified through ${entries}`}</Badge>
-      </FactRow>
+      <>
+        <Fact name={last}>
+          <span {...stylex.props(styles.running)}>
+            {time}
+            <Badge size="sm" tone="success">
+              {t`Verified through ${entries}`}
+            </Badge>
+          </span>
+        </Fact>
+        {purged === undefined ? null : (
+          <Text size="sm" tone="muted">
+            {t`Entries through ${purged} were removed when their retention ended; they still link up.`}
+          </Text>
+        )}
+      </>
     );
   }
   const entry = ended.brokenAt;
   const reason = i18n._(breakReasons[ended.reason]);
   return (
-    <RowAlert variant="danger">
+    <Alert tone="danger">
       {t`On ${time}, the chain broke at entry ${entry}: nothing from there on is verified. ${reason}`}
-    </RowAlert>
+    </Alert>
   );
 };
 
@@ -187,7 +199,7 @@ export const IntegrityDialog = ({
   /** The check the page ran, if it ran one. */
   own: FullVerification | null;
   onChecked: (ended: FullVerification) => void;
-  /** How long Grasp keeps events, as rows after the check's. */
+  /** How long Grasp keeps events, as facts after the check's. */
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
@@ -207,7 +219,7 @@ export const IntegrityDialog = ({
       <DialogTrigger
         aria-label={t`Integrity and archive`}
         icon={Info}
-        size="sm"
+        size="xs"
         tooltip={t`Integrity and archive`}
         variant="ghost"
       />
@@ -221,17 +233,17 @@ export const IntegrityDialog = ({
             {own === null && !busy && last.state !== "ready" ? (
               <SectionNotLoaded page={last} />
             ) : (
-              <SettingsRows>
+              <div {...stylex.props(styles.facts)}>
+                {failure === undefined ? null : (
+                  <Alert tone="danger">{failure}</Alert>
+                )}
                 <Outcome
                   ended={endedOf(own, last)}
                   running={busy}
                   through={through}
                 />
-                {failure === undefined ? null : (
-                  <RowAlert variant="danger">{failure}</RowAlert>
-                )}
                 {children}
-              </SettingsRows>
+              </div>
             )}
           </div>
         </DialogBody>

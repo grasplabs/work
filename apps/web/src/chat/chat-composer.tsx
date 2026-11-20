@@ -1,15 +1,22 @@
 import type { ModelEffort } from "@grasp-os/shared/models";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
-import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
-import { Composer, ComposerAdd } from "../grasp/composer/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Composer,
+  ComposerAdd,
+  ComposerSurface,
+} from "../grasp/composer/index.ts";
 import type {
   ComposerAgentOption,
   ComposerFile,
 } from "../grasp/composer/index.ts";
+import { Lock } from "../grasp/icons/index.ts";
+import { useMemberAdmin } from "../use-member-admin.ts";
 import { accepted, useAttachmentWords } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
 import { useOwnComposerLook } from "./composer-look.ts";
@@ -87,6 +94,8 @@ export interface ChatComposerProps {
   onRemoveFile?: (id: string) => void;
   /** One row, the actions beside the text: a guest's chat. */
   compact?: boolean;
+  /** The box itself, for a holder that gives it the cursor. */
+  boxRef?: Ref<HTMLTextAreaElement> | undefined;
   /** Glass over a backdrop: Chat start's. */
   surface?: "card" | "glass";
   /** After send: a control not about this message, such as the idle bar's Open the chat. */
@@ -129,13 +138,35 @@ const attachmentsOf = (files: readonly CardFile[]): ComposerFile[] =>
   }));
 
 /**
- * The line under the box: how to connect an AI provider while there is
- * none, else why a file stayed out or why the last question didn't go
- * (from the box, or from Try again in the thread). Said, never a reason to
- * hold the next question back, as `validation` would.
+ * While there is no AI provider, the band on top of the box says so in a
+ * line (Grasp UI's ComposerSurface), with the way to Settings › AI
+ * providers for whoever can connect one, and who to ask for anyone else:
+ * the box stays where it is, at the page's foot.
  */
-const noteOf = (noProvider: boolean, problem: string | undefined) =>
-  noProvider ? <ConnectAiProvider size="xs" /> : problem;
+const NoProviderBand = () => {
+  const { t } = useLingui();
+  const canConnect = useMemberAdmin();
+  return canConnect ? (
+    <ComposerSurface
+      action={
+        <Button render={<Link to="/settings/ai-providers" />} size="sm">
+          {t`Go to AI providers`}
+        </Button>
+      }
+      icon={Lock}
+    >
+      {t`Connect an AI provider to start asking`}
+    </ComposerSurface>
+  ) : (
+    <ComposerSurface icon={Lock}>
+      {t`Ask your admin to connect an AI provider.`}
+    </ComposerSurface>
+  );
+};
+
+/** The band on top of the box: no AI provider yet, else what the chat is about. */
+const topOf = (noProvider: boolean, subject: ReactNode): ReactNode =>
+  noProvider ? <NoProviderBand /> : subject;
 
 /**
  * Whether Grasp has just finished an answer here: from the moment it stops
@@ -253,6 +284,7 @@ export const ChatComposer = ({
   mentions = noMentions,
   onMentions,
   compact = false,
+  boxRef,
   surface,
   footer,
   showWorking,
@@ -310,8 +342,11 @@ export const ChatComposer = ({
         />
       }
       aria-label={label ?? t`Your question`}
+      ref={boxRef}
       layout={styles.fill}
-      note={noteOf(noProvider, fileProblem ?? failure)}
+      // Why a file stayed out or why the last question didn't go: said,
+      // never a reason to hold the next question back, as `validation` would.
+      note={fileProblem ?? failure}
       onAttach={
         onAttach === undefined
           ? undefined
@@ -342,7 +377,7 @@ export const ChatComposer = ({
       takeover={takeover}
       // Its other words are the parts' catalogue's (frame/part-words.tsx).
       // The band above the box: what the chat is about (subject-bar.tsx).
-      top={subject}
+      top={topOf(noProvider, subject)}
       value={text}
     />
   );

@@ -241,10 +241,22 @@ const press = async (element: HTMLElement): Promise<void> => {
   await settled();
 };
 
-/** The button named `name`, by its label or its text. */
+/** The words an element is labelled by (`aria-labelledby`), if any. */
+const labelledBy = (element: Element): string | null =>
+  element
+    .getAttribute("aria-labelledby")
+    ?.split(" ")
+    .map((id) => document.querySelector(`[id="${id}"]`))
+    .map((part) => (part === null ? "" : wordsOf(part)))
+    .join(" ") ?? null;
+
+/** The button named `name`, by its label, what labels it, or its text. */
 const button = (name: string): HTMLButtonElement => {
   const found = [...document.querySelectorAll("button")].find(
-    (each) => each.getAttribute("aria-label") === name || wordsOf(each) === name
+    (each) =>
+      each.getAttribute("aria-label") === name ||
+      labelledBy(each) === name ||
+      wordsOf(each) === name
   );
   if (found === undefined) {
     throw new TypeError(`No button ${name}`);
@@ -384,7 +396,12 @@ const replaceKey = async (label: string, key: string): Promise<void> => {
 };
 
 /** The page's text, without its markup. */
-const text = (): string => document.body.textContent ?? "";
+/** What the page shows: its words, and the values in its fields that only read. */
+const text = (): string =>
+  [
+    document.body.textContent ?? "",
+    ...[...document.querySelectorAll("input")].map((input) => input.value),
+  ].join(" ");
 
 describe("Settings › AI providers", () => {
   afterEach(() => {
@@ -395,14 +412,29 @@ describe("Settings › AI providers", () => {
     document.body.replaceChildren();
   });
 
-  it("adds a provider in a password field, and shows only the key's mask once it is saved", async () => {
+  it("connects the first provider from its tile: adds the key, tests it, and shows only its mask on the connected row", async () => {
     const { api, asked } = fakeAiProviders();
     await shown(api);
-    expect(text()).toContain("No provider is connected");
+    // Nothing connected: the providers as tiles, and the endpoint on its own line.
+    const offered = [
+      "Anthropic",
+      "OpenAI",
+      "Mistral AI",
+      "OpenRouter",
+      "Use an OpenAI-compatible endpoint",
+    ].map((name) => button(name).disabled);
+    expect({
+      offered,
+      asks: text().includes(
+        "Choose the AI that Grasp's chat, agents and workflows run on."
+      ),
+    }).toStrictEqual({
+      offered: [false, false, false, false, false],
+      asks: true,
+    });
 
-    await press(button("Add a provider"));
-    await chooseProvider("OpenAI");
-    // Where it runs, in place of the name said again.
+    await press(button("OpenAI"));
+    // Where it runs, by the name chosen.
     expect(text()).toContain("United States");
     const key = textField("Key");
     expect({ type: key.type, placeholder: key.placeholder }).toStrictEqual({
@@ -410,7 +442,7 @@ describe("Settings › AI providers", () => {
       placeholder: "sk-proj-…",
     });
     await enter(key, pastedKey);
-    await press(dialogButton("Add provider"));
+    await press(button("Connect"));
 
     const row =
       document.querySelector('ul[aria-label="Connected providers"]')
@@ -420,7 +452,10 @@ describe("Settings › AI providers", () => {
       listed: row.includes("OpenAI"),
       masked: row.includes("•••• a3f2"),
     }).toStrictEqual({
-      asked: [["add", { provider: "openai", key: pastedKey }]],
+      asked: [
+        ["add", { provider: "openai", key: pastedKey }],
+        ["test", "openai", undefined],
+      ],
       listed: true,
       masked: true,
     });
@@ -433,20 +468,61 @@ describe("Settings › AI providers", () => {
     }).toStrictEqual({ markup: false, fields: false });
   });
 
-  it("asks a custom endpoint for its base URL, and sends the key there", async () => {
+  it("keeps no key its provider refuses: says why under the key, and removes it again", async () => {
+    const { api, asked } = fakeAiProviders({
+      tested: {
+        ok: false,
+        model: "anthropic/claude-haiku-4-5",
+        code: "model.provider_key_failed",
+      },
+    });
+    await shown(api);
+
+    await press(button("Anthropic"));
+    await enter(textField("Key"), pastedKey);
+    await press(button("Connect"));
+
+    // Why, as the key field's own error: the field said wrong, the reason
+    // tied to it, and the key cleared.
+    const key = textField("Key");
+    const described = (key.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.querySelector(`[id="${id}"]`))
+      .map((each) => (each === null ? "" : wordsOf(each)));
+    expect({
+      asked,
+      invalid: key.getAttribute("aria-invalid"),
+      why: described.includes("It refused the key."),
+      // A key that did not work is not kept in the page.
+      cleared: key.value,
+      connected: document.querySelector('ul[aria-label="Connected providers"]'),
+    }).toStrictEqual({
+      asked: [
+        ["add", { provider: "anthropic", key: pastedKey }],
+        ["test", "anthropic", undefined],
+        ["remove", "anthropic"],
+      ],
+      invalid: "true",
+      why: true,
+      cleared: "",
+      connected: null,
+    });
+  });
+
+  it("connects an OpenAI-compatible endpoint from the line under the tiles, asking its address first", async () => {
     const { api, asked } = fakeAiProviders();
     await shown(api);
 
-    await press(button("Add a provider"));
-    await chooseProvider("OpenAI-compatible endpoint");
+    await press(button("Use an OpenAI-compatible endpoint"));
     // No address yet: nothing is sent, and the field says what it needs.
     await enter(textField("Key"), pastedKey);
-    await press(dialogButton("Add provider"));
+    await press(button("Connect"));
     const sentEarly = [...asked];
     await enter(textField("Address"), "https://models.example.com/v1");
-    await press(dialogButton("Add provider"));
+    await press(button("Connect"));
 
     expect(sentEarly).toStrictEqual([]);
+    // Tested once a model it serves is named: none is yet.
     expect(asked).toStrictEqual([
       [
         "add",
@@ -457,7 +533,47 @@ describe("Settings › AI providers", () => {
         },
       ],
     ]);
+    expect(text()).toContain("Your endpoint's model");
     expect(document.body.innerHTML).not.toContain(pastedKey);
+  });
+
+  it("adds a second provider in a dialog once one is connected", async () => {
+    const { api, asked } = fakeAiProviders({
+      connected: [{ provider: "openai" }],
+    });
+    await shown(api);
+
+    await press(button("Add a provider"));
+    await chooseProvider("Anthropic");
+    await enter(textField("Key"), pastedKey);
+    await press(dialogButton("Add provider"));
+
+    const rows = [
+      ...document.querySelectorAll('ul[aria-label="Connected providers"] > li'),
+    ].map((row) => row.textContent ?? "");
+    expect({
+      asked,
+      rows: rows.map(
+        (row) => row.includes("Anthropic") || row.includes("OpenAI")
+      ),
+      masked: rows.some((row) => row.includes("•••• a3f2")),
+    }).toStrictEqual({
+      asked: [["add", { provider: "anthropic", key: pastedKey }]],
+      rows: [true, true],
+      masked: true,
+    });
+  });
+
+  it("tells someone who can't connect a provider that the organization's admins do", async () => {
+    const { api } = fakeAiProviders();
+    await shown(api, false);
+
+    expect({
+      said: text().includes(
+        "The organization's own admins connect its AI provider here."
+      ),
+      buttons: document.querySelectorAll("button").length,
+    }).toStrictEqual({ said: true, buttons: 0 });
   });
 
   it("tests a provider with one call, says Works on the button, or Failed and why", async () => {
@@ -588,7 +704,7 @@ describe("Settings › AI providers", () => {
       ["add", { provider: "openai", key: pastedKey }],
       ["remove", "openai"],
     ]);
-    expect(text()).toContain("No provider is connected");
+    expect(text()).toContain("Choose the AI that Grasp's chat");
   });
 
   it("offers none of a removed provider's models, and asks for a new default before the fallbacks change when its was the default", async () => {
@@ -712,15 +828,16 @@ describe("Settings › AI providers", () => {
     });
   });
 
-  it("doesn't say AI can't answer for want of a provider while it runs on Grasp's AI", async () => {
+  it("asks for a provider only while nothing answers, not while it runs on Grasp's AI", async () => {
     const { api } = fakeAiProviders({ graspAvailable: true });
     await shown(api);
-    const onOwn = text().includes("so Grasp's AI can't answer yet");
+    const asks = () => text().includes("Choose the AI that Grasp's chat");
+    const onOwn = asks();
     await press(button("Switch to Grasp’s AI"));
 
     expect({
       onOwn,
-      onGrasp: text().includes("so Grasp's AI can't answer yet"),
+      onGrasp: asks(),
       whatSwitchingLeaves: text().includes(
         "No provider of your own is connected"
       ),
@@ -750,7 +867,10 @@ describe("Settings › AI providers", () => {
     expect(text()).toContain("•••• 0000");
     expect(text()).toContain("GPT-5.4");
     expect(text()).toContain("GPT-5 mini");
-    expect(document.querySelectorAll("input, select")).toHaveLength(0);
+    // A field that only reads is no way to change it.
+    expect(
+      document.querySelectorAll("input:not([readonly]), select")
+    ).toHaveLength(0);
     // Only the info marks that say more: nothing that manages, tests or changes.
     expect(
       [...document.querySelectorAll("button")].filter(

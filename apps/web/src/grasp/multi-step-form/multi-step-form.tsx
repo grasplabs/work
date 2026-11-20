@@ -41,6 +41,7 @@ import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
 import { multiStepFormWords } from "./words";
+import type { MultiStepFormWords } from "./words";
 
 /** What a caller may style: where it sits and how wide it is. */
 export type MultiStepFormLayoutStyle = LayoutStyle;
@@ -127,6 +128,12 @@ export interface MultiStepFormProps {
   style?: MultiStepFormLayoutStyle;
   /** Layout only: where it sits and how wide it is. */
   layout?: MultiStepFormLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ submit: "Create project" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<MultiStepFormWords>;
 }
 
 const styles = stylex.create({
@@ -606,6 +613,7 @@ export const MultiStepForm = ({
   method = "post",
   style: styleProp,
   layout,
+  words,
 }: MultiStepFormProps) => {
   // Its words: the product's, by its catalogue, else English; the caller's props still win.
   const {
@@ -615,7 +623,7 @@ export const MultiStepForm = ({
     failed: failedLabel,
     page: pageLabel,
     counter: counterLabel,
-  } = withGiven(useWords("multiStepForm", multiStepFormWords), {
+  } = withGiven(useWords("multiStepForm", multiStepFormWords, words), {
     back: backGiven,
     next: nextGiven,
     submit: submitGiven,

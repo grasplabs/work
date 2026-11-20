@@ -35,6 +35,7 @@ import { Step } from "./step";
 import { activityStyles as styles } from "./styles";
 import type { ActivityStep, AgentActivityWords } from "./types";
 import { agentActivityWords } from "./words";
+import type { AgentActivityCatalogueWords } from "./words";
 
 /** Every prop an AgentActivity takes. */
 export interface AgentActivityProps {
@@ -71,8 +72,12 @@ export interface AgentActivityProps {
    * @default "Working"
    */
   workingLabel?: string;
-  /** The words it writes itself, any of them replaced: state names, Show more, the labels, the one line. */
-  words?: Partial<AgentActivityWords>;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ working: "Thinking" }`): state names,
+   * Show more, the labels, the one line, its name. Any left out are the catalogue's, else English. A flat text prop
+   * given beside it (`aria-label`, `workingLabel`) still wins until the release's step 5.
+   */
+  words?: Partial<AgentActivityWords & AgentActivityCatalogueWords>;
 }
 
 /** The cleanup of an effect that started nothing. */
@@ -113,11 +118,10 @@ export const AgentActivity = ({
   words: given,
 }: AgentActivityProps) => {
   // Its words: the product's, by its catalogue, else English; the caller's still win.
-  const words = withGiven(useWords("agentActivity", agentActivityWords), {
-    ...given,
-    name: ariaLabel,
-    working: workingLabel,
-  });
+  const words = withGiven(
+    useWords("agentActivity", agentActivityWords, given),
+    { name: ariaLabel, working: workingLabel }
+  );
   // Its own name, so the effect that says finished steps follows only this word, not the object.
   const { stepFailed } = words;
   const current = steps.find((step) => step.state === "working");

@@ -48,6 +48,7 @@ import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { formatDay, formatMonth } from "../format.ts";
+import { NotePending } from "../frame/page-skeletons-b.tsx";
 import { NotFoundState } from "../frame/page-states.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
@@ -60,6 +61,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "../grasp/tabs/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 
@@ -159,10 +161,6 @@ const styles = stylex.create({
     color: grasp.muted,
   },
   earlier: { paddingBottom: grasp.space2 },
-  count: {
-    marginInlineStart: grasp.space2,
-    color: grasp.muted,
-  },
   details: {
     display: "flex",
     flexDirection: "column",
@@ -439,8 +437,10 @@ const Fold = ({
     fit
     title={
       <>
-        {title}
-        <span {...stylex.props(styles.count)}>{count}</span>
+        {title}{" "}
+        <Text element="span" size="sm" tone="quiet">
+          {count}
+        </Text>
       </>
     }
   >
@@ -969,7 +969,8 @@ const NoteContent = ({
           {
             value: "timeline",
             label: t`Timeline`,
-            count: events,
+            // A timeline of only what is still open counts nothing that happened.
+            ...(events > 0 ? { count: events } : {}),
             content: <Timeline note={note} />,
           },
         ]
@@ -1129,5 +1130,8 @@ export const Route = createFileRoute("/_shell/brain/$noteId")({
       ),
     };
   },
+  // Going to a note whose transcript is read: its banner and text wait,
+  // under the layout's bar.
+  pendingComponent: NotePending,
   component: NotePage,
 });

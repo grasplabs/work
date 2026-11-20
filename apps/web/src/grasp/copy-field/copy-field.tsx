@@ -30,6 +30,7 @@ import { useWords, withGiven } from "../words/words";
 import { copyFieldMarker } from "./copy-field.stylex";
 import { styles } from "./styles";
 import { copyFieldWords } from "./words";
+import type { CopyFieldWords } from "./words";
 
 /** What a caller may style: where the field sits and how wide it is. Never its look. */
 export type CopyFieldLayoutStyle = LayoutStyle;
@@ -66,6 +67,12 @@ export interface CopyFieldProps {
   style?: CopyFieldLayoutStyle;
   /** Layout only: margins, width and alignment. The look belongs to the field. */
   layout?: CopyFieldLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ failed: "Not copied" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<CopyFieldWords>;
 }
 
 /** Which end of the value has more beyond it, as data-more says it. */
@@ -134,6 +141,7 @@ export const CopyField = ({
   "aria-label": label = labelDeprecated ?? "",
   copiedLabel: copiedLabelGiven,
   failedLabel: failedLabelGiven,
+  words,
   size = "md",
   swatch,
   onCopy,
@@ -141,7 +149,7 @@ export const CopyField = ({
   layout,
 }: CopyFieldProps) => {
   const { copied: copiedLabel, failed: failedLabel } = withGiven(
-    useWords("copyField", copyFieldWords),
+    useWords("copyField", copyFieldWords, words),
     { copied: copiedLabelGiven, failed: failedLabelGiven }
   );
   const [box, more] = useMore();

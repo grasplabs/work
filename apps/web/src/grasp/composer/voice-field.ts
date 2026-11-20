@@ -19,6 +19,7 @@ import type { VoiceReading, VoiceShape } from "./voice-motion";
 /** What the field is doing, from the dictation's phase. */
 export type VoiceFieldMode =
   | "listening"
+  | "speaking"
   | "silent"
   | "unheard"
   | "muted"
@@ -111,6 +112,15 @@ const gradeOf = (canvas: HTMLCanvasElement): string[] => {
     : ["", stop("sea"), stop("mint"), stop("pine")];
 };
 
+/**
+ * The other voice's grade, in a conversation: the same light, its core one stop short of the
+ * person's (mint on paper, sea at night), so whose turn it is reads at a glance.
+ */
+const quietOf = (grade: string[]) =>
+  grade.map((stop, index) =>
+    index === grade.length - 1 ? (grade[index - 1] ?? stop) : stop
+  );
+
 /** What every column of a picture shares: the sound now, and how the field stands. */
 interface Scene {
   sound: VoiceShape;
@@ -137,6 +147,7 @@ interface Look {
 /** How present the field is in each mode: gone, dim when muted, else whole. */
 const PRESENCE: Record<VoiceFieldMode, number> = {
   listening: 1,
+  speaking: 1,
   silent: 1,
   unheard: 1,
   thinking: 1,
@@ -144,9 +155,10 @@ const PRESENCE: Record<VoiceFieldMode, number> = {
   leaving: 0,
   off: 0,
 };
-/** How much of the voice reaches it: all while it listens, half when a stretch is unheard. */
+/** How much of the voice reaches it: all while it listens (or the other voice speaks), half when a stretch is unheard. */
 const VOICE: Record<VoiceFieldMode, number> = {
   listening: 1,
+  speaking: 1,
   silent: 1,
   unheard: 0.5,
   thinking: 0,
@@ -456,12 +468,23 @@ export const startVoiceField = (
         }
       }
     }
-    drawCells(ctx, cells, grade, ratio, width, height);
+    drawCells(
+      ctx,
+      cells,
+      mode === "speaking" ? quietOf(grade) : grade,
+      ratio,
+      width,
+      height
+    );
     canvas.dataset.drawn = String(Number(canvas.dataset.drawn ?? "0") + 1);
   };
 
+  // The sound is read while it listens, and while the other voice speaks (a conversation).
   const listening = () =>
-    mode === "listening" || mode === "unheard" || mode === "silent";
+    mode === "listening" ||
+    mode === "speaking" ||
+    mode === "unheard" ||
+    mode === "silent";
 
   const tick = (now: number) => {
     const dt = last === 0 ? 1 / 60 : Math.min(0.1, (now - last) / 1000);

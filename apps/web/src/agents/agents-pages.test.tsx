@@ -83,6 +83,17 @@ const wake: AgentWake = {
   lastOutcome: null,
 };
 
+/** A wake-up whose last run didn't start: no AI provider was connected. */
+const failedWake: AgentWake = {
+  ...wake,
+  id: "wake-2",
+  agentId: stephen.id,
+  nextAt: null,
+  state: "paused",
+  lastAt: "2026-11-12T06:30:00.000Z",
+  lastOutcome: "model.no_provider",
+};
+
 const managed: ManagedAgents = {
   agents: [stephen, claire, milan],
   settings: {
@@ -195,6 +206,15 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** Waits `ms` of real time: a hover card opens only after the pointer rests. */
+const waited = async (ms: number): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  setTimeout(() => {
+    resolve(true);
+  }, ms);
+  await promise;
+};
+
 const press = async (element: Element | null | undefined) => {
   if (!(element instanceof HTMLElement)) {
     throw new TypeError("Nothing to press");
@@ -209,7 +229,7 @@ const press = async (element: Element | null | undefined) => {
 /** The agents' names, as the rows start with them. */
 const names = ["Stephen", "Claire", "Milan"];
 
-/** Each row as its name, where its name leads, and whether it offers a chat. */
+/** Each card as its name, where it leads, and whether it opens a chat. */
 const cards = () =>
   [...document.querySelectorAll("ul[aria-label='Agents'] > li")].map((row) => {
     const text = row.textContent ?? "";
@@ -272,7 +292,6 @@ describe("the company's agents, on pages of their own", () => {
     it("shows someone who isn't an admin only their agents, each opening a chat with it and nothing to change", async () => {
       await mounted(
         <AgentsOverview
-          models={[]}
           makes={false}
           managed={undefined}
           usable={[chatAgent(stephen), chatAgent(claire)]}
@@ -285,17 +304,19 @@ describe("the company's agents, on pages of their own", () => {
         { name: "Claire", to: undefined, chat: ["/?agent=agent-claire"] },
       ]);
       expect({
-        newAgent: buttonNamed("New agent") !== undefined,
+        newAgent: document.querySelector("a[href='/agents/new']") !== null,
         says: document.body.textContent?.includes("Paused"),
       }).toStrictEqual({ newAgent: false, says: false });
     });
 
-    it("shows an admin every agent, and offers a chat only with one that is on and answers them", async () => {
+    it("shows an admin every agent, each card opening its page with one fact at its foot", async () => {
       await mounted(
         <AgentsOverview
-          models={[]}
           makes
-          managed={managed}
+          managed={{
+            ...managed,
+            wakes: { ...managed.wakes, [stephen.id]: [failedWake] },
+          }}
           // The admin isn't in Claire's teams; Milan is paused.
           usable={[chatAgent(stephen)]}
         />
@@ -303,53 +324,86 @@ describe("the company's agents, on pages of their own", () => {
       expect(
         cards().map(({ name, to, chat }) => ({ name, to, chat }))
       ).toStrictEqual([
-        {
-          name: "Stephen",
-          to: "/agents/organization",
-          chat: ["/?agent=organization"],
-        },
+        { name: "Stephen", to: "/agents/organization", chat: [] },
         { name: "Claire", to: "/agents/agent-claire", chat: [] },
         { name: "Milan", to: "/agents/agent-milan", chat: [] },
       ]);
-      const [, clairesCard, milansCard] = cards();
+      const [stephensCard, clairesCard, milansCard] = cards();
       expect({
-        claire: [
-          "Finance",
-          "3 of 6 kinds of work",
-          "1 schedule",
-          "$12.50 this month",
-        ].map((words) => clairesCard?.text.includes(words)),
-        // Never asked this month: nothing about what it cost.
-        milanCost: milansCard?.text.includes("this month"),
-        milan: ["Nobody yet", "May do nothing yet"].map((words) =>
-          milansCard?.text.includes(words)
+        // Its next run at its foot, and whom it answers for a touch screen.
+        claire: ["Next", "Finance"].map((words) =>
+          clairesCard?.text.includes(words)
+        ),
+        stephen: ["Everyone with Grasp", "Last run failed"].map((words) =>
+          stephensCard?.text.includes(words)
         ),
         milanPaused: milansCard?.text.includes("Paused"),
-        newAgent: buttonNamed("New agent") !== undefined,
+        newAgent: document.querySelector("a[href='/agents/new']") !== null,
       }).toStrictEqual({
-        claire: [true, true, true, true],
-        milanCost: false,
-        milan: [true, true],
+        claire: [true, true],
+        stephen: [true, true],
         milanPaused: true,
         newAgent: true,
       });
     });
 
-    it("narrows an admin's list to the paused ones", async () => {
+    it("tells an admin resting on a card what is worth knowing before opening it", async () => {
       await mounted(
-        <AgentsOverview
-          models={[]}
-          makes
-          managed={managed}
-          usable={[chatAgent(stephen)]}
-        />
+        <AgentsOverview makes managed={managed} usable={[chatAgent(stephen)]} />
       );
-      await press(buttonNamed("Paused"));
-      expect(cards().map(({ name }) => name)).toStrictEqual(["Milan"]);
+      const card = document.querySelector("a[href='/agents/agent-claire']");
+      await act(async () => {
+        card?.dispatchEvent(
+          new PointerEvent("pointerenter", {
+            bubbles: true,
+            pointerType: "mouse",
+          })
+        );
+        card?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        card?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+        await waited(800);
+      });
+      const said = document.body.textContent ?? "";
+      expect(
+        [
+          "Answers",
+          "Finance",
+          "3 of 6 kinds of work",
+          "$12.50 · 40 requests · 4 people",
+          "Last asked",
+        ].map((words) => said.includes(words))
+      ).toStrictEqual([true, true, true, true, true]);
+      // Milan was never asked this month: nothing about what it cost.
+      expect(said).not.toContain("$0.00");
     });
   });
 
   describe("one agent's page", () => {
+    it("says in words how its last run went, never core's code for it", async () => {
+      await mounted(
+        <AgentPage
+          agent={claire}
+          documents={[]}
+          editable
+          first={false}
+          firstAccess={undefined}
+          models={[]}
+          people={[]}
+          settings={managed.settings[claire.id]}
+          tab="overview"
+          teams={teams}
+          usable
+          usage={undefined}
+          wakes={[{ ...failedWake, agentId: claire.id }]}
+        />
+      );
+      const said = document.body.textContent ?? "";
+      expect({
+        why: said.includes("no AI provider is connected"),
+        code: said.includes("model.no_provider"),
+      }).toStrictEqual({ why: true, code: false });
+    });
+
     it("pauses the agent in core from its heading, and offers a chat only while it is on and answers the person", async () => {
       const asked = await mounted(page(claire, "overview"));
       expect(
@@ -455,7 +509,6 @@ describe("the company's agents, on pages of their own", () => {
       const unread: ManagedAgents = { ...managed, settings: {} };
       await mounted(
         <AgentsOverview
-          models={[]}
           makes={false}
           managed={unread}
           usable={[chatAgent(stephen)]}

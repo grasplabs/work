@@ -24,6 +24,7 @@ import { useSyncExternalStore } from "react";
 import type { ComponentProps } from "react";
 
 import { CalendarMonths } from "../calendar/months";
+import type { CalendarWords } from "../calendar/words";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { popup, px } from "../tokens/tokens.values";
@@ -31,6 +32,7 @@ import { datePlaceholder, defaultFormatLabels } from "./placeholder";
 import type { DateFormatLabels } from "./placeholder";
 import { datePickerStyles as styles } from "./styles";
 import { DateTrigger } from "./trigger";
+import type { DatePickerWords } from "./words";
 
 type RootProps = ComponentProps<typeof RootPrimitive>;
 
@@ -118,6 +120,12 @@ export interface DatePickerProps extends Omit<
    * @default true for one month, false for more
    */
   showOutsideDays?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ choose: "Pick the due date" }`): its own
+   * (`datePicker`) and its calendar's (`calendar`: previous, next). Any left out are the catalogue's,
+   * else English. A flat text prop given beside it still wins until the release's step 5.
+   */
+  words?: Partial<DatePickerWords & CalendarWords>;
 }
 
 /** The words for a range's two fields, when the page gives none. */
@@ -150,6 +158,7 @@ export const DatePicker = ({
   formatLabels = defaultFormatLabels,
   showOutsideDays,
   invalid = false,
+  words,
   ...rest
 }: DatePickerProps) => {
   const input = stylex.props(styles.input, focus.carrier);
@@ -219,7 +228,7 @@ export const DatePicker = ({
           {...input}
         />
       )}
-      <DateTrigger label={triggerLabel} size={size} />
+      <DateTrigger label={triggerLabel} size={size} words={words} />
       <HintPrimitive {...stylex.props(visuallyHidden)} />
       <ContentPrimitive
         align="start"
@@ -233,6 +242,7 @@ export const DatePicker = ({
             months={shown}
             previousLabel={previousLabel}
             nextLabel={nextLabel}
+            words={words}
           />
         </div>
       </ContentPrimitive>

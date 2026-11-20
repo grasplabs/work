@@ -61,7 +61,7 @@ const Ideas = ({
           size="sm"
           variant="outline"
         >
-          <ItemMedia icon={icon} />
+          <ItemMedia align="center" icon={icon} />
           <ItemContent>
             <ItemTitle>{title}</ItemTitle>
             <ItemDescription>{description}</ItemDescription>

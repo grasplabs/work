@@ -4,7 +4,6 @@ import { Suspense, lazy } from "react";
 
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Thread } from "../grasp/thread/index.ts";
@@ -108,17 +107,6 @@ export const loadThread = async (): Promise<ThreadComponent> => {
 
 const LazyThread = lazy(async () => ({ default: await loadThread() }));
 
-/** What the chat says before anything is asked in it. */
-const Welcome = ({ text }: { text: string }) => (
-  <div {...stylex.props(styles.grow)}>
-    <Empty shape="thread">
-      <EmptyHeader>
-        <EmptyDescription>{text}</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-  </div>
-);
-
 /** The chat loading, in the thread's place: Grasp UI's Thread, loading. */
 const Loading = () => {
   const { t } = useLingui();
@@ -146,7 +134,7 @@ export const ChatConversation = ({
   focusBox: () => void;
 }) => {
   const { t } = useLingui();
-  const { chatId, finding, view, failure, empty, words, ask, composer } = chat;
+  const { chatId, finding, view, failure, empty, ask, composer } = chat;
   // A subject's chat, while core finds it, or why it gave none.
   if (finding.searching || finding.failure !== undefined) {
     return finding.failure === undefined ? (
@@ -166,7 +154,8 @@ export const ChatConversation = ({
     );
   }
   if (chatId === undefined || empty) {
-    return <Welcome text={words.empty} />;
+    // Before anything is asked the chat is empty: the box at its foot is enough.
+    return <div {...stylex.props(styles.grow)} />;
   }
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const ChatThread = threadLoaded ?? LazyThread;

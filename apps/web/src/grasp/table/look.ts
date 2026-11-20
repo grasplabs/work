@@ -11,7 +11,7 @@ export type TableHeadLook = "plain" | "soft" | "quiet";
 /** The look every table takes unless it is given another. */
 export const tableLook: { range: TableRangeLook; head: TableHeadLook } = {
   range: "mint",
-  head: "soft",
+  head: "plain",
 };
 
 export const RangeLookContext = createContext<TableRangeLook>(tableLook.range);
