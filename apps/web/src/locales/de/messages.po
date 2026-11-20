@@ -244,7 +244,7 @@ msgstr "{count, plural, one {# Agent} other {# Agenten}}"
 
 #: src/frame/part-words.tsx
 msgid "{count, plural, one {# app needs you} other {# apps need you}}"
-msgstr "{count, plural, one {# App braucht dich} other {# Apps brauchen dich}}"
+msgstr "{count, plural, one {# App braucht Sie} other {# Apps brauchen Sie}}"
 
 #: src/inbox/items.ts
 msgid "{count, plural, one {# binding} other {# bindings}}"
@@ -11144,7 +11144,7 @@ msgstr "Jemand muss sich erneut anmelden"
 #: src/frame/part-words.tsx
 msgctxt "state of one app"
 msgid "Needs you"
-msgstr "Braucht dich"
+msgstr "Braucht Sie"
 
 #: src/workflows/workflows-table.tsx
 msgctxt "workflow phase"
