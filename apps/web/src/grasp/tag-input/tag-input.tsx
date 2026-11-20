@@ -142,7 +142,7 @@ const styles = stylex.create({
       },
       [OFF]: `inset 0 0 0 1px ${grasp.fieldEdge}`,
     },
-    // Focus, the ring for the keyboard and a real outline in forced colours: focus.fieldWithin.
+    // Focus is the box's edge (field-focus); a real outline in forced colours: focus.fieldWithin.
     opacity: { default: 1, [OFF]: grasp.dim },
     cursor: "text",
     transitionProperty: "box-shadow",

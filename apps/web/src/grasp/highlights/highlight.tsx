@@ -95,7 +95,9 @@ export const useHighlightBody = ({
         </div>
         {loading ? (
           <div {...stylex.props(styles.figures)}>
-            <Skeleton variant="block" layout={styles.skeletonValue} />
+            <span {...stylex.props(styles.skeletonValueAt)}>
+              <Skeleton variant="block" layout={styles.skeletonValue} />
+            </span>
             {change !== undefined && (
               <Skeleton layout={styles.skeletonChange} />
             )}

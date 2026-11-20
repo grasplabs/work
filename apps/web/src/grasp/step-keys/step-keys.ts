@@ -1,6 +1,7 @@
-// The keys of a guided flow, shared by StepFoot and StepBar: Enter is Next where focus is not in a
-// field of several lines or on another button, Mod+Enter is Next anywhere in the flow, Alt+← is Back
-// (Alt+→ right to left). The flow is the form round the part, else the page.
+// The keys of a guided flow, shared by StepFoot and StepBar (a shared part, so the bar does not need
+// the foot): Enter is Next where focus is not in a field of several lines or on another button,
+// Mod+Enter is Next anywhere in the flow, Alt+← is Back (Alt+→ right to left). The flow is the form
+// round the part, else the page.
 import { useEffect } from "react";
 import type { RefObject } from "react";
 

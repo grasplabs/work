@@ -25,7 +25,7 @@ import { grasp } from "../../tokens/tokens.stylex";
 
 const styles = stylex.create({
   // The header, then the list, a section's gap apart: as the loaded page lays them.
-  page: { display: "grid", gap: grasp.space6, minWidth: 0 },
+  page: { display: "grid", gap: grasp.pageGap, minWidth: 0 },
   // A row's placeholder, in the row's mark slot after an empty name: pulled back over the row's own
   // gap, so its first box stands where the row's first box will (the kind's icon, or the name), and
   // its line, a gap on, where the name's words will start.
@@ -90,6 +90,10 @@ export interface PageSkeletonListProps {
   variant?: "rows" | "items";
   /** With `variant="items"`: a hairline between the rows, as the page's ItemGroup has. @default true */
   separated?: boolean;
+  /** With `variant="items"`: the Items' size, as the page's rows have it (`xs` among setting rows and in an inbox, `sm` dense). @default "md" */
+  size?: "xs" | "sm" | "md";
+  /** With `variant="items"`: how each row's icon stands, `square` in its box or `inline`, the bare icon on the title's line. @default "square" */
+  iconLook?: "square" | "inline";
   /** The page's rows lead with their kind's icon: each placeholder shows the icon's box, then its line where the name will start. Without, the line starts where a name does. @default true */
   icons?: boolean;
 }
@@ -101,6 +105,8 @@ export const PageSkeletonList = ({
   icons = true,
   variant = "rows",
   separated = true,
+  size = "md",
+  iconLook = "square",
   header = true,
   toolbar,
   actions,
@@ -124,8 +130,8 @@ export const PageSkeletonList = ({
       {variant === "items" ? (
         <ItemGroup separated={separated}>
           {Array.from({ length: rows }, (_, index) => (
-            <Item key={index} loading>
-              {icons ? <ItemMedia /> : null}
+            <Item key={index} size={size} loading>
+              {icons ? <ItemMedia iconLook={iconLook} /> : null}
               <ItemContent>
                 <ItemTitle />
                 <ItemDescription />

@@ -44,7 +44,11 @@ const AiProvidersPage = () => {
 
 /** The providers, the models (default, fallbacks, add), then the month's spend. */
 const AiProvidersPending = () => (
-  <PageSkeletonSettings header={false} help={false} sections={[1, 3, 8]} />
+  <PageSkeletonSettings
+    header={false}
+    help={false}
+    sections={[1, 3, { variant: "chart" }]}
+  />
 );
 
 export const Route = createFileRoute("/_shell/settings/ai-providers")({

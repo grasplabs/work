@@ -13,7 +13,7 @@ import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { OrgCard } from "../settings/org-card.tsx";
+import { OrgCard, OrgCardLoading } from "../settings/org-card.tsx";
 import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 import { SignInRow } from "../settings/sign-in-settings.tsx";
 import { StaffAccessSection } from "../settings/staff-access.tsx";
@@ -263,13 +263,19 @@ const Workspace = () => {
 };
 
 /** The organization's card, the time zone and sign-in, then staff access. */
-const WorkspacePending = () => (
-  <PageSkeletonSettings
-    header={false}
-    help={false}
-    sections={[{ rows: 5, title: false }, { rows: 2, title: false }, 1]}
-  />
-);
+const WorkspacePending = () => {
+  const { identity } = Route.useRouteContext();
+  return (
+    <>
+      <OrgCardLoading canChange={isMemberAdmin(identity)} />
+      <PageSkeletonSettings
+        header={false}
+        help={false}
+        sections={[{ rows: 2, title: false }, 1]}
+      />
+    </>
+  );
+};
 
 export const Route = createFileRoute("/_shell/settings/workspace")({
   pendingComponent: WorkspacePending,

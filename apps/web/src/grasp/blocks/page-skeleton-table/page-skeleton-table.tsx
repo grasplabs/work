@@ -16,7 +16,7 @@ import { grasp } from "../../tokens/tokens.stylex";
 
 const styles = stylex.create({
   // The header, then the table, a section's gap apart: as the loaded page lays them.
-  page: { display: "grid", gap: grasp.space6, minWidth: 0 },
+  page: { display: "grid", gap: grasp.pageGap, minWidth: 0 },
 });
 
 const noRows: readonly never[] = [];

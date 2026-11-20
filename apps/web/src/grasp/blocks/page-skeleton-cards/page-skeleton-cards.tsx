@@ -15,7 +15,7 @@ import { grasp } from "../../tokens/tokens.stylex";
 
 const styles = stylex.create({
   // The header, then the grid, as the Apps page lays them.
-  page: { display: "grid", gap: grasp.space8, minWidth: 0 },
+  page: { display: "grid", gap: grasp.pageGap, minWidth: 0 },
 });
 
 export interface PageSkeletonCardsProps {

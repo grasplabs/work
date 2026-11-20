@@ -188,7 +188,7 @@ const BrainBody = ({ page }: { page: BrainPage }) => {
           <PageSkeletonList
             descriptionLines={0}
             rows={6}
-            toolbar={<PageSkeletonToolbar variant="search" />}
+            toolbar={<PageSkeletonToolbar icon={false} variant="search" />}
           />
         ) : null}
         {page === "section" ? (

@@ -58,6 +58,14 @@ export interface PageSkeletonListDetailProps {
   descriptionLines?: number;
   /** The rows lead with their kind's icon or a person's picture: each shows its box. @default true */
   icons?: boolean;
+  /** What the rows are, as PageSkeletonList's: `rows` one-line, `items` an ItemGroup of two-line Items. @default "rows" */
+  variant?: "rows" | "items";
+  /** With `items`: their size (`xs` for an inbox's rows). @default "md" */
+  size?: "xs" | "sm" | "md";
+  /** With `items`: the icon in its square, or `inline`, the bare icon on the title's line. @default "square" */
+  iconLook?: "square" | "inline";
+  /** With `items`: a hairline between the rows. @default true */
+  separated?: boolean;
 }
 
 /** The list before it arrives: the page's header, then quiet rows in the rows' own boxes. */
@@ -68,6 +76,10 @@ export const PageSkeletonListDetail = ({
   header = true,
   toolbar,
   actions,
+  variant,
+  size,
+  iconLook,
+  separated,
 }: PageSkeletonListDetailProps) => (
   <PageSkeletonList
     toolbar={toolbar}
@@ -76,6 +88,10 @@ export const PageSkeletonListDetail = ({
     descriptionLines={descriptionLines}
     icons={icons}
     header={header}
+    {...(variant === undefined ? {} : { variant })}
+    {...(size === undefined ? {} : { size })}
+    {...(iconLook === undefined ? {} : { iconLook })}
+    {...(separated === undefined ? {} : { separated })}
   />
 );
 
