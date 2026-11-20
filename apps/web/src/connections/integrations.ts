@@ -388,7 +388,7 @@ export const roundedDown = (count: number): number => {
 };
 
 /** A name as it is compared: letters and digits only, so "Google Sheets" is "google_sheets". */
-const plain = (name: string): string =>
+export const plain = (name: string): string =>
   name.toLocaleLowerCase().replaceAll(/[^\p{L}\p{N}]/gu, "");
 
 /**

@@ -34,7 +34,7 @@ import {
   signInHostOf,
 } from "./connect-dialog.tsx";
 import { DisconnectDialog } from "./connection-list.tsx";
-import { fixOf } from "./integrations-header.tsx";
+import { fixOf } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
 import { reliedOnLapsed } from "./integrations.ts";
 import { toolRules } from "./tool-choices.ts";
