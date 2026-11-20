@@ -1,6 +1,10 @@
 // Page skeleton, integrations: the Integrations page before its apps arrive (a route's first paint),
 // and an app's panel before its account and tools arrive, built from the parts they will show:
 //
+//   <PageSkeletonIntegrations band runs={[{ tiles: 4, note: true }, 2, 4]} />
+//                                                    with `band`, the slim hero's card at its size
+//                                                    (its two lines, the connected marks' frame and
+//                                                    their count) between the header and the runs
 //   <PageSkeletonIntegrations runs={[2, 4, 4]} />    PageHeader's own `loading` with its search and
 //                                                    Request app, then runs of tiles under their
 //                                                    headings, in the real ItemGrid with Items in an
@@ -24,7 +28,7 @@ import {
 import { PageHeader } from "../../page-header";
 import { RowList, RowListItem } from "../../row-list";
 import { Skeleton } from "../../skeleton";
-import { grasp } from "../../tokens/tokens.stylex";
+import { grasp, media } from "../../tokens/tokens.stylex";
 
 const PHONE = "@container page-header (width < 40rem)";
 
@@ -34,6 +38,14 @@ const styles = stylex.create({
   run: { display: "grid", gap: grasp.space3, minWidth: 0 },
   // A run's heading: one line of small words.
   heading: { width: grasp.space24 },
+  // A run's note under its heading, at the note's own line; on a phone it runs to two lines.
+  head: { display: "grid", gap: grasp.space1 },
+  note: { height: grasp.textXsLine, width: "min(100%, 24rem)" },
+  noteMore: {
+    display: { default: "none", [media.belowPhone]: "block" },
+    height: grasp.textXsLine,
+    width: "8rem",
+  },
   // The header's actions: the search field and Request app, at their sizes. On a phone (the header
   // under 40rem) the row is the column's width, the field taking what Request app leaves, as the page's.
   actions: {
@@ -51,6 +63,37 @@ const styles = stylex.create({
   },
   search: { width: "100%", height: grasp.controlMd },
   request: { width: "8.5rem", flexShrink: 0, height: grasp.controlMd },
+  // The slim hero's card: its frame and insets, its words, then the connected marks and their count.
+  band: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space4,
+    paddingBlock: grasp.space5,
+    paddingInline: { default: grasp.space6, [media.belowPhone]: grasp.space4 },
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    boxShadow: `inset 0 0 0 ${grasp.hairline} ${grasp.line}`,
+    backgroundColor: grasp.raised,
+  },
+  // The words take the row; on a phone the title runs to two lines and the marks wrap under them.
+  bandWords: {
+    display: "grid",
+    gap: grasp.space1,
+    flexGrow: 1,
+    flexBasis: { default: "auto", [media.belowPhone]: "100%" },
+    minWidth: 0,
+  },
+  bandTitle: { width: "min(100%, 22rem)" },
+  bandTitleMore: {
+    display: { default: "none", [media.belowPhone]: "block" },
+    width: "min(100%, 11rem)",
+  },
+  bandLead: { width: "min(100%, 15rem)" },
+  bandStack: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  bandMarks: { width: grasp.space16, height: grasp.controlSm },
+  bandCount: { width: "5rem" },
   // A tile's mark, as an app's 32px mark.
   mark: { width: grasp.controlSm, height: grasp.controlSm },
   // A tile's name and its one fact, as wide as a name and a short fact read.
@@ -76,9 +119,19 @@ const styles = stylex.create({
 
 export interface PageSkeletonIntegrationsProps {
   /** How many tiles each run holds at first, in order: Connected, then the kinds of app. @default [2, 4, 4] */
-  runs?: readonly number[];
+  runs?: readonly (number | PageSkeletonRun)[];
+  /** The slim hero's card waits too, between the header and the runs. @default false */
+  band?: boolean;
   /** What the region says while it waits, for a screen reader. @default "Loading integrations" */
   label?: string;
+}
+
+/** A run with a note under its heading, as Recommended's "From your Microsoft 365, …". */
+export interface PageSkeletonRun {
+  /** How many tiles it holds at first. */
+  tiles: number;
+  /** A note stands under the heading. */
+  note?: boolean;
 }
 
 /** The runs a page shows at first: Connected, then two kinds of app. */
@@ -104,6 +157,7 @@ const WaitingTile = () => (
 /** The Integrations page before it arrives: the header's placeholders and its actions, then the runs of tiles. */
 export const PageSkeletonIntegrations = ({
   runs = RUNS,
+  band = false,
   label = "Loading integrations",
 }: PageSkeletonIntegrationsProps) => (
   <output
@@ -125,16 +179,41 @@ export const PageSkeletonIntegrations = ({
         </span>
       }
     />
-    {runs.map((count, run) => (
-      <div key={run} {...stylex.props(styles.run)}>
-        <Skeleton text="sm" layout={styles.heading} />
-        <ItemGrid>
-          {Array.from({ length: count }, (_, index) => (
-            <WaitingTile key={index} />
-          ))}
-        </ItemGrid>
+    {band ? (
+      <div {...stylex.props(styles.band)}>
+        <div {...stylex.props(styles.bandWords)}>
+          <Skeleton text="lg" layout={styles.bandTitle} />
+          <Skeleton text="lg" layout={styles.bandTitleMore} />
+          <Skeleton text="sm" layout={styles.bandLead} />
+        </div>
+        <span {...stylex.props(styles.bandStack)}>
+          <Skeleton variant="block" layout={styles.bandMarks} />
+          <Skeleton text="sm" layout={styles.bandCount} />
+        </span>
       </div>
-    ))}
+    ) : null}
+    {runs.map((entry, run) => {
+      const { tiles: count, note = false } =
+        typeof entry === "number" ? { tiles: entry } : entry;
+      return (
+        <div key={run} {...stylex.props(styles.run)}>
+          {note ? (
+            <div {...stylex.props(styles.head)}>
+              <Skeleton text="sm" layout={styles.heading} />
+              <Skeleton text="sm" layout={styles.note} />
+              <Skeleton text="sm" layout={styles.noteMore} />
+            </div>
+          ) : (
+            <Skeleton text="sm" layout={styles.heading} />
+          )}
+          <ItemGrid>
+            {Array.from({ length: count }, (_, index) => (
+              <WaitingTile key={index} />
+            ))}
+          </ItemGrid>
+        </div>
+      );
+    })}
   </output>
 );
 
