@@ -1,13 +1,17 @@
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Fragment, useSyncExternalStore } from "react";
+
+import { focus } from "../grasp/focus/focus.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { cn } from "@grasp-os/ui/lib/utils";
-import { useLingui } from "@lingui/react/macro";
-import { Fragment, useSyncExternalStore } from "react";
-
-import { useEntrance } from "./setup-parts.tsx";
+} from "../grasp/tooltip/index.ts";
+import { comeIn, motion } from "./motion.ts";
+import { useArrives } from "./setup-parts.tsx";
 import { dotsOf } from "./setup.ts";
 import type { KnownDot } from "./setup.ts";
 
@@ -34,10 +38,10 @@ export interface Knowledge {
 const roomy = "(min-width: 36rem)";
 
 const onRoomy = (listener: () => void): (() => void) => {
-  const media = window.matchMedia(roomy);
-  media.addEventListener("change", listener);
+  const query = window.matchMedia(roomy);
+  query.addEventListener("change", listener);
   return () => {
-    media.removeEventListener("change", listener);
+    query.removeEventListener("change", listener);
   };
 };
 
@@ -48,17 +52,109 @@ const useDotCount = (): number =>
     () => 40
   );
 
-const dotClass = {
-  filled: "bg-foreground block rounded-full transition-colors duration-500",
-  next: "bg-muted-foreground block animate-pulse rounded-full transition-colors duration-500",
-  empty: "bg-border block rounded-full transition-colors duration-500",
-} as const;
+/** Where the corner's name shows beside its dots. */
+const ROOMY = "@media (min-width: 64rem)";
 
-const lookOf = (dot: KnownDot, breathing: boolean): string => {
+const breathe = stylex.keyframes({
+  "50%": { opacity: 0.4 },
+});
+
+const styles = stylex.create({
+  dot: {
+    display: "block",
+    flexShrink: 1,
+    aspectRatio: "1",
+    width: "0.375rem",
+    borderRadius: "50%",
+    transitionProperty: "background-color",
+    transitionDuration: grasp.durationArrive,
+    transitionTimingFunction: grasp.ease,
+  },
+  filled: { backgroundColor: grasp.ink },
+  empty: { backgroundColor: grasp.line },
+  next: {
+    backgroundColor: grasp.muted,
+    animationName: { default: breathe, [media.reduced]: "none" },
+    animationDuration: "2s",
+    animationIterationCount: "infinite",
+    animationTimingFunction: grasp.easeInOut,
+  },
+  first: { marginInlineStart: "0.375rem" },
+  // Where the team can start: a line raised a little towards the words above.
+  gate: {
+    display: "block",
+    flexShrink: 0,
+    width: grasp.hairline,
+    height: "1rem",
+    marginInline: grasp.space1,
+    transform: "translateY(-0.25rem)",
+    backgroundColor: grasp.ink,
+    transitionProperty: "opacity",
+    transitionDuration: grasp.durationArrive,
+    transitionTimingFunction: grasp.ease,
+  },
+  hidden: { opacity: 0 },
+  bar: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space4,
+    width: "100%",
+    overflowX: "clip",
+    textAlign: "start",
+  },
+  // Side by side where both fit; on a phone, in a longer language, where the team can start goes under.
+  words: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    columnGap: grasp.space4,
+    minHeight: "1.25rem",
+  },
+  dots: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space1,
+  },
+  gateWords: {
+    transitionProperty: "opacity",
+    transitionDuration: grasp.durationArrive,
+    transitionTimingFunction: grasp.ease,
+  },
+  corner: { minWidth: 0 },
+  trigger: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.625rem",
+    maxWidth: "100%",
+    paddingInline: grasp.space2,
+    paddingBlock: grasp.space1,
+    borderWidth: 0,
+    borderRadius: "999px",
+    backgroundColor: "transparent",
+    color: grasp.text,
+    font: "inherit",
+    cursor: "default",
+  },
+  name: {
+    display: { default: "none", [ROOMY]: "inline" },
+    whiteSpace: "nowrap",
+  },
+  cornerDots: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    minWidth: 0,
+  },
+  percent: { fontVariantNumeric: "tabular-nums" },
+});
+
+const lookOf = (dot: KnownDot, breathing: boolean) => {
   if (dot.filled) {
-    return dotClass.filled;
+    return styles.filled;
   }
-  return breathing && dot.next ? dotClass.next : dotClass.empty;
+  return breathing && dot.next ? styles.next : styles.empty;
 };
 
 /** The dots, with the mark where the team can start raised a little towards the words above. */
@@ -77,17 +173,12 @@ const Dots = ({
     {dots.map((dot, at) => (
       <Fragment key={at}>
         {at === cut ? (
-          <span
-            className={cn(
-              "bg-foreground mx-1 block h-4 w-px shrink-0 -translate-y-1 transition-opacity duration-700",
-              !gate && "opacity-0"
-            )}
-          />
+          <span {...stylex.props(styles.gate, !gate && styles.hidden)} />
         ) : null}
         <span
-          className={cn(
-            "aspect-square w-1.5",
-            dot.first && "ml-1.5",
+          {...stylex.props(
+            styles.dot,
+            dot.first && styles.first,
             lookOf(dot, breathing)
           )}
         />
@@ -117,28 +208,22 @@ export const KnowledgeBar = ({
   const { t } = useLingui();
   const dots = dotsOf(parts, useDotCount());
   const cut = Math.round((threshold / 100) * dots.length);
-  const captionEntrance = useEntrance(
-    caption ?? "",
-    "animate-in fade-in duration-400"
-  );
+  const captionArrives = useArrives(caption ?? "");
   return (
-    <div className="flex w-full flex-col gap-4 overflow-x-clip text-left">
-      {/* Side by side where both fit; on a phone, in a longer language, where the team can start goes under. */}
-      <div className="flex min-h-5 flex-wrap items-baseline justify-between gap-x-4">
-        <span className={cn("font-medium", captionEntrance)}>{caption}</span>
-        <span
-          className={cn(
-            "text-muted-foreground transition-opacity duration-600",
-            !gate && "opacity-0"
-          )}
-        >
-          {t`Your team can start at ${threshold}%`}
+    <div {...stylex.props(styles.bar)}>
+      <div {...stylex.props(styles.words)}>
+        <span {...comeIn(captionArrives, motion.fade)}>
+          <Text element="span" weight="medium">
+            {caption}
+          </Text>
+        </span>
+        <span {...stylex.props(styles.gateWords, !gate && styles.hidden)}>
+          <Text element="span" tone="muted">
+            {t`Your team can start at ${threshold}%`}
+          </Text>
         </span>
       </div>
-      <div
-        aria-hidden="true"
-        className="flex items-center justify-between gap-1"
-      >
+      <div aria-hidden="true" {...stylex.props(styles.dots)}>
         <Dots breathing={false} cut={cut} dots={dots} gate={gate} />
       </div>
     </div>
@@ -158,24 +243,26 @@ export const KnowledgeCorner = ({ parts, percent, threshold }: Knowledge) => {
   const gate = Math.round((threshold / 100) * dots.length);
   return (
     // On a screen too narrow even for 20 dots, the dots grow smaller with it, still round, and the percentage keeps its size; the name makes way first.
-    <div className="min-w-0">
+    <div {...stylex.props(styles.corner)}>
       <Tooltip>
         <TooltipTrigger
           render={
             <button
               aria-label={t`What I know about your organization: ${percent}%. This is not how far you are in these steps. Your team can start at ${threshold}%.`}
-              className="focus-visible:ring-ring/50 flex max-w-full items-center gap-2.5 rounded-full px-2 py-1 outline-none focus-visible:ring-3"
               type="button"
+              {...stylex.props(styles.trigger, focus.ring)}
             />
           }
         >
-          <span className="text-muted-foreground hidden whitespace-nowrap lg:inline">
-            {t`Known about your organization`}
+          <span {...stylex.props(styles.name)}>
+            <Text element="span" size="sm" tone="muted">
+              {t`Known about your organization`}
+            </Text>
           </span>
-          <span className="flex min-w-0 items-center gap-1">
+          <span {...stylex.props(styles.cornerDots)}>
             <Dots breathing cut={gate} dots={dots} gate />
           </span>
-          <span className="tabular-nums">{percent}%</span>
+          <span {...stylex.props(styles.percent)}>{percent}%</span>
         </TooltipTrigger>
         <TooltipContent>
           {t`How much I know about your organization, not how far you are in these steps. It grows as you share and as I talk to your team. Your team can start at ${threshold}%, and I keep learning after that.`}

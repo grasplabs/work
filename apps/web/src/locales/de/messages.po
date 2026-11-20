@@ -2565,6 +2565,7 @@ msgstr "Agenten lesen dies, bevor sie hineinschauen."
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain.ts
 #: src/interview/words.ts
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "AI"
 msgstr "KI"
@@ -4785,6 +4786,7 @@ msgid "Commerce"
 msgstr "Handel"
 
 #: src/brain/brain.ts
+#: src/onboarding/setup-frame.tsx
 #: src/settings/billing-card.tsx
 msgid "Company"
 msgstr "Unternehmen"
@@ -6007,6 +6009,7 @@ msgstr "Dokument nicht gefunden"
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/onboarding/document-drop.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Documents"
 msgstr "Dokumente"
 
@@ -8090,6 +8093,10 @@ msgstr "Wie gründlich soll {name} nachdenken?"
 msgid "How it went then"
 msgstr "Wie es damals lief"
 
+#: src/onboarding/setup-frame.tsx
+msgid "How it works"
+msgstr "So funktioniert es"
+
 #: src/onboarding/about-story.tsx
 msgid "How long does one of those take you, {name}?"
 msgstr "Wie lange brauchen Sie für so eine Rechnung, {name}?"
@@ -8525,6 +8532,7 @@ msgstr "Interviewt: {role}"
 #: src/brain/brain.ts
 #: src/inbox/interviews-item.tsx
 #: src/inbox/items.ts
+#: src/onboarding/setup-frame.tsx
 msgid "Interviews"
 msgstr "Interviews"
 
@@ -9323,6 +9331,10 @@ msgstr "Teamleitung von {name}"
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead talked"
 msgstr "Teamleitung hat gesprochen"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Leads"
+msgstr "Teamleitungen"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Leads get their link {when}. Everyone else right after their lead has talked to me."
@@ -11991,6 +12003,7 @@ msgstr "Nur Sie sehen das"
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/uploads.tsx
+#: src/onboarding/setup-frame.tsx
 #: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Öffnen"
@@ -13977,6 +13990,7 @@ msgstr "Erneut versucht"
 
 #: src/agents/new-agent.tsx
 #: src/inbox/item-detail.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Review"
 msgstr "Prüfen"
 
@@ -15617,6 +15631,7 @@ msgstr "Quelle {number}"
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
 #: src/frame/part-words.tsx
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/settings/event-sources.tsx
 msgid "Sources"
@@ -15838,10 +15853,6 @@ msgstr "Bleiben"
 #: src/interview/words.ts
 msgid "Step"
 msgstr "Schritt"
-
-#: src/onboarding/setup-frame.tsx
-msgid "Step {n}"
-msgstr "Schritt {n}"
 
 #: src/frame/part-words.tsx
 msgid "Step {step} of {total}"
@@ -16195,6 +16206,7 @@ msgstr "aufgaben"
 #: src/brain/brain.ts
 #: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Team"
 msgstr "Team"
 
@@ -17757,6 +17769,7 @@ msgid "Tool"
 msgstr "Tool"
 
 #: src/brain/brain.ts
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Tools"
@@ -18709,6 +18722,10 @@ msgstr "Wochenreporter"
 #: src/workflows/requests/request-summary.tsx
 msgid "Weekly summary"
 msgstr "Wochenzusammenfassung"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Welcome"
+msgstr "Willkommen"
 
 #: src/workflows/today-lanes.tsx
 msgid "went to people"
