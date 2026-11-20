@@ -1,4 +1,3 @@
-import { linkPath, wikiLinkPattern } from "@grasp-os/shared/knowledge";
 import type {
   Backlink,
   DocumentRead,
@@ -6,47 +5,86 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
-import type { ReactNode } from "react";
 
+import { copyText } from "../copy.ts";
 import { ErrorText } from "../error-text.tsx";
-import { ExportMenu } from "../export/export-menu.tsx";
+import { exportAs } from "../export/export-file.tsx";
+import type { ExportFormat } from "../export/export-file.tsx";
 import { formatDay } from "../format.ts";
-import { PageHeading } from "../frame/page.tsx";
+import { useFollowLinks } from "../frame/follow-links.ts";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Alert } from "../grasp/alert/index.ts";
+import { PageBrain } from "../grasp/blocks/page-brain/page-brain.tsx";
 import { Button } from "../grasp/button/index.ts";
-import { Doc, Edit } from "../grasp/icons/index.ts";
-import { Input } from "../grasp/input/index.ts";
+import { DropdownMenuMore } from "../grasp/dropdown-menu/index.ts";
+import type { DropdownMenuAction } from "../grasp/dropdown-menu/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
 import {
-  Item,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "../grasp/item/index.ts";
-import { Section, SectionHeader } from "../grasp/section-header/index.ts";
-import { Text } from "../grasp/text/index.ts";
+  CalendarIcon,
+  Clock,
+  Doc,
+  Edit,
+  Folder,
+  Link as LinkIcon,
+  Pdf,
+  Rows,
+  TextParagraph,
+} from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import type { PageVersion } from "../grasp/page-history/index.ts";
+import type { PageFact } from "../grasp/page-properties/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { DocumentMarkdown } from "./markdown.tsx";
+import {
+  DocumentMarkdown,
+  documentLinksOf,
+  readingMarkdown,
+} from "./markdown.tsx";
 import { saveOrNewer } from "./save.ts";
-import { Timeline } from "./timeline.tsx";
 import type { ResolveLink } from "./wiki-links.ts";
 
-// One document, read like a note in the prototype's brain
-// (grasplabs/prototype `routes/brain/$noteId.tsx`): its kind, title and
-// when to use it, then its text, and its history as a timeline below it.
-// Its facts (the collection, the file, the version, its review date) stand
-// in a line under its title; what it links to and what links to it, in a
-// small section each under its text. Where the person may change it: an editor, and
-// restoring from its history. Every save names the version it was edited
-// from, so a save that would overwrite one made since, in another tab or
-// by someone else, shows that version instead.
+// One document as a Brain page (the library's page-brain, Ruben's pick D):
+// its title, its facts one quiet press away under Properties, and its text.
+// Its actions stand at the end of the bar: Share, then "…" with Edit, the
+// downloads and History, where a version is brought back as the next one.
+// The text is read on the page and changed in its Markdown, as written:
+// DocumentEditor writes Markdown back changed (`[[links]]` escaped, HTML and
+// images dropped), so editing in place waits for it to keep a document as it
+// is. Every save names the version it was edited from, so a save that would
+// overwrite one made since, in another tab or by someone else, shows that
+// version instead.
 
 const styles = stylex.create({
+  view: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    overflowY: "auto",
+    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+    paddingBlockEnd: grasp.space24,
+  },
+  // Page-brain's reading column, for what stands above the page and for the editor.
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space4,
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: {
+      default: `calc(44rem + ${grasp.space16})`,
+      [media.belowPhone]: "44rem",
+    },
+    marginInline: "auto",
+    paddingBlockStart: {
+      default: grasp.space8,
+      [media.belowPhone]: grasp.space2,
+    },
+    paddingInlineStart: { default: grasp.space16, [media.belowPhone]: 0 },
+  },
   form: { display: "flex", flexDirection: "column", gap: grasp.space3 },
   newer: { display: "flex", flexDirection: "column", gap: grasp.space2 },
   start: { alignSelf: "flex-start" },
@@ -58,20 +96,12 @@ const styles = stylex.create({
     justifyContent: "space-between",
     gap: grasp.space2,
   },
-  view: { display: "flex", flex: 1, minWidth: 0, minHeight: 0 },
-  scroll: { flex: 1, minWidth: 0, overflowY: "auto" },
-  column: {
+  links: {
     display: "flex",
-    flexDirection: "column",
-    gap: grasp.space8,
-    boxSizing: "border-box",
-    width: "100%",
-    paddingBlock: grasp.space8,
-    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+    flexWrap: "wrap",
+    columnGap: grasp.space3,
+    rowGap: grasp.space1,
   },
-  actions: { display: "flex", alignItems: "center", gap: grasp.space2 },
-  // The title, and its facts close under it.
-  head: { display: "flex", flexDirection: "column", gap: grasp.space2 },
 });
 
 const Editor = ({
@@ -205,111 +235,105 @@ const fileNameOf = (doc: DocumentRead): string => {
 
 /** A document this one links to, by its ID, named as the link names it. */
 interface Linked {
+  collectionId: string;
   documentId: string;
   title: string;
 }
 
-/** Fenced code, whose `[[…]]` are code, not links. */
-const fencedCode = /^(?:```|~~~)[^\n]*\n[\s\S]*?^(?:```|~~~)[ \t]*$/gmu;
+/** The documents the text links to that `resolve` knows, named as the text names them. */
+const linksOf = (doc: DocumentRead, resolve: ResolveLink): Linked[] =>
+  documentLinksOf(doc.version.text, resolve).map(({ documentId, words }) => ({
+    collectionId: doc.collectionId,
+    documentId,
+    title: words,
+  }));
 
-/**
- * The documents `text` links to with `[[links]]` that `resolve` knows, each
- * once, in the order they first appear, named by the link's label or its
- * target.
- */
-const linksOf = (text: string, resolve: ResolveLink): Linked[] => {
-  const found = new Map<string, string>();
-  for (const match of text
-    .replaceAll(fencedCode, "")
-    .matchAll(wikiLinkPattern)) {
-    const [target = "", ...rest] = (match.groups?.inner ?? "").split("|");
-    const path = linkPath(target);
-    const documentId = path === undefined ? undefined : resolve(path);
-    if (documentId !== undefined && !found.has(documentId)) {
-      const label = rest.join("|").trim();
-      found.set(documentId, label === "" ? target.trim() : label);
-    }
-  }
-  return [...found].map(([documentId, title]) => ({ documentId, title }));
-};
-
-/**
- * The facts under the title, in one quiet line: the collection, the file,
- * the version and when to review it.
- */
-const Facts = ({
-  doc,
-  collection,
-}: {
-  doc: DocumentRead;
-  collection: string;
-}) => {
-  const { t } = useLingui();
-  const version = doc.version.number;
-  const review = doc.reviewDate === null ? null : formatDay(doc.reviewDate);
-  return (
-    <Text size="sm" tone="muted">
+/** Documents as links to them, side by side: what this one links to, or what links to it. */
+const DocumentLinks = ({ documents }: { documents: readonly Linked[] }) => (
+  <span {...stylex.props(styles.links)}>
+    {documents.map((document) => (
       <RouterLink
-        params={{ collection: doc.collectionId }}
-        search={{}}
+        key={document.documentId}
+        params={{ collection: document.collectionId }}
+        search={{ doc: document.documentId }}
         to="/knowledge/$collection"
         variant="standalone"
       >
-        {collection}
+        {document.title}
       </RouterLink>
-      {` · ${doc.path.split("/").at(-1) ?? doc.path} · `}
-      {t`Version ${version}`}
-      {review === null ? null : ` · ${t`Review by ${review}`}`}
-    </Text>
-  );
-};
+    ))}
+  </span>
+);
 
 /**
- * Documents as a small section of links to them: what this one
- * links to, or what links to it. Nothing where there are none.
+ * The document's facts, behind the page's Properties: first what every page has (its collection,
+ * when it changed and its version), then when to use it, when to review it, and what it links to
+ * and what links to it, where it has them.
  */
-const Related = ({
-  id,
-  title,
-  documents,
+const useFacts = ({
+  doc,
+  collection,
+  links,
+  backlinks,
 }: {
-  id: string;
-  title: string;
-  documents: readonly {
-    collectionId: string;
-    documentId: string;
-    title: string;
-  }[];
-}) => {
-  if (documents.length === 0) {
-    return null;
-  }
-  return (
-    <Section aria-labelledby={id}>
-      <SectionHeader id={id} size="sm" title={title} />
-      {/* Each one has an address: a link, never a button. */}
-      <ItemGroup aria-label={title}>
-        {documents.map((document) => (
-          <Item
-            key={document.documentId}
-            render={
-              <Link
-                params={{ collection: document.collectionId }}
-                search={{ doc: document.documentId }}
-                to="/knowledge/$collection"
-              />
-            }
-            size="sm"
-          >
-            <ItemMedia icon={Doc} iconLook="inline" />
-            <ItemContent>
-              <ItemTitle>{document.title}</ItemTitle>
-            </ItemContent>
-          </Item>
-        ))}
-      </ItemGroup>
-    </Section>
-  );
+  doc: DocumentRead;
+  collection: string;
+  links: readonly Linked[];
+  backlinks: readonly Backlink[];
+}): PageFact[] => {
+  const { t } = useLingui();
+  return [
+    {
+      key: t`Collection`,
+      icon: Folder,
+      value: (
+        <RouterLink
+          params={{ collection: doc.collectionId }}
+          search={{}}
+          to="/knowledge/$collection"
+          variant="standalone"
+        >
+          {collection}
+        </RouterLink>
+      ),
+    },
+    {
+      key: t`Updated`,
+      icon: Clock,
+      value: formatDay(doc.version.createdAt),
+    },
+    { key: t`Version`, icon: Rows, value: String(doc.version.number) },
+    ...(doc.description === ""
+      ? []
+      : [{ key: t`Description`, icon: TextParagraph, value: doc.description }]),
+    ...(doc.reviewDate === null
+      ? []
+      : [
+          {
+            key: t`Review by`,
+            icon: CalendarIcon,
+            value: formatDay(doc.reviewDate),
+          },
+        ]),
+    ...(links.length === 0
+      ? []
+      : [
+          {
+            key: t`Links to`,
+            icon: LinkIcon,
+            value: <DocumentLinks documents={links} />,
+          },
+        ]),
+    ...(backlinks.length === 0
+      ? []
+      : [
+          {
+            key: t`Used by`,
+            icon: LinkIcon,
+            value: <DocumentLinks documents={backlinks} />,
+          },
+        ]),
+  ];
 };
 
 /** Says an earlier version is open, with the way back to the current one. */
@@ -340,94 +364,291 @@ const EarlierVersion = ({ doc }: { doc: DocumentRead }) => {
   );
 };
 
-/** A document, with its editor and history where the person may change it. */
+/** The versions in History, the newest first, each with its text. */
+interface DocumentHistory {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  versions: PageVersion[];
+}
+
+/**
+ * The open document's page: its History, opened from the bar, where every version's text is read
+ * as it opens, so the changes show against the text as it stands; and its editor, open on one
+ * version, so another opens read. A person's own saves are "You"; another author can't be named
+ * here yet (core gives an id, which is never shown), so it is "Someone".
+ */
+export const useDocumentPage = ({
+  read,
+  me,
+  writable,
+}: {
+  /** The open document and its versions; none while none is open. */
+  read: { doc: DocumentRead; versions: readonly VersionSummary[] } | undefined;
+  me: string;
+  writable: boolean;
+}) => {
+  const { t } = useLingui();
+  const { run } = useCoreAction();
+  const [open, setOpen] = useState(false);
+  // Each version's text, for the document they were read for.
+  const [loaded, setLoaded] = useState<{
+    docId: string;
+    texts: ReadonlyMap<number, string>;
+  }>();
+  const [editing, setEditing] = useState<string>();
+  const doc = read?.doc;
+  const versions = read?.versions ?? [];
+  // The version shown, by its document and number.
+  const key = doc === undefined ? undefined : `${doc.id}@${doc.version.number}`;
+  const history: DocumentHistory = {
+    open,
+    onOpenChange: setOpen,
+    versions: versions.flatMap((version) => {
+      const markdown =
+        loaded?.docId === doc?.id
+          ? loaded?.texts.get(version.number)
+          : undefined;
+      const { number, restoredFrom } = version;
+      return markdown === undefined
+        ? []
+        : [
+            {
+              id: String(number),
+              who: version.author === me ? t`You` : t`Someone`,
+              when: formatDay(version.createdAt),
+              what:
+                restoredFrom === null
+                  ? (version.message ?? t`Version ${number}`)
+                  : t`Restored version ${restoredFrom}`,
+              markdown,
+            },
+          ];
+    }),
+  };
+  // The current version, where the person may change it: its editor, and History, where a version is brought back.
+  const changeable =
+    writable && doc !== undefined && doc.version.number === doc.currentVersion;
+  const openHistory = async (): Promise<void> => {
+    if (doc === undefined) {
+      return;
+    }
+    const docs = await run(
+      async (session) =>
+        await Promise.all(
+          versions.map(
+            async (version) =>
+              await session.knowledge.getDocument(doc.id, version.number)
+          )
+        )
+    );
+    if (docs === undefined) {
+      toast.error(t`The history didn't load. Try again.`);
+      return;
+    }
+    setLoaded({
+      docId: doc.id,
+      texts: new Map(
+        docs.map((each) => [each.version.number, each.version.text])
+      ),
+    });
+    setOpen(true);
+  };
+  return {
+    key,
+    history,
+    handleHistory: changeable
+      ? () => {
+          void openHistory();
+        }
+      : undefined,
+    editing: editing !== undefined && editing === key,
+    onEditingChange: (opened: boolean): void => {
+      setEditing(opened ? key : undefined);
+    },
+    /** Opens the editor on the current version, where the person may change it. */
+    handleEdit: changeable
+      ? () => {
+          setEditing(key);
+        }
+      : undefined,
+  };
+};
+
+/** Keeps nothing: the page is read; the editor changes the text. */
+const unchanged = () => {
+  // The text is saved from the editor, as a new version.
+};
+
+/**
+ * A document's actions at the end of the bar, as the library's Brain page has them: Share, then
+ * "…" with Edit where the person may change it, the downloads and History. Share copies the page's
+ * link: who may read it is the collection's to say.
+ */
+export const DocumentActions = ({
+  doc,
+  onEdit,
+  onHistory,
+}: {
+  doc: DocumentRead;
+  /** Opens the editor; none where the person may not change it. */
+  onEdit: (() => void) | undefined;
+  /** Opens the document's versions; none where the person may not bring one back. */
+  onHistory: (() => void) | undefined;
+}) => {
+  const { t, i18n } = useLingui();
+  const download = async (format: ExportFormat): Promise<void> => {
+    try {
+      await exportAs(
+        {
+          name: fileNameOf(doc),
+          title: doc.title,
+          markdown: () => doc.version.text,
+        },
+        format,
+        i18n.locale
+      );
+    } catch {
+      toast.error(t`The export didn't work. Try again.`);
+    }
+  };
+  const actions: DropdownMenuAction[] = [
+    ...(onEdit === undefined
+      ? []
+      : [{ label: t`Edit`, icon: Edit, onSelect: onEdit }]),
+    {
+      label: t`Download as Markdown`,
+      icon: Doc,
+      onSelect: () => {
+        void download("md");
+      },
+    },
+    {
+      label: t`Download as PDF`,
+      icon: Pdf,
+      onSelect: () => {
+        void download("pdf");
+      },
+    },
+    ...(onHistory === undefined
+      ? []
+      : [{ label: t`History`, icon: Clock, onSelect: onHistory }]),
+  ];
+  return (
+    <>
+      <Button
+        onClick={() => {
+          void (async () => {
+            if (await copyText(window.location.href)) {
+              toast.success(t`Link copied`);
+            } else {
+              toast.error(t`Copying didn't work`);
+            }
+          })();
+        }}
+        size="sm"
+        variant="ghost"
+      >
+        {t({ message: "Share", context: "a Brain page's link" })}
+      </Button>
+      <DropdownMenuMore actions={actions} label={t`More for this page`} />
+    </>
+  );
+};
+
+/**
+ * A document as a Brain page, read only: its text is changed in the editor (`editing`), and an
+ * earlier version, opened from History, is read with the way back to the current one.
+ */
 export const DocumentView = ({
   doc,
   collection,
-  versions,
   backlinks,
   resolve,
-  me,
-  writable,
-  actions,
+  history,
+  editing,
+  onEditingChange,
 }: {
   doc: DocumentRead;
   /** The name of the collection it is in. */
   collection: string;
-  versions: VersionSummary[];
   backlinks: Backlink[];
   /** The collection's document at a `[[link]]`'s path, if the page has it. */
   resolve: ResolveLink;
-  me: string;
-  writable: boolean;
-  /** What else the page offers on it, beside Edit and Export. */
-  actions?: ReactNode;
+  history: DocumentHistory;
+  editing: boolean;
+  onEditingChange: (editing: boolean) => void;
 }) => {
-  const { t } = useLingui();
-  const [editing, setEditing] = useState(false);
+  const router = useRouter();
+  const { failure, run } = useCoreAction();
+  const followLinks = useFollowLinks();
   // An earlier version, opened from the history: read only.
   const earlier = doc.version.number !== doc.currentVersion;
-  const links = linksOf(doc.version.text, resolve).map((link) => ({
-    ...link,
-    collectionId: doc.collectionId,
-  }));
+  const facts = useFacts({
+    doc,
+    collection,
+    links: linksOf(doc, resolve),
+    backlinks,
+  });
+  /** Brings an earlier version back as the next one, and shows it. */
+  const restore = async (version: PageVersion): Promise<void> => {
+    const restored = await run(
+      async (session) =>
+        await session.knowledge.restoreVersion({
+          documentId: doc.id,
+          version: Number(version.id),
+          ifVersion: doc.currentVersion,
+        })
+    );
+    history.onOpenChange(false);
+    if (restored === undefined) {
+      return;
+    }
+    await router.invalidate({ sync: true });
+  };
+  if (editing) {
+    return (
+      <div {...stylex.props(styles.view)}>
+        <div {...stylex.props(styles.column)}>
+          <Heading level={1}>{doc.title}</Heading>
+          <Editor
+            doc={doc}
+            onClose={() => {
+              onEditingChange(false);
+            }}
+            resolve={resolve}
+          />
+        </div>
+      </div>
+    );
+  }
   return (
     <div {...stylex.props(styles.view)}>
-      <div {...stylex.props(styles.scroll)}>
+      {earlier || failure !== undefined ? (
         <div {...stylex.props(styles.column)}>
-          <div {...stylex.props(styles.head)}>
-            <PageHeading
-              action={
-                <span {...stylex.props(styles.actions)}>
-                  {writable && !editing && !earlier ? (
-                    <Button
-                      icon={Edit}
-                      onClick={() => {
-                        setEditing(true);
-                      }}
-                      size="sm"
-                      variant="quiet"
-                    >
-                      <Trans>Edit</Trans>
-                    </Button>
-                  ) : null}
-                  {actions}
-                  <ExportMenu
-                    file={{
-                      name: fileNameOf(doc),
-                      title: doc.title,
-                      markdown: () => doc.version.text,
-                    }}
-                  />
-                </span>
-              }
-              {...(doc.description === ""
-                ? {}
-                : { description: doc.description })}
-              title={doc.title}
-            />
-            <Facts collection={collection} doc={doc} />
-          </div>
           {earlier ? <EarlierVersion doc={doc} /> : null}
-          {editing ? (
-            <Editor
-              doc={doc}
-              resolve={resolve}
-              onClose={() => {
-                setEditing(false);
-              }}
-            />
-          ) : (
-            <DocumentMarkdown
-              resolve={resolve}
-              text={doc.version.text}
-              title={doc.title}
-            />
-          )}
-          <Related documents={links} id="links-to" title={t`Links to`} />
-          <Related documents={backlinks} id="used-by" title={t`Used by`} />
-          <Timeline doc={doc} me={me} versions={versions} writable={writable} />
+          <ErrorText>{failure}</ErrorText>
         </div>
+      ) : null}
+      <div ref={followLinks}>
+        <PageBrain
+          facts={facts}
+          historyOpen={history.open}
+          onHistoryOpenChange={(open) => {
+            history.onOpenChange(open);
+          }}
+          onRestore={(version) => {
+            void restore(version);
+          }}
+          onValueChange={unchanged}
+          readOnly
+          title={doc.title}
+          value={readingMarkdown(doc.version.text, doc.title, resolve)}
+          // Each version as the page reads it, so History shows what changed in the text.
+          versions={history.versions.map((version) => ({
+            ...version,
+            markdown: readingMarkdown(version.markdown, doc.title, resolve),
+          }))}
+        />
       </div>
     </div>
   );

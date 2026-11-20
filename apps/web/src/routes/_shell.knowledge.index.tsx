@@ -422,7 +422,7 @@ const Knowledge = () => {
 
 export const Route = createFileRoute("/_shell/knowledge/")({
   // It fills the page\'s card, its panes scrolling on their own (frame/page-fill.ts).
-  staticData: { page: "fill" },
+  staticData: { page: "whole" },
   validateSearch: (search: Record<string, unknown>): { q?: string } =>
     typeof search.q === "string" && search.q.trim() !== ""
       ? { q: search.q.slice(0, knowledgeSearchMaxLength) }

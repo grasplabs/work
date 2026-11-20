@@ -49,7 +49,9 @@ test("an admin copies a Grasp skill into Our skills to adapt it, while a member 
   await expect(
     page.getByRole("heading", { level: 1, name: skill.title })
   ).toBeVisible(pageRead);
-  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await page.getByRole("button", { name: "More for this page" }).click();
+  await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // Copied once: the next copy changes nothing, and says why.
   await page.goto(address);

@@ -12,6 +12,7 @@ import { PageSkeletonList } from "../grasp/blocks/page-skeleton-list/page-skelet
 import { PageSkeletonRecord } from "../grasp/blocks/page-skeleton-record/page-skeleton-record.tsx";
 import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { PageSkeletonToolbar } from "../grasp/blocks/page-skeleton-toolbar/page-skeleton-toolbar.tsx";
+import { PageHeader } from "../grasp/page-header/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
@@ -58,15 +59,24 @@ const styles = stylex.create({
       [media.fromTablet]: grasp.space12,
     },
   },
-  // A note's column (brain-article/note-article.tsx).
-  noteColumn: {
+  // A note's page, as the route lays out the library's page-brain: its inset, then page-brain's
+  // reading column with its gutter's room before it on a wider window.
+  brainPagePane: {
+    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+  },
+  brainPage: {
     boxSizing: "border-box",
     width: "100%",
-    maxWidth: `calc(12 * ${grasp.space16})`,
+    maxWidth: {
+      default: `calc(44rem + ${grasp.space16})`,
+      [media.belowPhone]: "44rem",
+    },
     marginInline: "auto",
-    paddingTop: grasp.space8,
-    paddingBottom: grasp.space24,
-    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+    paddingBlockStart: {
+      default: grasp.space8,
+      [media.belowPhone]: grasp.space2,
+    },
+    paddingInlineStart: { default: grasp.space16, [media.belowPhone]: 0 },
   },
   // An App's or a workflow's settings column (app-settings.tsx,
   // workflow-settings.tsx): their measure, in the middle.
@@ -114,11 +124,16 @@ export const SettingsPending = ({
   </div>
 );
 
-/** A note's page before it arrives: its banner and its text, in the note's column. */
+/**
+ * A note's page before it arrives, as its Brain page stands (the library's page-brain): its title,
+ * then its text, in page-brain's column. No block has a Brain page's shape yet: a page header's
+ * own loading and the band's text, without its band, stand in.
+ */
 export const NotePending = () => (
-  <div {...stylex.props(styles.pane)}>
-    <div {...stylex.props(styles.noteColumn)}>
-      <PageSkeletonBand paragraphs={2} />
+  <div {...stylex.props(styles.pane, styles.brainPagePane)}>
+    <div {...stylex.props(styles.brainPage)}>
+      <PageHeader loading title="" />
+      <PageSkeletonBand header={false} paragraphs={2} />
     </div>
   </div>
 );

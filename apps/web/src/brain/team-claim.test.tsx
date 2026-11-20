@@ -17,11 +17,11 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { BannerHeader } from "./brain-article/kern.tsx";
 import { MentionLinks } from "./brain-article/mention-links.tsx";
 import { NoteChip } from "./brain-chips.tsx";
 import { buildBrain } from "./brain.ts";
 import type { Note } from "./brain.ts";
+import { NoteBrainPage } from "./note-page.tsx";
 import { testWorkspace } from "./test-workspace.ts";
 
 // A team's claim from the interviews (GRA-1084) is what five or more of
@@ -107,8 +107,9 @@ describe("a team's claim, wherever the Brain names it", () => {
 
   it("heads its page in plain words, and says it rests on five or more people", async () => {
     const host = await shown(
-      <BannerHeader
-        kern={{ interviewed: [], counts: [] }}
+      <NoteBrainPage
+        byId={new Map()}
+        facts={[]}
         note={statementNote(claimId, claimText)}
       />
     );
@@ -120,8 +121,9 @@ describe("a team's claim, wherever the Brain names it", () => {
 
   it("heads someone's own statement in quotation marks, with no basis", async () => {
     const host = await shown(
-      <BannerHeader
-        kern={{ interviewed: [], counts: [] }}
+      <NoteBrainPage
+        byId={new Map()}
+        facts={[]}
         note={statementNote(ownId, ownText)}
       />
     );

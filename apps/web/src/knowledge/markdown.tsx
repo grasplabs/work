@@ -54,11 +54,12 @@ interface Node {
   position?: { start: { offset?: number }; end: { offset?: number } };
 }
 
-/** A span of the source and what replaces it. */
+/** A span of the source and what replaces it; for a resolved `[[link]]`, the document it names. */
 interface Edit {
   from: number;
   to: number;
   text: string;
+  linked?: { documentId: string; words: string };
 }
 
 /**
@@ -87,6 +88,7 @@ const wikiLinkEdits = (
         from: start,
         to: start + match[0].length,
         text: `[${words}](<${documentHref(documentId)}>)`,
+        linked: { documentId, words },
       },
     ];
   });
@@ -122,19 +124,45 @@ const editsOf = (
   );
 };
 
-/** `source` as it is drawn: see `editsOf`. */
-const prepared = (source: string, resolve?: ResolveLink): string => {
-  const tree = fromMarkdown(source, {
+const treeOf = (source: string): Node =>
+  fromMarkdown(source, {
     extensions: [gfm()],
     mdastExtensions: [gfmFromMarkdown()],
   });
-  return editsOf(tree, source, resolve)
+
+/** `source` as it is drawn: see `editsOf`. */
+const prepared = (source: string, resolve?: ResolveLink): string =>
+  editsOf(treeOf(source), source, resolve)
     .toSorted((a, b) => b.from - a.from)
     .reduce(
       (text, edit) =>
         text.slice(0, edit.from) + edit.text + text.slice(edit.to),
       source
     );
+
+/**
+ * A document's text as its page reads it: frontmatter and a first heading that only repeats
+ * `title` left out, raw HTML dropped, and each `[[link]]` `resolve` knows made a link.
+ */
+export const readingMarkdown = (
+  text: string,
+  title: string,
+  resolve: ResolveLink
+): string => prepared(withoutTitle(bodyOf(text).trim(), title), resolve);
+
+/** The documents `text` links to with `[[links]]` `resolve` knows, each once, as first named. */
+export const documentLinksOf = (
+  text: string,
+  resolve: ResolveLink
+): { documentId: string; words: string }[] => {
+  const body = bodyOf(text);
+  const found = new Map<string, string>();
+  for (const { linked } of editsOf(treeOf(body), body, resolve)) {
+    if (linked !== undefined && !found.has(linked.documentId)) {
+      found.set(linked.documentId, linked.words);
+    }
+  }
+  return [...found].map(([documentId, words]) => ({ documentId, words }));
 };
 
 /** A resolved `[[link]]`'s address (`documentHref`), or one written so. */
