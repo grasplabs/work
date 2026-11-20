@@ -14372,7 +14372,6 @@ msgid "Remove the webhook to {url}?"
 msgstr "Supprimer le webhook vers {url} ?"
 
 #: src/brain/brain-article/kern.tsx
-#: src/brain/source-interview.tsx
 msgid "Remove this from the brain"
 msgstr "Retirer ceci du cerveau"
 
@@ -16865,11 +16864,6 @@ msgstr "Suggérées"
 msgid "Summarise documents"
 msgstr "Résumer des documents"
 
-#: src/brain/source-interview.tsx
-msgctxt "tab: an interview written up short"
-msgid "Summary"
-msgstr "Résumé"
-
 #: src/agents/agent-templates.ts
 msgid "Summary writer"
 msgstr "Rédacteur de résumés"
@@ -18798,11 +18792,6 @@ msgstr "Transcription"
 
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
-msgid "Transcript"
-msgstr "Transcription"
-
-#: src/brain/source-interview.tsx
-msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcription"
 
