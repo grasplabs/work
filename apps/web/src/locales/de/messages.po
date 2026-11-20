@@ -3682,6 +3682,10 @@ msgctxt "a question going out"
 msgid "Asking"
 msgstr "Wird gefragt"
 
+#: src/brain/activity-page.tsx
+msgid "Asking failed: {reason}"
+msgstr "Die Frage konnte nicht gestellt werden: {reason}"
+
 #: src/frame/part-words.tsx
 msgid "Asking for the microphone"
 msgstr "Fragt nach dem Mikrofon"
