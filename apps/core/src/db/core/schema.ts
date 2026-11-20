@@ -2925,7 +2925,7 @@ export const runBrainEvidence = sqliteTable(
  * (resource-brain.ts, GRA-2218), from the first such read on: written
  * before what it read is handed over, never removed, as what it read may
  * stay in its data. Counted as a grant to read the Brain is
- * (app-provenance.ts `recallsTheBrain`): such an App answers no visitor.
+ * (app-provenance.ts `holdsAnySource`): such an App takes no guests.
  * `subject_type` leaves room for a workflow's.
  */
 export const brainDefaultReads = sqliteTable(
@@ -4684,9 +4684,12 @@ export const guestChats = sqliteTable(
 );
 
 /**
- * Who may open a published App without being a member (app-visitors.ts):
- * each address its builders listed, and each domain whose every address
- * may. Only these can ask for a code.
+ * Who could open a published App without being a member: each address
+ * its builders listed, and each domain whose every address could.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
  */
 export const appVisitorEntries = sqliteTable(
   "app_visitor_entries",
@@ -4695,7 +4698,6 @@ export const appVisitorEntries = sqliteTable(
       .notNull()
       .references(() => apps.id, { onDelete: "cascade" }),
     kind: text({ enum: ["address", "domain"] }).notNull(),
-    /** Lower case, ASCII (`appVisitorEntrySchema`). */
     value: text().notNull(),
     addedBy: text("added_by").notNull(),
     addedAt: timestamp("added_at").notNull(),
@@ -4704,10 +4706,11 @@ export const appVisitorEntries = sqliteTable(
 );
 
 /**
- * The functions each version of an App grants its visitors
- * (app-visitor-grants.ts), as its builders chose them: the App's own
- * queries and mutations, by path. A version starts with none, so a new
- * current version grants nothing until a builder grants it again.
+ * The functions each version of an App granted its visitors, by path.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
  */
 export const appVisitorGrants = sqliteTable(
   "app_visitor_grants",
@@ -4726,10 +4729,11 @@ export const appVisitorGrants = sqliteTable(
 );
 
 /**
- * The codes sent to visitors (app-visitors.ts), each kept as its SHA-256
- * only, with how many tries it took. A row outlives its code (signed in,
- * used up or expired) for an hour, so the hour's codes per address and
- * per App are counted from it, then the sweep deletes it.
+ * The sign-in codes mailed to an App's visitors, each as its SHA-256.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
  */
 export const appVisitorCodes = sqliteTable(
   "app_visitor_codes",
@@ -4747,23 +4751,22 @@ export const appVisitorCodes = sqliteTable(
     expiresAt: timestamp("expires_at").notNull(),
   },
   (table) => [
-    // An address's codes for an App, newest first: the one to check, and
-    // the hour's count.
     index("app_visitor_codes_address_idx").on(
       table.appId,
       table.address,
       table.sentAt
     ),
-    // The hour's count for the App.
     index("app_visitor_codes_sent_idx").on(table.appId, table.sentAt),
-    // What the sweep deletes, oldest first.
     index("app_visitor_codes_sweep_idx").on(table.sentAt),
   ]
 );
 
 /**
- * Signed-in visitors (app-visitors.ts): each session opens one App, until
- * it expires or the visitor signs out. Kept as its token's SHA-256 only.
+ * The sessions of an App's signed-in visitors, each as its token's SHA-256.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
  */
 export const appVisitorSessions = sqliteTable(
   "app_visitor_sessions",
@@ -4779,7 +4782,6 @@ export const appVisitorSessions = sqliteTable(
   },
   (table) => [
     uniqueIndex("app_visitor_sessions_token_idx").on(table.tokenHash),
-    // What the sweep deletes.
     index("app_visitor_sessions_expires_idx").on(table.expiresAt),
   ]
 );

@@ -666,9 +666,18 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
       // Another App that reads the Brain by default starts a workflow
       // that calls this one's functions.
       throughAnotherApp: async (app) => {
-        const [other, workflow] = [crypto.randomUUID(), workflowId()];
+        const [{ app: other }, workflow] = [await desk(builder), workflowId()];
         await env.DB.batch([
           readByDefault("app", other),
+          grantedRow("app", other, "workflow", workflow, ["start"]),
+          grantedRow("workflow", workflow, "app", app, ["call"]),
+        ]);
+      },
+      // An App with no row starts a workflow that calls this one's
+      // functions: what it holds can't be known, so it counts as a source.
+      throughAnUnknownApp: async (app) => {
+        const [other, workflow] = [crypto.randomUUID(), workflowId()];
+        await env.DB.batch([
           grantedRow("app", other, "workflow", workflow, ["start"]),
           grantedRow("workflow", workflow, "app", app, ["call"]),
         ]);

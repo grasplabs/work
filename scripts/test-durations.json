@@ -200,8 +200,6 @@
   "@grasp-os/core test/app-status.test.ts": 40.9,
   "@grasp-os/core test/app-version-approval.test.ts": 10.5,
   "@grasp-os/core test/app-version-workflow-bindings.test.ts": 10.4,
-  "@grasp-os/core test/app-visitor-calls.test.ts": 46.4,
-  "@grasp-os/core test/app-visitors.test.ts": 9.9,
   "@grasp-os/core test/app-webhooks.test.ts": 58.5,
   "@grasp-os/core test/app-workflow-bindings.test.ts": 38.9,
   "@grasp-os/core test/apps.test.ts": 43.9,

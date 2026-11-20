@@ -204,7 +204,7 @@ const grantTeamsOf = async (
  * its budget, as of its moment when given. Refused as
  * `permission.invalid_args` when `input` isn't a request, as
  * `permission.denied` without the grant, and as `permission.unavailable`
- * once the person is no longer a member (a visitor never was). Audited,
+ * once the person is no longer a member (a guest never was). Audited,
  * answered or refused, before it returns.
  */
 export const recallFor = async (

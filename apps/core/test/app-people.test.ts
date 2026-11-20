@@ -31,11 +31,10 @@ import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
 // Who calls an App, and the organization's people (app-people.ts), from
 // its threat model: who calls comes from core, for a builder, a user, a
-// workflow run's person, an agent's person and a visitor
-// (app-visitor-calls.test.ts) alike; a page can't name someone else; a
-// removed person is refused; only an App that declares it reads the
-// directory, which answers only members, at most 100 a read, each read
-// recorded as whoever made it.
+// workflow run's person and an agent's person alike; a page can't name
+// someone else; a removed person is refused; only an App that declares it
+// reads the directory, which answers only members, at most 100 a read,
+// each read recorded as whoever made it.
 
 const idp = mockIdp();
 

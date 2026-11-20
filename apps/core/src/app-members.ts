@@ -24,9 +24,10 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
-import { appsBuiltBy, holdsAnySource } from "./app-access.ts";
+import { appsBuiltBy } from "./app-access.ts";
 import {
   hasSources,
+  holdsAnySource,
   readerOf,
   sourcesOf,
   unreadableBy,

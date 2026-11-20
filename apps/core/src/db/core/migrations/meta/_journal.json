@@ -2059,6 +2059,13 @@
       "when": 1795190518526,
       "tag": "0293_guest_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 294,
+      "version": "6",
+      "when": 1795197092103,
+      "tag": "0294_app_visitors_emptied",
+      "breakpoints": true
     }
   ]
 }

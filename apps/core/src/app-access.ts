@@ -11,10 +11,9 @@ import { drizzle } from "drizzle-orm/d1";
 
 import {
   brainTeamsOfApps,
-  hasSources,
+  holdsAnySource,
   mayReadBrainTeamsOf,
   readerOf,
-  recallsTheBrain,
   sourcesOf,
   sourcesOfApps,
   unreadableBy,
@@ -224,22 +223,6 @@ const appRole = async (
 };
 
 /**
- * Whether App `app` holds any source (GRA-2235): a connection it was
- * ever granted, shared ones too, a grant to read the Brain, or a Brain
- * read by default, itself or through the workflows and Apps it reaches
- * (app-provenance.ts). A source once held counts for good. Such an App
- * takes no guests, whoever shares it (app-members.ts, `requireAppRole`);
- * `sources` when the caller read them already.
- */
-export const holdsAnySource = async (
-  env: Env,
-  app: AppId,
-  sources?: AppSources
-): Promise<boolean> =>
-  hasSources(sources ?? (await sourcesOf(env, app))) ||
-  (await recallsTheBrain(env, app));
-
-/**
  * Refuses `by` unless they have `needed` or more in `app`: an App they
  * have no role in with `app.not_found`, as one that isn't there, and too
  * low a role with `role.forbidden`. Someone it is shared with is also
@@ -276,16 +259,17 @@ export const requireAppRole = async (
   if (needed === "builder" && role !== "builder") {
     throw roleErrors.create("role.forbidden");
   }
-  if (shared) {
-    const held = sources ?? (await sourcesOf(env, app.id));
+  if (shared && guest) {
     // An App that holds a source takes no guests (GRA-2235): read on
     // every request, at a call's start and before each commit, so a
-    // guest's share lapses for good the moment the App gains one.
-    if (guest && (await holdsAnySource(env, app.id, held))) {
+    // guest's share lapses for good the moment the App gains one. One
+    // that holds none has nothing a guest can't read.
+    if (await holdsAnySource(env, app.id)) {
       throw appErrors.create("app.unreadable");
     }
+  } else if (shared) {
     const unreadable = unreadableBy(
-      held,
+      sources ?? (await sourcesOf(env, app.id)),
       readerOf(
         by.userId,
         by.teams.map(({ id }) => id),

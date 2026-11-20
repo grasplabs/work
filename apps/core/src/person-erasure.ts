@@ -43,8 +43,6 @@ import { endHandOversOf } from "./brain-sources.ts";
 import { personalWorkspaceId } from "./chats-rpc.ts";
 import {
   accounts,
-  appVisitorCodes,
-  appVisitorSessions,
   appWebhookDeliveries,
   brainUploads,
   erasedSubjects,
@@ -192,10 +190,8 @@ const erasedEmail = (userId: string): string =>
 /**
  * Their identity: their email (the address `users` keeps becomes one that
  * reaches nobody, and names nobody), whether it was verified, their
- * picture, every sign-in account and every session, and the codes and
- * sessions an App's visitor had under the address that was theirs (an App
- * may list a member's address, or their domain, app-visitors.ts). Their
- * name and ID stay.
+ * picture, every sign-in account and every session, and a guest's
+ * sign-in code. Their name and ID stay.
  * What each account named them by stays as a keyed hash, written in the
  * batch that deletes the accounts, so there is never a moment when neither
  * keeps them out. Only the accounts whose subjects were hashed go: one
@@ -274,16 +270,10 @@ const identity: ErasureStep = {
     const hashes = await Promise.all(
       [...subjects].map(async (subject) => await subjectHashOf(env, subject))
     );
-    // Their address as `users` has it still: the visitor rows go before it
-    // does, in the same batch, so a retry after it finds none left.
+    // Their address as `users` has it still: their sign-in code's row goes
+    // before it does, in the same batch, so a retry after it finds none left.
     const theirAddress = sql`(SELECT lower(${users.email}) FROM ${users} WHERE ${users.id} = ${userId})`;
     await db.batch([
-      db
-        .delete(appVisitorCodes)
-        .where(eq(appVisitorCodes.address, theirAddress)),
-      db
-        .delete(appVisitorSessions)
-        .where(eq(appVisitorSessions.address, theirAddress)),
       // A guest's sign-in code, keyed by their address (auth/guest-codes.ts).
       db.delete(verifications).where(signInCodeOf(theirAddress)),
       db

@@ -15,9 +15,9 @@ import { v } from "./values.ts";
 // The directory is read-only and bounded, and only an App that declares it
 // (`app({ permissions: { people: true } })`) reads it: a member finds people by ID, by name
 // or email, or by team, at most `peopleLimits.pageMax` a read, and each
-// person comes with their name, email and teams, nothing else. A visitor
-// (someone outside the organization an App was shared with) is told who
-// they are, and is refused the directory.
+// person comes with their name, email and teams, nothing else. A guest
+// (someone outside the company an App was shared with) is told who they
+// are, and is refused the directory.
 
 /** The bounds of a directory read. */
 export const peopleLimits = {
@@ -49,24 +49,18 @@ export type TeamRef = Infer<typeof team>;
 /**
  * The roles someone holds in an App: `builder` for its builders (an
  * admin builds every App), `user` for everyone with a role in it, its
- * builders included, as a row rule's `role("user")` admits them. A
- * visitor (someone outside the organization the App was shared with)
- * holds none.
+ * builders included, as a row rule's `role("user")` admits them.
  */
 const appRoles = ["builder", "user"] as const;
 
 const user = v.object({
-  /**
-   * Who they are: a member's ID, the same in every App. A visitor's is
-   * their session's, which owns what they insert and changes each time
-   * they sign in: key what a visitor keeps by their `email`.
-   */
+  /** Who they are: their ID, the same in every App. */
   id,
-  /** Their name; a visitor's address, as they have no other. */
+  /** Their name. */
   name,
   /** Their address; null for a member who has no real one yet. */
   email,
-  /** Their roles in the App (`appRoles`); none for a visitor. */
+  /** Their roles in the App (`appRoles`). */
   roles: v.array(v.enum(appRoles)),
 });
 
@@ -184,7 +178,7 @@ export interface PageOptions {
 /**
  * The organization's people, read-only, for the members of an App that
  * declares it (`app({ permissions: { people: true } })`; `permission.denied` otherwise),
- * never for a visitor (`visitor.not_granted`). Each read answers at most
+ * never for a guest (`permission.denied`). Each read answers at most
  * 100.
  */
 export interface PeopleDirectory {

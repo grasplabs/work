@@ -56,8 +56,8 @@ export interface NotifyReceipt {
  * at most 50 people a send, and an App sends at most 200 notifications an
  * hour, all its calls together (`permission.limit_reached` past it, the
  * whole send refused). Each send is audited, with how many it told and
- * skipped, never what it said. A call a visitor makes, or one from a
- * workflow's run, tells nobody (`permission.unavailable`).
+ * skipped, never what it said. A call from a workflow's run tells nobody
+ * (`permission.unavailable`).
  */
 type NotifyPeople<Told> = (
   to: string,
@@ -136,10 +136,9 @@ type PermissionClients<Grants extends Grant> = {
 export interface Auth {
   /**
    * Who the call is for (`User`): their ID, name, address and roles in
-   * the App (`builder`, `user`; none for a visitor the App was shared
-   * with, whose `id` is their session's: key a visitor by `email`). A
-   * workflow run's call is for the person the run acts for. Read once as
-   * the call starts, from core's own record of who is signed in.
+   * the App (`builder`, `user`). A workflow run's call is for the person
+   * the run acts for. Read once as the call starts, from core's own
+   * record of who is signed in.
    */
   readonly getUser: () => Promise<User>;
 }
@@ -155,8 +154,8 @@ export interface CallerCtx {
    * The organization's members, read-only, for an App that declares it
    * (`app({ permissions: { people: true } })`; `permission.denied` otherwise): by ID, by
    * name or email, or by team, at most 100 a read, each with only their
-   * name, email and teams. A visitor's call is refused it
-   * (`visitor.not_granted`).
+   * name, email and teams. A guest's call is refused it
+   * (`permission.denied`).
    */
   readonly people: PeopleDirectory;
 }

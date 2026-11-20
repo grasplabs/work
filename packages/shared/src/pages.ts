@@ -89,7 +89,6 @@ export {
   pageLimits,
   pageModulePath,
   pagePersonHeader,
-  pageVisitorHeader,
   streamCallActions,
 } from "./page-limits.ts";
 

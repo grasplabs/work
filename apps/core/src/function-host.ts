@@ -237,7 +237,7 @@ import type { WorkflowEventSends } from "./workflow-event-sends.ts";
 //   (`peopleAlias`, an alias no App can declare) goes through
 //   `Invocation.notifyPeople` alone, after the one gate (`admit`), which decides
 //   whom it reaches and holds the App's limits (app-notifications.ts); a
-//   call with none (a visitor's, a run's) is refused. A mutation's is
+//   call with none (a run's) is refused. A mutation's is
 //   staged as an intent of its commit, in the commit's bound with its
 //   starts; an action's is keyed by its place among its sends, so a call
 //   made again under the same key tells nobody twice.
@@ -275,7 +275,7 @@ export interface Invocation {
   readonly principal: string;
   /**
    * Who the audit log names as making the call: the person, an agent for
-   * them, a visitor, a workflow run, or the App. Each commit names them,
+   * them, a workflow run, or the App. Each commit names them,
    * in the store's change history of every record it writes.
    */
   readonly actor: AuditActor;
@@ -327,7 +327,7 @@ export interface Invocation {
   /**
    * How core tells people for this call (`ctx.notifyPeople`, of an action
    * or a mutation, app-notifications.ts); none
-   * told without it: a visitor's call and a workflow run's have none.
+   * told without it: a workflow run's call has none.
    */
   readonly notifyPeople?: PeopleNotifications;
   /**

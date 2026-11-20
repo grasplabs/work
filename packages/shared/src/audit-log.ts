@@ -351,21 +351,6 @@ const typeRules: readonly {
   { action: "app.webhook.approved", type: "decision" },
   { action: "app.webhook.undeliverable", type: "action" },
   { action: "webhook.call", type: "action" },
-  // Visitors of a published App (core's src/app-visitors.ts): who may
-  // visit, a visitor signing in and out, and each refusal, are who gets
-  // in; a code mailed is something done for them.
-  { action: "app.visitor_listed", type: "permission" },
-  { action: "app.visitor_unlisted", type: "permission" },
-  { action: "app.visitor_signed_in", type: "permission" },
-  { action: "app.visitor_signed_out", type: "permission" },
-  { action: "app.visitor_refused", type: "permission" },
-  { action: "app.visitor_code_sent", type: "action" },
-  // The functions a version grants visitors (core's
-  // src/app-visitor-grants.ts) are who may do what; a visitor's call of
-  // one runs it.
-  { action: "app.visitor_granted", type: "permission" },
-  { action: "app.visitor_ungranted", type: "permission" },
-  { action: "app.visitor_called", type: "action" },
   { action: "app", type: "config" },
   // A person linking a chat platform account to themselves, so the agent
   // knows them there, or unlinking it: who they are on that door.
@@ -497,7 +482,6 @@ const actorTypes = [
   "app",
   "workflow",
   "staff",
-  "visitor",
   "system",
 ] as const satisfies readonly AuditActor["type"][];
 

@@ -132,8 +132,8 @@ export const leaseKey = (lease: PageLease | undefined): Json => {
 const draftMark = "d";
 
 /**
- * Core's word that it handed `lease` of `app` to `principal` (a member's
- * ID, or a visitor's `visitor:<session>`): the build's hash, the version
+ * Core's word that it handed `lease` of `app` to `principal` (the
+ * person's user ID): the build's hash, the version
  * or the draft it runs on, and a MAC only core can make (a key derived
  * from its auth secret). The page sends it with every call (page-calls.ts)
  * and when it opens a frame (`PagesApi.frame`).
@@ -242,7 +242,7 @@ export const readLease = async (
 /**
  * The build of the App's release `lease` says core handed `principal` for
  * `app`, or `undefined` for code core didn't serve: for what only a
- * release's page reaches (its files, its links, a visitor's calls). A
+ * release's page reaches (its files, its links). A
  * draft's lease is refused there (`app.preview_side_effect`), never taken
  * for none, which the App's data being `ordinary` would let through.
  */
