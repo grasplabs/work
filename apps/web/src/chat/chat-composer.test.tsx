@@ -232,6 +232,92 @@ const button = (name: string): HTMLButtonElement => {
   return found;
 };
 
+/** Whether the box offers dictation: its microphone. */
+const offersDictation = (): boolean =>
+  [...document.querySelectorAll("button")].some(
+    (each) => each.getAttribute("aria-label") === "Dictate"
+  );
+
+/** A browser's constructor, faked: `new` gives what `make` makes. */
+const constructed = (make: () => object): object =>
+  new Proxy(Object, { construct: make });
+
+/**
+ * Core's live transcription, faked where it reaches the browser: a
+ * microphone that gives no sound, and a line on which core says it isn't
+ * set up for this deployment and hangs up, as core does.
+ */
+const transcriptionNotSetUp = (): void => {
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: {
+      getUserMedia: async () =>
+        await Promise.resolve({
+          getAudioTracks: () => [],
+          getTracks: () => [],
+        }),
+    },
+  });
+  Reflect.set(
+    globalThis,
+    "AudioContext",
+    constructed(() => ({
+      sampleRate: 48_000,
+      destination: {},
+      audioWorklet: {
+        addModule: async () => await Promise.reject(new Error("No tap")),
+      },
+      createAnalyser: () => ({
+        fftSize: 0,
+        getByteTimeDomainData: () => {
+          // No sound.
+        },
+      }),
+      createMediaStreamSource: () => ({
+        connect: () => {
+          // No tap to connect.
+        },
+      }),
+      resume: async () => {
+        await Promise.resolve();
+      },
+      close: async () => {
+        await Promise.resolve();
+      },
+    }))
+  );
+  Reflect.set(
+    globalThis,
+    "WebSocket",
+    constructed(() => {
+      const line = new EventTarget();
+      queueMicrotask(() => {
+        line.dispatchEvent(new Event("open"));
+      });
+      return Object.assign(line, {
+        binaryType: "blob",
+        send: (data: unknown) => {
+          if (typeof data !== "string") {
+            return;
+          }
+          line.dispatchEvent(
+            new MessageEvent("message", {
+              data: JSON.stringify({
+                type: "error",
+                code: "transcription.unavailable",
+              }),
+            })
+          );
+          line.dispatchEvent(Object.assign(new Event("close"), { code: 1008 }));
+        },
+        close: () => {
+          // Hung up already.
+        },
+      });
+    })
+  );
+};
+
 /** The model and effort control's name, as a screen reader hears it. */
 const control = (): string =>
   [...document.querySelectorAll("button")]
@@ -440,6 +526,18 @@ describe(ChatComposer, () => {
     }
   });
 
+  it("offers no microphone to a member whose browser can't dictate", async () => {
+    const given = window.SpeechRecognition;
+    Reflect.deleteProperty(window, "SpeechRecognition");
+    try {
+      await shown({}, member);
+
+      expect(offersDictation()).toBeFalsy();
+    } finally {
+      window.SpeechRecognition = given;
+    }
+  });
+
   it("tells a member, the first time they dictate, that their browser's maker writes it down", async () => {
     Recognition.made = undefined;
     window.SpeechRecognition = Recognition;
@@ -493,5 +591,54 @@ describe(ChatComposer, () => {
       longer: 0,
       after: [],
     });
+  });
+
+  // Last: what it notes lasts for the rest of the visit, as it should.
+  it("says once that core's dictation isn't set up, then offers no microphone in any box for the rest of the visit", async () => {
+    const given = {
+      mediaDevices: Object.getOwnPropertyDescriptor(navigator, "mediaDevices"),
+      AudioContext: Reflect.get(globalThis, "AudioContext"),
+      WebSocket: Reflect.get(globalThis, "WebSocket"),
+    };
+    transcriptionNotSetUp();
+    try {
+      await shown();
+      const before = offersDictation();
+      await press(button("Dictate"));
+      await act(async () => {
+        const { promise, resolve } = Promise.withResolvers<boolean>();
+        setTimeout(() => {
+          resolve(true);
+        }, 0);
+        await promise;
+      });
+      const said = document.body.textContent.includes(
+        "Dictation isn't set up here yet. What you typed is kept."
+      );
+      await press(button("Cancel"));
+      const after = offersDictation();
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      await shown();
+
+      expect({ before, said, after, another: offersDictation() }).toStrictEqual(
+        {
+          before: true,
+          said: true,
+          after: false,
+          another: false,
+        }
+      );
+    } finally {
+      if (given.mediaDevices === undefined) {
+        Reflect.deleteProperty(navigator, "mediaDevices");
+      } else {
+        Object.defineProperty(navigator, "mediaDevices", given.mediaDevices);
+      }
+      Reflect.set(globalThis, "AudioContext", given.AudioContext);
+      Reflect.set(globalThis, "WebSocket", given.WebSocket);
+    }
   });
 });
