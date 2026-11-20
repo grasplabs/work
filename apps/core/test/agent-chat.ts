@@ -94,6 +94,21 @@ export const chatOf = async (personId: string, ...replies: ProviderReply[]) => {
 };
 
 /**
+ * Asks `text` in a new chat of `chat`'s workspace, whose agent's grants
+ * hold there too. A read of the person's own connection marks the chat it
+ * answers in, which then holds every later toolkit read for them
+ * (GRA-1928): a test of something else gives each such read a chat of its
+ * own.
+ */
+export const askAfresh = async (
+  chat: Awaited<ReturnType<typeof chatOf>>,
+  text: string
+): Promise<void> => {
+  const fresh = await chat.stub.createChat("Questions", chat.personId, chat.id);
+  await chat.stub.ask(fresh.id, { text, model });
+};
+
+/**
  * `personId`'s own Workspace object, the one their session's chats are in
  * (`personalWorkspaceId`), answered by `replies` in all its chats, with an
  * agent of its own: `newChat` makes each chat.

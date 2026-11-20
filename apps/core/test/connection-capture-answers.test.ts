@@ -10,7 +10,7 @@ import { answerCaptureIdOf } from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
-import { chatOf, codeStep, model, says } from "./agent-chat.ts";
+import { askAfresh, chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -120,17 +120,6 @@ const grant = async (
     actions,
     binding,
   });
-};
-
-/**
- * Asks `text` in a new chat of `chat`'s workspace, whose agent's grants
- * hold there too. A read of the person's own connection marks the chat it
- * answers in, which then holds every later toolkit read for them
- * (GRA-1928): each read here starts a chat of its own.
- */
-const askAfresh = async (chat: Chat, text: string): Promise<void> => {
-  const fresh = await chat.stub.createChat("Questions", chat.personId, chat.id);
-  await chat.stub.ask(fresh.id, { text, model });
 };
 
 /** The day (UTC) of `date`. */
