@@ -141,12 +141,15 @@ export const NotFoundState = ({
   title,
   icon,
   heading = "h1",
+  way,
 }: {
   title?: string;
   /** What wasn't found, as the sidebar draws it: a workflow's icon, say. */
   icon?: StateIcon;
   /** Its title's level: the page's own heading unless it sits in a section that has one. */
   heading?: StateHeading;
+  /** The way back to where it would have been ("Back to Integrations"), in place of Go to Chat. */
+  way?: ReactNode;
 }) => {
   const { t } = useLingui();
   const inFrame = use(InFrame);
@@ -174,11 +177,9 @@ export const NotFoundState = ({
           )}
         </EmptyDescription>
       </EmptyHeader>
-      {offersChat(heading, inFrame) ? (
-        <EmptyContent>
-          <GoToChat />
-        </EmptyContent>
-      ) : null}
+      {way === undefined && !offersChat(heading, inFrame) ? null : (
+        <EmptyContent>{way ?? <GoToChat />}</EmptyContent>
+      )}
     </Empty>
   );
 };
@@ -192,15 +193,18 @@ export const NotFound = ({
   crumbs,
   title,
   icon,
+  way,
 }: {
   crumbs?: readonly Crumb[];
   title?: string;
   icon?: StateIcon;
+  /** The way back, in place of Go to Chat (NotFoundState). */
+  way?: ReactNode;
 }) => {
   const { t } = useLingui();
   return (
     <Place crumbs={crumbs ?? [{ label: t`Not found` }]}>
-      <NotFoundState icon={icon} title={title} />
+      <NotFoundState icon={icon} title={title} way={way} />
     </Place>
   );
 };

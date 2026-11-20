@@ -272,4 +272,31 @@ describe("the Integrations overview", () => {
       appAfter(router, tiles[2]?.querySelector("button"))
     ).resolves.toBe("composio:acme-crm");
   });
+
+  it("says an app needs someone when a spare account ran out, and how to fix the one relied on", async () => {
+    const { host } = await opened([
+      connection("microsoft", { id: "c-ms-shared" }),
+      connection("microsoft", {
+        id: "c-ms-spare",
+        scope: "personal",
+        ownerUserId: "u1",
+        status: "needs_reauth",
+      }),
+      connection("google", { id: "c-g-shared", status: "needs_reauth" }),
+      connection("google", {
+        id: "c-g-own",
+        scope: "personal",
+        ownerUserId: "u1",
+      }),
+    ]);
+    const tiles = [
+      ...host.querySelectorAll<HTMLElement>('ul[aria-label="Apps"] li'),
+    ];
+    expect(tiles.map((tile) => heard(tile))).toStrictEqual([
+      "Microsoft 365Needs you",
+      "Google WorkspaceSign in again",
+      "Acme CRM3 tools",
+      "Ledger3 tools",
+    ]);
+  });
 });

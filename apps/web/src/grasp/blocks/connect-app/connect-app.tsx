@@ -19,7 +19,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import {
   Dialog,
@@ -141,6 +141,12 @@ export interface ConnectAppConsentProps extends Omit<
    * is working until it settles, and failed if it fails.
    */
   onConnect: (choice: ConnectAppConsentChoice) => unknown;
+  /**
+   * What Grasp may do with each tool when the dialog opens, where the host knows it: connecting a
+   * stopped toolkit again (`again`) starts from the old connection's choices. A tool left out starts
+   * at its default (reads on, changes off).
+   */
+  initialTools?: readonly { id: string; choice: AppToolChoice }[];
 }
 
 const styles = stylex.create({
@@ -326,12 +332,40 @@ export const ConnectApp = ({
   );
 };
 
-/** Each tool at its default: a tool that only reads runs; one that changes something stays off until chosen. */
-const defaultsOf = (tools: readonly AppTool[]): AppTool[] =>
-  tools.map((tool) => ({
-    ...tool,
-    choice: tool.kind === "read" ? "read" : "never",
-  }));
+/**
+ * Where the focus opens: the first control, the switch's chosen side, else Cancel where the host
+ * fixes who uses it. Never the consent's scroller, which a sheet would scroll to its end to reveal.
+ */
+const firstControl = (body: HTMLElement | null) =>
+  body?.querySelector<HTMLElement>(
+    '[aria-pressed="true"], [aria-checked="true"], [data-pressed]'
+  ) ??
+  body
+    ?.closest("[role=dialog]")
+    ?.querySelector<HTMLElement>("[data-slot=dialog-footer] button") ??
+  undefined;
+
+/**
+ * Each tool as it starts: the host's earlier choice where it gives one (`initialTools`), else its
+ * default, a tool that only reads runs and one that changes something stays off until chosen. A tool
+ * that changes something is never Read: an earlier Read for it starts as Write, which asks first.
+ */
+const defaultsOf = (
+  tools: readonly AppTool[],
+  initial: ConnectAppConsentProps["initialTools"]
+): AppTool[] => {
+  const earlier = new Map(
+    (initial ?? []).map((each) => [each.id, each.choice])
+  );
+  return tools.map((tool) => {
+    const choice =
+      earlier.get(tool.id) ?? (tool.kind === "read" ? "read" : "never");
+    return {
+      ...tool,
+      choice: tool.kind === "write" && choice === "read" ? "write" : choice,
+    };
+  });
+};
 
 /** What Grasp may do with the tools: every tool at once, then each group, opening to its tools. */
 const ToolPicker = ({
@@ -401,6 +435,7 @@ export const ConnectAppConsent = ({
   forWhom: fixed,
   words: given,
   appWords,
+  initialTools,
 }: ConnectAppConsentProps) => {
   const words = useWords("connectApp", connectAppWords, given);
   const shared = useWords("appIntegration", appIntegrationWords, appWords);
@@ -409,9 +444,10 @@ export const ConnectAppConsent = ({
     fixed ?? "you"
   );
   const [tools, setTools] = useState<readonly AppTool[]>(() =>
-    defaultsOf(app.tools ?? [])
+    defaultsOf(app.tools ?? [], initialTools)
   );
   const consentId = useId();
+  const body = useRef<HTMLDivElement>(null);
   const consentLabel = words.consent ?? consentWords.consent;
   const allowsSome = tools.some((tool) => tool.choice !== "never");
   return (
@@ -420,7 +456,7 @@ export const ConnectAppConsent = ({
       onOpenChange={(next) => {
         setOpen(next);
         if (next) {
-          setTools(defaultsOf(app.tools ?? []));
+          setTools(defaultsOf(app.tools ?? [], initialTools));
           setForWhom(fixed ?? "you");
         }
       }}
@@ -428,10 +464,13 @@ export const ConnectAppConsent = ({
       <DialogTrigger variant="ink" size={size}>
         {again ? shared.connectAgain : shared.connect}
       </DialogTrigger>
-      <DialogContent closeLabel={shared.close}>
+      <DialogContent
+        closeLabel={shared.close}
+        initialFocus={() => firstControl(body.current)}
+      >
         <Head app={app} again={again} words={words} />
         <DialogBody>
-          <div {...stylex.props(styles.body)}>
+          <div ref={body} {...stylex.props(styles.body)}>
             <WhoUses
               fixed={fixed}
               forWhom={forWhom}

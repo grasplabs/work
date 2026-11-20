@@ -2194,6 +2194,7 @@ msgstr "Activiteit: bekijk alles in Traces"
 #: src/agents/agent-wakes.tsx
 #: src/agents/setup/apps-step.tsx
 #: src/apps/indexes-view.tsx
+#: src/connections/http-connections.tsx
 #: src/drafts/share-with-team.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
@@ -3786,6 +3787,10 @@ msgstr "Terug naar {agent}"
 #: src/frame/part-words.tsx
 msgid "Back to Grasp"
 msgstr "Terug naar Grasp"
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Back to Integrations"
+msgstr "Terug naar Integraties"
 
 #: src/frame/part-words.tsx
 msgid "Back to reference {number}"
@@ -9382,6 +9387,10 @@ msgstr "Het is geen van deze"
 msgctxt "a webhook event: the App was published"
 msgid "It is published"
 msgstr "De app wordt gepubliceerd"
+
+#: src/connections/integration-facts.ts
+msgid "It isn't offered any more, so no one can connect it again."
+msgstr "Het wordt niet meer aangeboden, dus niemand kan het opnieuw koppelen."
 
 #: src/connections/integration-facts.ts
 msgid "It isn't offered to your organization yet: offer it before connecting it."

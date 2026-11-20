@@ -83,14 +83,20 @@ export const useIntegrationsSection = (): SidebarSection | undefined => {
     from: "/_shell/integrations/",
     shouldThrow: false,
   });
+  // An app's page reads the same catalog and connections, so its kinds match the overview's.
+  const app = useMatch({
+    from: "/_shell/integrations/$integration",
+    shouldThrow: false,
+  });
   const wayOut = useWayOut();
   const inIntegrations =
     pathname === "/integrations" || pathname.startsWith("/integrations/");
   if (!inIntegrations) {
     return undefined;
   }
-  const catalog = overview?.loaderData?.catalog;
-  const connections = overview?.loaderData?.connections;
+  const read = overview?.loaderData ?? app?.loaderData;
+  const catalog = read?.catalog;
+  const connections = read?.connections;
   const entries = catalog?.state === "ready" ? catalog.data.entries : [];
   const chosen = overview?.search.group;
   const counts = kindCounts(

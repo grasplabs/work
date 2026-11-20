@@ -2194,6 +2194,7 @@ msgstr "Actividad: verla entera en Trazas"
 #: src/agents/agent-wakes.tsx
 #: src/agents/setup/apps-step.tsx
 #: src/apps/indexes-view.tsx
+#: src/connections/http-connections.tsx
 #: src/drafts/share-with-team.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
@@ -3786,6 +3787,10 @@ msgstr "Volver a {agent}"
 #: src/frame/part-words.tsx
 msgid "Back to Grasp"
 msgstr "Volver a Grasp"
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Back to Integrations"
+msgstr "Volver a Integraciones"
 
 #: src/frame/part-words.tsx
 msgid "Back to reference {number}"
@@ -9382,6 +9387,10 @@ msgstr "No es ninguna de estas"
 msgctxt "a webhook event: the App was published"
 msgid "It is published"
 msgstr "Se publica"
+
+#: src/connections/integration-facts.ts
+msgid "It isn't offered any more, so no one can connect it again."
+msgstr "Ya no se ofrece, así que nadie puede volver a conectarla."
 
 #: src/connections/integration-facts.ts
 msgid "It isn't offered to your organization yet: offer it before connecting it."
