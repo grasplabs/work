@@ -195,7 +195,9 @@ describe("the Integrations overview", () => {
     expect(host.querySelector("h2")?.textContent).toBe(
       "Connect the apps your work runs on"
     );
-    expect(host.querySelector("section")?.textContent).toContain("2 connected");
+    expect(host.querySelector("section")?.textContent).toContain(
+      "1 app needs you"
+    );
   });
 
   it("recommends the apps to connect first, each with its one reason", async () => {
@@ -234,6 +236,7 @@ describe("the Integrations overview", () => {
       suites: ["microsoft"],
     });
     expect(host.querySelector('ul[aria-label="Recommended"]')).toBeNull();
+    expect(host.querySelector("section")?.textContent).toContain("1 connected");
   });
 
   it("tells someone who can't sign in again who can, with nothing to press", async () => {
