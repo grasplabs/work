@@ -250,9 +250,9 @@ describe("the built-in blueprints' build", () => {
     ["an action the platform doesn't have", [onPlatform("STATS", ["delete"])]],
     [
       "more than one action on the platform",
-      [onPlatform("STATS", ["statistics", "guests"])],
+      [onPlatform("STATS", ["statistics", "brain"])],
     ],
-    ["a binding name twice", [onPlatform(), onPlatform("STATS", ["guests"])]],
+    ["a binding name twice", [onPlatform(), onPlatform("STATS", ["brain"])]],
     ["a platform binding name", [onPlatform("DB")]],
     [
       "a Knowledge collection, which nothing grants any more",

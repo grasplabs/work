@@ -294,6 +294,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company:
       "which Brain memories a run's entity reads rested on, identifiers only, no person's, as runs are (D3)",
   },
+  // Unused since GRA-2234, kept for a rollback to the release before.
   "core.guest_chats": { company: "guest chats they opened for an App" },
   // An App's visitor list (app-visitors.ts): the company's, as its builders
   // keep it, with the builder who listed each entry (`added_by`). An entry
@@ -417,6 +418,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.brain_records": {
     company: "agreed facts naming roles; a gap's answer names who gave it",
   },
+  // Unused since GRA-2234, kept for a rollback to the release before.
   "core.guest_messages": { company: "guest chats they opened for an App" },
   "core.app_statistics": { company: "an App's aggregates, by its dimensions" },
   "core.app_statistic_steps": {

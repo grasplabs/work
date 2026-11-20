@@ -23,18 +23,11 @@ import {
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The intake, the built-in App (apps/core/blueprints/intake/): drafts of
-// a source and its statements, typed in or taken out of notes or a
-// stakeholder's chat by a model, reviewed, and saved as a source and its
-// statements, all in the App's own store, which only its builders reach.
-// What can go wrong, tried below: a draft saved without anyone reviewing
-// it, saved twice, or saved halfway; someone who isn't one of the App's
-// builders reading or writing drafts, or inviting, listing or reading
-// stakeholder chats through its actions; edits written over someone
-// else's; a draft that doesn't fit kept or saved; and a source taken from
-// a stakeholder's chat saved without the mark of their untrusted words,
-// or one typed in saved with it.
+// a source and its statements, typed in or taken out of notes by a model,
+// reviewed, and saved as a source and its statements, all in the App's
+// own store, which only its builders reach.
 //
-// Here: reading notes; the rest in intake.test.ts and intake-chats.test.ts.
+// Here: reading notes; the rest in intake.test.ts.
 
 const idp = mockIdp();
 const memberOf = memberIn(idp);
@@ -78,7 +71,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
     const app = await copyOf(admin, { model: false });
     const provider = await fakeProvider();
     const refused = await outcome(
-      extracted(admin, admin, app, { notes, lines: [] }, provider)
+      extracted(admin, admin, app, { notes }, provider)
     );
     const approvals = await admin.api.workflowResources.bindings(
       await workflowOf(admin, app)
@@ -102,7 +95,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
       admin,
       admin,
       app,
-      { notes, lines: [] },
+      { notes },
       await answering()
     );
     const output = foundSchema.parse(run.result);
@@ -112,7 +105,6 @@ describe("reading notes", { timeout: 60_000 }, () => {
         await call(admin, app, "drafts.propose", "mutation", {
           source: { ...source, notes },
           statements: output.statements,
-          guest: false,
         })
       )
     );
@@ -176,14 +168,13 @@ describe("reading notes", { timeout: 60_000 }, () => {
       admin,
       member,
       app,
-      { notes, lines: [] },
+      { notes },
       await answering()
     );
     const kept = codeOf(
       await call(member, app, "drafts.propose", "mutation", {
         source: { ...interviewSource(`Not theirs ${unique()}`), notes },
         statements: found.statements,
-        guest: false,
       })
     );
     expect({

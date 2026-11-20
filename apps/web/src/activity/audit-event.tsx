@@ -78,9 +78,6 @@ const useKindWord = () => {
       case "workflow": {
         return t`Workflow run`;
       }
-      case "guest": {
-        return t`Guest`;
-      }
       case "visitor": {
         return t`Visitor`;
       }
@@ -115,14 +112,6 @@ const useWhoRows = () => {
         icon: Person,
         name: personName(directory, actor.onBehalfOf),
         detail: t`For`,
-      });
-    }
-    if (actor.type === "guest") {
-      rows.push({
-        id: "invited",
-        icon: Person,
-        name: personName(directory, actor.invitedBy),
-        detail: t`Invited by`,
       });
     }
     if (actor.type === "person" || actor.type === "agent") {

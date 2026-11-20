@@ -39,7 +39,7 @@ import type { InvocationOrigin } from "./resource-adapter.ts";
 //   that call runs nested (`InvocationOrigin`). An agent's call holds
 //   what its chat read, which only its person may; Code Mode's too; a
 //   workflow's step what its run was started with. Each is refused by
-//   name. A visitor's or a guest's call never reaches the Brain: it binds
+//   name. A visitor's call never reaches the Brain: it binds
 //   nothing, and an App that holds the Brain answers no visitor
 //   (app-provenance.ts `recallsTheBrain`).
 // - The person it is for uses the App now, as `requireAppRole` decides

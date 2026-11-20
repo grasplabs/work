@@ -87,8 +87,8 @@ export type {
 // - an action has no `db` at all: it composes the App's functions
 //   (`runQuery`, `runMutation`, `runAction`), each its own invocation,
 //   reaches outside the App only through the App's permissions (`ctx.ai`,
-//   `ctx.connections`, `ctx.brain`, `ctx.grasp`, `ctx.guests`), starts
-//   the App's workflows (`ctx.workflows`), and tells people through the
+//   `ctx.connections`, `ctx.brain`, `ctx.grasp`), starts the App's
+//   workflows (`ctx.workflows`), and tells people through the
 //   platform's notifications (`ctx.notifyPeople`).
 // What a function reads and writes is its tables' access and row rules
 // for whoever calls, which the store decides. The host enforces each of

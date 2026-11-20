@@ -68,7 +68,12 @@ export const quietTeamOf = (
   }
   const leadOf = (team: string) => {
     const lead = roster?.teams.find((each) => each.id === team)?.lead ?? null;
-    return roster?.people.find((person) => person.id === lead) ?? null;
+    // An erased lead has no name to give, and can't help: as if none.
+    return (
+      roster?.people.find(
+        (person) => person.id === lead && person.name !== ""
+      ) ?? null
+    );
   };
   const team = progress?.teams.find(
     (each) =>

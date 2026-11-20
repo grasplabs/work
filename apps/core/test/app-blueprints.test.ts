@@ -197,7 +197,7 @@ describe("blueprints", { timeout: 60_000 }, () => {
     await owner.api.permissions.request({
       subject: { type: "app", appId: source },
       object: { type: "platform" },
-      actions: ["guests"],
+      actions: ["brain"],
       binding: "LATER",
     });
 

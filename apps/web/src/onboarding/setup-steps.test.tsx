@@ -17,6 +17,7 @@ import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
+import { InterviewsProgress } from "./interviews-progress.tsx";
 import { SetupFrame } from "./setup-frame.tsx";
 import { SetupStepBody, directoryProblemOf } from "./setup-steps.tsx";
 import type { SetupData } from "./setup-steps.tsx";
@@ -536,5 +537,72 @@ describe("a directory the company step couldn't read", () => {
       "directory.too_large": "large",
       "directory.provider_failed": "failed",
     });
+  });
+});
+
+describe("a team far behind, halfway through the interviews", () => {
+  /** What the page says of team Ops, quiet, its lead named `lead` on the list. */
+  const saidOfQuiet = (lead: string): string =>
+    page(
+      <InterviewsProgress
+        links={[]}
+        listening={{
+          progress: 0.5,
+          day: 7,
+          days: 14,
+          leadsHeard: 1,
+          colleaguesHeard: 0,
+          heard: [1],
+        }}
+        spoken={false}
+        today={today}
+        view={{
+          ...view(false, null, noContext, true, null, null),
+          roster: {
+            teams: [
+              { id: "ops", name: "Ops", lead: "lea", does: "", off: false },
+            ],
+            people: [
+              {
+                id: "lea",
+                name: lead,
+                email: "",
+                team: "ops",
+                title: "",
+                away: false,
+              },
+            ],
+          },
+          progress: {
+            teams: [
+              {
+                id: "ops",
+                name: "Ops",
+                people: 6,
+                off: false,
+                leadTalked: true,
+                talked: 0,
+                asked: 5,
+              },
+            ],
+            talked: 0,
+            asked: 5,
+            leadsTalked: 1,
+            leads: 1,
+            asOf: today,
+          },
+        }}
+      />
+    )
+      .replaceAll(/<[^>]+>/gu, " ")
+      .replaceAll(/\s+/gu, " ");
+
+  it("is named with its lead, and not at all once core erased the lead", () => {
+    expect({
+      named: saidOfQuiet("Lea Smit").includes(
+        "Ops has been quiet so far. A short message from Lea, their lead, usually helps."
+      ),
+      erased: saidOfQuiet("").includes("has been quiet"),
+    }).toStrictEqual({ named: true, erased: false });
   });
 });

@@ -288,7 +288,8 @@ export const staffSnapshotOf = (
             })),
             people: snapshot.roster.people.map((person) => ({
               id: person.id,
-              name: person.name,
+              // Someone core erased stays in their team, without a name.
+              name: person.name === "" ? "Erased" : person.name,
               email: person.email,
               team: person.team,
               title: person.title,

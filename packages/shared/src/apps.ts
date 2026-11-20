@@ -160,7 +160,6 @@ export const reservedAppLinks: ReadonlySet<string> = new Set([
   "connections",
   "dashboard",
   "decisions",
-  "guest",
   "inbox",
   "integrations",
   "interview",

@@ -543,7 +543,6 @@ const interview: ErasureStep = {
  * of it went.
  * Removing them took out their chat accounts, notifications and teams
  * already; this takes them out again, in case any came back since.
- * Guest chats they opened for an App are the company's, naming them.
  */
 const channels: ErasureStep = {
   area: "channels",

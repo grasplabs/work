@@ -76,7 +76,6 @@ const kindLabels: Readonly<
   connector: msg`Integration`,
   brain: msg`Brain`,
   grasp: msg`The platform's statistics`,
-  guests: msg`Guests`,
 };
 
 const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
@@ -126,7 +125,7 @@ const useBoundTo = () => {
       const account = label.connection.account ?? provider;
       return t`${account} on ${provider}`;
     }
-    // The platform's statistics, guests or the Brain: one of the App's
+    // The platform's statistics or the Brain: one of the App's
     // platform permissions.
     const { permissionId: permission } = target;
     return t`Permission ${permission}`;
@@ -190,7 +189,6 @@ const NothingToChoose = ({
     connector: t`None of the App's integration permissions serves ${contract} with every action it declares. Grant one first.`,
     brain: t`The App has no permission to read the Brain. Grant one first.`,
     grasp: t`The App has no permission to read the platform's statistics. Grant one first.`,
-    guests: t`The App has no permission to invite guests. Grant one first.`,
   };
   return (
     <Text size="sm" tone="muted">
@@ -199,7 +197,7 @@ const NothingToChoose = ({
   );
 };
 
-/** The permissions a choice of the platform's or of guests offers, as a select's items. */
+/** The permissions a choice of the platform's offers, as a select's items. */
 const permissionItems = (
   permissions: readonly { permissionId: string }[],
   name: (permission: string) => string
@@ -287,14 +285,6 @@ const BindForm = ({
         <Choice
           items={permissionItems(choices.permissions, named)}
           label={t`Permission for the platform's statistics`}
-          onChange={setPicked}
-          value={picked}
-        />
-      ) : null}
-      {choices.kind === "guests" ? (
-        <Choice
-          items={permissionItems(choices.permissions, named)}
-          label={t`Permission to invite guests`}
           onChange={setPicked}
           value={picked}
         />

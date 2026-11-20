@@ -195,16 +195,6 @@ const statistics: DeclaredPermission = {
   binding: "NOTES",
 };
 
-/**
- * A permission to invite guests: one that changes things, so a version no
- * admin approved is asked for it again.
- */
-const guests: DeclaredPermission = {
-  object: { type: "platform" },
-  actions: ["guests"],
-  binding: "GUESTS",
-};
-
 /** A workflow value of an object of `fields`, all required. */
 const objectSchema = (fields: Record<string, unknown>) => ({
   kind: "object",
@@ -679,7 +669,7 @@ describe("the built-in blueprints", () => {
     await reinstall();
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
-    const declaring = releaseWith({ permissions: [guests] });
+    const declaring = releaseWith({ permissions: [statistics] });
     await expect(install(declaring)).resolves.toBeTruthy();
     const created = await builder.api.apps.blueprints.create("hello", {
       name: "Granted",
@@ -703,7 +693,7 @@ describe("the built-in blueprints", () => {
               ...hello().files,
               [greetings]: `${hello().files[greetings]}\n// Changed.\n`,
             },
-            permissions: [guests],
+            permissions: [statistics],
           })
         )
       ).resolves.toBeTruthy();

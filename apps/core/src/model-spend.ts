@@ -65,9 +65,8 @@ export interface SpendInput {
 }
 
 /**
- * The person a call is made by or for, if any: who makes it, whom an
- * agent or a run acts for, and for a guest's chat the member who invited
- * them.
+ * The person a call is made by or for, if any: who makes it, or whom an
+ * agent or a run acts for.
  */
 export const spendPersonOf = ({
   trigger,
@@ -78,9 +77,6 @@ export const spendPersonOf = ({
   }
   if (trigger.type === "agent") {
     return trigger.onBehalfOf;
-  }
-  if (trigger.type === "guest") {
-    return trigger.invitedBy;
   }
   return work !== undefined && "authority" in work
     ? work.authority.onBehalfOf

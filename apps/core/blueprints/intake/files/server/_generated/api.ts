@@ -13,12 +13,6 @@ const frozen = <Value>(value: Value): Value => {
 };
 
 export const api: {
-  readonly chats: {
-    readonly invite: FunctionReferenceFromExport<typeof import("../chats.ts").invite>;
-    readonly notes: FunctionReferenceFromExport<typeof import("../chats.ts").notes>;
-    readonly overview: FunctionReferenceFromExport<typeof import("../chats.ts").overview>;
-    readonly revoke: FunctionReferenceFromExport<typeof import("../chats.ts").revoke>;
-  };
   readonly drafts: {
     readonly create: FunctionReferenceFromExport<typeof import("../drafts.ts").create>;
     readonly discard: FunctionReferenceFromExport<typeof import("../drafts.ts").discard>;
@@ -33,12 +27,6 @@ export const api: {
     readonly statementsOf: FunctionReferenceFromExport<typeof import("../drafts.ts").statementsOf>;
   };
 } = frozen({
-  chats: {
-    invite: { name: "chats.invite" },
-    notes: { name: "chats.notes" },
-    overview: { name: "chats.overview" },
-    revoke: { name: "chats.revoke" },
-  },
   drafts: {
     create: { name: "drafts.create" },
     discard: { name: "drafts.discard" },
@@ -57,7 +45,7 @@ export const api: {
 export const workflows: {
   readonly extract: WorkflowReference<
     "extract",
-    { lines: Array<{ role: "guest" | "question"; text: string }>; notes: string },
+    { notes: string },
     { statements: Array<{ quote: string; tags: Array<"goal" | "blocker" | "time_sink" | "handover" | "tool" | "rule">; text: string }> },
     | WorkflowEngineWait,
     Readonly<Record<never, never>>,
@@ -72,7 +60,7 @@ export const workflows: {
       readonly cancel: FunctionReference<"mutation", "public", { runId: string }, { kind: "pause" | "resume" | "cancel"; state: "admitted" | "applied" | "superseded" }>;
       readonly pause: FunctionReference<"mutation", "public", { runId: string }, { kind: "pause" | "resume" | "cancel"; state: "admitted" | "applied" | "superseded" }>;
       readonly resume: FunctionReference<"mutation", "public", { runId: string }, { kind: "pause" | "resume" | "cancel"; state: "admitted" | "applied" | "superseded" }>;
-      readonly start: FunctionReference<"mutation", "public", { args: { lines: Array<{ role: "guest" | "question"; text: string }>; notes: string } }, { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }>;
+      readonly start: FunctionReference<"mutation", "public", { args: { notes: string } }, { manifestHash: string; runId: string; workflowId: string; workflowVersion: number }>;
     }
   >;
 } = frozen({

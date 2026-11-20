@@ -143,9 +143,6 @@ export const brainTeamsSchema = z
  *   reads only once an admin grants it this, and then only of Apps whose
  *   runs the person it acts for may see. An App's own statistics need no
  *   permission.
- * - `guests`: inviting people who aren't members to a short chat with a
- *   model, through a link, and reading back what they wrote
- *   (`@grasp-os/shared/guests`).
  * - `brain`: reading the company Brain, and only reading: recall, reads of
  *   its evidence and of its open questions (gaps). Apps, runs and agents
  *   share this one permission, and start without it. A grant never
@@ -213,12 +210,12 @@ const connectionActionPattern = /^[A-Za-z][\w.-]{0,63}$/u;
 /** The actions of workflows and the platform, fixed by the platform. */
 const platformActions = {
   workflow: ["read", "start", "send"],
-  platform: ["statistics", "guests", "brain"],
+  platform: ["statistics", "brain"],
 } as const;
 
 /**
  * What a platform permission's one action is: each is a binding of its
- * own kind in an App's env (statistics, guest chats).
+ * own kind in an App's env (statistics, the Brain).
  */
 export const platformActionSchema = z.enum(platformActions.platform);
 export type PlatformAction = z.infer<typeof platformActionSchema>;
@@ -462,7 +459,7 @@ export type PermissionRequest = z.input<typeof permissionRequestSchema>;
  * A permission a blueprint declares (a built-in's `blueprint.json`, or
  * what its App asked for as it was marked): a request without its
  * subject, which is every App created from it. Only what the platform
- * offers (its statistics, guest chats, the Brain): the thing that names
+ * offers (its statistics, the Brain): the thing that names
  * the same for whoever creates from it, where a connection is someone's
  * or set up for one App, and a workflow or exports name an App its
  * creator may not see.

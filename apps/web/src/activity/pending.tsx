@@ -139,12 +139,6 @@ export const objectOf = (
       ? i18n._(msg`Mutations and actions of ${ph({ app })}`)
       : i18n._(msg`Queries of ${ph({ app })}`);
   }
-  if (object.type === "platform" && actions.includes("guests")) {
-    // Consent in plain words: who reaches what, and at whose cost.
-    return i18n._(
-      msg`Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them`
-    );
-  }
   if (object.type === "platform" && actions.includes("brain")) {
     // Consent in plain words: what it reads, whose access bounds it, and
     // who it may then be shared with (core's brain-recall.ts). The teams

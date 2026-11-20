@@ -1928,22 +1928,6 @@ msgstr "A former member"
 msgid "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp."
 msgstr "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp."
 
-#: src/activity/audit-words.ts
-msgid "A guest chat changed"
-msgstr "A guest chat changed"
-
-#: src/activity/audit-words.ts
-msgid "A guest finished their chat"
-msgstr "A guest finished their chat"
-
-#: src/activity/audit-words.ts
-msgid "A guest opened their chat"
-msgstr "A guest opened their chat"
-
-#: src/activity/audit-words.ts
-msgid "A guest wrote a message"
-msgstr "A guest wrote a message"
-
 #: src/workflows/resource-params.tsx
 msgid "A JSON value"
 msgstr "A JSON value"
@@ -7067,6 +7051,7 @@ msgstr "Erase your teams from your Brain?"
 msgid "Erase…"
 msgstr "Erase…"
 
+#: src/onboarding/setup-steps.tsx
 #: src/settings/erasures.tsx
 msgid "Erased"
 msgstr "Erased"
@@ -7777,10 +7762,6 @@ msgstr "Find what was last agreed with them, and what is still open."
 msgid "Finds overdue invoices and drafts friendly reminders."
 msgstr "Finds overdue invoices and drafts friendly reminders."
 
-#: src/routes/guest.tsx
-msgid "Finish"
-msgstr "Finish"
-
 #: src/onboarding/setup-steps.tsx
 msgid "First I need your staff list."
 msgstr "First I need your staff list."
@@ -8343,7 +8324,6 @@ msgstr "Grasp can't be reached right now. Try again in a minute."
 
 #: src/chat/global-chat.tsx
 #: src/core.ts
-#: src/guest/api.ts
 #: src/interview/api.ts
 #: src/load-from-core.tsx
 #: src/routes/decisions.$decision.tsx
@@ -8636,10 +8616,6 @@ msgstr "Grasp's team can help here until then"
 msgid "Grid"
 msgstr "Grid"
 
-#: src/activity/audit-event.tsx
-msgid "Guest"
-msgstr "Guest"
-
 #: src/frame/part-words.tsx
 msgid "Guest accounts can't sign in."
 msgstr "Guest accounts can't sign in."
@@ -8647,18 +8623,6 @@ msgstr "Guest accounts can't sign in."
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Guest accounts can't sign in. Use your organization's own account."
-
-#: src/activity/pending.tsx
-msgid "Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-msgstr "Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-
-#: src/activity/audit-log.tsx
-msgid "Guest of {app}, invited for {person}"
-msgstr "Guest of {app}, invited for {person}"
-
-#: src/apps/resource-bindings.tsx
-msgid "Guests"
-msgstr "Guests"
 
 #: src/onboarding/about-story.tsx
 msgid "Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask."
@@ -8750,10 +8714,6 @@ msgstr "Here's what Grasp will make"
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Hi {admin}, I’m Stephen"
-
-#: src/routes/guest.tsx
-msgid "Hi {name}"
-msgstr "Hi {name}"
 
 #: src/interview/sound-check.tsx
 msgid "Hi {name}, I’m {who}, an AI. Can you hear me?"
@@ -9507,14 +9467,6 @@ msgstr "Invited"
 #: src/routes/_shell.settings.members.tsx
 msgid "Invited {date}"
 msgstr "Invited {date}"
-
-#: src/activity/audit-words.ts
-msgid "Invited a guest"
-msgstr "Invited a guest"
-
-#: src/activity/audit-event.tsx
-msgid "Invited by"
-msgstr "Invited by"
 
 #: src/brain/brain.ts
 msgid "Invited for step 2"
@@ -11036,7 +10988,6 @@ msgstr "Message other people"
 
 #: src/chat/chat-body.tsx
 #: src/chat/thread.tsx
-#: src/routes/guest.tsx
 msgid "Messages"
 msgstr "Messages"
 
@@ -13320,10 +13271,6 @@ msgstr "Opening {provider}"
 msgid "Opening Grasp"
 msgstr "Opening Grasp"
 
-#: src/routes/guest.tsx
-msgid "Opening the chat…"
-msgstr "Opening the chat…"
-
 #: src/frame/part-words.tsx
 msgid "Opening the file"
 msgstr "Opening the file"
@@ -13875,10 +13822,6 @@ msgstr "Permission {permission}"
 #: src/apps/resource-bindings.tsx
 msgid "Permission for the platform's statistics"
 msgstr "Permission for the platform's statistics"
-
-#: src/apps/resource-bindings.tsx
-msgid "Permission to invite guests"
-msgstr "Permission to invite guests"
 
 #: src/apps/resource-bindings.tsx
 msgid "Permission to read the Brain"
@@ -14464,10 +14407,6 @@ msgid "Read their own"
 msgstr "Read their own"
 
 #: src/activity/audit-words.ts
-msgid "Read what a guest wrote"
-msgstr "Read what a guest wrote"
-
-#: src/activity/audit-words.ts
 msgid "Read what changed at a connection"
 msgstr "Read what changed at a connection"
 
@@ -14531,10 +14470,6 @@ msgstr "Reading the workspace"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "Reading what changed at a connection failed"
-
-#: src/routes/guest.tsx
-msgid "Reading what you wrote"
-msgstr "Reading what you wrote"
 
 #: src/people/person-picker.tsx
 msgid "Reading who can own it…"
@@ -17808,7 +17743,6 @@ msgstr "That account's email address isn't verified."
 msgid "That address wasn’t kept out."
 msgstr "That address wasn’t kept out."
 
-#: src/guest/api.ts
 #: src/interview/api.ts
 msgid "That didn't work. Try again in a moment."
 msgstr "That didn't work. Try again in a moment."
@@ -17930,10 +17864,6 @@ msgstr "The answer, and who gave it, are taken away for good. The question stays
 #: src/frame/part-words.tsx
 msgid "The app didn't start"
 msgstr "The app didn't start"
-
-#: src/apps/resource-bindings.tsx
-msgid "The App has no permission to invite guests. Grant one first."
-msgstr "The App has no permission to invite guests. Grant one first."
 
 #: src/apps/resource-bindings.tsx
 msgid "The App has no permission to read the Brain. Grant one first."
@@ -18364,10 +18294,6 @@ msgstr "The line is deleted now, and so is what I marked in it. What I wrote dow
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."
 msgstr "The link wasn't opened."
-
-#: src/routes/guest.tsx
-msgid "The link works until {until}."
-msgstr "The link works until {until}."
 
 #: src/settings/workspace-name.tsx
 msgid "The logo could not be put back"
@@ -18903,22 +18829,6 @@ msgstr "This chat"
 msgid "This chat account is linked to someone else. They need to unlink it first."
 msgstr "This chat account is linked to someone else. They need to unlink it first."
 
-#: src/routes/guest.tsx
-msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
-msgstr "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
-
-#: src/routes/guest.tsx
-msgid "This chat can't be opened"
-msgstr "This chat can't be opened"
-
-#: src/routes/guest.tsx
-msgid "This chat has been closed by whoever sent you the link."
-msgstr "This chat has been closed by whoever sent you the link."
-
-#: src/routes/guest.tsx
-msgid "This chat has reached its length. Press Finish to end it."
-msgstr "This chat has reached its length. Press Finish to end it."
-
 #: src/chat/held-writes.tsx
 msgid "This chat read private or restricted data: this may send it out"
 msgstr "This chat read private or restricted data: this may send it out"
@@ -18995,7 +18905,6 @@ msgstr "This kind of file does not show here"
 msgid "This link can’t be used"
 msgstr "This link can’t be used"
 
-#: src/routes/guest.tsx
 #: src/routes/interview.tsx
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "This link doesn't work. Ask whoever sent it for a new one."
@@ -19003,10 +18912,6 @@ msgstr "This link doesn't work. Ask whoever sent it for a new one."
 #: src/settings/chat-accounts.tsx
 msgid "This link has been used already. Each link works once."
 msgstr "This link has been used already. Each link works once."
-
-#: src/routes/guest.tsx
-msgid "This link has expired. Ask whoever sent it for a new one."
-msgstr "This link has expired. Ask whoever sent it for a new one."
 
 #: src/settings/chat-accounts.tsx
 msgid "This link has expired. Write to Grasp in the chat app for a new one."
@@ -19319,10 +19224,6 @@ msgstr "Too many files are moving at once. Try again shortly."
 #: src/activity/audit-words.ts
 msgid "Took a reply to a run's email"
 msgstr "Took a reply to a run's email"
-
-#: src/activity/audit-words.ts
-msgid "Took back a guest's link"
-msgstr "Took back a guest's link"
 
 #: src/activity/audit-words.ts
 msgid "Took back the approval of a page's code"
@@ -21530,10 +21431,6 @@ msgstr "Write one sentence on what each message is about."
 msgid "Write the weekly report"
 msgstr "Write the weekly report"
 
-#: src/routes/guest.tsx
-msgid "Write your answer"
-msgstr "Write your answer"
-
 #: src/workflows/workflow-settings.tsx
 msgid "Writes a model may steer:"
 msgstr "Writes a model may steer:"
@@ -21740,10 +21637,6 @@ msgstr "You don't have access to this organisation. Ask an admin."
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "You don't have access to this organization. Ask an admin."
 
-#: src/routes/guest.tsx
-msgid "You finished this chat. Thank you for your time."
-msgstr "You finished this chat. Thank you for your time."
-
 #: src/projects/project-chats.tsx
 msgid "You have no chats to add."
 msgstr "You have no chats to add."
@@ -21915,10 +21808,6 @@ msgstr "Your export's files"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
 msgstr "Your instructions"
-
-#: src/routes/guest.tsx
-msgid "Your message"
-msgstr "Your message"
 
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."

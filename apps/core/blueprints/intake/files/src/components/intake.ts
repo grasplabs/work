@@ -62,20 +62,8 @@ export interface Draft {
 export const originLabels = {
   manual: "Typed in",
   notes: "Notes",
-  guest: "Stakeholder chat",
 } as const;
 export type Origin = keyof typeof originLabels;
-
-/** A stakeholder chat, as the intake lists it (server/chats.ts). */
-export interface GuestChat {
-  id: string;
-  name: string;
-  status: "open" | "finished" | "revoked" | "expired";
-  turns: number;
-  createdAt: string;
-  expiresAt: string;
-  endedAt: string | null;
-}
 
 /** A draft as the editor opens it: the stored draft. */
 export interface OpenedDraft {
@@ -194,22 +182,7 @@ export const refusal = (code: string): string => {
       return "Only the App's builders take intake.";
     }
     case "permission.unavailable": {
-      return "Intake can't do that yet: an admin approves what it uses (its model, its guest chats) first.";
-    }
-    case "intake.empty_chat": {
-      return "Nobody wrote in that chat yet.";
-    }
-    case "guest.too_many_open": {
-      return "Too many chats are open. Revoke some, or wait for them to end.";
-    }
-    case "guest.no_model": {
-      return "No model is set up for this deployment, so nobody can be invited.";
-    }
-    case "guest.invalid": {
-      return "That can't be invited: give their name, of at most 100 characters.";
-    }
-    case "guest.not_found": {
-      return "That chat is gone.";
+      return "Intake can't do that yet: an admin approves the model it uses first.";
     }
     case "app.unreachable": {
       return "Grasp can't be reached right now. Try again in a moment.";

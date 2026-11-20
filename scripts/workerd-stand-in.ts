@@ -40,8 +40,8 @@ const wranglerBundle = (
       compatibility_date: "2026-09-15",
       compatibility_flags: ["nodejs_compat"],
       alias: { "#version": path.join(out, "version.js") },
-      // As core's own wrangler.jsonc: migrations and Grasp skills (a guests
-      // resource's chats are guided by one) come along as text modules.
+      // As core's own wrangler.jsonc: migrations and Grasp skills come
+      // along as text modules.
       rules: [
         { type: "Text", globs: ["**/*.sql", "**/SKILL.md"], fallthrough: true },
       ],

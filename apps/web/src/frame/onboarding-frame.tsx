@@ -9,9 +9,8 @@ import { LanguageButton } from "../language-picker.tsx";
 // The foot's height, and the same room kept at the top so the column
 // stands in the middle of the window.
 const FOOT = "4.5rem";
-// How wide the column is: a form, or a chat (`wide`).
+// How wide the column is: a form.
 const NARROW_COLUMN = "24rem";
-const WIDE_COLUMN = "42rem";
 
 const styles = stylex.create({
   window: {
@@ -42,7 +41,6 @@ const styles = stylex.create({
     marginBlock: "auto",
     textAlign: "center",
   },
-  wide: { maxWidth: WIDE_COLUMN, textAlign: "start" },
   foot: {
     position: "sticky",
     insetBlockEnd: 0,
@@ -58,23 +56,15 @@ const styles = stylex.create({
 });
 
 /**
- * A page for someone outside the product (sign-in, a guest's chat) in the
- * onboarding's frame: one centred column, the mark bottom left and the
- * language bottom right. `wide` holds a chat.
+ * A page for someone outside the product (sign-in) in the onboarding's
+ * frame: one centred column, the mark bottom left and the language bottom
+ * right.
  */
-export const OnboardingFrame = ({
-  children,
-  wide = false,
-}: {
-  children: ReactNode;
-  wide?: boolean;
-}) => (
+export const OnboardingFrame = ({ children }: { children: ReactNode }) => (
   <div {...stylex.props(styles.window)}>
     <div aria-hidden="true" {...stylex.props(styles.top)} />
     <main {...stylex.props(styles.main)}>
-      <div {...stylex.props(styles.column, wide && styles.wide)}>
-        {children}
-      </div>
+      <div {...stylex.props(styles.column)}>{children}</div>
     </main>
     <footer {...stylex.props(styles.foot)}>
       <span {...stylex.props(styles.mark)}>

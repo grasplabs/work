@@ -11,21 +11,6 @@
             "kind": "string",
             "min": 1,
             "max": 30000
-          },
-          "lines": {
-            "kind": "array",
-            "item": {
-              "kind": "object",
-              "fields": {
-                "role": {
-                  "kind": "enum",
-                  "values": ["guest", "question"]
-                },
-                "text": {
-                  "kind": "string"
-                }
-              }
-            }
           }
         }
       },
@@ -62,11 +47,6 @@
           }
         }
       }
-    },
-    {
-      "~permission": "guests",
-      "alias": "guests",
-      "operations": ["invite", "list", "read", "revoke"]
     }
   ],
   "tables": [
@@ -153,7 +133,7 @@
           "name": "origin",
           "type": {
             "kind": "enum",
-            "values": ["manual", "notes", "guest"]
+            "values": ["manual", "notes"]
           }
         }
       ],
@@ -215,13 +195,6 @@
             "kind": "string",
             "trim": true,
             "max": 30000
-          }
-        },
-        {
-          "id": "594cf528-4438-41f8-b941-c128aac2fe1b",
-          "name": "guest",
-          "type": {
-            "kind": "boolean"
           }
         }
       ],
@@ -294,13 +267,6 @@
             "kind": "string",
             "min": 10,
             "max": 10
-          }
-        },
-        {
-          "id": "fb7ea4b2-f50f-4560-9fb8-cca296982812",
-          "name": "guest",
-          "type": {
-            "kind": "boolean"
           }
         }
       ],

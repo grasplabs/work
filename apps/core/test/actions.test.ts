@@ -87,8 +87,6 @@ const mailTo = (to: string) => ({
 });
 const ai = permission.ai({ maxOutputTokens: 200 });
 const brain = permission.brain({ operations: ["recall"] });
-// Guest chats it lists and reads, and never invites.
-const guests = permission.guests({ operations: ["list", "read"] });
 // The platform's functions, which serve only the paths they declare.
 const grasp = permission.grasp();
 
@@ -105,7 +103,6 @@ const config = defineApp({
     connections: [mail],
     ai,
     brain,
-    guests,
     grasp,
     workflows: [followUp],
   },
@@ -251,15 +248,6 @@ const recallHelp = action({
       budget: { tokens: 500 },
     });
     return pack.items.map(({ text }) => text);
-  },
-});
-
-const listGuests = action({
-  args: {},
-  returns: v.number(),
-  handler: async (ctx) => {
-    const chats = await ctx.guests.list();
-    return chats.length;
   },
 });
 
@@ -564,7 +552,6 @@ const notesApp = registerApp({
       checkLater,
     },
     actions: {
-      listGuests,
       compose,
       createThenFail,
       rethrow,
@@ -1236,34 +1223,6 @@ describe("resources", () => {
           }
         )
       );
-    // A guests resource that lists and reads, asked to invite: refused
-    // before its binding hears of it, so no chat is made and nothing is
-    // audited.
-    let invited = false;
-    const guestBindings = bindingsOf({
-      guests: bound("guests", null, async () => {
-        invited = true;
-        return await Promise.resolve([]);
-      }),
-    });
-    const invite = codeOf(
-      await call(
-        fixture,
-        "action",
-        "actions.listGuests",
-        {},
-        {
-          resources: guestBindings,
-          run: misusing(
-            "actions.listGuests",
-            async (channel) =>
-              await channel.permission("guests", "invite", [
-                { name: "Anna", skill: "interview-a-stakeholder" },
-              ])
-          ),
-        }
-      )
-    );
     // A Brain declared for `recall` alone, asked for its skills past the
     // client, which has no member for them: refused before the binding
     // hears of it.
@@ -1324,8 +1283,6 @@ describe("resources", () => {
           await channel.permission("grasp", "call", ["statistics.write", {}])
       ),
       reached,
-      invite,
-      invited,
     }).toStrictEqual({
       skills: {
         select: "permission.not_allowed",
@@ -1339,8 +1296,6 @@ describe("resources", () => {
       workflowAsResource: "permission.not_allowed",
       undeclaredFunction: "permission.not_allowed",
       reached: false,
-      invite: "permission.not_allowed",
-      invited: false,
     });
   });
 

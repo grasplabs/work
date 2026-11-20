@@ -10,7 +10,6 @@ import type {
   AnyPermission,
   BrainOperation,
   BrowserPermission,
-  GuestsOperation,
   WorkflowPermission,
 } from "./permission-types.ts";
 
@@ -74,14 +73,6 @@ export const brainOperations: readonly BrainOperation[] = [
   "entities.find",
   "remember",
   "forget",
-];
-
-/** The operations a guests permission may declare. */
-export const guestsOperations: readonly GuestsOperation[] = [
-  "invite",
-  "list",
-  "read",
-  "revoke",
 ];
 
 /** The operations a files permission may declare. */

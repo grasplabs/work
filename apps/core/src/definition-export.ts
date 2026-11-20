@@ -44,7 +44,7 @@ import { exportedWorkflowVersion, liveWorkflow } from "./workflow-resources.ts";
 //   that strict schema before it leaves, so nothing unlisted can, and
 //   nothing that holds one is read: no connection, permission or approval
 //   (a binding is its alias and kind), no parameter value, no record,
-//   member, guest, run, decision or audit row. A workflow travels as the
+//   member, run, decision or audit row. A workflow travels as the
 //   TypeScript generated from it, never its definition, and a sensitive parameter has no value in either: the
 //   format keeps none in the document. The sealed generated files, which name this
 //   deployment's resources, are only their hashes. What builders wrote

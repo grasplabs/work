@@ -12,8 +12,6 @@ export interface Reading {
   title: string;
   /** The source its statements are kept under, its notes included. */
   source: DraftSource;
-  /** Whether it is a stakeholder's chat, whose words are untrusted. */
-  guest: boolean;
 }
 
 type ExtractView = WorkflowViewOf<typeof workflows.extract>;

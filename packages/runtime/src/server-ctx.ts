@@ -19,7 +19,6 @@ import type {
   BrainClient,
   BrainClientOf,
   ConnectionClientOf,
-  GuestsClientOf,
   GraspClient,
 } from "./permission-clients.ts";
 import type {
@@ -27,7 +26,6 @@ import type {
   BrainPermission,
   ConnectionPermission,
   GraspPermission,
-  GuestsPermission,
 } from "./permission-types.ts";
 import type { AnyTables } from "./server-function.ts";
 
@@ -117,8 +115,8 @@ type BrainOf<Grants extends Grant> = Readonly<
 
 /**
  * What an action reaches through the App's permissions (`Grants`): `ai`,
- * `grasp` (the platform's own functions) and `guests` when declared, the
- * connections by alias, and `brain` always (`BrainOf`).
+ * `grasp` (the platform's own functions) when declared, the connections
+ * by alias, and `brain` always (`BrainOf`).
  */
 type PermissionClients<Grants extends Grant> = {
   /** Each of the App's connections, by alias. */
@@ -132,8 +130,7 @@ type PermissionClients<Grants extends Grant> = {
     "grasp",
     [Extract<Grants, GraspPermission>] extends [never] ? never : GraspClient
   > &
-  BrainOf<Grants> &
-  Present<"guests", GuestsClientOf<Extract<Grants, GuestsPermission>>>;
+  BrainOf<Grants>;
 
 /** `ctx.auth`: who the call is for, as Convex's `ctx.auth` answers it. */
 export interface Auth {

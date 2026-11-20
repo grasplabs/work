@@ -1,9 +1,3 @@
-import type {
-  GuestChat,
-  GuestInvitation,
-  GuestInvite,
-  GuestTranscript,
-} from "@grasp-os/shared/guests";
 import type { HttpContract } from "@grasp-os/shared/http-contract";
 
 import type {
@@ -24,8 +18,6 @@ import type {
   BrainOperation,
   BrainPermission,
   ConnectionPermission,
-  GuestsOperation,
-  GuestsPermission,
 } from "./permission-types.ts";
 import type { ValueSchema } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
@@ -163,37 +155,6 @@ interface BrainCalls {
 export type BrainClient<Operations extends readonly BrainOperation[]> =
   BrainMembersOf<BrainCalls, Operations[number]>;
 
-/** What `ctx.guests` is, by its operations. */
-export type GuestsClient<Operations extends readonly GuestsOperation[]> =
-  ("invite" extends Operations[number]
-    ? {
-        /**
-         * Invites a guest, for the person the call acts for: only a
-         * person's own call, never a workflow run's. The answer holds the
-         * link, shown once.
-         */
-        readonly invite: (invite: GuestInvite) => Promise<GuestInvitation>;
-      }
-    : unknown) &
-    ("list" extends Operations[number]
-      ? {
-          /** The App's guest chats: the open ones first, newest first. */
-          readonly list: () => Promise<GuestChat[]>;
-        }
-      : unknown) &
-    ("read" extends Operations[number]
-      ? {
-          /** A guest chat of the App, with what was written: untrusted text. */
-          readonly read: (id: string) => Promise<GuestTranscript>;
-        }
-      : unknown) &
-    ("revoke" extends Operations[number]
-      ? {
-          /** Stops a guest chat's link for good. */
-          readonly revoke: (id: string) => Promise<GuestChat>;
-        }
-      : unknown);
-
 /** The paths of the platform's functions: `<namespace>.<function>`. */
 type GraspPath = Extract<keyof GraspFunctions, string>;
 
@@ -231,10 +192,4 @@ export type ConnectionClientOf<Permission> =
 export type BrainClientOf<Permission> =
   Permission extends BrainPermission<infer Operations>
     ? BrainClient<Operations>
-    : never;
-
-/** What `ctx.guests` is for `Permission`. */
-export type GuestsClientOf<Permission> =
-  Permission extends GuestsPermission<infer Operations>
-    ? GuestsClient<Operations>
     : never;

@@ -1928,22 +1928,6 @@ msgstr "Een voormalig lid"
 msgid "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp."
 msgstr "Een gat: deze verbinding kan Grasp niet vertellen wat er veranderd is, dus Grasp ziet alleen wat er via Grasp gedaan wordt."
 
-#: src/activity/audit-words.ts
-msgid "A guest chat changed"
-msgstr "Een gastchat is gewijzigd"
-
-#: src/activity/audit-words.ts
-msgid "A guest finished their chat"
-msgstr "Een gast heeft de chat afgerond"
-
-#: src/activity/audit-words.ts
-msgid "A guest opened their chat"
-msgstr "Een gast heeft de chat geopend"
-
-#: src/activity/audit-words.ts
-msgid "A guest wrote a message"
-msgstr "Een gast heeft een bericht geschreven"
-
 #: src/workflows/resource-params.tsx
 msgid "A JSON value"
 msgstr "Een JSON-waarde"
@@ -7067,6 +7051,7 @@ msgstr "Je teams uit je Brain wissen?"
 msgid "Erase…"
 msgstr "Wissen…"
 
+#: src/onboarding/setup-steps.tsx
 #: src/settings/erasures.tsx
 msgid "Erased"
 msgstr "Gewist"
@@ -7777,10 +7762,6 @@ msgstr "Zoek wat het laatst met hen is afgesproken, en wat nog openstaat."
 msgid "Finds overdue invoices and drafts friendly reminders."
 msgstr "Zoekt achterstallige facturen en schrijft vriendelijke herinneringen voor."
 
-#: src/routes/guest.tsx
-msgid "Finish"
-msgstr "Afronden"
-
 #: src/onboarding/setup-steps.tsx
 msgid "First I need your staff list."
 msgstr "Eerst heb ik je personeelslijst nodig."
@@ -8343,7 +8324,6 @@ msgstr "Grasp is nu niet bereikbaar. Probeer het over een minuut opnieuw."
 
 #: src/chat/global-chat.tsx
 #: src/core.ts
-#: src/guest/api.ts
 #: src/interview/api.ts
 #: src/load-from-core.tsx
 #: src/routes/decisions.$decision.tsx
@@ -8636,10 +8616,6 @@ msgstr "Tot dan kan het team van Grasp hier helpen"
 msgid "Grid"
 msgstr "Raster van stippen"
 
-#: src/activity/audit-event.tsx
-msgid "Guest"
-msgstr "Gast"
-
 #: src/frame/part-words.tsx
 msgid "Guest accounts can't sign in."
 msgstr "Gastaccounts kunnen niet inloggen."
@@ -8647,18 +8623,6 @@ msgstr "Gastaccounts kunnen niet inloggen."
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Gastaccounts kunnen niet inloggen. Gebruik een eigen account van je organisatie."
-
-#: src/activity/pending.tsx
-msgid "Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-msgstr "Gastchats. Deze app kan mensen die geen lid zijn via een link uitnodigen voor een korte chat met een model, en teruglezen wat ze schrijven. Gasten bereiken verder niets; hun chats gaan ten koste van het modelbudget van wie hen uitnodigt"
-
-#: src/activity/audit-log.tsx
-msgid "Guest of {app}, invited for {person}"
-msgstr "Gast van {app}, uitgenodigd voor {person}"
-
-#: src/apps/resource-bindings.tsx
-msgid "Guests"
-msgstr "Gasten"
 
 #: src/onboarding/about-story.tsx
 msgid "Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask."
@@ -8750,10 +8714,6 @@ msgstr "Dit gaat Grasp maken"
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Hoi {admin}, ik ben Stephen"
-
-#: src/routes/guest.tsx
-msgid "Hi {name}"
-msgstr "Hoi {name}"
 
 #: src/interview/sound-check.tsx
 msgid "Hi {name}, I’m {who}, an AI. Can you hear me?"
@@ -9507,14 +9467,6 @@ msgstr "Uitgenodigd"
 #: src/routes/_shell.settings.members.tsx
 msgid "Invited {date}"
 msgstr "Uitgenodigd op {date}"
-
-#: src/activity/audit-words.ts
-msgid "Invited a guest"
-msgstr "Een gast uitgenodigd"
-
-#: src/activity/audit-event.tsx
-msgid "Invited by"
-msgstr "Uitgenodigd door"
 
 #: src/brain/brain.ts
 msgid "Invited for step 2"
@@ -11036,7 +10988,6 @@ msgstr "Andere mensen berichten sturen"
 
 #: src/chat/chat-body.tsx
 #: src/chat/thread.tsx
-#: src/routes/guest.tsx
 msgid "Messages"
 msgstr "Berichten"
 
@@ -13320,10 +13271,6 @@ msgstr "{provider} wordt geopend"
 msgid "Opening Grasp"
 msgstr "Grasp gaat open"
 
-#: src/routes/guest.tsx
-msgid "Opening the chat…"
-msgstr "Chat wordt geopend…"
-
 #: src/frame/part-words.tsx
 msgid "Opening the file"
 msgstr "Het bestand wordt geopend"
@@ -13875,10 +13822,6 @@ msgstr "Recht {permission}"
 #: src/apps/resource-bindings.tsx
 msgid "Permission for the platform's statistics"
 msgstr "Recht voor de platformstatistieken"
-
-#: src/apps/resource-bindings.tsx
-msgid "Permission to invite guests"
-msgstr "Recht om gasten uit te nodigen"
 
 #: src/apps/resource-bindings.tsx
 msgid "Permission to read the Brain"
@@ -14464,10 +14407,6 @@ msgid "Read their own"
 msgstr "Hun eigen lezen"
 
 #: src/activity/audit-words.ts
-msgid "Read what a guest wrote"
-msgstr "Gelezen wat een gast schreef"
-
-#: src/activity/audit-words.ts
 msgid "Read what changed at a connection"
 msgstr "Gelezen wat er bij een verbinding is veranderd"
 
@@ -14531,10 +14470,6 @@ msgstr "Werkruimte wordt gelezen"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "Lezen wat er bij een verbinding veranderd is, is mislukt"
-
-#: src/routes/guest.tsx
-msgid "Reading what you wrote"
-msgstr "Je antwoord wordt gelezen"
 
 #: src/people/person-picker.tsx
 msgid "Reading who can own it…"
@@ -17808,7 +17743,6 @@ msgstr "Het e-mailadres van dat account is niet geverifieerd."
 msgid "That address wasn’t kept out."
 msgstr "Dat adres werd niet buitengehouden."
 
-#: src/guest/api.ts
 #: src/interview/api.ts
 msgid "That didn't work. Try again in a moment."
 msgstr "Dat is niet gelukt. Probeer het zo opnieuw."
@@ -17930,10 +17864,6 @@ msgstr "Het antwoord, en wie het gaf, worden definitief weggehaald. De vraag bli
 #: src/frame/part-words.tsx
 msgid "The app didn't start"
 msgstr "De app is niet gestart"
-
-#: src/apps/resource-bindings.tsx
-msgid "The App has no permission to invite guests. Grant one first."
-msgstr "De app heeft geen recht om gasten uit te nodigen. Verleen er eerst een."
 
 #: src/apps/resource-bindings.tsx
 msgid "The App has no permission to read the Brain. Grant one first."
@@ -18364,10 +18294,6 @@ msgstr "De beurt wordt nu verwijderd, net als wat ik erin heb gemarkeerd. Wat ik
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."
 msgstr "De link is niet geopend."
-
-#: src/routes/guest.tsx
-msgid "The link works until {until}."
-msgstr "De link werkt tot {until}."
 
 #: src/settings/workspace-name.tsx
 msgid "The logo could not be put back"
@@ -18903,22 +18829,6 @@ msgstr "Deze chat"
 msgid "This chat account is linked to someone else. They need to unlink it first."
 msgstr "Dit chataccount is aan iemand anders gekoppeld. Die moet het eerst ontkoppelen."
 
-#: src/routes/guest.tsx
-msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
-msgstr "Deze chat vraagt hoe je werk wordt gedaan. Alles wat je schrijft, wordt bewaard en gelezen door de mensen die je hebben uitgenodigd; zij kunnen het overnemen in hun eigen administratie en het daar bewaren. Deel geen wachtwoorden, bankgegevens of iets wat je niet in een e-mail zou zetten."
-
-#: src/routes/guest.tsx
-msgid "This chat can't be opened"
-msgstr "Deze chat kan niet worden geopend"
-
-#: src/routes/guest.tsx
-msgid "This chat has been closed by whoever sent you the link."
-msgstr "Deze chat is gesloten door wie je de link stuurde."
-
-#: src/routes/guest.tsx
-msgid "This chat has reached its length. Press Finish to end it."
-msgstr "Deze chat heeft zijn maximale lengte bereikt. Klik op Afronden om hem te beëindigen."
-
 #: src/chat/held-writes.tsx
 msgid "This chat read private or restricted data: this may send it out"
 msgstr "Deze chat heeft privé- of beperkte gegevens gelezen: dit kan ze naar buiten sturen"
@@ -18995,7 +18905,6 @@ msgstr "Dit soort bestand wordt hier niet getoond"
 msgid "This link can’t be used"
 msgstr "Deze link kan niet worden gebruikt"
 
-#: src/routes/guest.tsx
 #: src/routes/interview.tsx
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "Deze link werkt niet. Vraag wie hem stuurde om een nieuwe."
@@ -19003,10 +18912,6 @@ msgstr "Deze link werkt niet. Vraag wie hem stuurde om een nieuwe."
 #: src/settings/chat-accounts.tsx
 msgid "This link has been used already. Each link works once."
 msgstr "Deze link is al gebruikt. Elke link werkt één keer."
-
-#: src/routes/guest.tsx
-msgid "This link has expired. Ask whoever sent it for a new one."
-msgstr "Deze link is verlopen. Vraag wie hem stuurde om een nieuwe."
 
 #: src/settings/chat-accounts.tsx
 msgid "This link has expired. Write to Grasp in the chat app for a new one."
@@ -19319,10 +19224,6 @@ msgstr "Er worden te veel bestanden tegelijk overgedragen. Probeer het zo opnieu
 #: src/activity/audit-words.ts
 msgid "Took a reply to a run's email"
 msgstr "Een antwoord op de e-mail van een run aangenomen"
-
-#: src/activity/audit-words.ts
-msgid "Took back a guest's link"
-msgstr "De link van een gast ingetrokken"
 
 #: src/activity/audit-words.ts
 msgid "Took back the approval of a page's code"
@@ -21530,10 +21431,6 @@ msgstr "Schrijf per bericht één zin over waar het over gaat."
 msgid "Write the weekly report"
 msgstr "Het weekrapport schrijven"
 
-#: src/routes/guest.tsx
-msgid "Write your answer"
-msgstr "Schrijf je antwoord"
-
 #: src/workflows/workflow-settings.tsx
 msgid "Writes a model may steer:"
 msgstr "Schrijfacties die een model kan sturen:"
@@ -21740,10 +21637,6 @@ msgstr "Je hebt geen toegang tot deze organisatie. Vraag het een beheerder."
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "Je hebt geen toegang tot deze organisatie. Vraag een beheerder."
 
-#: src/routes/guest.tsx
-msgid "You finished this chat. Thank you for your time."
-msgstr "Je hebt deze chat afgerond. Bedankt voor je tijd."
-
 #: src/projects/project-chats.tsx
 msgid "You have no chats to add."
 msgstr "Je hebt geen chats om toe te voegen."
@@ -21915,10 +21808,6 @@ msgstr "De bestanden van je export"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
 msgstr "Jouw instructies"
-
-#: src/routes/guest.tsx
-msgid "Your message"
-msgstr "Je bericht"
 
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."

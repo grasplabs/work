@@ -52,7 +52,6 @@ export const readPermissionDeclaration = (data: unknown): AppPermission => {
   if (
     kind === "ai" ||
     kind === "brain" ||
-    kind === "guests" ||
     kind === "files" ||
     kind === "links"
   ) {
@@ -60,7 +59,6 @@ export const readPermissionDeclaration = (data: unknown): AppPermission => {
     const constructors = {
       ai: permission.ai,
       brain: permission.brain,
-      guests: permission.guests,
       files: permission.files,
       links: permission.links,
     } as const;

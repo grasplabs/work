@@ -1564,9 +1564,10 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
       <Onward>
         <div className="setup-org-list flex w-full flex-col overflow-auto rounded-xl border text-left">
           {teams.map(({ team, people }) => {
+            // Someone erased stays in their team, without a name.
             const options = people.map((person) => ({
               value: person.id,
-              label: person.name,
+              label: person.name === "" ? t`Erased` : person.name,
             }));
             const { name } = team;
             const count = people.length;

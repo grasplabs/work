@@ -1,4 +1,5 @@
 import { errorReportMaxBytes } from "@grasp-os/shared/error-reports";
+import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { expect } from "@playwright/test";
 import type { WebSocketRoute } from "@playwright/test";
 import { z } from "zod";
@@ -42,23 +43,7 @@ test("shows only its own words for a refused sign-in, never the link's, and come
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
 });
 
-test("shows a refusal with the request ID core answered it under, for the person to quote", async ({
-  page,
-}) => {
-  // A guest link nobody made: core refuses to open it.
-  const answered = page.waitForResponse(
-    (response) => new URL(response.url()).pathname === "/api/guest"
-  );
-  await page.goto(`/guest#${"A".repeat(43)}`);
-  const answer = await answered;
-  const requestId = answer.headers()["x-request-id"] ?? "";
-  expect(requestId).toMatch(/^[\da-f-]{36}$/u);
-  await expect(page.getByRole("alert")).toHaveText(
-    `This link doesn't work. Ask whoever sent it for a new one. Reference: ${requestId}`
-  );
-});
-
-test("an interview link nobody made asks to sign in first, then can't be opened, says nothing was saved, and lets them sign out to sign in again", async ({
+test("an interview link nobody made asks to sign in first, then can't be opened with the request ID core refused it under, says nothing was saved, and lets them sign out to sign in again", async ({
   context,
   page,
 }) => {
@@ -73,10 +58,19 @@ test("an interview link nobody made asks to sign in first, then can't be opened,
     role: "user",
     cookie: await signInAs(email),
   });
+  const refused = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === interviewApiPath && !response.ok()
+  );
   await page.reload();
+  const refusal = await refused;
+  const requestId = refusal.headers()["x-request-id"] ?? "";
+  expect(requestId).toMatch(/^[\da-f-]{36}$/u);
   await expect(
     page.getByRole("heading", { name: "This interview can't be opened" })
   ).toBeVisible();
+  // Core's refusal, with the reference the person can quote.
+  await expect(page.getByText(`Reference: ${requestId}`)).toBeVisible();
   await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
   // Signed in with another account than the link's: a way out, to sign in
   // again.

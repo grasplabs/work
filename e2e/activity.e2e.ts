@@ -16,8 +16,8 @@ test("an admin approves a permission request, finds it in the audit log, and exp
 }) => {
   const { admin, builder } = peopleIn("activity");
   const appName = `Board pack ${crypto.randomUUID()}`;
-  // Another App asks to invite guests: each row names one request.
-  const guestApp = `Guest list ${crypto.randomUUID()}`;
+  // Another App asks to read the Brain: each row names one request.
+  const brainApp = `Board notes ${crypto.randomUUID()}`;
   const { core, api } = apiOf(builder);
   let approved: string;
   try {
@@ -31,15 +31,15 @@ test("an admin approves a permission request, finds it in the audit log, and exp
       actions: ["statistics"],
       binding: "BOARD_PACK",
     }));
-    const { id: guestAppId } = await api.apps.create({
-      name: guestApp,
-      description: "Invites guests to the board meeting",
+    const { id: brainAppId } = await api.apps.create({
+      name: brainApp,
+      description: "Reads the Brain for the board meeting",
     });
     await api.permissions.request({
-      subject: { type: "app", appId: guestAppId },
+      subject: { type: "app", appId: brainAppId },
       object: { type: "platform" },
-      actions: ["guests"],
-      binding: "GUESTS",
+      actions: ["brain"],
+      binding: "BRAIN",
     });
   } finally {
     core[Symbol.dispose]();
@@ -62,16 +62,16 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   ).toHaveCount(1);
   await expect(reading).toHaveCount(0);
 
-  const inviting = await toItem(
+  const recalling = await toItem(
     page,
-    new RegExp(`^${guestApp}$`, "u"),
-    new RegExp(`^Grant ${guestApp}: guests on Guest chats\\.`, "u")
+    new RegExp(`^${brainApp}$`, "u"),
+    new RegExp(`^Grant ${brainApp}: brain on Company Brain, read only\\.`, "u")
   );
-  await inviting.getByRole("button", { name: "Decline" }).click();
+  await recalling.getByRole("button", { name: "Decline" }).click();
   await expect(
-    saidOf(page).filter({ hasText: `Declined: Grant ${guestApp}` })
+    saidOf(page).filter({ hasText: `Declined: Grant ${brainApp}` })
   ).toHaveCount(1);
-  await expect(inviting).toHaveCount(0);
+  await expect(recalling).toHaveCount(0);
 
   // The approval is in the log, found by what it granted, once the log has
   // taken its events from core's outbox, which it does in the background.
@@ -158,14 +158,14 @@ test("an admin approves an App's request only for the version the list shows", a
   try {
     const { id: appId } = await builds.api.apps.create({
       name: appName,
-      description: "Invites guests to the minutes",
+      description: "Reads the Brain for the minutes",
     });
     await release(builds.api, appId, { "README.md": "One" });
     await builds.api.permissions.request({
       subject: { type: "app", appId },
       object: { type: "platform" },
-      actions: ["guests"],
-      binding: "GUESTS",
+      actions: ["brain"],
+      binding: "BRAIN",
     });
 
     const page = await pageOf(admin);
@@ -173,7 +173,7 @@ test("an admin approves an App's request only for the version the list shows", a
     const card = await toItem(
       page,
       new RegExp(`^${appName}$`, "u"),
-      new RegExp(`^Grant ${appName}: guests on Guest chats\\.`, "u")
+      new RegExp(`^Grant ${appName}: brain on Company Brain, read only\\.`, "u")
     );
     await card.getByRole("button", { name: "Details" }).click();
     // Versions as people know them: YY.MM.N, the first this month.
@@ -189,7 +189,7 @@ test("an admin approves an App's request only for the version the list shows", a
     await card.getByRole("button", { name: "Grant it" }).click();
     await expect(
       saidOf(page).filter({
-        hasText: `Approved: Grant ${appName}: guests on Guest chats.`,
+        hasText: `Approved: Grant ${appName}: brain on Company Brain, read only.`,
       })
     ).toHaveCount(1);
     await expect(card).toHaveCount(0);

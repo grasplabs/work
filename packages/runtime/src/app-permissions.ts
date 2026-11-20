@@ -21,7 +21,6 @@ const permissionKeys: ReadonlyMap<string, string> = new Map([
   ["grasp", "one `permission.grasp()`"],
   ["people", "`true` when it reads the organization's people"],
   ["files", "one `permission.files`"],
-  ["guests", "one `permission.guests`"],
   ["links", "one `permission.links`"],
 ]);
 
