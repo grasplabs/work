@@ -10,7 +10,7 @@ import type { Integration } from "./integrations.ts";
 // knows. The suite the kickoff says the company works in, the tools the
 // company's documents name (with the teams they are about), and the apps
 // people asked for. Interviews and what a connected suite sees give no
-// reason yet: core links neither to an app (core-needs 61). Only an app
+// reason yet: core links neither to an app. Only an app
 // the company could connect and has no connection to is recommended
 // (`beyond`), and a name matches an app's only letter for letter.
 
