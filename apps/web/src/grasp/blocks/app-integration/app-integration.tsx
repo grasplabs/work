@@ -12,6 +12,7 @@
 "use client";
 
 import { useId } from "react";
+import type { ReactNode } from "react";
 
 import { Badge } from "../../badge";
 import {
@@ -39,6 +40,9 @@ export type {
 export type { AppIntegrationWords } from "./words";
 export { appIntegrationWords } from "./words";
 export { groupTools } from "./tools";
+export { needsYou, rollUp } from "./state";
+export { AppsState } from "./parts";
+export type { AppsStateProps } from "./parts";
 export type { ToolGroup } from "./tools";
 
 export { AppPanel } from "./panel";
@@ -69,6 +73,13 @@ const TileFact = ({ app, words }: { app: App; words: AppIntegrationWords }) => {
       </Badge>
     );
   }
+  if (state === "needs-you") {
+    return (
+      <Badge tone="attention" size="sm">
+        {words.needsYou}
+      </Badge>
+    );
+  }
   if (state === "works" && app.tools !== undefined) {
     return words.allowed(
       app.tools.filter((tool) => tool.choice !== "never").length,
@@ -88,6 +99,8 @@ export interface AppTileProps {
   onOpen: (app: App, tile: HTMLElement | null) => void;
   /** Its panel is open: the tile stays lit. */
   current?: boolean;
+  /** The one fact under its name, in place of its state or tool count: why it is recommended ("Asked for by 2 people"). */
+  fact?: ReactNode;
   words?: Partial<AppIntegrationWords>;
 }
 
@@ -96,6 +109,7 @@ export const AppTile = ({
   app,
   onOpen,
   current = false,
+  fact,
   words: given,
 }: AppTileProps) => {
   const words = useAppWords(given);
@@ -122,7 +136,7 @@ export const AppTile = ({
           <span id={id}>{app.name}</span>
         </ItemTitle>
         <ItemDescription>
-          <TileFact app={app} words={words} />
+          {fact ?? <TileFact app={app} words={words} />}
         </ItemDescription>
       </ItemContent>
     </Item>

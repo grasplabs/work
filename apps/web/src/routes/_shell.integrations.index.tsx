@@ -25,14 +25,16 @@ import {
 import { IntegrationPanel } from "../connections/integration-panel.tsx";
 import { IntegrationTile } from "../connections/integration-tile.tsx";
 import type { OpenApp } from "../connections/integration-tile.tsx";
-import { loadIntegrations } from "../connections/integrations-data.ts";
-import { IntegrationsHeader } from "../connections/integrations-header.tsx";
+import { IntegrationsBand } from "../connections/integrations-band.tsx";
+import { knownOf, loadIntegrations } from "../connections/integrations-data.ts";
 import { IntegrationsSkeleton } from "../connections/integrations-skeleton.tsx";
 import { integrationsOf, sectionsOf } from "../connections/integrations.ts";
 import type {
   Integration,
   IntegrationSections,
 } from "../connections/integrations.ts";
+import { RecommendedApps } from "../connections/recommended-apps.tsx";
+import { nothingKnown, recommendedOf } from "../connections/recommended.ts";
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
 import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
@@ -63,12 +65,13 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 
-// Integrations: what Grasp can reach. A header card says it at a glance,
-// a brain in dots with a nerve into it for every connected app
-// (integrations-header.tsx), and what needs someone to sign in again.
-// Under it every app is a small tile with its own mark (Ruben, 19 Nov
-// 2026: tiles, not rows, so many apps fit): what is connected first, then
-// each kind of app, a few of each. The kinds themselves stand in the
+// Integrations: what Grasp can reach. A slim band says it at a glance,
+// with the connected apps' marks at its end (integrations-band.tsx), then
+// the apps to connect first, each saying why (recommended-apps.tsx; Ruben's
+// direction B, 20 Nov 2026). Every app is a small tile with its own mark
+// (Ruben, 19 Nov 2026: tiles, not rows, so many apps fit): what is
+// connected, then each kind of app, a few of each, leaving out the
+// recommended ones. The kinds themselves stand in the
 // sidebar (integrations-sidebar.tsx), each opening that kind whole here
 // (`?group=`); the search beside "Request app" narrows every app. An app
 // opens in a panel over the page (`?app=`), which never squeezes the
@@ -294,10 +297,13 @@ const Drawn = ({
 /** Every kind of app, a few of each, with the rest of a kind a press away. */
 const Kinds = ({
   others,
+  recommended,
   open,
   onOpen,
 }: {
   others: readonly Integration[];
+  /** The recommended apps' keys: they stand in their own run above. */
+  recommended: ReadonlySet<string>;
   open: string | undefined;
   onOpen: OpenApp;
 }) => {
@@ -305,7 +311,10 @@ const Kinds = ({
   const { t, i18n } = useLingui();
   return catalogGroups.map((group) => {
     const ofKind = others.filter((integration) => integration.group === group);
-    if (ofKind.length === 0) {
+    const shown = ofKind
+      .filter((integration) => !recommended.has(integration.key))
+      .slice(0, perKind);
+    if (shown.length === 0) {
       return null;
     }
     const label = i18n._(groupLabel[group]);
@@ -313,7 +322,7 @@ const Kinds = ({
     return (
       <Tiles count={count} key={group} title={label}>
         <ItemGrid aria-label={label}>
-          {ofKind.slice(0, perKind).map((integration) => (
+          {shown.map((integration) => (
             <IntegrationTile
               identity={identity}
               integration={integration}
@@ -323,7 +332,7 @@ const Kinds = ({
             />
           ))}
         </ItemGrid>
-        {count > perKind ? (
+        {count > shown.length ? (
           <Button
             layout={styles.more}
             render={
@@ -350,12 +359,14 @@ const Kinds = ({
  */
 const Others = ({
   others,
+  recommended,
   group,
   q,
   open,
   onOpen,
 }: {
   others: readonly Integration[];
+  recommended: ReadonlySet<string>;
   group: CatalogGroup | undefined;
   q: string | undefined;
   open: string | undefined;
@@ -366,7 +377,14 @@ const Others = ({
     return null;
   }
   if (q === undefined && group === undefined) {
-    return <Kinds onOpen={onOpen} open={open} others={others} />;
+    return (
+      <Kinds
+        onOpen={onOpen}
+        open={open}
+        others={others}
+        recommended={recommended}
+      />
+    );
   }
   const title =
     group === undefined
@@ -544,7 +562,7 @@ const shownOf = (
 };
 
 const Integrations = () => {
-  const { catalog, connections, requests, toRevoke, uses } =
+  const { catalog, connections, known, requests, toRevoke, uses } =
     Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { q, group, app, connectionError, connection } = Route.useSearch();
@@ -573,6 +591,7 @@ const Integrations = () => {
   };
   // The overview itself: no kind chosen and nothing searched.
   const overview = group === undefined && q === undefined;
+  const recommended = overview ? recommendedOf(integrations, known) : [];
   const kind = group === undefined ? undefined : i18n._(groupLabel[group]);
   const crumbs =
     kind === undefined
@@ -625,11 +644,14 @@ const Integrations = () => {
         </output>
         <div {...stylex.props(styles.lists)}>
           {overview && loaded ? (
-            <IntegrationsHeader
-              identity={identity}
-              integrations={integrations}
-            />
+            <IntegrationsBand identity={identity} integrations={integrations} />
           ) : null}
+          <RecommendedApps
+            identity={identity}
+            onOpen={onOpen}
+            open={app}
+            recommended={recommended}
+          />
           {group === undefined ? (
             <Await
               fallback={
@@ -643,7 +665,7 @@ const Integrations = () => {
               promise={uses}
             >
               {(read) => {
-                const known = read.state === "ready" ? read.data : undefined;
+                const used = read.state === "ready" ? read.data : undefined;
                 return (
                   <Connected
                     onOpen={onOpen}
@@ -652,9 +674,9 @@ const Integrations = () => {
                       integrations,
                       { show: "all" },
                       q,
-                      known
+                      used
                     )}
-                    uses={known}
+                    uses={used}
                   />
                 );
               }}
@@ -666,6 +688,9 @@ const Integrations = () => {
             open={app}
             others={others}
             q={q}
+            recommended={
+              new Set(recommended.map(({ integration }) => integration.key))
+            }
           />
           {loaded && shown === 0 ? (
             <NothingFound
@@ -721,22 +746,33 @@ export const Route = createFileRoute("/_shell/integrations/")({
   // read, so a new one keeps the page as it is rather than reading it
   // again. A change reads it again (use-change.ts invalidates it).
   shouldReload: false,
-  loader: async ({ context: { core, identity } }) => ({
-    ...(await loadIntegrations(core, identity, { held: false })),
-    // Not awaited: the catalog never waits for the apps people asked for.
-    requests: loadFromCore(
+  loader: async ({ context: { core, identity } }) => {
+    const requests = loadFromCore(
       core,
       async (session) => await session.connections.appRequests()
-    ),
-    // Admins' and Grasp staff's only, and never waited for either.
-    toRevoke:
-      identity.staff || isAdmin(identity.role)
-        ? loadFromCore(
-            core,
-            async (session) => await session.connections.revocationsByHand()
-          )
-        : undefined,
-  }),
+    );
+    // What Recommended's reasons are read from comes with the catalog, so
+    // the kinds never lose an app under the reader's eyes; each read has
+    // core's deadline, and one that fails only leaves its reasons out.
+    // None for Grasp staff, who connect nothing here.
+    const [integrations, known] = await Promise.all([
+      loadIntegrations(core, identity, { held: false }),
+      identity.staff ? nothingKnown : knownOf(core, identity, requests),
+    ]);
+    return {
+      ...integrations,
+      known,
+      requests,
+      // Admins' and Grasp staff's only, and never waited for either.
+      toRevoke:
+        identity.staff || isAdmin(identity.role)
+          ? loadFromCore(
+              core,
+              async (session) => await session.connections.revocationsByHand()
+            )
+          : undefined,
+    };
+  },
   pendingComponent: IntegrationsSkeleton,
   component: Integrations,
 });

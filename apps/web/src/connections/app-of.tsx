@@ -12,9 +12,9 @@ import type {
   AppIntegrationWords,
 } from "../grasp/blocks/app-integration/app-integration.tsx";
 import { useWords } from "../grasp/words/words.tsx";
+import { fixOf } from "./fix.ts";
 import { groupLabel } from "./groups.ts";
 import { aboutOf } from "./integration-facts.ts";
-import { fixOf } from "./integrations-header.tsx";
 import type { Integration } from "./integrations.ts";
 import { reliedOnLapsed, workflowsOf } from "./integrations.ts";
 import { ProviderMark } from "./provider-mark.tsx";

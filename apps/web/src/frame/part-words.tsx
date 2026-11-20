@@ -1418,6 +1418,11 @@ export const usePartWords = (): GraspWordsCatalog => {
         t`${plural(total, { one: `${allowed} of # tool allowed`, other: `${allowed} of # tools allowed` })}`,
       needsSignIn: t`Sign in again`,
       needsConnect: t`Connect again`,
+      needsYou: t({ message: "Needs you", context: "state of one app" }),
+      appsNeedYou: (count) =>
+        t`${plural(count, { one: "# app needs you", other: "# apps need you" })}`,
+      connectedCount: (count) =>
+        t`${plural(count, { one: "# connected", other: "# connected" })}`,
       account: t`Account`,
       connection: t`Connection`,
       signedInAs: t`Signed in as`,

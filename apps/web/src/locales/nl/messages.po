@@ -105,14 +105,6 @@ msgstr "{app} is gekoppeld"
 msgid "{app} is connected again"
 msgstr "{app} is weer gekoppeld"
 
-#: src/connections/integrations-header.tsx
-msgid "{app} needs someone to sign in again. Until then, what uses it waits."
-msgstr "Iemand moet opnieuw inloggen bij {app}. Tot die tijd wacht wat het gebruikt."
-
-#: src/connections/integrations-header.tsx
-msgid "{app} stopped working. Connect it again; until then, what uses it waits."
-msgstr "{app} werkt niet meer. Koppel het opnieuw; tot dan wacht wat het gebruikt."
-
 #: src/connections/revocations-by-hand.tsx
 msgid "{app}, {whose}'s own"
 msgstr "{app}, eigen account van {whose}"
@@ -250,6 +242,10 @@ msgstr "{count, plural, one {{names} werken hier, aan # stuk werk dat naar voren
 msgid "{count, plural, one {# agent} other {# agents}}"
 msgstr "{count, plural, one {# agent} other {# agents}}"
 
+#: src/frame/part-words.tsx
+msgid "{count, plural, one {# app needs you} other {# apps need you}}"
+msgstr "{count, plural, one {# app heeft je nodig} other {# apps hebben je nodig}}"
+
 #: src/inbox/items.ts
 msgid "{count, plural, one {# binding} other {# bindings}}"
 msgstr "{count, plural, one {# koppeling} other {# koppelingen}}"
@@ -269,6 +265,10 @@ msgstr "{count, plural, one {# wijziging in de gegevens} other {# wijzigingen in
 #: src/chat/held-writes.tsx
 msgid "{count, plural, one {# change waits for you to confirm or reject it.} other {# changes wait for you to confirm or reject them.}}"
 msgstr "{count, plural, one {# wijziging wacht tot je die bevestigt of afwijst.} other {# wijzigingen wachten tot je ze bevestigt of afwijst.}}"
+
+#: src/frame/part-words.tsx
+msgid "{count, plural, one {# connected} other {# connected}}"
+msgstr "{count, plural, one {# gekoppeld} other {# gekoppeld}}"
 
 #: src/chat/sources.tsx
 msgid "{count, plural, one {# connection} other {# connections}}"
@@ -465,10 +465,6 @@ msgstr "{count, plural, one {Company Brain, alleen lezen. Deze App kan oproepen 
 #: src/brain/skills-page.tsx
 msgid "{count, plural, one {From your last run of {workflow}, version {version}, which succeeded on {ended}.} other {From your last # runs of {workflow}, version {version}, which all succeeded, the latest on {ended}.}}"
 msgstr "{count, plural, one {Uit je laatste run van {workflow}, versie {version}, die slaagde op {ended}.} other {Uit je laatste # runs van {workflow}, versie {version}, die allemaal slaagden, de laatste op {ended}.}}"
-
-#: src/connections/integrations-header.tsx
-msgid "{count, plural, one {Grasp reaches # app} other {Grasp reaches # apps}}"
-msgstr "{count, plural, one {Grasp bereikt # app} other {Grasp bereikt # apps}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{count, plural, one {It can't be published yet: # problem} other {It can't be published yet: # problems}}"
@@ -1195,10 +1191,6 @@ msgstr "{openCount, plural, =0 {Niets wacht op jou} =1 {Nog maar één ding voor
 msgid "{origin} · {methods} under {paths} · sent in {header} · added {added}"
 msgstr "{origin} · {methods} onder {paths} · verstuurd in {header} · toegevoegd op {added}"
 
-#: src/connections/integrations-header.tsx
-msgid "{others, plural, one {{app} and # other app need someone to sign in again.} other {{app} and # other apps need someone to sign in again.}}"
-msgstr "{others, plural, one {Iemand moet opnieuw inloggen bij {app} en # andere app.} other {Iemand moet opnieuw inloggen bij {app} en # andere apps.}}"
-
 #: src/inbox/interviews-item.tsx
 msgid "{outCount, plural, one {# out, as a list} other {# out, as a list}}"
 msgstr "{outCount, plural, one {# verstuurd, als lijst} other {# verstuurd, als lijst}}"
@@ -1234,6 +1226,10 @@ msgstr "{people, plural, one {# persoon} other {# mensen}}"
 #: src/projects/file-item-dialog.tsx
 msgid "{people, plural, one {Also give the # person in {projectName} access?} other {Also give the # people in {projectName} access?}}"
 msgstr "{people, plural, one {Ook de # persoon in {projectName} toegang geven?} other {Ook de # mensen in {projectName} toegang geven?}}"
+
+#: src/connections/recommended-apps.tsx
+msgid "{people, plural, one {Asked for by # person} other {Asked for by # people}}"
+msgstr "{people, plural, one {Aangevraagd door # persoon} other {Aangevraagd door # mensen}}"
 
 #: src/agents/agent-page.tsx
 msgid "{people, plural, one {for # person} other {for # people}}"
@@ -1644,6 +1640,10 @@ msgstr "{waiting, plural, one {# workflow heeft je nodig} other {# workflows heb
 #: src/drafts/share-with-team.tsx
 msgid "{waiting, plural, one {It uses # new kind of access. An admin approves that once.} other {It uses # new kinds of access. An admin approves those once.}}"
 msgstr "{waiting, plural, one {Het gebruikt # nieuw soort toegang. Een beheerder keurt dat één keer goed.} other {Het gebruikt # nieuwe soorten toegang. Een beheerder keurt die één keer goed.}}"
+
+#: src/connections/integrations-band.tsx
+msgid "{waits, plural, one {# app waits for an admin} other {# apps wait for an admin}}"
+msgstr "{waits, plural, one {# app wacht op een beheerder} other {# apps wachten op een beheerder}}"
 
 #: src/chat/held-writes.tsx
 msgid "{what} didn't go through."
@@ -2803,10 +2803,6 @@ msgstr "Een beheerder koppelt dit voor iedereen."
 #: src/chat/connection-requests.tsx
 msgid "An admin decides. It holds in this chat only."
 msgstr "Een beheerder beslist. Het geldt alleen in deze chat."
-
-#: src/connections/integrations-header.tsx
-msgid "An admin needs to connect {app} again. Until then, what uses it waits."
-msgstr "Een beheerder moet {app} opnieuw koppelen. Tot die tijd wacht wat het gebruikt."
 
 #: src/settings/directory-placement.tsx
 msgid "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is."
@@ -5149,7 +5145,7 @@ msgstr "Nog een account koppelen"
 msgid "Connect first: {systems}."
 msgstr "Koppel eerst: {systems}."
 
-#: src/connections/integrations-header.tsx
+#: src/connections/integrations-band.tsx
 msgid "Connect the apps your work runs on"
 msgstr "Koppel de apps waar je werk op draait"
 
@@ -7200,10 +7196,6 @@ msgstr "Iedereen met de rol {name}"
 msgid "Everything around employees, from hiring to leaving."
 msgstr "Alles rond medewerkers, van aanname tot vertrek."
 
-#: src/connections/integrations-header.tsx
-msgid "Everything connected works."
-msgstr "Alles wat gekoppeld is, werkt."
-
 #: src/workflows/business-process.tsx
 msgid "Everything from a first client conversation until the money is in the bank."
 msgstr "Alles van het eerste gesprek met een klant tot het geld op de bank staat."
@@ -7881,9 +7873,17 @@ msgstr "Uit wat mensen in het hele bedrijf zeggen, versie {version}"
 msgid "From what your team said, version {version}"
 msgstr "Uit wat je team zei, versie {version}"
 
+#: src/connections/recommended-apps.tsx
+msgid "From your {suite}, your documents and what people asked for."
+msgstr "Uit jullie {suite}, jullie documenten en wat mensen aanvroegen."
+
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "From your Apps"
 msgstr "Uit je apps"
+
+#: src/connections/recommended-apps.tsx
+msgid "From your documents and what people asked for."
+msgstr "Uit jullie documenten en wat mensen aanvroegen."
 
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
@@ -8275,6 +8275,10 @@ msgstr "Grasp gaat binnenkort voor iedereen open, zodra Stephen met de teams hee
 #: src/frame/part-words.tsx
 msgid "Grasp opens for everyone soon. If you have an interview link, it is in your email."
 msgstr "Grasp gaat binnenkort voor iedereen open. Heb je een interviewlink, dan staat die in je e-mail."
+
+#: src/connections/integrations-band.tsx
+msgid "Grasp reaches only what you connect."
+msgstr "Grasp bereikt alleen wat je koppelt."
 
 #: src/settings/directory-reads.tsx
 msgid "Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says."
@@ -8982,6 +8986,10 @@ msgstr "Maak in {name} een service user aan die de basis- en werkgegevens van me
 msgid "In {team} from the directory."
 msgstr "In {team} via de directory."
 
+#: src/connections/recommended-apps.tsx
+msgid "In {teams} documents"
+msgstr "In documenten van {teams}"
+
 #: src/agents/new-agent-start.tsx
 msgid "In a chat"
 msgstr "In een chat"
@@ -9010,6 +9018,10 @@ msgstr "Bezig"
 #: src/brain/brain.ts
 msgid "In the brain"
 msgstr "In het Brein"
+
+#: src/connections/recommended-apps.tsx
+msgid "In the company's documents"
+msgstr "In de documenten van het bedrijf"
 
 #: src/agents/setup/schedule-step.tsx
 msgid "in the company's time zone"
@@ -11146,6 +11158,11 @@ msgstr "Heeft iemand nodig"
 msgid "Needs someone to sign in again"
 msgstr "Iemand moet opnieuw aanmelden"
 
+#: src/frame/part-words.tsx
+msgctxt "state of one app"
+msgid "Needs you"
+msgstr "Heeft je nodig"
+
 #: src/workflows/workflows-table.tsx
 msgctxt "workflow phase"
 msgid "Needs you"
@@ -12786,10 +12803,6 @@ msgctxt "open a link to another site"
 msgid "Open"
 msgstr "Openen"
 
-#: src/connections/integrations-header.tsx
-msgid "Open {lapsedApp}"
-msgstr "{lapsedApp} openen"
-
 #: src/frame/part-words.tsx
 msgid "Open {name}"
 msgstr "{name} openen"
@@ -13501,10 +13514,6 @@ msgstr "Kies een deel van de pagina. Escape om te stoppen."
 msgid "Pick a table"
 msgstr "Kies een tabel"
 
-#: src/connections/integrations-header.tsx
-msgid "Pick an app below to connect it. Grasp reaches only what you connect."
-msgstr "Kies hieronder een app om te koppelen. Grasp bereikt alleen wat je koppelt."
-
 #: src/agents/setup/schedule-step.tsx
 msgid "Pick at least one day."
 msgstr "Kies minstens één dag."
@@ -14144,6 +14153,11 @@ msgstr "Recente runs"
 #: src/agents/setup/apps-step.tsx
 #: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
+msgid "Recommended"
+msgstr "Aanbevolen"
+
+#: src/connections/recommended-apps.tsx
+msgctxt "apps to connect first"
 msgid "Recommended"
 msgstr "Aanbevolen"
 
@@ -16089,7 +16103,6 @@ msgstr "Aanmelden"
 #: src/connections/connection-list.tsx
 #: src/connections/integration-item.tsx
 #: src/connections/integrations-banner.tsx
-#: src/connections/integrations-header.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 msgid "Sign in again"
@@ -21157,6 +21170,10 @@ msgstr "Je hebt je teruggetrokken. Niets van wat je zei wordt nog gebruikt."
 #: src/interview/page.tsx
 msgid "You withdrew. What the Brain kept of it is being removed."
 msgstr "Je hebt je teruggetrokken. Wat het Brein ervan bewaarde, wordt nu verwijderd."
+
+#: src/connections/recommended-apps.tsx
+msgid "You work in {name}"
+msgstr "Jullie werken in {name}"
 
 #. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
 #: src/frame/part-words.tsx

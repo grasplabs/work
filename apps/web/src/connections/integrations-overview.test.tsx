@@ -21,13 +21,16 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { ItemGrid } from "../grasp/item/index.ts";
 import { IntegrationTile } from "./integration-tile.tsx";
-import { IntegrationsHeader } from "./integrations-header.tsx";
+import { IntegrationsBand } from "./integrations-band.tsx";
 import { integrationsOf } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
+import { RecommendedApps } from "./recommended-apps.tsx";
+import { nothingKnown, recommendedOf } from "./recommended.ts";
+import type { Known } from "./recommended.ts";
 
-// The Integrations overview as people meet it: the header card says how
-// many apps Grasp reaches and names the one that needs someone to sign in
-// again, with its fix; every app is the library's tile, saying where it
+// The Integrations overview as people meet it: the slim band says how
+// many apps are connected; Recommended names the apps to connect first,
+// each with its reason; every app is the library's tile, saying where it
 // stands, that opens it over the page.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -102,13 +105,15 @@ const Tiles = ({
 
 const opened = async (
   connections: ListedConnection[],
-  identity: { role: "admin" | "user"; staff: boolean; userId: string } = admin
+  identity: { role: "admin" | "user"; staff: boolean; userId: string } = admin,
+  known: Known = nothingKnown
 ) => {
   const integrations = integrationsOf(
     [
       entry("microsoft", "Microsoft 365"),
       entry("google", "Google Workspace"),
       entry("acme-crm", "Acme CRM", "composio"),
+      entry("ledger", "Ledger", "composio"),
     ],
     connections
   );
@@ -118,7 +123,15 @@ const opened = async (
     path: "/integrations/",
     component: () => (
       <>
-        <IntegrationsHeader identity={identity} integrations={integrations} />
+        <IntegrationsBand identity={identity} integrations={integrations} />
+        <RecommendedApps
+          identity={identity}
+          onOpen={() => {
+            // Opening is the tiles' own, tested below.
+          }}
+          open={undefined}
+          recommended={recommendedOf(integrations, known)}
+        />
         <Tiles identity={identity} integrations={integrations} />
       </>
     ),
@@ -174,32 +187,56 @@ describe("the Integrations overview", () => {
     document.body.replaceChildren();
   });
 
-  it("says how many apps Grasp reaches and opens the one to sign in to again", async () => {
-    const { host, router } = await opened([
+  it("sums up the connected apps: how many need someone", async () => {
+    const { host } = await opened([
       connection("microsoft", { scope: "personal", ownerUserId: "u1" }),
       connection("google", { status: "needs_reauth" }),
     ]);
-    expect(host.querySelector("h2")?.textContent).toBe("Grasp reaches 2 apps");
-    expect(host.textContent).toContain(
-      "Google Workspace needs someone to sign in again."
+    expect(host.querySelector("h2")?.textContent).toBe(
+      "Connect the apps your work runs on"
     );
-    const fix = [...host.querySelectorAll("a")].find(
-      (link) => link.textContent === "Sign in again"
+    expect(host.querySelector("section")?.textContent).toContain(
+      "1 app needs you"
     );
-    await expect(appAfter(router, fix)).resolves.toBe("native:google");
   });
 
-  it("has an admin connect a toolkit again from its panel, as it can't be signed in to again", async () => {
-    const { host, router } = await opened([
-      connection("acme-crm", { source: "composio", status: "needs_reauth" }),
+  it("recommends the apps to connect first, each with its one reason", async () => {
+    const { host } = await opened([], admin, {
+      suites: ["microsoft"],
+      tools: [
+        { name: "Ledger", teamIds: ["t-finance", "t-ops"] },
+        { name: "Spreadsheets", teamIds: ["t-finance"] },
+      ],
+      teams: [
+        { id: "t-finance", name: "Finance" },
+        { id: "t-ops", name: "Operations" },
+      ],
+      requests: [
+        { name: "Acme CRM", requestedBy: { userId: "u2", name: "Eva" } },
+        { name: "acme-crm", requestedBy: { userId: "u3", name: "Daan" } },
+        { name: "AcmeCRM", requestedBy: { userId: "u2", name: "Eva" } },
+      ],
+    });
+    const recommended = [
+      ...host.querySelectorAll<HTMLElement>('ul[aria-label="Recommended"] li'),
+    ];
+    expect(recommended.map((tile) => heard(tile))).toStrictEqual([
+      "Microsoft 365You work in Microsoft 365",
+      "LedgerIn Finance and Operations documents",
+      "Acme CRMAsked for by 2 people",
     ]);
     expect(host.textContent).toContain(
-      "Acme CRM stopped working. Connect it again"
+      "From your Microsoft 365, your documents and what people asked for."
     );
-    const open = [...host.querySelectorAll("a")].find(
-      (link) => link.textContent === "Open Acme CRM"
-    );
-    await expect(appAfter(router, open)).resolves.toBe("composio:acme-crm");
+  });
+
+  it("recommends nothing already connected, and shows no run without a reason", async () => {
+    const { host } = await opened([connection("microsoft")], admin, {
+      ...nothingKnown,
+      suites: ["microsoft"],
+    });
+    expect(host.querySelector('ul[aria-label="Recommended"]')).toBeNull();
+    expect(host.querySelector("section")?.textContent).toContain("1 connected");
   });
 
   it("tells someone who can't sign in again who can, with nothing to press", async () => {
@@ -213,24 +250,9 @@ describe("the Integrations overview", () => {
     expect(tile === undefined ? "" : heard(tile)).toBe(
       "Google WorkspaceWaiting for an admin"
     );
-    expect(host.textContent).toContain(
-      "An admin needs to connect Google Workspace again."
+    expect(host.querySelector("section")?.textContent).toContain(
+      "1 app waits for an admin"
     );
-    const fixes = [...host.querySelectorAll("a")].filter(
-      (link) => link.textContent === "Sign in again"
-    );
-    expect(fixes).toHaveLength(0);
-  });
-
-  it("asks for a first app while nothing is connected, with nothing to fix", async () => {
-    const { host } = await opened([]);
-    expect(host.querySelector("h2")?.textContent).toBe(
-      "Connect the apps your work runs on"
-    );
-    const fixes = [...host.querySelectorAll("a")].filter(
-      (link) => link.textContent === "Sign in again"
-    );
-    expect(fixes).toHaveLength(0);
   });
 
   it("opens an app over the page from its tile, saying where a connected one stands", async () => {
@@ -244,6 +266,7 @@ describe("the Integrations overview", () => {
       "Microsoft 3653 tools",
       "Google WorkspaceSign in again",
       "Acme CRM3 tools",
+      "Ledger3 tools",
     ]);
     await expect(
       appAfter(router, tiles[2]?.querySelector("button"))
