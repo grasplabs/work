@@ -1,17 +1,3 @@
-// Page column: a page's content in one column of a reading width, at the page's start or in its
-// middle (`align="center"`), as a settings page has it. A child that needs the page's whole width, a
-// table, stands in PageColumnWide.
-//
-//   <PageColumn measure="settings" align="center">
-//     <PageHeader size="md" title="General" />
-//     <SectionCard variant="grouped" flush density="compact" title="Interface">
-//       <SettingsRows controls="fit">…</SettingsRows>
-//     </SectionCard>
-//     <PageColumnWide><DataTable … /></PageColumnWide>
-//   </PageColumn>
-//
-// The column is the frame's width less what is past the measure, so it narrows with the page and
-// never runs wider. Every value is a token.
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
@@ -34,9 +20,9 @@ export interface PageColumnProps {
    */
   measure?: "column" | "settings" | "page";
   /**
-   * Where the column stands: at the page's start, or in its middle with the room past the measure
-   * shared on both sides (a settings page).
-   * @default "start"
+   * Where the column stands: in the page's middle with the room past the measure shared on both
+   * sides, so its margins are equal, or at the page's start.
+   * @default "center"
    */
   align?: "start" | "center";
   /** Layout only. */
@@ -84,11 +70,11 @@ const measures = {
   page: styles.measure_page,
 } as const;
 
-/** A page's content in one column of a reading width, at the page's start or in its middle. */
+/** A page's content in one column of a reading width, in the page's middle or at its start. */
 export const PageColumn = ({
   children,
   measure = "column",
-  align = "start",
+  align = "center",
   layout,
 }: PageColumnProps) => (
   <div

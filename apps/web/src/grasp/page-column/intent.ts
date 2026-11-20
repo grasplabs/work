@@ -2,7 +2,7 @@
 // server read this one file (src/intent/README.md). A line with `source` comes from that file, a
 // line with `proposed` is not yet confirmed, and any other restates the component's own page.
 export const intent = {
-  what: "A page's content in one column of a reading width at the page's start, with room for a child that runs the whole width.",
+  what: "A page's content in one column of a reading width in the page's middle, with room for a child that runs the whole width.",
   useWhen: [
     {
       when: "A settings page or a form page: a card per topic in a column about 720px wide, beside the nav.",
@@ -22,11 +22,11 @@ export const intent = {
   variants: [
     {
       name: 'measure="settings"',
-      when: 'A settings page: its title and groups of rows 640px wide (with align="center").',
+      when: "A settings page: its title and groups of rows 640px wide.",
     },
     {
-      name: 'align="center"',
-      when: "The column in the page's middle, the room past it shared on both sides: a settings page.",
+      name: 'align="start"',
+      when: "The column at the page's start, all the room past it at its end, where something beside the page already sets its left edge.",
     },
     {
       name: 'measure="page"',
