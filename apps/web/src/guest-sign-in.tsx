@@ -52,12 +52,14 @@ const post = async (path: string, body: unknown): Promise<string | null> => {
   }
 };
 
-/** Asking for a code by email, then signing in with it. */
-export const GuestCodeSignIn = () => {
+/**
+ * Asking for a code by email, then signing in with it; `onBack` goes back
+ * to the company's own ways of signing in.
+ */
+export const GuestCodeSignIn = ({ onBack }: { onBack: () => void }) => {
   const { i18n, t } = useLingui();
   const emailId = useId();
   const codeId = useId();
-  const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
@@ -95,19 +97,6 @@ export const GuestCodeSignIn = () => {
     setBusy(false);
     setFailure(say(refusal));
   };
-  if (!open) {
-    return (
-      <Button
-        className="w-full"
-        onClick={() => {
-          setOpen(true);
-        }}
-        variant="ghost"
-      >
-        <Trans>Invited as a guest? Sign in with a code</Trans>
-      </Button>
-    );
-  }
   return (
     <form
       className="flex w-full flex-col gap-3"
@@ -161,19 +150,21 @@ export const GuestCodeSignIn = () => {
       <Button disabled={busy} size="xl" type="submit">
         {sent ? t`Sign in` : t`Email me a code`}
       </Button>
-      {sent ? (
-        <Button
-          disabled={busy}
-          onClick={() => {
+      <Button
+        disabled={busy}
+        onClick={() => {
+          setFailure(undefined);
+          if (sent) {
             setCode("");
             setSent(false);
-            setFailure(undefined);
-          }}
-          variant="ghost"
-        >
-          <Trans>Ask for a new code</Trans>
-        </Button>
-      ) : null}
+          } else {
+            onBack();
+          }
+        }}
+        variant="ghost"
+      >
+        {sent ? t`Ask for a new code` : t`Back`}
+      </Button>
     </form>
   );
 };

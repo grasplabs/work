@@ -1,6 +1,8 @@
+import { Button } from "@grasp-os/ui/components/button";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { useState } from "react";
 import { z } from "zod";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
@@ -91,6 +93,7 @@ const SignIn = () => {
   const { error, returnTo } = Route.useSearch();
   const { core } = Route.useRouteContext();
   const { t } = useLingui();
+  const [byCode, setByCode] = useState(false);
   if (guest !== null) {
     return (
       <OnboardingFrame>
@@ -106,22 +109,38 @@ const SignIn = () => {
         <PageHeaderTitle>
           <Trans>Sign in to Grasp</Trans>
         </PageHeaderTitle>
-        {connected ? (
+        {connected && !byCode ? (
           <p className="text-muted-foreground text-balance">
             <Trans>Use your organization’s account to go on.</Trans>
           </p>
         ) : null}
       </div>
-      {connected ? (
+      {connected && byCode ? (
+        <GuestCodeSignIn
+          onBack={() => {
+            setByCode(false);
+          }}
+        />
+      ) : null}
+      {connected && !byCode ? (
         <>
           <SignInOptions
             error={error ?? (interviewOnly ? "not_open_yet" : undefined)}
             options={signInOptions}
             returnTo={returnTo}
           />
-          <GuestCodeSignIn />
+          <Button
+            className="w-full"
+            onClick={() => {
+              setByCode(true);
+            }}
+            variant="ghost"
+          >
+            <Trans>Invited as a guest? Sign in with a code</Trans>
+          </Button>
         </>
-      ) : (
+      ) : null}
+      {connected ? null : (
         <ErrorText>
           {t`Grasp can't be reached right now. Try again in a moment.`}
         </ErrorText>

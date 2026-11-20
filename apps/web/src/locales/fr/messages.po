@@ -3318,6 +3318,7 @@ msgstr "Disponible, via Composio"
 #: src/brain/back-button.tsx
 #: src/chat/asked-questions.tsx
 #: src/chat/composer-menu.tsx
+#: src/guest-sign-in.tsx
 #: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
@@ -7661,7 +7662,7 @@ msgstr "A ajouté un invité"
 msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 msgstr "Invité comme {role} par {inviter} le {date} · pas encore connecté"
 
-#: src/guest-sign-in.tsx
+#: src/routes/sign-in.tsx
 msgid "Invited as a guest? Sign in with a code"
 msgstr "Invité ? Connectez-vous avec un code"
 
