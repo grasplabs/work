@@ -1,7 +1,4 @@
-import {
-  capabilityErrors,
-  heldBindingSchema,
-} from "@grasp-os/shared/capability";
+import { heldBindingSchema } from "@grasp-os/shared/capability";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type {
@@ -290,7 +287,8 @@ export interface Kept {
 const storedOriginSchema = z.strictObject({
   mode: z.enum(["interactive", "workflow"]),
   appVersion: z.int().positive().nullable(),
-  permissionId: z.string().min(1),
+  /** Null for a read that needs no grant, kept once its person confirmed it. */
+  permissionId: z.string().min(1).nullable(),
   context: workContextSchema,
   /**
    * Recovering it needs its person: its context had read restricted data,
@@ -306,26 +304,13 @@ const storedOriginSchema = z.strictObject({
   binding: heldBindingSchema.optional(),
 });
 
-/**
- * The grant `claims` were signed under. Only a side effect is kept under
- * a key, and a capability with no grant (a read of its person's own
- * connection) is always read-only (`requireAllowedEffect`), so one never
- * gets here: refused as invalid if it does.
- */
-const grantOf = (claims: CapabilityClaims): string => {
-  if (claims.origin.permissionId === null) {
-    throw capabilityErrors.create("capability.invalid");
-  }
-  return claims.origin.permissionId;
-};
-
 /** What a call whose capability says `claims` keeps under its key. */
 export const keptOf = (claims: CapabilityClaims, input: Json): Kept => ({
   input: claims.sensitive ? null : JSON.stringify(input),
   origin: JSON.stringify({
     mode: claims.authority.mode,
     appVersion: claims.authority.appVersion ?? null,
-    permissionId: grantOf(claims),
+    permissionId: claims.origin.permissionId,
     context: claims.origin.context,
     restricted: claims.restricted,
     ...(claims.origin.binding === undefined
@@ -495,15 +480,18 @@ export const effectKeyHashOfRow = async (row: EffectScope): Promise<string> =>
 
 /**
  * Where a side effect's result is kept under its idempotency key, for a
- * call that has one. Work that may only read (`readOnly`) has no side
- * effects, so it has no stored results of one either: none is replayed to
- * it, whatever key it names.
+ * call that has one. Work that may only read (`readOnly`) has no stored
+ * results of a side effect: none is replayed to it, whatever key it
+ * names. Except the read its person confirmed (`decision`, checked
+ * against the held action exactly): a read held because of where it was
+ * asked (policy.ts `hasSideEffect`), whose answer is kept under the key
+ * it was held with, for its caller to read (`heldOutcome`).
  */
 export const scopeOf = (
-  { authority, resource, idempotencyKey, readOnly }: CapabilityClaims,
+  { authority, resource, idempotencyKey, readOnly, decision }: CapabilityClaims,
   call: { connectionId: string; action: string }
 ): IdempotencyScope | undefined =>
-  idempotencyKey === null || readOnly
+  idempotencyKey === null || (readOnly && decision === undefined)
     ? undefined
     : {
         subject: authority.subject,

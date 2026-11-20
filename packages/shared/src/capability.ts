@@ -57,9 +57,9 @@ export type HeldBinding = z.infer<typeof heldBindingSchema>;
 /** Where a call a person is there for comes from (`origin`). */
 const originSchema = z.strictObject({
   /**
-   * The grant the call was allowed under; null for a read of its person's
-   * own connection in their own chat, which needs none (core's
-   * own-connection-reads.ts), and is always `readOnly`.
+   * The grant the call was allowed under; null for a read in its
+   * person's own chat that needs none (core's ungranted-reads.ts), which
+   * is always `readOnly`.
    */
   permissionId: permissionIdSchema.nullable(),
   context: workContextSchema,
@@ -110,8 +110,10 @@ export const capabilityClaimsSchema = z.strictObject({
   idempotencyKey: identifierSchema.nullable(),
   /**
    * The chat, App or run making the call has read restricted data (threat
-   * model R12, Q12): connect lets it read, as a tool declares, and holds
-   * every side effect for the person. Only the capability says it.
+   * model R12, Q12), or the chat handed over something only its person
+   * may read (core's private-reads.ts, GRA-1928): connect lets it read, as
+   * a tool declares, and holds every side effect for the person, a read
+   * whose input leaves for a third party too. Only the capability says it.
    */
   restricted: z.boolean().default(false),
   /**

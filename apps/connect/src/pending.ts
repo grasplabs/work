@@ -601,12 +601,9 @@ export const hold = async (
   }
 ): Promise<PendingReference> => {
   const { authority, origin } = claims;
-  // A capability with no grant (a read of its person's own connection) is
-  // always read-only, so never held: refused as invalid if one gets here.
+  // Null for a read with no grant, held because of where it was asked
+  // (`restricted`): core decides it by the same rule as the read.
   const { permissionId } = origin;
-  if (permissionId === null) {
-    throw capabilityErrors.create("capability.invalid");
-  }
   const db = drizzle(env.DB);
   const { subject } = authority;
   const subjectType = subject.type;
