@@ -146,10 +146,10 @@ describe("Settings › Workspace › Grasp staff access", () => {
     await shown(session);
     expect(text()).toContain("Onboarding only");
 
-    await press("End staff access now");
+    await press("End now");
     await press("Cancel");
     const afterCancel = [...asked];
-    await press("End staff access now");
+    await press("End now");
     await press("End access");
 
     expect({ afterCancel, asked }).toStrictEqual({
@@ -159,7 +159,7 @@ describe("Settings › Workspace › Grasp staff access", () => {
     // Ended, the card goes: nobody from Grasp can sign in.
     expect({
       card: text().includes("Grasp staff access"),
-      end: button("End staff access now"),
+      end: button("End now"),
     }).toStrictEqual({ card: false, end: undefined });
   });
 
@@ -170,7 +170,7 @@ describe("Settings › Workspace › Grasp staff access", () => {
     );
     await shown(session);
 
-    await press("End staff access now");
+    await press("End now");
     await press("End access");
 
     expect({
@@ -188,7 +188,7 @@ describe("Settings › Workspace › Grasp staff access", () => {
 
     expect({
       card: text().includes("Grasp staff access"),
-      end: button("End staff access now"),
+      end: button("End now"),
     }).toStrictEqual({ card: false, end: undefined });
   });
 
@@ -198,7 +198,7 @@ describe("Settings › Workspace › Grasp staff access", () => {
 
     expect({
       reach: text().includes("Full access"),
-      end: button("End staff access now"),
+      end: button("End now"),
     }).toStrictEqual({ reach: true, end: undefined });
   });
 });

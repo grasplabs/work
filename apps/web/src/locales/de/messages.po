@@ -6432,8 +6432,8 @@ msgid "End Grasp staff access now?"
 msgstr "Zugriff der Grasp-Mitarbeitenden jetzt beenden?"
 
 #: src/settings/staff-access.tsx
-msgid "End staff access now"
-msgstr "Mitarbeiterzugriff jetzt beenden"
+msgid "End now"
+msgstr "Jetzt beenden"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -7858,8 +7858,8 @@ msgid "Grasp's own rules always hold over these."
 msgstr "Die eigenen Regeln von Grasp gehen immer vor."
 
 #: src/settings/staff-access.tsx
-msgid "Grasp's team can help until then, unless you end it"
-msgstr "Bis dahin kann das Grasp-Team helfen, sofern Sie den Zugang nicht beenden"
+msgid "Grasp's team can help here until then"
+msgstr "Bis dahin kann das Grasp-Team hier helfen"
 
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
