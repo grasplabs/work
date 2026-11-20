@@ -66,8 +66,11 @@ const styles = stylex.create({
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
     alignItems: "start",
+    columnGap: grasp.space6,
     minWidth: 0,
   },
+  // On a phone the line in hand takes the page's place; closing it brings the page back.
+  pageBeside: { display: { default: "none", [media.fromSidebar]: "block" } },
   // Room for the line beside the page only while one is open.
   splitOpen: {
     gridTemplateColumns: {
@@ -416,14 +419,16 @@ export const ActivityPage = () => {
           inHand !== undefined && styles.splitOpen
         )}
       >
-        <PageBrainActivity
-          description={description}
-          fresh={freshLines}
-          groups={groups}
-          onOpen={setOpen}
-          waiting={waiting}
-          words={words}
-        />
+        <div {...stylex.props(inHand !== undefined && styles.pageBeside)}>
+          <PageBrainActivity
+            description={description}
+            fresh={freshLines}
+            groups={groups}
+            onOpen={setOpen}
+            waiting={waiting}
+            words={words}
+          />
+        </div>
         {inHand === undefined ? null : (
           <div {...stylex.props(styles.inspector)}>
             <BrainActivityInspector
