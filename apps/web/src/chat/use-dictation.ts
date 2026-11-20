@@ -172,14 +172,7 @@ export const useDictation = (
         // Told: now it asks for the microphone, as it says.
         setRun((was) => (was === undefined ? was : { ...was, telling: false }));
       }
-      void (async () => {
-        await microphone.start();
-        // Put away, or stopped by a problem, while the browser still asked:
-        // the microphone it gave goes at once. A newer dictation keeps its own.
-        if (source.current === null) {
-          microphone.stop();
-        }
-      })();
+      void microphone.start();
       chosen.start({
         ready: () => {
           if (!current()) {
