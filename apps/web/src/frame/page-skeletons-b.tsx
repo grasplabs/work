@@ -11,6 +11,7 @@ import { PageSkeletonCards } from "../grasp/blocks/page-skeleton-cards/page-skel
 import { PageSkeletonList } from "../grasp/blocks/page-skeleton-list/page-skeleton-list.tsx";
 import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { PageSkeletonToolbar } from "../grasp/blocks/page-skeleton-toolbar/page-skeleton-toolbar.tsx";
+import { PageColumn } from "../grasp/page-column/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { SiteHeader } from "./site-header.tsx";
@@ -37,27 +38,6 @@ const styles = stylex.create({
   },
   // A pane of its own that scrolls, as the Brain's pages and settings have.
   pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
-  // The Brain's column for its pages (brain-home.tsx's `blockStyles.column`,
-  // memories-page.tsx, sources-page.tsx).
-  brainColumn: {
-    boxSizing: "border-box",
-    width: "100%",
-    maxWidth: grasp.pageMeasure,
-    marginInline: "auto",
-    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
-  },
-  // The Brain's activity is narrower (the library's PageColumn, brain/activity-page.tsx).
-  logColumn: {
-    boxSizing: "border-box",
-    width: "100%",
-    maxWidth: grasp.pageColumnMeasure,
-    marginInline: "auto",
-    paddingInline: {
-      default: grasp.space4,
-      [media.fromPhone]: grasp.space6,
-      [media.fromTablet]: grasp.space12,
-    },
-  },
   // A note's page, as the route lays out the library's page-brain: its inset, then page-brain's
   // reading column with its gutter's room before it on a wider window.
   brainPagePane: {
@@ -186,10 +166,10 @@ const BrainBody = ({ page }: { page: BrainPage }) => {
   if (page === "map") {
     return null;
   }
-  const column = page === "activity" ? styles.logColumn : styles.brainColumn;
   return (
     <div {...stylex.props(styles.pane)}>
-      <div {...stylex.props(column)}>
+      {/* Every Brain page's column: the library's, as wide as a page. */}
+      <PageColumn measure="page">
         {page === "activity" ? (
           // What came in since the last look, as a list of rows.
           <PageSkeletonList descriptionLines={1} rows={8} />
@@ -197,7 +177,7 @@ const BrainBody = ({ page }: { page: BrainPage }) => {
         {page === "memory" || page === "opportunities" ? (
           // Its kinds of record as tabs under the title, its records as Items.
           <PageSkeletonList
-            descriptionLines={0}
+            descriptionLines={1}
             rows={6}
             toolbar={<PageSkeletonToolbar variant="tabs" />}
             variant="items"
@@ -220,7 +200,7 @@ const BrainBody = ({ page }: { page: BrainPage }) => {
             descriptionLines={0}
           />
         ) : null}
-      </div>
+      </PageColumn>
     </div>
   );
 };

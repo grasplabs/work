@@ -220,24 +220,13 @@ const styles = stylex.create({
     marginTop: grasp.space2,
   },
   count: { flexShrink: 0, fontVariantNumeric: "tabular-nums" },
-  column: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space8,
-    boxSizing: "border-box",
-    width: "100%",
-    maxWidth: grasp.pageMeasure,
-    marginInline: "auto",
-    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
-  },
 });
 
-/** The grid of blocks, a block's name row, and the page's column, for a part's own page. */
+/** The grid of blocks and a block's name row, for a part's own page. */
 export const blockStyles = {
   nameRow: styles.nameRow,
   count: styles.count,
   blocks: styles.blocks,
-  column: styles.column,
 } as const;
 
 /** A pale field with a dashed grid, the drawing in the middle. A note's block uses a shorter one. */

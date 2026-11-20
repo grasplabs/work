@@ -52,10 +52,11 @@ import {
   ItemGroup,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
-import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { skillOf, useStartFrom } from "./opportunity-drafts.ts";
@@ -107,19 +108,8 @@ The steps.
 `;
 
 const styles = stylex.create({
-  // A page of the brain as its memory is: its own pane that scrolls, the
-  // column in its middle, with room at the foot for the chat.
+  // A page of the brain: its own pane that scrolls, round the library's page column.
   pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
-  column: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space8,
-    boxSizing: "border-box",
-    width: "100%",
-    maxWidth: grasp.pageMeasure,
-    marginInline: "auto",
-    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
-  },
   section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
   stack: { display: "flex", flexDirection: "column", gap: grasp.space2 },
   unread: {
@@ -1137,17 +1127,13 @@ export const SkillsPage = ({
   const editorBusy = busy || reading !== null;
 
   return (
-    // A page of the brain: the title in the serif, in the brain's column,
-    // with room at the foot for the chat.
+    // A page of the brain: the title in the serif, in the library's page column.
     <div {...stylex.props(styles.pane)}>
-      <div {...stylex.props(styles.column)}>
+      <PageColumn measure="page">
         <PageHeader
           description={
             <Trans>
-              How things are done here. Your own skills are used in your own
-              chats alone. Sharing one with the company or one of your teams
-              waits for an admin, and from then on the agents of everyone in it
-              use it. A skill is guidance: it never grants access.
+              How things are done here: guidance that never grants access.
             </Trans>
           }
           title={<Trans context="the Brain's skills page">Skills</Trans>}
@@ -1332,7 +1318,7 @@ export const SkillsPage = ({
             });
           }}
         />
-      </div>
+      </PageColumn>
     </div>
   );
 };

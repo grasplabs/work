@@ -38,6 +38,7 @@ import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import {
   formatBytes,
+  formatDate,
   formatDateTime,
   formatDay,
   formatList,
@@ -88,6 +89,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { PanelSection } from "../grasp/panel-section/index.ts";
 import { RowList } from "../grasp/row-list/index.ts";
@@ -266,19 +268,8 @@ interface Row {
 }
 
 const styles = stylex.create({
-  // A page of the brain as its memory is: its own pane that scrolls, the
-  // column in its middle, with room at the foot for the chat.
+  // A page of the brain: its own pane that scrolls, round the library's page column.
   pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
-  column: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space8,
-    boxSizing: "border-box",
-    width: "100%",
-    maxWidth: grasp.pageMeasure,
-    marginInline: "auto",
-    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
-  },
   section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
   stack: { display: "flex", flexDirection: "column", gap: grasp.space4 },
   list: { display: "flex", flexDirection: "column", gap: grasp.space3 },
@@ -1630,9 +1621,7 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
       </Heading>
       <Text size="sm" tone="muted">
         <Trans>
-          Uploads shared with a team or everyone, those their uploader removed
-          among them. Only an admin can erase one, for everyone and for good.
-          Its text isn&apos;t shown here.
+          Uploads shared with a team or everyone, which only an admin can erase.
         </Trans>
       </Text>
       {listed.state === "refused" ? (
@@ -1648,13 +1637,11 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
           {listed.data.uploads.map((upload) => {
             const { uploaderName, teamName, readers } = upload;
             // Named only for an admin who may read it; else told apart by
-            // its team, uploader and the minute it was uploaded.
+            // its team, uploader and the day it was uploaded.
             const { name } = upload;
-            const uploaded = formatDateTime(upload.uploadedAt);
+            const uploaded = formatDate(upload.uploadedAt);
             const removed =
-              upload.removedAt === null
-                ? null
-                : formatDateTime(upload.removedAt);
+              upload.removedAt === null ? null : formatDate(upload.removedAt);
             let readBy = t`Everyone`;
             if (readers.kind === "team") {
               readBy =
@@ -1960,7 +1947,7 @@ export const SourcesPage = ({
             ]
               .filter(given)
               .join(" · "),
-            when: formatDay(each.addedAt),
+            when: formatDate(each.addedAt),
           },
           open: () => {
             open(each.source);
@@ -1980,10 +1967,9 @@ export const SourcesPage = ({
   const rowOf = new Map(rows.map((row) => [row.item, row]));
 
   return (
-    // A page of the brain: the title in the serif, in the brain's column,
-    // with room at the foot for the chat.
+    // A page of the brain: the title in the serif, in the library's page column.
     <div {...stylex.props(styles.pane)}>
-      <div {...stylex.props(styles.column)}>
+      <PageColumn measure="page">
         <PageHeader
           actions={
             <UploadDialog
@@ -2111,7 +2097,7 @@ export const SourcesPage = ({
           <SharedConnectionReads connected={connectedList} />
         )}
         <OwnExportSection />
-      </div>
+      </PageColumn>
     </div>
   );
 };

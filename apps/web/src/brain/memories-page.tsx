@@ -23,7 +23,7 @@ import type { ReactNode } from "react";
 
 import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+import { formatDate, formatDateTime } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Card } from "../grasp/card/index.ts";
@@ -51,6 +51,7 @@ import {
   ItemGroup,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import {
   Select,
@@ -397,19 +398,8 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
 };
 
 const styles = stylex.create({
-  // A page of the brain as its memory is: its own pane that scrolls, the
-  // column in its middle, with room at the foot for the chat.
+  // A page of the brain: its own pane that scrolls, round the library's page column.
   pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
-  column: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space8,
-    boxSizing: "border-box",
-    width: "100%",
-    maxWidth: grasp.pageMeasure,
-    marginInline: "auto",
-    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
-  },
   section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
   stack: { display: "flex", flexDirection: "column", gap: grasp.space3 },
   form: { display: "flex", flexDirection: "column", gap: grasp.space4 },
@@ -1011,7 +1001,7 @@ const OnlyYou = () => {
 /** A memory's marks: whose it is, disagreement, confirmation, origin and its dates. */
 const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
   const { endedAt, confirmed } = memory;
-  const learned = formatDateTime(memory.learnedAt);
+  const learned = formatDate(memory.learnedAt);
   const ended = endedAt === null ? null : formatDateTime(endedAt);
   const current = endedAt === null;
   return (
@@ -1729,25 +1719,17 @@ export const MemoriesPage = ({
   const entitiesHeading = useId();
   return (
     <OwnEntity value={own}>
-      {/* A page of the brain: the title in the serif, in the brain's
-          column, with room at the foot for the chat. */}
+      {/* A page of the brain: the title in the serif, in the library's page column. */}
       <div {...stylex.props(styles.pane)}>
-        <div {...stylex.props(styles.column)}>
+        <PageColumn measure="page">
           <PageHeader
             description={
               <Trans>
-                What the Brain remembers that you may read, where each memory
-                came from, and where sources disagree.
+                What the Brain remembers, and where sources disagree.
               </Trans>
             }
             title={<Trans context="the Brain's memories page">Memories</Trans>}
           />
-          <Text size="sm" tone="muted">
-            <Trans>
-              Those marked Only you are yours alone: nobody else sees them,
-              admins included.
-            </Trans>
-          </Text>
           <section
             aria-labelledby={contestedHeading}
             {...stylex.props(styles.section)}
@@ -1840,7 +1822,7 @@ export const MemoriesPage = ({
               teams={teams}
             />
           </section>
-        </div>
+        </PageColumn>
         {correcting === undefined ? null : (
           <CorrectDialog
             key={correcting.opening}

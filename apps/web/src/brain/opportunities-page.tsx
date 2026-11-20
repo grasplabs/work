@@ -33,11 +33,12 @@ import {
   ItemGroup,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { StatsGrid } from "../grasp/stats/index.ts";
 import { Tag } from "../grasp/tag/index.ts";
 import { Text } from "../grasp/text/index.ts";
-import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 import { draftOf, titleOf } from "./opportunity-drafts.ts";
 
@@ -93,19 +94,8 @@ const acting = async (
 };
 
 const styles = stylex.create({
-  // A page of the brain as its memory is: its own pane that scrolls, the
-  // column in its middle, with room at the foot for the chat.
+  // A page of the brain: its own pane that scrolls, round the library's page column.
   pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
-  column: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space8,
-    boxSizing: "border-box",
-    width: "100%",
-    maxWidth: grasp.pageMeasure,
-    marginInline: "auto",
-    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
-  },
   section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
   card: { display: "flex", flexDirection: "column", gap: grasp.space4 },
   head: {
@@ -561,18 +551,11 @@ export const OpportunitiesPage = () => {
   const hiddenTitle = hidden === undefined ? "" : titleOf(hidden, i18n.locale);
 
   return (
-    // A page of the brain: the title in the serif, in the brain's column,
-    // with room at the foot for the chat.
+    // A page of the brain: the title in the serif, in the library's page column.
     <div {...stylex.props(styles.pane)}>
-      <div {...stylex.props(styles.column)}>
+      <PageColumn measure="page">
         <PageHeader
-          description={
-            <Trans>
-              What Grasp could automate or improve, from how your teams describe
-              their work and how five or more of a team were seen doing it, the
-              largest first. One hidden comes back when its evidence changes.
-            </Trans>
-          }
+          description={<Trans>What Grasp could automate, largest first.</Trans>}
           title={
             <Trans context="the Brain's opportunities page">
               Opportunities
@@ -645,7 +628,7 @@ export const OpportunitiesPage = () => {
             }}
           />
         ) : null}
-      </div>
+      </PageColumn>
     </div>
   );
 };

@@ -8825,8 +8825,8 @@ msgid "How they would notice: not said yet."
 msgstr "Comment ils le remarqueraient : pas encore précisé."
 
 #: src/brain/skills-page.tsx
-msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company or one of your teams waits for an admin, and from then on the agents of everyone in it use it. A skill is guidance: it never grants access."
-msgstr "Comment on fait les choses ici. Vos propres skills ne servent que dans vos propres chats. Partager un skill avec l'entreprise ou l'une de vos équipes attend un administrateur, puis les agents de tous ceux qui en font partie l'utilisent. Un skill est un guide : il ne donne jamais d'accès."
+msgid "How things are done here: guidance that never grants access."
+msgstr "Comment on fait les choses ici : des guides qui ne donnent jamais d'accès."
 
 #: src/apps/app-settings.tsx
 msgid "How this App is built and what to keep in mind when changing it."
@@ -18838,10 +18838,6 @@ msgstr "Cette version, en lecture seule"
 msgid "This week"
 msgstr "Cette semaine"
 
-#: src/brain/memories-page.tsx
-msgid "Those marked Only you are yours alone: nobody else sees them, admins included."
-msgstr "Ce qui est marqué Vous seul n'appartient qu'à vous : personne d'autre ne le voit, pas même les administrateurs."
-
 #: src/agents/new-agent.tsx
 msgid "Three circling"
 msgstr "Trois en cercle"
@@ -19436,8 +19432,8 @@ msgid "Uploading…"
 msgstr "Import en cours…"
 
 #: src/brain/sources-page.tsx
-msgid "Uploads shared with a team or everyone, those their uploader removed among them. Only an admin can erase one, for everyone and for good. Its text isn't shown here."
-msgstr "Fichiers importés partagés avec une équipe ou tout le monde, y compris ceux que la personne qui les a importés a retirés. Seul un administrateur peut en effacer un, pour tous et définitivement. Son texte n'est pas affiché ici."
+msgid "Uploads shared with a team or everyone, which only an admin can erase."
+msgstr "Fichiers importés partagés avec une équipe ou tout le monde, que seul un administrateur peut effacer."
 
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"
@@ -20088,8 +20084,8 @@ msgid "What gets in the way"
 msgstr "Ce qui gêne"
 
 #: src/brain/opportunities-page.tsx
-msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."
-msgstr "Ce que Grasp pourrait automatiser ou améliorer, d'après la façon dont vos équipes décrivent leur travail et dont cinq personnes ou plus d'une équipe ont été vues le faire, le plus important d'abord. Une opportunité masquée revient quand ses éléments changent."
+msgid "What Grasp could automate, largest first."
+msgstr "Ce que Grasp pourrait automatiser, le plus important d'abord."
 
 #: src/chat/thread.tsx
 msgid "What Grasp did"
@@ -20339,8 +20335,8 @@ msgid "What the Brain remembers"
 msgstr "Ce que retient le Brain"
 
 #: src/brain/memories-page.tsx
-msgid "What the Brain remembers that you may read, where each memory came from, and where sources disagree."
-msgstr "Ce que retient le Brain que vous pouvez lire, d’où vient chaque souvenir et où les sources divergent."
+msgid "What the Brain remembers, and where sources disagree."
+msgstr "Ce que retient le Brain, et où les sources divergent."
 
 #: src/workflows/item-test.tsx
 msgid "What the calls answer isn't JSON."
