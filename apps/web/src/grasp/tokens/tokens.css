@@ -625,7 +625,7 @@
     oklch(0.965 0.014 150 / 0.3)
   );
   /* The soft ring around the menu's mint dot. */
-  --grasp-frame-halo: oklch(0.8005 0.1625 165.25 / 0.22);
+  --grasp-frame-halo: oklch(0.8005 0.1625 165.25 / 0.14);
   /* The shade over the page behind the search dialog. */
   --grasp-frame-scrim: oklch(0.173 0.028 169.36 / 0.24);
   /* Fields: fields. */
@@ -638,7 +638,7 @@
   );
   /* The words of a read-only field: the muted step, still easy to read and copy. Disabled fields are weaker again (dim). */
   --grasp-field-ink-read: var(--grasp-muted);
-  /* A field at rest: its hairline drawn inside, which adds no size, and its lift. A field focused by the keyboard keeps it, and the focus ring stands round it. */
+  /* A field at rest: its hairline drawn inside, which adds no size, and its lift. A field in focus takes field-focus instead. */
   --grasp-field-rest:
     inset 0 0 0 1px var(--grasp-field-edge), var(--grasp-field-lift);
   /* A wrong field: its hairline tinted red, drawn inside like field-rest, so it is exactly as big as the fields beside it. */
@@ -658,15 +658,31 @@
   );
   /* The hairline of a field whose value is wrong: the danger tone itself, 3:1 or more on every ground, drawn inside so the field is no bigger. Its message says what is wrong, never the colour alone. */
   --grasp-field-edge-invalid: var(--grasp-danger);
-  /* A field focused by a pointer press: its hairline and lift stay, and a soft shadow fades out round it. Focused by the keyboard it keeps field-rest and takes the focus ring (focus.field). */
+  /* The hairline of a field you are typing in: one step darker than field-edge, a quiet grey-green, never the ink. 3:1 or more on the page, the field's fill and every ground round it, so the keyboard finds it (2.4.7), and plainly apart from the resting hairline. */
+  --grasp-field-edge-focus: light-dark(
+    oklch(0.62 0.03 165),
+    oklch(0.6 0.025 158)
+  );
+  /* The faint halo round a field in focus: the brand's mint at a low alpha, 3px wide. It says which field is live; the edge carries the contrast. */
+  --grasp-field-focus-halo: light-dark(
+    oklch(0.8005 0.1625 165.25 / 0.14),
+    oklch(0.8 0.15 165 / 0.16)
+  );
+  /* The halo round a wrong field in focus: the same faint 3px, tinted danger. */
+  --grasp-field-focus-halo-invalid: light-dark(
+    oklch(0.52 0.175 28 / 0.1),
+    oklch(0.7 0.16 28 / 0.22)
+  );
+  /* A field in focus, by a press or the keyboard alike: its hairline a step darker (field-edge-focus) and a faint mint halo round it. No ring and no dark fill: the caret says where the words go (Ruben, 20 November). */
   --grasp-field-focus:
-    inset 0 0 0 1px var(--grasp-field-edge), var(--grasp-field-lift),
-    0 0 10px 1px var(--grasp-ring-halo), 0 2px 6px var(--grasp-ring-halo);
-  /* A wrong field in focus: the same, tinted red, so it stays wrong while you type. */
+    inset 0 0 0 1px var(--grasp-field-edge-focus), var(--grasp-field-lift),
+    0 0 0 3px var(--grasp-field-focus-halo);
+  /* A read-only field in focus: only the darker hairline, no halo and no lift, so it never looks open for typing. */
+  --grasp-field-focus-read: inset 0 0 0 1px var(--grasp-field-edge-focus);
+  /* A wrong field in focus: its red hairline stays and the faint halo turns red, so it stays wrong while you type. */
   --grasp-field-focus-invalid:
     inset 0 0 0 1px var(--grasp-field-edge-invalid), var(--grasp-field-lift),
-    0 0 10px 1px var(--grasp-ring-halo-invalid),
-    0 2px 6px var(--grasp-ring-halo-invalid);
+    0 0 0 3px var(--grasp-field-focus-halo-invalid);
   /* The size of the typed words in a field on a phone or a touch screen (media.typing): under 16px, Safari zooms the page in on focus. */
   --grasp-field-text-touch: 16px;
   /* The breath of lift under a field, beneath its hairline: lift-low's shadow without its edge. */
@@ -1791,6 +1807,8 @@
   --grasp-page-column-measure: 45rem;
   /* The width of a wide page's centred column, such as a table or a board. */
   --grasp-page-measure-wide: 80rem;
+  /* Between the parts of a page, top to bottom: its header, its toolbar and its content, as a page lays them and its skeleton waits in them. */
+  --grasp-page-gap: var(--grasp-space-6);
   /* Carousel: carousel. */
   /* The room between two slides. */
   --grasp-carousel-gap: var(--grasp-space-4);
@@ -2236,6 +2254,8 @@
   --grasp-chat-start-width: 48rem;
   /* The widest a chat's column runs, its thread and the box under it: as wide as where the chat started, so the box keeps its width from the first question on. */
   --grasp-chat-width: var(--grasp-chat-start-width);
+  /* The room inside a chat's column at each side: the column is chat-width, so its thread and box stand chat-width less twice this (44rem), as the product's chat page lays them. */
+  --grasp-chat-inline: var(--grasp-space-8);
   /* Sign in: sign in. */
   /* The sign-in page's ground under the glass door, and all it shows where the door cannot draw: night in both themes, as the website's login. */
   --grasp-sign-in-night: var(--grasp-light-night);

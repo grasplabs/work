@@ -40,6 +40,7 @@ import type {
 import { createContext, useContext, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
+import { fieldBoxStyles, isInvalid } from "../field-box/field-box";
 import { focus } from "../focus/focus";
 import { ChevronDown, Icon, Tick } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
@@ -244,7 +245,7 @@ const COARSE = media.coarse;
 const FORCED = media.forced;
 const REDUCED = media.reduced;
 
-const styles = stylex.create({
+const ownStyles = stylex.create({
   // Closed: Input's box, words at the start and the chevron at the end.
   trigger: {
     [iconVars.size]: grasp.iconSm,
@@ -282,39 +283,11 @@ const styles = stylex.create({
     touchAction: "manipulation",
     paddingInlineStart: grasp.space3,
     paddingInlineEnd: grasp.space2,
-    // Focus is the edge itself (field-focus, as in Input) and focus.field (src/focus). A pointer
-    // opens the list, so the edge lights for the keyboard only.
+    // Focus is the edge itself (field-focus, as in Input: a step darker and a faint halo, no ring),
+    // with focus.field (src/focus) for forced colours.
     transitionProperty: "box-shadow, background-color",
     transitionDuration: grasp.durationHover,
     transitionTimingFunction: grasp.ease,
-  },
-  sm: {
-    minHeight: grasp.controlSm,
-    paddingBlock: `calc((${grasp.controlSm} - ${grasp.textSmLine}) / 2)`,
-    borderRadius: `min(${grasp.corner}, calc(${grasp.controlSm} / 2))`,
-  },
-  md: {
-    minHeight: grasp.controlMd,
-    paddingBlock: `calc((${grasp.controlMd} - ${grasp.textSmLine}) / 2)`,
-    borderRadius: `min(${grasp.corner}, calc(${grasp.controlMd} / 2))`,
-  },
-  // The chevron keeps one inset at every size, as the words do.
-  lg: {
-    minHeight: grasp.controlLg,
-    paddingBlock: `calc((${grasp.controlLg} - ${grasp.textSmLine}) / 2)`,
-    borderRadius: `min(${grasp.corner}, calc(${grasp.controlLg} / 2))`,
-  },
-  // Can be opened: the hairline deepens under a pointer.
-  live: {
-    boxShadow: {
-      default: `inset 0 0 0 1px ${grasp.fieldEdge}, ${grasp.fieldLift}`,
-      // Hover never covers the focus edge: the pointer often rests on a field while you type.
-      ":hover:not(:focus-visible)": {
-        default: null,
-        [HOVER]: `inset 0 0 0 1px ${grasp.fieldEdgeHover}, ${grasp.fieldLift}`,
-      },
-      ":focus-visible": grasp.fieldFocus,
-    },
   },
   // Open: the hairline stays at its hover strength while the list is out.
   open: {
@@ -326,44 +299,10 @@ const styles = stylex.create({
     color: grasp.fieldInkRead,
     boxShadow: {
       default: `inset 0 0 0 1px ${grasp.fieldEdge}`,
-      ":focus-visible": grasp.fieldFocus,
+      ":focus-visible": grasp.fieldFocusRead,
     },
     cursor: "default",
   },
-  disabled: {
-    opacity: grasp.dim,
-    boxShadow: `inset 0 0 0 1px ${grasp.fieldEdge}`,
-    cursor: "not-allowed",
-  },
-  invalid: {
-    boxShadow: {
-      default: grasp.fieldInvalid,
-      ":focus-visible": grasp.fieldFocusInvalid,
-    },
-    // In forced colours the danger tint is dropped: a wrong field's edge turns dashed instead, the
-    // same 1px, so it is no bigger than the fields beside it.
-    borderStyle: { default: "solid", [FORCED]: "dashed" },
-  },
-
-  // A finger needs 44px: an invisible area inside the control reaches past its edges.
-  target: {
-    position: "absolute",
-    insetInline: 0,
-    insetBlock: 0,
-  },
-  targetSm: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${grasp.controlSm} - ${grasp.tap}) / 2)`,
-    },
-  },
-  targetMd: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${grasp.controlMd} - ${grasp.tap}) / 2)`,
-    },
-  },
-  targetLg: { insetBlock: 0 },
 
   // Text: the words and a small chevron, no box: as wide as its words, a ghost button's hover and
   // press, and the ring of every control for the keyboard. A wrong one keeps its danger edge.
@@ -627,6 +566,9 @@ const styles = stylex.create({
   },
 });
 
+// Closed, Input's box (src/field-box): its sizes, its target and its states.
+const styles = { ...ownStyles, ...fieldBoxStyles };
+
 /** The popup and its items, shared with parts that open the same list (Filter builder's segments). */
 export const selectPopupStyles = styles;
 
@@ -672,8 +614,6 @@ const variantLook = (variant: SelectVariant, state: SelectTriggerState) =>
       ]
     : [];
 const variantFocus = { field: focus.field, text: focus.ring } as const;
-
-const isInvalid = (value: unknown) => value === true || value === "true";
 
 const className = (...parts: (stylex.StyleXStyles | false)[]) =>
   stylex.props(...parts).className;

@@ -30,12 +30,22 @@ export interface ComposerActionProps {
    * @default false
    */
   pressed?: boolean;
+  /**
+   * The fill while `pressed`: `ink`, the strong one, or `quiet`, the soft fill the Ask bar's
+   * buttons take. At rest it is bare either way.
+   * @default "ink"
+   */
+  pressedVariant?: ComposerActionPressedVariant;
 }
 
-/** Filled while pressed on (dictation listening); else bare: just its icon. */
-const variantOf = (pressed: boolean) => (pressed ? "ink" : "ghost");
+/** The fill a ComposerAction takes while pressed on. */
+export type ComposerActionPressedVariant = "ink" | "quiet";
 
-/** A round icon button for a composer's `start` or `end`. */
+/** Filled while pressed on (dictation listening); else bare: just its icon. */
+const variantOf = (pressed: boolean, filled: ComposerActionPressedVariant) =>
+  pressed ? filled : "ghost";
+
+/** A round icon button for a composer's `start`, `end` or `footer`. */
 export const ComposerAction = ({
   icon,
   label: labelDeprecated,
@@ -43,6 +53,7 @@ export const ComposerAction = ({
   onClick,
   disabled: own = false,
   pressed,
+  pressedVariant = "ink",
 }: ComposerActionProps) => {
   const disabled = useComposerDisabled() || own;
   // First or last in its side of the footer, it nests in the card's corner (corner.ts).
@@ -56,7 +67,7 @@ export const ComposerAction = ({
         render={(props: Record<string, unknown>) => (
           <Button
             {...props}
-            variant={variantOf(pressed === true)}
+            variant={variantOf(pressed === true, pressedVariant)}
             size="sm"
             icon={icon}
             aria-label={label}

@@ -1,3 +1,4 @@
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 3: ComposerTakeover stays a wrapper over QuestionTool's buttons until step 9 removes it (handover/audit/RELEASE.md §7). */
 export { Composer } from "./composer";
 export type {
   ComposerActivity,
@@ -15,7 +16,10 @@ export {
 export type { ComposerReference } from "./pictures";
 export type { ComposerAccent, ComposerEdge } from "./glow";
 export { ComposerAction } from "./action";
-export type { ComposerActionProps } from "./action";
+export type {
+  ComposerActionPressedVariant,
+  ComposerActionProps,
+} from "./action";
 export { ComposerAttachment } from "./attachment";
 export type {
   ComposerAttachmentProps,

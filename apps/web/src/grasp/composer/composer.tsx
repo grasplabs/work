@@ -45,13 +45,14 @@ import { flushSync } from "react-dom";
 
 import { AgentIndicator } from "../agent-indicator";
 import { visuallyHidden } from "../hidden/hidden";
-import { Alert, Icon, Mic } from "../icons";
+import { Alert, Icon, Listening, Mic } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { scroll } from "../scroll/scroll";
 import { Shimmer } from "../shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ComposerAction } from "./action";
+import type { ComposerActionPressedVariant } from "./action";
 import type { ComposerKind } from "./add";
 import { ChosenAgentContext, ComposerAgentChip } from "./agent-chip";
 import type { ComposerChosenAgent } from "./agent-chip";
@@ -218,6 +219,23 @@ export interface ComposerProps {
    */
   dictateLabel?: string;
   /**
+   * The host is listening without a takeover (the Ask bar's dictation): the microphone shows as
+   * pressed, with the Listening icon.
+   * @default false
+   */
+  listening?: boolean;
+  /**
+   * The microphone's fill while `listening`: `ink`, or `quiet` as the Ask bar's buttons are.
+   * @default "ink"
+   */
+  listeningVariant?: ComposerActionPressedVariant;
+  /**
+   * The microphone shows only while nothing is written: once there is text it goes, and send stands
+   * alone at the end (the Ask bar, Sidekick's "typing swaps voice for send"). By default it stays.
+   * @default false
+   */
+  dictateWhileEmpty?: boolean;
+  /**
    * While given, a dictation takes the card over: ComposerVoice, drawn from these props (the
    * phase, the words, the time, the sound), with what was typed kept before its words. Escape
    * cancels it unless `onTakeoverDismiss` says otherwise. A `takeover` of the host's comes first.
@@ -344,8 +362,8 @@ export interface ComposerProps {
   /** A band tucked under the top of the card: ComposerSurface, or ComposerQueue for waiting messages. */
   top?: ReactNode;
   /**
-   * Takes the card's place for the text and footer while the assistant needs something first:
-   * ComposerTakeover, or a QuestionTool with `embedded`.
+   * Takes the card's place for the text and footer while the assistant needs something first: a
+   * QuestionTool with `embedded` (`variant="buttons"` for a line and a row of choices).
    */
   takeover?: ReactNode;
   /** Escape leaves the takeover. Without it, Escape does nothing there. */
@@ -489,24 +507,17 @@ const styles = stylex.create({
     "--grasp-composer-first": grasp.corner,
     "--grasp-composer-last": grasp.corner,
     backgroundColor: { default: grasp.raised, ":disabled": grasp.soft },
-    // Medium lift at rest, as Palermo's; while the text has focus from a press, a soft halo round
-    // it says so. The keyboard's focus shows the system's ring instead (C1, PROOF-2026-11-17.md):
-    // the halo gives way to rest, as on every field (src/focus/focus.ts).
     boxShadow: {
       default: grasp.liftMedium,
-      ":has(textarea:focus-visible)": grasp.fieldFocus,
-      ":has(textarea[aria-invalid=true]:focus-visible)":
-        grasp.fieldFocusInvalid,
-      [KEY_IN_TEXT]: grasp.liftMedium,
+      ":has(textarea:focus-visible)": `inset 0 0 0 1px ${grasp.fieldEdgeFocus}, 0 0 0 3px ${grasp.fieldFocusHalo}, ${grasp.liftMedium}`,
+      ":has(textarea[aria-invalid=true]:focus-visible)": `inset 0 0 0 1px ${grasp.fieldEdgeInvalid}, 0 0 0 3px ${grasp.fieldFocusHaloInvalid}, ${grasp.liftMedium}`,
     },
     color: grasp.ink,
     cursor: { default: "text", ":disabled": "not-allowed" },
-    // The ring stands just inside the card's edge, over the card's own fill, so it holds 3:1 on any
-    // ground round the card: paper, a scene, a dither. Never after a press (data-focus-pointer).
-    // In forced colours a press keeps a thin line and the keyboard the thick Highlight ring.
+    // In forced colours, where the edge and halo are dropped, a press keeps a thin line and the
+    // keyboard the thick Highlight ring, just inside the card's edge.
     outline: {
       default: "none",
-      [KEY_IN_TEXT]: `${grasp.ringWidth} solid ${grasp.ring}`,
       [FORCED]: {
         default: "none",
         ":has(textarea:focus-visible)": `${grasp.ringWidth} solid`,
@@ -1068,6 +1079,10 @@ const useRowFit = (
 ) => {
   const [tall, setTall] = useState(false);
   const [fold, setFold] = useState(false);
+  // What was last set, so a read that finds the same answer sets nothing. A set to the same value
+  // can still cost a render of the whole card (React bails out late when the card has just updated
+  // itself, as on a send that clears the text), and that render landed in the Enter key's frame.
+  const last = useRef({ tall: false, fold: false });
   // The end side's width while the level shows: what unfolding would need again.
   const wideEnd = useRef(0);
   useLayoutEffect(() => {
@@ -1077,6 +1092,19 @@ const useRowFit = (
       // (RowTallContext), and the row comes back as it went, read again before paint.
       return holdNothing;
     }
+    const said = last.current;
+    const putTall = (next: boolean) => {
+      if (next !== said.tall) {
+        said.tall = next;
+        setTall(next);
+      }
+    };
+    const putFold = (next: boolean) => {
+      if (next !== said.fold) {
+        said.fold = next;
+        setFold(next);
+      }
+    };
     const pen = document.createElement("canvas").getContext("2d");
     const start = box.querySelector<HTMLElement>(
       ":scope > [data-slot=composer-start]"
@@ -1112,7 +1140,7 @@ const useRowFit = (
       const folding =
         level !== null &&
         inner - sides - Math.max(wideEnd.current, endWidth) < least;
-      setFold(folding);
+      putFold(folding);
       if (folding !== fold) {
         // The sides change width with the fold: read again once it is drawn.
         return;
@@ -1120,18 +1148,18 @@ const useRowFit = (
       const room = inner - sides - endWidth;
       const words = text;
       if (room < least || words.includes("\n")) {
-        setTall(true);
+        putTall(true);
         return;
       }
       if (words === "") {
-        setTall(false);
+        putTall(false);
         return;
       }
       if (pen !== null) {
         pen.font = own.font;
       }
       // A caret's width to spare, so the last letter is never under the controls.
-      setTall(
+      putTall(
         (pen?.measureText(words).width ?? 0) + 2 >
           room - px(own.paddingInlineStart) - px(own.paddingInlineEnd)
       );
@@ -2669,20 +2697,32 @@ type Resolved = Omit<ComposerProps, "ref"> &
   ReturnType<typeof lookDefaults> &
   ReturnType<typeof wordDefaults> & { hostField?: ComposerProps["ref"] };
 
+/** The composer's own microphone, from `onDictate`: pressed while `listening`, gone once written with `dictateWhileEmpty`. */
+const ownMicrophone = (props: Resolved, text: string) => {
+  if (
+    props.onDictate === undefined ||
+    (props.dictateWhileEmpty === true && text.trim() !== "")
+  ) {
+    return null;
+  }
+  // Said as pressed only where the host says whether it listens.
+  return (
+    <ComposerAction
+      icon={props.listening === true ? Listening : Mic}
+      aria-label={props.dictateLabel}
+      pressed={props.listening}
+      pressedVariant={props.listeningVariant}
+      onClick={props.onDictate}
+    />
+  );
+};
+
 /**
  * The footer's microphone and the dictation it hands the card to, from `onDictate` and
  * `dictation`; the host's own `voice` and `takeover` come first.
  */
 const dictationParts = (props: Resolved, text: string) => ({
-  voice:
-    props.voice ??
-    (props.onDictate === undefined ? undefined : (
-      <ComposerAction
-        icon={Mic}
-        aria-label={props.dictateLabel}
-        onClick={props.onDictate}
-      />
-    )),
+  voice: props.voice ?? ownMicrophone(props, text),
   takeover:
     props.takeover ??
     (props.dictation === undefined ? undefined : (

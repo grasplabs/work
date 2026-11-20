@@ -258,7 +258,11 @@ export const grasp = stylex.defineConsts({
   fieldEdge: "var(--grasp-field-edge)",
   fieldEdgeHover: "var(--grasp-field-edge-hover)",
   fieldEdgeInvalid: "var(--grasp-field-edge-invalid)",
+  fieldEdgeFocus: "var(--grasp-field-edge-focus)",
+  fieldFocusHalo: "var(--grasp-field-focus-halo)",
+  fieldFocusHaloInvalid: "var(--grasp-field-focus-halo-invalid)",
   fieldFocus: "var(--grasp-field-focus)",
+  fieldFocusRead: "var(--grasp-field-focus-read)",
   fieldFocusInvalid: "var(--grasp-field-focus-invalid)",
   fieldTextTouch: "var(--grasp-field-text-touch)",
   fieldLift: "var(--grasp-field-lift)",
@@ -700,6 +704,7 @@ export const grasp = stylex.defineConsts({
   pickerTile: "var(--grasp-picker-tile)",
   pageColumnMeasure: "var(--grasp-page-column-measure)",
   pageMeasureWide: "var(--grasp-page-measure-wide)",
+  pageGap: "var(--grasp-page-gap)",
   // Carousel: carousel.
   carouselGap: "var(--grasp-carousel-gap)",
   carouselDot: "var(--grasp-carousel-dot)",
@@ -869,6 +874,7 @@ export const grasp = stylex.defineConsts({
   chatStartGap: "var(--grasp-chat-start-gap)",
   chatStartWidth: "var(--grasp-chat-start-width)",
   chatWidth: "var(--grasp-chat-width)",
+  chatInline: "var(--grasp-chat-inline)",
   // Sign in: sign in.
   signInNight: "var(--grasp-sign-in-night)",
   signInColumn: "var(--grasp-sign-in-column)",

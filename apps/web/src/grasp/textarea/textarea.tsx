@@ -20,6 +20,7 @@ import type { TextareaState } from "@ui-sdk/react/textarea";
 import { useEffect, useRef } from "react";
 import type { ComponentProps, Ref } from "react";
 
+import { fieldBoxStyles, isInvalid } from "../field-box/field-box";
 import { focus } from "../focus/focus";
 import type { LayoutStyle } from "../layout/layout";
 import { scroll } from "../scroll/scroll";
@@ -95,11 +96,10 @@ export interface TextareaProps extends Omit<
 
 // ---- The look --------------------------------------------------------------------------------------
 
-const HOVER = media.hover;
 const COARSE = media.coarse;
 const FORCED = media.forced;
 
-const styles = stylex.create({
+const ownStyles = stylex.create({
   area: {
     display: "block",
     boxSizing: "border-box",
@@ -197,17 +197,6 @@ const styles = stylex.create({
     resize: "vertical",
     maxHeight: "none",
   },
-  live: {
-    boxShadow: {
-      default: `inset 0 0 0 1px ${grasp.fieldEdge}, ${grasp.fieldLift}`,
-      // Hover never covers the focus edge: the pointer often rests on a field while you type.
-      ":hover:not(:focus-visible)": {
-        default: null,
-        [HOVER]: `inset 0 0 0 1px ${grasp.fieldEdgeHover}, ${grasp.fieldLift}`,
-      },
-      ":focus-visible": grasp.fieldFocus,
-    },
-  },
   // Settled, as Input's: the soft ground, a hairline, no lift, its words a step quieter. Disabled
   // is the weaker look.
   readOnly: {
@@ -215,24 +204,13 @@ const styles = stylex.create({
     color: grasp.fieldInkRead,
     boxShadow: {
       default: `inset 0 0 0 1px ${grasp.fieldEdge}`,
-      ":focus-visible": grasp.fieldFocus,
+      ":focus-visible": grasp.fieldFocusRead,
     },
-  },
-  disabled: {
-    opacity: grasp.dim,
-    boxShadow: `inset 0 0 0 1px ${grasp.fieldEdge}`,
-    cursor: "not-allowed",
-  },
-  invalid: {
-    boxShadow: {
-      default: grasp.fieldInvalid,
-      ":focus-visible": grasp.fieldFocusInvalid,
-    },
-    // In forced colours the danger tint is dropped: a wrong field's edge turns dashed instead, the
-    // same 1px, so it is no bigger than the fields beside it.
-    borderStyle: { default: "solid", [FORCED]: "dashed" },
   },
 });
+
+// Input's states (src/field-box): live under a pointer, out of use, wrong.
+const styles = { ...ownStyles, ...fieldBoxStyles };
 
 const rowStyles = [
   styles.rows1,
@@ -242,8 +220,6 @@ const rowStyles = [
   styles.rows5,
   styles.rows6,
 ] as const;
-
-const isInvalid = (value: unknown) => value === true || value === "true";
 
 export const Textarea = ({
   rows = 3,
