@@ -2689,6 +2689,10 @@ msgstr "Tous les fournisseurs"
 msgid "All steps done"
 msgstr "Toutes les étapes sont terminées"
 
+#: src/frame/part-words.tsx
+msgid "All tools"
+msgstr "Tous les outils"
+
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
 msgstr "Autorisez au moins une méthode."
@@ -5278,6 +5282,7 @@ msgid "Connects with a key"
 msgstr "Se connecte avec une clé"
 
 #: src/connections/connection-list.tsx
+#: src/frame/part-words.tsx
 msgid "Consent"
 msgstr "Consentement"
 

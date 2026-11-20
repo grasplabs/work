@@ -2689,6 +2689,10 @@ msgstr "Alle aanbieders"
 msgid "All steps done"
 msgstr "Alle stappen klaar"
 
+#: src/frame/part-words.tsx
+msgid "All tools"
+msgstr "Alle tools"
+
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
 msgstr "Sta minstens één methode toe."
@@ -5278,6 +5282,7 @@ msgid "Connects with a key"
 msgstr "Koppelt met een sleutel"
 
 #: src/connections/connection-list.tsx
+#: src/frame/part-words.tsx
 msgid "Consent"
 msgstr "Toestemming"
 

@@ -1477,6 +1477,9 @@ export const usePartWords = (): GraspWordsCatalog => {
         }),
       cancel: t`Cancel`,
       signIn: (app) => t`Sign in to ${app}`,
+      consent: t`Consent`,
+      allTools: t`All tools`,
+      connect: t`Connect`,
     },
     signIn: {
       // The product's name: never translated.

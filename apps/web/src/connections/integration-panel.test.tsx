@@ -25,8 +25,9 @@ import { integrationsOf } from "./integrations.ts";
 
 // One app's panel over the Integrations page, on the library's app panel,
 // against core's connections as the page reaches them over RPC, faked: an
-// admin connects a Composio toolkit in our connect dialog, consenting to its
-// text word for word, and connecting sends the tools chosen and that text;
+// admin connects a Composio toolkit in the library's consent dialog, for
+// everyone, consenting to its text word for word, and connecting sends the
+// tools chosen (reads on, changes off, to start) and that text;
 // members and Grasp's staff get nothing to connect it with; Microsoft 365
 // connects in the library's connect dialog, for everyone where an admin
 // chooses it and otherwise for the person alone, saying where they'll sign
@@ -210,11 +211,16 @@ const buttons = (text: string): HTMLElement[] =>
     (each) => each.textContent.trim() === text
   );
 
-/** A dialog's action, which carries its working and failed words too. */
+/**
+ * A dialog's action, which carries its working and failed words too: the
+ * last such button, as the dialog stands over the panel and its Connect.
+ */
 const dialogAction = (text: string): HTMLElement | undefined =>
-  [...document.querySelectorAll<HTMLElement>('[role="dialog"] button')].find(
-    (each) => each.textContent.startsWith(text)
-  );
+  [
+    ...document.querySelectorAll<HTMLElement>(
+      '[data-slot="dialog-footer"] button'
+    ),
+  ].find((each) => each.textContent.startsWith(text));
 
 /** The open dialog titled `title`. */
 const dialogOf = (title: string): Element | undefined =>
@@ -231,17 +237,20 @@ describe("an app's panel", () => {
     document.body.innerHTML = "";
   });
 
-  it("has an admin connect a toolkit, consenting to its text word for word", async () => {
+  it("has an admin connect a toolkit for everyone, consenting to its text word for word", async () => {
     const sent = await opened("hubspot", []);
     await press(buttons("Connect")[0]);
-    const consent =
-      dialogOf("Connect HubSpot")?.textContent.includes(composioConsentText) ??
-      false;
-    await press(dialogOf("Connect HubSpot")?.querySelector('[role="switch"]'));
-    await press(buttons("Consent and connect")[0]);
+    const dialog = dialogOf("Connect HubSpot");
+    const shown = {
+      consent: dialog?.textContent.includes(composioConsentText) ?? false,
+      // Who uses a toolkit isn't asked: it is always everyone.
+      forEveryone: dialog?.textContent.includes("Everyone") ?? false,
+      choice: buttons("Just you").length,
+    };
+    await press(dialogAction("Connect"));
 
-    expect({ consent, sent }).toStrictEqual({
-      consent: true,
+    expect({ shown, sent }).toStrictEqual({
+      shown: { consent: true, forEveryone: true, choice: 0 },
       sent: [
         {
           toolkit: "hubspot",
@@ -270,8 +279,7 @@ describe("an app's panel", () => {
     };
     const sent = await opened("hubspot", [stopped]);
     await press(buttons("Connect again")[0]);
-    await press(dialogOf("Connect HubSpot")?.querySelector('[role="switch"]'));
-    await press(buttons("Consent and connect")[0]);
+    await press(dialogAction("Connect"));
 
     expect(
       sent.map((each) => ("toolkit" in each ? "connect" : each))
