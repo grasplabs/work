@@ -197,7 +197,7 @@
   --grasp-bevel-ink-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)),
-    inset 0 0 0 0.75px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
+    inset 0 0 0 1px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
     inset 0 -6px 12px
       light-dark(oklch(0.12 0.03 162 / 0.45), oklch(0.29 0.05 162 / 0.08));
   --grasp-bevel-ink-drop: light-dark(
@@ -214,14 +214,18 @@
   --grasp-bevel-ink-press:
     var(--grasp-bevel-ink-face), var(--grasp-button-lift-press);
   --grasp-bevel-quiet:
-    inset 0 0 0 1px var(--grasp-edge-tone), var(--grasp-field-lift);
+    inset 0 0 0 1px var(--grasp-bevel-quiet-edge), var(--grasp-field-lift);
+  --grasp-bevel-quiet-edge: light-dark(
+    oklch(0.173 0.028 169.36 / 0.11),
+    oklch(0.96 0.02 150 / 0.16)
+  );
   --grasp-button-lift-hover:
     0 1px 2px var(--grasp-shade-faint), 0 3px 6px var(--grasp-shade-faint);
   --grasp-button-lift-press: 0 1px 1px var(--grasp-shade-faint);
   --grasp-bevel-danger-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.2), oklch(1 0 0 / 0.24)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.06), oklch(1 0 0 / 0.08)),
-    inset 0 0 0 0.75px light-dark(oklch(0.36 0.13 28), oklch(0 0 0 / 0.5)),
+    inset 0 0 0 1px light-dark(oklch(0.36 0.13 28), oklch(0 0 0 / 0.5)),
     inset 0 -6px 12px oklch(0.3 0.12 28 / 0.4);
   --grasp-bevel-danger-drop: light-dark(
     oklch(0.3 0.1 28 / 0.2),
@@ -239,7 +243,7 @@
   --grasp-bevel-approve-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.18), oklch(1 0 0 / 0.22)),
     inset 0 -0.75px 0 oklch(1 0 0 / 0.06),
-    inset 0 0 0 0.75px oklch(0.36 0.07 173 / 0.7),
+    inset 0 0 0 1px oklch(0.36 0.07 173 / 0.7),
     inset 0 -6px 12px oklch(0.3 0.06 173 / 0.3);
   --grasp-bevel-approve-drop: light-dark(
     oklch(0.45 0.12 167 / 0.2),
@@ -250,7 +254,7 @@
     0 0.5px 0.5px var(--grasp-bevel-approve-drop),
     0 0.25px 0.25px var(--grasp-bevel-approve-drop);
   --grasp-bevel-approve:
-    var(--grasp-bevel-approve-face), 0 2px 6px -5px var(--grasp-approve-glow),
+    var(--grasp-bevel-approve-face), 0 1px 3px -3px var(--grasp-approve-glow),
     var(--grasp-field-lift);
   --grasp-bevel-approve-hover:
     var(--grasp-bevel-approve-face),
@@ -283,7 +287,7 @@
     oklch(0.267 0.048 169.88 / 0.3),
     oklch(0.965 0.014 150 / 0.3)
   );
-  --grasp-frame-halo: oklch(0.8005 0.1625 165.25 / 0.22);
+  --grasp-frame-halo: oklch(0.8005 0.1625 165.25 / 0.14);
   --grasp-frame-scrim: oklch(0.173 0.028 169.36 / 0.24);
   --grasp-field-fill: var(--grasp-quiet-fill);
   --grasp-field-fill-read: light-dark(
@@ -305,13 +309,29 @@
     oklch(0.96 0.02 150 / 0.18)
   );
   --grasp-field-edge-invalid: var(--grasp-danger);
+  --grasp-field-edge-focus: light-dark(
+    oklch(0.62 0.03 165),
+    oklch(0.6 0.025 158)
+  );
+  --grasp-field-focus-halo: light-dark(
+    oklch(0.8005 0.1625 165.25 / 0.14),
+    oklch(0.8 0.15 165 / 0.16)
+  );
+  --grasp-field-focus-halo-invalid: light-dark(
+    oklch(0.52 0.175 28 / 0.1),
+    oklch(0.7 0.16 28 / 0.22)
+  );
   --grasp-field-focus:
-    inset 0 0 0 1px var(--grasp-field-edge), var(--grasp-field-lift),
-    0 0 10px 1px var(--grasp-ring-halo), 0 2px 6px var(--grasp-ring-halo);
+    inset 0 0 0 1px var(--grasp-field-edge-focus), var(--grasp-field-lift),
+    0 0 0 3px var(--grasp-field-focus-halo);
+  --grasp-composer-edge-focus: light-dark(
+    oklch(0.173 0.028 169.36 / 0.24),
+    oklch(0.96 0.02 150 / 0.26)
+  );
+  --grasp-field-focus-read: inset 0 0 0 1px var(--grasp-field-edge-focus);
   --grasp-field-focus-invalid:
     inset 0 0 0 1px var(--grasp-field-edge-invalid), var(--grasp-field-lift),
-    0 0 10px 1px var(--grasp-ring-halo-invalid),
-    0 2px 6px var(--grasp-ring-halo-invalid);
+    0 0 0 3px var(--grasp-field-focus-halo-invalid);
   --grasp-field-lift:
     0 1px 2px var(--grasp-shade-faint), 0 2px 4px var(--grasp-shade-faint);
   --grasp-checkbox-fill-hover: light-dark(
@@ -758,12 +778,14 @@
     oklch(0.243 0.028 169.36)
   );
   --grasp-shell-popup-line: var(--grasp-shell-rule);
+  --grasp-shell-guide: var(--grasp-hairline);
   --grasp-shell-panel-composer-corner: calc(
     var(--grasp-shell-card-corner) * 1.84
   );
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
   );
+  --grasp-page-gap: var(--grasp-space-6);
   --grasp-carousel-gap: var(--grasp-space-4);
   --grasp-carousel-dot-fill: var(--grasp-muted);
   --grasp-carousel-dot-fill-current: var(--grasp-ink);
@@ -881,7 +903,10 @@
     var(--grasp-light-sea) 70%,
     transparent
   );
-  --grasp-code-block-fill: var(--grasp-soft);
+  --grasp-code-block-fill: light-dark(
+    oklch(0.29 0.05 162 / 0.035),
+    oklch(0.96 0.02 150 / 0.04)
+  );
   --grasp-code-block-line: var(--grasp-text-md-line);
   --grasp-code-block-gutter: var(--grasp-quiet);
   --grasp-code-block-marked: light-dark(
@@ -970,6 +995,7 @@
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
   --grasp-chat-width: var(--grasp-chat-start-width);
+  --grasp-chat-inline: var(--grasp-space-8);
   --grasp-sign-in-night: var(--grasp-light-night);
   --grasp-sign-in-veil: oklch(0.131 0.021 174.91 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);
@@ -1181,7 +1207,7 @@
   --grasp-bevel-ink-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)),
-    inset 0 0 0 0.75px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
+    inset 0 0 0 1px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
     inset 0 -6px 12px
       light-dark(oklch(0.12 0.06 178 / 0.45), oklch(0.29 0.1 178 / 0.08));
   --grasp-bevel-ink-drop: light-dark(
@@ -1198,14 +1224,18 @@
   --grasp-bevel-ink-press:
     var(--grasp-bevel-ink-face), var(--grasp-button-lift-press);
   --grasp-bevel-quiet:
-    inset 0 0 0 1px var(--grasp-edge-tone), var(--grasp-field-lift);
+    inset 0 0 0 1px var(--grasp-bevel-quiet-edge), var(--grasp-field-lift);
+  --grasp-bevel-quiet-edge: light-dark(
+    oklch(0.173 0.056 178 / 0.11),
+    oklch(0.96 0.04 178 / 0.16)
+  );
   --grasp-button-lift-hover:
     0 1px 2px var(--grasp-shade-faint), 0 3px 6px var(--grasp-shade-faint);
   --grasp-button-lift-press: 0 1px 1px var(--grasp-shade-faint);
   --grasp-bevel-danger-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.2), oklch(1 0 0 / 0.24)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.06), oklch(1 0 0 / 0.08)),
-    inset 0 0 0 0.75px light-dark(oklch(0.36 0.13 28), oklch(0 0 0 / 0.5)),
+    inset 0 0 0 1px light-dark(oklch(0.36 0.13 28), oklch(0 0 0 / 0.5)),
     inset 0 -6px 12px oklch(0.3 0.12 28 / 0.4);
   --grasp-bevel-danger-drop: light-dark(
     oklch(0.3 0.1 28 / 0.2),
@@ -1223,7 +1253,7 @@
   --grasp-bevel-approve-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.18), oklch(1 0 0 / 0.22)),
     inset 0 -0.75px 0 oklch(1 0 0 / 0.06),
-    inset 0 0 0 0.75px oklch(0.36 0.07 173 / 0.7),
+    inset 0 0 0 1px oklch(0.36 0.07 173 / 0.7),
     inset 0 -6px 12px oklch(0.3 0.12 178 / 0.3);
   --grasp-bevel-approve-drop: light-dark(
     oklch(0.45 0.12 167 / 0.2),
@@ -1234,7 +1264,7 @@
     0 0.5px 0.5px var(--grasp-bevel-approve-drop),
     0 0.25px 0.25px var(--grasp-bevel-approve-drop);
   --grasp-bevel-approve:
-    var(--grasp-bevel-approve-face), 0 2px 6px -5px var(--grasp-approve-glow),
+    var(--grasp-bevel-approve-face), 0 1px 3px -3px var(--grasp-approve-glow),
     var(--grasp-field-lift);
   --grasp-bevel-approve-hover:
     var(--grasp-bevel-approve-face),
@@ -1267,7 +1297,7 @@
     oklch(0.267 0.096 178 / 0.3),
     oklch(0.965 0.028 178 / 0.3)
   );
-  --grasp-frame-halo: oklch(0.8005 0.1625 165.25 / 0.22);
+  --grasp-frame-halo: oklch(0.8005 0.1625 165.25 / 0.14);
   --grasp-frame-scrim: oklch(0.173 0.056 178 / 0.24);
   --grasp-field-fill: var(--grasp-quiet-fill);
   --grasp-field-fill-read: light-dark(
@@ -1289,13 +1319,29 @@
     oklch(0.96 0.04 178 / 0.18)
   );
   --grasp-field-edge-invalid: var(--grasp-danger);
+  --grasp-field-edge-focus: light-dark(
+    oklch(0.62 0.06 178),
+    oklch(0.6 0.05 178)
+  );
+  --grasp-field-focus-halo: light-dark(
+    oklch(0.8005 0.1625 165.25 / 0.14),
+    oklch(0.8 0.15 165 / 0.16)
+  );
+  --grasp-field-focus-halo-invalid: light-dark(
+    oklch(0.52 0.175 28 / 0.1),
+    oklch(0.7 0.16 28 / 0.22)
+  );
   --grasp-field-focus:
-    inset 0 0 0 1px var(--grasp-field-edge), var(--grasp-field-lift),
-    0 0 10px 1px var(--grasp-ring-halo), 0 2px 6px var(--grasp-ring-halo);
+    inset 0 0 0 1px var(--grasp-field-edge-focus), var(--grasp-field-lift),
+    0 0 0 3px var(--grasp-field-focus-halo);
+  --grasp-composer-edge-focus: light-dark(
+    oklch(0.173 0.056 178 / 0.24),
+    oklch(0.96 0.04 178 / 0.26)
+  );
+  --grasp-field-focus-read: inset 0 0 0 1px var(--grasp-field-edge-focus);
   --grasp-field-focus-invalid:
     inset 0 0 0 1px var(--grasp-field-edge-invalid), var(--grasp-field-lift),
-    0 0 10px 1px var(--grasp-ring-halo-invalid),
-    0 2px 6px var(--grasp-ring-halo-invalid);
+    0 0 0 3px var(--grasp-field-focus-halo-invalid);
   --grasp-field-lift:
     0 1px 2px var(--grasp-shade-faint), 0 2px 4px var(--grasp-shade-faint);
   --grasp-checkbox-fill-hover: light-dark(
@@ -1734,12 +1780,14 @@
     oklch(0.285 0.058 178)
   );
   --grasp-shell-popup-line: var(--grasp-shell-rule);
+  --grasp-shell-guide: var(--grasp-hairline);
   --grasp-shell-panel-composer-corner: calc(
     var(--grasp-shell-card-corner) * 1.84
   );
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
   );
+  --grasp-page-gap: var(--grasp-space-6);
   --grasp-carousel-gap: var(--grasp-space-4);
   --grasp-carousel-dot-fill: var(--grasp-muted);
   --grasp-carousel-dot-fill-current: var(--grasp-ink);
@@ -1857,7 +1905,10 @@
     var(--grasp-light-sea) 70%,
     transparent
   );
-  --grasp-code-block-fill: var(--grasp-soft);
+  --grasp-code-block-fill: light-dark(
+    oklch(0.29 0.1 178 / 0.035),
+    oklch(0.96 0.04 178 / 0.04)
+  );
   --grasp-code-block-line: var(--grasp-text-md-line);
   --grasp-code-block-gutter: var(--grasp-quiet);
   --grasp-code-block-marked: light-dark(
@@ -1946,6 +1997,7 @@
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
   --grasp-chat-width: var(--grasp-chat-start-width);
+  --grasp-chat-inline: var(--grasp-space-8);
   --grasp-sign-in-night: var(--grasp-light-night);
   --grasp-sign-in-veil: oklch(0.131 0.042 178 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);
@@ -2154,7 +2206,7 @@
   --grasp-bevel-ink-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)),
-    inset 0 0 0 0.75px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
+    inset 0 0 0 1px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
     inset 0 -6px 12px
       light-dark(oklch(0.12 0.007 75 / 0.45), oklch(0.29 0.011 75 / 0.08));
   --grasp-bevel-ink-drop: light-dark(
@@ -2171,14 +2223,18 @@
   --grasp-bevel-ink-press:
     var(--grasp-bevel-ink-face), var(--grasp-button-lift-press);
   --grasp-bevel-quiet:
-    inset 0 0 0 1px var(--grasp-edge-tone), var(--grasp-field-lift);
+    inset 0 0 0 1px var(--grasp-bevel-quiet-edge), var(--grasp-field-lift);
+  --grasp-bevel-quiet-edge: light-dark(
+    oklch(0.173 0.006 75 / 0.11),
+    oklch(0.96 0.004 75 / 0.16)
+  );
   --grasp-button-lift-hover:
     0 1px 2px var(--grasp-shade-faint), 0 3px 6px var(--grasp-shade-faint);
   --grasp-button-lift-press: 0 1px 1px var(--grasp-shade-faint);
   --grasp-bevel-danger-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.2), oklch(1 0 0 / 0.24)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.06), oklch(1 0 0 / 0.08)),
-    inset 0 0 0 0.75px light-dark(oklch(0.36 0.13 28), oklch(0 0 0 / 0.5)),
+    inset 0 0 0 1px light-dark(oklch(0.36 0.13 28), oklch(0 0 0 / 0.5)),
     inset 0 -6px 12px oklch(0.3 0.12 28 / 0.4);
   --grasp-bevel-danger-drop: light-dark(
     oklch(0.3 0.1 28 / 0.2),
@@ -2196,7 +2252,7 @@
   --grasp-bevel-approve-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.18), oklch(1 0 0 / 0.22)),
     inset 0 -0.75px 0 oklch(1 0 0 / 0.06),
-    inset 0 0 0 0.75px oklch(0.36 0.07 173 / 0.7),
+    inset 0 0 0 1px oklch(0.36 0.07 173 / 0.7),
     inset 0 -6px 12px oklch(0.3 0.013 75 / 0.3);
   --grasp-bevel-approve-drop: light-dark(
     oklch(0.45 0.12 167 / 0.2),
@@ -2207,7 +2263,7 @@
     0 0.5px 0.5px var(--grasp-bevel-approve-drop),
     0 0.25px 0.25px var(--grasp-bevel-approve-drop);
   --grasp-bevel-approve:
-    var(--grasp-bevel-approve-face), 0 2px 6px -5px var(--grasp-approve-glow),
+    var(--grasp-bevel-approve-face), 0 1px 3px -3px var(--grasp-approve-glow),
     var(--grasp-field-lift);
   --grasp-bevel-approve-hover:
     var(--grasp-bevel-approve-face),
@@ -2240,7 +2296,7 @@
     oklch(0.267 0.011 75 / 0.3),
     oklch(0.965 0.003 75 / 0.3)
   );
-  --grasp-frame-halo: oklch(0.8005 0.1625 165.25 / 0.22);
+  --grasp-frame-halo: oklch(0.8005 0.1625 165.25 / 0.14);
   --grasp-frame-scrim: oklch(0.173 0.006 75 / 0.24);
   --grasp-field-fill: var(--grasp-quiet-fill);
   --grasp-field-fill-read: light-dark(
@@ -2262,13 +2318,29 @@
     oklch(0.96 0.004 75 / 0.18)
   );
   --grasp-field-edge-invalid: var(--grasp-danger);
+  --grasp-field-edge-focus: light-dark(
+    oklch(0.62 0.007 75),
+    oklch(0.6 0.006 75)
+  );
+  --grasp-field-focus-halo: light-dark(
+    oklch(0.8005 0.1625 165.25 / 0.14),
+    oklch(0.8 0.15 165 / 0.16)
+  );
+  --grasp-field-focus-halo-invalid: light-dark(
+    oklch(0.52 0.175 28 / 0.1),
+    oklch(0.7 0.16 28 / 0.22)
+  );
   --grasp-field-focus:
-    inset 0 0 0 1px var(--grasp-field-edge), var(--grasp-field-lift),
-    0 0 10px 1px var(--grasp-ring-halo), 0 2px 6px var(--grasp-ring-halo);
+    inset 0 0 0 1px var(--grasp-field-edge-focus), var(--grasp-field-lift),
+    0 0 0 3px var(--grasp-field-focus-halo);
+  --grasp-composer-edge-focus: light-dark(
+    oklch(0.173 0.006 75 / 0.24),
+    oklch(0.96 0.004 75 / 0.26)
+  );
+  --grasp-field-focus-read: inset 0 0 0 1px var(--grasp-field-edge-focus);
   --grasp-field-focus-invalid:
     inset 0 0 0 1px var(--grasp-field-edge-invalid), var(--grasp-field-lift),
-    0 0 10px 1px var(--grasp-ring-halo-invalid),
-    0 2px 6px var(--grasp-ring-halo-invalid);
+    0 0 0 3px var(--grasp-field-focus-halo-invalid);
   --grasp-field-lift:
     0 1px 2px var(--grasp-shade-faint), 0 2px 4px var(--grasp-shade-faint);
   --grasp-checkbox-fill-hover: light-dark(
@@ -2704,12 +2776,14 @@
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.1));
   --grasp-shell-popup: light-dark(oklch(0.982 0.007 85), oklch(0.275 0.006 75));
   --grasp-shell-popup-line: var(--grasp-shell-rule);
+  --grasp-shell-guide: var(--grasp-hairline);
   --grasp-shell-panel-composer-corner: calc(
     var(--grasp-shell-card-corner) * 1.84
   );
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
   );
+  --grasp-page-gap: var(--grasp-space-6);
   --grasp-carousel-gap: var(--grasp-space-4);
   --grasp-carousel-dot-fill: var(--grasp-muted);
   --grasp-carousel-dot-fill-current: var(--grasp-ink);
@@ -2824,7 +2898,10 @@
     var(--grasp-light-sea) 70%,
     transparent
   );
-  --grasp-code-block-fill: var(--grasp-soft);
+  --grasp-code-block-fill: light-dark(
+    oklch(0.29 0.011 75 / 0.035),
+    oklch(0.96 0.004 75 / 0.04)
+  );
   --grasp-code-block-line: var(--grasp-text-md-line);
   --grasp-code-block-gutter: var(--grasp-quiet);
   --grasp-code-block-marked: light-dark(
@@ -2910,6 +2987,7 @@
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
   --grasp-chat-width: var(--grasp-chat-start-width);
+  --grasp-chat-inline: var(--grasp-space-8);
   --grasp-sign-in-night: var(--grasp-light-night);
   --grasp-sign-in-veil: oklch(0.131 0.005 75 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);
