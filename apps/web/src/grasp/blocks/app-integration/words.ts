@@ -1,5 +1,6 @@
 // The words an app's tile, panel, page and connect dialog show or say, in English. The product gives
 // them in its languages through GraspWords (src/words).
+/* oxlint-disable typescript/no-deprecated -- canDo keeps its English beside mayDo until the product stops passing it. */
 
 /** Every word the app's parts show or say. */
 export interface AppIntegrationWords {
@@ -33,9 +34,9 @@ export interface AppIntegrationWords {
   notConnected: string;
   /** Why a member sees no Connect: only an admin may connect the app. */
   adminConnects: string;
-  /** The panel's section: what the app's tools can do. */
+  /** @deprecated The panel says `mayDo` too, as the page does. */
   canDo: string;
-  /** The page's main card: what Grasp may do with them. */
+  /** What Grasp may do with the app's tools: the page's main card and the panel's section. */
   mayDo: string;
   /** How many tools read and how many change. */
   counts: (reads: number, writes: number) => string;
@@ -71,6 +72,13 @@ export interface AppIntegrationWords {
   other: string;
   readsWord: string;
   changesWord: string;
+  /** A description cut at its lines: show it whole, then cut it again. */
+  showMore: string;
+  showLess: string;
+  /** Whether people in the organization may connect the app: the row's name, and its line on and off. */
+  offered: string;
+  offeredOn: string;
+  offeredOff: string;
 }
 
 export const appIntegrationWords: AppIntegrationWords = {
@@ -128,6 +136,11 @@ export const appIntegrationWords: AppIntegrationWords = {
   other: "Other",
   readsWord: "Reads",
   changesWord: "Changes",
+  showMore: "Show more",
+  showLess: "Show less",
+  offered: "Available in your organization",
+  offeredOn: "Anyone here can connect it.",
+  offeredOff: "No one can connect it. Connections already made keep working.",
 };
 
 declare module "../../words/words" {

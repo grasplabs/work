@@ -106,6 +106,42 @@ const VERBS = new Set([
   "watch",
 ]);
 
+/**
+ * Verbs that are nouns as well: a verb as a name's first word ("Post message", "Reply to thread"),
+ * the thing acted on after another verb ("Create link", "Get post comments").
+ */
+const NOUNS_TOO = new Set([
+  "link",
+  "reply",
+  "post",
+  "share",
+  "view",
+  "query",
+  "export",
+  "import",
+  "run",
+  "check",
+  "copy",
+]);
+
+/** Words in -ing that name a thing that can be counted ("Meetings"); others are mass nouns ("Billing"). */
+const COUNTED_ING = new Set([
+  "meeting",
+  "recording",
+  "booking",
+  "listing",
+  "setting",
+  "posting",
+  "warning",
+  "mapping",
+  "rating",
+  "heading",
+  "finding",
+  "building",
+  "drawing",
+  "opening",
+]);
+
 /** Words that are not what a tool acts on: articles, prepositions, qualifiers. They are skipped. */
 const SKIPPED = new Set([
   "a",
@@ -168,6 +204,14 @@ const SKIPPED = new Set([
   "available",
   "various",
   "other",
+  "pending",
+  "upcoming",
+  "incoming",
+  "outgoing",
+  "missing",
+  "remaining",
+  "trending",
+  "related",
   "me",
   "you",
   "us",
@@ -244,7 +288,11 @@ const groupName = (word: string, cased: boolean) => {
   }
   let many = IRREGULAR.get(lower) ?? `${lower}s`;
   // Already plural, or ending in s (Settings, Access), or with no plural: as it is.
-  if ((lower.endsWith("s") && !IRREGULAR.has(lower)) || UNCOUNTED.has(lower)) {
+  if (
+    (lower.endsWith("s") && !IRREGULAR.has(lower)) ||
+    UNCOUNTED.has(lower) ||
+    (lower.endsWith("ing") && !COUNTED_ING.has(lower))
+  ) {
     many = lower;
   } else if (/[^aeiou]y$/u.test(lower)) {
     many = `${lower.slice(0, -1)}ies`;
@@ -254,15 +302,29 @@ const groupName = (word: string, cased: boolean) => {
   return many.charAt(0).toUpperCase() + many.slice(1);
 };
 
-/** Whether a word can name what a tool acts on: letters, not a verb's form (scheduled, pending), not a skipped word. */
+/** A known verb in -ed or -ing ("scheduled", "archived", "pinned", "running"): it only qualifies. */
+const verbForm = (lower: string) => {
+  const stem = /^(?<stem>.+?)(?:ed|ing)$/u.exec(lower)?.groups?.stem;
+  if (stem === undefined) {
+    return false;
+  }
+  const undoubled = /(?<last>[^aeiou])\k<last>$/u.test(stem)
+    ? stem.slice(0, -1)
+    : stem;
+  return [stem, `${stem}e`, undoubled, lower.replace(/d$/u, "")].some((form) =>
+    VERBS.has(form)
+  );
+};
+
+/** Whether a word can name what a tool acts on: letters, not a verb or a verb's form (scheduled), not a skipped word. */
 const nounLike = (word: string) => {
   const lower = word.toLowerCase();
   return (
     /^\p{L}[\p{L}']*$/u.test(word) &&
     lower.length > 1 &&
-    !VERBS.has(lower) &&
+    (!VERBS.has(lower) || NOUNS_TOO.has(lower)) &&
     !SKIPPED.has(lower) &&
-    !/(?:ed|ing)$/u.test(lower)
+    !verbForm(lower)
   );
 };
 
@@ -300,8 +362,12 @@ export const groupOf = (tool: AppTool) => {
     .split(/[\s_/-]+/u)
     .filter((word) => word !== "" && word.toLowerCase() !== app);
   // Past the verbs and the words that only qualify at its start: then the first word that can name it.
+  // A verb that is a noun as well names the thing once a verb has come before it ("Create link").
   const start = words.findIndex(
-    (word, index) => !verbAt(word, index) && !SKIPPED.has(word.toLowerCase())
+    (word, index) =>
+      (!verbAt(word, index) ||
+        (index > 0 && NOUNS_TOO.has(word.toLowerCase()))) &&
+      !SKIPPED.has(word.toLowerCase())
   );
   const rest = start === -1 ? [] : words.slice(start);
   const at = rest.findIndex(

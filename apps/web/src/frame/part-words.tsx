@@ -1417,7 +1417,8 @@ export const usePartWords = (): GraspWordsCatalog => {
       stopped: t({ message: "Stopped working", context: "state of one app" }),
       notConnected: t`Not connected`,
       adminConnects: t`An admin connects this`,
-      canDo: t`What Grasp can do`,
+      // oxlint-disable-next-line typescript/no-deprecated -- AppIntegrationWords still requires canDo at ui 59169853; drop it when the library makes it optional.
+      canDo: t`What Grasp may do`,
       mayDo: t`What Grasp may do`,
       counts: (reads, writes) =>
         t({
@@ -1462,6 +1463,11 @@ export const usePartWords = (): GraspWordsCatalog => {
       other: t`Other`,
       readsWord: t`Reads`,
       changesWord: t`Changes`,
+      showMore: t`Show more`,
+      showLess: t`Show less`,
+      offered: t`Available in your organization`,
+      offeredOn: t`Anyone here can connect it.`,
+      offeredOff: t`No one can connect it. Connections already made keep working.`,
     },
     connectApp: {
       title: (app) => t`Connect ${app}`,

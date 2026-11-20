@@ -5,6 +5,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { BrandIcon } from "../../brand-icon";
@@ -15,6 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../dropdown-menu";
+import { Field, FieldContent, FieldDescription, FieldLabel } from "../../field";
+import { focus } from "../../focus/focus";
 import { Edit, Icon, Lock, Rows, Show } from "../../icons";
 import type { IconData } from "../../icons";
 import { iconVars } from "../../icons/icon.stylex";
@@ -24,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../select";
+import { Switch } from "../../switch";
 import { useMarkTint } from "../../texture/mark-tint";
 import { grasp, media } from "../../tokens/tokens.stylex";
 import type { App, AppState, AppTool, AppToolChoice } from "./model";
@@ -110,6 +114,32 @@ const styles = stylex.create({
   },
   attention: {
     backgroundColor: { default: grasp.attention, [media.forced]: "CanvasText" },
+  },
+  // A description cut at its lines, and the quiet button that shows it whole.
+  clampText: { display: "block", whiteSpace: "pre-line", textWrap: "pretty" },
+  clamped: {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 2,
+    overflow: "hidden",
+  },
+  more: {
+    display: "inline-flex",
+    marginBlockStart: grasp.space1,
+    marginInlineStart: `calc(-1 * ${grasp.space1})`,
+    paddingBlock: 0,
+    paddingInline: grasp.space1,
+    borderWidth: 0,
+    borderRadius: grasp.cornerMark,
+    backgroundColor: "transparent",
+    color: { default: grasp.muted, ":hover": grasp.ink },
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightMedium,
+    cursor: "pointer",
+    transitionProperty: "color",
+    transitionDuration: grasp.durationHover,
   },
   none: {
     boxShadow: {
@@ -359,6 +389,85 @@ export const StateWord = ({
   );
 };
 
+/**
+ * The app's description cut at two lines, with Show more under it where it runs longer (a press,
+ * not a hover, so a touch screen reaches it too), and Show less once it is whole.
+ */
+export const Clamped = ({
+  text,
+  words,
+}: {
+  text: string;
+  words: AppIntegrationWords;
+}) => {
+  const [whole, setWhole] = useState(false);
+  const [cut, setCut] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  const id = useId();
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (element === null || whole) {
+      return () => {
+        // Whole, it is not measured.
+      };
+    }
+    const measure = () => {
+      setCut(text !== "" && element.scrollHeight > element.clientHeight + 1);
+    };
+    measure();
+    const seen = new ResizeObserver(measure);
+    seen.observe(element);
+    return () => {
+      seen.disconnect();
+    };
+  }, [text, whole]);
+  return (
+    <>
+      <span
+        ref={box}
+        id={id}
+        {...stylex.props(styles.clampText, !whole && styles.clamped)}
+      >
+        {text}
+      </span>
+      {cut || whole ? (
+        <button
+          type="button"
+          aria-expanded={whole}
+          aria-controls={id}
+          onClick={() => {
+            setWhole(!whole);
+          }}
+          {...stylex.props(styles.more, focus.ring)}
+        >
+          {whole ? words.showLess : words.showMore}
+        </button>
+      ) : null}
+    </>
+  );
+};
+
+/** Whether people in the organization may connect the app: its name, one quiet line, and a switch. */
+export const OfferSwitch = ({
+  offered,
+  onChange,
+  words,
+}: {
+  offered: boolean;
+  onChange: (offered: boolean) => void;
+  words: AppIntegrationWords;
+}) => (
+  <Field orientation="horizontal">
+    <FieldContent>
+      <FieldLabel>{words.offered}</FieldLabel>
+      <FieldDescription>
+        {offered ? words.offeredOn : words.offeredOff}
+      </FieldDescription>
+    </FieldContent>
+    <Switch checked={offered} onCheckedChange={onChange} />
+  </Field>
+);
+
 /** What the host does for the app's actions; each left out is not offered. */
 export interface AppActions {
   /**
@@ -375,6 +484,13 @@ export interface AppActions {
   onConnectAnother?: (app: App) => void;
   /** Disconnect it (the host asks first). */
   onDisconnect?: (app: App) => void;
+  /**
+   * The person is a member, who cannot connect apps: where the app waits to be connected, the page
+   * and the panel say "An admin connects this" in place of Connect. Left out, a missing Connect shows
+   * nothing (the host still loading what it needs), never that line.
+   * @default false
+   */
+  member?: boolean;
 }
 
 /** Manage: a menu of what can be done to the connection, Disconnect last. */
@@ -383,12 +499,16 @@ export const ManageMenu = ({
   actions,
   words,
   size,
+  asState = false,
 }: {
   app: App;
   actions: AppActions;
   words: AppIntegrationWords;
   size: "xs" | "sm";
+  asState?: boolean;
 }) => {
+  // With `asState` the trigger is the connection's state ("Connected"), so no Status line repeats it.
+  const state = <StateWord state={app.connection?.state} words={words} />;
   const items: { label: string; run: (app: App) => void; danger?: boolean }[] =
     [];
   if (actions.onSignIn !== undefined) {
@@ -405,12 +525,17 @@ export const ManageMenu = ({
     });
   }
   if (items.length === 0) {
-    return null;
+    return asState ? state : null;
   }
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger variant="quiet" size={size} chevron>
-        {words.manage}
+      <DropdownMenuTrigger
+        variant="quiet"
+        size={size}
+        chevron
+        {...(asState ? { "aria-label": words.manage } : {})}
+      >
+        {asState ? state : words.manage}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {items.map((item) => (

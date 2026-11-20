@@ -95,9 +95,7 @@ export const IntegrationPanel = ({
         open
         settingsHref={`/integrations/${integration.key}`}
         {...actions}
-        // The library takes no Connect for a member's app; an admin's is only
-        // missing while its tools load, or where none can connect it.
-        {...(isMemberAdmin(identity) ? { words: { adminConnects: "" } } : {})}
+        member={!isMemberAdmin(identity)}
       />
       {dialogs}
     </FollowLinks>

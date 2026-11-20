@@ -8,7 +8,10 @@ export const intent = {
       when: "A settings page or a form page: a card per topic in a column about 720px wide, beside the nav.",
     },
     {
-      when: "A table under them that needs the page's whole width (PageColumnWide).",
+      when: "A table on a settings page: in the column, its edges on the cards' edges.",
+    },
+    {
+      when: "Something that needs more room than the column, a wide table or a chart: PageColumnWide runs the page's whole width.",
     },
   ],
   notWhen: [

@@ -927,8 +927,7 @@ export const EventSourcesSettings = ({
       onClick={() => {
         setAdding(true);
       }}
-      // On the title's line, xs: a sm button there stands over the card (a library fault being fixed).
-      size={variant === "quiet" ? "xs" : "sm"}
+      size="sm"
       variant={variant}
     >
       {t`Add a source`}
