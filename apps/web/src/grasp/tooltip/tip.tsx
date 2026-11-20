@@ -119,7 +119,9 @@ export const Tip = ({
           );
         }}
       />
-      <TooltipContent>{tooltip}</TooltipContent>
+      <TooltipContent data-agent-hidden={name ? "" : undefined}>
+        {tooltip}
+      </TooltipContent>
     </TooltipPrimitive>
   );
 };
