@@ -140,10 +140,16 @@ const shown = async (
     identity = person(),
     address = "/",
     answered = Promise.resolve(true),
+    more = [],
+    app = entry,
   }: {
     identity?: Identity;
     address?: string;
     answered?: Promise<boolean>;
+    /** Its other accounts. */
+    more?: ListedConnection[];
+    /** The app, where it isn't HubSpot. */
+    app?: OfferedCatalog["entries"][number];
   } = {}
 ): Promise<Sent[]> => {
   const sent: Sent[] = [];
@@ -159,7 +165,7 @@ const shown = async (
       action: (session: { connections: typeof connections }) => Promise<T>
     ): Promise<T> => await action({ connections }),
   };
-  const [integration] = integrationsOf([entry], [listed]);
+  const [integration] = integrationsOf([app], [listed, ...more]);
   if (integration === undefined) {
     throw new Error("No integration");
   }
@@ -367,5 +373,58 @@ describe("changing what Grasp may do in a connected app", () => {
     await settled();
 
     expect(history?.location.search).toBe("?q=notes&show=connected");
+  });
+
+  it("lists each account on its own row, with its own sign in again and disconnect", async () => {
+    const microsoft: ListedConnection = {
+      id: "connection-1",
+      source: "native",
+      provider: "microsoft",
+      scope: "personal",
+      status: "active",
+      ownerUserId: "u1",
+      connectedBy: "u1",
+      connectedByName: "Ada",
+      accountName: "sales@acme.test",
+      createdAt: "2026-10-01T00:00:00.000Z",
+    };
+    await shown(microsoft, {
+      app: {
+        ...entry,
+        source: "native",
+        id: "microsoft",
+        name: "Microsoft 365",
+      },
+      more: [
+        {
+          ...microsoft,
+          id: "connection-2",
+          status: "needs_reauth",
+          accountName: "ops@acme.test",
+        },
+      ],
+    });
+    const rows = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="app-account"]'),
+    ].map((row) => ({
+      account: row.querySelector("[title]")?.getAttribute("title"),
+      actions: [...row.querySelectorAll("button")].map(
+        (button) => button.getAttribute("aria-label") ?? wordsOf(button)
+      ),
+    }));
+
+    expect(rows).toStrictEqual([
+      {
+        account: "sales@acme.test",
+        actions: ["Disconnect Microsoft 365 (sales@acme.test)"],
+      },
+      {
+        account: "ops@acme.test",
+        actions: [
+          "Sign in to Microsoft 365 (ops@acme.test) again",
+          "Disconnect Microsoft 365 (ops@acme.test)",
+        ],
+      },
+    ]);
   });
 });

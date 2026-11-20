@@ -30,7 +30,13 @@ import { Switch } from "../../switch";
 import { useMarkTint } from "../../texture/mark-tint";
 import { grasp, media } from "../../tokens/tokens.stylex";
 import { useWords } from "../../words/words";
-import type { App, AppState, AppTool, AppToolChoice } from "./model";
+import type {
+  App,
+  AppConnection,
+  AppState,
+  AppTool,
+  AppToolChoice,
+} from "./model";
 import { needsYou } from "./state";
 import { choiceUnder, choicesFor, presetOf } from "./tools";
 import type { ToolGroup } from "./tools";
@@ -560,12 +566,12 @@ export interface AppActions {
   connect?: ReactNode;
   /** Connect it, or connect it again, where no `connect` is given. */
   onConnect?: (app: App) => void;
-  /** Sign in again. */
-  onSignIn?: (app: App) => void;
+  /** Sign in again: to `connection` where the page's row of that account asks. */
+  onSignIn?: (app: App, connection?: AppConnection) => void;
   /** Connect a second account. */
   onConnectAnother?: (app: App) => void;
-  /** Disconnect it (the host asks first). */
-  onDisconnect?: (app: App) => void;
+  /** Disconnect it (the host asks first): `connection` where the page's row of that account asks. */
+  onDisconnect?: (app: App, connection?: AppConnection) => void;
   /**
    * The person is a member, who cannot connect apps: where the app waits to be connected, the page
    * and the panel say "An admin connects this" in place of Connect. Left out, a missing Connect shows

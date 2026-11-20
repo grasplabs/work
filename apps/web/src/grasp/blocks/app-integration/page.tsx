@@ -3,12 +3,14 @@
 //   head    a card of its own with the dither in the app's colour inside it: the app's mark, its name,
 //           its description (cut at two lines, Show more) and the one action at the end: Connect, or,
 //           once connected, its state ("Connected") as the menu that manages it
-//   facts   one card: signed in as, connected by, who can use it, and whether people in the
-//           organization may connect it (a switch, where the host gives it); left out while empty
+//   accounts one card, a row for each account it is connected with: the account, who connected it
+//           and when in quiet words, its state, and what can be done to it (sign in again,
+//           disconnect), which wraps under the account on a phone; left out while there is none
 //   used by the workflows and agents that use it, only when something does
 //   tools   "What Grasp may do": one card, each group of tools a setting row with a quiet Select at
 //           its edge; a group opens in place to its tools, one line each. Search in the card's head.
 //           A member sees the words, not the Selects.
+//   host    what the host adds (`children`): its notices, a connection's access, in the same column
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -36,8 +38,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../select";
-import { SettingRow, SettingsRows } from "../../setting-row";
-import { RowFrame } from "../../setting-row/frame";
+import { SettingsRows } from "../../setting-row";
+import { RowFrame, rowFrame } from "../../setting-row/frame";
 import { Texture } from "../../texture/texture";
 import { grasp, media } from "../../tokens/tokens.stylex";
 import { useWords } from "../../words/words";
@@ -53,6 +55,7 @@ import {
   GroupSelect,
   ManageMenu,
   OfferSwitch,
+  StateWord,
   ToolSelect,
   underChoice,
   useAppTint,
@@ -252,7 +255,72 @@ const styles = stylex.create({
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
   },
-  foot: { display: "flex", justifyContent: "flex-end", gap: grasp.space2 },
+  // The accounts: one grid for every row, so each row's state stands in one column at the same x and
+  // its actions in the column after; the rows are its subgrid. Measured by the card's own width: under
+  // 28rem the actions wrap under the words, at their start.
+  accountsBox: { containerType: "inline-size" },
+  accounts: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr) auto auto",
+      "@container (width < 28rem)": "minmax(0, 1fr) auto",
+    },
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  // An account's row: the setting row's height and sides, a hairline over every row but the first.
+  account: {
+    display: "grid",
+    gridColumn: "1 / -1",
+    gridTemplateColumns: "subgrid",
+    alignItems: "center",
+    columnGap: grasp.space4,
+    rowGap: grasp.space2,
+    borderBlockStartWidth: { default: grasp.hairline, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: grasp.line,
+  },
+  accountWords: { display: "grid", minWidth: 0 },
+  // The account, on one line: a long address ends in an ellipsis, never breaks.
+  accountName: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightMedium,
+    color: grasp.ink,
+  },
+  // Its state: the dot and its word on one line, at any width.
+  accountState: {
+    display: "inline-flex",
+    alignSelf: "start",
+    whiteSpace: "nowrap",
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.muted,
+  },
+  accountActions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: {
+      default: "flex-end",
+      "@container (width < 28rem)": "flex-start",
+    },
+    gap: grasp.space2,
+    gridColumn: { default: "auto", "@container (width < 28rem)": "1 / -1" },
+  },
+  // Who can use it, wrapped under the account: its word starts on the account's own start.
+  who: {
+    display: "inline-flex",
+    marginInlineStart: {
+      default: 0,
+      "@container (width < 28rem)": `calc(-1 * ${grasp.space2})`,
+    },
+  },
 });
 
 /** Every prop an AppPage takes. */
@@ -264,8 +332,18 @@ export interface AppPageProps extends AppActions {
   onToolsChange?: (
     changes: readonly { id: string; choice: AppToolChoice }[]
   ) => void;
-  /** A change of who may use it: the host keeps it. Without it, who may use it is shown as words. */
-  onForWhomChange?: (forWhom: AppConnection["forWhom"]) => void;
+  /** A change of who may use an account: the host keeps it. Without it, who may use it is shown as words. */
+  onForWhomChange?: (
+    forWhom: AppConnection["forWhom"],
+    connection: AppConnection
+  ) => void;
+  /**
+   * An account row's own actions, in place of Sign in again and Disconnect from `onSignIn` and
+   * `onDisconnect`: the host's triggers, so the dialogs they open grow from them.
+   */
+  accountActions?: (connection: AppConnection) => ReactNode;
+  /** What the host adds under the page's own sections, in the same column: its notices, a connection's access. */
+  children?: ReactNode;
   /** Whether the app is offered in the organization. With `onOfferedChange`, a compact switch under the head's action (an admin). */
   offered?: boolean;
   /** A change of whether it is offered: the host keeps it. */
@@ -546,64 +624,140 @@ const MainAction = ({
   ) : null;
 };
 
-/** Who can use it: a Select where the person may change it and the host keeps it, else its word. */
-const WhoValue = ({
+/** Who can use an account, as a quiet Select: where the person may change it and the host keeps it. */
+const WhoSelect = ({
   connection,
-  editable,
   words,
   onChange,
 }: {
   connection: AppConnection;
-  editable: boolean;
   words: AppIntegrationWords;
-  onChange: AppPageProps["onForWhomChange"];
-}) =>
-  editable ? (
-    <span {...stylex.props(styles.pull)}>
-      <Select
-        value={connection.forWhom}
-        items={[
-          { value: "everyone", label: words.forEveryone },
-          { value: "you", label: words.forYou },
-        ]}
-        onValueChange={(next) => {
-          if (next === "everyone" || next === "you") {
-            onChange?.(next);
-          }
-        }}
-      >
-        <SelectTrigger variant="text" size="sm" aria-label={words.whoCanUse}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent />
-      </Select>
-    </span>
-  ) : (
-    <span {...stylex.props(styles.help)}>
-      {connection.forWhom === "everyone" ? words.forEveryone : words.forYou}
-    </span>
-  );
+  onChange: (
+    forWhom: AppConnection["forWhom"],
+    connection: AppConnection
+  ) => void;
+}) => (
+  <Select
+    value={connection.forWhom}
+    items={[
+      { value: "everyone", label: words.forEveryone },
+      { value: "you", label: words.forYou },
+    ]}
+    onValueChange={(next) => {
+      if (next === "everyone" || next === "you") {
+        onChange(next, connection);
+      }
+    }}
+  >
+    <SelectTrigger variant="text" size="sm" aria-label={words.whoCanUse}>
+      <SelectValue />
+    </SelectTrigger>
+    <SelectContent />
+  </Select>
+);
 
-/** Sign in again, where the host offers it: under the connection, quiet. */
-const signInFoot = (
-  app: App,
-  actions: AppActions,
-  words: AppIntegrationWords
-) =>
-  actions.onSignIn === undefined ||
-  app.connection?.state !== "sign-in" ? undefined : (
-    <span {...stylex.props(styles.foot)}>
+/** What can be done to one account: the host's own, else Sign in again (where it asks) and Disconnect. */
+const AccountActions = ({
+  app,
+  connection,
+  actions,
+  words,
+}: {
+  app: App;
+  connection: AppConnection;
+  actions: AppActions;
+  words: AppIntegrationWords;
+}) => (
+  <>
+    {actions.onSignIn === undefined || connection.state !== "sign-in" ? null : (
       <Button
         variant="quiet"
         size="sm"
         onClick={() => {
-          actions.onSignIn?.(app);
+          actions.onSignIn?.(app, connection);
         }}
       >
         {words.signInAgain}
       </Button>
-    </span>
+    )}
+    {actions.onDisconnect === undefined ? null : (
+      <Button
+        variant="quiet"
+        size="sm"
+        onClick={() => {
+          actions.onDisconnect?.(app, connection);
+        }}
+      >
+        {words.disconnect}
+      </Button>
+    )}
+  </>
+);
+
+/** One account: who it is, who connected it and when, who can use it, its state, and its actions. */
+const AccountRow = ({
+  app,
+  connection,
+  onForWhomChange,
+  actions,
+  words,
+  own,
+}: {
+  app: App;
+  connection: AppConnection;
+  onForWhomChange: AppPageProps["onForWhomChange"];
+  actions: AppActions;
+  words: AppIntegrationWords;
+  own: ReactNode;
+}) => {
+  const name = connection.signedInAs ?? connection.account;
+  const forWhom =
+    connection.forWhom === "everyone" ? words.forEveryone : words.forYou;
+  // Who can use it: a Select among its actions where it may be changed, else words after when.
+  const who =
+    onForWhomChange === undefined ? null : (
+      <span {...stylex.props(styles.who)}>
+        <WhoSelect
+          connection={connection}
+          words={words}
+          onChange={onForWhomChange}
+        />
+      </span>
+    );
+  const when =
+    who === null
+      ? `${connection.by}, ${connection.on} · ${forWhom}`
+      : `${connection.by}, ${connection.on}`;
+  const acts = own ?? (
+    <AccountActions
+      app={app}
+      connection={connection}
+      actions={actions}
+      words={words}
+    />
   );
+  return (
+    <li
+      data-slot="app-account"
+      data-state={connection.state}
+      {...stylex.props(rowFrame.pad, styles.account)}
+    >
+      <span {...stylex.props(styles.accountWords)}>
+        <span {...stylex.props(styles.accountName)} title={name}>
+          {name}
+        </span>
+        <span {...stylex.props(styles.help)}>{when}</span>
+      </span>
+      <span {...stylex.props(styles.accountState)}>
+        <StateWord state={connection.state} words={words} />
+      </span>
+      <span {...stylex.props(styles.accountActions)}>
+        {who}
+        {acts}
+      </span>
+    </li>
+  );
+};
 
 /** Used by: the workflows and agents that use it; nothing at all while nothing does. */
 const UsedByRows = ({
@@ -647,14 +801,17 @@ export const AppPage = ({
   editable = false,
   onToolsChange,
   onForWhomChange,
+  accountActions,
   offered,
   onOfferedChange,
   words: given,
+  children,
   ...actions
 }: AppPageProps) => {
   const words = useWords("appIntegration", appIntegrationWords, given);
   const tint = useAppTint(app);
-  const { connection } = app;
+  const accounts =
+    app.connections ?? (app.connection === undefined ? [] : [app.connection]);
   const used = (app.workflows ?? []).length > 0;
   const tools =
     app.tools === undefined || app.tools.length === 0 ? null : (
@@ -669,7 +826,6 @@ export const AppPage = ({
     offered === undefined || onOfferedChange === undefined ? null : (
       <OfferSwitch offered={offered} onChange={onOfferedChange} words={words} />
     );
-  const foot = signInFoot(app, actions, words);
   return (
     <div data-slot="app-page" {...stylex.props(styles.page)}>
       <div {...stylex.props(styles.column)}>
@@ -689,39 +845,32 @@ export const AppPage = ({
             <span {...stylex.props(styles.headCardOffer)}>{offer}</span>
           )}
         </header>
-        {connection === undefined ? null : (
+        {accounts.length === 0 ? null : (
           <SectionCard
             variant="boxed"
             flush
             density="compact"
             aria-label={words.connection}
-            footer={foot}
           >
-            <SettingsRows>
-              {connection === undefined ? null : (
-                <>
-                  <SettingRow label={words.signedInAs}>
-                    <span {...stylex.props(styles.help)}>
-                      {connection.signedInAs ?? connection.account}
-                    </span>
-                  </SettingRow>
-                  <SettingRow label={words.connectedBy}>
-                    <span
-                      {...stylex.props(styles.help)}
-                    >{`${connection.by}, ${connection.on}`}</span>
-                  </SettingRow>
-                  <SettingRow label={words.whoCanUse}>
-                    {/* Changed only where the host can keep the change. */}
-                    <WhoValue
-                      connection={connection}
-                      editable={editable && onForWhomChange !== undefined}
-                      words={words}
-                      onChange={onForWhomChange}
-                    />
-                  </SettingRow>
-                </>
-              )}
-            </SettingsRows>
+            <div {...stylex.props(styles.accountsBox)}>
+              <ul
+                aria-label={words.connection}
+                {...stylex.props(styles.accounts)}
+              >
+                {accounts.map((each) => (
+                  <AccountRow
+                    key={each.id ?? each.signedInAs ?? each.account}
+                    app={app}
+                    connection={each}
+                    // Changed only where the host can keep the change.
+                    onForWhomChange={editable ? onForWhomChange : undefined}
+                    actions={actions}
+                    words={words}
+                    own={accountActions?.(each)}
+                  />
+                ))}
+              </ul>
+            </div>
           </SectionCard>
         )}
         {used ? (
@@ -735,6 +884,7 @@ export const AppPage = ({
           </SectionCard>
         ) : null}
         {tools}
+        {children}
       </div>
     </div>
   );

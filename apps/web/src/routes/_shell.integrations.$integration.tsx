@@ -4,10 +4,7 @@ import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSettled } from "../connections/app-of.tsx";
 import { IntegrationAppPage } from "../connections/app-page.tsx";
 import { ConnectedDialog } from "../connections/connected-dialog.tsx";
-import {
-  ConnectionAccess,
-  ConnectionList,
-} from "../connections/connection-list.tsx";
+import { ConnectionsAccess } from "../connections/connection-list.tsx";
 import type { HeldPermissions } from "../connections/connection-list.tsx";
 import { useWhyNoConnect } from "../connections/integration-facts.ts";
 import { loadIntegrations } from "../connections/integrations-data.ts";
@@ -26,12 +23,12 @@ import { Cable } from "../grasp/icons/index.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 
-// One integration, on the library's app page (connections/app-page.tsx):
-// its head in the app's own colour, what Grasp may do with its tools
-// beside its connection, who can use it and the workflows that use it.
-// Under it, for admins, whether it is offered, and each connection made to
-// it on its own card (who connected it, its consent, the Apps and agents
-// holding a permission for it, signing in again and disconnecting). A
+// One integration, on the library's app page (connections/app-page.tsx),
+// in one column: its head in the app's own colour, a row for each account,
+// the workflows that use it and what Grasp may do with its tools; then
+// why the page can't say all it would, and what each connection holds
+// besides (its consent, who may read in the Brain what agents read through
+// it, the Apps and agents holding a permission for it). A
 // flow comes back here from the provider, through core's callback, with
 // `connection=<id>` (and `again=1` when it signed in again), and opens the
 // success page.
@@ -109,10 +106,7 @@ const Notices = ({
   );
 };
 
-/**
- * One app's page: the library's app page, then, for admins, whether it is
- * offered, and its connections.
- */
+/** One app's page: the library's app page, with its notices and its connections' access in its column. */
 const IntegrationPage = ({ integration }: { integration: Integration }) => {
   const { held, tools, catalog, uses } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
@@ -120,7 +114,6 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
   const navigate = useNavigate({ from: Route.fullPath });
   const { t } = useLingui();
   const read = useSettled(integration.listed ? tools : undefined);
-  const [only, ...more] = integration.connections;
   const used = useSettled(uses);
   // Only a connection the page lists: anyone can put an ID in a link.
   const connected =
@@ -156,25 +149,15 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           integration={integration}
           tools={read}
           uses={used}
-        />
-        <Notices catalog={catalog} integration={integration} tools={read} />
-        <HeldNotLoaded held={held} />
-        {/* One connection: the app page says it, and this what it holds
-            besides. More: each a card of its own. */}
-        {only === undefined || more.length > 0 ? (
-          <ConnectionList
+        >
+          <Notices catalog={catalog} integration={integration} tools={read} />
+          <HeldNotLoaded held={held} />
+          <ConnectionsAccess
             held={held}
             identity={identity}
             integration={integration}
           />
-        ) : (
-          <ConnectionAccess
-            connection={only}
-            held={held}
-            identity={identity}
-            integration={integration}
-          />
-        )}
+        </IntegrationAppPage>
       </Page>
     </>
   );

@@ -8,14 +8,13 @@ import type { Permission } from "@grasp-os/shared/permissions";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { i18n } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { holderName } from "../activity/pending.tsx";
-import { formatDate, formatList } from "../format.ts";
+import { formatList } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,10 +25,8 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
-import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import {
   Item,
   ItemActions,
@@ -45,16 +42,18 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { BrainAudience, useBrainAudiences } from "./brain-audience.tsx";
-import type { AudiencesRead } from "./brain-audience.tsx";
 import { canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 import { useChange } from "./use-change.ts";
 
-// The person's connections and the shared ones, as core lists them: what
-// each reaches, who connected it, and, for admins and builders, which Apps
-// and agents hold a permission for it. Connect and core check every
-// reconnect, disconnect and revoke; the page leaves out only what the role
-// can't do.
+// What an app's page says of each connection beyond its row (the library's
+// app page lists the accounts): signing in again and disconnecting from the
+// row, and under the page's sections what each connection holds besides:
+// why one whose access ran out can't be signed in to again, the consent a
+// Composio one was made with, who may read in the Brain what agents read
+// through a shared one, and which Apps and agents hold a permission for it.
+// Connect and core check every reconnect, disconnect and revoke; the page
+// leaves out only what the role can't do.
 
 const styles = stylex.create({
   // A group's name in the card's flush rows, on their inset.
@@ -79,25 +78,6 @@ export interface HeldPermissions {
   /** App names by ID; an ID stands in for an App not listed here. */
   appNames: ReadonlyMap<string, string>;
 }
-
-/** Where a connection stands, in words, by its status and whose it is. */
-const statusTextOf = ({
-  status,
-  scope,
-}: ListedConnection): MessageDescriptor => {
-  if (status === "needs_reauth") {
-    return msg`Needs someone to sign in again`;
-  }
-  if (status === "disconnected") {
-    return msg`Disconnected`;
-  }
-  return scope === "shared"
-    ? msg`Active, for the whole company`
-    : msg`Active, only for you`;
-};
-
-/** An ISO 8601 time as a date for people. */
-const dateOf = (iso: string): string => formatDate(iso);
 
 /** Who holds a permission, for people: the App's name, or the agent. */
 const holderOf = (
@@ -158,47 +138,42 @@ const HolderItem = ({
 };
 
 /**
- * The Apps and agents that can use the connection `id` now: those with an
- * active permission for it. One only asked for allows nothing yet.
+ * The permissions that let Apps and agents use the connection `id` now:
+ * the active ones. One only asked for allows nothing yet.
  */
-const Holders = ({
-  id,
-  held,
-  mayRevoke,
-}: {
-  id: string;
-  held: HeldPermissions;
-  mayRevoke: boolean;
-}) => {
-  const holding = held.permissions.filter(
+const holdingOf = (held: HeldPermissions, id: string): Permission[] =>
+  held.permissions.filter(
     ({ object, status }) =>
       object.type === "connection" &&
       object.connectionId === id &&
       status === "active"
   );
+
+/** The Apps and agents that can use a connection now, each with what it may do. */
+const Holders = ({
+  holding,
+  appNames,
+  mayRevoke,
+}: {
+  holding: Permission[];
+  appNames: ReadonlyMap<string, string>;
+  mayRevoke: boolean;
+}) => {
   const { t } = useLingui();
   const title = t`Apps and agents with a permission`;
   return (
     <section>
       <SectionHeader layout={styles.head} size="sm" title={title} />
-      {holding.length === 0 ? (
-        <Empty size="sm">
-          <EmptyHeader>
-            <EmptyDescription>{t`None.`}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <ItemGroup aria-label={title} separated>
-          {holding.map((permission) => (
-            <HolderItem
-              holder={holderOf(permission, held.appNames)}
-              key={permission.id}
-              mayRevoke={mayRevoke}
-              permission={permission}
-            />
-          ))}
-        </ItemGroup>
-      )}
+      <ItemGroup aria-label={title} separated>
+        {holding.map((permission) => (
+          <HolderItem
+            holder={holderOf(permission, appNames)}
+            key={permission.id}
+            mayRevoke={mayRevoke}
+            permission={permission}
+          />
+        ))}
+      </ItemGroup>
     </section>
   );
 };
@@ -300,7 +275,7 @@ const SignInAgain = ({
           setOpen(true);
         }}
         size="sm"
-        variant="ink"
+        variant="quiet"
       >
         {t`Sign in again`}
       </Button>
@@ -423,115 +398,54 @@ const choosesBrainAudience = (
   connection.status !== "disconnected";
 
 /**
- * One connection to the integration, as the prototype's Account section
- * shows it: its account, where it stands, who connected it and when, and
- * what can be done with it.
+ * What can be done to one account from its row on the app's page: sign in
+ * again where its access ran out and this person may, and disconnect where
+ * they may (only its owner sees a personal connection, and admins
+ * disconnect shared ones: connect checks both). Each dialog grows from its
+ * own button.
  */
-const ConnectionItem = ({
+export const AccountActions = ({
   connection,
   integration,
-  held,
   identity,
-  audiences,
-  onAudienceChanged,
 }: {
   connection: ListedConnection;
   integration: Integration;
-  held: HeldPermissions | undefined;
   identity: Identity;
-  /** Every shared connection's Brain audience, read once for the page. */
-  audiences: AudiencesRead;
-  /** A change or an erase of one was asked for: they are read again. */
-  onAudienceChanged: () => void;
 }) => {
-  const { t } = useLingui();
-  const admin = isAdmin(identity.role);
-  // Only the owner sees a personal connection here, and admins disconnect
-  // shared ones: connect checks both.
-  const mayDisconnect = connection.scope === "personal" || admin;
-  const reconnectable = canReconnect(connection, integration.offered, identity);
-  const { accountName } = connection;
   const label = labelOf(connection, integration);
-  const connectedBy =
-    connection.connectedBy === identity.userId
-      ? t`You`
-      : (connection.connectedByName ?? t`Someone no longer here`);
-  const ranOut = connection.status === "needs_reauth";
   return (
-    <SectionCard
-      actions={
-        <>
-          {ranOut && reconnectable ? (
-            <SignInAgain
-              connection={connection}
-              identity={identity}
-              integration={integration}
-              label={label}
-            />
-          ) : null}
-          {mayDisconnect ? (
-            <Disconnect
-              connection={connection}
-              label={label}
-              last={!integration.listed && integration.connections.length === 1}
-            />
-          ) : null}
-        </>
-      }
-      aside={
-        <Badge tone={ranOut ? "attention" : "success"}>
-          {i18n._(statusTextOf(connection))}
-        </Badge>
-      }
-      density="compact"
-      flush
-      title={label}
-    >
-      <SettingsRows>
-        {ranOut ? (
-          <RowAlert variant="attention">
-            {reconnectable
-              ? t`Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it.`
-              : ranOutText(
-                  connection.source === "native" &&
-                    oauthProviderSchema.safeParse(connection.provider).success,
-                  integration.offered,
-                  identity.staff
-                )}
-          </RowAlert>
-        ) : null}
-        <FactRow label={t`Account`}>
-          {accountName ?? t`Not named by the provider`}
-        </FactRow>
-        <FactRow label={t`Connected by`}>{connectedBy}</FactRow>
-        <FactRow label={t`Connected on`}>
-          {dateOf(connection.createdAt)}
-        </FactRow>
-        {connection.source === "composio" ? (
-          <ConsentRecord connection={connection} />
-        ) : null}
-      </SettingsRows>
-      {choosesBrainAudience(connection, identity) ? (
-        <BrainAudience
-          audiences={audiences}
+    <>
+      {connection.status === "needs_reauth" &&
+      canReconnect(connection, integration.offered, identity) ? (
+        <SignInAgain
           connection={connection}
+          identity={identity}
+          integration={integration}
           label={label}
-          onChanged={onAudienceChanged}
         />
       ) : null}
-      {held === undefined ? null : (
-        <Holders
-          held={held}
-          id={connection.id}
-          mayRevoke={isMemberAdmin(identity)}
+      {connection.scope === "personal" || isAdmin(identity.role) ? (
+        <Disconnect
+          connection={connection}
+          label={label}
+          last={!integration.listed && integration.connections.length === 1}
         />
-      )}
-    </SectionCard>
+      ) : null}
+    </>
   );
 };
 
-/** The integration's connections this person can see, each on its own compact card. */
-export const ConnectionList = ({
+/**
+ * What each of an app's connections holds beyond its row on the app's
+ * page: why one whose access ran out can't be signed in to again by this
+ * person; the consent a Composio one was made with; for the company's
+ * admins on a shared one, who may read in the Brain what agents read
+ * through it; and, for admins and builders, the Apps and agents holding a
+ * permission for it. A card for each connection with any of these, named
+ * by its account where there are several; nothing for the rest.
+ */
+export const ConnectionsAccess = ({
   integration,
   held,
   identity,
@@ -541,75 +455,65 @@ export const ConnectionList = ({
   held: Loaded<HeldPermissions> | undefined;
   identity: Identity;
 }) => {
+  const { t } = useLingui();
   // Read once for every card that chooses one, never a read a card.
   const { read: audiences, onChanged } = useBrainAudiences(
     integration.connections.some((connection) =>
       choosesBrainAudience(connection, identity)
     )
   );
-  return integration.connections.map((connection) => (
-    <ConnectionItem
-      audiences={audiences}
-      connection={connection}
-      held={held?.state === "ready" ? held.data : undefined}
-      identity={identity}
-      integration={integration}
-      key={connection.id}
-      onAudienceChanged={onChanged}
-    />
-  ));
-};
-
-/**
- * What an app's one connection holds beyond what the app's page says of it
- * (its account, who connected it, signing in again and disconnecting): the
- * consent a Composio one was connected with; for admins and builders,
- * which Apps and agents hold a permission for it; and, for the company's
- * admins on a shared one, who may read in the Brain what agents read
- * through it. Nothing for someone who would see none of these.
- */
-export const ConnectionAccess = ({
-  connection,
-  integration,
-  held,
-  identity,
-}: {
-  connection: ListedConnection;
-  integration: Integration;
-  /** Undefined for someone who can't list permissions. */
-  held: Loaded<HeldPermissions> | undefined;
-  identity: Identity;
-}) => {
-  const { t } = useLingui();
-  const consented = connection.source === "composio";
   const holders = held?.state === "ready" ? held.data : undefined;
-  const chooses = choosesBrainAudience(connection, identity);
-  const { read: audiences, onChanged } = useBrainAudiences(chooses);
-  if (!consented && holders === undefined && !chooses) {
-    return null;
-  }
-  return (
-    <SectionCard density="compact" flush title={t`Access`}>
-      {consented ? (
-        <SettingsRows>
-          <ConsentRecord connection={connection} />
-        </SettingsRows>
-      ) : null}
-      {chooses ? (
-        <BrainAudience
-          audiences={audiences}
-          connection={connection}
-          label={labelOf(connection, integration)}
-          onChanged={onChanged}
-        />
-      ) : null}
-      {holders === undefined ? null : (
-        <Holders
-          held={holders}
-          id={connection.id}
-          mayRevoke={isMemberAdmin(identity)}
-        />
-      )}
-    </SectionCard>
-  );
+  const several = integration.connections.length > 1;
+  return integration.connections.map((connection) => {
+    const label = labelOf(connection, integration);
+    const stuck =
+      connection.status === "needs_reauth" &&
+      !canReconnect(connection, integration.offered, identity);
+    const consented = connection.source === "composio";
+    const chooses = choosesBrainAudience(connection, identity);
+    const holding =
+      holders === undefined ? [] : holdingOf(holders, connection.id);
+    if (!stuck && !consented && !chooses && holding.length === 0) {
+      return null;
+    }
+    return (
+      <SectionCard
+        density="compact"
+        flush
+        key={connection.id}
+        title={several ? label : t`Access`}
+      >
+        {stuck || consented ? (
+          <SettingsRows>
+            {stuck ? (
+              <RowAlert variant="attention">
+                {ranOutText(
+                  connection.source === "native" &&
+                    oauthProviderSchema.safeParse(connection.provider).success,
+                  integration.offered,
+                  identity.staff
+                )}
+              </RowAlert>
+            ) : null}
+            {consented ? <ConsentRecord connection={connection} /> : null}
+          </SettingsRows>
+        ) : null}
+        {chooses ? (
+          <BrainAudience
+            audiences={audiences}
+            connection={connection}
+            label={label}
+            onChanged={onChanged}
+          />
+        ) : null}
+        {holders === undefined || holding.length === 0 ? null : (
+          <Holders
+            appNames={holders.appNames}
+            holding={holding}
+            mayRevoke={isMemberAdmin(identity)}
+          />
+        )}
+      </SectionCard>
+    );
+  });
 };

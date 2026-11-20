@@ -2115,7 +2115,6 @@ msgstr "Handmatig te verwijderen toegang"
 msgid "Access waiting for an admin"
 msgstr "Toegang die op een beheerder wacht"
 
-#: src/connections/connection-list.tsx
 #: src/frame/part-words.tsx
 msgid "Account"
 msgstr "Account"
@@ -2163,14 +2162,6 @@ msgstr "Acties voor {who}"
 #: src/drafts/draft-history.tsx
 msgid "Actions for the version not shared yet"
 msgstr "Acties voor de versie die nog niet gedeeld is"
-
-#: src/connections/connection-list.tsx
-msgid "Active, for the whole company"
-msgstr "Actief, voor het hele bedrijf"
-
-#: src/connections/connection-list.tsx
-msgid "Active, only for you"
-msgstr "Actief, alleen voor jou"
 
 #: src/brain/activity-page.tsx
 #: src/brain/brain-section.tsx
@@ -5242,7 +5233,6 @@ msgstr "Een account gekoppeld"
 msgid "Connected as {account}."
 msgstr "Gekoppeld als {account}."
 
-#: src/connections/connection-list.tsx
 #: src/frame/part-words.tsx
 msgid "Connected by"
 msgstr "Gekoppeld door"
@@ -5254,10 +5244,6 @@ msgstr "Verbonden voor iedereen"
 #: src/connections/integration-item.tsx
 msgid "Connected for you"
 msgstr "Verbonden voor jou"
-
-#: src/connections/connection-list.tsx
-msgid "Connected on"
-msgstr "Gekoppeld op"
 
 #: src/settings/ai-providers.tsx
 msgid "Connected providers"
@@ -6364,10 +6350,6 @@ msgstr "{label} ontkoppelen"
 #: src/frame/part-words.tsx
 msgid "Disconnect {label}?"
 msgstr "{label} ontkoppelen?"
-
-#: src/connections/connection-list.tsx
-msgid "Disconnected"
-msgstr "Ontkoppeld"
 
 #: src/activity/audit-words.ts
 msgid "Disconnected an account"
@@ -9709,10 +9691,6 @@ msgstr "De toegang is verlopen. Een beheerder van je organisatie kan hem opnieuw
 msgid "Its access ran out. Grasp staff can't reconnect it: an admin of the organization can."
 msgstr "De toegang is verlopen. Grasp-medewerkers kunnen hem niet opnieuw koppelen: een beheerder van de organisatie wel."
 
-#: src/connections/connection-list.tsx
-msgid "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
-msgstr "De toegang is verlopen. Meld je opnieuw aan met hetzelfde account: apps en agents houden hun toestemmingen ervoor."
-
 #: src/settings/ai-providers.tsx
 msgid "Its account is out of credit."
 msgstr "Het tegoed van het account is op."
@@ -11316,7 +11294,6 @@ msgstr "Opnieuw aanmelden nodig"
 msgid "Needs someone"
 msgstr "Heeft iemand nodig"
 
-#: src/connections/connection-list.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Iemand moet opnieuw aanmelden"
@@ -11979,10 +11956,6 @@ msgstr "Nog geen: een workflow start op zijn events via het tabblad Triggers van
 msgid "None: its provider was removed."
 msgstr "Geen: de provider ervan is verwijderd."
 
-#: src/connections/connection-list.tsx
-msgid "None."
-msgstr "Geen."
-
 #: src/settings/workspace-name.tsx
 msgid "Not a PNG, JPEG or WebP picture"
 msgstr "Geen PNG-, JPEG- of WebP-afbeelding"
@@ -12157,10 +12130,6 @@ msgstr "Niet gemaakt"
 #: src/settings/chat-accounts.tsx
 msgid "Not mine"
 msgstr "Niet van mij"
-
-#: src/connections/connection-list.tsx
-msgid "Not named by the provider"
-msgstr "Niet benoemd door de provider"
 
 #: src/onboarding/hr-leads.tsx
 msgid "Not now"
@@ -16642,7 +16611,6 @@ msgid "Someone it is no longer shared with"
 msgstr "Iemand met wie hij niet meer gedeeld is"
 
 #: src/connections/app-of.tsx
-#: src/connections/connection-list.tsx
 msgid "Someone no longer here"
 msgstr "Iemand die er niet meer is"
 
@@ -21299,7 +21267,6 @@ msgid "you"
 msgstr "jou"
 
 #: src/connections/app-of.tsx
-#: src/connections/connection-list.tsx
 #: src/drafts/draft-history.tsx
 #: src/frame/part-words.tsx
 #: src/workflows/run-detail.tsx
