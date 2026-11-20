@@ -3007,6 +3007,10 @@ msgstr "Apps qu’il utilise"
 msgid "Apps it works in"
 msgstr "Applications dans lesquelles il travaille"
 
+#: src/routes/guest.tsx
+msgid "Apps shared with you"
+msgstr "Apps partagées avec vous"
+
 #: src/chat/agent-change-card.tsx
 msgid "Apps taken off"
 msgstr "Apps retirées"
@@ -6982,6 +6986,10 @@ msgstr "Regroupez les apps et les workflows d’un processus, d’une équipe ou
 msgid "Groups of teams"
 msgstr "Groupes d’équipes"
 
+#: src/people/person-picker.tsx
+msgid "Guest"
+msgstr "Invité"
+
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Les comptes invités ne peuvent pas se connecter. Utilisez un compte propre à votre organisation."
@@ -10011,6 +10019,10 @@ msgstr "Rien n’est envoyé ni modifié dans {connection}."
 #: src/projects/project-people.tsx
 msgid "Nothing is shared with the project, so they lose no access."
 msgstr "Rien n’est partagé avec le projet, donc ils ne perdent aucun accès."
+
+#: src/routes/guest.tsx
+msgid "Nothing is shared with you yet."
+msgstr "Rien n’est encore partagé avec vous."
 
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
@@ -13364,6 +13376,7 @@ msgstr "Connectez-vous avec le compte de votre organisation."
 
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
