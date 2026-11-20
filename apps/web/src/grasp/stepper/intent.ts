@@ -24,6 +24,16 @@ export const intent = {
       instead: ["progress"],
       source: "docs/components/progress.mdx",
     },
+    {
+      when: "The foot of a flow that goes on in order, one question at a time: Back, how far through, Next.",
+      instead: ["step-foot"],
+      source: "docs/components/step-foot.mdx",
+    },
+    {
+      when: "A flow that goes on in order with a quiet bar at its top: Back and Next as ghost arrows either side of the progress.",
+      instead: ["step-bar"],
+      source: "docs/components/step-bar.mdx",
+    },
   ],
   variants: [
     {

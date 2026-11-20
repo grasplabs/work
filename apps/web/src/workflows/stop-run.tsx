@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
+import { barActionSize } from "../grasp/bar-actions/bar-actions.tsx";
 import { Stop } from "../grasp/icons/index.ts";
 
 // Stopping a run that hasn't ended, independent or in an App, asked again
@@ -49,7 +50,7 @@ export const StopRun = ({
         }
       }}
     >
-      <AlertDialogTrigger icon={Stop} size="xs">
+      <AlertDialogTrigger icon={Stop} size={barActionSize}>
         {t({ message: "Stop", context: "stop a workflow's run" })}
       </AlertDialogTrigger>
       <AlertDialogContent>

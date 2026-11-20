@@ -25,9 +25,8 @@ import type { ResizableLayoutChangeDetails } from "@ui-sdk/react/resizable";
 import { createContext, useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
-import { Button } from "../button";
+import { BarClose } from "../bar-actions/bar-actions";
 import { focus } from "../focus/focus";
-import { Cross } from "../icons";
 import { simply } from "../motion/simply.stylex";
 import { Resizable } from "../resizable";
 import { grasp, media } from "../tokens/tokens.stylex";
@@ -867,13 +866,7 @@ const PanelsCard = ({
               data-slot="app-shell-panels-close"
               {...stylex.props(styles.close)}
             >
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={Cross}
-                aria-label={closeLabel}
-                onClick={onClose}
-              />
+              <BarClose label={closeLabel} onClick={onClose} />
             </span>
           )}
         </div>

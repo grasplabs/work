@@ -1,5 +1,6 @@
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
+import type { ReactNode } from "react";
 
 import { AppTile } from "../grasp/blocks/app-integration/app-integration.tsx";
 import { useAppOf, useTileWords } from "./app-of.tsx";
@@ -22,6 +23,7 @@ export const IntegrationTile = ({
   uses,
   open,
   onOpen,
+  fact,
 }: {
   integration: Integration;
   /** Who looks: what a tile that needs someone says depends on what they may do. */
@@ -31,6 +33,8 @@ export const IntegrationTile = ({
   /** It is the one open over the page. */
   open: boolean;
   onOpen: OpenApp;
+  /** The one line under its name in place of where it stands: why it is recommended. */
+  fact?: ReactNode;
 }) => {
   const appOf = useAppOf(identity);
   const wordsOf = useTileWords(identity);
@@ -38,6 +42,7 @@ export const IntegrationTile = ({
     <AppTile
       app={appOf(integration, { size: "sm", uses })}
       current={open}
+      fact={fact}
       onOpen={(_app, tile) => {
         onOpen(integration.key, tile);
       }}

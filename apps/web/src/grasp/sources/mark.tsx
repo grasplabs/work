@@ -64,8 +64,14 @@ const Favicon = ({ source }: { source: Source }) => {
   );
 };
 
-/** What stands on the tile: a portrait, a brand, a favicon or an icon. */
-const Face = ({ source, size }: { source: Source; size: "row" | "pile" }) => {
+/** What stands on the tile: a portrait, a brand, a favicon or an icon. Bare, at the icon's size, in a RowList row (item.tsx). */
+export const Face = ({
+  source,
+  size,
+}: {
+  source: Source;
+  size: "row" | "pile";
+}) => {
   const kind = kindOf(source);
   if (kind === "person" && source.person !== undefined) {
     return (

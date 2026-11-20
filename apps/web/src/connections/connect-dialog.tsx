@@ -12,7 +12,7 @@ import type {
   ToolkitKeyField,
 } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -99,6 +99,12 @@ export const canConnect = (
   }
   return isAdmin(identity.role);
 };
+
+/** Whether an admin connects it for this person: they can't connect it, and they aren't one of the organization's admins. */
+export const waitsForAdmin = (
+  integration: Integration,
+  identity: Identity
+): boolean => !canConnect(integration, identity) && !isMemberAdmin(identity);
 
 /** Whether this person can sign in again to `connection`, as core decides it. */
 export const canReconnect = (
@@ -576,6 +582,20 @@ const KeyFields = ({
 };
 
 /**
+ * Disconnects the connections a toolkit's new one replaces, first:
+ * Composio's account can't be signed in to again, and the same account
+ * can't be connected twice.
+ */
+const disconnectReplaced = async (
+  session: Session,
+  replacing: readonly ListedConnection[]
+): Promise<void> => {
+  await Promise.all(
+    replacing.map(async ({ id }) => await session.connections.disconnect(id))
+  );
+};
+
+/**
  * The last step of connecting a toolkit that takes a key: the consent as
  * written, then the fields Composio asks for, typed in here. Core answers
  * with the integration's page, which the browser loads afresh, so what was
@@ -584,11 +604,13 @@ const KeyFields = ({
 const KeyStep = ({
   integration,
   allowed,
+  replacing,
   returnTo,
   onClose,
 }: {
   integration: Integration;
   allowed: AllowedTool[];
+  replacing: readonly ListedConnection[];
   returnTo: string;
   onClose: () => void;
 }) => {
@@ -621,16 +643,16 @@ const KeyStep = ({
       ({ name, required }) => !required || (values[name] ?? "") !== ""
     ) === true;
   const connect = async (): Promise<void> => {
-    await begin(
-      async (session) =>
-        await session.connections.connectToolkitWithKey({
-          toolkit: id,
-          tools: toolRules(allowed),
-          consent: composioKeyConsentText,
-          values,
-          returnTo,
-        })
-    );
+    await begin(async (session) => {
+      await disconnectReplaced(session, replacing);
+      return await session.connections.connectToolkitWithKey({
+        toolkit: id,
+        tools: toolRules(allowed),
+        consent: composioKeyConsentText,
+        values,
+        returnTo,
+      });
+    });
   };
   return (
     <>
@@ -681,10 +703,13 @@ const KeyStep = ({
  */
 const ComposioFlow = ({
   integration,
+  replacing,
   returnTo,
   onClose,
 }: {
   integration: Integration;
+  /** The connections that stopped working, which connecting again replaces. */
+  replacing: readonly ListedConnection[];
   returnTo: string;
   onClose: () => void;
 }) => {
@@ -714,15 +739,15 @@ const ComposioFlow = ({
   }, [core, source, id]);
   const tools = listed?.state === "ready" ? listed.data : undefined;
   const connect = async (): Promise<void> => {
-    await begin(
-      async (session) =>
-        await session.connections.connectToolkit({
-          toolkit: integration.id,
-          tools: toolRules(allowed),
-          consent: composioConsentText,
-          returnTo,
-        })
-    );
+    await begin(async (session) => {
+      await disconnectReplaced(session, replacing);
+      return await session.connections.connectToolkit({
+        toolkit: integration.id,
+        tools: toolRules(allowed),
+        consent: composioConsentText,
+        returnTo,
+      });
+    });
   };
   const steps = [
     {
@@ -774,6 +799,7 @@ const ComposioFlow = ({
           <KeyStep
             allowed={allowed}
             integration={integration}
+            replacing={replacing}
             onClose={onClose}
             returnTo={returnTo}
           />
@@ -808,6 +834,8 @@ const ComposioFlow = ({
   );
 };
 
+const noneReplaced: readonly ListedConnection[] = [];
+
 /**
  * The dialog: connecting `integration`, or signing in again to `again`.
  * Open only for someone `canConnect` or `canReconnect` allows. The flow
@@ -817,6 +845,7 @@ export const ConnectDialog = ({
   integration,
   identity,
   again,
+  replacing = noneReplaced,
   returnTo,
   open,
   onOpenChange,
@@ -824,6 +853,8 @@ export const ConnectDialog = ({
   integration: Integration;
   identity: Identity;
   again?: ListedConnection;
+  /** A toolkit's connections that stopped working, disconnected before connecting it again. */
+  replacing?: readonly ListedConnection[];
   returnTo?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -859,6 +890,7 @@ export const ConnectDialog = ({
           {open && integration.source === "composio" ? (
             <ComposioFlow
               integration={integration}
+              replacing={replacing}
               onClose={() => {
                 onOpenChange(false);
               }}

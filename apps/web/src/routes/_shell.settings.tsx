@@ -50,7 +50,7 @@ const SettingsLayout = () => {
             <Outlet />
           </>
         ) : (
-          <PageColumn measure="settings" align="center">
+          <PageColumn measure="settings">
             {header}
             <Outlet />
           </PageColumn>

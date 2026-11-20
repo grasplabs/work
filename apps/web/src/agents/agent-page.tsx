@@ -763,7 +763,7 @@ export const AgentPage = ({
     own && (tab === "access" || tab === "schedule") ? "overview" : tab;
   return (
     <Page>
-      <PageColumn align="center" measure="settings">
+      <PageColumn measure="settings">
         <PageHeader
           actions={
             <div {...stylex.props(styles.actions)}>

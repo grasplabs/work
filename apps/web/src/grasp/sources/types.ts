@@ -1,7 +1,9 @@
-import type { ActivityStep } from "../agent-activity";
-import type { Brand } from "../brand-icon";
 // What a source is, shared by the parts of Sources (sources.tsx, citation.tsx, list.tsx, card.tsx).
 // One shape for every kind: the fields every row shows, then the detail a kind's card draws.
+import type { RenderProp } from "@ui-sdk/react/primitive";
+
+import type { ActivityStep } from "../agent-activity";
+import type { Brand } from "../brand-icon";
 import type { IconData } from "../icons";
 import type { KeyValueItem } from "../key-value";
 import type { StepperStep } from "../stepper";
@@ -83,8 +85,14 @@ export interface Source {
   when?: string;
   /** How fresh it is, when that matters: "live", "2 days old". */
   fresh?: string;
-  /** Its address, opened from its row and its card. Leave it out for a source with nowhere to go. */
+  /** Its address, opened in a new tab from its row and its card. Leave it out for a source with nowhere to go. */
   href?: string;
+  /**
+   * A page in the product, drawn as the router's own link (`render: <Link to="/brain/notes/q3" />`):
+   * its row's title and its card's link take that element, in this tab, and keep its address, so
+   * middle-click and the address under the pointer still work. In place of `href`.
+   */
+  render?: RenderProp;
   /** The part the answer used: the passage, the line, what was said. Shown in the row and the card. */
   quote?: string;
   /** The words before and after the quote, quieter, so the card shows it in context. */
@@ -128,6 +136,14 @@ export interface Source {
   access?: SourceAccess;
   /** Why it could not be opened, in a few words: "No access", "Deleted", "Timed out". */
   reason?: string;
+  /** It may no longer hold, in a few words, after where and when (`"Not heard since March"`): in ink, never in colour. */
+  stale?: string;
+  /**
+   * A gone source whose words were kept: its card still shows the quote, after why it could not be
+   * opened, so a claim whose only source was removed can still show what it said.
+   * @default false
+   */
+  kept?: boolean;
   /**
    * It could not be opened (moved, private, gone). The same as `access: "gone"`, kept for the
    * Sources that set it before `access` existed.

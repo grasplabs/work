@@ -1,5 +1,6 @@
 // The words an app's tile, panel, page and connect dialog show or say, in English. The product gives
 // them in its languages through GraspWords (src/words).
+/* oxlint-disable typescript/no-deprecated -- canDo keeps its English beside mayDo until the product stops passing it. */
 
 /** Every word the app's parts show or say. */
 export interface AppIntegrationWords {
@@ -19,6 +20,12 @@ export interface AppIntegrationWords {
   /** Asks for attention on a tile. */
   needsSignIn: string;
   needsConnect: string;
+  /** An app that works but has an account that needs someone: its tile, its state. */
+  needsYou: string;
+  /** How many apps need someone, said where the page sums up its apps (`AppsState`). */
+  appsNeedYou: (count: number) => string;
+  /** How many apps are connected, where none needs anyone (`AppsState`). */
+  connectedCount: (count: number) => string;
   account: string;
   connection: string;
   signedInAs: string;
@@ -33,9 +40,9 @@ export interface AppIntegrationWords {
   notConnected: string;
   /** Why a member sees no Connect: only an admin may connect the app. */
   adminConnects: string;
-  /** The panel's section: what the app's tools can do. */
+  /** @deprecated The panel says `mayDo` too, as the page does. */
   canDo: string;
-  /** The page's main card: what Grasp may do with them. */
+  /** What Grasp may do with the app's tools: the page's main card and the panel's section. */
   mayDo: string;
   /** How many tools read and how many change. */
   counts: (reads: number, writes: number) => string;
@@ -71,6 +78,13 @@ export interface AppIntegrationWords {
   other: string;
   readsWord: string;
   changesWord: string;
+  /** A description cut at its lines: show it whole, then cut it again. */
+  showMore: string;
+  showLess: string;
+  /** Whether the app is offered in the organization: the switch's name, and the one line that says what its state means. */
+  offered: string;
+  offeredOn: string;
+  offeredOff: string;
 }
 
 export const appIntegrationWords: AppIntegrationWords = {
@@ -86,6 +100,10 @@ export const appIntegrationWords: AppIntegrationWords = {
   allowed: (allowed, of) => `${allowed} of ${of} tools allowed`,
   needsSignIn: "Sign in again",
   needsConnect: "Connect again",
+  needsYou: "Needs you",
+  appsNeedYou: (count) =>
+    count === 1 ? "1 app needs you" : `${count} apps need you`,
+  connectedCount: (count) => `${count} connected`,
   account: "Account",
   connection: "Connection",
   signedInAs: "Signed in as",
@@ -128,6 +146,11 @@ export const appIntegrationWords: AppIntegrationWords = {
   other: "Other",
   readsWord: "Reads",
   changesWord: "Changes",
+  showMore: "Show more",
+  showLess: "Show less",
+  offered: "Available in your organization",
+  offeredOn: "Members see it in Integrations.",
+  offeredOff: "Hidden from members, and no one can connect it.",
 };
 
 declare module "../../words/words" {

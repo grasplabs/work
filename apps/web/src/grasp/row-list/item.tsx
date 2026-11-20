@@ -1,9 +1,11 @@
 // RowListItem: one row of a RowList (row-list.tsx). Its name, the small icon of its kind before it,
 // a mark after it, a quiet detail and its actions at the end. With `onPress` the whole row is one
-// button, its actions still their own.
+// button, with `href` or `render` one link; its actions are still their own.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { renderElement } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import { use } from "react";
 import type { ReactNode } from "react";
 
@@ -20,6 +22,8 @@ export interface RowListItemProps {
   name: string;
   /** The small icon that says what kind of thing it is, in the one accent. From the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
+  /** In the icon's place, a mark of its own the same size: a brand, a portrait, a source's tile. */
+  media?: ReactNode;
   /** After the name: a lock on one that cannot change, as an Icon with a `label`, or a Badge. */
   mark?: ReactNode;
   /** At the end, quiet: one short fact ("Required", "Text", "Daily"). */
@@ -31,6 +35,13 @@ export interface RowListItemProps {
   actions?: ReactNode;
   /** Makes the whole row one button: open it, or edit it. Its actions stay their own buttons. */
   onPress?: () => void;
+  /** Makes the whole row one link, to this address. Its actions stay their own buttons. */
+  href?: string;
+  /**
+   * The row's link drawn as the router's own (`render={<Link to="/brain/sources/q3" />}`), so it keeps
+   * middle-click and the address under the pointer. Leave `href` out when the link carries it.
+   */
+  render?: RenderProp;
   /**
    * Just added: it fades in once, as it arrives. Nothing with reduced motion.
    * @default false
@@ -57,17 +68,64 @@ const End = ({ actions }: { actions: ReactNode }) => {
   return <span aria-hidden {...stylex.props(styles.actions, styles.held)} />;
 };
 
+/** The row's name: its link, its button, or its words. */
+const Name = ({
+  name,
+  linked,
+  href,
+  render,
+  onPress,
+}: Pick<RowListItemProps, "name" | "href" | "render" | "onPress"> & {
+  linked: boolean;
+}) => {
+  if (linked) {
+    return renderElement(
+      "a",
+      {
+        href,
+        "data-row-press": "",
+        title: name,
+        className: stylex.props(styles.press).className,
+        children: name,
+      },
+      render
+    );
+  }
+  if (onPress !== undefined) {
+    return (
+      <button
+        type="button"
+        data-row-press=""
+        onClick={onPress}
+        title={name}
+        {...stylex.props(styles.press)}
+      >
+        {name}
+      </button>
+    );
+  }
+  return (
+    <span title={name} {...stylex.props(styles.name)}>
+      {name}
+    </span>
+  );
+};
+
 /** One 44px row: kind, name, mark, detail and actions. */
 export const RowListItem = ({
   name,
   icon,
+  media,
   mark,
   detail,
   actions,
   onPress,
+  href,
+  render,
   fresh = false,
 }: RowListItemProps) => {
-  const pressable = onPress !== undefined;
+  const linked = (href !== undefined && href !== "") || render !== undefined;
+  const pressable = linked || onPress !== undefined;
   return (
     <li
       data-slot="row-list-item"
@@ -79,26 +137,24 @@ export const RowListItem = ({
         fresh && arrive.in
       )}
     >
-      {icon !== undefined && (
+      {given(media) ? (
         <span data-row-kind="" {...stylex.props(styles.kind)}>
-          <Icon icon={icon} />
+          {media}
         </span>
-      )}
-      {pressable ? (
-        <button
-          type="button"
-          data-row-press=""
-          onClick={onPress}
-          title={name}
-          {...stylex.props(styles.press)}
-        >
-          {name}
-        </button>
       ) : (
-        <span title={name} {...stylex.props(styles.name)}>
-          {name}
-        </span>
+        icon !== undefined && (
+          <span data-row-kind="" {...stylex.props(styles.kind)}>
+            <Icon icon={icon} />
+          </span>
+        )
       )}
+      <Name
+        name={name}
+        linked={linked}
+        href={href}
+        render={render}
+        onPress={onPress}
+      />
       {given(mark) && <span {...stylex.props(styles.mark)}>{mark}</span>}
       <span aria-hidden {...stylex.props(styles.spring)} />
       {given(detail) && (

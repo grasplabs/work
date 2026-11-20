@@ -936,7 +936,7 @@ const KindStep = ({
           </Button>
         ) : null}
       </header>
-      <RowList aria-label={t`Kinds of field`}>
+      <RowList aria-label={t`Kinds of field`} noActions>
         {options.map((option) => (
           <RowListItem
             detail={option.description}

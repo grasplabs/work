@@ -5,26 +5,35 @@ import type {
 } from "@grasp-os/shared/connect";
 import { connectionErrors } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useEffectEvent, useId, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useEffectEvent, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { SectionHeader } from "../grasp/section-header/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import {
+  RowAlert,
+  SettingRow,
+  SettingsRows,
+} from "../grasp/setting-row/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 import { SyncPlaces } from "./sync-places.tsx";
 import { useChange } from "./use-change.ts";
@@ -39,6 +48,16 @@ import { useChange } from "./use-change.ts";
 // Beside it, which of the connection's shared drives or libraries Grasp
 // may copy into the Brain (sync-places.tsx): what comes in, and who may
 // read it, are decided in one place.
+
+const styles = stylex.create({
+  // The section's name in the card's flush rows, on their inset, as the
+  // card's other sections have it (connection-list.tsx).
+  head: {
+    marginInline: grasp.space4,
+    marginBlockStart: grasp.space3,
+    marginBlockEnd: grasp.space1,
+  },
+});
 
 /** A team of the company, to choose. */
 interface Team {
@@ -248,7 +267,7 @@ const WidenDialog = ({
   const { t } = useLingui();
   const team = teamNameOf(next, teams);
   return (
-    <Dialog
+    <AlertDialog
       onOpenChange={(open) => {
         if (!open) {
           onCancel();
@@ -256,46 +275,86 @@ const WidenDialog = ({
       }}
       open
     >
-      <DialogContent closeLabel={t`Close`}>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Keep what agents read through {label} in the Brain?</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            {next.kind === "everyone" ? (
-              <Trans>
-                Everyone in the company will be able to find what agents read
-                through {label} and what is copied from it, including what was
-                kept before, whatever their permissions in {label}. Their
-                assistants will also read {label} directly, in their own chats.
-                Choose a team if not everyone should have this.
-              </Trans>
-            ) : null}
-            {next.kind === "team" && team !== undefined ? (
-              <Trans>
-                Everyone in {team} will be able to find what agents read through{" "}
-                {label} and what is copied from it, including what was kept
-                before, whatever their permissions in {label}. Their assistants
-                will also read {label} directly, in their own chats.
-              </Trans>
-            ) : null}
-            {next.kind === "team" && team === undefined ? (
-              <Trans>
-                Everyone in this team will be able to find what agents read
-                through {label} and what is copied from it, including what was
-                kept before, whatever their permissions in {label}. Their
-                assistants will also read {label} directly, in their own chats.
-              </Trans>
-            ) : null}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter closeLabel={t`Cancel`} showCloseButton>
-          <Button onClick={onConfirm}>
-            <Trans>Keep it for them</Trans>
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <AlertDialogContent>
+        <AlertDialogTitle>
+          <Trans>Keep what agents read through {label} in the Brain?</Trans>
+        </AlertDialogTitle>
+        <AlertDialogDescription>
+          {next.kind === "everyone" ? (
+            <Trans>
+              Everyone in the company will be able to find what agents read
+              through {label} and what is copied from it, including what was
+              kept before, whatever their permissions in {label}. Their
+              assistants will also read {label} directly, in their own chats.
+              Choose a team if not everyone should have this.
+            </Trans>
+          ) : null}
+          {next.kind === "team" && team !== undefined ? (
+            <Trans>
+              Everyone in {team} will be able to find what agents read through{" "}
+              {label} and what is copied from it, including what was kept
+              before, whatever their permissions in {label}. Their assistants
+              will also read {label} directly, in their own chats.
+            </Trans>
+          ) : null}
+          {next.kind === "team" && team === undefined ? (
+            <Trans>
+              Everyone in this team will be able to find what agents read
+              through {label} and what is copied from it, including what was
+              kept before, whatever their permissions in {label}. Their
+              assistants will also read {label} directly, in their own chats.
+            </Trans>
+          ) : null}
+        </AlertDialogDescription>
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogAction onClick={onConfirm} variant="ink">
+            {t`Keep it for them`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
+/**
+ * The erase dialog's answers, and why an erase was refused. Mounted only
+ * while the dialog is open, so a reason from an earlier try is gone when
+ * it opens again; while the erase runs the dialog stays open.
+ */
+const EraseAnswers = ({
+  connection,
+  onErased,
+}: {
+  connection: ListedConnection;
+  onErased: () => void;
+}) => {
+  const { failure, change } = useChange();
+  const { t } = useLingui();
+  return (
+    <>
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
+      <AlertDialogFooter>
+        <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+        <AlertDialogAction
+          action={async () => {
+            let erased = false;
+            await change(async (session) => {
+              await session.connections.eraseBrainReads(connection.id);
+              erased = true;
+            });
+            onErased();
+            if (!erased) {
+              throw new Error("Not erased");
+            }
+          }}
+          failedLabel={t`Couldn't erase`}
+          variant="danger"
+        >
+          {t`Erase for good`}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </>
   );
 };
 
@@ -310,58 +369,22 @@ const EraseKept = ({
   /** The erase was asked for: what the card shows is read again. */
   onErased: () => void;
 }) => {
-  const { busy, failure, change } = useChange();
-  const [confirming, setConfirming] = useState(false);
   const { t } = useLingui();
   return (
-    <div className="flex flex-col gap-1">
-      <Button
-        className="self-start"
-        disabled={busy}
-        onClick={() => {
-          setConfirming(true);
-        }}
-        size="sm"
-        variant="outline"
-      >
-        <Trans>Erase what the Brain kept</Trans>
-      </Button>
-      <Dialog onOpenChange={setConfirming} open={confirming}>
-        <DialogContent closeLabel={t`Close`}>
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>Erase what the Brain kept from {label}?</Trans>
-            </DialogTitle>
-            <DialogDescription>
-              <Trans>
-                Everything the Brain kept from it is erased for good, and nobody
-                reads it from now on. This can&apos;t be undone. To keep
-                anything from it again, choose who may read it once the erasure
-                is done.
-              </Trans>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter closeLabel={t`Cancel`} showCloseButton>
-            <Button
-              disabled={busy}
-              onClick={() => {
-                setConfirming(false);
-                void (async () => {
-                  await change(async (session) => {
-                    await session.connections.eraseBrainReads(connection.id);
-                  });
-                  onErased();
-                })();
-              }}
-              variant="destructive"
-            >
-              <Trans>Erase for good</Trans>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <ErrorText>{failure}</ErrorText>
-    </div>
+    <AlertDialog>
+      <AlertDialogTrigger size="sm">
+        {t`Erase what the Brain kept`}
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogTitle>
+          {t`Erase what the Brain kept from ${label}?`}
+        </AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`Everything the Brain kept from it is erased for good, and nobody reads it from now on. This can't be undone. To keep anything from it again, choose who may read it once the erasure is done.`}
+        </AlertDialogDescription>
+        <EraseAnswers connection={connection} onErased={onErased} />
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };
 
@@ -384,7 +407,6 @@ export const BrainAudience = ({
   onChanged: () => void;
 }) => {
   const { t } = useLingui();
-  const selectId = useId();
   const { busy, failure, change } = useChange();
   // The widening asked about, and the audience it was asked from: what
   // core is told the choice was made from, so another admin's change
@@ -398,8 +420,16 @@ export const BrainAudience = ({
   if (audiences.state === "loading") {
     return null;
   }
+  const title = t`The Brain`;
   if (audiences.state === "refused") {
-    return <ErrorText>{audiences.message}</ErrorText>;
+    return (
+      <section>
+        <SectionHeader layout={styles.head} size="sm" title={title} />
+        <SettingsRows>
+          <RowAlert variant="danger">{audiences.message}</RowAlert>
+        </SettingsRows>
+      </section>
+    );
   }
   const { settings, teams } = audiences.data;
   const setting = settings.find(
@@ -430,73 +460,78 @@ export const BrainAudience = ({
       onChanged();
     })();
   };
+  const choices = [
+    { value: "nobody", label: t`Nobody` },
+    { value: "everyone", label: t`Everyone in the company` },
+    ...teams.map(({ id, name }) => ({ value: id, label: t`Team ${name}` })),
+  ];
   return (
-    <div className="flex flex-col gap-2 text-sm">
-      <h4 className="font-medium">
-        <Trans>The Brain</Trans>
-      </h4>
-      <Field>
-        <FieldLabel htmlFor={selectId}>
-          <Trans>Keep what agents read through it for</Trans>
-        </FieldLabel>
-        <NativeSelect
-          disabled={busy || erasing}
-          id={selectId}
-          onChange={(event) => {
-            const next = audienceOf(event.target.value);
-            if (widens(audience, next)) {
-              setAsked({ next, from: audience });
-              return;
-            }
-            choose(next, audience);
-          }}
-          value={valueOf(audience)}
+    <section>
+      <SectionHeader
+        actions={
+          !erasing &&
+          (audience.kind !== "nobody" || connection.keepsReads === true) ? (
+            <EraseKept
+              connection={connection}
+              label={label}
+              onErased={onChanged}
+            />
+          ) : null
+        }
+        layout={styles.head}
+        size="sm"
+        title={title}
+      />
+      <SettingsRows>
+        <SettingRow
+          {...(failure === undefined ? {} : { error: failure })}
+          info={t`Who may read it, in the Brain and through their assistant in their own chat, is decided inside Grasp, not by the permissions in ${label}: choose a team if not everyone should have it.`}
+          label={t`Keep what agents read through it for`}
+          status={busy ? "saving" : "idle"}
         >
-          <NativeSelectOption value="nobody">{t`Nobody`}</NativeSelectOption>
-          <NativeSelectOption value="everyone">
-            {t`Everyone in the company`}
-          </NativeSelectOption>
-          {teams.map(({ id, name }) => (
-            <NativeSelectOption key={id} value={id}>
-              {t`Team ${name}`}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </Field>
-      <p className="text-muted-foreground">
-        <Trans>
-          Who may read it, in the Brain and through their assistant in their own
-          chat, is decided inside Grasp, not by the permissions in {label}:
-          choose a team if not everyone should have it.
-        </Trans>
-      </p>
-      {connection.status === "needs_reauth" ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            Nobody can find what the Brain kept from {label} until someone signs
-            in again. None of it is erased.
-          </Trans>
-        </p>
-      ) : null}
-      {erasing ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            What the Brain kept from {label} is being erased. You can choose who
-            may read it again once that is done.
-          </Trans>
-        </p>
-      ) : null}
-      {changedMeanwhile ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            Who may read what agents read through {label} was changed in the
-            meantime. This is who may read it now: choose again if you still
-            want to change it.
-          </Trans>
-        </p>
-      ) : null}
-      <ErrorText>{failure}</ErrorText>
-      <ErrorText>{audiences.refused}</ErrorText>
+          {(field) => (
+            <Select
+              disabled={busy || erasing}
+              items={choices}
+              onValueChange={(value: string | null) => {
+                if (value === null) {
+                  return;
+                }
+                const next = audienceOf(value);
+                if (widens(audience, next)) {
+                  setAsked({ next, from: audience });
+                  return;
+                }
+                choose(next, audience);
+              }}
+              value={valueOf(audience)}
+            >
+              <SelectTrigger {...field} size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          )}
+        </SettingRow>
+        {connection.status === "needs_reauth" ? (
+          <RowAlert variant="attention">
+            {t`Nobody can find what the Brain kept from ${label} until someone signs in again. None of it is erased.`}
+          </RowAlert>
+        ) : null}
+        {erasing ? (
+          <RowAlert variant="neutral">
+            {t`What the Brain kept from ${label} is being erased. You can choose who may read it again once that is done.`}
+          </RowAlert>
+        ) : null}
+        {changedMeanwhile ? (
+          <RowAlert variant="attention">
+            {t`Who may read what agents read through ${label} was changed in the meantime. This is who may read it now: choose again if you still want to change it.`}
+          </RowAlert>
+        ) : null}
+        {audiences.refused === undefined ? null : (
+          <RowAlert variant="danger">{audiences.refused}</RowAlert>
+        )}
+      </SettingsRows>
       {asked === undefined ? null : (
         <WidenDialog
           label={label}
@@ -517,10 +552,6 @@ export const BrainAudience = ({
         onAudienceStale={onChanged}
         team={teamNameOf(audience, teams)}
       />
-      {!erasing &&
-      (audience.kind !== "nobody" || connection.keepsReads === true) ? (
-        <EraseKept connection={connection} label={label} onErased={onChanged} />
-      ) : null}
-    </div>
+    </section>
   );
 };

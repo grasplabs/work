@@ -20,6 +20,7 @@ import {
   artifactViewerBoxWords,
   englishLabels as artifactViewerWords,
 } from "../grasp/artifact-viewer/words.ts";
+import { askBarWords } from "../grasp/ask-bar/words.ts";
 import { audioPlayerWords } from "../grasp/audio-player/words.ts";
 import { avatarGroupWords } from "../grasp/avatar/words.ts";
 import {
@@ -143,6 +144,7 @@ const englishDraftWords: DraftWords = {
 export const englishPartWords: GraspWordsCatalog = {
   "app-shell-panel": appShellPanelWords,
   agentActivity: agentActivityWords,
+  askBar: askBarWords,
   alert: alertWords,
   appBuilding: appBuildingWords,
   artifactViewer: artifactViewerWords,
@@ -361,6 +363,18 @@ export const usePartWords = (): GraspWordsCatalog => {
       retry: t`Try again`,
       how: t`Click or drop a picture.`,
       refused: (name, reason) => refusedFile(name, reason, true),
+    },
+    askBar: {
+      failed: t`Could not send`,
+      working: t`Working`,
+      target: t({ message: "Target", context: "pick a part of the page" }),
+      dictate: t`Dictate`,
+      pick: t`Pick a part of the page. Escape to stop.`,
+      untitled: t`New chat`,
+      newChat: t`New chat`,
+      expand: t`Full screen`,
+      dock: t`Dock beside the page`,
+      close: t`Close the chat`,
     },
     agentActivity: {
       states: {
@@ -1404,6 +1418,11 @@ export const usePartWords = (): GraspWordsCatalog => {
         t`${plural(total, { one: `${allowed} of # tool allowed`, other: `${allowed} of # tools allowed` })}`,
       needsSignIn: t`Sign in again`,
       needsConnect: t`Connect again`,
+      needsYou: t({ message: "Needs you", context: "state of one app" }),
+      appsNeedYou: (count) =>
+        t`${plural(count, { one: "# app needs you", other: "# apps need you" })}`,
+      connectedCount: (count) =>
+        t`${plural(count, { one: "# connected", other: "# connected" })}`,
       account: t`Account`,
       connection: t`Connection`,
       signedInAs: t`Signed in as`,
@@ -1417,7 +1436,8 @@ export const usePartWords = (): GraspWordsCatalog => {
       stopped: t({ message: "Stopped working", context: "state of one app" }),
       notConnected: t`Not connected`,
       adminConnects: t`An admin connects this`,
-      canDo: t`What Grasp can do`,
+      // oxlint-disable-next-line typescript/no-deprecated -- AppIntegrationWords still requires canDo at ui 59169853; drop it when the library makes it optional.
+      canDo: t`What Grasp may do`,
       mayDo: t`What Grasp may do`,
       counts: (reads, writes) =>
         t({
@@ -1462,25 +1482,28 @@ export const usePartWords = (): GraspWordsCatalog => {
       other: t`Other`,
       readsWord: t`Reads`,
       changesWord: t`Changes`,
+      showMore: t`Show more`,
+      showLess: t`Show less`,
+      offered: t`Available in your organization`,
+      offeredOn: t`Members see it in Integrations.`,
+      offeredOff: t`Hidden from members, and no one can connect it.`,
     },
     connectApp: {
       title: (app) => t`Connect ${app}`,
       titleAgain: (app) => t`Connect ${app} again`,
-      summaryAll: t`Read everything, ask before changes`,
-      summaryRead: t`Read everything, change nothing`,
-      summaryNone: t`Nothing yet`,
-      summaryMixed: t`Set group by group`,
-      change: t`Change`,
-      done: t`Done`,
       whoUses: t`Who uses it`,
-      forEveryone: t`Everyone in the organization`,
       forYou: t`Just you`,
-      consentFrom: (provider) =>
+      forEveryone: t`Everyone`,
+      signInAt: (host) =>
         t({
-          message: `Consent · ${provider}`,
-          comment: "{provider} keeps the access, such as Composio.",
+          message: `You’ll sign in at ${host}.`,
+          comment:
+            "{host} is the web address of the sign-in page, e.g. login.microsoftonline.com.",
         }),
       cancel: t`Cancel`,
+      signIn: (app) => t`Sign in to ${app}`,
+      consent: t`Consent`,
+      allTools: t`All tools`,
       connect: t`Connect`,
     },
     signIn: {

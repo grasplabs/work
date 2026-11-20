@@ -1,67 +1,71 @@
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 
 import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { appIntegrationWords } from "../grasp/blocks/app-integration/app-integration.tsx";
+import {
+  PageSkeletonAppPanel,
+  PageSkeletonIntegrations,
+} from "../grasp/blocks/page-skeleton-integrations/page-skeleton-integrations.tsx";
 import { PageSkeletonRecord } from "../grasp/blocks/page-skeleton-record/page-skeleton-record.tsx";
-import { Card } from "../grasp/card/index.ts";
-import { ItemGrid } from "../grasp/item/index.ts";
-import { PageHeader } from "../grasp/page-header/index.ts";
-import { Skeleton } from "../grasp/skeleton/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { Sheet, SheetContent, SheetTitle } from "../grasp/sheet/index.ts";
+import { useWords } from "../grasp/words/words.tsx";
 
-// The Integrations overview before it arrives: the page as it will stand,
-// so nothing moves when it does. The header with its title waiting, the
-// header card at its own height, then two runs of tiles, each tile as
-// tall as a loaded one. The library has no tile-grid skeleton block, so
-// it is made from the same parts the page shows.
+// The Integrations overview before it arrives, as the library's skeleton
+// stands it, so nothing moves when it does: on the overview with the slim
+// band (integrations-band.tsx); with an app's panel waiting
+// over it too, when the address opens one (`?app=`).
 
-const styles = stylex.create({
-  lists: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space8,
-  },
-  run: { display: "flex", flexDirection: "column", gap: grasp.space4 },
-  header: { height: "10rem" },
-  heading: { width: "8rem" },
-  // As tall as a loaded tile (the library's 56px app tile).
-  tile: { height: `calc(${grasp.space12} + ${grasp.space2})` },
-});
-
-/** How many tiles each run shows while waiting. */
-const tiles = 8;
-
-/** A run of waiting tiles under a waiting heading. */
-const Run = ({ label }: { label: string }) => (
-  <div {...stylex.props(styles.run)}>
-    <Skeleton layout={styles.heading} text="md" />
-    <ItemGrid aria-label={label}>
-      {Array.from({ length: tiles }, (_, index) => (
-        <li key={index}>
-          <Skeleton layout={styles.tile} pulse={false} variant="block" />
-        </li>
-      ))}
-    </ItemGrid>
-  </div>
-);
-
-/** The overview, waiting. */
+/** The overview, waiting, and the panel of the app the address names. */
 export const IntegrationsSkeleton = () => {
   const { t } = useLingui();
+  const words = useWords("appIntegration", appIntegrationWords);
+  const { app, group, q } = useSearch({ strict: false });
+  // The overview shows the slim band, then Recommended, Connected and a kind.
+  const overview = group === undefined && q === undefined;
+  const navigate = useNavigate({ from: "/integrations/" });
+  const close = (): void => {
+    void navigate({
+      search: (last) => ({ ...last, app: undefined }),
+    });
+  };
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Integrations` }]} />
       <Page>
-        <PageHeader loading loadingLines={0} title="" />
-        <div aria-busy="true" {...stylex.props(styles.lists)}>
-          <Card padding="lg">
-            <Skeleton layout={styles.header} variant="block" />
-          </Card>
-          <Run label={t`Connected`} />
-          <Run label={t`Apps`} />
-        </div>
+        <PageSkeletonIntegrations
+          band={overview}
+          label={t`Loading integrations`}
+          runs={overview ? [{ tiles: 3, note: true }, 2, 4] : undefined}
+        />
       </Page>
+      {app === undefined ? null : (
+        <Sheet
+          modal={false}
+          onOpenChange={(open) => {
+            if (!open) {
+              close();
+            }
+          }}
+          open
+        >
+          <SheetContent close="none" initialFocus="content">
+            <SheetTitle hidden>{t`Loading the app`}</SheetTitle>
+            <PageSkeletonAppPanel
+              label={t`Loading the app`}
+              onClose={close}
+              words={{
+                account: words.account,
+                mayDo: words.mayDo,
+                usedBy: words.usedBy,
+                signedInAs: words.signedInAs,
+                forWhom: words.forWhom,
+              }}
+            />
+          </SheetContent>
+        </Sheet>
+      )}
     </>
   );
 };

@@ -10,6 +10,7 @@ import {
 } from "@ui-sdk/react/drawer";
 import type { ComponentProps, ReactNode } from "react";
 
+import { BarClose, barActionSize } from "../bar-actions/bar-actions";
 import { Button } from "../button";
 import { drawerMarker } from "../drawer/drawer.stylex";
 import { KindContext } from "../drawer/kind-context";
@@ -86,15 +87,19 @@ export const SheetClose = ({ label, size = "sm", words }: SheetCloseProps) => {
   });
   return (
     <ClosePrimitive
-      render={(props: Record<string, unknown>) => (
-        <Button
-          {...props}
-          variant="ghost"
-          size={size}
-          icon={Cross}
-          aria-label={said.close}
-        />
-      )}
+      render={(props: Record<string, unknown>) =>
+        size === barActionSize ? (
+          <BarClose label={said.close} primitive={props} />
+        ) : (
+          <Button
+            {...props}
+            variant="ghost"
+            size={size}
+            icon={Cross}
+            aria-label={said.close}
+          />
+        )
+      }
     />
   );
 };
@@ -136,12 +141,7 @@ export const SheetContent = ({
           >
             {children}
             <span {...stylex.props(styles.close)}>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={Cross}
-                aria-label={closeLabel}
-              />
+              <BarClose label={closeLabel} />
             </span>
           </div>
         </div>
