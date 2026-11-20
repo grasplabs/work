@@ -82,6 +82,12 @@ export const sessions = sqliteTable(
      * nothing else of Grasp, and the gate's opening ends it.
      */
     interview: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * A guest's session (roles.ts `guestRole`), made by a code mailed to
+     * them (auth/guest-codes.ts): it tells their browser they are one.
+     * What they reach is decided by their membership, never by this.
+     */
+    guest: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("sessions_user_id_idx").on(table.userId)]
 );
