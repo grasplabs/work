@@ -40,14 +40,6 @@ const statisticsFor = (app: AppId): PermissionRequest => ({
   binding: "STATS",
 });
 
-/** A permission for `app` to invite guests: one that changes things. */
-const guestsFor = (app: AppId): PermissionRequest => ({
-  subject: { type: "app", appId: app },
-  object: { type: "platform" },
-  actions: ["guests"],
-  binding: "GUESTS",
-});
-
 /** A permission for `app` to list a shared mailbox under `binding`. */
 const mailFor = (app: AppId, binding: string): PermissionRequest => ({
   subject: { type: "app", appId: app },
@@ -57,19 +49,17 @@ const mailFor = (app: AppId, binding: string): PermissionRequest => ({
 });
 
 /**
- * An App `builder` published, which `admin` granted guests, and the
- * platform's statistics to read.
+ * An App `builder` published, which `admin` granted the platform's
+ * statistics to read.
  */
 const builtBy = async (builder: Person, admin: Person): Promise<AppId> => {
   const { id } = await builder.api.apps.create({ name: `Map ${unique()}` });
   const app = appIdSchema.parse(id);
   await publishApp(builder.api, id, { "src/routes/index.tsx": deskPage });
-  for (const request of [guestsFor(app), statisticsFor(app)]) {
-    // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-    const { id: permission } = await builder.api.permissions.request(request);
-    // oxlint-disable-next-line no-await-in-loop -- as above
-    await grantReviewed(admin.api, permission);
-  }
+  const { id: permission } = await builder.api.permissions.request(
+    statisticsFor(app)
+  );
+  await grantReviewed(admin.api, permission);
   return app;
 };
 
@@ -115,7 +105,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       after: await permissionsOf(admin, app),
       asked: events.filter(({ action }) => action.startsWith("permission.")),
     }).toStrictEqual({
-      granted: ["active", "active"],
+      granted: ["active"],
       after: granted,
       asked: [],
     });

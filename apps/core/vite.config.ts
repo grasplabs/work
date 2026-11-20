@@ -107,7 +107,6 @@ export const pageTests = [
   "test/run-object.test.ts",
   "test/rpc-targets.test.ts",
   "test/statistics.test.ts",
-  "test/guests*.test.ts",
   "test/app-function-calls.test.ts",
   "test/workflow-schema-builds.test.ts",
   "test/type-check-parity.test.ts",

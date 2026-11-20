@@ -1,5 +1,4 @@
 import drawAWorkflow from "../skills/draw-a-workflow/SKILL.md";
-import interviewAStakeholder from "../skills/interview-a-stakeholder/SKILL.md";
 import runABaseline from "../skills/run-a-baseline/SKILL.md";
 import writeBoardPage from "../skills/write-board-page/SKILL.md";
 
@@ -18,7 +17,6 @@ export interface ShippedSkill {
  */
 export const shippedSkills: readonly ShippedSkill[] = [
   { name: "draw-a-workflow", text: drawAWorkflow },
-  { name: "interview-a-stakeholder", text: interviewAStakeholder },
   { name: "run-a-baseline", text: runABaseline },
   { name: "write-board-page", text: writeBoardPage },
 ];

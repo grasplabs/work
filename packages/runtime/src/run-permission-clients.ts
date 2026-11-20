@@ -11,10 +11,10 @@ import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 
 // The clients an action reaches the App's permissions through
-// (`ctx.ai`, `ctx.brain`, `ctx.connections.<alias>`, `ctx.grasp`,
-// `ctx.guests`), built from the App's sealed declarations as frozen
-// objects with no prototype: each declared action, operation or function
-// a member, and nothing else. Never a `Proxy`, so a name is a member only
+// (`ctx.ai`, `ctx.brain`, `ctx.connections.<alias>`, `ctx.grasp`),
+// built from the App's sealed declarations as frozen objects with no
+// prototype: each declared action, operation or function a member, and
+// nothing else. Never a `Proxy`, so a name is a member only
 // if it was declared.
 //
 // What can go wrong, and what holds:
@@ -206,11 +206,6 @@ const clientOf = (
   if (kind === "brain") {
     return brainOf(permission.operations, call);
   }
-  if (kind === "guests") {
-    return membersOf(
-      permission.operations.map((method) => [method, call(method)])
-    );
-  }
   if (kind === "grasp") {
     return graspOf(Object.keys(permission.functions), call("call"));
   }
@@ -222,7 +217,7 @@ const clientOf = (
 
 /**
  * The App's permissions as an action's context holds them: `ai`,
- * `brain`, `grasp` and `guests` when declared, and the connections by
+ * `brain` and `grasp` when declared, and the connections by
  * alias; and the Brain's reads when it declares none
  * (`defaultPermission`).
  */

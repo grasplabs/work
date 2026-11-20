@@ -345,7 +345,7 @@ granted.action({
     ).resolves.toEqualTypeOf<BrainPack>();
     // Only the App's declared permissions.
     expectTypeOf(ctx.connections).not.toHaveProperty("calendar");
-    expectTypeOf(ctx).not.toHaveProperty("guests");
+    expectTypeOf(ctx).not.toHaveProperty("grasp");
     return await ctx.ai.generate({
       prompt: "Summarize",
       output: v.object({ summary: v.string() }),

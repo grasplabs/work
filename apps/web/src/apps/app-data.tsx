@@ -143,8 +143,7 @@ const actorText = (actor: AuditActor): string => {
       const workflow = actor.workflowId;
       return i18n._(msg`Workflow ${workflow}`);
     }
-    case "app":
-    case "guest": {
+    case "app": {
       const app = actor.appId;
       return i18n._(msg`App ${app}`);
     }

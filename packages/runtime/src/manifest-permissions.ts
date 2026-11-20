@@ -55,7 +55,6 @@ const reachedKinds: ReadonlySet<AppPermissionKind> = new Set([
   "connections",
   "brain",
   "grasp",
-  "guests",
 ]);
 
 /** Whether `declared` is one an action reaches through `ctx`. */

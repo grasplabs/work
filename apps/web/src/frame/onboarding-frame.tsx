@@ -4,28 +4,16 @@ import type { ReactNode } from "react";
 import { LanguageButton } from "../language-picker.tsx";
 
 /**
- * A page for someone outside the product (sign-in, a guest's chat) in the
+ * A page for someone outside the product (sign-in) in the
  * onboarding's frame (grasplabs/prototype
  * `components/onboarding/onboarding-frame.tsx`): one centred column, the
- * mark bottom left and the language bottom right. `wide` holds a chat.
+ * mark bottom left and the language bottom right.
  */
-export const OnboardingFrame = ({
-  children,
-  wide = false,
-}: {
-  children: ReactNode;
-  wide?: boolean;
-}) => (
+export const OnboardingFrame = ({ children }: { children: ReactNode }) => (
   <div className="bg-background flex min-h-svh flex-col text-sm">
     <div aria-hidden="true" className="h-18 flex-none" />
     <main className="flex flex-1 flex-col items-center px-4 py-2">
-      <div
-        className={
-          wide
-            ? "my-auto flex w-full max-w-2xl flex-col items-center gap-8"
-            : "my-auto flex w-full max-w-sm flex-col items-center gap-8 text-center"
-        }
-      >
+      <div className="my-auto flex w-full max-w-sm flex-col items-center gap-8 text-center">
         {children}
       </div>
     </main>
