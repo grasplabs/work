@@ -8714,6 +8714,10 @@ msgstr "Make a new secret for {name}"
 msgid "Make a new secret?"
 msgstr "Make a new secret?"
 
+#: src/settings/directory-placement.tsx
+msgid "Make a team that doesn’t follow the directory’s groups first: only such a team can take a department."
+msgstr "Make a team that doesn’t follow the directory’s groups first: only such a team can take a department."
+
 #: src/workflows/requests/request-detail.tsx
 msgid "Make a workflow of it"
 msgstr "Make a workflow of it"

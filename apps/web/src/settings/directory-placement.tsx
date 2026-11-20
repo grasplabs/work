@@ -164,6 +164,7 @@ const AddToTeam = ({
 /**
  * One department that fills no team, and linking it to one of `teams`
  * (GRA-2247): the directory's next daily read puts everyone in it there.
+ * No link without a team to take it.
  */
 const UnlinkedDepartmentRow = ({
   department,
@@ -182,18 +183,28 @@ const UnlinkedDepartmentRow = ({
   const { busy, failure, run } = useTeamChange(onChanged);
   const items = teams.map((team) => ({ value: team.id, label: team.name }));
   const picked = items.some((item) => item.value === chosen) ? chosen : null;
+  const described = (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <span className="truncate">{department}</span>
+      <span className="text-muted-foreground">
+        <Plural
+          one="# person in the directory"
+          other="# people in the directory"
+          value={people}
+        />
+      </span>
+    </div>
+  );
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 border-t px-5 py-3">
+        {described}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center gap-3 border-t px-5 py-3">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">{department}</span>
-        <span className="text-muted-foreground">
-          <Plural
-            one="# person in the directory"
-            other="# people in the directory"
-            value={people}
-          />
-        </span>
-      </div>
+      {described}
       <form
         className="flex flex-col items-end gap-1"
         onSubmit={(event) => {
@@ -250,7 +261,7 @@ const UnlinkedDepartmentRow = ({
 /**
  * The departments of the people the directory lists that fill no team,
  * each to link to a team, from those that don't follow the directory's
- * groups (`following`), which take none.
+ * groups (`following`), which take none: listed even with no such team.
  */
 const UnlinkedDepartments = ({
   departments,
@@ -265,12 +276,16 @@ const UnlinkedDepartments = ({
 }) => {
   const { t } = useLingui();
   const linkable = teams.filter((team) => !following.includes(team.id));
-  if (departments.length === 0 || linkable.length === 0) {
+  if (departments.length === 0) {
     return null;
   }
+  const explained = t`The directory’s daily read puts nobody from these departments in a team. Link each to a team, and its next read puts everyone in the department there, except anyone an admin took off it by hand.`;
+  // Still listed with no team to link them to: the admin sees whom the
+  // directory leaves out, and what to make first.
+  const noTeam = t`Make a team that doesn’t follow the directory’s groups first: only such a team can take a department.`;
   return (
     <SettingsSection
-      description={t`The directory’s daily read puts nobody from these departments in a team. Link each to a team, and its next read puts everyone in the department there, except anyone an admin took off it by hand.`}
+      description={linkable.length === 0 ? `${explained} ${noTeam}` : explained}
       title={t`Departments no team is linked to`}
     >
       {departments.map(({ department, people }) => (
