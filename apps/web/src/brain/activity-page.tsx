@@ -41,6 +41,7 @@ import { useCore } from "../use-core.ts";
 import { useBrainData } from "./brain-data.ts";
 import { brainLog } from "./brain-log.ts";
 import type { LogEntry, LogKind } from "./brain-log.ts";
+import { sourceContents } from "./brain.ts";
 import { keepLooked, lastLooked } from "./last-looked.ts";
 
 // The brain's Activity on the library's page: what changed since the
@@ -208,7 +209,11 @@ export const ActivityPage = () => {
   // The line in hand takes focus as it opens, so a screen reader is where it opened.
   useEffect(() => {
     if (open !== undefined) {
-      inspector.current?.focus();
+      inspector.current?.focus({ preventScroll: true });
+      // On a phone it stands in the page's place: from its top.
+      if (page.current?.checkVisibility() === false) {
+        pane.current?.scrollTo({ top: 0 });
+      }
     }
   }, [open]);
 
@@ -224,11 +229,14 @@ export const ActivityPage = () => {
         : [{ id: note.id, name: note.title }];
     });
   // A source: who gave it and when, what the brain kept of it, the pages its statements are on.
+  // What the brain kept of a source: what was said in it, and for a directory, its teams. The
+  // pages it changed: what its note links to, the teams it listed, the pages its statements are on.
   const sourceOpened = (source: Source, icon: IconData): Opened => {
     const kept = workspace.statements.filter(
       (statement) => statement.sourceId === source.id
     );
     const said = new Set(kept.map(({ id }) => id));
+    const rows = sourceContents(workspace, source.id)?.rows ?? [];
     return {
       title: source.title,
       icon,
@@ -236,11 +244,27 @@ export const ActivityPage = () => {
         [source.who, source.how].filter(Boolean).join(" · "),
         formatDay(source.date),
       ].filter((each) => each !== ""),
-      kept: kept.map(({ text }) => text),
+      kept: [
+        ...kept.map(({ text }) => text),
+        ...rows.flatMap(({ teamId, people }) => {
+          if (people === null) {
+            return [];
+          }
+          const team = notes.get(teamId)?.title ?? teamId;
+          return plural(people, {
+            one: `${team}: # person`,
+            other: `${team}: # people`,
+          });
+        }),
+      ],
       changed: pagesOf(
-        brain.notes
-          .filter((note) => note.statementIds.some((id) => said.has(id)))
-          .map(({ id }) => id),
+        [
+          ...(notes.get(source.id)?.links ?? []),
+          ...rows.map(({ teamId }) => teamId),
+          ...brain.notes
+            .filter((note) => note.statementIds.some((id) => said.has(id)))
+            .map(({ id }) => id),
+        ],
         source.id
       ),
       ...(notes.has(source.id) ? { goes: { to: "note", id: source.id } } : {}),

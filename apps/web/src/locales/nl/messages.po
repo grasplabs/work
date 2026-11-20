@@ -1167,6 +1167,10 @@ msgstr "{page} van {total}"
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # persoon.} other {{sector}, # mensen.}}"
 
+#: src/brain/activity-page.tsx
+msgid "{people, plural, one {{team}: # person} other {{team}: # people}}"
+msgstr "{people, plural, one {{team}: # persoon} other {{team}: # personen}}"
+
 #: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 #: src/workflows/requests/request-table.tsx
