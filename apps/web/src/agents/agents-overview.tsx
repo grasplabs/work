@@ -478,7 +478,12 @@ export const AgentsOverview = ({
   };
   const newAgent =
     makes || makesOwn ? (
-      <Button icon={Plus} render={<Link to="/agents/new" />} variant="ink">
+      <Button
+        icon={Plus}
+        render={<Link to="/agents/new" />}
+        size="sm"
+        variant="ink"
+      >
         {t`New agent`}
       </Button>
     ) : undefined;
