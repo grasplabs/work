@@ -11,7 +11,7 @@ import type {
   ComposerVoiceWords,
 } from "../grasp/composer/index.ts";
 import { isLocale } from "../i18n.ts";
-import { sourceFor } from "./dictation.ts";
+import { sourceFor, useCanDictate } from "./dictation.ts";
 import type { DictationSource } from "./dictation.ts";
 
 // Dictation in the chat's box (chat-composer.tsx), as Grasp UI's Composer
@@ -104,6 +104,11 @@ export const useDictation = (
   // A guest's chat is outside the shell: nobody to dictate for.
   const identity = useMatch({ from: "/_shell", shouldThrow: false })?.context
     .identity;
+  // No microphone where dictation can't work: a browser without
+  // recognition, or core's transcription not set up.
+  const possible = useCanDictate(
+    identity !== undefined && isAdmin(identity.role)
+  );
   const microphone = useComposerMicrophone();
   const [run, setRun] = useState<Run>();
   const [now, setNow] = useState(0);
@@ -130,20 +135,11 @@ export const useDictation = (
       return;
     }
     const chosen = sourceFor(isAdmin(identity.role), locale);
-    const at = Date.now();
-    setNow(at);
     if (chosen === undefined) {
-      setRun({
-        phase: "problem",
-        problem: "unsupported",
-        settled: "",
-        interim: "",
-        startedAt: at,
-        muted: false,
-        telling: false,
-      });
       return;
     }
+    const at = Date.now();
+    setNow(at);
     source.current = chosen;
     const telling = chosen.outside && !told(identity.userId);
     setRun({
@@ -202,7 +198,8 @@ export const useDictation = (
     source.current = null;
     setRun(undefined);
   };
-  if (identity === undefined) {
+  // One that ran into it still says why, until it is put away.
+  if (identity === undefined || (!possible && run === undefined)) {
     return {};
   }
   return {
