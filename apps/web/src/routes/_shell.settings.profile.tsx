@@ -50,7 +50,10 @@ const languages = Object.entries(localeNames).flatMap(([code, name]) =>
 const EmailRow = ({ email, role }: { email: string; role: string }) => {
   const { t } = useLingui();
   return (
-    <SettingRow info={t`Your sign-in; your admin changes it.`} label={t`Email`}>
+    <SettingRow
+      help={t`Your sign-in, which your admin changes`}
+      label={t`Email`}
+    >
       {(field) => (
         <InputGroup size="sm" layout={styles.control}>
           <InputGroupInput {...field} readOnly type="email" value={email} />
@@ -68,7 +71,7 @@ const LanguageRow = () => {
   const { t, i18n } = useLingui();
   const label = t`Language`;
   return (
-    <SettingRow label={label}>
+    <SettingRow help={t`The language Grasp speaks to you`} label={label}>
       <LanguageSwitch
         layout={styles.control}
         size="sm"
@@ -93,7 +96,11 @@ const Profile = () => {
       <SettingsRows>
         {/* Grasp's staff sign in for a while, as Grasp names them. */}
         {identity.staff ? (
-          <ReadOnlyRow label={t`Name`} value={identity.name} />
+          <ReadOnlyRow
+            help={t`How Grasp and your colleagues see you`}
+            label={t`Name`}
+            value={identity.name}
+          />
         ) : (
           <ProfileName name={identity.name} />
         )}

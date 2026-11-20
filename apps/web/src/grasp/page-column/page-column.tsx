@@ -1,5 +1,5 @@
-// Page column: a page's content in one column of a reading width, standing at the page's start, as a
-// settings page has it (the product's Settings: one screen per section, a column about 720px wide
+// Page column: a page's content in one column of a reading width, at the page's start or in its
+// middle (`align="center"`), as a settings page has it (the product's Settings: one screen per section, a column about 720px wide
 // beside the nav). A child that needs the page's whole width, a table, stands in PageColumnWide.
 //
 //   <PageColumn>
@@ -28,6 +28,12 @@ export interface PageColumnProps {
    * @default "column"
    */
   measure?: "column" | "page";
+  /**
+   * Where the column stands: at the page's start, or in its middle, the room past the measure shared
+   * on both sides (a settings page).
+   * @default "start"
+   */
+  align?: "start" | "center";
   /** Layout only. */
   layout?: PageColumnLayoutStyle;
 }
@@ -55,6 +61,12 @@ const styles = stylex.create({
   column_page: {
     paddingInlineEnd: `max(0px, calc(100% - ${grasp.pageMeasure}))`,
   },
+  center_column: {
+    paddingInline: `max(0px, calc((100% - ${grasp.pageColumnMeasure}) / 2))`,
+  },
+  center_page: {
+    paddingInline: `max(0px, calc((100% - ${grasp.pageMeasure}) / 2))`,
+  },
   wide: { width: "100cqi", minWidth: 0 },
 });
 
@@ -62,6 +74,7 @@ const styles = stylex.create({
 export const PageColumn = ({
   children,
   measure = "column",
+  align = "start",
   layout,
 }: PageColumnProps) => (
   <div
@@ -72,7 +85,10 @@ export const PageColumn = ({
     <div
       {...stylex.props(
         styles.column,
-        measure === "page" ? styles.column_page : styles.column_column
+        align === "start" &&
+          (measure === "page" ? styles.column_page : styles.column_column),
+        align === "center" &&
+          (measure === "page" ? styles.center_page : styles.center_column)
       )}
     >
       {children}

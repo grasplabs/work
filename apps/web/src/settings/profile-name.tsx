@@ -63,6 +63,7 @@ export const ProfileName = ({ name }: { name: string }) => {
         saved: t`Saved`,
         saving: t`Saving`,
       }}
+      help={t`How Grasp and your colleagues see you`}
       label={t`Name`}
       onRetry={() => {
         if (tried !== undefined) {

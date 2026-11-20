@@ -35,7 +35,7 @@ const Plan = () => {
     <SectionCard variant="grouped" density="compact" flush title={t`Plan`}>
       <SettingsRows>
         <ReadOnlyRow
-          info={t`Grasp links Stripe and sets up your plan with you.`}
+          help={t`Grasp sets it up with you`}
           label={t`Current plan`}
           value={t`None yet`}
         />

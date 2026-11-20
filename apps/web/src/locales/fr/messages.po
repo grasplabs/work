@@ -7289,6 +7289,10 @@ msgstr "Par exemple Vendre et encaisser"
 msgid "For example: read new hires and prepare their first day"
 msgstr "Par exemple : lire les nouvelles recrues et préparer leur premier jour"
 
+#: src/routes/_shell.settings.workspace.tsx
+msgid "For schedules and the times Grasp shows"
+msgstr "Pour les planifications et les heures qu'affiche Grasp"
+
 #: src/workflows/requests/request-needs.tsx
 msgid "For Stephen's requests, about “{label}” ({why}), do this: {proposal}"
 msgstr "Pour les demandes de Stephen, à propos de « {label} » ({why}), fais ceci : {proposal}"
@@ -7702,10 +7706,6 @@ msgstr "Grasp ne sait encore rien de ce travail dans ses propres mots."
 msgid "Grasp lets it be sent once more, exactly as before, and a run waiting on it sends it again now. Nothing is undone: if it did take effect on {connection}, it takes effect twice."
 msgstr "Grasp permet de l'envoyer une fois de plus, exactement comme avant, et une exécution qui l'attend l'envoie de nouveau maintenant. Rien n'est annulé : s'il a bien pris effet sur {connection}, il prend effet deux fois."
 
-#: src/routes/_shell.settings.billing.tsx
-msgid "Grasp links Stripe and sets up your plan with you."
-msgstr "Grasp relie Stripe et configure votre offre avec vous."
-
 #: src/connections/connected-dialog.tsx
 msgid "Grasp may read and write in {app}, only for what you allow."
 msgstr "Grasp peut lire et écrire dans {app}, uniquement pour ce que vous autorisez."
@@ -7757,6 +7757,10 @@ msgstr "Grasp a envoyé ce lien à ce compte dans {app}. Reliez-le seulement s�
 #: src/inbox/outcome-details.tsx
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp a envoyé ceci, mais sa réponse s'est perdue : personne ne sait s'il a pris effet. Vérifiez sur {connection} avant de répondre."
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Grasp sets it up with you"
+msgstr "Grasp le met en place avec vous"
 
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx
@@ -7839,8 +7843,8 @@ msgid "Grasp's own rules always hold over these."
 msgstr "Les règles de Grasp priment toujours."
 
 #: src/settings/staff-access.tsx
-msgid "Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time."
-msgstr "L’équipe de Grasp ne peut se connecter ici pour aider que tant que Grasp a ouvert une fenêtre, 7 jours au plus, et vous pouvez y mettre fin à tout moment."
+msgid "Grasp's team can help until then, unless you end it"
+msgstr "L'équipe de Grasp peut aider jusque-là, sauf si vous y mettez fin"
 
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
@@ -8068,6 +8072,11 @@ msgstr "Comment voulez-vous le créer ?"
 msgid "How far back"
 msgstr "Jusqu’où"
 
+#: src/routes/_shell.settings.profile.tsx
+#: src/settings/profile-name.tsx
+msgid "How Grasp and your colleagues see you"
+msgstr "Comment Grasp et vos collègues vous voient"
+
 #: src/frame/part-words.tsx
 msgid "How hard it thinks"
 msgstr "Niveau de réflexion"
@@ -8109,6 +8118,10 @@ msgstr "Comment doit travailler {name} ?"
 msgid "How sure"
 msgstr "Quelle certitude"
 
+#: src/settings/composer-settings.tsx
+msgid "How that light is drawn"
+msgstr "Comment cette lumière est dessinée"
+
 #: src/frame/part-words.tsx
 msgid "How the dither's cells are set."
 msgstr "Comment les cellules de la trame sont disposées."
@@ -8140,6 +8153,10 @@ msgstr "Comment l’entreprise verra-t-elle qu’il est atteint ?"
 #: src/brain/sources-page.tsx
 msgid "How your connections feed the Brain"
 msgstr "Comment vos connexions alimentent le cerveau"
+
+#: src/settings/sign-in-settings.tsx
+msgid "How your people sign in"
+msgstr "Comment vos équipes se connectent"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -10120,10 +10137,6 @@ msgstr "En savoir plus sur {header}"
 msgid "More about copies"
 msgstr "En savoir plus sur les copies"
 
-#: src/settings/staff-access.tsx
-msgid "More about Grasp staff access"
-msgstr "En savoir plus sur l’accès du personnel de Grasp"
-
 #: src/connections/http-connections.tsx
 msgid "More about HTTP connections"
 msgstr "En savoir plus sur les connexions HTTP"
@@ -10139,10 +10152,6 @@ msgstr "En savoir plus sur Pulse"
 #: src/apps/app-settings.tsx
 msgid "More about putting it away"
 msgstr "En savoir plus sur le rangement"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "More about signing in"
-msgstr "En savoir plus sur la connexion"
 
 #: src/apps/app-settings.tsx
 msgid "More about the owner"
@@ -11845,6 +11854,10 @@ msgstr "Un message court : d’abord ce que tu as trouvé, puis ce que tu propos
 msgid "Only"
 msgstr "Uniquement"
 
+#: src/settings/sign-in-settings.tsx
+msgid "Only {accounts}"
+msgstr "Uniquement {accounts}"
+
 #: src/inbox/item-detail.tsx
 msgid "Only {person} can say whether it happened."
 msgstr "Seul·e {person} peut dire si cela a eu lieu."
@@ -12476,8 +12489,8 @@ msgid "Passing it on"
 msgstr "Passation"
 
 #: src/routes/_shell.settings.security.tsx
-msgid "Passwords and two-step sign-in live with your organization’s account."
-msgstr "Les mots de passe et la connexion en deux étapes relèvent du compte de votre organisation."
+msgid "Passwords and two-step sign-in live with your organization"
+msgstr "Les mots de passe et la connexion en deux étapes relèvent de votre organisation"
 
 #: src/settings/invitations.tsx
 msgid "Paste several at once, split by commas or lines."
@@ -16795,9 +16808,17 @@ msgstr "L'entrée n'est pas du JSON."
 msgid "The interviews are over."
 msgstr "Les entretiens sont terminés."
 
+#: src/routes/_shell.settings.profile.tsx
+msgid "The language Grasp speaks to you"
+msgstr "La langue dans laquelle Grasp vous parle"
+
 #: src/agents/agent-templates.ts
 msgid "The last mail with each lead."
 msgstr "Le dernier courriel échangé avec chaque prospect."
+
+#: src/settings/composer-settings.tsx
+msgid "The light around the box while Grasp works"
+msgstr "La lumière autour de la zone pendant que Grasp travaille"
 
 #: src/frame/part-words.tsx
 msgid "The limit of {limit} characters is reached"
@@ -19502,6 +19523,10 @@ msgstr "Textes"
 msgid "Words and sentences"
 msgstr "Mots et phrases"
 
+#: src/settings/sign-in-settings.tsx
+msgid "work accounts at {hostedDomain}"
+msgstr "les comptes professionnels de {hostedDomain}"
+
 #: src/interview/words.ts
 msgid "Work of the team"
 msgstr "Travail de l’équipe"
@@ -20073,6 +20098,10 @@ msgstr "Votre organisation l’utilise via les autorisations que vous accordez."
 msgid "Your organization’s account"
 msgstr "Le compte de votre organisation"
 
+#: src/settings/sign-in-settings.tsx
+msgid "your organization’s work accounts"
+msgstr "les comptes professionnels de votre organisation"
+
 #: src/onboarding/ai-step.tsx
 msgid "Your own contract with Anthropic, OpenAI, Mistral or another provider. You pay them directly."
 msgstr "Votre propre contrat avec Anthropic, OpenAI, Mistral ou un autre fournisseur. Vous les payez directement."
@@ -20122,8 +20151,8 @@ msgid "Your session has ended"
 msgstr "Votre session est terminée"
 
 #: src/routes/_shell.settings.profile.tsx
-msgid "Your sign-in; your admin changes it."
-msgstr "Votre identifiant de connexion ; votre admin le modifie."
+msgid "Your sign-in, which your admin changes"
+msgstr "Votre identifiant, que votre admin modifie"
 
 #: src/interview/words.ts
 msgid "Your story"

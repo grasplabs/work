@@ -123,8 +123,6 @@ export const StaffAccessSection = ({
         : {})}
       density="compact"
       flush
-      info={t`Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time.`}
-      infoLabel={t`More about Grasp staff access`}
       title={t`Grasp staff access`}
     >
       <SettingsRows>
@@ -132,7 +130,10 @@ export const StaffAccessSection = ({
           <RowAlert variant="danger">{failure}</RowAlert>
         )}
         {/* Until when, in a field that only reads, with what staff reach at its end. */}
-        <SettingRow label={t`Open until`}>
+        <SettingRow
+          help={t`Grasp's team can help until then, unless you end it`}
+          label={t`Open until`}
+        >
           {(field) => (
             <InputGroup size="sm" layout={controlStyles.fill}>
               <InputGroupInput {...field} readOnly value={until} />
