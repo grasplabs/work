@@ -1551,8 +1551,11 @@ export interface PendingAction {
    * confirmation and its events record it.
    */
   restricted: boolean;
-  /** The permission that allowed it. */
-  permissionId: string;
+  /**
+   * The permission that allowed it; null for a read that needs no grant
+   * (core's ungranted-reads.ts), held because of where it was asked.
+   */
+  permissionId: string | null;
   connectionId: string;
   /**
    * The connection as people know it, by what it reaches and its account,
@@ -1837,7 +1840,8 @@ export type RefuseResolution = z.input<typeof refuseResolutionSchema>;
 export interface UnknownOutcomeOrigin {
   mode: "interactive" | "workflow";
   appVersion: number | null;
-  permissionId: string;
+  /** As `PendingAction.permissionId`. */
+  permissionId: string | null;
   context: WorkContext;
   /** The App's resource binding it came through, as `PendingAction.binding`. */
   binding?: HeldBinding;

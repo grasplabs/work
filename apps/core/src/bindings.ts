@@ -20,6 +20,7 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
 import { authorize, grantedPermissions } from "./permissions.ts";
+import { mustConfirmForOthers } from "./private-reads.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
@@ -103,8 +104,15 @@ const capabilityFor = async (
   decision?: CapabilityDecision
 ) => {
   // The context is checked first: a call from a chat or App that isn't
-  // there is refused as that, whatever its class.
-  const restricted = await isRestricted(env, authority, context);
+  // there is refused as that, whatever its class. A chat that handed over
+  // something only its person may read (private-reads.ts) is signed
+  // restricted too (GRA-1928): connect then holds for the person every
+  // call whose input leaves for a third party, reads too, as it does for
+  // restricted data, so an instruction in what was read can't carry it
+  // out through another read unconfirmed. Its native reads go on.
+  const restricted =
+    (await isRestricted(env, authority, context)) ||
+    (context.type === "chat" && (await mustConfirmForOthers(env, context)));
   // The chat's agent may call only the classes the company turned on for
   // its person: one that is off never reaches connect (tool-classes.ts).
   const classed = await requireToolClassOn(
@@ -186,14 +194,17 @@ export const signedCall = async (
  * Signs the capability for a read that needs no grant (ungranted-reads.ts):
  * of a connection active and the chat's person's own, or shared with an
  * audience that holds them, and only a tool whose class reads, checked
- * here again whoever asks, and signed read-only, so connect refuses any
- * side effect of it. The caller holds it to a turn whose answer reaches
- * its person alone.
+ * here again whoever asks, and signed read-only, so connect refuses
+ * anything but a read. The caller holds it to a turn whose answer reaches
+ * its person alone. Such a read connect held for its person (a marked
+ * chat's, GRA-1928) is confirmed (`decision`) and its answer read under
+ * its `idempotencyKey`, each checked here again as the read would be now.
  */
 export const signedUngrantedRead = async (
   env: Env,
   grant: Omit<CallGrant, "permissionId" | "readOnly" | "binding" | "sensitive">,
-  { action }: Pick<ConnectCall, "action">
+  { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
+  decision?: CapabilityDecision
 ) => {
   await ungrantedReadConnection(
     env,
@@ -204,7 +215,8 @@ export const signedUngrantedRead = async (
   return await capabilityFor(
     env,
     { ...grant, permissionId: null, readOnly: true },
-    { action, idempotencyKey: undefined }
+    { action, idempotencyKey },
+    decision
   );
 };
 

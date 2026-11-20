@@ -24,7 +24,7 @@ import { captureIdOf } from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
-import { chatOf, codeStep, says } from "./agent-chat.ts";
+import { askAfresh, chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents, loggedEvents } from "./audit-events.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
@@ -506,18 +506,21 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     );
     const chat = await chatOf(
       person.userId,
-      step(
-        calling("SHARED", "mail.search", { query: sharedMarker }),
-        calling("PRIVATE", "mail.search", { query: privateMarker }),
-        calling("OWN", "mail.search", { query: witness })
-      ),
-      says("Found them.")
+      step(calling("SHARED", "mail.search", { query: sharedMarker })),
+      says("Found it."),
+      step(calling("PRIVATE", "mail.search", { query: privateMarker })),
+      says("Found it."),
+      step(calling("OWN", "mail.search", { query: witness })),
+      says("Found it.")
     );
     await grant(chat, shared.id, "SHARED", ["mail.search"]);
     await grant(chat, forbidden.id, "PRIVATE", ["mail.search"]);
     await grant(chat, own.id, "OWN", ["mail.search"]);
 
-    await chat.ask("Find them.");
+    for (const ask of ["Find shared.", "Find private.", "Find own."]) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
+      await askAfresh(chat, ask);
+    }
     // Each capture starts as its call answers, the others' at once: once
     // the last call's is in, the earlier ones have ended.
     const [sharedEvents, witnessed] = await Promise.all([

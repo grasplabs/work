@@ -10,7 +10,7 @@ import {
 import type { CodeSubject, WorkContext } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { signedCall } from "./bindings.ts";
+import { signedCall, signedUngrantedRead } from "./bindings.ts";
 import { requireHeldBinding } from "./resource-bindings.ts";
 
 // A person deciding a call that waits for them, from their own session:
@@ -29,7 +29,8 @@ export interface DecidedCall {
   /** The App version whose code made it; null for an agent's. */
   appVersion: number | null;
   context: WorkContext;
-  permissionId: string;
+  /** Null for a read that needs no grant (ungranted-reads.ts). */
+  permissionId: string | null;
   /** The App's approved resource binding it came through, if any. */
   binding?: HeldBinding | undefined;
   connectionId: string;
@@ -87,21 +88,31 @@ export const reauthorizedCapability = async (
     mode: call.mode,
     ...(call.appVersion === null ? {} : { appVersion: call.appVersion }),
   });
-  const { capability } = await signedCall(
-    env,
-    {
-      authority,
-      context: call.context,
-      connection: {
-        type: "connection",
-        connectionId: connectionIdSchema.parse(call.connectionId),
-        resource: call.resource ?? undefined,
-      },
-      permissionId: permissionIdSchema.parse(call.permissionId),
-      ...(binding === undefined ? {} : { binding }),
+  const allowed = {
+    authority,
+    context: call.context,
+    connection: {
+      type: "connection" as const,
+      connectionId: connectionIdSchema.parse(call.connectionId),
+      resource: call.resource ?? undefined,
     },
-    { action: call.action, idempotencyKey: call.idempotencyKey },
-    decision
-  );
+  };
+  const scope = { action: call.action, idempotencyKey: call.idempotencyKey };
+  // A read with no grant, held in a chat that read something only its
+  // person may read (GRA-1928): decided only while the person still
+  // reads that connection so, by the same rule as the read itself.
+  const { capability } =
+    call.permissionId === null
+      ? await signedUngrantedRead(env, allowed, scope, decision)
+      : await signedCall(
+          env,
+          {
+            ...allowed,
+            permissionId: permissionIdSchema.parse(call.permissionId),
+            ...(binding === undefined ? {} : { binding }),
+          },
+          scope,
+          decision
+        );
   return capability;
 };

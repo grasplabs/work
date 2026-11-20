@@ -24,7 +24,8 @@ import type { CodeSubject, WorkContext } from "@grasp-os/shared/permissions";
 export interface DecidedOrigin {
   mode: "interactive" | "workflow";
   appVersion: number | null;
-  permissionId: string;
+  /** Null for a read that needs no grant. */
+  permissionId: string | null;
   context: WorkContext;
   binding?: HeldBinding | undefined;
 }

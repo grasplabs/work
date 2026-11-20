@@ -110,8 +110,10 @@ export const capabilityClaimsSchema = z.strictObject({
   idempotencyKey: identifierSchema.nullable(),
   /**
    * The chat, App or run making the call has read restricted data (threat
-   * model R12, Q12): connect lets it read, as a tool declares, and holds
-   * every side effect for the person. Only the capability says it.
+   * model R12, Q12), or the chat handed over something only its person
+   * may read (core's private-reads.ts, GRA-1928): connect lets it read, as
+   * a tool declares, and holds every side effect for the person, a read
+   * whose input leaves for a third party too. Only the capability says it.
    */
   restricted: z.boolean().default(false),
   /**
@@ -412,7 +414,10 @@ export const verifyCapability = async (
     claims.resource === (scope.resource ?? null) &&
     claims.action === scope.action &&
     claims.idempotencyKey === (scope.idempotencyKey ?? null);
-  if (!matches) {
+  // A call no grant allows may only read: whatever signed it, connect
+  // takes nothing else from it.
+  const grantless = claims.origin.permissionId === null;
+  if (!matches || (grantless && !claims.readOnly)) {
     throw invalid("scope");
   }
   return claims;

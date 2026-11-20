@@ -413,7 +413,9 @@ export const HeldWriteDetails = ({
       </p>
       {action.restricted ? (
         <Badge variant="attention">
-          <Trans>This chat read restricted data: this may send it out</Trans>
+          <Trans>
+            This chat read private or restricted data: this may send it out
+          </Trans>
         </Badge>
       ) : null}
       {action.withheld === undefined ? (

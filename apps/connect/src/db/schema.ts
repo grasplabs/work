@@ -380,7 +380,8 @@ export const pendingActions = sqliteTable(
     idempotencyKey: text("idempotency_key").notNull(),
     input: text().notNull(),
     inputHash: text("input_hash").notNull(),
-    permissionId: text("permission_id").notNull(),
+    /** Null for a read that needs no grant (core's ungranted-reads.ts). */
+    permissionId: text("permission_id"),
     context: text().notNull(),
     /** Asked for by a chat, App or run that had read restricted data. */
     restricted: integer({ mode: "boolean" }).notNull().default(false),

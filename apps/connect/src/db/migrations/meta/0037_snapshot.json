@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9e358cb9-3067-4971-bebb-daac1886e5f5",
+  "id": "e10426aa-d08c-4227-9ea1-4970879c952f",
   "prevId": "e9ed2c1d-4f7b-4322-ab43-1e5cf1292322",
   "tables": {
     "ai_provider_keys": {
@@ -733,13 +733,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "composio_auth": {
-          "name": "composio_auth",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "tools": {
           "name": "tools",
           "type": "text",
@@ -802,14 +795,6 @@
           ],
           "isUnique": true,
           "where": "\"connections\".\"account_id\" IS NOT NULL AND \"connections\".\"status\" <> 'disconnected'"
-        },
-        "connections_key_toolkit_idx": {
-          "name": "connections_key_toolkit_idx",
-          "columns": [
-            "provider"
-          ],
-          "isUnique": true,
-          "where": "\"connections\".\"composio_auth\" = 'key' AND \"connections\".\"status\" <> 'disconnected'"
         },
         "connections_owner_user_id_idx": {
           "name": "connections_owner_user_id_idx",
@@ -1584,7 +1569,7 @@
           "name": "permission_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "context": {

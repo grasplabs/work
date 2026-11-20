@@ -58,15 +58,17 @@ import { workspace } from "./durable-objects.ts";
 //   while the chat is marked (chat-connections.ts).
 // - A connection's side effects (mail, posts, invites, files) and a
 //   workflow's starts are held for the person from every chat already
-//   (connect's call.ts, held-starts.ts). A connection's reads are not:
-//   in a marked chat, what a read on a shared connection is asked with
-//   (a CRM search for recalled text) still leaves Grasp at once, allowed
-//   and audited by connect: GRA-1928.
+//   (connect's call.ts, held-starts.ts). A marked chat's reads whose
+//   input leaves for a third party (a Composio toolkit's, an HTTP
+//   connection's) are held too: its calls are signed restricted
+//   (bindings.ts `capabilityFor`, GRA-1928), with or without a grant. Its
+//   reads of a native connector go to the company's own tenant, and run.
 // - A query of an App (`env.apps.call`, a query) runs at once: what it is
 //   asked with can reach the App's error log (a live App's `console`
 //   lines and thrown errors that quote it: server-logs.ts,
-//   app-error-log.ts), which its builders and their agents read. Like a
-//   read on a shared connection, allowed: GRA-1928.
+//   app-error-log.ts), which its builders and their agents read: allowed
+//   and audited (GRA-1928). A toolkit read the App makes for it in its
+//   own context isn't held: GRA-2220.
 // - Building an App or a workflow writes a draft its builders read, and
 //   asking for an App's npm packages (`env.build.resolveDependencies`)
 //   keeps a `purpose` they read: GRA-1918.
