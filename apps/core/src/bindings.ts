@@ -19,12 +19,12 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
-import { ownReadConnection } from "./own-connection-reads.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
 import { requireToolClassOn } from "./tool-classes.ts";
+import { ungrantedReadConnection } from "./ungranted-reads.ts";
 import { stampedMail } from "./workflows/mail-stamps.ts";
 import type { StampingRun } from "./workflows/mail-stamps.ts";
 
@@ -81,7 +81,7 @@ export interface CallGrant {
 
 /**
  * The capability for one call already allowed (`signedCall`, or with no
- * grant `signedOwnRead`): its context's restricted mode, its class on for
+ * grant `signedUngrantedRead`): its context's restricted mode, its class on for
  * the person, then signed.
  */
 const capabilityFor = async (
@@ -183,18 +183,19 @@ export const signedCall = async (
 };
 
 /**
- * Signs the capability for a read of the chat's person's own connection
- * that needs no grant (own-connection-reads.ts): only their own, active,
- * and only a tool whose class reads, checked here again whoever asks, and
- * signed read-only, so connect refuses any side effect of it. The caller
- * holds it to a turn whose answer reaches its person alone.
+ * Signs the capability for a read that needs no grant (ungranted-reads.ts):
+ * of a connection active and the chat's person's own, or shared with an
+ * audience that holds them, and only a tool whose class reads, checked
+ * here again whoever asks, and signed read-only, so connect refuses any
+ * side effect of it. The caller holds it to a turn whose answer reaches
+ * its person alone.
  */
-export const signedOwnRead = async (
+export const signedUngrantedRead = async (
   env: Env,
   grant: Omit<CallGrant, "permissionId" | "readOnly" | "binding" | "sensitive">,
   { action }: Pick<ConnectCall, "action">
 ) => {
-  await ownReadConnection(
+  await ungrantedReadConnection(
     env,
     grant.authority,
     grant.connection.connectionId,
@@ -261,11 +262,10 @@ export interface ConnectionGrant {
 }
 
 /**
- * A read of the chat's person's own connection with no grant
- * (own-connection-reads.ts): signed by `signedOwnRead`, never authorized
+ * A read with no grant (ungranted-reads.ts): signed by `signedUngrantedRead`, never authorized
  * by a permission.
  */
-export interface OwnRead {
+export interface UngrantedRead {
   context: WorkContext;
   permissionId: null;
   connection: ConnectionObject;
@@ -337,7 +337,7 @@ export type StubAuthority =
 const signedStub = async (
   env: Env,
   authority: StubAuthority,
-  { context, permissionId, connection }: ConnectionGrant | OwnRead,
+  { context, permissionId, connection }: ConnectionGrant | UngrantedRead,
   call: unknown[]
 ): Promise<{
   request: ConnectCall;
@@ -365,7 +365,7 @@ const signedStub = async (
     };
     const { capability, scope } =
       permissionId === null
-        ? await signedOwnRead(env, allowed, { action })
+        ? await signedUngrantedRead(env, allowed, { action })
         : await signedCall(
             env,
             {
@@ -392,7 +392,7 @@ const signedStub = async (
 export const signedStubCall = async (
   env: Env,
   authority: StubAuthority,
-  grant: ConnectionGrant | OwnRead,
+  grant: ConnectionGrant | UngrantedRead,
   call: unknown[]
 ): Promise<ConnectCall> => {
   const { request } = await signedStub(env, authority, grant, call);

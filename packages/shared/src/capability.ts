@@ -57,9 +57,9 @@ export type HeldBinding = z.infer<typeof heldBindingSchema>;
 /** Where a call a person is there for comes from (`origin`). */
 const originSchema = z.strictObject({
   /**
-   * The grant the call was allowed under; null for a read of its person's
-   * own connection in their own chat, which needs none (core's
-   * own-connection-reads.ts), and is always `readOnly`.
+   * The grant the call was allowed under; null for a read in its
+   * person's own chat that needs none (core's ungranted-reads.ts), which
+   * is always `readOnly`.
    */
   permissionId: permissionIdSchema.nullable(),
   context: workContextSchema,

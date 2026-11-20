@@ -36,7 +36,7 @@ import {
   signedCall,
   signedStubCall,
 } from "./bindings.ts";
-import type { ConnectionGrant, OwnRead } from "./bindings.ts";
+import type { ConnectionGrant, UngrantedRead } from "./bindings.ts";
 import { readsMail, textsOf } from "./channels/stephen-rules.ts";
 import { askInChat, askableConnections } from "./chat-connections.ts";
 import type { AskableConnection, AskedConnection } from "./chat-connections.ts";
@@ -44,14 +44,16 @@ import { captureRead } from "./connection-capture.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { endOfCompanyDay } from "./organization.ts";
-import {
-  ownConnectionRead,
-  ownReadConnection,
-} from "./own-connection-reads.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { markPrivateRead } from "./private-reads.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
 import { readsOnly } from "./tool-classes.ts";
+import {
+  readsWithoutGrant,
+  sharedFor,
+  ungrantedRead,
+  ungrantedReadConnection,
+} from "./ungranted-reads.ts";
 
 // Connections for a chat's code: `await env.connections.call("OUTLOOK",
 // "mail.search", { query })`. The agent's connection permissions, each
@@ -164,28 +166,37 @@ export const connectionGrants = async (
 };
 
 /**
- * The person's own connections the agent reads through with no grant in a
- * turn of their own chat (own-connection-reads.ts): each offered and
- * active, named by its ID, with those of its actions that only read
- * (`readsOnly`). None in any other turn.
+ * The connections the agent reads through with no grant in a turn of its
+ * person's own chat (ungranted-reads.ts): their own, and the shared ones
+ * whose audience holds them, each offered and active, named by its ID,
+ * with those of its actions that only read (`readsOnly`). None in any
+ * other turn.
  */
-const ownReadable = async (
+const ungrantedReadable = async (
   env: Env,
   scope: Omit<AgentScope, "runId">
 ): Promise<AgentConnection[]> => {
   if (scope.ownChat !== true) {
     return [];
   }
-  const askable = await askableConnections(env, scope);
-  const personal = askable.filter(({ scope: whose }) => whose === "personal");
+  const [askable, shared] = await Promise.all([
+    askableConnections(env, scope),
+    sharedFor(env, scope.personId),
+  ]);
+  // What the chat itself calls: never an outside API only Apps use.
+  const callable = askable.filter(({ forAppsOnly }) => forAppsOnly !== true);
   const found = await connectionOwnersOf(
     env,
-    personal.map(({ connectionId }) => connectionId)
+    callable.map(({ connectionId }) => connectionId)
   );
   const owners = new Map(found.map((owner) => [owner.id, owner] as const));
-  return personal.flatMap(({ connectionId, actions }) => {
+  return callable.flatMap(({ connectionId, actions }) => {
     const owner = owners.get(connectionId);
-    if (owner?.ownerUserId !== scope.personId || owner.status !== "active") {
+    if (
+      owner === undefined ||
+      !readsWithoutGrant(owner, scope.personId, shared) ||
+      owner.status !== "active"
+    ) {
       return [];
     }
     const reads = actions.filter((action) => readsOnly(owner, action));
@@ -238,11 +249,11 @@ export const usableConnections = async (
           },
         ];
   });
-  // Beside its grants, in its person's own chat, their own connections it
-  // reads with none: each but one a grant for the whole connection already
-  // lists with all its reads (a grant for a write alone hides none).
-  const readable = await ownReadable(env, scope);
-  const own = readable.filter(
+  // Beside its grants, in its person's own chat, the connections it reads
+  // with none: each but one a grant for the whole connection already lists
+  // with all its reads (a grant for a write alone hides none).
+  const readable = await ungrantedReadable(env, scope);
+  const ungranted = readable.filter(
     ({ connectionId, actions }) =>
       !granted.some(
         ({ connection }) =>
@@ -253,7 +264,11 @@ export const usableConnections = async (
   );
   return [
     ...granted,
-    ...own.map((connection) => ({ connection, active: true, reads: true })),
+    ...ungranted.map((connection) => ({
+      connection,
+      active: true,
+      reads: true,
+    })),
   ];
 };
 
@@ -327,7 +342,7 @@ const sendersOf = async (
 const checkedForChatApp = async (
   env: Env,
   scope: AgentScope,
-  grant: ConnectionGrant | OwnRead,
+  grant: ConnectionGrant | UngrantedRead,
   action: unknown,
   input: unknown
 ): Promise<ActionShape | undefined> => {
@@ -399,14 +414,15 @@ const markIfPersonal = async (
 export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
    * The agent's grant under `name`, read now; or, in a turn of its
-   * person's own chat with none, a read of their own connection whose ID
-   * `name` is, when `action` of it only reads (own-connection-reads.ts,
+   * person's own chat with none, a read of a connection whose ID `name`
+   * is that they read with no grant (their own, or shared with an audience
+   * that holds them), when `action` of it only reads (ungranted-reads.ts,
    * checked again as it is signed); or why there is neither.
    */
   async #grantNamed(
     name: unknown,
     action: unknown
-  ): Promise<ConnectionGrant | OwnRead> {
+  ): Promise<ConnectionGrant | UngrantedRead> {
     const scope = this.ctx.props;
     const grants = await connectionGrants(this.env, scope);
     const grant = grants.find((held) => held.name === name);
@@ -420,7 +436,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     ) {
       throw connectErrors.create("connect.connection_not_found");
     }
-    const owner = await ownReadConnection(
+    const owner = await ungrantedReadConnection(
       this.env,
       chatAuthority(scope),
       name,
@@ -632,7 +648,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
       [connectionId],
       [
         grant.permissionId === null
-          ? ownConnectionRead(connectionId)
+          ? ungrantedRead(connectionId)
           : connectionRead(
               connectionId,
               permissionActionSchema.parse(action),
@@ -746,8 +762,9 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
 const connectionsDeclaration = `/**
  * The outside systems this chat may act in (mail, calendars, files), each
  * under the name its permission gives it. In your person's own chat, in a
- * turn they started, their own connections are there too with no request,
- * named by their \`connectionId\`, for the actions that only read. Every
+ * turn they started, their own connections and the company's shared ones
+ * they may read are there too with no request, named by their
+ * \`connectionId\`, for the actions that only read. Every
  * call is recorded. A call
  * that changes something (sends, creates, deletes) is never done straight
  * away: it waits for the person to confirm it in Grasp, and \`pending\`
@@ -766,7 +783,7 @@ const connectionsDeclaration = `/**
  * is in \`list\` under the name you asked for, in this chat only.
  */
 connections: {
-  /** The connections this chat may use, and the actions each allows: their own ones in their own chat by ID, its reads alone. */
+  /** The connections this chat may use, and the actions each allows: in their own chat, those read with no request by ID, their reads alone. */
   list(): Promise<{ name: string; connectionId: string; resource: string | null; actions: string[] }[]>;
   /**
    * The connections you may ask for, the actions each has, and who decides.
