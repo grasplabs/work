@@ -2052,6 +2052,20 @@
       "when": 1795188500876,
       "tag": "0292_guest_chats_emptied",
       "breakpoints": true
+    },
+    {
+      "idx": 293,
+      "version": "6",
+      "when": 1795190518526,
+      "tag": "0293_guest_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 294,
+      "version": "6",
+      "when": 1795196627262,
+      "tag": "0294_fuzzy_mongoose",
+      "breakpoints": true
     }
   ]
 }

@@ -15,6 +15,7 @@ import type {
   DirectoryRead,
   Erasure,
   ErasurePreview,
+  Guest,
   Invitation,
   Member,
   MembersApi,
@@ -52,6 +53,7 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
+import { signInCodeOf } from "./auth/guest-codes.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
@@ -71,11 +73,13 @@ import {
   teamPins,
   teams,
   users,
+  verifications,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { directoryPlacementOf } from "./directory-placement.ts";
 import { directoryKinds } from "./directory-ties.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
+import { guestsOf, inviteGuest } from "./guest-members.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
   erasePerson,
@@ -375,6 +379,18 @@ const recordRemoval = async (
         )
       ),
     db.delete(sessions).where(and(eq(sessions.userId, userId), removed)),
+    // A sign-in code a guest still holds (auth/guest-codes.ts): its row
+    // names their address.
+    db
+      .delete(verifications)
+      .where(
+        and(
+          signInCodeOf(
+            sql`(SELECT lower(${users.email}) FROM ${users} WHERE ${users.id} = ${userId})`
+          ),
+          removed
+        )
+      ),
     // Their chat accounts too: the agent no longer knows them on any platform.
     db
       .delete(channelAccounts)
@@ -1190,6 +1206,20 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     await withPerson(this.#check, async (person) => {
       await withdrawInvitation(this.#env, person, invitationId);
     });
+  }
+
+  async guests(): Promise<Guest[]> {
+    return await withPerson(this.#check, async (person) => {
+      requireMemberAdmin(person);
+      return await guestsOf(this.#env);
+    });
+  }
+
+  async inviteGuest(email: string): Promise<{ userId: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await inviteGuest(this.#env, person, email)
+    );
   }
 
   async erasure(userId: string): Promise<ErasurePreview> {

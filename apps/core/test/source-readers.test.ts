@@ -2821,6 +2821,25 @@ describe("the groups of a suspended member", () => {
   );
 
   it(
+    "are read nothing of for a guest (GRA-2235), who is never someone in the company",
+    setUpTime,
+    async () => {
+      const bob = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(bob);
+      // A guest's membership: nobody becomes one from a member, so set by hand.
+      await env.DB.prepare(
+        "UPDATE members SET role = 'guest' WHERE user_id = ?"
+      )
+        .bind(bob.userId)
+        .run();
+      await readFiveTimes();
+      const { triedAt } = await groupsReadOf(connectionId);
+
+      expect(triedAt).toBeNull();
+    }
+  );
+
+  it(
     "stop a read under way where it is while the member is suspended, and go on with it once it lifts",
     setUpTime,
     async () => {

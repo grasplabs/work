@@ -24,6 +24,18 @@ export interface Member {
 }
 
 /**
+ * A guest (`guestRole`): someone outside the company, invited by address,
+ * who signs in with a code mailed to them and reaches nothing of the
+ * company. Never a member: listed apart from them.
+ */
+export interface Guest {
+  userId: string;
+  email: string;
+  /** When they were invited (ISO 8601). */
+  invitedAt: string;
+}
+
+/**
  * A member's account as the organization's directory holds it now: turned
  * on, turned off, deleted (Entra keeps a deleted account 30 days), or not
  * in it at all.
@@ -188,6 +200,7 @@ export interface Erasure {
  */
 export interface ErasurePreview {
   userId: string;
+  /** Their name; empty for a guest, who is shown by their address. */
   name: string;
   /** Their email, or null once their erasure erased it. */
   email: string | null;
@@ -214,6 +227,7 @@ export interface ErasurePreview {
  */
 export interface RemovedPerson {
   userId: string;
+  /** Their name; empty for a guest, who is shown by their address. */
   name: string;
   /** Their email, or null once their erasure erased it. */
   email: string | null;
@@ -243,7 +257,7 @@ export interface RemovedPeoplePage {
 
 /**
  * The organization's members, over `/rpc`, for admins only (never Grasp
- * staff): offboarding. Removing someone is for good: every session they
+ * staff), but for inviting a guest, which builders may too: offboarding. Removing someone is for good: every session they
  * have ends, their open connections close on their next call, their
  * personal connections are disconnected, and signing in again doesn't
  * bring them back.
@@ -278,6 +292,21 @@ export interface MembersApi {
   /** Withdraws an invitation nobody has taken up: they'd join as users. */
   withdrawInvitation: (invitationId: string) => Promise<void>;
   /**
+   * The organization's guests, by address. An admin removes one as any
+   * member (`remove`), which ends their sessions.
+   */
+  guests: () => Promise<Guest[]>;
+  /**
+   * Invites `email` as a guest, also when nobody holds an account under
+   * it yet: they sign in with a code mailed to them, and reach nothing
+   * until something is shared with them. For admins and builders. Refused
+   * for an address someone already holds (a member, someone removed or
+   * suspended, Grasp staff), an erased person's, and one of the company's
+   * own sign-in domains or Grasp staff's. An address that is a guest's
+   * already answers that guest. Answers the guest's user ID.
+   */
+  inviteGuest: (email: string) => Promise<{ userId: string }>;
+  /**
    * What erasing the person with `userId` would do, or where their erasure
    * stands: for a removed person only to be erased.
    */
@@ -286,8 +315,9 @@ export interface MembersApi {
    * Erases the removed person with `userId` (GRA-903): each area the
    * preview names (`ErasurePreview.areas`) goes; their name and ID stay on
    * the company's records, so what they did stays traceable. `name` must be
-   * their name exactly as the preview showed it. Asking again while it
-   * runs, or after, answers where it stands.
+   * their name exactly as the preview showed it; a guest's, who has none,
+   * their address. Asking again while it runs, or after, answers where it
+   * stands.
    */
   erase: (userId: string, name: string) => Promise<Erasure>;
   /**
@@ -358,6 +388,9 @@ export const memberErrors = defineErrorFamily({
   "member.invite_removed":
     "They were removed from the organization, and can't join again. If they were erased and the company gave their address to someone else, release the address first.",
   "member.invite_pending": "They're invited already.",
+  "member.guest_email": "That isn't an email address.",
+  "member.guest_refused":
+    "That address belongs to someone in your organization or to Grasp, so it can't be a guest's.",
   "member.invitation_not_found":
     "There's no such invitation: it was taken up or withdrawn.",
   "member.erase_not_removed":

@@ -31,6 +31,7 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
+import { signInCodeOf } from "./auth/guest-codes.ts";
 import { eraseGapAnswerer } from "./brain-gaps.ts";
 import {
   erasePerson as eraseFromBrain,
@@ -75,6 +76,7 @@ import {
   brainSyncSources,
   runChatSources,
   runStateWriters,
+  verifications,
   workflowState,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -84,6 +86,7 @@ import {
   emailHashOf,
   emailKeyVersion,
   erasedAddress,
+  normalizedEmail,
   subjectHashOf,
   subjectKeyVersion,
   subjectsOf,
@@ -281,6 +284,8 @@ const identity: ErasureStep = {
       db
         .delete(appVisitorSessions)
         .where(eq(appVisitorSessions.address, theirAddress)),
+      // A guest's sign-in code, keyed by their address (auth/guest-codes.ts).
+      db.delete(verifications).where(signInCodeOf(theirAddress)),
       db
         .update(users)
         .set({
@@ -1072,6 +1077,44 @@ const addressKeptOut = async (env: Env, userId: string): Promise<boolean> => {
 };
 
 /**
+ * Whether `typed` confirms erasing `person` (`userId`): their name exactly
+ * as it stands. A guest has no name (guest-members.ts), so their address
+ * confirms them, never kept: as `users` has it until their erasure is
+ * recorded, then by the keyed hash the erasure keeps of it
+ * (`emailHashOf`), since the erasure rewrites `users.email`, so asking
+ * again still answers where it stands. Once the address is released (no
+ * hash kept), nothing confirms a guest again; the clock still finishes
+ * their erasure.
+ */
+const confirms = async (
+  env: Env,
+  userId: string,
+  person: { name: string; email: string },
+  typed: unknown
+): Promise<boolean> => {
+  if (typeof typed !== "string") {
+    return false;
+  }
+  if (person.name !== "") {
+    return typed === person.name;
+  }
+  const [recorded] = await drizzle(env.DB)
+    .select({ hash: personErasures.emailHash })
+    .from(personErasures)
+    .where(eq(personErasures.userId, userId));
+  if (recorded === undefined) {
+    return typed === person.email;
+  }
+  return (
+    recorded.hash !== null &&
+    typed !== "" &&
+    // Exactly as it was shown: the hash would take any case or spacing.
+    typed === normalizedEmail(typed) &&
+    (await emailHashOf(env, typed)) === recorded.hash
+  );
+};
+
+/**
  * What erasing `userId` would do, or where their erasure stands, for one of
  * the client's admins.
  */
@@ -1100,7 +1143,8 @@ export const erasurePreview = async (
 
 /**
  * Erases the removed person `userId`, as one of the client's admins asked,
- * confirming them by `name` exactly as it stands now: records the erasure
+ * confirming them by `name` exactly as it stands now (a guest, who has no
+ * name, by their address): records the erasure
  * and each of its areas pending, once, while the admin still is one and the
  * person is still removed, then runs it (`runErasure`). Asking again only
  * runs what is still pending, and answers where it stands.
@@ -1120,7 +1164,7 @@ export const erasePerson = async (
   if (!(await isRemoved(env, target))) {
     throw memberErrors.create("member.erase_not_removed");
   }
-  if (typeof name !== "string" || name !== person.name) {
+  if (!(await confirms(env, target, person, name))) {
     throw memberErrors.create("member.erase_name_mismatch");
   }
   const db = drizzle(env.DB);
