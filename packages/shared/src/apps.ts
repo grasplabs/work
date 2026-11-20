@@ -159,6 +159,8 @@ export const reservedAppLinks: ReadonlySet<string> = new Set([
   "connections",
   "dashboard",
   "decisions",
+  // A guest's home (apps/web/src/routes/guest.tsx).
+  "guest",
   "inbox",
   "integrations",
   "interview",
@@ -748,6 +750,8 @@ export const appErrors = defineErrorFamily({
   "app.integrations_full": "The App has as many integrations added as it may.",
   "app.share_unreadable":
     "This App has read data they can't read where it comes from, such as someone else's mailbox, so it can't be shared with them.",
+  "app.guest_sources":
+    "This App reads company data, from a connection or the Brain, so it can't be shared with a guest.",
   "app.unreadable":
     "This App has read data you can't read where it comes from, so it isn't open to you. Ask whoever shared it.",
   "app.blueprint_not_found": "There's no such blueprint.",

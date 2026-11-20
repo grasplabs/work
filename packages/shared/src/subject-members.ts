@@ -48,6 +48,8 @@ export interface SubjectMember extends SubjectMemberRef {
   /** Who shared it with them, or last changed their role. */
   addedBy: string;
   addedAt: string;
+  /** A guest, from outside the company: only ever an App's user. */
+  guest?: true;
 }
 
 /**
@@ -56,7 +58,12 @@ export interface SubjectMember extends SubjectMemberRef {
  * shared with.
  */
 export interface ShareCandidates {
-  people: { id: string; name: string }[];
+  /**
+   * People of the organization, and for an App also its guests, each
+   * marked so (`guest`): someone from outside the company, who is only
+   * ever an App's user.
+   */
+  people: { id: string; name: string; guest?: true }[];
   teams: { id: string; name: string }[];
   projects: { id: string; name: string }[];
 }

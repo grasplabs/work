@@ -29,6 +29,7 @@ import {
   actionInvocation,
   invocationName,
 } from "./action-invocation.ts";
+import { functionRoles } from "./app-access.ts";
 import {
   callPageFunction,
   readFunctionRequest,
@@ -37,10 +38,10 @@ import {
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { visitorCall, visitorStatusFor } from "./app-visitors.ts";
 import { currentVersionOf } from "./apps.ts";
-import { identify, identifyFull } from "./auth/identity.ts";
 import { callDraftOn } from "./draft-runs.ts";
 import { appPreview } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
+import { identifyAppUser, identifyAppUserFull } from "./guest-access.ts";
 import {
   delivering,
   personRefusal,
@@ -268,7 +269,8 @@ const admitMember = async (
   // not (staff-audit.ts).
   const person = await routeMember(
     env,
-    await identify(env, request.headers),
+    // A guest's too: page calls are open to guests (guest-access.ts).
+    await identifyAppUser(env, request.headers, operation),
     operation,
     { app }
   );
@@ -302,7 +304,8 @@ const admitMember = async (
       id,
       request.headers.get(pageLeaseHeader)
     ),
-    current: async () => await identifyFull(env, request.headers),
+    current: async () =>
+      await identifyAppUserFull(env, request.headers, operation),
   };
 };
 
@@ -566,14 +569,29 @@ const memberCall = async (
       })
     );
   }
-  return await delivering(env, person, id, buildOf(lease), "call", async () =>
-    withinFrame(
-      await callPageFunction(env, person, id, body, deadline, {
-        // A page's keyed mutation commits its form with its writes.
-        tellsForm: true,
-      })
-    )
+  const answer = await delivering(
+    env,
+    person,
+    id,
+    buildOf(lease),
+    "call",
+    async () =>
+      withinFrame(
+        await callPageFunction(env, person, id, body, deadline, {
+          // A page's keyed mutation commits its form with its writes.
+          tellsForm: true,
+        })
+      )
   );
+  // A guest's answer goes out only while they still have the App, read
+  // again now: one that gained a source while the call ran (GRA-2235,
+  // app-access.ts) keeps what the call read here. A keyed action's answer
+  // is held to it by `stillTheirs` before it goes out; a stream's before
+  // its result and, for a guest, before each frame (`relay`).
+  if (person.guest === true) {
+    await functionRoles(env, person, id);
+  }
+  return answer;
 };
 
 /**
@@ -757,6 +775,17 @@ const relay = (
         }
         const frame = frameOf(line);
         if (frame.type !== "result") {
+          // A guest's progress goes out only while they still have the
+          // App, read again before each frame: one that gained a source
+          // meanwhile closes to them at once (GRA-2235, app-access.ts).
+          if (call.person.guest === true) {
+            try {
+              await still("push");
+            } catch (error) {
+              await refuse?.(error);
+              return;
+            }
+          }
           controller.enqueue(encoder.encode(`${line}\n`));
           return;
         }

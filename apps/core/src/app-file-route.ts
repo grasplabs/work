@@ -40,7 +40,6 @@ import {
   storedEvent,
   uuidFromHash,
 } from "./audit-outbox.ts";
-import { identify, identifyFull } from "./auth/identity.ts";
 import { storeFiles } from "./data-stores.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
@@ -50,6 +49,7 @@ import type {
   FileReader,
   Publishable,
 } from "./file-host.ts";
+import { identifyAppUser, identifyAppUserFull } from "./guest-access.ts";
 import { delivering, leasedBuild, personRefusal } from "./page-delivery.ts";
 import { admitted } from "./pages-rpc.ts";
 import { requireNotRevoked } from "./release-runner.ts";
@@ -818,7 +818,8 @@ export const appFileResponse = async (
   // not (staff-audit.ts).
   const person = await routeMember(
     env,
-    await identify(env, request.headers),
+    // A guest's too: an App's files are open to guests (guest-access.ts).
+    await identifyAppUser(env, request.headers, "app.files"),
     "app.files",
     {
       app: route.app,
@@ -881,7 +882,7 @@ export const appFileResponse = async (
     const reader = async (): Promise<FileReader> => {
       // The session, as it is now: a sign-out or a revoked session ends
       // a download between chunks.
-      const now = await identifyFull(env, request.headers);
+      const now = await identifyAppUserFull(env, request.headers, "app.files");
       if (now?.userId !== person.userId) {
         throw authErrors.create("auth.unauthenticated");
       }

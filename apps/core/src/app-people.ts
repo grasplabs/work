@@ -17,12 +17,12 @@ import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { WriterRoles } from "@grasp-os/shared/stores";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { currentMembership, mayAct, organizationId } from "./auth/auth.ts";
+import { guestNow, mayAct, organizationId } from "./auth/auth.ts";
 import { realEmail } from "./auth/directory-members.ts";
 import { members, teamMembers, teams, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -362,20 +362,31 @@ const rolesOf = (builder: boolean): User["roles"] =>
   builder ? ["builder", "user"] : ["user"];
 
 /**
- * Who `userId` is, as a member calling the App: one read of their name
- * and address, with the App roles the call already has. Refused once
- * they are no member.
+ * Who `userId` is, as a member or a guest calling the App: one read of
+ * their name and address, with the App roles the call already has, and
+ * whether they are a member (`member`), who alone reads the directory.
+ * Refused once they are neither.
  */
 const personUser = async (
   env: Env,
   { userId, roles }: MemberReader
-): Promise<User> => {
+): Promise<{ user: User; member: boolean }> => {
   const [row, appRoles] = await Promise.all([
     drizzle(env.DB)
-      .select({ name: users.name, email: users.email })
+      .select({
+        name: users.name,
+        email: users.email,
+        member: sql<number>`${mayAct(userId)}`,
+      })
       .from(users)
       .innerJoin(members, eq(members.userId, users.id))
-      .where(currentMembership(userId))
+      .where(
+        and(
+          eq(members.organizationId, organizationId),
+          eq(members.userId, userId),
+          or(mayAct(userId), guestNow(userId))
+        )
+      )
       .get(),
     roles(),
   ]);
@@ -383,10 +394,13 @@ const personUser = async (
     throw permissionErrors.create("permission.person_inactive");
   }
   return {
-    id: userId,
-    name: row.name,
-    email: realEmail(row.email),
-    roles: rolesOf(appRoles.appBuilder),
+    user: {
+      id: userId,
+      name: row.name,
+      email: realEmail(row.email),
+      roles: rolesOf(appRoles.appBuilder),
+    },
+    member: row.member === 1,
   };
 };
 
@@ -405,7 +419,11 @@ const once = <Answer>(read: () => Promise<Answer>): (() => Promise<Answer>) => {
  * that doesn't is refused each read, recorded as `app.people.refused`.
  */
 export const memberPeople = (env: Env, reader: MemberReader): PeopleAccess => {
-  const user = once(async () => await personUser(env, reader));
+  const caller = once(async () => await personUser(env, reader));
+  const user = async (): Promise<User> => {
+    const { user: found } = await caller();
+    return found;
+  };
   const audit = async (action: string, detail: Record<string, Json>) => {
     await keepAuditEvent(env, drizzle(env.DB), {
       actor: reader.actor,
@@ -427,8 +445,15 @@ export const memberPeople = (env: Env, reader: MemberReader): PeopleAccess => {
   return {
     user,
     directory: async (name, args) => {
-      // A member, with a role in the App, as the call found them.
-      await user();
+      // A member, with a role in the App, as the call found them. A
+      // guest (guest-access.ts) is told who they are, and never anyone
+      // else: no colleague's name or address reaches someone outside the
+      // company.
+      const { member } = await caller();
+      if (!member) {
+        await audit("app.people.refused", { read: name, reason: "guest" });
+        throw permissionErrors.create("permission.denied");
+      }
       const answer = await directoryReads[name](env, args);
       await audit("app.people.read", { read: name, count: countOf(answer) });
       return answer;

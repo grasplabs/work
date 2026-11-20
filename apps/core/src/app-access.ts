@@ -11,8 +11,10 @@ import { drizzle } from "drizzle-orm/d1";
 
 import {
   brainTeamsOfApps,
+  hasSources,
   mayReadBrainTeamsOf,
   readerOf,
+  recallsTheBrain,
   sourcesOf,
   sourcesOfApps,
   unreadableBy,
@@ -20,6 +22,7 @@ import {
 } from "./app-provenance.ts";
 import type { AppSources } from "./app-provenance.ts";
 import { teamsOf } from "./auth/identity.ts";
+import { guestNow } from "./auth/membership-sql.ts";
 import { apps, appMembers, teamMembers } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { viaProjectSql } from "./project-sql.ts";
@@ -72,8 +75,13 @@ import type { SharedRole } from "./sharing.ts";
 // admins do, but never share one (app-members.ts): whom a client's data
 // reaches is the client's decision.
 
-/** Who asks, as far as their role in an App goes. */
-export type Person = Pick<Identity, "userId" | "role" | "teams">;
+/**
+ * Who asks, as far as their role in an App goes. A guest (`guest`,
+ * guest-access.ts) has a role only through a share with them as a
+ * person, as the App's user, and only in an App that holds no source,
+ * whoever shared it (`requireAppRole`).
+ */
+export type Person = Pick<Identity, "userId" | "role" | "teams" | "guest">;
 
 /** The member rows of Apps that are `by`'s: their own, or one of their teams'. */
 const rowsOf = (by: Pick<Identity, "userId" | "teams">): SQL =>
@@ -165,22 +173,71 @@ const appRole = async (
   env: Env,
   by: Person,
   app: Pick<App, "id" | "owner"> & AppOpening
-): Promise<{ role: MemberRole; shared: boolean } | undefined> => {
-  const owns = app.owner === by.userId;
-  // Whom it is shared with matters only to someone neither admin nor owner.
+): Promise<
+  | {
+      role: MemberRole;
+      shared: boolean;
+      /** Whether they are a guest, as their identity or the database says. */
+      guest: boolean;
+    }
+  | undefined
+> => {
+  const guest = by.guest === true;
+  // A guest is never an admin nor an App's owner, whatever else says so.
+  const admin = !guest && isAdmin(by.role);
+  const owns = !guest && app.owner === by.userId;
+  // Whom it is shared with matters only to someone neither admin nor
+  // owner; to a guest, only a share with them as a person counts.
   const rows =
-    isAdmin(by.role) || owns
+    admin || owns
       ? []
       : await drizzle(env.DB)
-          .select({ role: appMembers.role })
+          .select({
+            role: appMembers.role,
+            // Read too, so a guest's identity that lost its mark is still
+            // held to a guest's rule.
+            guestNow: sql<number>`${guestNow(by.userId)}`,
+          })
           .from(appMembers)
-          .where(and(eq(appMembers.appId, app.id), rowsOf(by)));
-  return decidedAppRole(by, {
+          .where(
+            and(
+              eq(appMembers.appId, app.id),
+              guest
+                ? and(
+                    eq(appMembers.memberType, "person"),
+                    eq(appMembers.memberId, by.userId)
+                  )
+                : rowsOf(by)
+            )
+          );
+  const found = decidedAppRole(guest ? { role: "user" } : by, {
     owns,
     shares: rows.map((row) => row.role),
     open: isOpenToUsers(app),
   });
+  return found === undefined
+    ? undefined
+    : {
+        ...found,
+        guest: guest || rows.some((row) => row.guestNow === 1),
+      };
 };
+
+/**
+ * Whether App `app` holds any source (GRA-2235): a connection it was
+ * ever granted, shared ones too, a grant to read the Brain, or a Brain
+ * read by default, itself or through the workflows and Apps it reaches
+ * (app-provenance.ts). A source once held counts for good. Such an App
+ * takes no guests, whoever shares it (app-members.ts, `requireAppRole`);
+ * `sources` when the caller read them already.
+ */
+export const holdsAnySource = async (
+  env: Env,
+  app: AppId,
+  sources?: AppSources
+): Promise<boolean> =>
+  hasSources(sources ?? (await sourcesOf(env, app))) ||
+  (await recallsTheBrain(env, app));
 
 /**
  * Refuses `by` unless they have `needed` or more in `app`: an App they
@@ -215,13 +272,20 @@ export const requireAppRole = async (
   if (found === undefined) {
     throw appErrors.create("app.not_found");
   }
-  const { role, shared } = found;
+  const { role, shared, guest } = found;
   if (needed === "builder" && role !== "builder") {
     throw roleErrors.create("role.forbidden");
   }
   if (shared) {
+    const held = sources ?? (await sourcesOf(env, app.id));
+    // An App that holds a source takes no guests (GRA-2235): read on
+    // every request, at a call's start and before each commit, so a
+    // guest's share lapses for good the moment the App gains one.
+    if (guest && (await holdsAnySource(env, app.id, held))) {
+      throw appErrors.create("app.unreadable");
+    }
     const unreadable = unreadableBy(
-      sources ?? (await sourcesOf(env, app.id)),
+      held,
       readerOf(
         by.userId,
         by.teams.map(({ id }) => id),
@@ -501,7 +565,7 @@ export const stillBuiltBy = (by: Person, app: AppId): SQL => {
  */
 export const functionRoles = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role">,
+  by: Pick<Identity, "userId" | "role" | "guest">,
   app: AppId
 ): Promise<{ appMember: boolean; appBuilder: boolean; teams: string[] }> => {
   const row = await drizzle(env.DB)

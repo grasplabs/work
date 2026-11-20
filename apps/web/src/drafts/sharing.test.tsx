@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { appErrors } from "@grasp-os/shared/apps";
 import type { ViewedApp } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -315,6 +316,55 @@ describe("Sharing an App or a workflow", () => {
       listed: ["eva  de \u200BVries (ID …bbbbbb)", "Eva de Vries (ID …aaaaaa)"],
     });
     expect(button("Stop sharing with Eva de Vries (ID …aaaaaa)")).toBeDefined();
+  });
+
+  it("marks a guest where they are offered and among whom it is shared with, and says plainly why sharing with one is refused", async () => {
+    const { session } = fakeMembers(
+      [
+        {
+          type: "person",
+          id: "user-gil",
+          name: "Gil",
+          role: "user",
+          addedBy: "user-owner",
+          addedAt: "2026-10-30T09:00:00.000Z",
+          guest: true,
+        },
+      ],
+      {
+        people: [
+          { id: "user-gus", name: "Gus", guest: true },
+          { id: "user-bo", name: "Bo" },
+        ],
+        teams: [],
+        projects: [],
+      }
+    );
+    // Core refuses a builder an App that holds a source (GRA-2235).
+    session.apps.members.add = async (): Promise<SubjectMember> => {
+      await Promise.resolve();
+      throw appErrors.create("app.guest_sources");
+    };
+    await shown(session, app("builder"));
+
+    await press(button("Share"));
+    const options = [...document.querySelectorAll("[cmdk-item]")].map(
+      (each) => each.textContent
+    );
+    await pickOption("Gus");
+
+    expect({
+      options,
+      listed: listed(),
+      refused: document.body.textContent?.includes(
+        appErrors.create("app.guest_sources").message
+      ),
+    }).toStrictEqual({
+      // Each with its avatar's initial first.
+      options: ["GGusGuest", "BBo"],
+      listed: ["GilGuest"],
+      refused: true,
+    });
   });
 
   it("lets a builder unshare it, only once they confirm", async () => {

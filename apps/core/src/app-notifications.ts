@@ -39,7 +39,7 @@ import {
 import type { AppSources } from "./app-provenance.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import { activeMember, mayAct, organizationId } from "./auth/auth.ts";
-import { memberOf } from "./auth/identity.ts";
+import { appUserOf } from "./auth/identity.ts";
 import {
   appMembers,
   apps,
@@ -540,11 +540,12 @@ export const dispatchAppNotifyIntent = async (
     requireLive(entry.signal);
     // The person it acts for, the release and an agent's permission, now.
     await requireNotRevoked(env, intent.app, intent.appVersion);
-    const member = await memberOf(env.DB, intent.principal);
-    if (member === undefined) {
+    // A member or a guest, as the call that staged it was let in.
+    const person = await appUserOf(env.DB, intent.principal);
+    if (person === undefined) {
       throw appErrors.create("app.not_found");
     }
-    await functionRoles(env, member, intent.app);
+    await functionRoles(env, person, intent.app);
     await requireAgentAllowed(env, intent.app, intent.principal, intent.agent);
     requireLive(entry.signal);
     await deliver(env, send);
