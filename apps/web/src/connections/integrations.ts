@@ -534,8 +534,8 @@ export const sectionsOf = (
     search
   );
   const own = found.filter((integration) => integration.connections.length > 0);
-  const lapsed = own.filter((integration) =>
-    integration.connections.some(ranOut)
+  const lapsed = own.filter(
+    (integration) => stateOf(integration) === "needs_reauth"
   );
   const connected = own.filter((integration) => !lapsed.includes(integration));
   const used = (integration: Integration): boolean =>

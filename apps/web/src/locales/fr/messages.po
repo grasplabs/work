@@ -4582,7 +4582,7 @@ msgstr "Discussions"
 #: src/frame/part-words.tsx
 msgctxt "a group of an app's tools"
 msgid "Chats"
-msgstr "Conversations"
+msgstr "Discussions"
 
 #. Folder of the chats people had with a Grasp agent
 #: src/brain/brain.ts
