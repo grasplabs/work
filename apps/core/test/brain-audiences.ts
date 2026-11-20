@@ -31,7 +31,10 @@ export const audienceNow = async (
   }
 };
 
-/** Chooses `audience` for `connectionId` as `api`, from the one held now. */
+/**
+ * Chooses `audience` for `connectionId` as `api`, from the one held now,
+ * confirming that it reads everything the connection brings.
+ */
 export const chooseAudience = async (
   api: Chooser,
   connectionId: string,
@@ -40,6 +43,7 @@ export const chooseAudience = async (
   await api.connections.setBrainAudience(
     connectionId,
     audience,
-    await audienceNow(api, connectionId)
+    await audienceNow(api, connectionId),
+    audience
   );
 };

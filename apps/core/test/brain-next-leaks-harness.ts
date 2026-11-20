@@ -332,6 +332,46 @@ export const recalledByMeaning = async <T>(
   );
 };
 
+/** `person`'s own store, as core names it. */
+export const ownStoreOf = (person: string) =>
+  inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${person}`);
+
+/** Most alarms a person's own store may take to embed what it holds. */
+const settleAlarmsMost = 50;
+
+/**
+ * Runs each of `people`'s own stores' alarms until it sleeps, everything
+ * it holds embedded: a store left to itself wakes on its own alarm, a
+ * minute after a change, and embeds in the background, which a pass must
+ * never straddle. Its embedding moves `fromOwn` for a question of any
+ * words (by meaning, the reader's own passages come in only once they
+ * have vectors), and a pass holds `fromOwn` to the twins'. Fails, naming
+ * the store, when it still wakes after `settleAlarmsMost` alarms, or
+ * sleeps with a passage of its own not embedded.
+ */
+export const settledOwnStores = async (
+  people: readonly string[]
+): Promise<void> => {
+  for (const person of people) {
+    let awake = true;
+    for (let run = 0; awake && run < settleAlarmsMost; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one alarm after another
+      awake = await runDurableObjectAlarm(ownStoreOf(person));
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one store at a time
+    const { embedding } = await ownStoreOf(person).workOverview();
+    const done =
+      embedding.chunks === 0 ||
+      (embedding.rebuilt &&
+        embedding.embedded + embedding.unembeddable === embedding.chunks);
+    if (awake || !done) {
+      throw new Error(
+        `person:${person}'s own store wasn't embedded in ${settleAlarmsMost} alarms: ${JSON.stringify(embedding)}`
+      );
+    }
+  }
+};
+
 /** Each of `among`'s answers by meaning (`recalledByMeaning`), and every line written. */
 const askedEachByMeaning = async (
   among: readonly [string, Probe][],
@@ -340,6 +380,17 @@ const askedEachByMeaning = async (
   const value: [string, Answer[]][] = [];
   const lines: unknown[] = [];
   for (const [name, probe] of among) {
+    // In a pass that reads as the person, their own store embedded and
+    // asleep before each surface asks: a probe before this one may have
+    // changed it (an own source added or removed, a skill, a memory), and
+    // its tick, on its own alarm, would then embed between a marker's
+    // question and its twin's, moving what meaning finds and `fromOwn`
+    // for one of them alone (GRA-2140). A pass as the company never reads
+    // it, and holds that it is never even addressed.
+    if (probing.personal) {
+      // oxlint-disable-next-line no-await-in-loop -- one surface at a time
+      await settledOwnStores([probing.personId]);
+    }
     // oxlint-disable-next-line no-await-in-loop -- one surface at a time
     const asked = await recalledByMeaning(
       name,
@@ -408,46 +459,6 @@ export const findingsOf = async (
       found,
     })),
   ];
-};
-
-/** `person`'s own store, as core names it. */
-export const ownStoreOf = (person: string) =>
-  inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${person}`);
-
-/** Most alarms a person's own store may take to embed what it holds. */
-const settleAlarmsMost = 50;
-
-/**
- * Runs each of `people`'s own stores' alarms until it sleeps, everything
- * it holds embedded: a store left to itself wakes on its own alarm, a
- * minute after a change, and embeds in the background, which a pass must
- * never straddle. Its embedding moves `fromOwn` for a question of any
- * words (by meaning, the reader's own passages come in only once they
- * have vectors), and a pass holds `fromOwn` to the twins'. Fails, naming
- * the store, when it still wakes after `settleAlarmsMost` alarms, or
- * sleeps with a passage of its own not embedded.
- */
-export const settledOwnStores = async (
-  people: readonly string[]
-): Promise<void> => {
-  for (const person of people) {
-    let awake = true;
-    for (let run = 0; awake && run < settleAlarmsMost; run += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one alarm after another
-      awake = await runDurableObjectAlarm(ownStoreOf(person));
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one store at a time
-    const { embedding } = await ownStoreOf(person).workOverview();
-    const done =
-      embedding.chunks === 0 ||
-      (embedding.rebuilt &&
-        embedding.embedded + embedding.unembeddable === embedding.chunks);
-    if (awake || !done) {
-      throw new Error(
-        `person:${person}'s own store wasn't embedded in ${settleAlarmsMost} alarms: ${JSON.stringify(embedding)}`
-      );
-    }
-  }
 };
 
 /** Each of `among`'s answers as `probing`'s reader, by surface: a `before` for `findingsOf`. */

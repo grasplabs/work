@@ -1,10 +1,10 @@
 import type {
+  ConnectionBrainAudience,
   ListedConnection,
   SharedSyncPlaces,
 } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
 import { syncErrors } from "@grasp-os/shared/sync";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
@@ -34,15 +34,12 @@ import { useChange } from "./use-change.ts";
 // For an admin, on a shared connection's card beside who may read in the
 // Brain what comes through it (brain-audience.tsx): which of its shared
 // drives or SharePoint libraries Grasp may copy into the Brain. The two
-// decisions belong together, and the page says, before anything is
-// picked, who will read what a picked place holds: those the provider
-// lets open each file, of those the audience holds, which Grasp reads
-// only with an account that can share it in Google, or owns its site in
-// SharePoint (GRA-2145); each place whose sharing the sync doesn't read
-// is marked, as nobody reads its files. Where every library is marked,
-// the connection was most likely made before Grasp asked to read
-// SharePoint's sharing: connecting it again asks for it. Core and connect decide who may pick and check every pick
-// (sync-picks.ts, connect's sync.ts); the card only asks. It promises
+// decisions belong together: everyone who may read it can read
+// everything in a picked place, whatever the source's own permissions
+// (GRA-2207). So a save that picks a place asks the admin to tick, for
+// the audience held now, that they know it; another audience asks again.
+// Core and connect decide who may pick and check every pick, the tick
+// too (sync-picks.ts, connect's sync.ts); the card only asks. It promises
 // nothing about when a copy is made or taken away.
 //
 // A save changes only what the admin ticked or unticked: it starts from
@@ -119,7 +116,9 @@ const usePlaces = (
 
 /**
  * Saves `places` from `from`: `changed` when connect refused it as the
- * picks changed meanwhile (nothing changed). Any other refusal is thrown.
+ * picks changed meanwhile, `unconfirmed` when core refused it as the
+ * audience confirmed is no longer the one held (nothing changed either
+ * way). Any other refusal is thrown.
  * Outside the components, as the React Compiler can't compile `try`.
  */
 const pickedFrom = async (
@@ -129,14 +128,19 @@ const pickedFrom = async (
     feed: string;
     from: string[];
     places: string[];
+    acknowledged?: ConnectionBrainAudience;
   }
-): Promise<"picked" | "changed"> => {
+): Promise<"picked" | "changed" | "unconfirmed"> => {
   try {
     await session.connections.pickSyncPlaces(request);
     return "picked";
   } catch (error) {
-    if (syncErrors.codeOf(error) === "sync.picks_changed") {
+    const code = syncErrors.codeOf(error);
+    if (code === "sync.picks_changed") {
       return "changed";
+    }
+    if (code === "sync.unacknowledged") {
+      return "unconfirmed";
     }
     throw error;
   }
@@ -150,16 +154,71 @@ const samePlaces = (
   before.length === picked.length &&
   before.every((place) => picked.includes(place));
 
+/** An audience, as a value that tells one from another. */
+const keyOf = (audience: ConnectionBrainAudience): string =>
+  audience.kind === "team" ? `team:${audience.teamId}` : audience.kind;
+
+/** What the admin ticks to say who will read everything in the places picked. */
+const Readers = ({
+  audience,
+  team,
+  label,
+}: {
+  audience: ConnectionBrainAudience;
+  team: string | undefined;
+  label: string;
+}) => {
+  if (audience.kind === "everyone") {
+    return (
+      <Trans>
+        Everyone in the company will be able to read everything in the places
+        you pick, whatever their permissions in {label}.
+      </Trans>
+    );
+  }
+  if (audience.kind === "team" && team !== undefined) {
+    return (
+      <Trans>
+        Everyone in the team {team} will be able to read everything in the
+        places you pick, whatever their permissions in {label}.
+      </Trans>
+    );
+  }
+  if (audience.kind === "team") {
+    return (
+      <Trans>
+        Everyone in this team will be able to read everything in the places you
+        pick, whatever their permissions in {label}.
+      </Trans>
+    );
+  }
+  return (
+    <Trans>
+      Whoever you let read {label} in the Brain will be able to read everything
+      in the places you pick, whatever their permissions in {label}.
+    </Trans>
+  );
+};
+
 /** The places of a connection, each to pick, and saving the picks. */
 const PlacesForm = ({
   connection,
   label,
+  audience,
+  team,
   places,
   onSaved,
+  onAudienceStale,
 }: {
   connection: ListedConnection;
   label: string;
+  /** The connection's Brain audience as core holds it now. */
+  audience: ConnectionBrainAudience;
+  /** The name of the audience's team, if it is one the page knows. */
+  team: string | undefined;
   places: SharedSyncPlaces;
+  /** Core holds another audience than `audience`: read it again. */
+  onAudienceStale: () => void;
   /**
    * The picks were asked for, `changed` when another change landed
    * meanwhile: the places are read again.
@@ -180,31 +239,19 @@ const PlacesForm = ({
   // A picked place this listing doesn't show stays picked: only what the
   // admin unticked here goes.
   const unshown = places.picks.filter((place) => !shown.has(place));
+  // Picking a place asks for the tick, for the audience it was ticked
+  // for: another audience, chosen meanwhile, asks again.
+  const picksMore = picked.some((place) => !places.picks.includes(place));
+  const [confirmedFor, setConfirmedFor] = useState<string>();
+  const confirmed = confirmedFor === keyOf(audience);
+  const confirmId = `${ids}-confirm`;
   return (
     <FieldSet>
       <FieldLegend variant="label">
         <Trans>Copy into the Brain from {label}</Trans>
       </FieldLegend>
-      <FieldDescription>
-        {connection.provider === "google" ? (
-          <Trans>
-            Each file is read in the Brain only by those {label} lets open it,
-            of those you let read {label} here. The account you connected must
-            be able to share files in each drive you pick: nobody reads the
-            files it can&apos;t share.
-          </Trans>
-        ) : (
-          <Trans>
-            Each file is read in the Brain only by those {label} lets open it,
-            of those you let read {label} here. The account you connected must
-            own each site you pick: nobody reads the files of a library marked
-            below. If every library is marked, disconnect {label} and connect it
-            again.
-          </Trans>
-        )}
-      </FieldDescription>
       <ul className="flex flex-col gap-2">
-        {places.choices.map(({ place, title, within, sharingRead }, index) => {
+        {places.choices.map(({ place, title, within }, index) => {
           // By position: a place's ID is the provider's, in any alphabet.
           const box = `${ids}-${index}`;
           return (
@@ -233,20 +280,34 @@ const PlacesForm = ({
                       {within}
                     </FieldDescription>
                   )}
-                  {sharingRead ? null : (
-                    <Badge className="self-start" variant="attention">
-                      <Trans>Nobody reads its files</Trans>
-                    </Badge>
-                  )}
                 </FieldContent>
               </Field>
             </li>
           );
         })}
       </ul>
+      {picksMore ? (
+        <Field orientation="horizontal">
+          <Checkbox
+            aria-labelledby={`${confirmId}-label`}
+            checked={confirmed}
+            disabled={busy}
+            id={confirmId}
+            onCheckedChange={(checked) => {
+              setConfirmedFor(checked ? keyOf(audience) : undefined);
+            }}
+            required
+          />
+          <FieldLabel htmlFor={confirmId} id={`${confirmId}-label`}>
+            <Readers audience={audience} label={label} team={team} />
+          </FieldLabel>
+        </Field>
+      ) : null}
       <Button
         className="self-start"
-        disabled={busy || samePlaces(before, picked)}
+        disabled={
+          busy || samePlaces(before, picked) || (picksMore && !confirmed)
+        }
         onClick={() => {
           setRereading(true);
           void (async () => {
@@ -257,8 +318,15 @@ const PlacesForm = ({
                 feed: places.feed,
                 from: places.picks,
                 places: [...unshown, ...picked],
+                ...(picksMore ? { acknowledged: audience } : {}),
               });
               changed = outcome === "changed";
+              // Confirmed for an audience no longer held: asked again, for
+              // the one held now.
+              if (outcome === "unconfirmed") {
+                setConfirmedFor(undefined);
+                onAudienceStale();
+              }
             });
             await onSaved(changed);
             setRereading(false);
@@ -312,9 +380,18 @@ const NothingToPick = ({
 export const SyncPlaces = ({
   connection,
   label,
+  audience,
+  team,
+  onAudienceStale,
 }: {
   connection: ListedConnection;
   label: string;
+  /** The connection's Brain audience as core holds it now. */
+  audience: ConnectionBrainAudience;
+  /** The name of the audience's team, if it is one the page knows. */
+  team: string | undefined;
+  /** Core holds another audience than `audience`: read it again. */
+  onAudienceStale: () => void;
 }) => {
   const { t } = useLingui();
   const { read, reload } = usePlaces(connection.id);
@@ -362,9 +439,11 @@ export const SyncPlaces = ({
   return (
     <div className="flex flex-col gap-2">
       <PlacesForm
+        audience={audience}
         connection={connection}
         key={key}
         label={label}
+        onAudienceStale={onAudienceStale}
         onSaved={async (changed) => {
           // Said only beside what was read after it: never while the form
           // still shows the admin's own ticks.
@@ -375,6 +454,7 @@ export const SyncPlaces = ({
           setChangedMeanwhile(changed);
         }}
         places={read.places}
+        team={team}
       />
       {changedMeanwhile ? (
         <p className="text-muted-foreground text-sm">
