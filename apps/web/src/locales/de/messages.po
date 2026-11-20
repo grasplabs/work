@@ -2606,6 +2606,7 @@ msgid "Agent not found"
 msgstr "Agent nicht gefunden"
 
 #: src/agents/agents-overview.tsx
+#: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
@@ -4911,6 +4912,7 @@ msgstr "Endet am {closes}"
 msgid "Closing the books and producing the numbers leadership looks at."
 msgstr "Den Abschluss machen und die Zahlen erstellen, auf die die Geschäftsleitung schaut."
 
+#: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
 msgid "Code"
 msgstr "Code"
@@ -6350,6 +6352,7 @@ msgstr "Dokument"
 
 #: src/agents/agent-documents.tsx
 #: src/brain/brain.ts
+#: src/brain/sources-page.tsx
 #: src/onboarding/document-drop.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Documents"
@@ -10653,6 +10656,10 @@ msgstr "Mittel"
 msgid "Meeting prep"
 msgstr "Meeting-Vorbereitung"
 
+#: src/brain/sources-page.tsx
+msgid "Meetings"
+msgstr "Meetings"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Member"
@@ -10676,6 +10683,7 @@ msgstr "Mitglieder sehen es unter Integrationen."
 
 #: src/brain/brain-section.tsx
 #: src/brain/memories-page.tsx
+#: src/brain/sources-page.tsx
 msgctxt "the Brain's memories page"
 msgid "Memories"
 msgstr "Erinnerungen"
@@ -10713,6 +10721,7 @@ msgstr "Aktionen zur Nachricht"
 msgid "Message other people"
 msgstr "Anderen Personen schreiben"
 
+#: src/brain/sources-page.tsx
 #: src/chat/chat-body.tsx
 #: src/chat/thread.tsx
 msgid "Messages"
@@ -11263,10 +11272,6 @@ msgstr "Neue Version"
 #: src/activity/audit-log.tsx
 msgid "Newer"
 msgstr "Neuer"
-
-#: src/brain/sources-page.tsx
-msgid "Newest first"
-msgstr "Neueste zuerst"
 
 #: src/agents/new-agent.tsx
 #: src/chat/asked-questions.tsx
@@ -13367,6 +13372,7 @@ msgstr "ausstehend"
 msgid "people"
 msgstr "Personen"
 
+#: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-dialog.tsx
@@ -14172,6 +14178,7 @@ msgid "records"
 msgstr "Datensätze"
 
 #: src/apps/app-data-model.tsx
+#: src/brain/sources-page.tsx
 msgctxt "a table's records"
 msgid "Records"
 msgstr "Datensätze"
@@ -16040,6 +16047,10 @@ msgstr "Vorschau zeigen"
 msgid "Show the time zones"
 msgstr "Zeitzonen anzeigen"
 
+#: src/brain/sources-page.tsx
+msgid "Show the whole text"
+msgstr "Den ganzen Text zeigen"
+
 #: src/frame/part-words.tsx
 msgid "Show them"
 msgstr "Anzeigen"
@@ -16938,6 +16949,7 @@ msgid "Table name"
 msgstr "Tabellenname"
 
 #: src/apps/app-data-model.tsx
+#: src/brain/sources-page.tsx
 msgid "Tables"
 msgstr "Tabellen"
 
@@ -17227,6 +17239,11 @@ msgstr "Text"
 
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
+msgid "Text"
+msgstr "Text"
+
+#: src/brain/sources-page.tsx
+msgctxt "a version of a source's text"
 msgid "Text"
 msgstr "Text"
 
@@ -19702,6 +19719,11 @@ msgstr "Wir wollen weniger Zeit mit wiederkehrender Arbeit verbringen, damit meh
 msgid "We wrote these for you. Change what you like."
 msgstr "Wir haben das für Sie geschrieben. Ändern Sie, was Sie möchten."
 
+#: src/brain/sources-page.tsx
+msgctxt "a kind of source of the Brain"
+msgid "Web pages"
+msgstr "Webseiten"
+
 #: src/workflows/trigger-description.ts
 msgid "Webhook trigger"
 msgstr "Webhook-Auslöser"
@@ -20754,6 +20776,7 @@ msgid "workflows"
 msgstr "Workflows"
 
 #: src/brain/goals-editor.tsx
+#: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx

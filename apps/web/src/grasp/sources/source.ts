@@ -19,7 +19,9 @@ export const hasWords = (words: string | undefined): words is string =>
 /** Whether its row and card may open it: open, with somewhere to go or a page's `onOpen` to run. */
 export const opens = (source: Source, onOpen?: unknown) =>
   accessOf(source) === "open" &&
-  (hasWords(source.href) || onOpen !== undefined);
+  (hasWords(source.href) ||
+    source.render !== undefined ||
+    onOpen !== undefined);
 
 /**
  * The source as one mention of it cites it: the mention's own quote, its context and place, and a

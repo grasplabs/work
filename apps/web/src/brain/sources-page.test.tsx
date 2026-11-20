@@ -523,7 +523,7 @@ const submitted = async (form: HTMLFormElement): Promise<void> => {
 const uploadPicker = (): HTMLInputElement => {
   const picker = [...document.querySelectorAll("input")].find(
     (input) =>
-      input.type === "file" && input.closest("[data-slot=card]") === null
+      input.type === "file" && input.closest("[data-slot=panel]") === null
   );
   if (!picker) {
     throw new TypeError("No upload picker");
@@ -593,7 +593,7 @@ const visibleText = (): string => {
 const versionFormOf = () => {
   const picker = [...document.querySelectorAll("input")].find(
     (input) =>
-      input.type === "file" && input.closest("[data-slot=card]") !== null
+      input.type === "file" && input.closest("[data-slot=panel]") !== null
   );
   const form = picker?.closest("form");
   if (!(picker && form)) {
@@ -671,7 +671,37 @@ const search = async (question: string): Promise<void> => {
 
 /** The text of the opened source's panel. */
 const panel = (): string =>
-  document.querySelector("[data-slot=card]")?.textContent ?? "";
+  document.querySelector("[data-slot=panel]")?.textContent ?? "";
+
+/** Opens the search result whose source is titled `title`, by its open-version action. */
+const openResult = async (title: string): Promise<void> => {
+  const button = [...document.querySelectorAll("[data-slot=item]")]
+    .find((each) => each.textContent.startsWith(title))
+    ?.querySelector("button");
+  if (!button) {
+    throw new TypeError(`No result ${title}`);
+  }
+  await act(async () => {
+    button.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** Follows the link whose text starts with `label`. */
+const follow = async (label: string): Promise<void> => {
+  const link = [...document.querySelectorAll("a")].find((each) =>
+    each.textContent.startsWith(label)
+  );
+  if (!link) {
+    throw new TypeError(`No link ${label}`);
+  }
+  await act(async () => {
+    link.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
 
 /** The text of the section whose heading is `heading`, as it is or counted, as a library list's is ("Results · 2"). */
 const section = (heading: string): string =>
@@ -854,12 +884,32 @@ describe(SourcesPage, () => {
     });
   });
 
+  it("closes the source opened, and leaves the list as it was", async () => {
+    await shown([]);
+    await press("Handbook");
+    const opened = panel();
+    const close = document.querySelector<HTMLButtonElement>(
+      '[data-slot=panel] button[aria-label="Close"]'
+    );
+    await act(async () => {
+      close?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect({
+      opened: opened.includes("Invoices are paid on Fridays."),
+      closed: panel(),
+      listed: section("Sources you may read").includes("Handbook"),
+    }).toStrictEqual({ opened: true, closed: "", listed: true });
+  });
+
   it("shows recall's pack as core gives it, and opens a result's source at its version", async () => {
     const { calls } = await shown([]);
     await search("  invoices refunds  ");
     const resultText = section("Results");
     const pageText = document.body.textContent;
-    await press("Handbook");
+    await openResult("Handbook");
 
     expect({
       order:
@@ -933,11 +983,11 @@ describe(SourcesPage, () => {
   it("opens a result at the version it cites, even after another version was picked in its panel", async () => {
     await shown([]);
     await search("invoices");
-    await press("Handbook");
+    await openResult("Handbook");
     const cited = panel();
     await press("Version 2");
     const picked = panel();
-    await press("Handbook");
+    await openResult("Handbook");
 
     expect({
       cited: cited.includes("Invoices are paid monthly."),
@@ -1063,7 +1113,7 @@ describe(SourcesPage, () => {
     const kept = section("What agents read through shared connections");
     await search("rotterdam");
     // A passage from a source the list hasn't shown is named by what added it.
-    await press("Read from a shared connection");
+    await openResult("Read from a shared connection");
     const opened = panel();
     act(() => {
       root?.unmount();
@@ -1123,7 +1173,7 @@ describe(SourcesPage, () => {
       "No first line",
       "Directory",
     ].map((title) => listedText.indexOf(title));
-    await press("Finance lead interview");
+    await follow("Finance lead interview");
 
     expect({
       waited: firstPage.includes("Directory"),
@@ -1320,7 +1370,7 @@ describe(SourcesPage, () => {
     await settle();
     const versionPicker = [...document.querySelectorAll("input")].find(
       (input) =>
-        input.type === "file" && input.closest("[data-slot=card]") !== null
+        input.type === "file" && input.closest("[data-slot=panel]") !== null
     );
     const versionForm = versionPicker?.closest("form");
     if (!(versionPicker && versionForm)) {
@@ -1681,7 +1731,7 @@ describe(SourcesPage, () => {
         ].find(
           (each) =>
             each.textContent === "Show more" &&
-            each.closest("[data-slot=card]") !== null
+            each.closest("[data-slot=panel]") !== null
         );
         await act(async () => {
           more?.click();
@@ -1734,7 +1784,7 @@ describe(SourcesPage, () => {
     ].find(
       (each) =>
         each.textContent === "Show more" &&
-        each.closest("[data-slot=card]") !== null
+        each.closest("[data-slot=panel]") !== null
     );
     await act(async () => {
       more?.click();

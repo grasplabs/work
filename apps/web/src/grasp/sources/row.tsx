@@ -5,6 +5,9 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { renderElement } from "@ui-sdk/react/primitive";
+import { Fragment } from "react";
+import type { ReactNode } from "react";
 
 import { focus } from "../focus/focus";
 import { Icon, Lock } from "../icons";
@@ -14,7 +17,7 @@ import { accessOf, hasWords, kindOf, opens } from "./source";
 import { sourceStyles as styles } from "./styles";
 import type { Source } from "./types";
 
-/** The quiet line: where it lives, when, how fresh, or why it cannot be opened. */
+/** The quiet line: where it lives, when, how fresh, whether it may no longer hold, or why it cannot be opened. */
 const Where = ({
   source,
   shared,
@@ -27,21 +30,42 @@ const Where = ({
   if (access === "gone") {
     return (
       <span {...stylex.props(styles.where, styles.gone)}>
-        {parts}. {shared.labels.gone}
+        {parts === "" ? null : `${parts}. `}
+        {shared.labels.gone}
         {hasWords(source.reason) ? `: ${source.reason}` : null}
       </span>
     );
   }
+  const pieces: { key: string; node: ReactNode }[] = [
+    { key: "where", node: parts },
+    {
+      key: "fresh",
+      node: hasWords(source.fresh) ? (
+        <span {...stylex.props(styles.fresh)}>{source.fresh}</span>
+      ) : (
+        ""
+      ),
+    },
+    {
+      key: "stale",
+      node: hasWords(source.stale) ? (
+        <span data-slot="source-stale" {...stylex.props(styles.stale)}>
+          {source.stale}
+        </span>
+      ) : (
+        ""
+      ),
+    },
+    { key: "locked", node: access === "locked" ? shared.labels.locked : "" },
+  ].filter((piece) => piece.node !== "");
   return (
     <span {...stylex.props(styles.where)}>
-      {parts}
-      {hasWords(source.fresh) ? (
-        <>
-          {" · "}
-          <span {...stylex.props(styles.fresh)}>{source.fresh}</span>
-        </>
-      ) : null}
-      {access === "locked" ? ` · ${shared.labels.locked}` : null}
+      {pieces.map((piece, index) => (
+        <Fragment key={piece.key}>
+          {index === 0 ? null : " · "}
+          {piece.node}
+        </Fragment>
+      ))}
     </span>
   );
 };
@@ -93,6 +117,26 @@ const Title = ({
       }
     },
   };
+  const words = (
+    <>
+      <span aria-hidden="true" {...stylex.props(styles.stretch)} />
+      {source.title}
+    </>
+  );
+  // A page in the product: the router's own link, in this tab.
+  if (source.render !== undefined) {
+    return renderElement(
+      "a",
+      {
+        href: source.href,
+        "data-slot": "source-title",
+        ...events,
+        className: stylex.props(styles.title, focus.words).className,
+        children: words,
+      },
+      source.render
+    );
+  }
   if (hasWords(source.href)) {
     return (
       <a
@@ -103,8 +147,7 @@ const Title = ({
         {...events}
         {...stylex.props(styles.title, focus.words)}
       >
-        <span aria-hidden="true" {...stylex.props(styles.stretch)} />
-        {source.title}
+        {words}
       </a>
     );
   }
@@ -115,8 +158,7 @@ const Title = ({
       {...events}
       {...stylex.props(styles.title, styles.titleButton, focus.words)}
     >
-      <span aria-hidden="true" {...stylex.props(styles.stretch)} />
-      {source.title}
+      {words}
     </button>
   );
 };
