@@ -92,3 +92,20 @@ export const memberNotRemoved = (
   userId: string | SQLiteColumn | SQL,
   withRoles?: readonly string[]
 ): SQL => memberWhile(userId, withRoles, notRemoved);
+
+/** `members`, as `guestNow` reads it for a suspension: apart from any caller's. */
+const suspendedGuest = alias(members, "suspended_guest");
+
+/**
+ * That `userId` is a guest now, as a SQL condition: a membership with the
+ * role `guest` (roles.ts `guestRole`) that an admin hasn't removed and
+ * nothing suspended. The one check a guest's way in reads: who is sent a
+ * code to sign in with, and whom a code signs in (auth/guest-codes.ts).
+ */
+export const guestNow = (userId: string | SQLiteColumn | SQL): SQL =>
+  sql`${memberWhile(userId, [guestRole], notRemoved)} AND NOT EXISTS (
+    SELECT 1 FROM ${members} AS ${suspendedGuest}
+    WHERE ${suspendedGuest.organizationId} = ${organizationId}
+      AND ${suspendedGuest.userId} = ${userId}
+      AND ${suspendedGuest.suspendedAt} IS NOT NULL
+  )`;

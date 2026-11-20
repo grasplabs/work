@@ -14,6 +14,7 @@ import type {
   DirectoryRead,
   Erasure,
   ErasurePreview,
+  Guest,
   Invitation,
   Member,
   MembersApi,
@@ -72,6 +73,7 @@ import { inList } from "./db/d1.ts";
 import { directoryPlacementOf } from "./directory-placement.ts";
 import { directoryKinds } from "./directory-ties.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
+import { guestsOf, inviteGuest } from "./guest-members.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
   erasePerson,
@@ -1073,6 +1075,20 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     await withPerson(this.#check, async (person) => {
       await withdrawInvitation(this.#env, person, invitationId);
     });
+  }
+
+  async guests(): Promise<Guest[]> {
+    return await withPerson(this.#check, async (person) => {
+      requireMemberAdmin(person);
+      return await guestsOf(this.#env);
+    });
+  }
+
+  async inviteGuest(email: string): Promise<{ userId: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await inviteGuest(this.#env, person, email)
+    );
   }
 
   async erasure(userId: string): Promise<ErasurePreview> {

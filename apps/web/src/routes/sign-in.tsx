@@ -8,6 +8,7 @@ import { forgetActiveChats } from "../chat/active-chat.ts";
 import { loadCoreStatus } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
+import { GuestCodeSignIn, NothingShared } from "../guest-sign-in.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 
@@ -39,25 +40,44 @@ const returnPathOf = (value: unknown): string =>
     ? value
     : "/";
 
-/** A session core made for someone's interview alone (GRA-1790), as Better Auth tells it. */
-const interviewSessionSchema = z.object({
-  session: z.object({ interview: z.literal(true) }),
+/**
+ * A session core made that is no member's, as Better Auth tells it: for
+ * someone's interview alone (GRA-1790), or a guest's (GRA-2235).
+ */
+const otherSessionSchema = z.object({
+  session: z
+    .object({
+      interview: z.boolean().optional(),
+      guest: z.boolean().optional(),
+    })
+    .loose(),
+  user: z.object({ email: z.string() }).loose(),
 });
 
 /**
- * Whether this browser is signed in for an interview alone: while the
- * gate is closed, someone a link went to who signed in here gets such a
- * session, which opens nothing but their interview. They are told Grasp
- * isn't open yet, as anyone the gate turns away is, and where their link
- * is, rather than asked to sign in again and again.
+ * Whom this browser is signed in for, when not a member. While the gate is
+ * closed, someone a link went to who signed in here gets a session for
+ * their interview alone: they are told Grasp isn't open yet, as anyone the
+ * gate turns away is, and where their link is, rather than asked to sign
+ * in again and again. A guest is told nothing is shared with them yet.
  */
-const isInterviewOnly = async (): Promise<boolean> => {
+const otherSession = async (): Promise<{
+  interviewOnly: boolean;
+  guest: string | null;
+}> => {
   try {
     const response = await fetch("/api/auth/get-session");
     const body: unknown = response.ok ? await response.json() : null;
-    return interviewSessionSchema.safeParse(body).success;
+    const parsed = otherSessionSchema.safeParse(body);
+    return {
+      interviewOnly: parsed.success && parsed.data.session.interview === true,
+      guest:
+        parsed.success && parsed.data.session.guest === true
+          ? parsed.data.user.email
+          : null,
+    };
   } catch {
-    return false;
+    return { interviewOnly: false, guest: null };
   }
 };
 
@@ -66,9 +86,19 @@ const isInterviewOnly = async (): Promise<boolean> => {
  * Grasp's buddy.
  */
 const SignIn = () => {
-  const { connected, signInOptions, interviewOnly } = Route.useLoaderData();
+  const { connected, signInOptions, interviewOnly, guest } =
+    Route.useLoaderData();
   const { error, returnTo } = Route.useSearch();
+  const { core } = Route.useRouteContext();
   const { t } = useLingui();
+  if (guest !== null) {
+    return (
+      <OnboardingFrame>
+        <GraspBuddy />
+        <NothingShared core={core} email={guest} />
+      </OnboardingFrame>
+    );
+  }
   return (
     <OnboardingFrame>
       <GraspBuddy />
@@ -83,11 +113,14 @@ const SignIn = () => {
         ) : null}
       </div>
       {connected ? (
-        <SignInOptions
-          error={error ?? (interviewOnly ? "not_open_yet" : undefined)}
-          options={signInOptions}
-          returnTo={returnTo}
-        />
+        <>
+          <SignInOptions
+            error={error ?? (interviewOnly ? "not_open_yet" : undefined)}
+            options={signInOptions}
+            returnTo={returnTo}
+          />
+          <GuestCodeSignIn />
+        </>
       ) : (
         <ErrorText>
           {t`Grasp can't be reached right now. Try again in a moment.`}
@@ -117,7 +150,7 @@ export const Route = createFileRoute("/sign-in")({
     if (status.connected) {
       forgetActiveChats();
     }
-    return { ...status, interviewOnly: await isInterviewOnly() };
+    return { ...status, ...(await otherSession()) };
   },
   component: SignIn,
 });

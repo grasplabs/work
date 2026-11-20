@@ -24,7 +24,7 @@ import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { readDirectories } from "./directory-people.ts";
 import { readReaderGroups } from "./directory-reader-groups.ts";
-import { suspendedUserIds } from "./directory-suspensions.ts";
+import { pausedUserIds } from "./directory-suspensions.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
 import { sweepGuestChats } from "./guests.ts";
@@ -225,7 +225,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
         requests: readerGroupRequestsPerTick,
         queries: readerGroupQueriesPerTick,
         // Whose own connections connect reads nothing of now (GRA-2143).
-        paused: await suspendedUserIds(env),
+        paused: await pausedUserIds(env),
       });
     },
   },

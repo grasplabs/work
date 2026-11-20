@@ -6,6 +6,11 @@ import { errorResponse } from "../errors.ts";
 import { relayedAuthorizationUrl } from "../oauth-relay.ts";
 import { authBasePath, authFor } from "./auth.ts";
 import { signInConfig } from "./config.ts";
+import {
+  guestCodeAsked,
+  guestCodePath,
+  guestSignInPath,
+} from "./guest-codes.ts";
 
 /**
  * The Better Auth routes core serves; everything else under `/api/auth` is
@@ -23,9 +28,15 @@ import { signInConfig } from "./config.ts";
  * member lists (`/get-full-organization`, `/list-members`), which would
  * name guests to every member: who is in the company comes from core's
  * own reads, which leave guests out (membership-sql.ts `mayAct`).
+ * A guest signs in with a code mailed to them (guest-codes.ts): asking
+ * for one is answered by core itself (`guestCodeAsked`), never by the
+ * plugin's route, and signing in with it is the plugin's, for guests
+ * alone (auth.ts). None of the plugin's other routes (verifying an
+ * address, passwords, changing an address) is on.
  */
 const allowedRoutes = new Set([
   "POST /sign-in/sso",
+  `POST ${guestSignInPath}`,
   "GET /get-session",
   "POST /sign-out",
   "GET /organization/list-teams",
@@ -96,11 +107,18 @@ const relayed = async (
 export const handleAuthRequest = async (
   request: Request,
   env: Env,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response> => {
   const path = new URL(request.url).pathname.slice(authBasePath.length);
   const config = signInConfig(env);
   const auth = await authFor(env, config);
+  // Asking for a guest's code: core's own answer, the plugin's call after.
+  if (auth && config && request.method === "POST" && path === guestCodePath) {
+    return await guestCodeAsked(request, env, ctx, async (email) => {
+      await auth.api.sendVerificationOTP({ body: { email, type: "sign-in" } });
+    });
+  }
   if (!(auth && config && isAllowed(request.method, path))) {
     return errorResponse(
       404,

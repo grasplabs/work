@@ -20,6 +20,7 @@ import {
   getSessionFromCtx,
 } from "better-auth/api";
 import { betterAuth } from "better-auth/minimal";
+import { emailOTP } from "better-auth/plugins/email-otp";
 import { organization } from "better-auth/plugins/organization";
 import { defaultAc } from "better-auth/plugins/organization/access";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
@@ -74,6 +75,15 @@ import {
   signInConfig,
 } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
+import {
+  guestAddress,
+  guestCodeDigits,
+  guestCodeLifetimeS,
+  guestCodeTries,
+  guestSignInPath,
+  isGuestNow,
+  mailGuestCode,
+} from "./guest-codes.ts";
 import {
   activeMember,
   mayAct,
@@ -801,9 +811,20 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
   env: Env,
   config: SignInConfig,
   session: T,
-  providerId: string | undefined
+  providerId: string | undefined,
+  path: string | undefined
 ) => {
   const now = Date.now();
+  if (path === guestSignInPath) {
+    // A guest, by a code mailed to them (guest-codes.ts): only someone who
+    // is a guest now, and only while the gate lets the company's own
+    // people in. They join nothing, and reach nothing of the company
+    // (identity.ts `sessionIdentity`, the `/organization/` hook).
+    return (await isGuestNow(env, session.userId)) &&
+      (await gateLetsIn(env, config, session.userId))
+      ? { data: { ...session, staff: false, interview: false, guest: true } }
+      : false;
+  }
   if (providerId === providerIds.staff && config.staff) {
     // A window the company's admin ended, or onboarding access past its
     // week after Grasp's go, lets nobody sign in (onboarding/gate.ts).
@@ -1018,6 +1039,36 @@ const refuseNameOnListUnmade = async (env: Env, name: string) => {
   }
 };
 
+/** What signing in with a code sends: the address it is for. */
+const codeSignInSchema = z.looseObject({ email: z.string() });
+
+/**
+ * Refuses a sign-in with a code (`guestSignInPath`) before the plugin
+ * reads or spends anything: while the gate keeps the company's own people
+ * out, for everyone alike; then for any address that isn't a guest's now,
+ * exactly as a wrong code is refused, so it says nothing of who is one.
+ * Members never sign in with a code, and the plugin never strips an
+ * unverified member's accounts (it does so for an address it signs in
+ * that isn't verified yet).
+ */
+const refuseUnlessGuest = async (
+  env: Env,
+  config: SignInConfig,
+  body: unknown,
+  codes: ReturnType<typeof emailOTP>
+): Promise<void> => {
+  if (!(await mayComeIn(env, config))) {
+    throw new APIError("FORBIDDEN", {
+      code: "not_open_yet",
+      message: "Grasp isn't open yet.",
+    });
+  }
+  const asked = codeSignInSchema.safeParse(body);
+  if (!(asked.success && (await guestAddress(env, asked.data.email)))) {
+    throw APIError.from("BAD_REQUEST", codes.$ERROR_CODES.INVALID_OTP);
+  }
+};
+
 const createAuth = (
   env: Env,
   config: SignInConfig,
@@ -1025,6 +1076,18 @@ const createAuth = (
   ssoOf: typeof sso
 ) => {
   const db = drizzle(env.DB);
+  // Guests' one way in (guest-codes.ts): never a member's, never a user
+  // made. Codes are kept hashed, and mailed by core alone.
+  const codes = emailOTP({
+    otpLength: guestCodeDigits,
+    expiresIn: guestCodeLifetimeS,
+    allowedAttempts: guestCodeTries,
+    storeOTP: "hashed",
+    disableSignUp: true,
+    sendVerificationOTP: async (data) => {
+      await mailGuestCode(env, data);
+    },
+  });
   return betterAuth({
     appName: "Grasp",
     // The deployment's own address from its config, never the request's:
@@ -1055,6 +1118,7 @@ const createAuth = (
       additionalFields: {
         staff: { type: "boolean", defaultValue: false, input: false },
         interview: { type: "boolean", defaultValue: false, input: false },
+        guest: { type: "boolean", defaultValue: false, input: false },
       },
     },
     // Never link an IdP account to an existing user by email.
@@ -1159,7 +1223,8 @@ const createAuth = (
               env,
               config,
               session,
-              context?.params?.providerId
+              context?.params?.providerId,
+              context?.path
             ),
           after: async (session) => {
             if (session.staff === true) {
@@ -1182,6 +1247,14 @@ const createAuth = (
               await drizzle(env.DB)
                 .delete(sessions)
                 .where(eq(sessions.id, session.id));
+              return;
+            }
+            if (session.guest === true) {
+              await record(env, {
+                actor: actorOf({ userId: session.userId, staff: false }),
+                action: "member.guest_signed_in",
+                target: { type: "session", id: session.id },
+              });
             }
           },
         },
@@ -1189,6 +1262,10 @@ const createAuth = (
     },
     hooks: {
       before: createAuthMiddleware(async (context) => {
+        if (context.path === guestSignInPath) {
+          await refuseUnlessGuest(env, config, context.body, codes);
+          return;
+        }
         if (!context.path.startsWith("/organization/")) {
           return;
         }
@@ -1228,6 +1305,7 @@ const createAuth = (
       }),
     },
     plugins: [
+      codes,
       organization({
         roles,
         creatorRole: "admin",

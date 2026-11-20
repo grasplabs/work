@@ -439,7 +439,7 @@ const route = async (
     return frameCode;
   }
   if (isUnder(pathname, authBasePath)) {
-    return await handleAuthRequest(request, env, requestId);
+    return await handleAuthRequest(request, env, requestId, ctx);
   }
   const connection = await connectionRouteResponse(
     request,

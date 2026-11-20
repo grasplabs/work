@@ -49,11 +49,16 @@ import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { httpConnectionSchema } from "@grasp-os/shared/http-connections";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
+import {
+  guestRole,
+  isAdmin,
+  requireAdmin,
+  roleErrors,
+} from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { waitUntil } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -684,14 +689,17 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
             .where(inList(users.id, ids));
     const names = new Map(people.map(({ id, name }) => [id, name]));
     // A removed member keeps their user row and name: only a membership
-    // says they are still here.
+    // says they are still here. A guest's is no member's (roles.ts
+    // `guestRole`); someone suspended is still one.
     const current =
       ids.length === 0
         ? []
         : await drizzle(this.#env.DB)
             .select({ userId: members.userId })
             .from(members)
-            .where(inList(members.userId, ids));
+            .where(
+              and(inList(members.userId, ids), ne(members.role, guestRole))
+            );
     const memberIds = new Set(current.map(({ userId }) => userId));
     // A personal connection's owner by name, as admins see members.
     return listed.map((each) => ({
