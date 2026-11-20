@@ -337,12 +337,12 @@ test("a builder sees every declared branch of the checked definition, and a test
     page.getByText("Version 2 waits for approval to run for the team")
   ).toBeVisible(pageRead);
 
-  // An admin finds it among what needs them, and lets it go live over
-  // its page: it is live, and nothing waits any more.
+  // An admin finds it among the workflows, under what needs them, and
+  // lets it go live over its page: it is live, and nothing waits any more.
   const decides = await pageOf(admin);
-  await decides.goto("/workflows?tab=needs");
+  await decides.goto("/workflows");
   await decides
-    .getByRole("region", { name: "Waiting for you to let them go live" })
+    .getByRole("table", { name: "Workflows" })
     .getByRole("link", { name })
     .click();
   await decides

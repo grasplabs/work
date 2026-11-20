@@ -29,10 +29,11 @@ import { Cross, Icon, Tick } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { useWords } from "../words/words";
+import { useWords, withGiven } from "../words/words";
 import { LookStepper } from "./looks";
 import { canPress, shownState } from "./reach";
 import { stepperWords } from "./words";
+import type { StepperWords } from "./words";
 
 /** Where a step is: done, the one you are on, still to come, or failed. */
 export type StepperState = "done" | "current" | "coming" | "failed";
@@ -141,6 +142,12 @@ export interface StepperProps {
    * @default "All steps done"
    */
   finishedLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ finished: "Every step is set" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<StepperWords>;
 }
 
 /** How a stepper is drawn: see `look`. */
@@ -435,11 +442,14 @@ const ClassicStepper = ({
   onSelect,
   reached,
   finishedLabel: finishedGiven,
+  words,
 }: StepperProps) => {
-  // Its words: the product's, by its catalogue, else English; the caller's props still win.
-  const words = useWords("stepper", stepperWords);
-  const finishedLabel = finishedGiven ?? words.finished;
-  const said = { ...words.states, ...stateLabels };
+  // Its words: the instance's, else the product's by its catalogue, else English; the caller's props still win.
+  const { finished: finishedLabel, states } = withGiven(
+    useWords("stepper", stepperWords, words),
+    { finished: finishedGiven }
+  );
+  const said = { ...states, ...stateLabels };
   const across = orientation === "horizontal";
   const finished = across && current >= steps.length;
   return (

@@ -42,11 +42,14 @@ const withoutDescription = (props: Record<string, unknown>) =>
     Object.entries(props).filter(([key]) => key !== "aria-describedby")
   );
 
+/** `always`: the chip never says its words whole (the level alone), so the tooltip opens at any width. */
 export const ChipTip = ({
   label,
+  always = false,
   render,
 }: {
   label: string;
+  always?: boolean;
   render: (props: Record<string, unknown>) => ReactElement;
 }) => {
   const node = useRef<HTMLElement | null>(null);
@@ -57,7 +60,7 @@ export const ChipTip = ({
     if (
       open &&
       (node.current?.getAttribute("aria-expanded") === "true" ||
-        !isShort(node.current))
+        (!always && !isShort(node.current)))
     ) {
       details.cancel();
     }

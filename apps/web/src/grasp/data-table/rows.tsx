@@ -4,8 +4,10 @@
 
 import * as stylex from "@stylexjs/stylex";
 import type { RowData } from "@tanstack/react-table";
+import { isValidElement } from "react";
 import type { ReactNode } from "react";
 
+import { Badge } from "../badge";
 import { Button } from "../button";
 import {
   DropdownMenu,
@@ -13,16 +15,22 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "../dropdown-menu";
+import { visuallyHidden } from "../hidden/hidden";
 import { ChevronDown, ChevronRight, More } from "../icons";
 import { Skeleton } from "../skeleton";
-import { TableCell, TableRow } from "../table";
+import { TableCell, TableRow, tableAboveStatus } from "../table";
 import { ChooseRow } from "./choose";
+import { DataTablePersonWaiting } from "./person";
 import { styles } from "./styles";
 import type { DataTableRowAction } from "./types";
 import type { Model, TableRowOf } from "./use-data-table";
 import type { DataTableWords } from "./words";
 
 const detailId = (key: string) => `${key}-detail`;
+
+/** A placeholder stands on its column's side: a number's at the cell's end, as its value will. */
+const waitingAlign = (align: "start" | "end" | undefined) =>
+  align === "end" ? styles.waitingEnd : null;
 
 interface ToggleProps<Row extends RowData> {
   row: TableRowOf<Row>;
@@ -62,21 +70,24 @@ interface GroupRowProps<Row extends RowData> {
   row: TableRowOf<Row>;
   groupBy: string;
   words: DataTableWords;
+  /** The group asks for attention: its count takes the tone, and it is said. */
+  tone?: "attention";
 }
 
-/** A group's heading: its toggle, the value its rows share, and how many they are. */
+/** A group's heading: its toggle, the value its rows share as a heading, and how many they are. */
 export const GroupRow = <Row extends RowData>({
   model,
   row,
   groupBy,
   words,
+  tone,
 }: GroupRowProps<Row>) => {
   const value = String(row.getGroupingValue(groupBy));
   const header = model.metaOf(groupBy)?.header ?? groupBy;
   return (
     <TableRow>
-      <TableCell colSpan={model.span} lead>
-        <span {...stylex.props(styles.group)}>
+      <TableCell colSpan={model.span} lead sticky>
+        <span data-slot="data-table-group" {...stylex.props(styles.group)}>
           <Toggle
             row={row}
             open={model.isOpen(row.id)}
@@ -84,9 +95,16 @@ export const GroupRow = <Row extends RowData>({
             words={words}
           />
           <span>{value}</span>
-          <span {...stylex.props(styles.groupCount)}>
-            {row.getLeafRows().length}
-          </span>
+          <Badge tone={tone ?? "neutral"} size="sm">
+            <span {...stylex.props(styles.groupCount)}>
+              {row.getLeafRows().length}
+            </span>
+          </Badge>
+          {tone === "attention" && (
+            <span
+              {...stylex.props(visuallyHidden)}
+            >{`, ${words.groupAttention}`}</span>
+          )}
         </span>
       </TableCell>
     </TableRow>
@@ -123,6 +141,49 @@ const RowActions = ({ actions, label }: RowActionsProps) => (
   </DropdownMenu>
 );
 
+/** How a row opens, from the table's `rowHref`, `onRowOpen` and `rowCurrent`. */
+export interface RowOpening<Row extends RowData> {
+  href?: (row: Row) => string;
+  onOpen?: (row: Row) => void;
+  current?: (row: Row) => boolean;
+}
+
+/** The lead cell's words as the row's target: a link, or a button, drawn as the cell's plain text. */
+const RowTarget = <Row extends RowData>({
+  opening,
+  row,
+  children,
+}: {
+  opening: RowOpening<Row>;
+  row: Row;
+  children: ReactNode;
+}) => {
+  if (opening.href !== undefined) {
+    return (
+      <a
+        href={opening.href(row)}
+        data-row-target=""
+        {...stylex.props(styles.rowTarget)}
+      >
+        {children}
+      </a>
+    );
+  }
+  const { onOpen } = opening;
+  return (
+    <button
+      type="button"
+      data-row-target=""
+      onClick={() => {
+        onOpen?.(row);
+      }}
+      {...stylex.props(styles.rowTarget)}
+    >
+      {children}
+    </button>
+  );
+};
+
 interface DataRowProps<Row extends RowData> {
   model: Model<Row>;
   row: TableRowOf<Row>;
@@ -132,7 +193,25 @@ interface DataRowProps<Row extends RowData> {
   detail?: (row: Row) => ReactNode;
   /** Kept only for the column widths it gives, while a search or a filter matches no row. */
   kept?: boolean;
+  /** The row's state (`rowStatus`): drawn over the row, said after its first words. */
+  status?: "pending" | "removed";
+  /** How the row opens, when it does. */
+  opening?: RowOpening<Row>;
 }
+
+/** A row's state, said after its first words, for a screen reader: the look alone is not enough. */
+const StatusWords = ({
+  status,
+  words,
+}: {
+  status: "pending" | "removed" | undefined;
+  words: DataTableWords;
+}) =>
+  status === undefined ? null : (
+    <span
+      {...stylex.props(visuallyHidden)}
+    >{`, ${status === "pending" ? words.rowPending : words.rowRemoved}`}</span>
+  );
 
 /** The lead cell's words, after a toggle when the row opens, stepped in when it is deeper. */
 const Lead = <Row extends RowData>({
@@ -141,7 +220,7 @@ const Lead = <Row extends RowData>({
   words,
   content,
   detail,
-}: Omit<DataRowProps<Row>, "selectable" | "rowActions"> & {
+}: Omit<DataRowProps<Row>, "selectable" | "rowActions" | "opening"> & {
   content: ReactNode;
 }) => {
   const opens =
@@ -173,85 +252,128 @@ export const DataRow = <Row extends RowData>({
   rowActions,
   detail,
   kept = false,
-}: DataRowProps<Row>) => (
-  <>
-    <TableRow chosen={model.isChosen(row.id)} open={!kept}>
-      {selectable && (
-        <TableCell pin={model.choosePin}>
-          <ChooseRow
-            row={row}
-            checked={model.isChosen(row.id)}
-            label={words.choose(model.name(row))}
-          />
-        </TableCell>
-      )}
-      {model.shown.map((column) => {
-        const meta = model.metaOf(column.id);
-        if (meta === undefined) {
-          return null;
-        }
-        const content =
-          meta.cell === undefined
-            ? meta.value(row.original)
-            : meta.cell(row.original);
-        const lead = column.id === model.flags.lead;
-        // The lead cell steps in for a deeper row, and holds a toggle in a table whose rows open.
-        const opener =
-          lead &&
-          ((model.flags.expanding && !model.flags.grouping) || row.depth > 0);
-        // A control in the cell stands in a box one line tall, as the row's menu does: the row keeps its height.
-        const shown =
-          meta.control === true ? (
+  status,
+  opening,
+}: DataRowProps<Row>) => {
+  const opens =
+    opening !== undefined &&
+    (opening.href !== undefined || opening.onOpen !== undefined);
+  return (
+    <>
+      <TableRow
+        chosen={model.isChosen(row.id)}
+        open={!kept}
+        status={status}
+        opens={opens}
+        current={opening?.current?.(row.original) === true}
+      >
+        {selectable && (
+          <TableCell pin={model.choosePin}>
+            {opens ? (
+              <span {...stylex.props(styles.aboveTarget)}>
+                <ChooseRow
+                  row={row}
+                  checked={model.isChosen(row.id)}
+                  label={words.choose(model.name(row))}
+                />
+              </span>
+            ) : (
+              <ChooseRow
+                row={row}
+                checked={model.isChosen(row.id)}
+                label={words.choose(model.name(row))}
+              />
+            )}
+          </TableCell>
+        )}
+        {model.shown.map((column) => {
+          const meta = model.metaOf(column.id);
+          if (meta === undefined) {
+            return null;
+          }
+          const value =
+            meta.cell === undefined
+              ? meta.value(row.original)
+              : meta.cell(row.original);
+          const lead = column.id === model.flags.lead;
+          // In a row that opens, the lead cell's words are its target.
+          const content =
+            opens && lead ? (
+              <RowTarget opening={opening} row={row.original}>
+                {value}
+              </RowTarget>
+            ) : (
+              value
+            );
+          // The lead cell steps in for a deeper row, and holds a toggle in a table whose rows open.
+          // A group's rows stand on the columns' own lines: the group's toggle is in its heading.
+          const opener =
+            lead &&
+            !model.flags.grouping &&
+            (model.flags.expanding || row.depth > 0);
+          // A control in the cell stands in a box one line tall, as the row's menu does: the row keeps its
+          // height. So does a Badge: on the text's line it sat off the baseline and grew the row by half a
+          // pixel, against a row of words and against the table's own placeholders.
+          const inLine =
+            meta.control === true ||
+            (isValidElement(value) && value.type === Badge);
+          const shown = inLine ? (
             <span {...stylex.props(styles.cellControl)}>{content}</span>
           ) : (
             content
           );
-        return (
-          <TableCell
-            key={column.id}
-            lead={lead}
-            align={meta.align}
-            wrap={meta.wrap === true}
-            pin={model.pinOf(column.id)}
-            clip={model.sized}
-            title={String(meta.value(row.original))}
-          >
-            {opener ? (
-              <Lead
-                model={model}
-                row={row}
-                words={words}
-                content={content}
-                detail={detail}
+          return (
+            <TableCell
+              key={column.id}
+              lead={lead}
+              align={meta.align}
+              wrap={meta.wrap === true}
+              pin={model.pinOf(column.id)}
+              clip={model.sized}
+              title={String(meta.value(row.original))}
+              hideBelow={model.hideOf(column.id)}
+            >
+              {opener ? (
+                <Lead
+                  model={model}
+                  row={row}
+                  words={words}
+                  content={content}
+                  detail={detail}
+                />
+              ) : (
+                shown
+              )}
+              {lead && <StatusWords status={status} words={words} />}
+            </TableCell>
+          );
+        })}
+        {rowActions !== undefined && (
+          <TableCell align="end">
+            {/* Above a row's state: its actions stay fully seen and usable. */}
+            <span {...stylex.props(styles.cellControl, tableAboveStatus)}>
+              <RowActions
+                actions={rowActions(row.original)}
+                label={words.actionsFor(model.name(row))}
               />
-            ) : (
-              shown
-            )}
+            </span>
           </TableCell>
-        );
-      })}
-      {rowActions !== undefined && (
-        <TableCell align="end">
-          <span {...stylex.props(styles.cellControl)}>
-            <RowActions
-              actions={rowActions(row.original)}
-              label={words.actionsFor(model.name(row))}
-            />
-          </span>
-        </TableCell>
-      )}
-    </TableRow>
-    {detail !== undefined && model.flags.expanding && model.isOpen(row.id) && (
-      <TableRow>
-        <TableCell colSpan={model.span}>
-          <div id={detailId(row.id)} {...stylex.props(styles.detail)}>
-            {detail(row.original)}
-          </div>
-        </TableCell>
+        )}
       </TableRow>
-    )}
-  </>
-);
+      {detail !== undefined &&
+        model.flags.expanding &&
+        model.isOpen(row.id) && (
+          <TableRow>
+            <TableCell colSpan={model.span}>
+              <div id={detailId(row.id)} {...stylex.props(styles.detail)}>
+                {detail(row.original)}
+              </div>
+            </TableCell>
+          </TableRow>
+        )}
+    </>
+  );
+};
 
 interface PlaceholdersProps<Row extends RowData> {
   model: Model<Row>;
@@ -279,12 +401,20 @@ export const Placeholders = <Row extends RowData>({
           key={column.id}
           pin={model.pinOf(column.id)}
           align={model.metaOf(column.id)?.align}
+          hideBelow={model.hideOf(column.id)}
         >
-          <span
-            {...stylex.props(at === 0 ? styles.waitingLead : styles.waiting)}
-          >
-            <Skeleton />
-          </span>
+          {model.metaOf(column.id)?.placeholder === "person" ? (
+            <DataTablePersonWaiting />
+          ) : (
+            <span
+              {...stylex.props(
+                at === 0 ? styles.waitingLead : styles.waiting,
+                waitingAlign(model.metaOf(column.id)?.align)
+              )}
+            >
+              <Skeleton />
+            </span>
+          )}
         </TableCell>
       ))}
       {hasActions && <TableCell />}

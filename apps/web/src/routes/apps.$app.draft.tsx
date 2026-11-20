@@ -1,4 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { useAppDraft } from "../apps/use-app-draft.ts";
@@ -13,6 +14,11 @@ import { PreviewFrame } from "../pages/page-frame.tsx";
 // each write of the draft as the workspace's does. Core opens a preview
 // to the App's builders alone.
 
+const page = stylex.create({
+  // The frame fills the window: the App's page scrolls inside it.
+  main: { display: "flex", flexDirection: "column", height: "100svh" },
+});
+
 const DraftPage = () => {
   const { app } = Route.useParams();
   const { t } = useLingui();
@@ -21,10 +27,7 @@ const DraftPage = () => {
   // Each write of the draft comes into the frame, as in the workspace.
   const { draft: read } = useAppDraft(app, 0);
   return (
-    <main
-      aria-label={t`Your version of the App`}
-      className="flex h-svh flex-col"
-    >
+    <main aria-label={t`Your version of the App`} {...stylex.props(page.main)}>
       <PreviewFrame
         bare={false}
         app={app}

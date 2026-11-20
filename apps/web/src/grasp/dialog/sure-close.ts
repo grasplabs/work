@@ -5,6 +5,8 @@
 // cancelled, which lets the close complete.
 "use client";
 
+import { originFromTrigger } from "../motion/origin";
+
 const MARGIN = 250;
 
 /** Milliseconds from a computed list of times ("0.2s, 150ms"); one that cannot be read is 0. */
@@ -71,3 +73,35 @@ const watchClose = (element: HTMLElement) => {
  * for every panel, so React attaches it once per element. */
 export const sureClose = (element: HTMLElement | null) =>
   element === null ? undefined : watchClose(element);
+
+/**
+ * A dialog panel's watches: it closes for sure once its leave has run, and grows from its trigger,
+ * with no rise then (a rise would fight the origin). With no trigger it grows from its own centre
+ * and keeps the rise.
+ */
+export const watchPanel = (element: HTMLElement | null) => {
+  const stopClose = sureClose(element);
+  const stopOrigin = originFromTrigger(element);
+  if (element?.dataset.fromTrigger !== undefined) {
+    element.style.setProperty("--dialog-shift", "0px");
+  }
+  return () => {
+    stopClose?.();
+    stopOrigin();
+  };
+};
+
+/**
+ * The command palette's watches: as a dialog's; opened by a press it also grows from that trigger
+ * at the dialog's start scale. Opened from the keyboard (no trigger) it stays a fade alone.
+ */
+export const watchPalette = (element: HTMLElement | null) => {
+  const stop = watchPanel(element);
+  if (element?.dataset.fromTrigger !== undefined) {
+    element.style.setProperty(
+      "--palette-grow",
+      "scale(var(--grasp-dialog-from-scale))"
+    );
+  }
+  return stop;
+};

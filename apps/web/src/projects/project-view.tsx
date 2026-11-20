@@ -36,7 +36,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { IconTile } from "../grasp/icon-tile/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import {
@@ -209,7 +209,13 @@ const Items = ({
   const builds = project.role === "builder";
   const items = pages.all.filter(({ type }) => type === kind);
   if (items.length === 0 && !pages.more) {
-    return <Empty size="inline">{t`Nothing in it that you can open.`}</Empty>;
+    return (
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`Nothing in it that you can open.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
   return (
     <>

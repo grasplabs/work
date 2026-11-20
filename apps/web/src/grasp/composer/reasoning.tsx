@@ -26,6 +26,7 @@ import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
 import { stopEscape } from "./escape";
 import { useComposerWords } from "./words";
+import type { ComposerWords } from "./words";
 
 /** One level. */
 export interface ComposerReasoningOption {
@@ -170,6 +171,12 @@ export interface ComposerReasoningProps {
    * @default false
    */
   topLight?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords) `composer.reasoning` group, key by key
+   * (`{ label: "Thinking" }`). Any left out are the catalogue's, else English. A flat text prop given beside it
+   * (`aria-label`) still wins until the release's step 5.
+   */
+  words?: Partial<ComposerWords["reasoning"]>;
 }
 
 /**
@@ -198,7 +205,10 @@ export const LevelWords = ({
   </span>
 );
 
-/** How hard the agent thinks: a word in the footer and a small menu of levels. */
+/**
+ * How hard the agent thinks: a word in the footer and a small menu of levels. `ComposerModelEffort`
+ * holds the same levels as its menu's Thinking row.
+ */
 export const ComposerReasoning = ({
   levels,
   value,
@@ -206,10 +216,11 @@ export const ComposerReasoning = ({
   label: labelDeprecated,
   "aria-label": labelGiven,
   topLight = false,
+  words: own,
 }: ComposerReasoningProps) => {
   const disabled = useComposerDisabled();
   // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
-  const words = useComposerWords("reasoning");
+  const words = useComposerWords("reasoning", own);
   const label = labelGiven ?? labelDeprecated ?? words.label;
   const current = levels.find((level) => level.value === value);
   const lit = topLight && current?.top === true;

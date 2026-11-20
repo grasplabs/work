@@ -21,11 +21,14 @@ const plain = (text: string): string =>
   text.toLowerCase().replaceAll(/[^a-z]/gu, "");
 
 /** The library's brand for an app, by its catalog id or its name; none for the rest. */
-const brandOf = (id: string, name: string): Brand | undefined =>
+export const brandOf = (id: string, name: string): Brand | undefined =>
   brandKeys.find((key) => plain(key) === plain(id)) ??
   // A catalog name that is a brand's own, such as "Microsoft 365" or
   // "Google Workspace": the brand whose name starts it.
-  brandKeys.find((key) => plain(name).startsWith(plain(brands[key].name)));
+  brandKeys.find((key) => plain(name).startsWith(plain(brands[key].name))) ??
+  // One of Grasp's own connectors to a provider's other product, such as
+  // `microsoft-directory`: the provider's brand.
+  brandKeys.find((key) => plain(key) === plain(id.split("-")[0] ?? ""));
 
 const sizes = { sm: "2rem", md: "2.5rem" } as const;
 

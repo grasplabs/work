@@ -25,6 +25,7 @@ import { contextMenuLook } from "./look";
 import { MenuEntriesView, actionsOf, withFailureWords } from "./menu-items";
 import type { MenuEntries } from "./menu-items";
 import { contextMenuWords } from "./words";
+import type { ContextMenuWords } from "./words";
 
 type FinalFocus = ComponentProps<typeof MenuContent>["finalFocus"];
 
@@ -56,6 +57,12 @@ export interface ContextMenuProps {
   tabStop?: boolean;
   /** @deprecated Use `ContextMenuContent.finalFocus`. */
   finalFocus?: FinalFocus;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ failed: "Could not do it" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<ContextMenuWords>;
 }
 
 /** Every prop a ContextMenuTrigger takes. */
@@ -177,9 +184,10 @@ const ContextMenuOfItems = ({
   failedLabel: failedGiven,
   tabStop = true,
   finalFocus,
+  words,
 }: ContextMenuProps & { items: MenuEntries }) => {
   const { failed: failedLabel } = withGiven(
-    useWords("contextMenu", contextMenuWords),
+    useWords("contextMenu", contextMenuWords, words),
     { failed: failedGiven }
   );
   // A failure is said aloud by a status line beside the menu, as well as shown on the action.

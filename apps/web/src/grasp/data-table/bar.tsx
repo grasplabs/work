@@ -84,7 +84,14 @@ const Chosen = <Row extends RowData>({
   onAsk,
 }: Omit<BarProps<Row>, "fields" | "onExport">) => {
   const count = (
-    <span aria-live="polite" {...stylex.props(styles.count)}>
+    // While the rows load there is nothing to count: the line keeps its room, unseen and unsaid.
+    <span
+      aria-live="polite"
+      {...stylex.props(
+        styles.count,
+        props.loading === true && styles.countWaiting
+      )}
+    >
       {words.chosen(model.own.chosen.length, model.total ?? props.rows.length)}
     </span>
   );

@@ -151,6 +151,7 @@ const AuditTrail = () => {
       <ChainBroken ended={endedOf(own, last)} />
       <div ref={box} {...stylex.props(styles.split, beside && styles.open)}>
         <SectionCard
+          variant="grouped"
           actions={
             <IntegrityDialog last={last} onChecked={setOwn} own={own}>
               <RetentionRows />

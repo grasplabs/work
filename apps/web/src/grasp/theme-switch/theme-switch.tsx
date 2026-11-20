@@ -29,7 +29,7 @@ import { ThemeSwitchPicker } from "./picker";
 import { ThemeSwitchSegmented } from "./segmented";
 import { switchStyles as styles } from "./styles";
 import { defaultThemeWords, themeSwitchWords } from "./words";
-import type { ModeWords, ThemeWords } from "./words";
+import type { ModeWords, ThemeSwitchCatalogueWords, ThemeWords } from "./words";
 
 /** What a caller may style: where the switch sits. Never its look. */
 export type ThemeSwitchLayoutStyle = LayoutStyle;
@@ -82,6 +82,12 @@ export interface ThemeSwitchProps {
   style?: ThemeSwitchLayoutStyle;
   /** Layout only: where it sits. */
   layout?: ThemeSwitchLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ themes: "Colours" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<ThemeSwitchCatalogueWords>;
 }
 
 export const ThemeSwitch = ({
@@ -95,16 +101,18 @@ export const ThemeSwitch = ({
   modeWords,
   themeWords,
   iconLabel,
+  words: given,
   style: styleProp,
   layout,
 }: ThemeSwitchProps) => {
   const controls = useTheme();
   // Its words: the product's, by its catalogue, else English; the caller's props still win.
-  const words = useWords("themeSwitch", themeSwitchWords);
-  const { label, themes: themesLabel } = withGiven(words, {
+  const words = withGiven(useWords("themeSwitch", themeSwitchWords, given), {
     label: labelGiven,
     themes: themesGiven,
+    icon: iconLabel,
   });
+  const { label, themes: themesLabel } = words;
   const wordsOfMode = (mode: ThemeMode): ModeWords =>
     modeWords?.[mode] ?? words[mode];
   const wordsOfTheme = (theme: ThemeId): ThemeWords =>
@@ -132,11 +140,7 @@ export const ThemeSwitch = ({
   });
 
   const name = (current: ThemeMode, next: ThemeMode): string =>
-    (iconLabel ?? words.icon)(
-      label,
-      wordsOfMode(current).name,
-      wordsOfMode(next).name
-    );
+    words.icon(label, wordsOfMode(current).name, wordsOfMode(next).name);
   const chooseMode = (mode: ThemeMode, origin?: { x: number; y: number }) => {
     controls.chooseMode(mode, origin);
   };

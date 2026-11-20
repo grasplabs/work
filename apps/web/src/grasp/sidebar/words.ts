@@ -24,6 +24,8 @@ export const sidebarWords = {
   renamed: (name: string) => `Renamed to ${name}`,
   /** Said after a row's name while the agent works there. */
   working: "Working",
+  /** Said once while the rows are not there yet (`loading`). */
+  loading: "Loading",
 };
 
 export type SidebarWords = typeof sidebarWords;

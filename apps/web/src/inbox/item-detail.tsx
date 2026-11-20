@@ -7,15 +7,15 @@ import type { ReactNode } from "react";
 
 import { grantReviewed, reviewedVersion } from "../activity/pending.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { draftOf } from "../chat/held-drafts.ts";
 import {
   confirmHeld,
   declineHeld,
   HeldWriteDetails,
+  HeldWriteDraft,
   useShown,
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
-import { isUnresolvable, OutcomeDetails } from "../dashboard/outcome-card.tsx";
-import { RequestDetails } from "../dashboard/pile-cards.tsx";
 import { formatDate, formatDateTime } from "../format.ts";
 import {
   AlertDialog,
@@ -27,14 +27,20 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { ApprovalRequest } from "../grasp/approval-request/index.ts";
+import {
+  ApprovalRequest,
+  ApprovalRequestApprove,
+} from "../grasp/approval-request/index.ts";
 import type { ApprovalWords } from "../grasp/approval-request/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
-import { ArrowLeft, External } from "../grasp/icons/index.ts";
+import { External } from "../grasp/icons/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
-import { QuestionTool } from "../grasp/question-tool/index.ts";
+import {
+  QuestionTool,
+  QuestionToolSubmit,
+} from "../grasp/question-tool/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -44,6 +50,8 @@ import { PendingBindingList } from "../workflows/binding-approvals.tsx";
 import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import { InterviewsDetail } from "./interviews-item.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
+import { isUnresolvable, OutcomeDetails } from "./outcome-details.tsx";
+import { RequestDetails } from "./request-details.tsx";
 import { TargetLink } from "./target-link.tsx";
 
 // An item of the inbox, on Grasp UI: what it is and what happened, what
@@ -54,20 +62,12 @@ import { TargetLink } from "./target-link.tsx";
 // brain asked the person is answered here, in their own words, on the
 // Question tool (`brain.answerGap`); core then lists it no more.
 
-/** The inbox's own width at which the list and the item stand side by side, as inbox-page.tsx has it. */
-const WIDE = "@container inbox (width >= 52rem)";
-
 const styles = stylex.create({
   item: {
     display: "flex",
     flexDirection: "column",
     gap: grasp.space2,
     minWidth: 0,
-  },
-  // Only where the item takes the list's place: beside it, the list is the way back.
-  back: {
-    alignSelf: "flex-start",
-    display: { default: null, [WIDE]: "none" },
   },
   marks: {
     display: "flex",
@@ -199,7 +199,7 @@ const ItemFrame = ({
   failure: string | undefined;
 }) => {
   const { t, i18n } = useLingui();
-  const { item, onBack } = frame;
+  const { item } = frame;
   // Who it is for, when it is someone in particular: an admin's by default.
   const facts = item.facts.map(({ label, value }) => ({ key: label, value }));
   if (item.forWhom !== undefined && "role" in item.forWhom) {
@@ -215,17 +215,6 @@ const ItemFrame = ({
       : acts;
   return (
     <div {...stylex.props(styles.item)}>
-      {onBack === undefined ? null : (
-        <Button
-          icon={ArrowLeft}
-          layout={styles.back}
-          onClick={onBack}
-          size="sm"
-          variant="ghost"
-        >
-          {t`All items`}
-        </Button>
-      )}
       <SectionCard
         aside={
           <span {...stylex.props(styles.marks)}>
@@ -265,7 +254,7 @@ const ItemFrame = ({
             </div>
           )}
           {failure === undefined ? null : (
-            <Alert variant="danger">{failure}</Alert>
+            <Alert tone="danger">{failure}</Alert>
           )}
           {/* What `extra` shows says these already, in its own words. */}
           {extra === undefined && facts.length > 0 ? (
@@ -280,8 +269,6 @@ const ItemFrame = ({
 /** What the inbox gives an item: the way back to the list, and where to say what was done. */
 interface Frame {
   item: InboxItem;
-  /** Back to the list, where the item takes the list's place (a narrow page). */
-  onBack?: () => void;
   /** Says what was done, for a screen reader: the list only loses the item. */
   onSaid: (said: string) => void;
 }
@@ -314,7 +301,9 @@ const useDecide = (onSaid: (said: string) => void) => {
 const useApprovalWords = (): Partial<ApprovalWords> => {
   const { t } = useLingui();
   return {
-    theAgent: t`Someone`,
+    // Who asks when an item names nobody: a held write or start, which a
+    // chat's agent or an App run in Grasp asked for.
+    theAgent: "Grasp",
     details: t`Details`,
     askForChanges: t`Ask for changes`,
     whatShouldChange: t`What should change`,
@@ -362,7 +351,6 @@ const useApprovalWords = (): Partial<ApprovalWords> => {
  */
 const ApprovalFrame = ({
   frame,
-  who,
   summary,
   details,
   approveLabel,
@@ -372,8 +360,6 @@ const ApprovalFrame = ({
   onDecline,
 }: {
   frame: Frame;
-  /** Who asks: the App, agent or person. */
-  who?: string;
   /** The one fact that decides it, in the card's quiet line. */
   summary?: string;
   /** What to read before answering, under Details. */
@@ -389,7 +375,7 @@ const ApprovalFrame = ({
   const router = useRouter();
   const core = useCore();
   const words = useApprovalWords();
-  const { item, onBack } = frame;
+  const { item } = frame;
   const answer =
     (change: (session: Session) => Promise<unknown>, said: string) =>
     async () => {
@@ -400,21 +386,9 @@ const ApprovalFrame = ({
   const { title } = item;
   return (
     <div {...stylex.props(styles.item)}>
-      {onBack === undefined ? null : (
-        <Button
-          icon={ArrowLeft}
-          layout={styles.back}
-          onClick={onBack}
-          size="sm"
-          variant="ghost"
-        >
-          {t`All items`}
-        </Button>
-      )}
       <ApprovalRequest
-        {...(who === undefined ? {} : { agent: who })}
+        {...(item.asker === undefined ? {} : { agent: item.asker })}
         {...(summary === undefined ? {} : { summary })}
-        {...(approveLabel === undefined ? {} : { approveLabel })}
         {...(approveHeld === undefined ? {} : { approveHeld })}
         askedAt={item.date === "" ? undefined : formatDate(item.date)}
         grave={grave}
@@ -422,8 +396,12 @@ const ApprovalFrame = ({
         onApprove={answer(onApprove, t`Approved: ${title}`)}
         onDecline={answer(onDecline, t`Declined: ${title}`)}
         title={title}
+        variant="ledger"
         words={words}
       >
+        {approveLabel === undefined ? null : (
+          <ApprovalRequestApprove>{approveLabel}</ApprovalRequestApprove>
+        )}
         {details}
       </ApprovalRequest>
     </div>
@@ -433,6 +411,8 @@ const ApprovalFrame = ({
 /**
  * A held write: confirming it is for what the person was shown, all of
  * it. Confirm waits, with why, until every part of what it sends was shown.
+ * One that makes a thing (an email, an event, a task) stands as its draft,
+ * as in the chat.
  */
 const HeldItem = ({
   frame,
@@ -442,8 +422,30 @@ const HeldItem = ({
   source: Extract<InboxSource, { type: "held" }>;
 }) => {
   const { t } = useLingui();
+  const router = useRouter();
   const { action } = source;
   const shown = useShown(action);
+  const draft = draftOf(action);
+  if (draft !== undefined) {
+    const { title } = frame.item;
+    return (
+      <div {...stylex.props(styles.item)}>
+        <HeldWriteDraft
+          action={action}
+          draft={draft}
+          onDecided={async (done, confirmed) => {
+            // A refusal stays on the draft, in core's words, with the item.
+            if (done) {
+              frame.onSaid(
+                confirmed ? t`Approved: ${title}` : t`Declined: ${title}`
+              );
+              await router.invalidate({ sync: true });
+            }
+          }}
+        />
+      </div>
+    );
+  }
   return (
     <ApprovalFrame
       approveHeld={
@@ -492,7 +494,6 @@ const HeldStartItem = ({
       onDecline={async (session) => {
         await session.heldStarts.decline(start.id);
       }}
-      summary={frame.item.context}
     />
   );
 };
@@ -524,7 +525,6 @@ const RequestItem = ({
       onDecline={async (session) =>
         await session.permissions.revoke(request.id)
       }
-      who={frame.item.context}
     />
   );
 };
@@ -557,7 +557,6 @@ const WorkflowGoLiveDetail = ({
       grave
       onApprove={decide("approve")}
       onDecline={decide("reject")}
-      summary={t`Version ${version}`}
     />
   );
 };
@@ -743,13 +742,14 @@ const AskedItem = ({
       extra={
         <QuestionTool
           embedded
-          failedLabel={t`Your answer wasn't saved. Try again.`}
+          words={{ failed: t`Your answer wasn't saved. Try again.` }}
           kind="text"
           label={t`Question`}
           onSubmit={answer}
           question={notification.question}
-          submitLabel={t`Answer`}
-        />
+        >
+          <QuestionToolSubmit>{t`Answer`}</QuestionToolSubmit>
+        </QuestionTool>
       }
       failure={undefined}
       frame={{
@@ -809,13 +809,14 @@ const GapItem = ({
       extra={
         <QuestionTool
           embedded
-          failedLabel={t`Your answer wasn't saved. Try again.`}
+          words={{ failed: t`Your answer wasn't saved. Try again.` }}
           kind="text"
           label={t`Question`}
           onSubmit={answer}
           question={question}
-          submitLabel={t`Answer`}
-        />
+        >
+          <QuestionToolSubmit>{t`Answer`}</QuestionToolSubmit>
+        </QuestionTool>
       }
       failure={failure}
       frame={{
@@ -847,33 +848,16 @@ const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   );
 };
 
-/** The interviews, with the way back to the list where they take its place. */
+/** The interviews. */
 const InterviewsFrame = ({
-  frame,
   source,
 }: {
-  frame: Frame;
   source: Extract<InboxSource, { type: "interviews" }>;
-}) => {
-  const { t } = useLingui();
-  const { onBack } = frame;
-  return (
-    <div {...stylex.props(styles.item)}>
-      {onBack === undefined ? null : (
-        <Button
-          icon={ArrowLeft}
-          layout={styles.back}
-          onClick={onBack}
-          size="sm"
-          variant="ghost"
-        >
-          {t`All items`}
-        </Button>
-      )}
-      <InterviewsDetail interviews={source.interviews} today={source.today} />
-    </div>
-  );
-};
+}) => (
+  <div {...stylex.props(styles.item)}>
+    <InterviewsDetail interviews={source.interviews} today={source.today} />
+  </div>
+);
 
 /**
  * Someone else's change whose answer was lost, for the organization's own
@@ -890,22 +874,10 @@ const EveryonesOutcomeItem = ({
   source: Extract<InboxSource, { type: "everyonesOutcome" }>;
 }) => {
   const { t } = useLingui();
-  const { onBack } = frame;
   const { listing, person } = source;
   const connection = listing.connectionName ?? listing.connectionId;
   return (
     <div {...stylex.props(styles.item)}>
-      {onBack === undefined ? null : (
-        <Button
-          icon={ArrowLeft}
-          layout={styles.back}
-          onClick={onBack}
-          size="sm"
-          variant="ghost"
-        >
-          {t`All items`}
-        </Button>
-      )}
       <SectionCard
         density="compact"
         description={t`Its answer was lost: nobody can tell whether it took effect.`}
@@ -945,7 +917,7 @@ const EveryonesOutcomeItem = ({
 export const ItemDetail = (frame: Frame) => {
   const { source } = frame.item;
   if (source.type === "interviews") {
-    return <InterviewsFrame frame={frame} source={source} />;
+    return <InterviewsFrame source={source} />;
   }
   if (source.type === "everyonesOutcome") {
     return <EveryonesOutcomeItem frame={frame} source={source} />;

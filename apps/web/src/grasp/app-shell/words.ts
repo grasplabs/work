@@ -16,6 +16,8 @@ export const appShellWords = {
   togglePanel: "Show or hide the panel",
   /** The bar's More button, once its `actionItems` fold into it for want of room. */
   more: "More actions",
+  /** The name of the page's own panel (`pagePanel`), and of its sheet on a narrow card. */
+  pagePanel: "Details",
 };
 
 export type AppShellWords = typeof appShellWords;
@@ -32,8 +34,10 @@ export const appShellPanelWords = {
   dock: "Dock beside the page",
   /** The link to the panel's own page. */
   page: "Open as a page",
-  /** The menu the head's own controls fold into when its name would fall too short. */
+  /** The head's "…" menu: the placement, the page's link, rename and the host's own items. */
   more: "More actions",
+  /** The head's last button, which closes the panel. */
+  close: "Close",
   /** The control that takes the panel full screen over the page. */
   expand: "Full screen",
   /** The same control while it is full screen: back to where it was. */

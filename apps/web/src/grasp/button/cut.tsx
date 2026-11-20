@@ -45,11 +45,13 @@ export const CutButton = (props: ButtonProps) => {
     >
       <TriggerPrimitive
         render={(trigger: Record<string, unknown>) => {
-          // The tooltip only repeats the name, so it is not tied to the button as a description.
+          // The tooltip only repeats the name, so it is not tied to the button as a description;
+          // data-tooltip-trigger says the cut words can still be read whole (as Breadcrumb's does).
           const { "aria-describedby": _repeated, ...own } = trigger;
           // One element takes the trigger's ref, the caller's and this one's; the caller's props win.
           const merged: Record<string, unknown> = mergeProps(
             own,
+            { "data-tooltip-trigger": "" },
             rest,
             { ref: callerRef },
             { ref: keep }

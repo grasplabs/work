@@ -7,6 +7,8 @@
 import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
 
+import type { SidebarWords } from "./words";
+
 /** What App shell asks of the Sidebar inside it. */
 export interface SidebarInShell {
   /** Its column beside the page, or the sheet a narrow shell opens it in. */
@@ -35,3 +37,15 @@ export const SidebarShellProvider = SidebarShellContext.Provider;
 
 /** The Sidebar's side: what the shell around it asks, or null outside a shell. */
 export const useSidebarInShell = () => useContext(SidebarShellContext);
+
+// The Sidebar's own `words` (an instance's, over the catalogue's), for the parts drawn inside it
+// (its rows, its section's head, its profile) to read: the caller's object, never built in render.
+const SidebarGivenWordsContext = createContext<
+  Partial<SidebarWords> | undefined
+>(undefined);
+
+/** The Sidebar's side: hands its `words` to what it draws. */
+export const SidebarGivenWords = SidebarGivenWordsContext.Provider;
+
+/** A part's side: the Sidebar's own `words` round it, or undefined. */
+export const useSidebarGivenWords = () => useContext(SidebarGivenWordsContext);

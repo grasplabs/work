@@ -13,6 +13,8 @@ export const questionToolWords = {
   back: "Back",
   /** The mark on the recommended choice. */
   recommended: "Recommended",
+  /** Under the card when the answer could not be sent, and given to an agent (`failedLabel`). */
+  failed: "Could not send the answer",
   /** Which question of how many ("2 of 3"). */
   step: (step: number, count: number) => `${step} of ${count}`,
 };

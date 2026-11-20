@@ -3,7 +3,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -94,6 +94,8 @@ export interface ChatComposerProps {
   onRemoveFile?: (id: string) => void;
   /** One row, the actions beside the text: a guest's chat. */
   compact?: boolean;
+  /** The box itself, for a holder that gives it the cursor. */
+  boxRef?: Ref<HTMLTextAreaElement> | undefined;
   /** Glass over a backdrop: Chat start's. */
   surface?: "card" | "glass";
   /** After send: a control not about this message, such as the idle bar's Open the chat. */
@@ -282,6 +284,7 @@ export const ChatComposer = ({
   mentions = noMentions,
   onMentions,
   compact = false,
+  boxRef,
   surface,
   footer,
   showWorking,
@@ -339,6 +342,7 @@ export const ChatComposer = ({
         />
       }
       aria-label={label ?? t`Your question`}
+      ref={boxRef}
       layout={styles.fill}
       // Why a file stayed out or why the last question didn't go: said,
       // never a reason to hold the next question back, as `validation` would.

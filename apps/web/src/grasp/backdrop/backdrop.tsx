@@ -7,7 +7,7 @@ import type { ReactNode, RefObject } from "react";
 import { grasp } from "../tokens/tokens.stylex";
 import { BackdropField } from "./field";
 import type { BackdropProgress } from "./field";
-import { byNewName, schemeOf } from "./look";
+import { byNewName, isScene, schemeOf } from "./look";
 import type { BackdropLook } from "./look";
 
 type Layout = string | number | null;
@@ -78,7 +78,8 @@ export interface BackdropProps {
   progress?: BackdropProgress;
   /**
    * The drawing fades out towards the box's foot and stops short of it, as the product's Chat page
-   * has it; a dither or sand stands on the page's own ground. Chat start turns it on.
+   * has it; a dither or sand stands on the page's own ground. A scene, which covers its box whole,
+   * is never faded: it stays the scene down to its foot. Chat start turns it on.
    * @default false
    */
   fadeFoot?: boolean;
@@ -123,6 +124,10 @@ export const Backdrop = ({
 }: BackdropProps) => {
   const look = byNewName(variant, lookDeprecated, "Backdrop: pass `variant`.");
   const scheme = schemeOf(look);
+  // The foot fades only a look that stands on the page's ground (sand, a dither), which shows through
+  // as it fades. A scene covers its box whole: faded, the page's paper showed under the night as a
+  // white band. Keyed on the look being a scene, not on its scheme.
+  const fades = fadeFoot && !isScene(look.backdrop);
   return (
     <div
       data-slot="backdrop"
@@ -132,11 +137,11 @@ export const Backdrop = ({
       {...stylex.props(
         styles.box,
         scheme === "dark" && styles.onNight,
-        fadeFoot && scheme !== "dark" && styles.ground,
+        fades && styles.ground,
         layout ?? styleProp
       )}
     >
-      {fadeFoot ? (
+      {fades ? (
         <div aria-hidden="true" {...stylex.props(styles.foot)}>
           <BackdropField
             clear={clear}

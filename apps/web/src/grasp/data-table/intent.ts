@@ -30,5 +30,9 @@ export const intent = {
       name: "filterable",
       when: "One condition narrows the rows: a column, an operator and a value.",
     },
+    {
+      name: "empty",
+      when: "Its own empty state: what it says while it has no rows yet, and when the search or the filter finds none.",
+    },
   ],
 };

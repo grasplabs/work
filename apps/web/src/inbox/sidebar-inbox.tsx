@@ -4,16 +4,16 @@ import { useLingui } from "@lingui/react/macro";
 import { Link, useLocation } from "@tanstack/react-router";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { readWaiting } from "../dashboard/read-dashboard.ts";
 import { formatAge } from "../format.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { Bell, Brain, People, Question, Tick } from "../grasp/icons/index.ts";
-import type { SidebarGroup, SidebarRow } from "../grasp/sidebar/index.ts";
+import type { SidebarGroupEntry, SidebarRow } from "../grasp/sidebar/index.ts";
 import { kindMark } from "./inbox-kind.tsx";
 import { groupLabel, groupOrder } from "./inbox-page.tsx";
 import { groupOf, inboxItems, unread } from "./items.ts";
 import type { Group, InboxItem } from "./items.ts";
+import { readWaiting } from "./read-waiting.ts";
 
 // The sidebar's Inbox view: the inbox's own navigation. First its views,
 // named and ordered as the inbox's filter names them (inbox-page.tsx), each
@@ -26,7 +26,7 @@ import type { Group, InboxItem } from "./items.ts";
 // What waits is read where the frame reads its counts (frame/frame-read.ts),
 // without marking a notification read (only the inbox and the dashboard,
 // which show them whole, do that). The counted items (what needs the
-// person) are the bell's dot and the Dashboard row's count, so the view and
+// person) are the bell's dot and the Inbox row's count, so the view and
 // the counts never disagree.
 
 /** Each view's icon: what its items are about. */
@@ -104,7 +104,7 @@ const byAge = (a: InboxItem, b: InboxItem): number => {
  */
 export const useInboxGroups = (
   items: readonly InboxItem[] | undefined
-): SidebarGroup[] => {
+): SidebarGroupEntry[] => {
   const { t, i18n } = useLingui();
   const { pathname, search } = useLocation();
   const waitedLabel = (duration: string): string => t`Waiting for ${duration}`;

@@ -122,7 +122,7 @@ export const AppLinkDialog = ({
               ) : null}
             </Field>
             {failure === undefined ? null : (
-              <Alert title={failure} variant="danger" />
+              <Alert title={failure} tone="danger" />
             )}
           </Form>
         </DialogBody>

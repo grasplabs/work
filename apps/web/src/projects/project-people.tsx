@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar } from "../grasp/avatar/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Icon, People } from "../grasp/icons/index.ts";
 import {
@@ -116,7 +116,9 @@ const MemberRow = ({
       {team ? (
         <Icon icon={People} />
       ) : (
-        <Avatar decorative name={name} size="xs" />
+        <Avatar decorative name={name} size="xs">
+          <AvatarFallback />
+        </Avatar>
       )}
     </ItemMedia>
     <ItemContent>
@@ -213,10 +215,14 @@ const ManagePeople = ({
     <>
       <ShareAccess
         candidates={found}
-        failedInviteLabel={t`Not added`}
+        words={{
+          failedInvite: t`Not added`,
+          // With candidates to pick from, the field is named by `pick`.
+          pick: t`Search people and teams`,
+          inviteLevel: t`Role in the project`,
+          owner: t({ message: "Owner", context: "a project's owner" }),
+        }}
         filter={false}
-        findLabel={t`Search people and teams`}
-        inviteLevelLabel={t`Role in the project`}
         levels={roles.map((role) => ({ value: role, label: roleLabel(role) }))}
         loading={offered === undefined}
         members={[
@@ -262,18 +268,15 @@ const ManagePeople = ({
         onRemove={(id) => {
           setRemoving(members.find((member) => keyOf(member) === id));
         }}
-        ownerLabel={t({ message: "Owner", context: "a project's owner" })}
         query={query}
       />
       {offered !== undefined && offered.state !== "ready" ? (
         <Alert
           title={t`Who to share with couldn't be read. Try again in a moment.`}
-          variant="danger"
+          tone="danger"
         />
       ) : null}
-      {failure === undefined ? null : (
-        <Alert title={failure} variant="danger" />
-      )}
+      {failure === undefined ? null : <Alert title={failure} tone="danger" />}
       <AlertDialog
         onOpenChange={(open) => {
           if (!open) {

@@ -18,6 +18,7 @@ import type { LayoutStyle } from "../layout/layout";
 import { arrive } from "../motion/arrive";
 import { Skeleton } from "../skeleton/skeleton";
 import { grasp } from "../tokens/tokens.stylex";
+import { sectionHeaderVars } from "./section-header.stylex";
 
 /** What a caller may style: where the header sits, and how wide it is. Never its look. */
 export type SectionHeaderLayoutStyle = LayoutStyle;
@@ -45,6 +46,13 @@ export interface SectionHeaderProps {
    * @default "md"
    */
   size?: "md" | "sm";
+  /**
+   * `group` for the name of a group of rows standing over its card (a grouped Section card): the
+   * title at text-md, a step over the rows' own labels, and the sentence at text-sm right under it.
+   * It sets the words' size, so `size` is a `section`'s.
+   * @default "section"
+   */
+  variant?: "section" | "group";
   /** The heading's id: for a link to the section (`#usage`), and for its Section's name. */
   id?: string;
   /**
@@ -57,9 +65,6 @@ export interface SectionHeaderProps {
   /** Layout only: margins and alignment. The look belongs to the header. */
   layout?: SectionHeaderLayoutStyle;
 }
-
-/** A Section card narrower than this puts the actions on their own line (its head is the container). */
-const NARROW_CARD = "@container section-card-head (width < 30rem)";
 
 const styles = stylex.create({
   header: {
@@ -75,9 +80,12 @@ const styles = stylex.create({
     display: "grid",
     rowGap: grasp.space1,
     flexGrow: 1,
-    flexBasis: "16rem",
-    minWidth: 0,
+    // Beside the actions the words take what is left: a title alone down to its longest word (its
+    // own min-content, a flex item's floor), a title with a line under it down to 10rem, so that
+    // line is never squeezed to a word a line. Past that the actions wrap under them.
+    flexBasis: 0,
   },
+  wordsWithLine: { minWidth: "10rem" },
   titleRow: {
     display: "flex",
     flexWrap: "wrap",
@@ -103,6 +111,13 @@ const styles = stylex.create({
   // A dense head with a title alone: the title on the actions' middle, not 12px above it.
   headerCentred: { alignItems: "center" },
   titleSm: { fontSize: grasp.textSm, lineHeight: grasp.textSmLine },
+  // A group's name over its card: a step over the rows' labels (text-sm), and a weight over theirs
+  // (weight-semibold's one use), so "Plan" over a row named Plan reads as the group's name.
+  titleGroup: {
+    fontSize: grasp.textMd,
+    lineHeight: grasp.textMdLine,
+    fontWeight: grasp.weightSemibold,
+  },
   descriptionSm: { fontSize: grasp.textSm, lineHeight: grasp.textSmLine },
   description: {
     margin: 0,
@@ -113,18 +128,20 @@ const styles = stylex.create({
     textWrap: "pretty",
     overflowWrap: "break-word",
   },
-  // Never past the header's edge: on a line of their own they may shrink to its width and wrap
-  // (a search and Invite on a phone ran 60px past a card at 320). In a Section card narrower than
-  // 30rem they take the line under the title, its full width: by the card's width, not the window's.
   actions: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
     gap: grasp.space2,
     flexShrink: 1,
-    flexBasis: { default: "auto", [NARROW_CARD]: "100%" },
+    flexBasis: "auto",
     minWidth: 0,
     maxWidth: "100%",
+    // On the title's line they may give back room above themselves (a grouped Section card's, so an
+    // xs button's foot meets the line's and its card stands 8px under both), at every width now that
+    // they stay on that line while they fit. Wrapped under the title, the row's gap less the trim
+    // still parts them. Never below: what is there stays whole.
+    marginBlockStart: sectionHeaderVars.actionsTrim,
     // Above a Section card's drag handle, which lies over the header: they stay pressable.
     position: "relative",
     zIndex: 1,
@@ -135,9 +152,44 @@ const styles = stylex.create({
   descriptionWait: { width: "100%" },
 });
 
-/** A small header with no description stands centred on its line. */
-const centredOf = (size: SectionHeaderProps["size"], description: ReactNode) =>
-  size === "sm" && description === undefined;
+/**
+ * How the words are drawn: small (a dense header's, or a group's sentence, text-sm right under the
+ * title), the title's size, and whether a small header with no sentence stands centred on its line.
+ */
+/** The text size a title's placeholder stands for, so the head is as tall loading as loaded. */
+const waitOf = (size: SectionHeaderProps["size"], group: boolean) => {
+  if (group) {
+    return "md" as const;
+  }
+  return size === "sm" ? ("sm" as const) : ("lg" as const);
+};
+
+const lookOf = (
+  size: SectionHeaderProps["size"],
+  variant: SectionHeaderProps["variant"],
+  description: ReactNode
+) => {
+  const group = variant === "group";
+  const small = size === "sm" || group;
+  return {
+    small,
+    title: [
+      styles.title,
+      size === "sm" && styles.titleSm,
+      group && styles.titleGroup,
+    ],
+    // While loading, the placeholders take the lines the words will: a group's title is text-md,
+    // a small one text-sm, else text-lg; a small head's sentence text-sm, else text-md.
+    titleWait: waitOf(size, group),
+    descriptionWait: small ? ("sm" as const) : ("md" as const),
+    centred: small && description === undefined,
+    words: [
+      styles.words,
+      description !== undefined && styles.wordsWithLine,
+      small && styles.wordsSm,
+    ],
+  };
+};
 
 export const SectionHeader = ({
   title,
@@ -147,6 +199,7 @@ export const SectionHeader = ({
   level: levelDeprecated,
   headingLevel: level = levelDeprecated ?? 2,
   size = "md",
+  variant = "section",
   id,
   loading = false,
   style: styleProp,
@@ -160,7 +213,14 @@ export const SectionHeader = ({
     setWaited(true);
   }
   const arrived = waited && !loading;
-  const centred = centredOf(size, description);
+  const {
+    small,
+    title: titleLook,
+    titleWait,
+    descriptionWait,
+    centred,
+    words,
+  } = lookOf(size, variant, description);
   return (
     <div
       data-slot="section-header"
@@ -171,21 +231,21 @@ export const SectionHeader = ({
         layout ?? styleProp
       )}
     >
-      <div {...stylex.props(styles.words, size === "sm" && styles.wordsSm)}>
+      <div {...stylex.props(words)}>
         {loading ? (
           <>
-            <Skeleton text="lg" layout={styles.titleWait} />
+            <Skeleton text={titleWait} layout={styles.titleWait} />
             {description !== undefined && (
-              <Skeleton text="md" layout={styles.descriptionWait} />
+              <Skeleton
+                text={descriptionWait}
+                layout={styles.descriptionWait}
+              />
             )}
           </>
         ) : (
           <>
             <div {...stylex.props(styles.titleRow, arrived && arrive.in)}>
-              <Heading
-                id={id}
-                {...stylex.props(styles.title, size === "sm" && styles.titleSm)}
-              >
+              <Heading id={id} {...stylex.props(titleLook)}>
                 {title}
               </Heading>
               {aside}
@@ -194,7 +254,7 @@ export const SectionHeader = ({
               <p
                 {...stylex.props(
                   styles.description,
-                  size === "sm" && styles.descriptionSm,
+                  small && styles.descriptionSm,
                   arrived && arrive.in
                 )}
               >

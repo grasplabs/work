@@ -42,6 +42,7 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { renameWords } from "../words/rename";
 import { useWords } from "../words/words";
 import { rowActionsMarker } from "./row-actions.stylex";
+import { useSidebarGivenWords } from "./shell";
 import { sidebarWords } from "./words";
 
 /** What a row with actions or a rename takes, beside its link (sidebar.tsx's `SidebarSubRow`). */
@@ -396,7 +397,7 @@ export const RowActions = ({
   /** Draws the row's link, with what it takes from its actions. */
   children: (extras: RowLinkExtras) => ReactElement;
 }): ReactElement => {
-  const words = useWords("sidebar", sidebarWords);
+  const words = useWords("sidebar", sidebarWords, useSidebarGivenWords());
   const said = useWords("rename", renameWords);
   const hint = useId();
   const [renaming, setRenaming] = useState(false);

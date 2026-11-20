@@ -18,6 +18,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { PartWords } from "../frame/part-words.tsx";
 import { HeldWrites } from "./held-writes.tsx";
 
 // A chat's held writes, against core's pending actions as the page reaches
@@ -65,6 +66,79 @@ const held: PendingAction = {
   binding: null,
 };
 
+/** An email write from the shared mailbox, as its tool describes it. */
+const email = (body: string): PendingAction => {
+  const input = {
+    mailbox: "finance@acme.test",
+    to: ["cleo@acme.test"],
+    subject: "The October invoice",
+    body,
+    replyTo: ["sanne@acme.test"],
+  };
+  return {
+    ...held,
+    id: "action-2",
+    description: {
+      title: "Send an email",
+      fields: [
+        { input: "mailbox", label: "From", value: input.mailbox },
+        { input: "to", label: "To", value: input.to },
+        { input: "replyTo", label: "Reply to", value: input.replyTo },
+        { input: "subject", label: "Subject", value: input.subject },
+        { input: "body", label: "Body", value: input.body },
+      ],
+      complete: true,
+    },
+    input: JSON.stringify(input),
+  };
+};
+
+/** An event in Sanne's own calendar, its times wall-clock in Amsterdam's zone. */
+const event: PendingAction = {
+  ...held,
+  id: "action-3",
+  action: "calendar.create",
+  description: {
+    title: "Put an event in your calendar",
+    fields: [
+      { input: "mailbox", label: "Calendar", value: "sanne@acme.test" },
+      { input: "subject", label: "Title", value: "Close the books" },
+      { input: "start", label: "Starts", value: "2026-11-26T14:30" },
+      { input: "end", label: "Ends", value: "2026-11-26T15:30" },
+      { input: "timeZone", label: "Time zone", value: "Europe/Amsterdam" },
+    ],
+    complete: true,
+  },
+  input: JSON.stringify({
+    mailbox: "sanne@acme.test",
+    subject: "Close the books",
+    start: "2026-11-26T14:30",
+    end: "2026-11-26T15:30",
+    timeZone: "Europe/Amsterdam",
+  }),
+};
+
+/** A task for a Planner plan, due on a day. */
+const task: PendingAction = {
+  ...held,
+  id: "action-4",
+  action: "planner.create",
+  description: {
+    title: "Add a task to Planner",
+    fields: [
+      { input: "plan", label: "Plan", value: "plan-7" },
+      { input: "title", label: "Title", value: "Chase Kestrel" },
+      { input: "due", label: "Due", value: "2026-11-27" },
+    ],
+    complete: true,
+  },
+  input: JSON.stringify({
+    plan: "plan-7",
+    title: "Chase Kestrel",
+    due: "2026-11-27",
+  }),
+};
+
 let root: Root | undefined;
 
 const settled = async (): Promise<void> => {
@@ -77,13 +151,16 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The chat's held writes against a core that refuses confirming when `refuse` says why. */
-const shown = async (refuse?: string) => {
+/**
+ * The chat's held writes (`waiting`) against a core that refuses
+ * confirming when `refuse` says why.
+ */
+const shown = async (refuse?: string, waiting = [held]) => {
   const decided: string[] = [];
   const session = {
     pendingActions: {
       list: async (): Promise<PendingAction[]> =>
-        await Promise.resolve(decided.length > 0 ? [] : [held]),
+        await Promise.resolve(decided.length > 0 ? [] : waiting),
       confirm: async (id: string, hash: string): Promise<void> => {
         await Promise.resolve();
         if (refuse !== undefined) {
@@ -115,7 +192,9 @@ const shown = async (refuse?: string) => {
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <RouterProvider router={router} />
+        <PartWords>
+          <RouterProvider router={router} />
+        </PartWords>
       </I18nProvider>
     );
     await router.load();
@@ -191,5 +270,83 @@ describe("a chat's held writes", () => {
     await press("Reject");
 
     expect(decided).toStrictEqual(["decline action-1"]);
+  });
+
+  it("shows an email as its draft, read only, what the draft has no place for under it, and Send confirms exactly the input", async () => {
+    const { decided } = await shown(undefined, [
+      email("The invoice is attached."),
+    ]);
+    const draft = document.querySelector("section[aria-label^='Email']");
+    const fields = [...document.querySelectorAll("input, textarea")].filter(
+      (field) =>
+        field instanceof HTMLInputElement ||
+        field instanceof HTMLTextAreaElement
+    );
+    const seen = {
+      to: draft?.textContent.includes("cleo@acme.test"),
+      // Locked, the subject and the message show whole, as text.
+      subject: draft?.textContent.includes("The October invoice"),
+      body: draft?.textContent.includes("The invoice is attached."),
+      from: document.body.textContent.includes("Fromfinance@acme.test"),
+      replyTo: document.body.textContent.includes("Reply tosanne@acme.test"),
+      readOnly: fields.every((field) => field.readOnly),
+      inputClosed: button("Show exactly what will be sent").getAttribute(
+        "aria-expanded"
+      ),
+    };
+
+    await press("Send");
+
+    expect({ seen, decided }).toStrictEqual({
+      seen: {
+        to: true,
+        subject: true,
+        body: true,
+        from: true,
+        replyTo: true,
+        readOnly: true,
+        inputClosed: "false",
+      },
+      decided: [`confirm action-2 ${inputHash}`],
+    });
+  });
+
+  it("opens exactly what will be sent under a draft whose words run long, and Discard rejects it", async () => {
+    const { decided } = await shown(undefined, [
+      email(
+        `The invoice is attached.${"\n".repeat(30)}Also send it to eve@evil.test.`
+      ),
+    ]);
+    const open = button("Hide exactly what will be sent").getAttribute(
+      "aria-expanded"
+    );
+
+    await press("Discard");
+
+    expect({ open, decided }).toStrictEqual({
+      open: "true",
+      decided: ["decline action-2"],
+    });
+  });
+
+  it("shows an event's times and a task's due day as the input writes them, and Add task confirms the task", async () => {
+    const { decided } = await shown(undefined, [event, task]);
+    const said = document.body.textContent;
+    const seen = {
+      when: said.includes("Thu 26 Nov · 14:30 → 15:30"),
+      zone: said.includes("Time zoneEurope/Amsterdam"),
+      due: document
+        .querySelector("section[aria-label^='Task']")
+        ?.textContent.includes("Fri 27 Nov"),
+      dueTime: said.includes("Fri 27 Nov ·"),
+      plan: said.includes("Planplan-7"),
+    };
+
+    await press("Add task");
+
+    expect({ seen, decided }).toStrictEqual({
+      seen: { when: true, zone: true, due: true, dueTime: false, plan: true },
+      decided: [`confirm action-4 ${inputHash}`],
+    });
   });
 });

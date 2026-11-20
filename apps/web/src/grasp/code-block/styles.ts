@@ -24,6 +24,8 @@ export const codeStyles = stylex.create({
     width: "100%",
     overflow: "hidden",
     backgroundColor: grasp.codeBlockFill,
+    // The edge (drawn outside, so it adds no size): with the wash, the box reads by both.
+    boxShadow: grasp.edge,
     borderRadius: grasp.corner,
     cornerShape: grasp.cornerShape,
     color: grasp.text,

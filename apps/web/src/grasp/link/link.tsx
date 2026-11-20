@@ -25,6 +25,7 @@ import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
 import { linkWords } from "./words";
+import type { LinkWords } from "./words";
 
 /** What a caller may style: where the link sits. Never its look. */
 export type LinkLayoutStyle = LayoutStyle;
@@ -70,6 +71,12 @@ export interface LinkProps extends Omit<
   style?: LinkLayoutStyle;
   /** Layout only: margins and alignment. The look belongs to the link. */
   layout?: LinkLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ external: "opens in a new tab" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<LinkWords>;
 }
 
 const styles = stylex.create({
@@ -171,15 +178,17 @@ export const Link = ({
   variant = "inline",
   external = false,
   externalLabel: externalGiven,
+  words,
   style: styleProp,
   layout,
   target,
   rel,
   ...rest
 }: LinkProps) => {
-  const { external: externalLabel } = withGiven(useWords("link", linkWords), {
-    external: externalGiven,
-  });
+  const { external: externalLabel } = withGiven(
+    useWords("link", linkWords, words),
+    { external: externalGiven }
+  );
   return renderElement(
     "a",
     {

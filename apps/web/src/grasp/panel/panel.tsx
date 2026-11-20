@@ -19,13 +19,15 @@
 import * as stylex from "@stylexjs/stylex";
 import type { ChangeDetails } from "@ui-sdk/core";
 import { Tabs as TabsPrimitive } from "@ui-sdk/react/tabs";
-import { useRef, useState } from "react";
+import { use, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { LayoutStyle } from "../layout/layout";
 import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { PanelContext } from "./context";
+import { panelVars } from "./panel.stylex";
+import { PanelSeated } from "./seat";
 
 /** What a caller may style: where the panel sits and how tall it stands. Never its look. */
 export type PanelLayoutStyle = LayoutStyle;
@@ -46,7 +48,7 @@ export interface PanelProps {
   onViewChange?: (view: string) => void;
   /**
    * Stand on its own: the raised ground, the high lift and the corner. Off inside a Sheet, which
-   * draws its own.
+   * draws its own. In App shell's `pagePanel` it is off unless given: the shell seats it.
    * @default true
    */
   framed?: boolean;
@@ -57,6 +59,8 @@ export interface PanelProps {
 }
 
 const styles = stylex.create({
+  // Seated by App shell: its bar and views strip on the shell card's ground, as the panel around it.
+  seated: { [panelVars.ground]: grasp.shellCard },
   panel: {
     position: "relative",
     display: "flex",
@@ -101,10 +105,13 @@ export const Panel = ({
   defaultView,
   view,
   onViewChange,
-  framed = true,
+  framed: framedGiven,
   style: styleProp,
   layout,
 }: PanelProps) => {
+  // Seated by App shell's page panel, it takes the shell's frame; given, `framed` wins.
+  const seat = use(PanelSeated);
+  const framed = framedGiven ?? seat === "none";
   const scroller = useRef<HTMLDivElement>(null);
   const [scrolled, setScrolled] = useState(false);
   const [folded, setFolded] = useState(false);
@@ -138,6 +145,7 @@ export const Panel = ({
         {...stylex.props(
           styles.panel,
           framed && styles.framed,
+          seat !== "none" && styles.seated,
           layout ?? styleProp
         )}
       >

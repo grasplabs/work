@@ -59,6 +59,7 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
 import { useWords, withGiven } from "../words/words";
 import { ownerPickerNotices, ownerPickerWords } from "./words";
+import type { OwnerPickerWords } from "./words";
 
 /** One person who can own it. */
 export interface Owner {
@@ -100,6 +101,12 @@ export interface OwnerPickerProps {
   empty?: string;
   /** The name of the button that opens the list of people. @default "Show the people" */
   triggerLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ trigger: "Show the team" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<OwnerPickerWords>;
   /** The name the id is sent under in a form. Inside a Field, the Field's `name` serves. */
   name?: string;
   /** Needs an owner before the form is sent. @default false */
@@ -257,6 +264,7 @@ export const OwnerPicker = ({
   placeholder: placeholderGiven,
   empty: emptyGiven,
   triggerLabel: triggerLabelGiven,
+  words,
   style: styleProp,
   layout,
   "aria-label": ariaLabel,
@@ -266,7 +274,7 @@ export const OwnerPicker = ({
     placeholder,
     empty,
     trigger: triggerLabel,
-  } = withGiven(useWords("ownerPicker", ownerPickerWords), {
+  } = withGiven(useWords("ownerPicker", ownerPickerWords, words), {
     placeholder: placeholderGiven,
     empty: emptyGiven,
     trigger: triggerLabelGiven,

@@ -11,12 +11,14 @@ import { Button } from "../button";
 import { visuallyHidden } from "../hidden/hidden";
 import { Icon, Info, Tick } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
+import { Skeleton } from "../skeleton";
 import { Spinner } from "../spinner";
 import { grasp } from "../tokens/tokens.stylex";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
 import { useWords, withGiven } from "../words/words";
 import { RowProblem } from "./line-context";
 import { settingRowWords } from "./words";
+import type { SettingRowWords } from "./words";
 
 /** What a caller may style: where the rows sit and how wide they are. Never their look. */
 export type SettingsRowsLayoutStyle = LayoutStyle;
@@ -66,6 +68,19 @@ export interface SettingRowProps {
   failedLabel?: string;
   /** The button that saves again. @default "Try again" */
   retryLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ failed: "Could not save. Your name is kept." }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SettingRowWords>;
+  /**
+   * The setting is not there yet (a page's first paint): its name, and its help when `help` is
+   * given (even empty), are quiet lines in their own lines, so the row keeps its height; pass a
+   * placeholder as the control. Hidden from a reader: the page says it is loading.
+   * @default false
+   */
+  loading?: boolean;
 }
 
 /** Every prop a FactRow takes. */
@@ -80,6 +95,12 @@ export interface FactRowProps {
   infoLabel?: string;
   /** Its value, in the control's place: words, a Badge, a Copy field. */
   children: ReactNode;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ info: "More about this fact" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SettingRowWords>;
 }
 
 /** Every prop a RowAlert takes. */
@@ -128,6 +149,16 @@ const styles = stylex.create({
     flexDirection: "column",
     gap: grasp.space1,
     minWidth: 0,
+  },
+  // A named group that is not the first thing in its card (after rows, a table, a paragraph): a
+  // hairline over its label, across the card as a row's is, and room under it, so the label belongs
+  // to the rows below it and does not float under what came before. The first thing in a card has
+  // none: the card's own edge is above it.
+  groupAfter: {
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+    borderTopWidth: { default: 0, ":not(:first-child)": grasp.hairline },
+    paddingBlockStart: { default: 0, ":not(:first-child)": grasp.space4 },
   },
   groupLabel: {
     margin: 0,
@@ -190,6 +221,9 @@ const styles = stylex.create({
     color: grasp.muted,
   },
   failed: { color: grasp.danger },
+  // While it loads: the name's and the help's lines, quiet, each in its own line's box.
+  nameWait: { width: "9rem", maxWidth: "100%" },
+  helpWait: { width: "16rem", maxWidth: "100%" },
   control: {
     position: "relative",
     display: "flex",
@@ -251,6 +285,8 @@ interface LineProps {
   retryLabel: string;
   /** A problem the control put here (a file it refused): in the danger tone, in the help's place. */
   problem: string;
+  /** The row is not there yet: the help's line holds a quiet line. */
+  loading: boolean;
 }
 
 const Line = ({
@@ -263,7 +299,13 @@ const Line = ({
   failedLabel,
   retryLabel,
   problem,
+  loading,
 }: LineProps) => {
+  if (loading) {
+    return help === undefined ? null : (
+      <Skeleton text="sm" layout={styles.helpWait} />
+    );
+  }
   // Saving and saved are drawn beside the control (the row's mark); here they are only said, and
   // the help keeps its place, so nothing under the name changes.
   if (state === "saving" || state === "saved") {
@@ -319,6 +361,8 @@ export const SettingRow = ({
   savedLabel: savedLabelGiven,
   failedLabel: failedLabelGiven,
   retryLabel: retryLabelGiven,
+  words,
+  loading = false,
 }: SettingRowProps) => {
   const {
     info: infoLabel,
@@ -326,7 +370,7 @@ export const SettingRow = ({
     saved: savedLabel,
     failed: failedLabel,
     retry: retryLabel,
-  } = withGiven(useWords("settingRow", settingRowWords), {
+  } = withGiven(useWords("settingRow", settingRowWords, words), {
     info: infoLabelGiven,
     saving: savingLabelGiven,
     saved: savedLabelGiven,
@@ -345,12 +389,13 @@ export const SettingRow = ({
     <div
       data-slot="setting-row"
       data-state={state}
+      aria-hidden={loading ? true : undefined}
       {...stylex.props(styles.box)}
     >
       <div {...stylex.props(styles.row)}>
         <div {...stylex.props(styles.words)}>
           <label htmlFor={id} {...stylex.props(styles.name)}>
-            {label}
+            {loading ? <Skeleton text="sm" layout={styles.nameWait} /> : label}
             {info !== undefined && (
               <span {...stylex.props(styles.info)}>
                 <Tooltip>
@@ -370,6 +415,7 @@ export const SettingRow = ({
             <Line
               id={helpId}
               help={help}
+              loading={loading}
               state={state}
               onRetry={onRetry}
               savingLabel={savingLabel}
@@ -419,10 +465,11 @@ export const FactRow = ({
   help,
   info,
   infoLabel: infoLabelGiven,
+  words,
   children,
 }: FactRowProps) => {
   const { info: infoLabel } = withGiven(
-    useWords("settingRow", settingRowWords),
+    useWords("settingRow", settingRowWords, words),
     { info: infoLabelGiven }
   );
   return (
@@ -489,7 +536,7 @@ export const SettingsRows = ({
     <section
       data-slot="settings-rows"
       aria-labelledby={labelId}
-      {...stylex.props(styles.group, layout ?? style)}
+      {...stylex.props(styles.group, styles.groupAfter, layout ?? style)}
     >
       <Heading
         id={labelId}

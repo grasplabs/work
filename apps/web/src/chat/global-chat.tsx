@@ -157,7 +157,6 @@ const useModelsUnavailable = (
 export interface ChatWords {
   title: string;
   placeholder: string;
-  empty: string;
 }
 
 /**
@@ -189,18 +188,16 @@ const useChatWords = (): ChatWords => {
   const { t, i18n } = useLingui();
   const subject = subjectOf(useShownSlot());
   if (subject !== undefined) {
-    const { title, placeholder, empty } = subjectWords(subject.kind);
+    const { title, placeholder } = subjectWords(subject.kind);
     return {
       title: i18n._(title),
       placeholder: i18n._(placeholder),
-      empty: i18n._(empty),
     };
   }
   const title = t`Ask Grasp`;
   return {
     title,
     placeholder: title,
-    empty: t`Ask anything, or describe a process`,
   };
 };
 

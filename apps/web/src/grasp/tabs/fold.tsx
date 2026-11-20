@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
   menuStyles,
 } from "../dropdown-menu";
+import { Icon } from "../icons";
 import type { TabsLinkProps } from "./nav";
 import { PlaceContext } from "./place";
 
@@ -33,6 +34,7 @@ export const MenuLink = ({
   children,
   href,
   render,
+  icon,
   current = false,
 }: TabsLinkProps) => (
   <ItemPrimitive
@@ -43,7 +45,21 @@ export const MenuLink = ({
       renderElement("a", { ...props, href }, render)
     }
   >
-    <span {...stylex.props(menuStyles.words, menuStyles.wordsBare)}>
+    {icon !== undefined && (
+      <span
+        aria-hidden="true"
+        data-menu-icon=""
+        {...stylex.props(menuStyles.icon)}
+      >
+        <Icon icon={icon} />
+      </span>
+    )}
+    <span
+      {...stylex.props(
+        menuStyles.words,
+        icon === undefined && menuStyles.wordsBare
+      )}
+    >
       {children}
     </span>
     {current && <span aria-hidden="true" {...stylex.props(menuStyles.dot)} />}

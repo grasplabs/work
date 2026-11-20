@@ -9,15 +9,13 @@ import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 
 import { formatList } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
-import { Collapsible } from "../grasp/collapsible/index.ts";
+import { DiffFiles } from "../grasp/diff-files/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Icon, Key, People } from "../grasp/icons/index.ts";
-import { Skeleton } from "../grasp/skeleton/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PlanList, planLines } from "./data-model-changes.tsx";
@@ -25,15 +23,9 @@ import { PlanList, planLines } from "./data-model-changes.tsx";
 // What publishing an App's draft changes, as Publish (publish.tsx) shows
 // it before the person publishes, and History (app-history.tsx) of a
 // version against the one before it: its files, grouped by what they
-// are, each with its diff on demand; what it does to the App's data; and
+// are, each with its diff (the library's DiffFiles); what it does to the App's data; and
 // the access the App waits for or is asked for again. All as core worked
 // it out (`apps.drafts.changes`), never as whoever wrote the draft says.
-
-// The diff, with its renderer and highlighter, loads once one opens.
-const CodeDiff = lazy(async () => {
-  const { CodeDiff: diff } = await import("./code-view.tsx");
-  return { default: diff };
-});
 
 /** What a changed file is part of: its group in the list. */
 export type FileGroup = "pages" | "functions" | "data" | "tests" | "other";
@@ -76,19 +68,8 @@ export const groupOf = (path: string): FileGroup => {
   return path.startsWith("tests/") ? "tests" : "other";
 };
 
-const changeNames = {
-  added: msg({ message: "Added", context: "a file a change adds" }),
-  modified: msg({ message: "Changed", context: "a file a change changes" }),
-  deleted: msg({ message: "Removed", context: "a file a change removes" }),
-} as const satisfies Record<FileDiff["change"], unknown>;
-
-// How tall a file's change may stand before it scrolls: Grasp UI has no
-// token for a code box's height.
-const DIFF_TALL = "24rem";
-
 const styles = stylex.create({
   stack: { display: "grid", gap: grasp.space3, minWidth: 0 },
-  tight: { display: "grid", gap: grasp.space1, minWidth: 0 },
   list: {
     display: "grid",
     gap: grasp.space1,
@@ -97,48 +78,10 @@ const styles = stylex.create({
     listStyle: "none",
   },
   path: { fontFamily: grasp.fontMono, overflowWrap: "anywhere" },
-  title: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-    minWidth: 0,
-  },
-  diff: {
-    maxHeight: DIFF_TALL,
-    overflow: "auto",
-    borderRadius: grasp.corner,
-    boxShadow: grasp.edge,
-  },
+  tight: { display: "grid", gap: grasp.space1, minWidth: 0 },
   line: { display: "flex", alignItems: "flex-start", gap: grasp.space2 },
   start: { display: "grid", justifyItems: "start", gap: grasp.space1 },
 });
-
-/** One changed file, its diff shown once the person opens it. */
-const ChangedFile = ({ diff }: { diff: FileDiff }) => {
-  const { i18n } = useLingui();
-  return (
-    <li>
-      <Collapsible
-        title={
-          <span {...stylex.props(styles.title)}>
-            <Text element="span" size="xs">
-              <span {...stylex.props(styles.path)}>{diff.path}</span>
-            </Text>
-            <Badge tone={diff.change === "deleted" ? "danger" : "neutral"}>
-              {i18n._(changeNames[diff.change])}
-            </Badge>
-          </span>
-        }
-      >
-        <div {...stylex.props(styles.diff)}>
-          <Suspense fallback={<Skeleton variant="block" />}>
-            <CodeDiff diff={diff} />
-          </Suspense>
-        </div>
-      </Collapsible>
-    </li>
-  );
-};
 
 /** A part of what changes: its heading, and what it says. */
 export const ChangesSection = ({
@@ -168,11 +111,7 @@ export const FileChanges = ({ files }: { files: readonly FileDiff[] }) => {
             <Text element="span" size="xs" tone="muted">
               {i18n._(groupNames[group])}
             </Text>
-            <ul {...stylex.props(styles.list)}>
-              {inGroup.map((diff) => (
-                <ChangedFile diff={diff} key={diff.path} />
-              ))}
-            </ul>
+            <DiffFiles files={inGroup} total={false} />
           </div>
         );
       })}

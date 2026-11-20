@@ -5,7 +5,8 @@
 // that squeezes a wide slice of the scene, so the wave is broken into bars. The pointer is a lamp
 // behind the glass; without one it drifts on its own. Behind the words the light dims.
 // The way out: chosen, the light gathers on that way in, a bright seam runs up and down the glass
-// from it, the two doors slide apart from the seam, and the light beyond floods the page. With
+// from it, the two doors slide apart from the seam, and the light beyond floods the page, over the
+// page's `duration-arrive`. With
 // reduced motion: one still frame, and a chosen way leaves at once. Where WebGL can't run, nothing
 // is drawn and the page's own night shows. The seven colours are the tokens light-night to
 // light-paper, read from the page (the website's literals, which they equal).
@@ -20,8 +21,24 @@ export interface Door {
   stop: () => void;
 }
 
-/** How long the way out takes, as the website's. */
-const OPEN_MS = 1050;
+/**
+ * How long the way out takes: the page's `duration-arrive` (600ms, "a page's opening, once"; a
+ * page's leaving, once, is the same kind), read from the page as the colours are. The website's
+ * took 1050ms, over the product's 300ms rule; this is the token the rule names. Under reduced
+ * motion there is no way out at all: a chosen way leaves at once.
+ */
+const ARRIVE = "--grasp-duration-arrive";
+
+/** A CSS time ("600ms", "0.6s") in milliseconds; `fallback` when it cannot be read. */
+const msOf = (time: string, fallback: number) => {
+  const given = time.trim();
+  const inMs = given.endsWith("ms");
+  const value = Number(given.slice(0, given.length - (inMs ? 2 : 1)));
+  if (given === "" || Number.isNaN(value)) {
+    return fallback;
+  }
+  return inMs ? value : value * 1000;
+};
 
 const VERTEX = `
 attribute vec2 a_pos;
@@ -227,6 +244,7 @@ export const startDoor = (canvas: HTMLCanvasElement, calm: boolean): Door => {
   }
   const at = (name: string) => gl.getUniformLocation(made, name);
   const style = getComputedStyle(canvas);
+  const openMs = msOf(style.getPropertyValue(ARRIVE), 600);
   gl.uniform3fv(
     at("u_palette"),
     stops.flatMap((stop) => rgbOf(style.getPropertyValue(stop).trim()))
@@ -265,7 +283,7 @@ export const startDoor = (canvas: HTMLCanvasElement, calm: boolean): Door => {
       lamp.held = true;
     }
     if (opening.start > 0) {
-      opening.open = Math.min(1, (now - opening.start) / OPEN_MS);
+      opening.open = Math.min(1, (now - opening.start) / openMs);
       if (opening.open === 1) {
         opening.done();
         opening.done = nothing;
@@ -322,7 +340,7 @@ export const startDoor = (canvas: HTMLCanvasElement, calm: boolean): Door => {
         }
       };
       opening.done = once;
-      window.setTimeout(once, OPEN_MS + 200);
+      window.setTimeout(once, openMs + 200);
     },
     pointer: (x, y, on) => {
       if (opening.open > 0) {

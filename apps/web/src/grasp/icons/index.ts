@@ -70,6 +70,7 @@ import {
   GoForward10SecIcon,
   GridViewIcon,
   HashtagIcon,
+  Heading02Icon,
   HelpCircleIcon,
   Home01Icon,
   Idea01Icon,
@@ -83,8 +84,11 @@ import {
   LaptopIcon,
   LeftToRightListBulletIcon,
   LeftToRightListDashIcon,
+  LeftToRightListNumberIcon,
   Link04Icon,
+  ListCollapseIcon,
   Loading03Icon,
+  Location01Icon,
   Logout03Icon,
   Mail01Icon,
   MailWarningIcon,
@@ -103,6 +107,7 @@ import {
   PencilEdit02Icon,
   PercentIcon,
   PlayIcon,
+  QuoteDownIcon,
   Redo02Icon,
   RefreshIcon,
   RepeatIcon,
@@ -115,6 +120,7 @@ import {
   ServerStack01Icon,
   Settings01Icon,
   Share08Icon,
+  SheetIcon,
   ShieldAlertIcon,
   SidebarLeftIcon,
   SidebarRightIcon,
@@ -127,7 +133,7 @@ import {
   StarIcon,
   StopIcon,
   Sun03Icon,
-  Table01Icon,
+  TableIcon,
   Tablet01Icon,
   Tag01Icon,
   Task01Icon,
@@ -148,6 +154,7 @@ import {
   UserAdd01Icon,
   UserCircleIcon,
   UserGroupIcon,
+  Video01Icon,
   ViewIcon,
   ViewOffSlashIcon,
   VolumeHighIcon,
@@ -504,8 +511,8 @@ export const Database: IconData = Database01Icon;
 // Sources of every kind (cloud builder 10): the marks a source's kind wears.
 /** A workflow: steps that run in order, by a schedule or a trigger. WorkflowSquare03Icon. */
 export const Workflow: IconData = WorkflowSquare03Icon;
-/** A table or a query: rows of data. Table01Icon. */
-export const Rows: IconData = Table01Icon;
+/** A table or a query: rows of data, a head row over rows. TableIcon (was Table01Icon, a piece of furniture). */
+export const Rows: IconData = TableIcon;
 /** Code: a file of source, some of its lines. SourceCodeIcon. */
 export const Code: IconData = SourceCodeIcon;
 /** A record in an app: a deal, a ticket, an invoice. Invoice01Icon. */
@@ -560,3 +567,21 @@ export const FloorPlan: IconData = FloorPlanIcon;
 export const ThumbsUpFilled: IconData = solidForm(ThumbsUpIcon);
 /** A poor answer given: ThumbsDown's own shapes filled in the ink, for an action that stays on. ThumbsDownIcon. */
 export const ThumbsDownFilled: IconData = solidForm(ThumbsDownIcon);
+
+// Drafts in the answer (draft): an event's place and its video call.
+/** Where something happens: a place. Location01Icon. */
+export const Place: IconData = Location01Icon;
+/** A video call. Video01Icon. */
+export const VideoCall: IconData = Video01Icon;
+/** A spreadsheet: a head row over a grid of cells. SheetIcon. */
+export const Spreadsheet: IconData = SheetIcon;
+/** A heading in written text: the document editor's format bar. Heading02Icon. */
+export const HeadingText: IconData = Heading02Icon;
+/** A numbered list: steps in order. LeftToRightListNumberIcon. */
+export const ListNumbered: IconData = LeftToRightListNumberIcon;
+/** A bulleted list. LeftToRightListBulletIcon. */
+export const ListBulleted: IconData = LeftToRightListBulletIcon;
+/** A quotation, set apart. QuoteDownIcon. */
+export const QuoteText: IconData = QuoteDownIcon;
+/** A section that folds: its summary, and what it hides. ListCollapseIcon. */
+export const FoldSection: IconData = ListCollapseIcon;

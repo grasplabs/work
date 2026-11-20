@@ -266,7 +266,7 @@ export const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
   const { t } = useLingui();
   if (chat.state !== "ready") {
     return (
-      <SectionCard density="compact" title={t`Chat apps`}>
+      <SectionCard variant="grouped" density="compact" title={t`Chat apps`}>
         <SectionNotLoaded page={chat} />
       </SectionCard>
     );
@@ -277,7 +277,7 @@ export const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
   }
   const { preview, secret } = pending;
   return (
-    <SectionCard density="compact" title={t`Chat apps`}>
+    <SectionCard variant="grouped" density="compact" title={t`Chat apps`}>
       {preview.state === "refused" ? (
         <RefusedLink reason={preview.reason} />
       ) : (

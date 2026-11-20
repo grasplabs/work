@@ -14,7 +14,13 @@ import type { ReactNode } from "react";
 
 import { AgentIndicator } from "../grasp/agent-indicator/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { CommandDialog, CommandMatch } from "../grasp/command/index.ts";
+import {
+  CommandDialog,
+  CommandMatch,
+  CommandInput,
+  CommandEmpty,
+  CommandList,
+} from "../grasp/command/index.ts";
 import type {
   CommandEntry,
   CommandItems,
@@ -535,7 +541,6 @@ export const ChatWindow = ({
     <>
       <CommandDialog
         aria-label={label}
-        empty={failure ?? empty}
         filter={false}
         items={listing.listed === undefined ? [] : items}
         loading={
@@ -582,12 +587,15 @@ export const ChatWindow = ({
           }
         }}
         open={open}
-        placeholder={label}
         query={query}
         // The page holds it: ⌘K and the sidebar's "All chats" open it.
         shortcut={null}
         trigger={null}
-      />
+      >
+        <CommandInput placeholder={label} />
+        <CommandEmpty>{failure ?? empty}</CommandEmpty>
+        <CommandList />
+      </CommandDialog>
       <RenameChat
         chat={renaming}
         key={renaming?.id ?? "none"}

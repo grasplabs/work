@@ -2,7 +2,7 @@ import type { Member, OrganizationTeam } from "@grasp-os/shared/members";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
@@ -21,13 +21,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "../grasp/field/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
 import { Search } from "../grasp/icons/index.ts";
 import {
   InputGroup,
@@ -35,6 +29,13 @@ import {
   InputGroupText,
 } from "../grasp/input-group/index.ts";
 import { Input } from "../grasp/input/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { ScrollArea } from "../grasp/scroll-area/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { addTeamMember, removeTeamMember, renameTeam } from "./team-changes.ts";
@@ -50,7 +51,13 @@ import { addTeamMember, removeTeamMember, renameTeam } from "./team-changes.ts";
 const styles = stylex.create({
   fields: { display: "grid", gap: grasp.space4 },
   people: { display: "grid", gap: grasp.space2 },
-  list: { height: "16rem" },
+  // The list scrolls inside the field, so the dialog keeps its size with
+  // forty people. Its rows step out by Item's own inline room, so each
+  // checkbox stands on the fields' start edge.
+  list: {
+    height: "16rem",
+    marginInline: `calc(-1 * ${grasp.tableCellInline})`,
+  },
   label: {
     margin: 0,
     fontSize: grasp.textSm,
@@ -58,13 +65,21 @@ const styles = stylex.create({
     fontWeight: grasp.weightMedium,
     color: grasp.ink,
   },
-  rows: {
-    display: "grid",
-    gap: grasp.space1,
-    margin: 0,
-    padding: 0,
-    listStyle: "none",
+  rows: { display: "grid", margin: 0, padding: 0, listStyle: "none" },
+  // A hairline between rows, as the people's list has, the fields' width:
+  // the rows step out by Item's inline room, the line steps back in.
+  row: { position: "relative" },
+  line: {
+    "::before": {
+      content: "''",
+      position: "absolute",
+      top: 0,
+      insetInline: grasp.tableCellInline,
+      height: grasp.hairline,
+      backgroundColor: grasp.line,
+    },
   },
+  press: { display: "block", cursor: "pointer" },
   who: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
   count: {
     margin: 0,
@@ -73,6 +88,47 @@ const styles = stylex.create({
     color: grasp.muted,
   },
 });
+
+/** One of the organization's members, to tick into the team: the whole row is the checkbox's label. */
+const PersonRow = ({
+  member,
+  chosen,
+  first,
+  onTick,
+}: {
+  member: Member;
+  chosen: boolean;
+  first: boolean;
+  onTick: (on: boolean) => void;
+}) => {
+  const id = useId();
+  return (
+    <li {...stylex.props(styles.row, !first && styles.line)}>
+      <label htmlFor={id} {...stylex.props(styles.press)}>
+        <Item size="xs">
+          <ItemMedia>
+            <span {...stylex.props(styles.who)}>
+              <Checkbox
+                checked={chosen}
+                id={id}
+                onCheckedChange={(on) => {
+                  onTick(on === true);
+                }}
+              />
+              <Avatar decorative name={member.name} size="xs">
+                <AvatarFallback />
+              </Avatar>
+            </span>
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>{member.name}</ItemTitle>
+            <ItemDescription>{member.email}</ItemDescription>
+          </ItemContent>
+        </Item>
+      </label>
+    </li>
+  );
+};
 
 /** Whether `name` is another team's already, whatever its case. */
 export const isTaken = (
@@ -230,28 +286,16 @@ export const TeamDialog = ({
                   </Empty>
                 ) : (
                   <ul {...stylex.props(styles.rows)}>
-                    {found.map((member) => (
-                      <li key={member.userId}>
-                        <Field orientation="horizontal">
-                          <Checkbox
-                            checked={chosen.includes(member.userId)}
-                            onCheckedChange={(on) => {
-                              tick(member.userId, on === true);
-                            }}
-                          />
-                          <FieldContent>
-                            <FieldLabel>
-                              <span {...stylex.props(styles.who)}>
-                                <Avatar decorative name={member.name} size="xs">
-                                  <AvatarFallback />
-                                </Avatar>
-                                {member.name}
-                              </span>
-                            </FieldLabel>
-                            <FieldDescription>{member.email}</FieldDescription>
-                          </FieldContent>
-                        </Field>
-                      </li>
+                    {found.map((member, index) => (
+                      <PersonRow
+                        chosen={chosen.includes(member.userId)}
+                        first={index === 0}
+                        key={member.userId}
+                        member={member}
+                        onTick={(on) => {
+                          tick(member.userId, on);
+                        }}
+                      />
                     ))}
                   </ul>
                 )}

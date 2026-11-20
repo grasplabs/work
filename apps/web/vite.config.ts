@@ -83,6 +83,11 @@ export default defineConfig({
     localePreload(),
     tailwindcss(),
   ],
+  // The stylesheets outside StyleX (Grasp UI's tokens among them) keep
+  // light-dark() too: rewritten, a colour is settled once at the root, so a
+  // part that stands on its own ground (the sign-in page's night, a white
+  // button on it) drew the page's colours instead of its own.
+  css: { lightningcss: { exclude: Features.LightDark } },
   define: {
     // The build a page runs, in the error reports it sends: the commit CI
     // built it from, or `local`.

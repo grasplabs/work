@@ -14,7 +14,7 @@ import type {
 } from "@grasp-os/shared/ai-providers";
 import { failureText } from "@grasp-os/shared/errors";
 import { i18n as active } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
+import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -28,6 +28,7 @@ import { formatDollars } from "../format.ts";
 import { tellProvidersChanged } from "../frame/ai-key-banner.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { ConnectService } from "../grasp/blocks/connect-service/connect-service.tsx";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Button, useAction } from "../grasp/button/index.ts";
@@ -82,6 +83,7 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { ReadOnlyRow } from "./read-only-row.tsx";
 
 // Settings › AI providers, as the library's Settings pattern has it: one
 // compact card per topic, rows inside, every control on one edge and as
@@ -93,7 +95,12 @@ import { useCore } from "../use-core.ts";
 // once into a password field, goes straight to core and on to connect,
 // which seals it, and is never back on the page. Then the default model
 // and its fallbacks, the providers' main models first. The organization's
-// own admins change it; Grasp staff only read it.
+// own admins change it; Grasp staff only read it. While nothing is
+// connected and nothing answers, the Providers card is where the first
+// provider is connected: the library's Connect a service block, the
+// providers as tiles, an OpenAI-compatible endpoint on one quiet line under
+// them, and the key in the same card, added and tested in one step (Ruben,
+// 19 Nov 2026).
 
 /** The most fallbacks a choice may have, as core takes it. */
 const fallbacksMax = 5;
@@ -287,6 +294,23 @@ const KeyInput = ({
 /** Why a change failed, in the person's words. */
 const reasonOf = (error: unknown): string => failureText(error);
 
+/** `work`, refused with why in the person's words: core's refusal, or the provider's. */
+const withReason = async (work: Promise<void>): Promise<void> => {
+  try {
+    await work;
+  } catch (error) {
+    throw new Error(reasonOf(error), { cause: error });
+  }
+};
+
+/** Why a test failed, by core's code: this page's short words, else the chat's own. */
+const testFailureText = (code: string, i18n: I18n): string => {
+  const short = Object.hasOwn(testFailures, code)
+    ? testFailures[code]
+    : undefined;
+  return short === undefined ? failureMessage(code, i18n) : i18n._(short);
+};
+
 /** Test: one tiny call; working, then Works, or Failed and why under the name. */
 const useTest = (
   provider: OrganizationProviderId,
@@ -303,14 +327,7 @@ const useTest = (
       // How its calls go is read again: the test was one.
       void router.invalidate();
       if (!outcome.ok) {
-        const short = Object.hasOwn(testFailures, outcome.code)
-          ? testFailures[outcome.code]
-          : undefined;
-        throw new Error(
-          short === undefined
-            ? failureMessage(outcome.code, i18n)
-            : i18n._(short)
-        );
+        throw new Error(testFailureText(outcome.code, i18n));
       }
     },
     { working: t`Testing`, done: t`Works`, failed: t`Failed` }
@@ -547,17 +564,73 @@ const WhereItRuns = ({ provider }: { provider: OrganizationProviderId }) => {
   );
 };
 
+/** A custom endpoint's address. */
+const AddressField = ({
+  value,
+  onValueChange,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Field>
+      <FieldLabel>{t`Address`}</FieldLabel>
+      <Input
+        inputMode="url"
+        onValueChange={onValueChange}
+        placeholder="https://models.example.com/v1"
+        required
+        type="url"
+        value={value}
+      />
+      <FieldError match="valueMissing">{t`Enter your endpoint's address.`}</FieldError>
+      <FieldError match="typeMismatch">{t`Enter an address that starts with https://.`}</FieldError>
+    </Field>
+  );
+};
+
+/** A new provider's key, with what becomes of it. */
+const KeyField = ({
+  provider,
+  value,
+  onValueChange,
+}: {
+  provider: OrganizationProviderId;
+  value: string;
+  onValueChange: (value: string) => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Field>
+      <FieldLabel>{t`Key`}</FieldLabel>
+      <KeyInput
+        onValueChange={onValueChange}
+        provider={provider}
+        value={value}
+      />
+      <FieldDescription>
+        {t`Only its last four characters are shown again.`}
+      </FieldDescription>
+      <FieldError match="valueMissing">{t`Paste the key.`}</FieldError>
+    </Field>
+  );
+};
+
+/** Adds a provider's key, with a custom endpoint's address; throws, with why, where it failed. */
+type Connect = (
+  provider: OrganizationProviderId,
+  key: string,
+  baseUrl: string
+) => Promise<void>;
+
 /** Adding a provider, in a dialog: which one, by its mark; a custom endpoint's address; its key. */
 const AddProviderDialog = ({
   offered,
   onAdd,
 }: {
   offered: AiProvidersListing["offered"];
-  onAdd: (
-    provider: OrganizationProviderId,
-    key: string,
-    baseUrl: string
-  ) => Promise<void>;
+  onAdd: Connect;
 }) => {
   const { t } = useLingui();
   const formId = useId();
@@ -593,7 +666,7 @@ const AddProviderDialog = ({
         onClick={() => {
           setOpen(true);
         }}
-        size="sm"
+        size="xs"
         variant="ink"
       >
         {t`Add a provider`}
@@ -647,32 +720,13 @@ const AddProviderDialog = ({
                 ))}
               </RadioGroup>
               {custom ? (
-                <Field>
-                  <FieldLabel>{t`Address`}</FieldLabel>
-                  <Input
-                    inputMode="url"
-                    onValueChange={setBaseUrl}
-                    placeholder="https://models.example.com/v1"
-                    required
-                    type="url"
-                    value={baseUrl}
-                  />
-                  <FieldError match="valueMissing">{t`Enter your endpoint's address.`}</FieldError>
-                  <FieldError match="typeMismatch">{t`Enter an address that starts with https://.`}</FieldError>
-                </Field>
+                <AddressField onValueChange={setBaseUrl} value={baseUrl} />
               ) : null}
-              <Field>
-                <FieldLabel>{t`Key`}</FieldLabel>
-                <KeyInput
-                  onValueChange={setKey}
-                  provider={provider.provider}
-                  value={key}
-                />
-                <FieldDescription>
-                  {t`Only its last four characters are shown again.`}
-                </FieldDescription>
-                <FieldError match="valueMissing">{t`Paste the key.`}</FieldError>
-              </Field>
+              <KeyField
+                onValueChange={setKey}
+                provider={provider.provider}
+                value={key}
+              />
               {add.error === null || add.error === undefined ? null : (
                 <Alert tone="danger">{reasonOf(add.error)}</Alert>
               )}
@@ -934,7 +988,7 @@ const Models = ({
     defaultName = nameOf(defaultModel, providers);
   }
   return (
-    <SectionCard density="compact" flush title={t`Models`}>
+    <SectionCard variant="grouped" density="compact" flush title={t`Models`}>
       <SettingsRows>
         {editable && custom ? (
           <NameModel
@@ -972,14 +1026,14 @@ const Models = ({
                   }
                 }}
                 placeholder={t`Search models`}
-                triggerLabel={t`Show the models`}
+                words={{ trigger: t`Show the models` }}
                 size="sm"
                 value={defaultModel}
               />
             )}
           </SettingRow>
         ) : (
-          <FactRow label={t`Default model`}>{defaultName}</FactRow>
+          <ReadOnlyRow label={t`Default model`} value={defaultName} />
         )}
         {choice !== null && defaultModel === null && editable ? (
           <RowAlert variant="attention">
@@ -1010,7 +1064,7 @@ const Models = ({
                   }
                 }}
                 placeholder={t`Search models`}
-                triggerLabel={t`Show the models`}
+                words={{ trigger: t`Show the models` }}
                 size="sm"
                 value={null}
               />
@@ -1063,6 +1117,7 @@ const Source = ({
   const onGrasp = source === "grasp";
   return (
     <SectionCard
+      variant="grouped"
       {...(editable
         ? {
             actions: (
@@ -1115,6 +1170,81 @@ const Source = ({
   );
 };
 
+/** Adds `provider`'s key, with a custom endpoint's address. */
+const addProvider = async (
+  session: Session,
+  provider: OrganizationProviderId,
+  key: string,
+  baseUrl: string
+): Promise<void> => {
+  await (provider === "openai-compatible"
+    ? session.aiProviders.add({ provider, key, baseUrl })
+    : session.aiProviders.add({ provider, key }));
+};
+
+/**
+ * Connecting the first provider: the library's Connect a service block, one
+ * card of the named providers as tiles, an OpenAI-compatible endpoint on
+ * one quiet line under them, and the chosen one's key. `connect` adds and
+ * tests it, and throws with the provider's reason, which the block says
+ * under the key.
+ */
+const FirstProvider = ({
+  offered,
+  connect,
+}: {
+  offered: AiProvidersListing["offered"];
+  connect: Connect;
+}) => {
+  const { t } = useLingui();
+  const services = offered
+    .filter(({ provider }) => provider !== "openai-compatible")
+    .map(({ provider, label }) => {
+      const brand = marks[provider];
+      const placeholder = keyStarts[provider];
+      const { region } = aiProviders[provider];
+      return {
+        id: provider,
+        name: providerName(provider, label),
+        ...(brand === undefined ? {} : { brand }),
+        ...(placeholder === undefined ? {} : { placeholder }),
+        ...(region === "custom"
+          ? {}
+          : {
+              region:
+                region === "eu"
+                  ? { flag: EU, label: t`European Union` }
+                  : { flag: US, label: t`United States` },
+            }),
+      };
+    });
+  const endpoint = offered.some(
+    ({ provider }) => provider === "openai-compatible"
+  );
+  return (
+    <ConnectService
+      lead={t`Choose the AI that Grasp's chat, agents and workflows run on.`}
+      onConnect={async ({ service, key, address }) => {
+        // The block names an endpoint of your own by its own id, none of the providers'.
+        const provider =
+          offered.find((each) => each.provider === service)?.provider ??
+          "openai-compatible";
+        await withReason(connect(provider, key, address ?? ""));
+      }}
+      services={services}
+      title={t`Providers`}
+      {...(endpoint
+        ? {
+            custom: {
+              label: t`Use an OpenAI-compatible endpoint`,
+              name: providerName("openai-compatible", ""),
+            },
+          }
+        : {})}
+    />
+  );
+};
+
 /** Settings › AI providers, on what core listed; `editable` for the organization's own admins. */
 export const AiProvidersSettings = ({
   listing,
@@ -1123,7 +1253,7 @@ export const AiProvidersSettings = ({
   listing: AiProvidersListing;
   editable: boolean;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const router = useRouter();
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
@@ -1158,16 +1288,31 @@ export const AiProvidersSettings = ({
       );
     });
   };
-  const addKey = async (
-    provider: OrganizationProviderId,
-    key: string,
-    baseUrl: string
-  ): Promise<void> => {
-    await changeOrThrow(async (session) =>
-      provider === "openai-compatible"
-        ? await session.aiProviders.add({ provider, key, baseUrl })
-        : await session.aiProviders.add({ provider, key })
-    );
+  const addKey: Connect = async (provider, key, baseUrl) => {
+    await changeOrThrow(async (session) => {
+      await addProvider(session, provider, key, baseUrl);
+    });
+  };
+  // The first provider, in one step: its key added, then tested with one
+  // tiny call, and the page read again only after, so the card turns into
+  // the connected row only once the key works. A key its provider refuses
+  // is removed again: kept, it would stand as the organization's provider,
+  // close this card on a key that doesn't work, and leave every chat, agent
+  // and workflow failing on it, while the admin, told why under the field,
+  // pastes the right one here. A custom endpoint is kept untested: it is
+  // tested once a model it serves is named (testModelOf).
+  const connect: Connect = async (provider, key, baseUrl) => {
+    await changeOrThrow(async (session) => {
+      await addProvider(session, provider, key, baseUrl);
+      if (provider === "openai-compatible") {
+        return;
+      }
+      const outcome = await session.aiProviders.test(provider);
+      if (!outcome.ok) {
+        await session.aiProviders.remove(provider);
+        throw new Error(testFailureText(outcome.code, i18n));
+      }
+    });
   };
   const addable = offered.filter(
     ({ provider }) => !providers.some((each) => each.provider === provider)
@@ -1186,50 +1331,65 @@ export const AiProvidersSettings = ({
           });
         }}
       />
-      <SectionCard
-        {...(editable && addable.length > 0
-          ? {
-              actions: <AddProviderDialog offered={addable} onAdd={addKey} />,
-            }
-          : {})}
-        density="compact"
-        flush
-        title={t`Providers`}
-      >
-        {failure === undefined && !unanswered ? null : (
-          <SettingsRows>
-            {failure === undefined ? null : (
+      {unanswered && failure !== undefined ? (
+        <Alert tone="danger">{failure}</Alert>
+      ) : null}
+      {unanswered && editable ? (
+        // Nothing answers yet: the card is where the first provider is
+        // connected, for the organization's own admins.
+        <FirstProvider connect={connect} offered={addable} />
+      ) : null}
+      {unanswered && !editable ? (
+        <SectionCard variant="grouped" density="compact" title={t`Providers`}>
+          <Text size="sm" tone="muted">
+            {t`The organization's own admins connect its AI provider here.`}
+          </Text>
+        </SectionCard>
+      ) : null}
+      {unanswered ? null : (
+        <SectionCard
+          variant="grouped"
+          {...(editable && addable.length > 0
+            ? {
+                actions: <AddProviderDialog offered={addable} onAdd={addKey} />,
+              }
+            : {})}
+          density="compact"
+          flush
+          title={t`Providers`}
+        >
+          {failure === undefined ? null : (
+            <SettingsRows>
               <RowAlert variant="danger">{failure}</RowAlert>
-            )}
-            {unanswered ? (
-              <RowAlert variant="attention">
-                {t`No provider is connected, so Grasp's AI can't answer yet.`}
-              </RowAlert>
-            ) : null}
-          </SettingsRows>
-        )}
-        {providers.length > 0 ? (
-          <ItemGroup aria-label={t`Connected providers`} separated>
-            {providers.map((provider) => (
-              <ProviderRow
-                editable={editable}
-                // A new key is a new row: no test of the key it replaced stays.
-                key={`${provider.provider}:${provider.mask}:${String(provider.updatedAt)}`}
-                onDelete={async () => {
-                  await changeOrThrow(async (session) => {
-                    await session.aiProviders.remove(provider.provider);
-                  });
-                }}
-                onReplace={async (key) => {
-                  await addKey(provider.provider, key, provider.baseUrl ?? "");
-                }}
-                provider={provider}
-                testModel={testModelOf(provider.provider, choice)}
-              />
-            ))}
-          </ItemGroup>
-        ) : null}
-      </SectionCard>
+            </SettingsRows>
+          )}
+          {providers.length > 0 ? (
+            <ItemGroup aria-label={t`Connected providers`} separated>
+              {providers.map((provider) => (
+                <ProviderRow
+                  editable={editable}
+                  // A new key is a new row: no test of the key it replaced stays.
+                  key={`${provider.provider}:${provider.mask}:${String(provider.updatedAt)}`}
+                  onDelete={async () => {
+                    await changeOrThrow(async (session) => {
+                      await session.aiProviders.remove(provider.provider);
+                    });
+                  }}
+                  onReplace={async (key) => {
+                    await addKey(
+                      provider.provider,
+                      key,
+                      provider.baseUrl ?? ""
+                    );
+                  }}
+                  provider={provider}
+                  testModel={testModelOf(provider.provider, choice)}
+                />
+              ))}
+            </ItemGroup>
+          ) : null}
+        </SectionCard>
+      )}
       {providers.length === 0 ? null : (
         <Models
           choice={choice}

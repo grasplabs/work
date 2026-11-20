@@ -16,8 +16,11 @@ import type {
   ButtonVariant,
   ButtonWords,
 } from "../button";
+import { buttonWords } from "../button/words";
+import type { ButtonOwnWords } from "../button/words";
 import type { IconData } from "../icons";
 import { ms } from "../tokens/tokens.values";
+import { useWords } from "../words/words";
 import { useStill } from "./still-context";
 import { dialogStyles as styles } from "./styles";
 
@@ -43,6 +46,12 @@ interface ActionBase extends Omit<
    * `danger` action asks with its own words when this is left out.
    */
   agentConfirm?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ actionFailed: "Could not save" }`): Button's
+   * (`button`), as the action is one. Any left out are the catalogue's, else English. Its
+   * `workingLabel` and `failedLabel` stay its own props and win.
+   */
+  words?: Partial<ButtonOwnWords>;
 }
 
 /** An action that only closes, such as Cancel. */
@@ -63,8 +72,12 @@ interface WithWork {
   action: (event: Event | undefined, details: { source: string }) => unknown;
   /** The words while the work runs ("Renaming"). Leave it out to keep the button's own words. */
   workingLabel?: string;
-  /** The words when the work failed, said plainly on the button and to a screen reader ("Could not rename"). */
-  failedLabel: string;
+  /**
+   * The words when the work failed, said plainly on the button and to a screen reader: what did
+   * not happen ("Could not rename"). Say the action's own words; leave it out for the neutral one.
+   * @default "Could not finish"
+   */
+  failedLabel?: string;
 }
 
 /** Every prop a DialogAction takes: these, and the rest of UI SDK's DialogClose. */
@@ -102,6 +115,8 @@ export interface ActionButtonProps {
   look: Pick<ActionBase, "children" | "variant" | "icon" | "agentConfirm"> & {
     workingLabel?: string;
     failedLabel?: string;
+    /** The action's own words (DialogAction's `words`), over the catalogue's. */
+    words?: Partial<ButtonOwnWords> | undefined;
   };
   /** Its place in a still drawing for the docs (still.styles.ts), in place of its own. */
   still?: ButtonLayoutStyle;
@@ -131,12 +146,13 @@ export const ActionButton = ({
   life,
 }: ActionButtonProps) => {
   const failed = useFailed(error);
+  const { actionFailed } = useWords("button", buttonWords, look.words);
   const {
     variant = "quiet",
     icon,
     children,
     workingLabel,
-    failedLabel,
+    failedLabel = actionFailed,
     agentConfirm,
   } = look;
   const words = typeof children === "string" ? children : undefined;
@@ -146,7 +162,7 @@ export const ActionButton = ({
         state: currentOf(state, failed),
         workingLabel,
         doneLabel: words ?? "",
-        failedLabel: failedLabel ?? "",
+        failedLabel,
       }
     : {};
   return (
@@ -194,6 +210,7 @@ interface LiveActionProps {
 // person's failed press reaches the console as nothing.
 const LiveAction = ({ rest, action, look }: LiveActionProps) => {
   const running = useRef<Promise<unknown> | null>(null);
+  const { actionFailed } = useWords("button", buttonWords, look.words);
   if (action === undefined) {
     return (
       <ClosePrimitive
@@ -214,7 +231,12 @@ const LiveAction = ({ rest, action, look }: LiveActionProps) => {
     event: Event | undefined,
     details: { source: string }
   ) => {
-    const run = runWork(action, event, details, look.failedLabel);
+    const run = runWork(
+      action,
+      event,
+      details,
+      look.failedLabel ?? actionFailed
+    );
     running.current = run;
     return await run;
   };
@@ -264,6 +286,7 @@ export const DialogAction = (props: DialogActionProps) => {
     workingLabel,
     failedLabel,
     agentConfirm,
+    words,
     ...rest
   } = props;
   const still = useStill();
@@ -274,6 +297,7 @@ export const DialogAction = (props: DialogActionProps) => {
     workingLabel,
     failedLabel,
     agentConfirm,
+    words,
   };
   if (still) {
     const busy = still.busy && action !== undefined;

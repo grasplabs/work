@@ -3,16 +3,19 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
-import { FactRow, RowAlert } from "../grasp/setting-row/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import type { KeyValueItem } from "../grasp/key-value/index.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
 // Settings › Audit trail › Integrity and archive: how long Grasp keeps what
-// it records (`audit.retention`), as facts in the dialog. The archive
+// it records (`audit.retention`), as name and value in the dialog, one
+// list with the chain's last check. The archive
 // itself is searched from the events' Filters (activity/audit-log.tsx).
 
-/** How long Grasp keeps events and run details, as core answered: rows of facts. */
+/** How long Grasp keeps events and run details, as core answered: a list of facts. */
 export const RetentionView = ({
   retention,
 }: {
@@ -25,39 +28,28 @@ export const RetentionView = ({
       message: plural(days, { one: "# day", other: "# days" }),
       context: "how long something is kept",
     });
-  if (retention === undefined) {
-    return null;
+  if (retention !== undefined && retention.state !== "ready") {
+    return <Alert tone="danger">{notLoadedText(retention, i18n) ?? ""}</Alert>;
   }
-  if (retention.state !== "ready") {
-    return (
-      <RowAlert variant="danger">
-        {notLoadedText(retention, i18n) ?? ""}
-      </RowAlert>
-    );
-  }
-  const { auditDays, archiveDays, runDays } = retention.data;
+  const kept = retention?.data;
+  // While it is read, each value waits at its own width.
+  const fact = (key: string, days: number | undefined): KeyValueItem =>
+    days === undefined
+      ? { key, value: "", pending: true }
+      : { key, value: dayCount(days) };
   return (
-    <>
-      <FactRow help={t`Then events move to the archive.`} label={t`In the log`}>
-        {dayCount(auditDays)}
-      </FactRow>
-      <FactRow
-        help={t`From when each event was recorded; then deleted.`}
-        label={t`In the archive`}
-      >
-        {dayCount(archiveDays)}
-      </FactRow>
-      <FactRow
-        help={t`After a run ends; then its inputs, outputs and messages go.`}
-        label={t`Workflow run details`}
-      >
-        {dayCount(runDays)}
-      </FactRow>
-    </>
+    <KeyValueList
+      items={[
+        fact(t`Events in the log`, kept?.auditDays),
+        fact(t`Events in the archive`, kept?.archiveDays),
+        fact(t`Workflow run details`, kept?.runDays),
+      ]}
+      variant="inline"
+    />
   );
 };
 
-/** Retention, for an admin on Settings › Audit trail, read as the page shows, as rows. */
+/** Retention, for an admin on Settings › Audit trail, read as the page shows. */
 export const RetentionRows = () => {
   const core = useCore();
   const [retention, setRetention] = useState<Loaded<AuditRetention>>();

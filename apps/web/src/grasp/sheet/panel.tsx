@@ -19,6 +19,7 @@ import { Cross } from "../icons";
 import { useWords, withGiven } from "../words/words";
 import { useSize } from "./size-context";
 import { sheetWords } from "./words";
+import type { SheetWords } from "./words";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
@@ -34,6 +35,12 @@ export interface SheetContentProps extends Omit<
    * @default "Close"
    */
   closeLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ close: "Close the filters" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SheetWords>;
   /**
    * Where its close button stands: `corner`, its own; `none`, where the content puts a SheetClose
    * of its own (App shell's menu puts it in its sidebar's head, so the panel has one head).
@@ -55,15 +62,28 @@ export interface SheetContentProps extends Omit<
   bounds?: "window" | "shell";
 }
 
-/** The sheet's close button, for content that places its own (`SheetPanel close="none"`). */
-export const SheetClose = ({
-  label,
-  size = "sm",
-}: {
+/** Every prop a SheetClose takes. */
+export interface SheetCloseProps {
+  /**
+   * Its name, in the page's language.
+   * @default "Close"
+   */
   label?: string;
+  /** @default "sm" */
   size?: "xs" | "sm";
-}) => {
-  const words = withGiven(useWords("sheet", sheetWords), { close: label });
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ close: "Close the filters" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SheetWords>;
+}
+
+/** The sheet's close button, for content that places its own (`SheetPanel close="none"`). */
+export const SheetClose = ({ label, size = "sm", words }: SheetCloseProps) => {
+  const said = withGiven(useWords("sheet", sheetWords, words), {
+    close: label,
+  });
   return (
     <ClosePrimitive
       render={(props: Record<string, unknown>) => (
@@ -72,7 +92,7 @@ export const SheetClose = ({
           variant="ghost"
           size={size}
           icon={Cross}
-          aria-label={words.close}
+          aria-label={said.close}
         />
       )}
     />
@@ -83,12 +103,13 @@ export const SheetClose = ({
 export const SheetContent = ({
   children,
   closeLabel: closeGiven,
+  words,
   close = "corner",
   corner = "sheet",
   bounds = "window",
   ...rest
 }: SheetContentProps) => {
-  const closeLabel = withGiven(useWords("sheet", sheetWords), {
+  const closeLabel = withGiven(useWords("sheet", sheetWords, words), {
     close: closeGiven,
   }).close;
   const size = useSize();

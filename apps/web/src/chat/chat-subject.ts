@@ -31,7 +31,6 @@ import type { ChatSlot } from "./active-chat.ts";
 export interface ChatSubjectWords {
   title: MessageDescriptor;
   placeholder: MessageDescriptor;
-  empty: MessageDescriptor;
 }
 
 /** How a kind of subject has its chat. */
@@ -51,14 +50,12 @@ const kinds: Record<ChatSubjectKind, ChatSubjectKindOf> = {
     words: {
       title: msg`Ask for a change`,
       placeholder: msg`Say what should change`,
-      empty: msg`Say what to change. Only you see the changes until you share them with your team.`,
     },
   },
   workflow: {
     words: {
       title: msg`Ask for a change`,
       placeholder: msg`Say what should change`,
-      empty: msg`Say what to change. Only you see the changes, in the Flow: its runs go on as they are until a new version runs for your team.`,
     },
   },
 };

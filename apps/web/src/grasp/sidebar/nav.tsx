@@ -17,7 +17,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { ReactElement, RefObject } from "react";
+import type { ReactElement, ReactNode, RefObject } from "react";
 
 import { focus } from "../focus/focus";
 import { ChevronRight, Icon, Search } from "../icons";
@@ -28,6 +28,7 @@ import {
   InputGroupText,
 } from "../input-group";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { TreeChevronSeated } from "../tree/seat";
 
 const HOVER = media.hover;
 const COARSE = media.coarse;
@@ -47,6 +48,7 @@ export interface SidebarFilter {
 /** A row's words, as the filter reads them. */
 export interface NavRow {
   label: string;
+  current?: boolean;
   keywords?: readonly string[];
   rows?: readonly { label: string }[];
 }
@@ -64,6 +66,7 @@ export interface NavGroup<Row extends NavRow> {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
   count?: number;
+  content?: ReactNode;
 }
 
 // The list's end fades out over its last rows (black to here, clear by its end, less a hair).
@@ -204,6 +207,31 @@ export const navStyles = stylex.create({
   },
   // Folded, it points the way of reading: the mirrored icon already does.
   chevronFolded: { transform: { default: "none", ":dir(rtl)": "none" } },
+  // A group's own content in place of its rows (a Tree), at the rows' inset.
+  // A Tree here takes the sidebar's rows' measures, words and fills through its tokens, so its rows
+  // read as the sidebar's own: the height, inset, gap and corner, the quieter words that brighten
+  // under a pointer, their weight and tracking, the icons in the words' colour, and the hover and
+  // current fills.
+  content: {
+    display: { default: "block", ":is([hidden])": "none" },
+    minWidth: 0,
+    "--grasp-tree-row": grasp.shellRow,
+    "--grasp-tree-row-inset": grasp.shellRowInline,
+    "--grasp-tree-row-gap": grasp.shellRowGap,
+    "--grasp-tree-icon-gap": grasp.shellIconGap,
+    // A child's icon stands under its parent's words.
+    "--grasp-tree-indent": `calc(${grasp.shellIcon} + ${grasp.shellIconGap})`,
+    "--grasp-tree-row-corner": grasp.shellCorner,
+    "--grasp-tree-text": grasp.shellTextSecondary,
+    "--grasp-tree-text-hover": grasp.shellText,
+    "--grasp-tree-icon": grasp.shellTextSecondary,
+    "--grasp-tree-text-chosen": grasp.shellText,
+    "--grasp-tree-weight": grasp.weightMedium,
+    "--grasp-tree-weight-current": grasp.weightMedium,
+    "--grasp-tree-tracking": grasp.shellTracking,
+    "--grasp-tree-fill-hover": grasp.shellHover,
+    "--grasp-tree-fill-current": grasp.shellSelected,
+  },
   list: {
     display: { default: "flex", ":is([hidden])": "none" },
     flexDirection: "column",
@@ -474,6 +502,24 @@ const onListKey = (
   to.focus();
 };
 
+/** Where a folding group's row stands in its tree guide: the last branch, and on the path to the current row. */
+export interface GuidePlace {
+  last: boolean;
+  path: "above" | "at" | "off";
+}
+
+/** Where row `index` of a list stands on the path to its current row: above it, at it, or off it. */
+export const pathOf = (
+  rows: readonly { current?: boolean }[],
+  index: number
+): GuidePlace["path"] => {
+  const current = rows.findIndex((row) => row.current === true);
+  if (current === -1 || index > current) {
+    return "off";
+  }
+  return index === current ? "at" : "above";
+};
+
 interface NavProps<Row extends NavRow> {
   groups: readonly NavGroup<Row>[];
   label: string;
@@ -483,9 +529,17 @@ interface NavProps<Row extends NavRow> {
   storageKey?: string;
   keys?: "tab" | "list";
   /** Draws a row; `item` marks it as one of the list's items, for `keys="list"`. */
-  renderRow: (row: Row, item: boolean) => ReactElement;
+  renderRow: (
+    row: Row,
+    item: boolean,
+    place: GuidePlace | undefined
+  ) => ReactElement;
   /** Draws the last quiet row of the group at `index` ("All chats"), or nothing. Not while filtering. */
-  renderMore?: (index: number, item: boolean) => ReactElement | null;
+  renderMore?: (
+    index: number,
+    item: boolean,
+    place: GuidePlace | undefined
+  ) => ReactElement | null;
 }
 
 /** The filter field, the system's own (InputGroup): Escape clears it, ↓ moves into the rows. */
@@ -637,6 +691,47 @@ const PartLabel = ({
         </a>
       )}
     </div>
+  );
+};
+
+/**
+ * A group's rows, and its quiet last row. A folding group's rows are nested under its label, so each
+ * knows its place in the tree guide (the Sidebar draws it): the last one ends the stem.
+ */
+const GroupRows = <Row extends NavRow>({
+  rows,
+  index,
+  list,
+  branched,
+  more,
+  renderRow,
+}: {
+  rows: readonly Row[];
+  index: number;
+  list: boolean;
+  branched: boolean;
+  more: NavProps<Row>["renderMore"];
+  renderRow: NavProps<Row>["renderRow"];
+}) => {
+  const last =
+    more?.(index, list, branched ? { last: true, path: "off" } : undefined) ??
+    null;
+  return (
+    <>
+      {rows.map((row, at) =>
+        renderRow(
+          row,
+          list,
+          branched
+            ? {
+                last: at === rows.length - 1 && last === null,
+                path: pathOf(rows, at),
+              }
+            : undefined
+        )
+      )}
+      {last}
+    </>
   );
 };
 
@@ -795,9 +890,11 @@ export const SidebarNav = <Row extends NavRow>({
   const visible = groups.map((group) =>
     group.rows.filter((row) => matches(row, needle))
   );
-  const none = needle !== "" && visible.every((rows) => rows.length === 0);
-  const drawn = (index: number) =>
-    needle === "" || (visible[index]?.length ?? 0) > 0;
+  // A group of its own content (a Tree) is not filtered: it stands as it is while the filter holds words.
+  const held = (index: number) =>
+    groups[index]?.content !== undefined || (visible[index]?.length ?? 0) > 0;
+  const none = needle !== "" && groups.every((_group, index) => !held(index));
+  const drawn = (index: number) => needle === "" || held(index);
 
   return (
     <nav ref={nav} aria-label={label} {...stylex.props(navStyles.body)}>
@@ -815,7 +912,7 @@ export const SidebarNav = <Row extends NavRow>({
       )}
       {groups.map((group, index) => {
         const rows = visible[index] ?? [];
-        if (rows.length === 0 && needle !== "") {
+        if (!drawn(index)) {
           return null;
         }
         const named = group.label !== undefined && group.label !== "";
@@ -851,23 +948,42 @@ export const SidebarNav = <Row extends NavRow>({
                 }}
               />
             )}
-            <ul
-              id={listId}
-              aria-labelledby={named ? heading : undefined}
-              {...foldedLook(shut, foldsRead)}
-              data-sidebar-fold={
-                group.collapsible === true && group.collapsed === undefined
-                  ? keyOf(group, index)
-                  : undefined
-              }
-              {...stylex.props(
-                navStyles.list,
-                group.collapsible === true && navStyles.listUnder
-              )}
-            >
-              {rows.map((row) => renderRow(row, list))}
-              {needle === "" && renderMore?.(index, list)}
-            </ul>
+            {group.content === undefined ? (
+              <ul
+                id={listId}
+                aria-labelledby={named ? heading : undefined}
+                {...foldedLook(shut, foldsRead)}
+                data-sidebar-fold={
+                  group.collapsible === true && group.collapsed === undefined
+                    ? keyOf(group, index)
+                    : undefined
+                }
+                {...stylex.props(
+                  navStyles.list,
+                  group.collapsible === true && navStyles.listUnder
+                )}
+              >
+                <GroupRows
+                  rows={rows}
+                  index={index}
+                  list={list}
+                  branched={group.collapsible === true}
+                  more={needle === "" ? renderMore : undefined}
+                  renderRow={renderRow}
+                />
+              </ul>
+            ) : (
+              <div
+                id={listId}
+                data-slot="sidebar-group-content"
+                {...foldedLook(shut, foldsRead)}
+                {...stylex.props(navStyles.content)}
+              >
+                <TreeChevronSeated value="icon">
+                  {group.content}
+                </TreeChevronSeated>
+              </div>
+            )}
           </div>
         );
       })}

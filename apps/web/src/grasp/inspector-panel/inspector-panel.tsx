@@ -1,11 +1,17 @@
 "use client";
 
-import { IconTile } from "../icon-tile";
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
+import * as stylex from "@stylexjs/stylex";
+
+import { visuallyHidden } from "../hidden/hidden";
+import { IconTile } from "../icon-tile";
 import { Icon, Lock, Plus, Trash } from "../icons";
+import { KeyValueList } from "../key-value";
+import type { KeyValueItem } from "../key-value";
 import { Panel, PanelHeader, PanelText, PanelView } from "../panel";
 import { PanelSection } from "../panel-section";
 import { RowList, RowListAction, RowListItem } from "../row-list";
+import { grasp } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
 import type {
   InspectorPanelProps,
@@ -16,6 +22,13 @@ import type {
 import { englishWords } from "./words";
 
 export { englishWords } from "./words";
+
+const styles = stylex.create({
+  // The facts at the panel's own inset, the inset of its head and of its rows' words.
+  facts: { paddingInline: grasp.inspectorInset },
+  // A missing value: a quiet dash for the eye.
+  none: { color: grasp.muted },
+});
 
 const noSections: readonly InspectorSection[] = [];
 const noRows: readonly InspectorRow[] = [];
@@ -54,11 +67,48 @@ const Row = ({
   );
 };
 
-/** Whether a section's card holds anything: rows, long words, or what the caller gave. */
+/** Whether a section's card holds anything: rows, facts, long words, or what the caller gave. */
 const holds = (section: InspectorSection) =>
   (section.rows !== undefined && section.rows.length > 0) ||
+  (section.facts !== undefined && section.facts.length > 0) ||
   section.text !== undefined ||
   section.content !== undefined;
+
+/** A value that is not there: null, undefined, false or empty words. */
+const missing = (value: KeyValueItem["value"]) =>
+  value === null || value === undefined || value === false || value === "";
+
+/** The section's facts, side by side, at the panel's inset; a missing value a quiet dash, a pending one Key value's line. */
+const Facts = ({
+  facts,
+  words,
+}: {
+  facts: readonly KeyValueItem[];
+  words: InspectorPanelWords;
+}) => (
+  <div data-slot="inspector-facts" {...stylex.props(styles.facts)}>
+    <KeyValueList
+      variant="inline"
+      divided
+      items={facts.map((fact) =>
+        // A value still on its way is not missing: Key value draws its own short line for it.
+        missing(fact.value) && fact.pending !== true
+          ? {
+              ...fact,
+              value: (
+                <>
+                  <span aria-hidden="true" {...stylex.props(styles.none)}>
+                    —
+                  </span>
+                  <span {...stylex.props(visuallyHidden)}>{words.none}</span>
+                </>
+              ),
+            }
+          : fact
+      )}
+    />
+  </div>
+);
 
 /** A section's rows, as one list named for the section. */
 const Rows = ({
@@ -104,6 +154,10 @@ const Section = ({
         {section.text}
       </PanelText>
     );
+  const facts =
+    section.facts !== undefined && section.facts.length > 0 ? (
+      <Facts facts={section.facts} words={words} />
+    ) : undefined;
   const add =
     handleAdd === undefined ? undefined : (
       <RowListAction icon={Plus} onPress={handleAdd}>
@@ -116,7 +170,7 @@ const Section = ({
       hint={section.hint}
       action={section.action ?? add}
     >
-      {hasRows ? <Rows section={section} words={words} /> : other}
+      {hasRows ? <Rows section={section} words={words} /> : (facts ?? other)}
     </PanelSection>
   );
 };
@@ -138,7 +192,7 @@ const nameOf = (props: { "aria-label"?: string; label?: string }) =>
 
 /** The panel beside a page that says what a thing is and what it is made of. */
 export const InspectorPanel = (props: InspectorPanelProps) => {
-  const { title, icon, views, sections, framed = true } = props;
+  const { title, icon, views, sections, framed } = props;
   const label = nameOf(props);
   // Its words: the product's, by its catalogue, else English; the caller's `words` still win.
   const words = withGiven(
@@ -177,6 +231,7 @@ export const InspectorPanel = (props: InspectorPanelProps) => {
         }))}
         viewsLabel={words.views}
         texture={props.texture === true}
+        loading={props.loading === true}
       />
       {views === undefined ? (
         <PanelView>

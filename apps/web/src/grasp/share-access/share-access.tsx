@@ -215,6 +215,12 @@ export interface ShareAccessProps {
   layout?: ShareAccessLayoutStyle;
   /** @deprecated Use `layout`. */
   style?: ShareAccessLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ find: "Search people and teams" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<ShareAccessWords>;
 }
 
 // The add row follows its own width, not the window's: in a narrow Sheet on a wide screen it
@@ -666,6 +672,12 @@ export interface ShareAccessFootProps {
    * @default "Done"
    */
   doneLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ done: "Close" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<ShareAccessWords>;
 }
 
 /**
@@ -679,13 +691,14 @@ export const ShareAccessFoot = ({
   copiedLabel: copiedGiven,
   copyFailedLabel: copyFailedGiven,
   doneLabel: doneGiven,
+  words,
 }: ShareAccessFootProps) => {
   const {
     copyLink: copyLinkLabel,
     copied: copiedLabel,
     copyFailed: copyFailedLabel,
     done: doneLabel,
-  } = withGiven(useWords("shareAccess", shareAccessWords), {
+  } = withGiven(useWords("shareAccess", shareAccessWords, words), {
     copyLink: copyLinkGiven,
     copied: copiedGiven,
     copyFailed: copyFailedGiven,
@@ -752,7 +765,7 @@ const Preview = ({ preview, label }: { preview: ReactNode; label: string }) => {
 
 /** Who has access, at what level, and how to add more: the content of a Dialog or a Sheet. */
 export const ShareAccess = (given: ShareAccessProps) => {
-  const words = useWords("shareAccess", shareAccessWords);
+  const words = useWords("shareAccess", shareAccessWords, given.words);
   const props = withDefaults(given, words);
   const { members, onRemove } = props;
   const box = useRef<HTMLDivElement | null>(null);

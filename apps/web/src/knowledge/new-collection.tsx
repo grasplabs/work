@@ -21,7 +21,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../grasp/dialog/index.ts";
-import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import { Plus } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
@@ -252,15 +257,18 @@ const CollectionForm = ({ admin }: { admin: boolean }) => {
                 onChange={setTeamIds}
                 teams={teams}
               />
-              <Switch
-                checked={sensitive}
-                description={t`The model gateway treats what agents read from it as sensitive.`}
-                disabled={busy}
-                label={t`Sensitive`}
-                onCheckedChange={(checked) => {
-                  setSensitive(checked);
-                }}
-              />
+              <Field orientation="horizontal" disabled={busy}>
+                <FieldContent>
+                  <FieldLabel>{t`Sensitive`}</FieldLabel>
+                  <FieldDescription>{t`The model gateway treats what agents read from it as sensitive.`}</FieldDescription>
+                </FieldContent>
+                <Switch
+                  checked={sensitive}
+                  onCheckedChange={(checked) => {
+                    setSensitive(checked);
+                  }}
+                />
+              </Field>
             </>
           ) : null}
           <ErrorText>{failure}</ErrorText>

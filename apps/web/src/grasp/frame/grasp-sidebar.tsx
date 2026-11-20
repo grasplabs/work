@@ -3,13 +3,18 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useLocation, useMatchRoute } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useAgentSection } from "../../agents/agent-section.tsx";
+import { useAppSection } from "../../apps/app-section.tsx";
+import { useBrainSection } from "../../brain/brain-section.tsx";
 import { chatsKey, useChatsWindow } from "../../chat/chat-switcher.tsx";
 import { useRecentChats } from "../../chat/sidebar-chats.tsx";
+import { useIntegrationsSection } from "../../connections/integrations-sidebar.tsx";
 import type { CoreConnection } from "../../core-connection.ts";
+import { useMatchLatest } from "../../frame/match-latest.ts";
+import type { RouteTo } from "../../frame/match-latest.ts";
 import {
   organizationOf,
   useShownOrganization,
@@ -18,6 +23,7 @@ import { useSignOut } from "../../frame/person-menu.tsx";
 import { usePersonTheme } from "../../frame/person-theme.tsx";
 import { useSidebarApps } from "../../frame/surface-nav.tsx";
 import { chooseTheme, isTheme } from "../../frame/theme.ts";
+import { useWayOut } from "../../frame/way-out.tsx";
 import type { InboxItem } from "../../inbox/items.ts";
 import { useInboxGroups, useWaitingItems } from "../../inbox/sidebar-inbox.tsx";
 import { appSplat } from "../../pages/app-address.ts";
@@ -36,8 +42,6 @@ import {
   Conversation,
   Home,
   Cycle,
-  Inbox,
-  Projects,
   Question,
   Settings,
   Computer,
@@ -48,7 +52,7 @@ import {
   Icon,
 } from "../icons/index.ts";
 import type {
-  SidebarGroup,
+  SidebarGroupEntry,
   SidebarMenuEntry,
   SidebarProfileProps,
   SidebarProps,
@@ -66,7 +70,7 @@ const styles = stylex.create({
 // App shell stands it beside the page, folded as the person left it in this
 // browser (the frame keeps that), and on a phone in its menu's sheet.
 
-/** The Dashboard's count in words, for a screen reader: the badge shows the number alone. */
+/** What waits, in words, for a screen reader: the badge shows the number alone. */
 const thingsWaiting = (waiting: number): string =>
   plural(waiting, { one: "# thing waiting", other: "# things waiting" });
 
@@ -86,10 +90,9 @@ const useGroups = (
   identity: Identity,
   tab: SidebarView,
   waitingItems: readonly InboxItem[] | undefined
-): SidebarGroup[] => {
+): SidebarGroupEntry[] => {
   const { t } = useLingui();
-  const matchRoute = useMatchRoute();
-  const waiting = waitingItems?.length;
+  const matchRoute = useMatchLatest();
   const inbox = useInboxGroups(waitingItems);
   const workflowsWaiting = useWorkflowsWaiting();
   const apps = useSidebarApps(core);
@@ -101,10 +104,12 @@ const useGroups = (
   if (identity.onboardingOnly === true) {
     return [];
   }
-  const at = (to: string, fuzzy = true) => matchRoute({ to, fuzzy }) !== false;
+  // The address being loaded, not the last one loaded: a page's pending state
+  // already marks its own row (main.tsx shows it at once).
+  const at = (to: RouteTo, fuzzy = true) => matchRoute({ to, fuzzy }) !== false;
   const inWorkflows = at("/workflows");
   const onRequests = at("/workflows/requests");
-  const sections: SidebarGroup = {
+  const sections: SidebarGroupEntry = {
     rows: [
       {
         label: t`Chat`,
@@ -113,24 +118,10 @@ const useGroups = (
         current: at("/", false),
       },
       {
-        label: t`Dashboard`,
-        icon: Inbox,
-        render: <Link to="/dashboard" />,
-        current: at("/dashboard", false),
-        count: waiting,
-        countLabel: thingsWaiting(waiting ?? 0),
-      },
-      {
         label: t`Brain`,
         icon: Brain,
         render: <Link to="/brain" />,
         current: at("/brain"),
-      },
-      {
-        label: t`Projects`,
-        icon: Projects,
-        render: <Link to="/projects" />,
-        current: at("/projects"),
       },
       {
         label: t`Apps`,
@@ -176,7 +167,7 @@ const useGroups = (
     ],
   };
   // The Apps' own entries (spec 34.1), a group of their own; none when there are none.
-  const fromApps: SidebarGroup[] =
+  const fromApps: SidebarGroupEntry[] =
     apps.length === 0
       ? []
       : [
@@ -212,7 +203,7 @@ const useGroups = (
         ];
   // The person's recent chats: a group of their own under the product's
   // sections, named, so they never stand between the sections.
-  const chats: SidebarGroup[] =
+  const chats: SidebarGroupEntry[] =
     recent.length === 0
       ? []
       : [
@@ -236,12 +227,6 @@ const useGroups = (
   return tab === "inbox" ? inbox : [sections, ...chats, ...fromApps];
 };
 
-/** A page outside Settings, to go back to: its path and its search. */
-interface Outside {
-  pathname: string;
-  search: Record<string, unknown>;
-}
-
 /**
  * Settings as the sidebar's section while the person is in it: Back to the
  * page they came from (Chat, when they landed on Settings), then the
@@ -249,15 +234,10 @@ interface Outside {
  */
 const useSettingsSection = (identity: Identity): SidebarSection | undefined => {
   const { t, i18n } = useLingui();
-  const { pathname, search } = useLocation();
+  const { pathname } = useLocation();
   const inSettings =
     pathname === "/settings" || pathname.startsWith("/settings/");
-  // The last page outside Settings; kept while the frame is, so a reload on
-  // a section goes back to Chat.
-  const [outside, setOutside] = useState<Outside>();
-  if (!inSettings && outside?.pathname !== pathname) {
-    setOutside({ pathname, search });
-  }
+  const wayOut = useWayOut();
   if (!inSettings) {
     return undefined;
   }
@@ -265,14 +245,11 @@ const useSettingsSection = (identity: Identity): SidebarSection | undefined => {
     id: "settings",
     title: t`Settings`,
     icon: Settings,
+    // Back and its name as one press: the name opens Settings' first page.
+    home: <Link to="/settings" />,
     back: {
       label: t`Back`,
-      render:
-        outside === undefined ? (
-          <Link to="/" />
-        ) : (
-          <Link search={outside.search} to={outside.pathname} />
-        ),
+      render: wayOut,
     },
     groups: groupedSectionsFor(identity).map(({ group, sections }) => ({
       label: i18n._(group.title),
@@ -385,7 +362,8 @@ export const useGraspSidebar = ({
   const openChats = useChatsWindow();
   const [tab, setTab] = useState<SidebarView>("home");
   // What waits on the person: the Inbox view's list, and so the bell's
-  // dot and the Dashboard's count.
+  // dot and the Inbox's count.
+  const navigate = useNavigate();
   const waitingItems = useWaitingItems(
     identity,
     identity.onboardingOnly !== true
@@ -395,7 +373,15 @@ export const useGraspSidebar = ({
   const profile = useProfile(core, identity);
   const settingsSection = useSettingsSection(identity);
   const agentSection = useAgentSection();
-  const section = settingsSection ?? agentSection;
+  const brainSection = useBrainSection();
+  const appSection = useAppSection(identity);
+  const integrationsSection = useIntegrationsSection();
+  const section =
+    settingsSection ??
+    agentSection ??
+    brainSection ??
+    appSection ??
+    integrationsSection;
   const searching = identity.onboardingOnly !== true;
   return {
     foldLabel: t`Show or hide the sidebar`,
@@ -432,8 +418,16 @@ export const useGraspSidebar = ({
             },
           ],
           tab,
+          // The switch is the one way in to the Inbox: choosing it opens
+          // the Inbox's page too, so there is something to see even when
+          // nothing waits and the view has no row to press.
           onTabChange: (next: string) => {
-            setTab(next === "inbox" ? "inbox" : "home");
+            if (next === "inbox") {
+              setTab("inbox");
+              void navigate({ to: "/inbox" });
+              return;
+            }
+            setTab("home");
           },
           tabsLabel: t`Views`,
         }

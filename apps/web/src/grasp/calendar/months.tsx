@@ -25,11 +25,14 @@ import { ChevronLeft, ChevronRight } from "../icons";
 import { useWords, withGiven } from "../words/words";
 import { calendarStyles as styles } from "./styles";
 import { calendarWords } from "./words";
+import type { CalendarWords } from "./words";
 
 interface CalendarMonthsProps {
   months: number;
   previousLabel?: string;
   nextLabel?: string;
+  /** The instance's own words, from the Calendar, Date picker or Date range picker that draws these months. */
+  words?: Partial<CalendarWords> | undefined;
 }
 
 /** Says whether the months have wrapped under each other (a narrow screen), now and on each resize. */
@@ -59,9 +62,10 @@ export const CalendarMonths = ({
   months,
   previousLabel: previousGiven,
   nextLabel: nextGiven,
+  words,
 }: CalendarMonthsProps) => {
   const { previous: previousLabel, next: nextLabel } = withGiven(
-    useWords("calendar", calendarWords),
+    useWords("calendar", calendarWords, words),
     { previous: previousGiven, next: nextGiven }
   );
   const dayLook = stylex.props(styles.day, focus.mark);

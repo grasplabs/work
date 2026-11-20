@@ -1,7 +1,10 @@
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
+import { Page } from "../frame/page.tsx";
+import { SiteHeader } from "../frame/site-header.tsx";
+import { PageSkeletonRecord } from "../grasp/blocks/page-skeleton-record/page-skeleton-record.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { ProjectView } from "../projects/project-view.tsx";
 
@@ -36,8 +39,27 @@ const ProjectPage = () => {
   );
 };
 
+/**
+ * The project before it is read: the library's page-skeleton-record under
+ * the page's bar, which leads back to Projects until the project's name
+ * comes; its header with the goal's line, then a card of rows where its
+ * Apps will stand. A project has no side panel, so the record's panel
+ * stays out.
+ */
+const ProjectPending = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <SiteHeader crumbs={[{ label: t`Projects`, to: "/projects" }]} />
+      <Page>
+        <PageSkeletonRecord actions={1} density="compact" rows={4} />
+      </Page>
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/projects/$projectId")({
-  pendingComponent: PageLoading,
+  pendingComponent: ProjectPending,
   component: ProjectPage,
   loader: async ({ context: { core }, params: { projectId } }) =>
     await loadFromCore(core, async (session) => {
