@@ -8,3 +8,4 @@ export { PanelText } from "./text";
 export { PanelTexture } from "./texture";
 export type { PanelTextureLayoutStyle, PanelTextureProps } from "./texture";
 export type { PanelTextProps } from "./text";
+export { useMarkTint } from "../texture/mark-tint";

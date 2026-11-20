@@ -1,0 +1,245 @@
+import { composioConsentText } from "@grasp-os/shared/connect";
+import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
+import { failureText } from "@grasp-os/shared/errors";
+import { isAdmin } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { useLingui } from "@lingui/react/macro";
+import { useState } from "react";
+import type { ReactNode } from "react";
+
+import type {
+  App,
+  AppActions,
+} from "../grasp/blocks/app-integration/app-integration.tsx";
+import { ConnectApp } from "../grasp/blocks/connect-app/connect-app.tsx";
+import type { ConnectAppChoice } from "../grasp/blocks/connect-app/connect-app.tsx";
+import { toast } from "../grasp/toast/index.ts";
+import type { Loaded } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
+import {
+  canConnect,
+  ConnectDialog,
+  goTo,
+  returnToOf,
+  signInAgainTarget,
+} from "./connect-dialog.tsx";
+import { DisconnectDialog } from "./connection-list.tsx";
+import { fixOf } from "./integrations-header.tsx";
+import type { Integration } from "./integrations.ts";
+import { reliedOnLapsed } from "./integrations.ts";
+import { toolRules } from "./tool-choices.ts";
+
+// What can be done to an app from its panel and its page, as the library's
+// app parts offer it (their `AppActions`): connect it, sign in to it again,
+// connect another account, or disconnect it. Core and connect check every
+// one; this offers only what the person's role can do.
+//
+// A Composio toolkit connects in the library's connect dialog (ConnectApp),
+// which grows from the part's Connect: the admin sets what Grasp may do,
+// reads the consent as written, and connecting creates the connection
+// (always for everyone), saves those tools and opens the provider's
+// sign-in, in one call to core. One that stopped working is connected
+// again the same way, its stopped connection disconnected first. Grasp's
+// own connectors (Microsoft, Google) connect, and sign in again, in our
+// own connect dialog, which asks an admin who uses it; it is the fallback
+// for a toolkit whose tools couldn't be read, as it reads them itself and
+// says why not.
+
+/**
+ * Connecting a Composio toolkit from the library's dialog. Connecting it
+ * again, once it stopped working, disconnects the connections that stopped
+ * first: Composio's account can't be signed in to again, and the same
+ * account can't be connected twice.
+ */
+const ConnectToolkit = ({
+  app: shown,
+  integration,
+  replacing,
+  size,
+}: {
+  app: App;
+  integration: Integration;
+  /** The connections that stopped working, which connecting again replaces. */
+  replacing: readonly ListedConnection[];
+  size: "xs" | "sm";
+}) => {
+  const core = useCore();
+  const { t } = useLingui();
+  const app = integration.name;
+  const connect = ({ tools }: ConnectAppChoice): void => {
+    const allowed = tools
+      .filter(({ choice }) => choice !== "never")
+      .map(({ id, choice }) => ({ name: id, read: choice === "read" }));
+    if (allowed.length === 0) {
+      toast.error(t`Allow at least one tool to connect ${app}.`);
+      return;
+    }
+    const start = async (): Promise<void> => {
+      const started = await core.withSession(async (session) => {
+        await Promise.all(
+          replacing.map(
+            async ({ id }) => await session.connections.disconnect(id)
+          )
+        );
+        return await session.connections.connectToolkit({
+          toolkit: integration.id,
+          tools: toolRules(allowed),
+          // Word for word what the dialog showed: core records its hash.
+          consent: composioConsentText,
+          returnTo: returnToOf(integration.key),
+        });
+      });
+      // The browser leaves for the provider's sign-in.
+      goTo(started);
+    };
+    toast.promise(start(), {
+      loading: t`Waiting for ${app}`,
+      error: (error) => failureText(error),
+    });
+  };
+  return (
+    <ConnectApp
+      again={replacing.length > 0}
+      app={shown}
+      consent={composioConsentText}
+      forWhom="everyone"
+      onConnect={connect}
+      provider="Composio"
+      size={size}
+    />
+  );
+};
+
+/**
+ * The connection this person may disconnect from the app's Manage menu:
+ * its only one, when it is theirs or they are an admin. With more, each
+ * is disconnected from its own card on the app's page.
+ */
+const removableOf = (
+  integration: Integration,
+  identity: Identity
+): ListedConnection | undefined => {
+  const [only, ...more] = integration.connections;
+  return only !== undefined &&
+    more.length === 0 &&
+    (only.scope === "personal" || isAdmin(identity.role)) &&
+    !identity.staff
+    ? only
+    : undefined;
+};
+
+/**
+ * A toolkit's connections that stopped working, which an admin connects
+ * again (disconnecting them first); none while one the company relies on
+ * still works, or for anyone else.
+ */
+const stoppedOf = (
+  integration: Integration,
+  identity: Identity
+): ListedConnection[] =>
+  integration.source === "composio" &&
+  fixOf(integration, identity) === "reconnect" &&
+  reliedOnLapsed(integration)
+    ? integration.connections.filter(
+        ({ status, scope }) => status === "needs_reauth" && scope === "shared"
+      )
+    : [];
+
+/** What the native dialog is open for: connecting, or signing in again to one connection. */
+type Native = { again: ListedConnection | undefined } | undefined;
+
+/**
+ * The actions an app's panel or page offers this person, and the dialogs
+ * they open, to draw beside the part.
+ */
+export const useAppActions = ({
+  integration,
+  identity,
+  app,
+  tools,
+  size,
+}: {
+  integration: Integration;
+  identity: Identity;
+  /** The app as the part draws it, for the connect dialog's head and tools. */
+  app: App;
+  /** The read of its tools: the connect dialog waits for it. */
+  tools: Loaded<CatalogTool[]> | undefined;
+  size: "xs" | "sm";
+}): { actions: AppActions; dialogs: ReactNode } => {
+  const [native, setNative] = useState<Native>();
+  const [disconnecting, setDisconnecting] = useState(false);
+  const connectable = canConnect(integration, identity);
+  const none = integration.connections.length === 0;
+  const again = signInAgainTarget(integration, identity);
+  const removable = removableOf(integration, identity);
+  const openNative = (target?: ListedConnection) => () => {
+    setNative({ again: target });
+  };
+  const actions: AppActions = {};
+  const stopped = stoppedOf(integration, identity);
+  if (connectable && (none || stopped.length > 0)) {
+    if (
+      integration.source === "composio" &&
+      tools?.state === "ready" &&
+      tools.data.length > 0
+    ) {
+      actions.connect = (
+        <ConnectToolkit
+          app={app}
+          integration={integration}
+          replacing={stopped}
+          size={size}
+        />
+      );
+    } else if (
+      none &&
+      (integration.source === "native" || tools !== undefined)
+    ) {
+      // A toolkit's tools that couldn't be read: our dialog reads them
+      // again, and says why not.
+      actions.onConnect = openNative();
+    }
+  }
+  if (again !== undefined) {
+    actions.onSignIn = openNative(again);
+  }
+  if (connectable && !none && integration.source === "native") {
+    actions.onConnectAnother = openNative();
+  }
+  if (removable !== undefined) {
+    actions.onDisconnect = () => {
+      setDisconnecting(true);
+    };
+  }
+  const { name } = integration;
+  const dialogs = (
+    <>
+      <ConnectDialog
+        {...(native?.again === undefined ? {} : { again: native.again })}
+        identity={identity}
+        integration={integration}
+        onOpenChange={(open) => {
+          if (!open) {
+            setNative(undefined);
+          }
+        }}
+        open={native !== undefined}
+      />
+      {removable === undefined ? null : (
+        <DisconnectDialog
+          connection={removable}
+          label={
+            removable.accountName === null
+              ? name
+              : `${name} (${removable.accountName})`
+          }
+          last={!integration.listed}
+          onOpenChange={setDisconnecting}
+          open={disconnecting}
+        />
+      )}
+    </>
+  );
+  return { actions, dialogs };
+};

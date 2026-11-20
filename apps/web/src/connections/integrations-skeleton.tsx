@@ -5,10 +5,10 @@ import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { PageSkeletonRecord } from "../grasp/blocks/page-skeleton-record/page-skeleton-record.tsx";
 import { Card } from "../grasp/card/index.ts";
+import { ItemGrid } from "../grasp/item/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { Skeleton } from "../grasp/skeleton/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { TileGrid } from "./integration-tile.tsx";
 
 // The Integrations overview before it arrives: the page as it will stand,
 // so nothing moves when it does. The header with its title waiting, the
@@ -25,8 +25,8 @@ const styles = stylex.create({
   run: { display: "flex", flexDirection: "column", gap: grasp.space4 },
   header: { height: "10rem" },
   heading: { width: "8rem" },
-  // As tall as a loaded tile, which the grid sets.
-  tile: { height: "100%" },
+  // As tall as a loaded tile (the library's 56px app tile).
+  tile: { height: `calc(${grasp.space12} + ${grasp.space2})` },
 });
 
 /** How many tiles each run shows while waiting. */
@@ -36,13 +36,13 @@ const tiles = 8;
 const Run = ({ label }: { label: string }) => (
   <div {...stylex.props(styles.run)}>
     <Skeleton layout={styles.heading} text="md" />
-    <TileGrid label={label}>
+    <ItemGrid aria-label={label}>
       {Array.from({ length: tiles }, (_, index) => (
         <li key={index}>
           <Skeleton layout={styles.tile} pulse={false} variant="block" />
         </li>
       ))}
-    </TileGrid>
+    </ItemGrid>
   </div>
 );
 

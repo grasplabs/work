@@ -9,8 +9,9 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 // A provider's mark wherever an app is named on the Integrations pages:
 // Grasp UI's Brand icon where the library has the brand, else the logo
 // core serves for it (`CatalogEntry.logo`) on the same small tile, else
-// its first letter. The library's tile sizes: `sm` 32px in a list, `md`
-// 40px at the head of an app's page.
+// its first letter. The library's tile sizes, as Brand icon's: `sm` 32px
+// on a tile, `md` 40px at the head of an app's panel, `lg` 48px at the head
+// of its page.
 
 /** The library's brands, by their keys. */
 const isBrand = (key: string): key is Brand => Object.hasOwn(brands, key);
@@ -30,8 +31,6 @@ export const brandOf = (id: string, name: string): Brand | undefined =>
   // `microsoft-directory`: the provider's brand.
   brandKeys.find((key) => plain(key) === plain(id.split("-")[0] ?? ""));
 
-const sizes = { sm: "2rem", md: "2.5rem" } as const;
-
 const styles = stylex.create({
   tile: {
     display: "inline-grid",
@@ -46,8 +45,9 @@ const styles = stylex.create({
     fontSize: grasp.textXs,
     fontWeight: grasp.weightMedium,
   },
-  sm: { width: sizes.sm, height: sizes.sm },
-  md: { width: sizes.md, height: sizes.md },
+  sm: { width: grasp.avatarSm, height: grasp.avatarSm },
+  md: { width: grasp.avatarMd, height: grasp.avatarMd },
+  lg: { width: grasp.avatarLg, height: grasp.avatarLg },
   logo: { width: "60%", height: "60%", objectFit: "contain" },
 });
 
@@ -62,7 +62,7 @@ export const ProviderMark = ({
   id: string;
   name: string;
   logo: string | null;
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "lg";
 }) => {
   const { t } = useLingui();
   const [missing, setMissing] = useState<string>();

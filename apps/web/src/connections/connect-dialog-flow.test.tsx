@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { ConnectDialog } from "./connect-dialog.tsx";
 import { integrationsOf } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
-import { toolWords } from "./tool-rows.tsx";
+import { toolWords } from "./tool-choices.ts";
 
 // The connect dialog against core's connections as the page reaches them
 // over RPC, faked: what an admin chooses for each tool of a Composio

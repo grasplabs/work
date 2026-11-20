@@ -26,6 +26,8 @@ import {
   backdropPreviewWords,
 } from "../grasp/backdrop/words.ts";
 import { badgeWords } from "../grasp/badge/words.ts";
+import { appIntegrationWords } from "../grasp/blocks/app-integration/words.ts";
+import { connectAppWords } from "../grasp/blocks/connect-app/connect-app.tsx";
 import { connectServiceWords } from "../grasp/blocks/connect-service/connect-service.tsx";
 import { breadcrumbWords } from "../grasp/breadcrumb/words.ts";
 import { buttonWords } from "../grasp/button/words.ts";
@@ -207,6 +209,8 @@ export const englishPartWords: GraspWordsCatalog = {
   carousel: carouselWords,
   connectionRow: connectionRowWords,
   connectService: connectServiceWords,
+  appIntegration: appIntegrationWords,
+  connectApp: connectAppWords,
   signIn: signInWords,
 };
 
@@ -1248,6 +1252,99 @@ export const usePartWords = (): GraspWordsCatalog => {
       keyLine: (last, region) =>
         region === undefined ? t`Key …${last}` : t`Key …${last} · ${region}`,
       connectName: (label) => t`Connect ${label}`,
+    },
+    appIntegration: {
+      connect: t`Connect`,
+      connectAgain: t`Connect again`,
+      manage: t`Manage`,
+      settings: t`Settings`,
+      signInAgain: t`Sign in again`,
+      connectAnother: t`Connect another account`,
+      disconnect: t`Disconnect`,
+      close: t`Close`,
+      tools: (toolCount) =>
+        t`${plural(toolCount, { one: "# tool", other: "# tools" })}`,
+      allowed: (allowed, total) =>
+        t`${plural(total, { one: `${allowed} of # tool allowed`, other: `${allowed} of # tools allowed` })}`,
+      needsSignIn: t`Sign in again`,
+      needsConnect: t`Connect again`,
+      account: t`Account`,
+      connection: t`Connection`,
+      signedInAs: t`Signed in as`,
+      forWhom: t`For`,
+      forYou: t`Only you`,
+      forEveryone: t`Everyone`,
+      connectedBy: t`Connected by`,
+      status: t`Status`,
+      works: t({ message: "Connected", context: "state of one app" }),
+      signedOut: t({ message: "Signed out", context: "state of one app" }),
+      stopped: t({ message: "Stopped working", context: "state of one app" }),
+      notConnected: t`Not connected`,
+      canDo: t`What Grasp can do`,
+      mayDo: t`What Grasp may do`,
+      counts: (reads, writes) =>
+        t({
+          message: `${reads} read · ${writes} change`,
+          comment:
+            "How many of an app's tools only read, and how many change something.",
+        }),
+      readCount: (count) =>
+        t({
+          message: `${count} read`,
+          comment: "How many of an app's tools only read.",
+        }),
+      changeCount: (count) =>
+        t({
+          message: `${count} change`,
+          comment: "How many of an app's tools change something.",
+        }),
+      balance: (reads, writes) =>
+        t`${plural(reads, { one: `# tool reads, ${writes} change`, other: `# tools read, ${writes} change` })}`,
+      allTools: (count) =>
+        t`${plural(count, { one: "The # tool", other: "All # tools" })}`,
+      usedBy: t`Used by`,
+      notUsed: t`Not used yet`,
+      workflow: t`Workflow`,
+      agent: t`Agent`,
+      whoCanUse: t`Who can use it`,
+      searchTools: t`Search tools`,
+      noMatch: t`No tool matches`,
+      never: t({ message: "Never", context: "what a tool may do" }),
+      read: t({ message: "Read", context: "what a tool may do" }),
+      write: t({ message: "Write", context: "what a tool may do" }),
+      mixed: t({ message: "Mixed", context: "what a tool may do" }),
+      neverNote: t`Grasp doesn't use these`,
+      readNote: t`Reads without asking, changes nothing`,
+      writeNote: t`Reads, and asks before each change`,
+      mixedNote: t`Set tool by tool`,
+      toolReadNote: t`Runs without asking`,
+      toolWriteNote: t`Asks before each run`,
+      choiceOf: (name) => t`What Grasp may do: ${name}`,
+      showTools: (group, count) =>
+        t`${plural(count, { one: `Show the # ${group} tool`, other: `Show the # ${group} tools` })}`,
+      other: t`Other`,
+      readsWord: t`Reads`,
+      changesWord: t`Changes`,
+    },
+    connectApp: {
+      title: (app) => t`Connect ${app}`,
+      titleAgain: (app) => t`Connect ${app} again`,
+      summaryAll: t`Read everything, ask before changes`,
+      summaryRead: t`Read everything, change nothing`,
+      summaryNone: t`Nothing yet`,
+      summaryMixed: t`Set group by group`,
+      change: t`Change`,
+      done: t`Done`,
+      whoUses: t`Who uses it`,
+      forEveryone: t`Everyone in the organization`,
+      forYou: t`Just you`,
+      consentFrom: (provider) =>
+        t({
+          message: `Consent · ${provider}`,
+          comment: "{provider} keeps the access, such as Composio.",
+        }),
+      cancel: t`Cancel`,
+      connect: t`Connect`,
     },
     signIn: {
       // The product's name: never translated.

@@ -7,8 +7,20 @@ export const intent = {
     {
       when: "The top of a page: its title, one line on what it holds, its actions and its tabs.",
     },
+    {
+      when: "A list under the header to browse and narrow: its `toolbar`, the kinds to browse at the start, a scope, a search and the page's action at the end.",
+    },
   ],
   notWhen: [
+    {
+      when: "A toolbar with nothing to browse or narrow yet.",
+      source: "src/components/page-header/toolbar.tsx",
+    },
+    {
+      when: "Actions on the rows chosen in a table.",
+      instead: ["data-table"],
+      source: "docs/components/data-table.mdx",
+    },
     {
       when: "The title of a part of a page.",
       instead: ["section-header"],
@@ -20,6 +32,10 @@ export const intent = {
     },
   ],
   variants: [
+    {
+      name: "toolbar",
+      when: "A PageHeaderToolbar under the title: what changes the list below.",
+    },
     {
       name: 'size="sm"',
       when: "A sub-page whose crumbs say where you are (a settings page): a smaller title in the sans, no lead.",

@@ -21,11 +21,13 @@ import {
   DropdownMenuTrigger,
 } from "../dropdown-menu";
 import { dropdownMenuWords } from "../dropdown-menu/words";
+import { headingLook, headingStyles } from "../heading/styles";
 import { More, Spinner } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { arrive } from "../motion/arrive";
-import { PanelTexture } from "../panel/texture";
 import { Skeleton } from "../skeleton/skeleton";
+import { textStyles } from "../text/styles";
+import { Texture } from "../texture/texture";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
 import { pageBandVars } from "./band.stylex";
@@ -79,8 +81,20 @@ export interface PageHeaderProps {
    * @default "page"
    */
   variant?: "page" | "band";
+  /**
+   * The band's dither in the page's object's own colour (an app's brand, from `useMarkTint`), fading
+   * down from the top instead of the mint from the corner. Only with `variant="band"`.
+   */
+  tint?: string;
+  /** Over the title: the page's object's own mark (an app's logo), decorative; the title names it. */
+  mark?: ReactNode;
   /** Under the title: the page's Tabs, when it has views. */
   tabs?: ReactNode;
+  /**
+   * The row under the title (and the tabs) that changes the list below: a PageHeaderToolbar, the
+   * way to browse at its start and what narrows it at its end.
+   */
+  toolbar?: ReactNode;
   /**
    * Placeholders where the title and the line will be, while the page loads.
    * @default false
@@ -181,26 +195,12 @@ const styles = stylex.create({
     rowGap: grasp.space1,
     minWidth: 0,
   },
-  title: {
-    margin: 0,
-    minWidth: 0,
-    fontFamily: grasp.fontSerif,
-    fontSize: grasp.titleLg,
-    lineHeight: grasp.titleLgLine,
-    fontWeight: grasp.weightRegular,
-    letterSpacing: grasp.trackingTitle,
-    color: grasp.ink,
-    textWrap: "balance",
-    overflowWrap: "break-word",
-  },
-  description: {
-    margin: 0,
-    fontSize: grasp.textLg,
-    lineHeight: grasp.textLgLine,
-    color: grasp.muted,
-    textWrap: "pretty",
-    overflowWrap: "break-word",
-  },
+  // The object's mark over the title, its own size, the title's gap under it.
+  mark: { display: "flex", marginBlockEnd: grasp.space3 },
+  // The title is Heading's `lg` (headingLook), and may shrink beside the actions.
+  title: { minWidth: 0 },
+  // The line under it is Text's lg in muted (textStyles), its lines evened.
+  description: { textWrap: "pretty" },
   actions: {
     display: "flex",
     flexWrap: "wrap",
@@ -286,9 +286,8 @@ const styles = stylex.create({
     fontWeight: grasp.weightMedium,
     letterSpacing: grasp.trackingUiTitle,
   },
-  descriptionSm: { fontSize: grasp.textSm, lineHeight: grasp.textSmLine },
-  // A settings page's title: the page's serif at the middle size, as dense as a sub-page's.
-  titleMd: { fontSize: grasp.titleMd, lineHeight: grasp.titleMdLine },
+  // A settings page's title: the page's serif at the middle size (Heading's `md`), as dense as a
+  // sub-page's.
   actionsMd: { minHeight: grasp.titleMdLine },
   titleWaitMd: {
     height: grasp.titleMd,
@@ -317,14 +316,14 @@ const styles = stylex.create({
 const sizeLooks = {
   lg: { title: null, description: null, actions: null, titleWait: null },
   md: {
-    title: styles.titleMd,
-    description: styles.descriptionSm,
+    title: headingStyles.md,
+    description: textStyles.sm,
     actions: styles.actionsMd,
     titleWait: styles.titleWaitMd,
   },
   sm: {
     title: styles.titleSm,
-    description: styles.descriptionSm,
+    description: textStyles.sm,
     actions: styles.actionsSm,
     titleWait: styles.titleWaitSm,
   },
@@ -653,6 +652,7 @@ const Words = ({
           <div {...stylex.props(styles.titleRow, arrived && arrive.in)}>
             <h1
               {...stylex.props(
+                headingLook("lg"),
                 styles.title,
                 look.title,
                 room !== false && room !== undefined && styles.titleFlows
@@ -671,6 +671,9 @@ const Words = ({
                   : undefined
               }
               {...stylex.props(
+                textStyles.text,
+                textStyles.lg,
+                textStyles.muted,
                 styles.description,
                 look.description,
                 descriptionLines !== "all" && styles.clamp,
@@ -689,6 +692,18 @@ const Words = ({
   );
 };
 
+/** The object's mark over the title, when given: decorative, the title names it. */
+const Mark = ({ mark }: { mark: ReactNode }) =>
+  mark === undefined || mark === null ? null : (
+    <span
+      aria-hidden="true"
+      data-slot="page-header-mark"
+      {...stylex.props(styles.mark)}
+    >
+      {mark}
+    </span>
+  );
+
 export const PageHeader = ({
   title,
   description,
@@ -698,9 +713,12 @@ export const PageHeader = ({
   aside,
   actions,
   tabs,
+  toolbar,
   loading = false,
   size = "lg",
   variant = "page",
+  tint,
+  mark,
   style: styleProp,
   layout,
 }: PageHeaderProps) => {
@@ -720,8 +738,11 @@ export const PageHeader = ({
         layout ?? styleProp
       )}
     >
-      {variant === "band" && <PanelTexture layout={styles.bandTexture} />}
+      {variant === "band" && (
+        <Texture tint={tint} layout={styles.bandTexture} />
+      )}
       {breadcrumb}
+      <Mark mark={mark} />
       <div
         {...stylex.props(
           styles.row,
@@ -751,6 +772,7 @@ export const PageHeader = ({
         )}
       </div>
       {tabs !== undefined && <div {...stylex.props(styles.tabs)}>{tabs}</div>}
+      {toolbar}
       {variant === "band" && (
         <span
           aria-hidden="true"

@@ -14,6 +14,7 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
 import { Avatar, AvatarFallback, AvatarImage, initialsOf } from "./avatar";
 import type { AvatarSize } from "./avatar";
+import { groupMoreStyles } from "./more.styles";
 import { avatarGroupWords } from "./words";
 
 /** Someone in the group: their name, and their picture if they have one. */
@@ -83,28 +84,15 @@ const styles = stylex.create({
   cut: (face: string) => ({
     maskImage: `radial-gradient(circle at calc(${face} * 1.25) 50%, transparent calc(${face} / 2 + 2px), #000 calc(${face} / 2 + 2.5px))`,
   }),
-  // The rest, as a face of its own: the soft fill, the system's edge, the count in quiet ink.
+  // The rest, as a face of its own (more.styles.ts, shared with Brand icon group): a face wide, a
+  // circle, the avatar's edge.
   more: (face: string) => ({
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    boxSizing: "border-box",
     width: face,
-    height: face,
-    paddingInline: grasp.space1,
     borderRadius: grasp.cornerCircle,
-    backgroundColor: grasp.soft,
     boxShadow: grasp.avatarEdge,
     outlineWidth: { default: 0, [media.forced]: 1 },
     outlineStyle: "solid",
     outlineOffset: -1,
-    fontFamily: grasp.fontSans,
-    fontSize: `max(10px, calc(${face} * 0.4))`,
-    fontWeight: grasp.weightMedium,
-    fontVariantNumeric: "tabular-nums",
-    letterSpacing: "-0.02em",
-    color: grasp.muted,
-    whiteSpace: "nowrap",
   }),
 });
 
@@ -169,7 +157,11 @@ export const AvatarGroup = ({
         <span
           aria-hidden="true"
           data-slot="avatar-group-more"
-          {...stylex.props(styles.face(face), styles.more(face))}
+          {...stylex.props(
+            styles.face(face),
+            groupMoreStyles.more(face),
+            styles.more(face)
+          )}
         >
           {words.more(rest)}
         </span>

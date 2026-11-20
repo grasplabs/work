@@ -100,6 +100,11 @@ export interface InspectorPanelProps {
   /** The object's own icon, in the tile at the head. */
   icon?: IconData;
   /**
+   * The object's own mark in place of the icon's tile: an app's logo (a BrandIcon, an image), drawn
+   * as it is, at the tile's size.
+   */
+  mark?: ReactNode;
+  /**
    * The tile's look: `tint`, a faint wash of mint (as an agent's tile in Sources); `gradient`, the
    * mint-to-pine light; `raised`, plain.
    * @default "tint"
@@ -129,6 +134,11 @@ export interface InspectorPanelProps {
   framed?: boolean;
   /** The faint dither behind the head. @default false */
   texture?: boolean;
+  /**
+   * The dither in the object's own colour (an app's brand, from `useMarkTint`), fading down from the
+   * top. Given, the dither is drawn without `texture`.
+   */
+  tint?: string;
   /**
    * The object is not there yet (a page's first paint): the head's title, and its line when
    * `description` is given (even empty), are quiet placeholders in their own lines. Give the
