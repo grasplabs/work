@@ -295,10 +295,14 @@ export const useDictation = (
               source.current?.cancel();
               stop();
             },
+            // A press while a cancelled dictation still dissolves does nothing.
             onMute: () => {
+              if (source.current === null) {
+                return;
+              }
               const muted = !run.muted;
-              source.current?.mute(muted);
-              setRun({ ...run, muted });
+              source.current.mute(muted);
+              setRun((was) => (was === undefined ? was : { ...was, muted }));
             },
             onRetry: () => {
               source.current?.cancel();
