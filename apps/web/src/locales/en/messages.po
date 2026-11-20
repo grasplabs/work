@@ -315,6 +315,14 @@ msgstr "{count, plural, one {# change to its data} other {# changes to its data}
 msgid "{count, plural, one {# change waits for you to confirm or reject it.} other {# changes wait for you to confirm or reject them.}}"
 msgstr "{count, plural, one {# change waits for you to confirm or reject it.} other {# changes wait for you to confirm or reject them.}}"
 
+#: src/chat/sources.tsx
+msgid "{count, plural, one {# collection} other {# collections}}"
+msgstr "{count, plural, one {# collection} other {# collections}}"
+
+#: src/chat/sources.tsx
+msgid "{count, plural, one {# connection} other {# connections}}"
+msgstr "{count, plural, one {# connection} other {# connections}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {# conversation came in: with the board, the teams and their people.} other {# conversations came in: with the board, the teams and their people.}}"
 msgstr "{count, plural, one {# conversation came in: with the board, the teams and their people.} other {# conversations came in: with the board, the teams and their people.}}"
@@ -354,6 +362,10 @@ msgstr "{count, plural, one {# interview in week {week}} other {# interviews in 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
 msgstr "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
+
+#: src/chat/sources.tsx
+msgid "{count, plural, one {# memory} other {# memories}}"
+msgstr "{count, plural, one {# memory} other {# memories}}"
 
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more App this chat worked on} other {# more Apps this chat worked on}}"
@@ -445,10 +457,6 @@ msgstr "{count, plural, one {Add # document} other {Add # documents}}"
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Adding up the hours of # workflow} other {Adding up the hours of # workflows}}"
 msgstr "{count, plural, one {Adding up the hours of # workflow} other {Adding up the hours of # workflows}}"
-
-#: src/chat/sources.tsx
-msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
-msgstr "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 
 #: src/chat/asked-questions.tsx
 msgid "{count, plural, one {Asked you a question} other {Asked you # questions}}"
@@ -4994,6 +5002,7 @@ msgstr "Connecting your Microsoft 365"
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/resource-bindings.tsx
+#: src/chat/sources.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
@@ -9227,6 +9236,7 @@ msgstr "Kinds of field"
 msgid "Kinds of highlight"
 msgstr "Kinds of highlight"
 
+#: src/chat/sources.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -18049,6 +18059,7 @@ msgid "United States"
 msgstr "United States"
 
 #: src/activity/pending.tsx
+#: src/chat/sources.tsx
 msgid "Unknown"
 msgstr "Unknown"
 

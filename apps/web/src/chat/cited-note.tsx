@@ -1,28 +1,11 @@
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { focus } from "../grasp/focus/focus.ts";
+import { Link } from "../grasp/link/index.ts";
 import { toast } from "../grasp/toast/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-
-const styles = stylex.create({
-  // The cited words, as a link in the text reads: underlined, in its ink.
-  note: {
-    padding: 0,
-    borderWidth: 0,
-    backgroundColor: "transparent",
-    color: "inherit",
-    font: "inherit",
-    textDecorationLine: "underline",
-    textDecorationColor: grasp.linkUnderline,
-    textUnderlineOffset: grasp.linkUnderlineOffset,
-    cursor: "pointer",
-  },
-});
 
 // A note an answer cites (`ChatCitation`): its link opens the document on
 // its collection's page (`?doc=`, as `documentHref` addresses one). The
@@ -66,14 +49,19 @@ export const CitedNote = ({
     });
   };
   return (
-    <button
-      onClick={() => {
-        void open();
-      }}
-      type="button"
-      {...stylex.props(styles.note, focus.ring)}
+    <Link
+      render={
+        <button
+          onClick={() => {
+            void open();
+          }}
+          type="button"
+        >
+          {children}
+        </button>
+      }
     >
       {children}
-    </button>
+    </Link>
   );
 };

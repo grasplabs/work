@@ -1,7 +1,7 @@
 import type { Placed } from "./blocks";
 // A collapsible section in Markdown, in the one form GitHub renders and DocumentEditor writes:
 //
-//   <details>
+//   <details>                                (or with attributes: `<details open>` stands open)
 //   <summary>The policy's limits</summary>
 //
 //   - Meals: €40 a day.
@@ -19,7 +19,7 @@ import type { PhrasingContent } from "./types";
 
 /** An opening: `<details>`, then its `<summary>` on the next line or the same one, and nothing after. */
 const OPENING =
-  /^<details>[ \t]*\n?[ \t]*<summary>(?<summary>[^\n]*?)<\/summary>[ \t]*$/u;
+  /^<details(?<attributes>(?:\s+[a-z][a-z-]*(?:="[^"\n]*")?)*)\s*>[ \t]*\n?[ \t]*<summary>(?<summary>[^\n]*?)<\/summary>[ \t]*$/u;
 const CLOSING = /^<\/details>[ \t]*$/u;
 
 /** One block of the answer, or a section holding its own. */
@@ -29,6 +29,7 @@ export type Drawn =
       kind: "section";
       summary: PhrasingContent[];
       summaryText: string;
+      open: boolean;
       children: Drawn[];
       key: Placed;
     };
@@ -75,10 +76,15 @@ export const groupSections = (blocks: readonly Placed[]): Drawn[] => {
       at += 1;
     } else {
       const summaryText = (opening.groups?.summary ?? "").trim();
+      // `<details open>` stands open at first, as GitHub draws it (an Ask block is written so).
+      const open = /(?:^|\s)open(?:\s|=|$)/u.test(
+        opening.groups?.attributes ?? ""
+      );
       drawn.push({
         kind: "section",
         summary: summaryOf(summaryText),
         summaryText,
+        open,
         children: groupSections(blocks.slice(at + 1, end)),
         key: block,
       });
