@@ -2606,6 +2606,7 @@ msgid "Agent not found"
 msgstr "Agent introuvable"
 
 #: src/agents/agents-overview.tsx
+#: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
@@ -4908,6 +4909,7 @@ msgstr "Se termine le {closes}"
 msgid "Closing the books and producing the numbers leadership looks at."
 msgstr "Clôturer les comptes et produire les chiffres que regarde la direction."
 
+#: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
 msgid "Code"
 msgstr "Code"
@@ -6352,6 +6354,7 @@ msgstr "Document"
 
 #: src/agents/agent-documents.tsx
 #: src/brain/brain.ts
+#: src/brain/sources-page.tsx
 #: src/onboarding/document-drop.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Documents"
@@ -10650,6 +10653,10 @@ msgstr "Moyen"
 msgid "Meeting prep"
 msgstr "Préparation des réunions"
 
+#: src/brain/sources-page.tsx
+msgid "Meetings"
+msgstr "Réunions"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Member"
@@ -10669,6 +10676,7 @@ msgstr "les membres de l’équipe dans {field}"
 
 #: src/brain/brain-section.tsx
 #: src/brain/memories-page.tsx
+#: src/brain/sources-page.tsx
 msgctxt "the Brain's memories page"
 msgid "Memories"
 msgstr "Souvenirs"
@@ -10706,6 +10714,7 @@ msgstr "Actions du message"
 msgid "Message other people"
 msgstr "Écrire à d’autres personnes"
 
+#: src/brain/sources-page.tsx
 #: src/chat/chat-body.tsx
 #: src/chat/thread.tsx
 msgid "Messages"
@@ -11255,10 +11264,6 @@ msgstr "Nouvelle version"
 #: src/activity/audit-log.tsx
 msgid "Newer"
 msgstr "Plus récents"
-
-#: src/brain/sources-page.tsx
-msgid "Newest first"
-msgstr "Plus récents d'abord"
 
 #: src/agents/new-agent.tsx
 #: src/chat/asked-questions.tsx
@@ -13372,6 +13377,7 @@ msgstr "en attente"
 msgid "people"
 msgstr "personnes"
 
+#: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-dialog.tsx
@@ -14181,6 +14187,7 @@ msgid "records"
 msgstr "enregistrements"
 
 #: src/apps/app-data-model.tsx
+#: src/brain/sources-page.tsx
 msgctxt "a table's records"
 msgid "Records"
 msgstr "Enregistrements"
@@ -16950,6 +16957,7 @@ msgid "Table name"
 msgstr "Nom de la table"
 
 #: src/apps/app-data-model.tsx
+#: src/brain/sources-page.tsx
 msgid "Tables"
 msgstr "Tables"
 
@@ -19709,6 +19717,11 @@ msgstr "Nous voulons passer moins de temps sur les tâches répétitives, pour a
 msgid "We wrote these for you. Change what you like."
 msgstr "Nous les avons écrites pour vous. Modifiez ce que vous voulez."
 
+#: src/brain/sources-page.tsx
+msgctxt "a kind of source of the Brain"
+msgid "Web pages"
+msgstr "Pages web"
+
 #: src/workflows/trigger-description.ts
 msgid "Webhook trigger"
 msgstr "Déclencheur de webhook"
@@ -20765,6 +20778,7 @@ msgid "workflows"
 msgstr "workflows"
 
 #: src/brain/goals-editor.tsx
+#: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx

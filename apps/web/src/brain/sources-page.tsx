@@ -29,8 +29,9 @@ import {
 import { plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
@@ -53,7 +54,6 @@ import {
 import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Card } from "../grasp/card/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
 import { Empty, EmptyHeader, EmptyTitle } from "../grasp/empty/index.ts";
 import { Field, FieldLabel } from "../grasp/field/index.ts";
@@ -67,6 +67,8 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
+import { InspectorPanel } from "../grasp/inspector-panel/index.ts";
+import type { InspectorSection } from "../grasp/inspector-panel/index.ts";
 import {
   Item,
   ItemActions,
@@ -77,13 +79,19 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
+import { PanelSection } from "../grasp/panel-section/index.ts";
+import { RowList } from "../grasp/row-list/index.ts";
 import {
   Select,
   SelectContent,
   SelectTrigger,
   SelectValue,
 } from "../grasp/select/index.ts";
-import { SourceList, Sources } from "../grasp/sources/index.ts";
+import {
+  SourceItem,
+  SourceItemParts,
+  sourcesByKind,
+} from "../grasp/sources/index.ts";
 import type { Source, SourceKind } from "../grasp/sources/index.ts";
 import { Tag } from "../grasp/tag/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -94,11 +102,12 @@ import { given } from "./brain.ts";
 import { LearnedSection } from "./learned-section.tsx";
 import { OwnExportSection } from "./own-export.tsx";
 
-// The Brain's sources, every kind on the library's SourceList: the
+// The Brain's sources, a section per kind on the library's rows: the
 // interviews, documents, chats, imports and run logs the Brain learned
 // from (each opens its own page, an interview on the library's Interview),
 // and what the new Brain keeps that the person may read (GRA-1734), a page
-// at a time, newest first; one kept source's versions and text; search, which is recall as that person, shown as recall packs it (no
+// at a time, newest first; one kept source's versions and text, in an
+// inspector beside the list; search, which is recall as that person, shown as recall packs it (no
 // ranking of the page's own), its memories each with where it came from,
 // and everything the pack holds shown, as its budget was spent on it; and
 // how each of their connections feeds the Brain today. Core answers each
@@ -238,10 +247,11 @@ const sourceKind: Record<BrainSource["kind"], SourceKind> = {
   runLog: "workflow",
 };
 
-/** One row of the list, and what opening it does. */
+/** One row of the list: its key, the source, and what opening it does when it is no link. */
 interface Row {
+  key: string;
   item: Source;
-  open: () => void;
+  open?: () => void;
 }
 
 const styles = stylex.create({
@@ -272,22 +282,41 @@ const styles = stylex.create({
     alignItems: { default: "stretch", [media.fromTablet]: "flex-end" },
     gap: grasp.space3,
   },
-  // The list and the opened source side by side on a wide page.
+  // The opened source beside the list, or under it where there is no
+  // room for both.
   split: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr)",
-    alignItems: "start",
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
     gap: grasp.space6,
-    minHeight: 0,
+    minWidth: 0,
   },
-  // Room for the source beside the list only while one is open: an empty
-  // half would push the list off the middle.
-  splitOpen: {
-    gridTemplateColumns: {
-      default: "minmax(0, 1fr)",
-      [media.fromSidebar]: "repeat(2, minmax(0, 1fr))",
-    },
+  listed: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    flexGrow: 1,
+    flexBasis: "24rem",
+    minWidth: 0,
   },
+  inspector: {
+    flexShrink: 0,
+    width: `min(${grasp.inspectorWidth}, 100%)`,
+    position: "sticky",
+    insetBlockStart: grasp.space4,
+  },
+  // The list's sections, one per kind.
+  groups: { display: "flex", flexDirection: "column", gap: grasp.space6 },
+  // Search's passages, each its source's row with the passage under it.
+  passages: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  passage: { marginInline: grasp.space4 },
   // A row's facts: its kind, how it was found, its version.
   facts: {
     display: "flex",
@@ -373,6 +402,28 @@ const useFoundLabel = () => {
         context: "how search found a passage",
       }),
     })[found];
+};
+
+/** A group of the list's heading: the kind of its sources, in a word. */
+const useKindHeading = () => {
+  const { t } = useLingui();
+  return (kind: SourceKind): string =>
+    ({
+      meeting: t`Meetings`,
+      file: t`Documents`,
+      message: t`Messages`,
+      record: t({ message: "Records", context: "a table's records" }),
+      workflow: t`Workflows`,
+      person: t`People`,
+      table: t`Tables`,
+      memory: t({ message: "Memories", context: "the Brain's memories page" }),
+      web: t({
+        message: "Web pages",
+        context: "a kind of source of the Brain",
+      }),
+      agent: t`Agents`,
+      code: t`Code`,
+    })[kind];
 };
 
 const MemoryFoundBadge = ({ found }: { found: BrainMemoryFoundBy }) => {
@@ -503,6 +554,7 @@ const SearchResults = ({
   const producerLabel = useProducerLabel();
   const foundLabel = useFoundLabel();
   const heading = useId();
+  const passagesHeading = useId();
   const missing = formatList(pack.notFound);
   if (pack.items.length === 0 && pack.memories.length === 0) {
     return (
@@ -512,11 +564,11 @@ const SearchResults = ({
     );
   }
   const remembers = pack.memories.length > 0;
-  const items = pack.items.map((item): Source => {
+  const passages = pack.items.map((item) => {
     const { version } = item;
     const producer = producerLabel(item.source.producer);
     const first = titleOf(item.source);
-    return {
+    const source: Source = {
       kind: producerKind[item.source.producer],
       title: given(first) ? first : producer,
       origin: [
@@ -527,8 +579,8 @@ const SearchResults = ({
       ]
         .filter(given)
         .join(" · "),
-      quote: item.text,
     };
+    return { item, source };
   });
   return (
     // With memories, the Results hold two parts: what the Brain remembers,
@@ -558,23 +610,47 @@ const SearchResults = ({
           </ItemGroup>
         </div>
       ) : null}
-      {items.length === 0 ? null : (
-        <Sources
-          items={items}
-          onOpen={(_, index) => {
-            const item = pack.items[index];
-            if (item !== undefined) {
-              onOpen(item.source, item.version);
-            }
-          }}
+      {passages.length === 0 ? null : (
+        <section
+          aria-labelledby={passagesHeading}
+          {...stylex.props(styles.group)}
         >
-          <SourceList
-            defaultOpen
-            fold={items.length}
-            heading={remembers ? t`Passages` : t`Results`}
-            headingLevel={remembers ? 3 : 2}
-          />
-        </Sources>
+          <Heading id={passagesHeading} level={remembers ? 3 : 2} size="ui-sm">
+            {remembers ? <Trans>Passages</Trans> : <Trans>Results</Trans>}
+          </Heading>
+          <ul {...stylex.props(styles.passages)}>
+            {passages.map(({ item, source }) => {
+              const { version } = item;
+              return (
+                <li
+                  key={`${keyOf(item.source)}@${version}#${item.position}`}
+                  {...stylex.props(styles.group)}
+                >
+                  <Item size="sm">
+                    <SourceItemParts source={source} />
+                    <ItemActions>
+                      <Button
+                        onClick={() => {
+                          onOpen(item.source, version);
+                        }}
+                        size="xs"
+                        type="button"
+                        variant="ghost"
+                      >
+                        {t`Open version ${version}`}
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                  <blockquote {...stylex.props(styles.quote, styles.passage)}>
+                    <Text size="sm" tone="muted">
+                      <span {...stylex.props(styles.plain)}>{item.text}</span>
+                    </Text>
+                  </blockquote>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
       {pack.notFound.length === 0 ? null : (
         <Text size="sm" tone="muted">
@@ -729,49 +805,27 @@ const ReadersLine = ({
  */
 const UploadActions = ({
   source,
+  upload,
   teams,
   onChanged,
   onDeleted,
 }: {
   source: BrainSourceRef;
+  /** What core says the person may do to it. */
+  upload: BrainUpload;
   teams: Team[];
   onChanged: (source: BrainSourceRef) => void;
   onDeleted: (source: BrainSourceRef) => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
-  const [upload, setUpload] = useState<Read<BrainUpload | null>>({
-    state: "loading",
-  });
   // The new version's id, minted for the file chosen and sent again when
   // it is retried, so a retry after a lost answer is the same version.
   const [file, setFile] = useState<{ chosen: File; versionId: string }>();
   const [acting, setActing] = useState<Read<unknown>>();
   // Which action is under way: a new version shows it uploads.
   const [uploading, setUploading] = useState(false);
-  useEffect(() => {
-    let left = false;
-    const read = async (): Promise<void> => {
-      const answer = await readFrom(
-        core,
-        async (sources) => await sources.uploadOf(source.id)
-      );
-      if (!left) {
-        setUpload(answer);
-      }
-    };
-    void read();
-    return () => {
-      left = true;
-    };
-  }, [core, source]);
-  if (upload.state === "refused") {
-    return <ErrorText>{upload.message}</ErrorText>;
-  }
-  if (upload.state !== "ready" || upload.data === null) {
-    return null;
-  }
-  const { readers, mayAddVersion, deletes } = upload.data;
+  const { readers, mayAddVersion, deletes } = upload;
   const busy = acting?.state === "loading";
   return (
     <div {...stylex.props(styles.stack)}>
@@ -1099,34 +1153,25 @@ const connectionOfSource = (source: BrainSourceRef): string | undefined =>
 
 /**
  * Where and when a kept read was read (a `connected` source): its
- * system's name, when known, and its version's time. Nothing for any
- * other source.
+ * system's name, when known, and its version's time.
  */
 const ReadFrom = ({
-  source,
+  connectionId,
   read,
   names,
 }: {
-  source: BrainSourceRef;
+  connectionId: string;
   read: BrainSourceText;
   names: ReadonlyMap<string, string>;
 }) => {
-  const connectionId = connectionOfSource(source);
-  if (connectionId === undefined) {
-    return null;
-  }
   const name = names.get(connectionId);
   const readOn = formatDateTime(read.addedAt);
-  return (
-    <Text size="sm" tone="muted">
-      {name === undefined ? (
-        <Trans>Read from a shared connection on {readOn}</Trans>
-      ) : (
-        <Trans>
-          Read from {name} on {readOn}
-        </Trans>
-      )}
-    </Text>
+  return name === undefined ? (
+    <Trans>Read from a shared connection on {readOn}</Trans>
+  ) : (
+    <Trans>
+      Read from {name} on {readOn}
+    </Trans>
   );
 };
 
@@ -1149,9 +1194,6 @@ const VersionList = ({
   const { before } = page;
   return (
     <div {...stylex.props(styles.versions)}>
-      <Heading level={4} size="ui-sm">
-        <Trans>Versions</Trans>
-      </Heading>
       <ItemGroup>
         {page.versions.map(({ version, addedAt }) => {
           const added = formatDateTime(addedAt);
@@ -1211,7 +1253,106 @@ const VersionList = ({
   );
 };
 
-/** One source: its versions the person may read, and the text of the one in hand. */
+/** What the panel says of a source it can't show, under its name: nothing for one it can. */
+const aboutOf = (versions: Read<BrainSourceVersionPage>): ReactNode => {
+  if (versions.state === "refused") {
+    return <ErrorText>{versions.message}</ErrorText>;
+  }
+  if (versions.state === "ready" && versions.data.versions.length === 0) {
+    return <Trans>You can&apos;t read this source.</Trans>;
+  }
+  return undefined;
+};
+
+/** The version's text for its section, or why it isn't there: nothing while it is read. */
+const saidOf = (
+  text: Read<BrainSourceText | null>
+): Pick<InspectorSection, "text" | "content"> | undefined => {
+  if (text.state === "refused") {
+    return { content: <ErrorText>{text.message}</ErrorText> };
+  }
+  if (text.state === "loading") {
+    return undefined;
+  }
+  return text.data === null
+    ? { content: <Trans>You can&apos;t read this version.</Trans> }
+    : {
+        text: <span {...stylex.props(styles.plain)}>{text.data.text}</span>,
+      };
+};
+
+/**
+ * What the person may do to an upload, as core says, as the panel's
+ * section: none for any other source, or an upload they may not change.
+ */
+const useUploadSection = (
+  source: BrainSourceRef,
+  {
+    teams,
+    onChanged,
+    onDeleted,
+  }: {
+    teams: Team[];
+    onChanged: (source: BrainSourceRef) => void;
+    onDeleted: (source: BrainSourceRef) => void;
+  }
+): InspectorSection[] => {
+  const core = useCore();
+  const producerLabel = useProducerLabel();
+  const [upload, setUpload] = useState<Read<BrainUpload | null>>({
+    state: "loading",
+  });
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await readFrom(
+        core,
+        async (sources) => await sources.uploadOf(source.id)
+      );
+      if (!left) {
+        setUpload(answer);
+      }
+    };
+    if (source.producer === "upload") {
+      void read();
+    }
+    return () => {
+      left = true;
+    };
+  }, [core, source]);
+  if (upload.state === "refused") {
+    return [
+      {
+        id: "upload",
+        label: producerLabel("upload"),
+        content: <ErrorText>{upload.message}</ErrorText>,
+      },
+    ];
+  }
+  if (upload.state === "loading" || upload.data === null) {
+    return [];
+  }
+  return [
+    {
+      id: "upload",
+      label: producerLabel("upload"),
+      content: (
+        <UploadActions
+          onChanged={onChanged}
+          onDeleted={onDeleted}
+          source={source}
+          teams={teams}
+          upload={upload.data}
+        />
+      ),
+    },
+  ];
+};
+
+/**
+ * One source, in an inspector: its first line, its versions the person may
+ * read, the text of the one in hand, and what they may do to an upload.
+ */
 const SourcePanel = ({
   source,
   version: asked,
@@ -1219,6 +1360,7 @@ const SourcePanel = ({
   connectedNames,
   onChanged,
   onDeleted,
+  onClose,
 }: {
   source: BrainSourceRef;
   /** The version to show first: the newest they may read when left out. */
@@ -1230,8 +1372,11 @@ const SourcePanel = ({
   onChanged: (source: BrainSourceRef) => void;
   /** It was deleted. */
   onDeleted: (source: BrainSourceRef) => void;
+  onClose: () => void;
 }) => {
+  const { t } = useLingui();
   const core = useCore();
+  const producerLabel = useProducerLabel();
   const [versions, setVersions] = useState<Read<BrainSourceVersionPage>>({
     state: "loading",
   });
@@ -1242,6 +1387,11 @@ const SourcePanel = ({
     version: number;
     answer: Read<BrainSourceText | null>;
   }>();
+  const uploadSection = useUploadSection(source, {
+    teams,
+    onChanged,
+    onDeleted,
+  });
   useEffect(() => {
     let left = false;
     const read = async (): Promise<void> => {
@@ -1280,73 +1430,80 @@ const SourcePanel = ({
     };
   }, [core, source, shown]);
 
-  if (versions.state === "refused") {
-    return <ErrorText>{versions.message}</ErrorText>;
-  }
   const text: Read<BrainSourceText | null> =
     readOf !== undefined && readOf.version === shown
       ? readOf.answer
       : { state: "loading" };
-  const read = text.state === "ready" ? text.data : undefined;
+  const read =
+    text.state === "ready" && text.data !== null ? text.data : undefined;
+  const connectionId = connectionOfSource(source);
+  const said = saidOf(text);
+  const sections: InspectorSection[] = [];
+  if (shown !== undefined && said !== undefined) {
+    const version = shown;
+    sections.push({ id: "text", label: t`Version ${version}`, ...said });
+  }
+  if (versions.state === "ready" && versions.data.versions.length > 0) {
+    sections.push({
+      id: "versions",
+      label: t`Versions`,
+      content: (
+        <VersionList
+          onChoose={setChosen}
+          page={versions.data}
+          shown={shown}
+          source={source}
+          onMore={(page) => {
+            setVersions({
+              state: "ready",
+              data: {
+                versions: [...versions.data.versions, ...page.versions],
+                before: page.before,
+              },
+            });
+          }}
+        />
+      ),
+    });
+  }
+  sections.push(...uploadSection);
+  const title =
+    read === undefined
+      ? producerLabel(source.producer)
+      : firstLineOf(read.text) || t`No first line`;
   return (
-    <Card element="section" padding="md">
-      <div {...stylex.props(styles.stack)}>
-        {versions.state === "ready" && versions.data.versions.length === 0 ? (
-          <Text size="sm" tone="muted">
-            <Trans>You can&apos;t read this source.</Trans>
-          </Text>
-        ) : null}
-        {read === undefined || read === null ? null : (
-          <>
-            <Heading level={3} size="ui-sm">
-              {firstLineOf(read.text) || <Trans>No first line</Trans>}
-            </Heading>
-            <ReadFrom names={connectedNames} read={read} source={source} />
-            <Text size="sm">
-              <span {...stylex.props(styles.plain)}>{read.text}</span>
-            </Text>
-            <LearnedSection
-              key={`${keyOf(source)}#${read.version}`}
-              source={source}
-              version={read.version}
-            />
-          </>
-        )}
-        {text.state === "ready" && text.data === null ? (
-          <Text size="sm" tone="muted">
-            <Trans>You can&apos;t read this version.</Trans>
-          </Text>
-        ) : null}
-        {text.state === "refused" ? (
-          <ErrorText>{text.message}</ErrorText>
-        ) : null}
-        {versions.state === "ready" && versions.data.versions.length > 0 ? (
-          <VersionList
-            onChoose={setChosen}
-            page={versions.data}
-            shown={shown}
+    <InspectorPanel
+      aria-label={title}
+      description={aboutOf(versions)}
+      foot={
+        read === undefined ? undefined : (
+          <LearnedSection
+            key={`${keyOf(source)}#${read.version}`}
             source={source}
-            onMore={(page) => {
-              setVersions({
-                state: "ready",
-                data: {
-                  versions: [...versions.data.versions, ...page.versions],
-                  before: page.before,
-                },
-              });
-            }}
+            version={read.version}
           />
-        ) : null}
-        {source.producer === "upload" ? (
-          <UploadActions
-            onChanged={onChanged}
-            onDeleted={onDeleted}
-            source={source}
-            teams={teams}
-          />
-        ) : null}
-      </div>
-    </Card>
+        )
+      }
+      loading={
+        versions.state === "loading" ||
+        (shown !== undefined && text.state === "loading")
+      }
+      meta={
+        read === undefined || connectionId === undefined
+          ? undefined
+          : [
+              <ReadFrom
+                connectionId={connectionId}
+                key="read"
+                names={connectedNames}
+                read={read}
+              />,
+            ]
+      }
+      onClose={onClose}
+      sections={sections}
+      title={title}
+    />
   );
 };
 
@@ -1554,8 +1711,9 @@ export const SourcesPage = ({
 }) => {
   const { t } = useLingui();
   const core = useCore();
-  const navigate = useNavigate();
   const producerLabel = useProducerLabel();
+  const kindHeading = useKindHeading();
+  const listHeading = useId();
   // Each opening counts, so opening a source again (a search result
   // citing a version, after another was picked in its panel) starts its
   // panel afresh at what was asked.
@@ -1669,6 +1827,7 @@ export const SourcesPage = ({
       .map((source) => ({
         at: source.date,
         row: {
+          key: `note:${source.id}`,
           item: {
             kind:
               source.transcriptTurns === undefined
@@ -1688,12 +1847,8 @@ export const SourcesPage = ({
               .filter(given)
               .join(" · "),
             when: formatDay(source.date),
-          },
-          open: () => {
-            void navigate({
-              to: "/brain/$noteId",
-              params: { noteId: source.id },
-            });
+            // Its own page, in this tab, at its own address.
+            render: <Link params={{ noteId: source.id }} to="/brain/$noteId" />,
           },
         },
       })),
@@ -1704,6 +1859,7 @@ export const SourcesPage = ({
       return {
         at: each.addedAt,
         row: {
+          key: keyOf(each.source),
           item: {
             kind: producerKind[each.source.producer],
             title: each.firstLine === "" ? t`No first line` : each.firstLine,
@@ -1738,6 +1894,8 @@ export const SourcesPage = ({
     .filter(({ at }) => next === null || at >= next.addedAt)
     .toSorted((a, b) => Number(a.at < b.at) - Number(a.at > b.at))
     .map(({ row }) => row);
+  // Each source's row, as sourcesByKind gives the sources back.
+  const rowOf = new Map(rows.map((row) => [row.item, row]));
 
   return (
     // A page of the brain: the title in the serif, in the brain's column,
@@ -1777,28 +1935,38 @@ export const SourcesPage = ({
         ) : null}
         {opened === undefined &&
         (listed.state === "loading" || rows.length === 0) ? null : (
-          <div
-            {...stylex.props(
-              styles.split,
-              opened !== undefined && styles.splitOpen
-            )}
-          >
-            <div {...stylex.props(styles.list)}>
+          <div {...stylex.props(styles.split)}>
+            <div {...stylex.props(styles.listed)}>
               {rows.length === 0 ? null : (
-                <Sources
-                  items={rows.map(({ item }) => item)}
-                  labels={{ byRelevance: t`Newest first` }}
-                  onOpen={(_, index) => {
-                    rows[index]?.open();
-                  }}
+                <section
+                  aria-labelledby={listHeading}
+                  {...stylex.props(styles.section)}
                 >
-                  <SourceList
-                    defaultOpen
-                    fold={rows.length}
-                    heading={t`Sources you may read`}
-                    headingLevel={2}
-                  />
-                </Sources>
+                  <Heading id={listHeading} level={2} size="ui-sm">
+                    <Trans>Sources you may read</Trans>
+                  </Heading>
+                  <div {...stylex.props(styles.groups)}>
+                    {sourcesByKind(rows.map(({ item }) => item)).map(
+                      ({ kind, sources: ofKind }) => (
+                        <PanelSection
+                          headingLevel={3}
+                          key={kind}
+                          label={kindHeading(kind)}
+                        >
+                          <RowList noActions stack>
+                            {ofKind.map((item) => (
+                              <SourceItem
+                                key={rowOf.get(item)?.key}
+                                onOpen={rowOf.get(item)?.open}
+                                source={item}
+                              />
+                            ))}
+                          </RowList>
+                        </PanelSection>
+                      )
+                    )}
+                  </div>
+                </section>
               )}
               {kept.some((each) => each.personal) ? (
                 <Text size="sm" tone="muted">
@@ -1843,15 +2011,20 @@ export const SourcesPage = ({
               )}
             </div>
             {opened === undefined ? null : (
-              <SourcePanel
-                connectedNames={connectedNames}
-                key={`panel-${opened.opening}`}
-                onChanged={changed}
-                onDeleted={deleted}
-                source={opened.source}
-                teams={teams}
-                version={opened.version}
-              />
+              <div {...stylex.props(styles.inspector)}>
+                <SourcePanel
+                  connectedNames={connectedNames}
+                  key={`panel-${opened.opening}`}
+                  onChanged={changed}
+                  onClose={() => {
+                    setOpened(undefined);
+                  }}
+                  onDeleted={deleted}
+                  source={opened.source}
+                  teams={teams}
+                  version={opened.version}
+                />
+              </div>
             )}
           </div>
         )}
