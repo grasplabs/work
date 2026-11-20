@@ -16,5 +16,8 @@
     "hooks": "@grasp-os/ui/hooks",
     "lib": "@grasp-os/ui/lib",
     "ui": "@grasp-os/ui/components"
+  },
+  "registries": {
+    "@grasp": "https://damsko.joingrasp.com/r/{name}.json"
   }
 }
