@@ -1211,6 +1211,52 @@ describe(
       ]);
     });
 
+    it("lists one waiting for a sign-in only while its entry is offered, as only then can it be connected again", async () => {
+      const [person, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const provider = `mail-${crypto.randomUUID().slice(0, 8)}`;
+      const mail = await mailConnection([], mailWithSearch, { provider });
+      await chooseAudience(admin.api, mail.id, { kind: "everyone" });
+      await connectDb()
+        .prepare("UPDATE connections SET status = 'needs_reauth' WHERE id = ?")
+        .bind(mail.id)
+        .run();
+      const listing = codeStep(
+        "export default async (self, env) => await env.connections.list();"
+      );
+      const chat = await chatOf(
+        person.userId,
+        listing,
+        says("Listed."),
+        listing,
+        says("Listed again.")
+      );
+      await chat.ask("What can you read?");
+      // An admin hides its entry: reconnecting it is refused until offered.
+      await env.DB.prepare(
+        "INSERT INTO hidden_connectors (source, connector_id, hidden_by, hidden_at) VALUES ('composio', ?, ?, ?)"
+      )
+        .bind(provider, admin.userId, Date.now())
+        .run();
+      try {
+        await chat.ask("And now?");
+      } finally {
+        await env.DB.prepare(
+          "DELETE FROM hidden_connectors WHERE source = 'composio' AND connector_id = ?"
+        )
+          .bind(provider)
+          .run();
+      }
+
+      const [offered, hidden] = await codeResults(chat.stub, chat.chat.id);
+      expect({
+        offered: offered?.text.includes(`"connectionId":"${mail.id}"`),
+        hidden: hidden?.text.includes(`"connectionId":"${mail.id}"`),
+      }).toStrictEqual({ offered: true, hidden: false });
+    });
+
     it("withholds what was read through it while the provider refuses its grant, lists it with no actions, and says it needs connecting again", async () => {
       const [person, admin] = await Promise.all([
         signedInApi(idp, "user"),

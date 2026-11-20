@@ -210,7 +210,9 @@ const scopePerson = async (
 /**
  * The person's own connections and the shared ones that need someone to
  * sign in again (`needs_reauth`, GRA-2227), as connect lists them for the
- * person: never an outside API, which the chat never calls.
+ * person, of entries an admin hasn't hidden (`offeredAmong`): those that
+ * can be connected again. Never an outside API, which the chat never
+ * calls.
  */
 export const waitingConnections = async (
   env: Env,
@@ -219,9 +221,7 @@ export const waitingConnections = async (
   const listed = await env.CONNECT.listConnections(
     await scopePerson(env, scope)
   );
-  return listed.filter(
-    ({ status, source }) => status === "needs_reauth" && source !== "http"
-  );
+  return await offeredAmong(env, listed, "needs_reauth");
 };
 
 /**

@@ -356,22 +356,25 @@ const isHidden = async (
 };
 
 /**
- * The `offeredConnections` among `listed`, what connect lists for the
- * person: for a caller that needs that list itself too, so connect is
- * asked once.
+ * The connections among `listed`, what connect lists for the person, with
+ * status `status`, of entries an admin hasn't hidden: `active` ones are
+ * the `offeredConnections`; `needs_reauth` ones are those that can be
+ * connected again, which a hidden entry's can't (above). For a caller
+ * that needs that list itself too, so connect is asked once.
  */
 export const offeredAmong = async (
   env: Env,
-  listed: readonly ConnectionSummary[]
+  listed: readonly ConnectionSummary[],
+  status: "active" | "needs_reauth" = "active"
 ): Promise<ConnectionSummary[]> => {
   const hidden = await hiddenEntries(env);
   // An HTTP connection is Apps' and workflows' alone: a chat's agent
   // never asks for one (tool-classes.ts).
   return listed.filter(
-    ({ status, source, provider }) =>
-      status === "active" &&
-      source !== "http" &&
-      !hidden.has(entryKey(source, provider))
+    (connection) =>
+      connection.status === status &&
+      connection.source !== "http" &&
+      !hidden.has(entryKey(connection.source, connection.provider))
   );
 };
 
