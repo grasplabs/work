@@ -13,6 +13,7 @@ export const useFollowLinks = () => {
         event.target instanceof Element ? event.target.closest("a") : null;
       if (
         link === null ||
+        (link.protocol !== "http:" && link.protocol !== "https:") ||
         event.button !== 0 ||
         event.metaKey ||
         event.ctrlKey ||
