@@ -16087,7 +16087,7 @@ msgstr "Suggested"
 msgid "Summarise documents"
 msgstr "Summarise documents"
 
-#: src/routes/_shell.brain.$noteId.tsx
+#: src/brain/source-interview.tsx
 msgctxt "tab: an interview written up short"
 msgid "Summary"
 msgstr "Summary"
@@ -17871,14 +17871,18 @@ msgid "Track the month-end close"
 msgstr "Track the month-end close"
 
 #: src/brain/brain-markdown.ts
-#: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
 #: src/interview/page.tsx
 #: src/interview/transcript.tsx
 msgid "Transcript"
 msgstr "Transcript"
 
-#: src/routes/_shell.brain.$noteId.tsx
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Transcript"
+msgstr "Transcript"
+
+#: src/brain/source-interview.tsx
 msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcript"
