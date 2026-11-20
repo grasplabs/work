@@ -35,6 +35,7 @@ export {
   actionPermissions,
   declaredPermission,
   declaredPermissions,
+  defaultPermission,
   isActionPermission,
 } from "./manifest-permissions.ts";
 export { appErrorDetailsOf, appErrorProblemOf } from "./app-error.ts";

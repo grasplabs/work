@@ -314,7 +314,7 @@ granted.action({
   args: { noteId: v.id("notes"), to: v.string().email() },
   returns: v.object({ summary: v.string() }),
   handler: async (ctx, args) => {
-    expectTypeOf(ctx).toExtend<ActionCtx>();
+    expectTypeOf(ctx).toExtend<ActionCtx<typeof brain>>();
     // No database: it tells people only.
     expectTypeOf(ctx).not.toHaveProperty("db");
     expectTypeOf(ctx.notifyPeople).parameter(0).toEqualTypeOf<string>();
@@ -356,13 +356,17 @@ action({
   args: {},
   returns: v.null(),
   handler: (ctx) => {
-    // The App's functions, but nothing outside an App that declares nothing.
+    // The App's functions, but nothing outside an App that declares
+    // nothing, save the Brain's reads, which every App has (GRA-2218).
     expectTypeOf(ctx.runQuery(get, { id: noteId })).resolves.toExtend<{
       title: string;
     } | null>();
     expectTypeOf(ctx.connections).not.toHaveProperty("mail");
     expectTypeOf(ctx).not.toHaveProperty("ai");
-    expectTypeOf(ctx).not.toHaveProperty("brain");
+    expectTypeOf(
+      ctx.brain.recall({ question: "a", budget: { tokens: 500 } })
+    ).resolves.toEqualTypeOf<BrainPack>();
+    expectTypeOf(ctx.brain).not.toHaveProperty("remember");
     return null;
   },
 });

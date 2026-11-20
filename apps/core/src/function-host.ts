@@ -10,6 +10,7 @@ import {
   appErrorDetailsOf,
   declaredPermission,
   declaredPermissions,
+  defaultPermission,
   descriptorFromText,
   schemaFromDescriptor,
   schemaHash,
@@ -1678,10 +1679,13 @@ export interface BoundResource {
 /**
  * How core binds a declared resource for an invocation, under the App's
  * grants: the bound resource, or undefined when there is no approved
- * binding. A declaration alone grants nothing.
+ * binding. A declaration alone grants nothing. `byDefault`: the Brain's
+ * reads an App that declares no `brain` permission reaches with no
+ * binding (`defaultPermission`, GRA-2218), never anything it declares.
  */
 export type ResourceBindings = (
-  declaration: AnyPermission
+  declaration: AnyPermission,
+  byDefault: boolean
 ) => Promise<BoundResource | undefined>;
 
 /** A model request. */
@@ -2111,11 +2115,17 @@ const resourceCall = async (
   const { alias, method } = request;
   // Only an action reaches outside the App (its channel alone routes here,
   // checked again), and only through a permission the App declares for
-  // it: never a workflow, a pages' permission or `people`.
-  const declaration =
+  // it: never a workflow, a pages' permission or `people`; or, declaring
+  // none under the Brain's alias, the Brain's reads (GRA-2218).
+  const declared =
     fn.kind === "action"
       ? actionPermission(run.app.manifest, alias)
       : undefined;
+  const byDefault =
+    fn.kind === "action" && declared === undefined
+      ? defaultPermission(run.app.manifest.permissions, alias)
+      : undefined;
+  const declaration = declared ?? byDefault;
   const resourceName = sealedName(run.app.manifest.permissions, alias);
   if (declaration === undefined) {
     throw refusingUse(functionErrors.create("permission.not_allowed"), {
@@ -2154,7 +2164,8 @@ const resourceCall = async (
   await admit(run.invocation);
   // Core's own resolution: what it refuses with is the host's.
   const bound = await trusted(
-    async () => await run.invocation.resources?.(declaration)
+    async () =>
+      await run.invocation.resources?.(declaration, byDefault !== undefined)
   );
   const contract =
     declaration["~permission"] === "connections" ? declaration.contract : null;

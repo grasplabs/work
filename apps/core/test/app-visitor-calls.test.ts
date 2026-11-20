@@ -403,6 +403,15 @@ const refusal = (answer: unknown): string =>
   typeof answer === "string" ? "refused" : "answered";
 
 /** A permission row, granted, as an admin's grant writes it. */
+/**
+ * App `app` marked as having read the Brain by default, as core's default
+ * read marks it (resource-brain.ts, GRA-2218).
+ */
+const readByDefault = (app: string) =>
+  env.DB.prepare(
+    "INSERT INTO brain_default_reads (subject_type, subject_id, first_read_at) VALUES ('app', ?, ?)"
+  ).bind(app, Date.now());
+
 const grantedRow = (
   subjectType: "app" | "workflow",
   subject: string,
@@ -1194,6 +1203,53 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       grantAgain: "visitor.not_granted",
       listNone: "ok",
       grantNone: "ok",
+    });
+  });
+
+  it("are refused once the App read the Brain by default, or reaches one that did, though they were let in first, and no visitor is let in again", async () => {
+    const domain = newDomain();
+    const [direct, twoHops] = [await portal(domain), await portal(domain)];
+    const mail = await mailbox();
+    for (const { builder, app } of [direct, twoHops]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
+    }
+    const ana = await visitor(mail, direct.link, `ana@${domain}`);
+    const bo = await visitor(mail, twoHops.link, `bo@${domain}`);
+    const before = [
+      await call(direct.app, direct.version, ana, "portal.mine"),
+      await call(twoHops.app, twoHops.version, bo, "portal.mine"),
+    ];
+    // Then one App reads the Brain by default, declaring no permission to,
+    // and App A does, which starts workflow W, which calls the other: as
+    // core's default read marks each (resource-brain.ts, GRA-2218), with
+    // no grant to read the Brain anywhere.
+    const [a, w] = [crypto.randomUUID(), workflowId()];
+    await env.DB.batch([
+      readByDefault(direct.app),
+      readByDefault(a),
+      grantedRow("app", a, "workflow", w, ["start"]),
+      grantedRow("workflow", w, "app", twoHops.app, ["call"]),
+    ]);
+    expect({
+      before,
+      after: [
+        await call(direct.app, direct.version, ana, "portal.mine"),
+        await call(twoHops.app, twoHops.version, bo, "portal.mine"),
+      ],
+      listAgain: await outcome(
+        direct.builder.api.apps.setVisitors(direct.app, [
+          { kind: "domain", value: domain },
+        ])
+      ),
+      grantAgain: await outcome(
+        direct.builder.api.apps.setVisitorGrants(direct.app, ["portal.mine"])
+      ),
+    }).toStrictEqual({
+      before: [[], []],
+      after: ["visitor.not_granted", "visitor.not_granted"],
+      listAgain: "visitor.not_granted",
+      grantAgain: "visitor.not_granted",
     });
   });
 

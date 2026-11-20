@@ -12,9 +12,11 @@ import type {
   FunctionReturn,
   SingleAnswer,
 } from "./function-references.ts";
+import type { brainReads } from "./manifest-permissions.ts";
 import type { PeopleDirectory, User } from "./people.ts";
 import type {
   AiClient,
+  BrainClient,
   BrainClientOf,
   ConnectionClientOf,
   GuestsClientOf,
@@ -101,9 +103,22 @@ type AiOf<Grants extends Grant> = [Extract<Grants, AiPermission>] extends [
   : AiClient;
 
 /**
- * What an action reaches through the App's permissions (`Grants`), each
- * only when declared: `ai`, `brain`, `grasp` (the platform's own
- * functions) and `guests`, and the connections by alias.
+ * `ctx.brain`: the declared `brain` permission's operations, or the
+ * Brain's reads when `Grants` declare none (`brainByDefault`).
+ */
+type BrainOf<Grants extends Grant> = Readonly<
+  Record<
+    "brain",
+    [Extract<Grants, BrainPermission>] extends [never]
+      ? BrainClient<typeof brainReads>
+      : BrainClientOf<Extract<Grants, BrainPermission>>
+  >
+>;
+
+/**
+ * What an action reaches through the App's permissions (`Grants`): `ai`,
+ * `grasp` (the platform's own functions) and `guests` when declared, the
+ * connections by alias, and `brain` always (`BrainOf`).
  */
 type PermissionClients<Grants extends Grant> = {
   /** Each of the App's connections, by alias. */
@@ -117,7 +132,7 @@ type PermissionClients<Grants extends Grant> = {
     "grasp",
     [Extract<Grants, GraspPermission>] extends [never] ? never : GraspClient
   > &
-  Present<"brain", BrainClientOf<Extract<Grants, BrainPermission>>> &
+  BrainOf<Grants> &
   Present<"guests", GuestsClientOf<Extract<Grants, GuestsPermission>>>;
 
 /** `ctx.auth`: who the call is for, as Convex's `ctx.auth` answers it. */

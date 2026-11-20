@@ -338,10 +338,15 @@ expectTypeOf(entitiesCtx.brain.entities).not.toHaveProperty("find");
 await brainCtx.guests.revoke("chat");
 expectTypeOf(brainCtx.guests).not.toHaveProperty("invite");
 
-// An action that lists none of them reaches none of them.
+// An action that lists none of them reaches none of them, save the
+// Brain's reads, which every App has (GRA-2218).
 declare const bare: ActionCtx;
 expectTypeOf(bare).not.toHaveProperty("ai");
-expectTypeOf(bare).not.toHaveProperty("brain");
+expectTypeOf(bare.brain).toHaveProperty("recall");
+expectTypeOf(bare.brain.skills).toHaveProperty("select");
+expectTypeOf(bare.brain.entities).toHaveProperty("find");
+expectTypeOf(bare.brain).not.toHaveProperty("remember");
+expectTypeOf(bare.brain).not.toHaveProperty("forget");
 expectTypeOf(bare).not.toHaveProperty("guests");
 expectTypeOf(bare.connections).not.toHaveProperty("mail");
 expectTypeOf(bare).not.toHaveProperty("grasp");

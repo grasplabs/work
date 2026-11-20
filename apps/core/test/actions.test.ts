@@ -1616,9 +1616,9 @@ describe("cancelling a streaming action", () => {
       return await Promise.resolve({ mailbox: "m-1", sent: true });
     });
     // Resolving the binding is the last step before the request is sent.
-    const resources: ResourceBindings = async (declaration) => {
+    const resources: ResourceBindings = async (declaration, byDefault) => {
       cancel();
-      return await bindingsOf({ mail: mailBound })(declaration);
+      return await bindingsOf({ mail: mailBound })(declaration, byDefault);
     };
     const result = await call(
       fixture,
