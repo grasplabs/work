@@ -2115,7 +2115,6 @@ msgstr "Von Hand zu entfernender Zugriff"
 msgid "Access waiting for an admin"
 msgstr "Zugriffe, die auf einen Admin warten"
 
-#: src/connections/connection-list.tsx
 #: src/frame/part-words.tsx
 msgid "Account"
 msgstr "Konto"
@@ -2163,14 +2162,6 @@ msgstr "Aktionen für {who}"
 #: src/drafts/draft-history.tsx
 msgid "Actions for the version not shared yet"
 msgstr "Aktionen für die noch nicht geteilte Version"
-
-#: src/connections/connection-list.tsx
-msgid "Active, for the whole company"
-msgstr "Aktiv, für das ganze Unternehmen"
-
-#: src/connections/connection-list.tsx
-msgid "Active, only for you"
-msgstr "Aktiv, nur für Sie"
 
 #: src/brain/activity-page.tsx
 #: src/brain/brain-section.tsx
@@ -5243,7 +5234,6 @@ msgstr "Ein Konto verbunden"
 msgid "Connected as {account}."
 msgstr "Verbunden als {account}."
 
-#: src/connections/connection-list.tsx
 #: src/frame/part-words.tsx
 msgid "Connected by"
 msgstr "Verbunden von"
@@ -5255,10 +5245,6 @@ msgstr "Für alle verbunden"
 #: src/connections/integration-item.tsx
 msgid "Connected for you"
 msgstr "Für Sie verbunden"
-
-#: src/connections/connection-list.tsx
-msgid "Connected on"
-msgstr "Verbunden am"
 
 #: src/settings/ai-providers.tsx
 msgid "Connected providers"
@@ -6369,10 +6355,6 @@ msgstr "{label} trennen"
 #: src/frame/part-words.tsx
 msgid "Disconnect {label}?"
 msgstr "{label} trennen?"
-
-#: src/connections/connection-list.tsx
-msgid "Disconnected"
-msgstr "Getrennt"
 
 #: src/activity/audit-words.ts
 msgid "Disconnected an account"
@@ -9710,10 +9692,6 @@ msgstr "Ihr Zugriff ist abgelaufen. Ein Admin Ihrer Organisation kann sie neu ve
 msgid "Its access ran out. Grasp staff can't reconnect it: an admin of the organization can."
 msgstr "Ihr Zugriff ist abgelaufen. Das Grasp-Team kann sie nicht neu verbinden: ein Admin der Organisation schon."
 
-#: src/connections/connection-list.tsx
-msgid "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
-msgstr "Der Zugriff ist abgelaufen. Melden Sie sich mit demselben Konto erneut an: Apps und Agenten behalten ihre Berechtigungen dafür."
-
 #: src/settings/ai-providers.tsx
 msgid "Its account is out of credit."
 msgstr "Das Guthaben des Kontos ist aufgebraucht."
@@ -11318,7 +11296,6 @@ msgstr "Erneute Anmeldung nötig"
 msgid "Needs someone"
 msgstr "Braucht jemanden"
 
-#: src/connections/connection-list.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Jemand muss sich erneut anmelden"
@@ -11981,10 +11958,6 @@ msgstr "Noch keiner: Ein Workflow startet auf ihre Events über den Tab „Ausl�
 msgid "None: its provider was removed."
 msgstr "Keines: Sein Anbieter wurde entfernt."
 
-#: src/connections/connection-list.tsx
-msgid "None."
-msgstr "Keine."
-
 #: src/settings/workspace-name.tsx
 msgid "Not a PNG, JPEG or WebP picture"
 msgstr "Kein PNG-, JPEG- oder WebP-Bild"
@@ -12159,10 +12132,6 @@ msgstr "Nicht erstellt"
 #: src/settings/chat-accounts.tsx
 msgid "Not mine"
 msgstr "Nicht meins"
-
-#: src/connections/connection-list.tsx
-msgid "Not named by the provider"
-msgstr "Vom Anbieter nicht benannt"
 
 #: src/onboarding/hr-leads.tsx
 msgid "Not now"
@@ -16647,7 +16616,6 @@ msgid "Someone it is no longer shared with"
 msgstr "Jemand, mit dem sie nicht mehr geteilt ist"
 
 #: src/connections/app-of.tsx
-#: src/connections/connection-list.tsx
 msgid "Someone no longer here"
 msgstr "Jemand, der nicht mehr da ist"
 
@@ -21297,7 +21265,6 @@ msgid "you"
 msgstr "Ihnen"
 
 #: src/connections/app-of.tsx
-#: src/connections/connection-list.tsx
 #: src/drafts/draft-history.tsx
 #: src/frame/part-words.tsx
 #: src/workflows/run-detail.tsx

@@ -41,6 +41,8 @@ export type AppState = "works" | "needs-you" | "sign-in" | "reconnect";
 
 /** The account an app is connected with. */
 export interface AppConnection {
+  /** The host's lasting id for it, where it has several: what tells the rows apart. */
+  id?: string;
   /** The account, as the app calls it ("Acme HubSpot"). */
   account: string;
   /** Who it is signed in as, as the app shows it ("sales@acme.com"). Without it, the account. */
@@ -88,8 +90,13 @@ export interface App {
   tools?: readonly AppTool[];
   /** How many tools it has, where `tools` is not loaded. */
   toolCount?: number;
-  /** Its connection, when it has one. */
+  /** Its connection, when it has one: the one its tile, panel and head speak of. */
   connection?: AppConnection;
+  /**
+   * Every account it is connected with, `connection` among them, where there may be more than one:
+   * the page lists each as a row of its connection card. Without it, `connection` alone.
+   */
+  connections?: readonly AppConnection[];
   /** The workflows that use it. */
   workflows?: readonly AppWorkflow[];
 }

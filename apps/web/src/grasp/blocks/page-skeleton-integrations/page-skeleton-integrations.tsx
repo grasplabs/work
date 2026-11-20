@@ -12,6 +12,10 @@
 //   <PageSkeletonAppPanel />                         InspectorPanel's own `loading`: the head, then
 //                                                    Account, What Grasp may do and Used by, as the
 //                                                    app panel stands
+//   <PageSkeletonAppPage accounts={2} offer />       an app's own page (AppPage): its 40rem column,
+//                                                    the head card (with `offer`, the offered switch's
+//                                                    frame), a row for each account, then What Grasp
+//                                                    may do with its search and its groups
 //
 // So nothing moves when the data arrives: the grid's columns and rows, the panel's sections.
 import * as stylex from "@stylexjs/stylex";
@@ -27,6 +31,8 @@ import {
 } from "../../item";
 import { PageHeader } from "../../page-header";
 import { RowList, RowListItem } from "../../row-list";
+import { SectionCard } from "../../section-card";
+import { RowFrame } from "../../setting-row/frame";
 import { Skeleton } from "../../skeleton";
 import { grasp, media } from "../../tokens/tokens.stylex";
 
@@ -115,6 +121,97 @@ const styles = stylex.create({
   settings: { width: "4.5rem", height: grasp.controlXs },
   allTools: { width: "5.5rem" },
   bar: { height: grasp.space2 },
+  // An app's own page, as AppPage lays it (app-integration/page.tsx): one centred 40rem column.
+  appPage: {
+    display: "grid",
+    gap: grasp.space8,
+    width: "100%",
+    maxWidth: "40rem",
+    marginInline: "auto",
+    minWidth: 0,
+  },
+  // Its head card: the mark, the words, and the action at the line's end (under the words on a phone).
+  headCard: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "auto minmax(0, 1fr) auto",
+      [media.belowPhone]: "auto minmax(0, 1fr)",
+    },
+    columnGap: grasp.space4,
+    rowGap: grasp.space4,
+    alignItems: "start",
+    padding: grasp.space6,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    boxShadow: `inset 0 0 0 ${grasp.hairline} ${grasp.line}`,
+    backgroundColor: grasp.raised,
+  },
+  headMark: { width: grasp.avatarLg, height: grasp.avatarLg },
+  headWords: { display: "grid", gap: grasp.space1, minWidth: 0 },
+  headName: { width: "8rem" },
+  headLine: { width: "min(100%, 24rem)" },
+  headLineShort: { width: "min(100%, 16rem)" },
+  headAction: {
+    width: "7.5rem",
+    height: grasp.controlSm,
+    gridColumn: { default: "auto", [media.belowPhone]: "2" },
+  },
+  // Whether it is offered: the switch's frame and its one line, under the words.
+  headOffer: {
+    gridColumn: "2 / -1",
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+  headSwitch: {
+    width: grasp.switchWidth,
+    height: grasp.switchHeight,
+    flexShrink: 0,
+  },
+  headOfferLine: { width: "min(100%, 13rem)" },
+  // An account's row: its words, its state, then its actions, which wrap under the words on a phone.
+  accounts: { margin: 0, padding: 0, listStyle: "none" },
+  accountItem: {
+    borderBlockStartWidth: { default: grasp.hairline, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: grasp.line,
+  },
+  account: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr) auto auto",
+      "@container (width < 28rem)": "minmax(0, 1fr) auto",
+    },
+    alignItems: "center",
+    columnGap: grasp.space4,
+    rowGap: grasp.space2,
+  },
+  accountWords: { display: "grid", minWidth: 0 },
+  accountName: { width: "min(100%, 11rem)" },
+  accountWhen: { width: "min(100%, 7rem)" },
+  accountState: { width: "5.5rem", alignSelf: "start" },
+  accountActions: {
+    display: "flex",
+    gap: grasp.space2,
+    gridColumn: { default: "auto", "@container (width < 28rem)": "1 / -1" },
+  },
+  accountAction: { width: "6.5rem", height: grasp.controlSm },
+  // What Grasp may do: the search in the card's head, then a group a row, its name and counts.
+  toolsSearch: {
+    width: { default: "14rem", "@container (width < 28rem)": "100cqi" },
+    height: grasp.controlSm,
+  },
+  group: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    columnGap: grasp.space4,
+    paddingInlineStart: `calc(${grasp.iconSm} + ${grasp.space2})`,
+  },
+  groupName: { width: "6rem" },
+  groupCounts: { width: "7rem" },
+  groupChoice: { width: "3.5rem" },
 });
 
 export interface PageSkeletonIntegrationsProps {
@@ -301,4 +398,100 @@ export const PageSkeletonAppPanel = ({
       },
     ]}
   />
+);
+
+export interface PageSkeletonAppPageProps {
+  /** How many accounts wait, a row each. @default 1 */
+  accounts?: number;
+  /** Whether it is offered waits too, under the head's words, as an admin's page shows it. @default false */
+  offer?: boolean;
+  /** How many groups of tools wait under What Grasp may do. @default 4 */
+  groups?: number;
+  /** The tools card's name, as the page shows it. @default "What Grasp may do" */
+  mayDo?: string;
+  /** The accounts card's name for a screen reader, as the page's. @default "Connection" */
+  connection?: string;
+  /** What the region says while it waits, for a screen reader. @default "Loading the app" */
+  label?: string;
+}
+
+/**
+ * An app's own page before it arrives, as AppPage stands: the head card in the centred column, a
+ * row for each account (its words, its state, its actions' frames), then What Grasp may do with its
+ * search's frame and its groups. Put it where the AppPage will stand.
+ */
+export const PageSkeletonAppPage = ({
+  accounts = 1,
+  offer = false,
+  groups = 4,
+  mayDo = "What Grasp may do",
+  connection = "Connection",
+  label = "Loading the app",
+}: PageSkeletonAppPageProps) => (
+  <output
+    data-slot="page-skeleton-app-page"
+    aria-busy="true"
+    aria-label={label}
+    {...stylex.props(styles.appPage)}
+  >
+    <div {...stylex.props(styles.headCard)}>
+      <Skeleton variant="block" layout={styles.headMark} />
+      <div {...stylex.props(styles.headWords)}>
+        <Skeleton text="lg" layout={styles.headName} />
+        <Skeleton text="sm" layout={styles.headLine} />
+        <Skeleton text="sm" layout={styles.headLineShort} />
+      </div>
+      <Skeleton variant="block" layout={styles.headAction} />
+      {offer ? (
+        <span {...stylex.props(styles.headOffer)}>
+          <Skeleton variant="block" layout={styles.headSwitch} />
+          <Skeleton text="sm" layout={styles.headOfferLine} />
+        </span>
+      ) : null}
+    </div>
+    {accounts === 0 ? null : (
+      <SectionCard
+        variant="boxed"
+        flush
+        density="compact"
+        aria-label={connection}
+      >
+        <ul {...stylex.props(styles.accounts)}>
+          {Array.from({ length: accounts }, (_, index) => (
+            <li key={index} {...stylex.props(styles.accountItem)}>
+              <RowFrame slot="setting-row" inner={[styles.account]}>
+                <span {...stylex.props(styles.accountWords)}>
+                  <Skeleton text="sm" layout={styles.accountName} />
+                  <Skeleton text="sm" layout={styles.accountWhen} />
+                </span>
+                <Skeleton text="sm" layout={styles.accountState} />
+                <span {...stylex.props(styles.accountActions)}>
+                  <Skeleton variant="block" layout={styles.accountAction} />
+                </span>
+              </RowFrame>
+            </li>
+          ))}
+        </ul>
+      </SectionCard>
+    )}
+    <SectionCard
+      variant="grouped"
+      flush
+      density="compact"
+      title={mayDo}
+      actions={<Skeleton variant="block" layout={styles.toolsSearch} />}
+    >
+      <div>
+        {Array.from({ length: groups }, (_, index) => (
+          <RowFrame key={index} slot="setting-row" inner={[styles.group]}>
+            <span {...stylex.props(styles.accountWords)}>
+              <Skeleton text="sm" layout={styles.groupName} />
+              <Skeleton text="sm" layout={styles.groupCounts} />
+            </span>
+            <Skeleton text="sm" layout={styles.groupChoice} />
+          </RowFrame>
+        ))}
+      </div>
+    </SectionCard>
+  </output>
 );

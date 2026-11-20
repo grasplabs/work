@@ -19,11 +19,12 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { ConnectionList } from "./connection-list.tsx";
+import { AccountActions, ConnectionsAccess } from "./connection-list.tsx";
 import type { CatalogConnection, Integration } from "./integrations.ts";
 
-// The disconnect dialog of a person's connection: it says what the Brain
-// kept from it is erased whenever core says the connection may hold some
+// What an app's page says of each connection besides its account row:
+// the disconnect dialog of a person's connection says what the Brain kept
+// from it is erased whenever core says the connection may hold some
 // (`keepsReads`), and says nothing of the Brain for one that never can.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -78,11 +79,18 @@ const showing = async (shown: CatalogConnection): Promise<void> => {
   };
   const rootRoute = createRootRoute({
     component: () => (
-      <ConnectionList
-        held={undefined}
-        identity={person}
-        integration={integrationOf([shown])}
-      />
+      <>
+        <AccountActions
+          connection={shown}
+          identity={person}
+          integration={integrationOf([shown])}
+        />
+        <ConnectionsAccess
+          held={undefined}
+          identity={person}
+          integration={integrationOf([shown])}
+        />
+      </>
     ),
   });
   const router = createRouter({
@@ -329,7 +337,7 @@ const asAdmin = async (
   };
   const rootRoute = createRootRoute({
     component: () => (
-      <ConnectionList
+      <ConnectionsAccess
         held={undefined}
         identity={admin}
         integration={integrationOf([shown, ...others])}

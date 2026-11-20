@@ -33,7 +33,7 @@ import {
   signInAgainTarget,
   signInHostOf,
 } from "./connect-dialog.tsx";
-import { DisconnectDialog } from "./connection-list.tsx";
+import { DisconnectDialog, mayDisconnect } from "./connection-list.tsx";
 import { fixOf } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
 import { reliedOnLapsed } from "./integrations.ts";
@@ -198,8 +198,8 @@ const ConnectNative = ({
 
 /**
  * The connection this person may disconnect from the app's Manage menu:
- * its only one, when it is theirs or they are an admin. With more, each
- * is disconnected from its own card on the app's page.
+ * its only one, where they may disconnect it. With more, each is
+ * disconnected from its own row on the app's page.
  */
 const removableOf = (
   integration: Integration,
@@ -208,8 +208,7 @@ const removableOf = (
   const [only, ...more] = integration.connections;
   return only !== undefined &&
     more.length === 0 &&
-    (only.scope === "personal" || isAdmin(identity.role)) &&
-    !identity.staff
+    mayDisconnect(only, identity)
     ? only
     : undefined;
 };

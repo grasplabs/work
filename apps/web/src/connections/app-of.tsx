@@ -1,3 +1,4 @@
+import { canSignInAgain } from "@grasp-os/shared/connect";
 import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
@@ -63,6 +64,23 @@ export const appStateOf = (
   return fixOf(integration, identity) === "sign-in" ? "sign-in" : "reconnect";
 };
 
+/**
+ * How one account stands on its own row, as its own buttons do: it works,
+ * this person signs in to it again, or it is connected anew.
+ */
+const rowStateOf = (
+  connection: ListedConnection,
+  integration: Integration,
+  identity: Pick<Identity, "role" | "staff">
+): AppConnection["state"] => {
+  if (connection.status === "active") {
+    return "works";
+  }
+  return canSignInAgain(connection, integration.offered, identity)
+    ? "sign-in"
+    : "reconnect";
+};
+
 /** A promise's value once it settles, for as long as it is the promise given; undefined until then. */
 export const useSettled = <T,>(
   promise: Promise<T> | undefined
@@ -103,32 +121,32 @@ export const useAppOf = (
   const { t } = useLingui();
   return (integration: Integration, { tools, uses, size }: AppOptions): App => {
     const primary = primaryOf(integration, uses);
-    // The one the company relies on, when it ran out, says how to fix it;
-    // else every account counts: one that ran out beside one that works
-    // needs someone.
-    const state =
-      primary === undefined || primary.status === "active"
-        ? rollUp(
-            integration.connections.map((each) =>
-              appStateOf(each, integration, identity)
-            )
-          )
-        : appStateOf(primary, integration, identity);
+    // Each account, in its own state: the page's rows.
+    const rows = integration.connections.map((each): AppConnection => ({
+      id: each.id,
+      account: each.accountName ?? integration.name,
+      ...(each.accountName === null ? {} : { signedInAs: each.accountName }),
+      forWhom: each.scope === "shared" ? "everyone" : "you",
+      by:
+        each.connectedBy === identity.userId
+          ? t`You`
+          : (each.connectedByName ?? t`Someone no longer here`),
+      on: formatDate(each.createdAt),
+      state: rowStateOf(each, integration, identity),
+    }));
+    const row = rows.find(({ id }) => id === primary?.id);
+    // The one the company relies on, when it ran out, says how to fix it
+    // (`fixOf`); else every account counts: one that ran out beside one that
+    // works needs someone.
     const connection: AppConnection | undefined =
-      primary === undefined || state === undefined
+      row === undefined || primary === undefined
         ? undefined
         : {
-            account: primary.accountName ?? integration.name,
-            ...(primary.accountName === null
-              ? {}
-              : { signedInAs: primary.accountName }),
-            forWhom: primary.scope === "shared" ? "everyone" : "you",
-            by:
-              primary.connectedBy === identity.userId
-                ? t`You`
-                : (primary.connectedByName ?? t`Someone no longer here`),
-            on: formatDate(primary.createdAt),
-            state,
+            ...row,
+            state:
+              primary.status === "active"
+                ? (rollUp(rows.map(({ state }) => state)) ?? row.state)
+                : appStateOf(primary, integration, identity),
           };
     const workflows =
       uses === undefined
@@ -165,6 +183,7 @@ export const useAppOf = (
         ? {}
         : { toolCount: integration.toolCount }),
       ...(connection === undefined ? {} : { connection }),
+      ...(rows.length === 0 ? {} : { connections: rows }),
       ...(workflows === undefined ? {} : { workflows }),
     };
   };
