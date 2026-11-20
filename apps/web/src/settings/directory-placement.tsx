@@ -1,4 +1,5 @@
 import type {
+  DepartmentLink,
   DirectoryMover,
   DirectoryPlacement,
   OrganizationTeam,
@@ -35,8 +36,10 @@ import { useTeamChange } from "./use-team-change.ts";
 // in a team the directory's read put them in that their department no
 // longer fills (GRA-2135), and every hand pin. Placing and taking off go
 // through the same team routes as anywhere else, which pin the pair;
-// letting the directory decide again releases a pin. Each section shows
-// only while it lists someone.
+// letting the directory decide again releases a pin. A department that
+// fills no team can be linked to one, once for the department, and an
+// admin's link undone (GRA-2247).
+// Each section shows only while it lists something.
 
 /** What the directory says of someone's department, in one sentence. */
 const DirectorySays = ({
@@ -155,6 +158,146 @@ const AddToTeam = ({
       </Button>
       <ErrorText>{failure}</ErrorText>
     </form>
+  );
+};
+
+/**
+ * One department that fills no team, and linking it to one of `teams`
+ * (GRA-2247): the directory's next daily read puts everyone in it there.
+ * No link without a team to take it.
+ */
+const UnlinkedDepartmentRow = ({
+  department,
+  people,
+  teams,
+  onChanged,
+}: {
+  department: string;
+  people: number;
+  teams: readonly OrganizationTeam[];
+  onChanged: () => Promise<void>;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const [chosen, setChosen] = useState<string | null>(null);
+  const { busy, failure, run } = useTeamChange(onChanged);
+  const items = teams.map((team) => ({ value: team.id, label: team.name }));
+  const picked = items.some((item) => item.value === chosen) ? chosen : null;
+  const described = (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <span className="truncate">{department}</span>
+      <span className="text-muted-foreground">
+        <Plural
+          one="# person in the directory"
+          other="# people in the directory"
+          value={people}
+        />
+      </span>
+    </div>
+  );
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 border-t px-5 py-3">
+        {described}
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3 border-t px-5 py-3">
+      {described}
+      <form
+        className="flex flex-col items-end gap-1"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (picked !== null) {
+            void run(
+              async () => {
+                await core.withSession(async (session) => {
+                  await session.members.linkDepartment(department, picked);
+                });
+              },
+              t`“${department}” couldn't be linked to that team.`
+            );
+          }
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <Select
+            items={items}
+            onValueChange={(value: string | null) => {
+              setChosen(value);
+            }}
+            value={picked}
+          >
+            <SelectTrigger
+              aria-label={t`Team for the department “${department}”`}
+              className="w-44"
+            >
+              <SelectValue placeholder={t`Choose a team`} />
+            </SelectTrigger>
+            <SelectContent>
+              {items.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            disabled={busy || picked === null}
+            size="sm"
+            type="submit"
+            variant="outline"
+          >
+            <Trans>Link department</Trans>
+          </Button>
+        </div>
+        <ErrorText>{failure}</ErrorText>
+      </form>
+    </div>
+  );
+};
+
+/**
+ * The departments of the people the directory lists that fill no team,
+ * each to link to a team, from those that don't follow the directory's
+ * groups (`following`), which take none: listed even with no such team.
+ */
+const UnlinkedDepartments = ({
+  departments,
+  following,
+  teams,
+  onChanged,
+}: {
+  departments: readonly { department: string; people: number }[];
+  following: readonly string[];
+  teams: readonly OrganizationTeam[];
+  onChanged: () => Promise<void>;
+}) => {
+  const { t } = useLingui();
+  const linkable = teams.filter((team) => !following.includes(team.id));
+  if (departments.length === 0) {
+    return null;
+  }
+  const explained = t`The directory’s daily read puts nobody from these departments in a team. Link each to a team, and its next read puts everyone in the department there, except anyone an admin took off it by hand.`;
+  // Still listed with no team to link them to: the admin sees whom the
+  // directory leaves out, and what to make first.
+  const noTeam = t`Make a team that doesn’t follow the directory’s groups first: only such a team can take a department.`;
+  return (
+    <SettingsSection
+      description={linkable.length === 0 ? `${explained} ${noTeam}` : explained}
+      title={t`Departments no team is linked to`}
+    >
+      {departments.map(({ department, people }) => (
+        <UnlinkedDepartmentRow
+          department={department}
+          key={department}
+          onChanged={onChanged}
+          people={people}
+          teams={linkable}
+        />
+      ))}
+    </SettingsSection>
   );
 };
 
@@ -386,6 +529,82 @@ const Pins = ({
   );
 };
 
+/** A department an admin linked to a team, and undoing it. */
+const DepartmentLinkRow = ({
+  link,
+  onChanged,
+}: {
+  link: DepartmentLink;
+  onChanged: () => Promise<void>;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const { busy, failure, run } = useTeamChange(onChanged);
+  const { department } = link;
+  const team = link.team.name;
+  return (
+    <div className="flex flex-wrap items-center gap-3 border-t px-5 py-3">
+      <span className="min-w-0 flex-1">
+        <Trans>
+          “{department}” is linked to {team}.
+        </Trans>
+      </span>
+      <div className="flex flex-col items-end gap-1">
+        <Button
+          aria-label={t`Undo the link of “${department}” to ${team}`}
+          disabled={busy}
+          onClick={() => {
+            void run(
+              async () => {
+                await core.withSession(async (session) => {
+                  await session.members.unlinkDepartment(
+                    department,
+                    link.team.id
+                  );
+                });
+              },
+              t`The link couldn't be undone. Try again.`
+            );
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <Trans>Undo</Trans>
+        </Button>
+        <ErrorText>{failure}</ErrorText>
+      </div>
+    </div>
+  );
+};
+
+/** The departments admins linked to a team by hand. */
+const DepartmentLinks = ({
+  links,
+  onChanged,
+}: {
+  links: readonly DepartmentLink[];
+  onChanged: () => Promise<void>;
+}) => {
+  const { t } = useLingui();
+  if (links.length === 0) {
+    return null;
+  }
+  return (
+    <SettingsSection
+      description={t`The directory’s daily read puts everyone in each department in its team, except anyone an admin took off it by hand. Undoing a link takes nobody off.`}
+      title={t`Departments linked by hand`}
+    >
+      {links.map((link) => (
+        <DepartmentLinkRow
+          key={`${link.department} ${link.team.id}`}
+          link={link}
+          onChanged={onChanged}
+        />
+      ))}
+    </SettingsSection>
+  );
+};
+
 /**
  * Who the directory leaves for an admin to place, and the hand pins, as
  * the Teams tab read them with its teams (and reads again after every
@@ -401,8 +620,15 @@ export const DirectoryPlacementSections = ({
   onChanged: () => Promise<void>;
 }) => (
   <>
+    <UnlinkedDepartments
+      departments={placement.unlinkedDepartments}
+      following={placement.teamsFollowingGroups}
+      onChanged={onChanged}
+      teams={teams}
+    />
     <Unplaced onChanged={onChanged} people={placement.unplaced} teams={teams} />
     <Movers movers={placement.movers} onChanged={onChanged} teams={teams} />
     <Pins onChanged={onChanged} pins={placement.pins} />
+    <DepartmentLinks links={placement.departmentLinks} onChanged={onChanged} />
   </>
 );

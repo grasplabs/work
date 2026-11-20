@@ -1,4 +1,5 @@
 import type {
+  DepartmentLink,
   DirectoryMover,
   DirectoryPlacement,
   PlacedMember,
@@ -6,12 +7,13 @@ import type {
   TeamPin,
   UnplacedMember,
 } from "@grasp-os/shared/members";
-import { and, asc, eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { mayAct, organizationId } from "./auth/membership-sql.ts";
 import {
   directoryDepartments,
+  directoryGroupTeams,
   directoryMemberships,
   directoryPeople,
   members,
@@ -21,14 +23,19 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { directoryWants, followsGroups } from "./directory-teams.ts";
+import {
+  directoryWants,
+  followsGroups,
+  followsGroupsOf,
+} from "./directory-teams.ts";
 import { directoryKinds } from "./directory-ties.ts";
 
 // What the directory leaves for an admin to place, and what admins placed
 // by hand (GRA-2056, slice 4; GRA-2110, GRA-2135): read for Settings ›
 // Members › Teams, whose admin places people by hand through Better
-// Auth's team routes, which pin the pair (auth.ts), and releases a pin
-// with `releaseTeamPin` (members.ts). It writes nothing. The caller checks
+// Auth's team routes, which pin the pair (auth.ts), releases a pin with
+// `releaseTeamPin` and links a department to a team with `linkDepartment`
+// (members.ts). It writes nothing. The caller checks
 // the role. All of it is read in one batch, one snapshot, from the tables
 // the daily read writes (directory-people.ts, directory-teams.ts):
 //
@@ -46,6 +53,11 @@ import { directoryKinds } from "./directory-ties.ts";
 //   team a department fills is likewise never one that follows groups.
 // - Pins: those on a member tied to the directory, whom the read places;
 //   on anyone else a pin changes nothing the read does.
+// - Departments: those that fill no team, of everyone the directory lists
+//   (made members or not), for an admin to link to one (GRA-2247,
+//   members.ts `linkDepartment`), with the teams that follow groups, which
+//   take none; and the links admins made by hand, which only an admin
+//   undoes.
 
 /** A member tied to the directory: their department there, and the team it fills. */
 interface Tie {
@@ -62,96 +74,149 @@ export const directoryPlacementOf = async (
 ): Promise<DirectoryPlacement> => {
   const db = drizzle(env.DB);
   const providers = directoryKinds.map(({ provider }) => provider);
-  const [acting, tied, memberships, pins] = await db.batch([
-    db
-      .select({ userId: users.id, name: users.name, email: users.email })
-      .from(members)
-      .innerJoin(users, eq(users.id, members.userId))
-      .where(
-        and(eq(members.organizationId, organizationId), mayAct(members.userId))
-      ),
-    // One account each (accounts are never linked); ordered all the same.
-    db
-      .select({
-        userId: sql<string>`${directoryPeople.userId}`,
-        department: directoryPeople.department,
-        teamId: teams.id,
-        teamName: teams.name,
-      })
-      .from(directoryPeople)
-      .leftJoin(
-        directoryDepartments,
-        and(
-          eq(directoryDepartments.provider, directoryPeople.provider),
-          eq(directoryDepartments.department, directoryPeople.department)
+  const [acting, tied, memberships, pins, links, unlinked, following] =
+    await db.batch([
+      db
+        .select({ userId: users.id, name: users.name, email: users.email })
+        .from(members)
+        .innerJoin(users, eq(users.id, members.userId))
+        .where(
+          and(
+            eq(members.organizationId, organizationId),
+            mayAct(members.userId)
+          )
+        ),
+      // One account each (accounts are never linked); ordered all the same.
+      db
+        .select({
+          userId: sql<string>`${directoryPeople.userId}`,
+          department: directoryPeople.department,
+          teamId: teams.id,
+          teamName: teams.name,
+        })
+        .from(directoryPeople)
+        .leftJoin(
+          directoryDepartments,
+          and(
+            eq(directoryDepartments.provider, directoryPeople.provider),
+            eq(directoryDepartments.department, directoryPeople.department)
+          )
         )
-      )
-      // The team the department fills: none that follows groups.
-      .leftJoin(
-        teams,
-        and(
-          eq(teams.id, directoryDepartments.teamId),
-          sql`NOT (${or(
-            ...directoryKinds.map(
-              (kind) =>
-                sql`(${directoryPeople.provider} = ${kind.provider} AND ${followsGroups(kind, sql`${teams.id}`)})`
-            )
-          )})`
+        // The team the department fills: none that follows groups.
+        .leftJoin(
+          teams,
+          and(
+            eq(teams.id, directoryDepartments.teamId),
+            sql`NOT (${or(
+              ...directoryKinds.map(
+                (kind) =>
+                  sql`(${directoryPeople.provider} = ${kind.provider} AND ${followsGroups(kind, sql`${teams.id}`)})`
+              )
+            )})`
+          )
         )
-      )
-      .where(
-        and(
-          isNotNull(directoryPeople.userId),
-          inList(directoryPeople.provider, providers)
+        .where(
+          and(
+            isNotNull(directoryPeople.userId),
+            inList(directoryPeople.provider, providers)
+          )
         )
-      )
-      .orderBy(
-        asc(directoryPeople.provider),
-        asc(directoryPeople.tenant),
-        asc(directoryPeople.accountId)
-      ),
-    db
-      .select({
-        userId: teamMembers.userId,
-        teamId: teams.id,
-        teamName: teams.name,
-        madeByRead: sql<number>`${teamMembers.membershipKey} IN (
+        .orderBy(
+          asc(directoryPeople.provider),
+          asc(directoryPeople.tenant),
+          asc(directoryPeople.accountId)
+        ),
+      db
+        .select({
+          userId: teamMembers.userId,
+          teamId: teams.id,
+          teamName: teams.name,
+          madeByRead: sql<number>`${teamMembers.membershipKey} IN (
           SELECT ${directoryMemberships.membershipKey} FROM ${directoryMemberships}
         )`,
-        // The read's own rule for whom the directory wants in a team.
-        wanted: sql<number>`${or(
-          ...directoryKinds.map((kind) =>
-            directoryWants(
-              kind,
-              sql`${teamMembers.userId}`,
-              sql`${teamMembers.teamId}`
+          // The read's own rule for whom the directory wants in a team.
+          wanted: sql<number>`${or(
+            ...directoryKinds.map((kind) =>
+              directoryWants(
+                kind,
+                sql`${teamMembers.userId}`,
+                sql`${teamMembers.teamId}`
+              )
             )
+          )}`,
+        })
+        .from(teamMembers)
+        .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+        .where(eq(teams.organizationId, organizationId)),
+      db
+        // D1 answers a batch's rows by column name: the team's name is
+        // given one of its own, apart from the person's.
+        .select({
+          userId: teamPins.userId,
+          name: users.name,
+          email: users.email,
+          teamId: teamPins.teamId,
+          teamName: sql<string>`${teams.name}`.as("team_name"),
+          kept: teamPins.kept,
+          pinnedAt: teamPins.pinnedAt,
+        })
+        .from(teamPins)
+        .innerJoin(users, eq(users.id, teamPins.userId))
+        .innerJoin(teams, eq(teams.id, teamPins.teamId))
+        // A removal and an erasure delete the person's pins (members.ts,
+        // person-erasure.ts), and a pin is written only for an active member.
+        .where(eq(teams.organizationId, organizationId))
+        .orderBy(asc(teams.name), asc(users.name), asc(users.id)),
+      // One per department and team, whichever directories list it.
+      db
+        .selectDistinct({
+          department: directoryDepartments.department,
+          teamId: teams.id,
+          teamName: teams.name,
+        })
+        .from(directoryDepartments)
+        .innerJoin(teams, eq(teams.id, directoryDepartments.teamId))
+        .where(
+          and(
+            eq(directoryDepartments.byHand, true),
+            eq(teams.organizationId, organizationId)
           )
-        )}`,
-      })
-      .from(teamMembers)
-      .innerJoin(teams, eq(teams.id, teamMembers.teamId))
-      .where(eq(teams.organizationId, organizationId)),
-    db
-      // D1 answers a batch's rows by column name: the team's name is
-      // given one of its own, apart from the person's.
-      .select({
-        userId: teamPins.userId,
-        name: users.name,
-        email: users.email,
-        teamId: teamPins.teamId,
-        teamName: sql<string>`${teams.name}`.as("team_name"),
-        kept: teamPins.kept,
-        pinnedAt: teamPins.pinnedAt,
-      })
-      .from(teamPins)
-      .innerJoin(users, eq(users.id, teamPins.userId))
-      .innerJoin(teams, eq(teams.id, teamPins.teamId))
-      // A removal and an erasure delete the person's pins (members.ts,
-      // person-erasure.ts), and a pin is written only for an active member.
-      .where(eq(teams.organizationId, organizationId))
-      .orderBy(asc(teams.name), asc(users.name), asc(users.id)),
-  ]);
+        )
+        .orderBy(asc(directoryDepartments.department), asc(teams.name)),
+      // Each department of everyone the directory lists on that fills no
+      // team, by the read's own rule: none linked, or one that follows groups.
+      db
+        .select({
+          unlinkedDepartment: directoryPeople.department,
+          people: sql<number>`count(*)`,
+        })
+        .from(directoryPeople)
+        .where(
+          and(
+            inList(directoryPeople.provider, providers),
+            ne(directoryPeople.department, ""),
+            eq(directoryPeople.enabled, true),
+            eq(directoryPeople.deleted, false),
+            sql`NOT EXISTS (
+            SELECT 1 FROM ${directoryDepartments}
+            WHERE ${directoryDepartments.provider} = ${directoryPeople.provider}
+              AND ${directoryDepartments.department} = ${directoryPeople.department}
+              AND NOT ${followsGroupsOf(sql`${directoryPeople.provider}`, sql`${directoryDepartments.teamId}`)}
+          )`
+          )
+        )
+        .groupBy(directoryPeople.department)
+        .orderBy(asc(directoryPeople.department)),
+      db
+        .selectDistinct({ followingTeam: directoryGroupTeams.teamId })
+        .from(directoryGroupTeams)
+        .where(
+          and(
+            inList(directoryGroupTeams.provider, providers),
+            isNotNull(directoryGroupTeams.readAt)
+          )
+        ),
+    ]);
   const ties = new Map<string, Tie>();
   for (const { userId, department, teamId, teamName } of tied) {
     if (!ties.has(userId)) {
@@ -203,5 +268,21 @@ export const directoryPlacementOf = async (
       team: { id: teamId, name: teamName },
       pinnedAt: pinnedAt.toISOString(),
     }));
-  return { unplaced, movers, pins: shownPins };
+  const departmentLinks: DepartmentLink[] = links.map(
+    ({ department, teamId, teamName }) => ({
+      department,
+      team: { id: teamId, name: teamName },
+    })
+  );
+  return {
+    unplaced,
+    movers,
+    pins: shownPins,
+    departmentLinks,
+    unlinkedDepartments: unlinked.map(({ unlinkedDepartment, people }) => ({
+      department: unlinkedDepartment,
+      people,
+    })),
+    teamsFollowingGroups: following.map(({ followingTeam }) => followingTeam),
+  };
 };

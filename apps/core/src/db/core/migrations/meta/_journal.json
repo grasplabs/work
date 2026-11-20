@@ -2066,6 +2066,13 @@
       "when": 1795197092103,
       "tag": "0294_app_visitors_emptied",
       "breakpoints": true
+    },
+    {
+      "idx": 295,
+      "version": "6",
+      "when": 1795200589600,
+      "tag": "0295_polite_harpoon",
+      "breakpoints": true
     }
   ]
 }

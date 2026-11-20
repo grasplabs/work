@@ -11,6 +11,14 @@ msgstr ""
 msgid "“{action}” doesn't exist yet"
 msgstr "“{action}” doesn't exist yet"
 
+#: src/settings/directory-placement.tsx
+msgid "“{department}” couldn't be linked to that team."
+msgstr "“{department}” couldn't be linked to that team."
+
+#: src/settings/directory-placement.tsx
+msgid "“{department}” is linked to {team}."
+msgstr "“{department}” is linked to {team}."
+
 #. A statement, quoted. Use the quotation marks of your language.
 #: src/brain/brain.ts
 msgid "“{text}”"
@@ -1056,6 +1064,10 @@ msgstr "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 #: src/routes/_shell.settings.members.tsx
 msgid "{people, plural, one {# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start.} other {# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start.}}"
 msgstr "{people, plural, one {# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start.} other {# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start.}}"
+
+#: src/settings/directory-placement.tsx
+msgid "{people, plural, one {# person in the directory} other {# people in the directory}}"
+msgstr "{people, plural, one {# person in the directory} other {# people in the directory}}"
 
 #: src/brain/brain.ts
 #: src/workflows/requests/request-table.tsx
@@ -5083,6 +5095,14 @@ msgstr "Deny"
 msgid "Deny the packages for {subject}"
 msgstr "Deny the packages for {subject}"
 
+#: src/settings/directory-placement.tsx
+msgid "Departments linked by hand"
+msgstr "Departments linked by hand"
+
+#: src/settings/directory-placement.tsx
+msgid "Departments no team is linked to"
+msgstr "Departments no team is linked to"
+
 #: src/apps/app-start.tsx
 msgid "Describe the App"
 msgstr "Describe the App"
@@ -8480,6 +8500,10 @@ msgstr "Lines"
 msgid "Link"
 msgstr "Link"
 
+#: src/settings/directory-placement.tsx
+msgid "Link department"
+msgstr "Link department"
+
 #. placeholder {0}: app.name
 #: src/apps/app-own-link.tsx
 msgid "Link to {0}"
@@ -8677,6 +8701,10 @@ msgstr "Make a new secret for {name}"
 #: src/settings/event-sources.tsx
 msgid "Make a new secret?"
 msgstr "Make a new secret?"
+
+#: src/settings/directory-placement.tsx
+msgid "Make a team that doesn’t follow the directory’s groups first: only such a team can take a department."
+msgstr "Make a team that doesn’t follow the directory’s groups first: only such a team can take a department."
 
 #: src/workflows/requests/request-detail.tsx
 msgid "Make a workflow of it"
@@ -14247,6 +14275,10 @@ msgstr "Team doesn’t match the directory"
 msgid "Team for {who}"
 msgstr "Team for {who}"
 
+#: src/settings/directory-placement.tsx
+msgid "Team for the department “{department}”"
+msgstr "Team for the department “{department}”"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
 msgstr "team leads talked"
@@ -14857,6 +14889,14 @@ msgstr "The directory put them in a team their department there no longer fills.
 msgid "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
 msgstr "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
 
+#: src/settings/directory-placement.tsx
+msgid "The directory’s daily read puts everyone in each department in its team, except anyone an admin took off it by hand. Undoing a link takes nobody off."
+msgstr "The directory’s daily read puts everyone in each department in its team, except anyone an admin took off it by hand. Undoing a link takes nobody off."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory’s daily read puts nobody from these departments in a team. Link each to a team, and its next read puts everyone in the department there, except anyone an admin took off it by hand."
+msgstr "The directory’s daily read puts nobody from these departments in a team. Link each to a team, and its next read puts everyone in the department there, except anyone an admin took off it by hand."
+
 #: src/settings/directory-reads.tsx
 msgid "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
 msgstr "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
@@ -14949,6 +14989,10 @@ msgstr "The latest runs, newest first."
 #: src/interview/transcript.tsx
 msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
 msgstr "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
+
+#: src/settings/directory-placement.tsx
+msgid "The link couldn't be undone. Try again."
+msgstr "The link couldn't be undone. Try again."
 
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."
@@ -16028,6 +16072,7 @@ msgstr "Under way"
 
 #: src/chat/saved-memory.tsx
 #: src/drafts/share-with-team.tsx
+#: src/settings/directory-placement.tsx
 msgid "Undo"
 msgstr "Undo"
 
@@ -16058,6 +16103,10 @@ msgstr "Undo changes"
 #: src/drafts/draft-history.tsx
 msgid "Undo the changes only you see?"
 msgstr "Undo the changes only you see?"
+
+#: src/settings/directory-placement.tsx
+msgid "Undo the link of “{department}” to {team}"
+msgstr "Undo the link of “{department}” to {team}"
 
 #: src/drafts/draft-history.tsx
 msgid "Undone changes"

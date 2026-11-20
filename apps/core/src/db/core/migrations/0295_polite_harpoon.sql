@@ -1,0 +1,1 @@
+ALTER TABLE `directory_departments` ADD `by_hand` integer DEFAULT false NOT NULL;
