@@ -186,8 +186,8 @@ interface Facts {
 
 /**
  * What an admin's card says of an agent before it is opened. Whom it answers: everyone, its teams or
- * nobody yet, and nothing where core didn't say, never passed off as everyone. Then whether it works on its own and when next, its model, and this
- * month's use.
+ * nobody yet, and nothing where core didn't say, never passed off as everyone. Then whether it works
+ * on its own and when next, its model, and this month's use.
  */
 const useFacts = (teams: StephenReach["teams"]) => {
   const { t, i18n } = useLingui();

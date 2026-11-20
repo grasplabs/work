@@ -65,8 +65,9 @@ import { saveFirstInstructions } from "./unsaved-instructions.ts";
 // company. Who may use it is asked first, and only where there is a
 // choice, so the questions after it are the ones its answer leaves: what
 // it may do and when it works only for one of the company's. An admin's
-// starts as the company's, for everyone. The rest (web, workflows and Apps access, its effort) is
-// asked as Ruben decided and waits on core (.context/core-needs.md).
+// starts as the company's, for everyone. The rest (web, workflows and
+// Apps access, its effort) is asked as Ruben decided and waits on core
+// (.context/core-needs.md).
 // Should its instructions not save once it is made, its page opens on
 // Instructions with them as an unsaved draft (unsaved-instructions.ts).
 
