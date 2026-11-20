@@ -595,33 +595,50 @@ describe(ChatComposer, () => {
 
   // Last: what it notes lasts for the rest of the visit, as it should.
   it("says once that core's dictation isn't set up, then offers no microphone in any box for the rest of the visit", async () => {
+    const given = {
+      mediaDevices: Object.getOwnPropertyDescriptor(navigator, "mediaDevices"),
+      AudioContext: Reflect.get(globalThis, "AudioContext"),
+      WebSocket: Reflect.get(globalThis, "WebSocket"),
+    };
     transcriptionNotSetUp();
-    await shown();
-    const before = offersDictation();
-    await press(button("Dictate"));
-    await act(async () => {
-      const { promise, resolve } = Promise.withResolvers<boolean>();
-      setTimeout(() => {
-        resolve(true);
-      }, 0);
-      await promise;
-    });
-    const said = document.body.textContent.includes(
-      "Dictation isn't set up here yet. What you typed is kept."
-    );
-    await press(button("Cancel"));
-    const after = offersDictation();
-    act(() => {
-      root?.unmount();
-    });
-    document.body.replaceChildren();
-    await shown();
+    try {
+      await shown();
+      const before = offersDictation();
+      await press(button("Dictate"));
+      await act(async () => {
+        const { promise, resolve } = Promise.withResolvers<boolean>();
+        setTimeout(() => {
+          resolve(true);
+        }, 0);
+        await promise;
+      });
+      const said = document.body.textContent.includes(
+        "Dictation isn't set up here yet. What you typed is kept."
+      );
+      await press(button("Cancel"));
+      const after = offersDictation();
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      await shown();
 
-    expect({ before, said, after, another: offersDictation() }).toStrictEqual({
-      before: true,
-      said: true,
-      after: false,
-      another: false,
-    });
+      expect({ before, said, after, another: offersDictation() }).toStrictEqual(
+        {
+          before: true,
+          said: true,
+          after: false,
+          another: false,
+        }
+      );
+    } finally {
+      if (given.mediaDevices === undefined) {
+        Reflect.deleteProperty(navigator, "mediaDevices");
+      } else {
+        Object.defineProperty(navigator, "mediaDevices", given.mediaDevices);
+      }
+      Reflect.set(globalThis, "AudioContext", given.AudioContext);
+      Reflect.set(globalThis, "WebSocket", given.WebSocket);
+    }
   });
 });

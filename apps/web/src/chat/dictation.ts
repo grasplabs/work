@@ -69,6 +69,13 @@ export interface DictationSource {
 let notSetUp = false;
 const notSetUpHeard = new Set<() => void>();
 
+const hearNotSetUp = (changed: () => void): (() => void) => {
+  notSetUpHeard.add(changed);
+  return () => {
+    notSetUpHeard.delete(changed);
+  };
+};
+
 const noteNotSetUp = (): void => {
   notSetUp = true;
   for (const changed of notSetUpHeard) {
@@ -339,14 +346,8 @@ const browserSource = (
  * recognition, where the browser has one.
  */
 export const useCanDictate = (admin: boolean): boolean =>
-  useSyncExternalStore(
-    (changed) => {
-      notSetUpHeard.add(changed);
-      return () => {
-        notSetUpHeard.delete(changed);
-      };
-    },
-    () => (admin ? !notSetUp : recognitionOf() !== undefined)
+  useSyncExternalStore(hearNotSetUp, () =>
+    admin ? !notSetUp : recognitionOf() !== undefined
   );
 
 /**
