@@ -1,10 +1,12 @@
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { Heading } from "../grasp/heading/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import {
   isRefused,
   keepKey,
@@ -14,6 +16,7 @@ import {
 } from "../interview/api.ts";
 import type { OpenSession } from "../interview/api.ts";
 import { holdInterview, releaseInterview } from "../interview/kept.ts";
+import { Mark } from "../interview/mark.tsx";
 import { InterviewPage } from "../interview/page.tsx";
 import { resumed } from "../interview/progress.ts";
 
@@ -66,6 +69,28 @@ const opened = async (secret: string): Promise<Page> => {
   return { state: "open", secret, session: answer };
 };
 
+const styles = stylex.create({
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: grasp.space6,
+    boxSizing: "border-box",
+    minHeight: "100svh",
+    paddingInline: grasp.space4,
+    textAlign: "center",
+    backgroundColor: grasp.paper,
+  },
+  words: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space3,
+    maxWidth: "24rem",
+  },
+});
+
 /**
  * Why the link opens no interview here, laid out as calm as the prototype's
  * (`routes/i/$code.tsx`): the mark, and what there is to say.
@@ -80,14 +105,16 @@ const Notice = ({
   /** Core's refusal, with its reference for the person to quote. */
   failed?: boolean;
 }) => (
-  <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center text-sm">
-    <GraspMark className="size-6" />
-    <div className="flex max-w-sm flex-col items-center gap-3">
-      <PageHeaderTitle>{title}</PageHeaderTitle>
+  <main {...stylex.props(styles.page)}>
+    <Mark size="lg" />
+    <div {...stylex.props(styles.words)}>
+      <Heading level={1} size="md">
+        {title}
+      </Heading>
       {failed ? (
         <ErrorText>{children}</ErrorText>
       ) : (
-        <p className="text-muted-foreground text-balance">{children}</p>
+        <Text tone="muted">{children}</Text>
       )}
     </div>
   </main>
@@ -96,9 +123,13 @@ const Notice = ({
 const Loading = () => {
   const { t } = useLingui();
   return (
-    <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 px-4 text-center text-sm">
-      <GraspMark className="size-6" />
-      <output className="text-muted-foreground">{t`Opening your interview…`}</output>
+    <main {...stylex.props(styles.page)}>
+      <Mark size="lg" />
+      <output>
+        <Text element="span" tone="muted">
+          {t`Opening your interview…`}
+        </Text>
+      </output>
     </main>
   );
 };

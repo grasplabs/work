@@ -14827,7 +14827,6 @@ msgstr "Self-approved: nobody else could approve it"
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
-#: src/interview/composer.tsx
 msgid "Send"
 msgstr "Send"
 
@@ -16398,10 +16397,6 @@ msgstr "That email address already signs in with another account."
 #: src/projects/file-item-dialog.tsx
 msgid "That is {who}."
 msgstr "That is {who}."
-
-#: src/interview/composer.tsx
-msgid "That is too long to send in one go. Send it in two parts."
-msgstr "That is too long to send in one go. Send it in two parts."
 
 #: src/pages/page-files.ts
 msgid "That isn't a file call."
@@ -19959,10 +19954,6 @@ msgstr "You sign in on {app}’s own page."
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "You withdrew. Nothing you said is used from now on."
-
-#: src/interview/transcript.tsx
-msgid "You:"
-msgstr "You:"
 
 #: src/frame/part-words.tsx
 msgid "You're offline. Log in when you're back online."

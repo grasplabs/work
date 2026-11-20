@@ -14827,7 +14827,6 @@ msgstr "Zelf goedgekeurd: niemand anders kon het goedkeuren"
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
-#: src/interview/composer.tsx
 msgid "Send"
 msgstr "Versturen"
 
@@ -16398,10 +16397,6 @@ msgstr "Met dat e-mailadres wordt al ingelogd met een ander account."
 #: src/projects/file-item-dialog.tsx
 msgid "That is {who}."
 msgstr "Dat zijn {who}."
-
-#: src/interview/composer.tsx
-msgid "That is too long to send in one go. Send it in two parts."
-msgstr "Dat is te lang om in één keer te sturen. Stuur het in twee delen."
 
 #: src/pages/page-files.ts
 msgid "That isn't a file call."
@@ -19959,10 +19954,6 @@ msgstr "Je meldt je aan op de eigen pagina van {app}."
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "Je hebt je teruggetrokken. Niets van wat je zei wordt nog gebruikt."
-
-#: src/interview/transcript.tsx
-msgid "You:"
-msgstr "Jij:"
 
 #: src/frame/part-words.tsx
 msgid "You're offline. Log in when you're back online."

@@ -1,8 +1,10 @@
 import type { Interviewer } from "@grasp-os/shared/onboarding";
-import { cn } from "@grasp-os/ui/lib/utils";
+import * as stylex from "@stylexjs/stylex";
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { DotBrain } from "../brain/dot-brain.tsx";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { DotSign } from "./dot-sign.tsx";
 import type { DotSign as Sign } from "./dot-signs.ts";
 
@@ -30,40 +32,18 @@ const gapUnder = 24;
  */
 export const pair = { gap: 16, waiting: 0.6, clear: 0.85 };
 
-/** His sizes by twenty pixels: a class each, as a class is never built from a number. */
-const sizeClasses: Record<number, string> = {
-  120: "size-30",
-  140: "size-35",
-  160: "size-40",
-  180: "size-45",
-  200: "size-50",
-  220: "size-55",
-  240: "size-60",
-  260: "size-65",
-  280: "size-70",
-  300: "size-75",
-  320: "size-80",
-  340: "size-85",
-  360: "size-90",
-  380: "size-95",
-  400: "size-100",
-  420: "size-105",
-  440: "size-110",
-  460: "size-115",
-  480: "size-120",
-  500: "size-125",
-  520: "size-130",
-  540: "size-135",
-  560: "size-140",
-  580: "size-145",
-  600: "size-150",
-  620: "size-155",
-  640: "size-160",
-  660: "size-165",
-  680: "size-170",
-  700: "size-175",
-  720: "size-180",
-};
+const styles = stylex.create({
+  head: (size: number) => ({
+    position: "relative",
+    flexShrink: 0,
+    width: size,
+    height: size,
+    transitionProperty: "width, height",
+    transitionDuration: grasp.durationUi,
+    transitionTimingFunction: grasp.ease,
+  }),
+  drawing: { width: "100%", height: "100%" },
+});
 
 const onResize = (listener: () => void): (() => void) => {
   window.addEventListener("resize", listener);
@@ -137,17 +117,14 @@ export const Head = ({
   /** How loud their voice is right now, 0 to 1. */
   voice?: () => number;
 }) => {
-  const shown = sizeClasses[Math.min(size, headSizes.talking)];
-  if (shown === undefined) {
-    return <span className="sr-only">{label}</span>;
+  if (size < headSizes.least) {
+    return <span {...stylex.props(visuallyHidden)}>{label}</span>;
   }
   return (
-    <div
-      className={cn("relative flex-none transition-all duration-500", shown)}
-    >
+    <div {...stylex.props(styles.head(Math.min(size, headSizes.talking)))}>
       <DotBrain
         apart={beside === undefined ? undefined : { leaves: false }}
-        className="size-full"
+        className={stylex.props(styles.drawing).className}
         label={label}
         scene={{
           shape: { kind: "listen", who },

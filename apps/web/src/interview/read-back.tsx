@@ -1,15 +1,19 @@
 import { interviewerNames } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { XIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useRef, useState } from "react";
 
+import { Button } from "../grasp/button/index.ts";
+import { Cross } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { arrive } from "../grasp/motion/arrive.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { Head, headSizes, useHead } from "./head.tsx";
+import { voice } from "./interview.stylex.ts";
 import { update, useInterviewer, useProgress } from "./kept.ts";
+import { fullWidth, looks } from "./looks.ts";
 import { agreeToPart, changeLine, useLoop } from "./loop.ts";
 import type { LoopState } from "./loop.ts";
 import { partAt, withFactsBack, withFactToggled } from "./progress.ts";
@@ -24,11 +28,85 @@ import { usePromise } from "./words.ts";
 // button agrees to what is left. What they type is taken as a correction.
 // What they leave in is what counts.
 
+const styles = stylex.create({
+  lines: {
+    display: "flex",
+    flexDirection: "column",
+    width: "100%",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+    textAlign: "start",
+    borderBlockEndWidth: grasp.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: grasp.line,
+  },
+  item: {
+    borderBlockStartWidth: grasp.hairline,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: grasp.line,
+  },
+  line: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space3,
+    paddingBlock: grasp.space1,
+  },
+  field: { flexGrow: 1, minWidth: 0 },
+  // The line itself, pressed to put it right where it is.
+  words: {
+    display: "block",
+    width: "100%",
+    margin: 0,
+    paddingBlock: grasp.space1,
+    paddingInline: 0,
+    borderWidth: 0,
+    borderRadius: grasp.corner,
+    backgroundColor: {
+      default: "transparent",
+      [media.hover]: { default: "transparent", ":hover": grasp.quietFillHover },
+    },
+    color: grasp.ink,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textMd,
+    lineHeight: grasp.textMdLine,
+    textAlign: "start",
+    cursor: "text",
+    outline: {
+      default: "none",
+      ":focus-visible": `${grasp.ringWidth} solid ${grasp.ring}`,
+    },
+    outlineOffset: grasp.ringOffset,
+  },
+  said: {
+    color: grasp.ink,
+    transitionProperty: "color",
+    transitionDuration: grasp.durationUi,
+  },
+  saying: {
+    color: voice.heat,
+    transitionProperty: "color",
+    transitionDuration: grasp.durationHover,
+  },
+  waiting: {
+    color: grasp.quiet,
+    transitionProperty: "color",
+    transitionDuration: grasp.durationUi,
+  },
+  taken: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: grasp.space1,
+  },
+});
+
 /** A line of the read-back while he tells it: told, being told, or still to come. */
 const toldLooks = {
-  said: "text-foreground transition-colors duration-300",
-  saying: "text-brain-heat transition-colors duration-150",
-  waiting: "text-muted-foreground/60 transition-colors duration-300",
+  said: styles.said,
+  saying: styles.saying,
+  waiting: styles.waiting,
 } as const;
 
 const toldOf = (
@@ -71,19 +149,19 @@ const ReadBackLine = ({
     changeLine(id, text, now);
   };
   return (
-    <div className="flex items-center gap-3 py-1">
-      <span className="min-w-0 flex-1">
+    <div {...stylex.props(styles.line)}>
+      <span {...stylex.props(styles.field)}>
         {draft === null ? (
           <button
             aria-label={t`Change: ${text}`}
-            className="hover:bg-muted focus-visible:ring-ring/50 w-full cursor-text rounded-sm text-left outline-none focus-visible:ring-3"
             onClick={() => {
               letBe.current = false;
               setDraft(text);
             }}
             type="button"
+            {...stylex.props(styles.words)}
           >
-            <span className={told === null ? undefined : toldLooks[told]}>
+            <span {...stylex.props(told !== null && toldLooks[told])}>
               {text}
             </span>
           </button>
@@ -94,8 +172,8 @@ const ReadBackLine = ({
             autoFocus
             maxLength={300}
             onBlur={keep}
-            onChange={(event) => {
-              setDraft(event.target.value);
+            onValueChange={(value: string) => {
+              setDraft(value);
             }}
             onFocus={(event) => {
               const { length } = event.target.value;
@@ -116,14 +194,13 @@ const ReadBackLine = ({
       </span>
       <Button
         aria-label={t`Take out: ${text}`}
+        icon={Cross}
         onClick={() => {
           update((progress) => withFactToggled(progress, id));
         }}
-        size="icon-sm"
+        size="sm"
         variant="ghost"
-      >
-        <XIcon />
-      </Button>
+      />
     </div>
   );
 };
@@ -161,7 +238,7 @@ export const ReadBack = ({ room }: { room: number }) => {
   const n = at + 1;
   const count = parts.length;
   return (
-    <div className="flex w-full max-w-xl flex-col items-center gap-6 text-center">
+    <div {...stylex.props(looks.screen)}>
       <Head
         fill={1}
         label={t`${who}, reading back.`}
@@ -170,19 +247,19 @@ export const ReadBack = ({ room }: { room: number }) => {
         voice={voiceLevel}
         who={interviewer}
       />
-      <div className="flex w-full flex-col items-center gap-5" ref={body}>
-        <div aria-live="polite" className="min-h-8">
-          <PageHeaderTitle>
+      <div ref={body} {...stylex.props(looks.body)}>
+        <div aria-live="polite">
+          <h1 {...stylex.props(looks.said)}>
             <SpokenText said={said} text={loop.line} />
-          </PageHeaderTitle>
+          </h1>
         </div>
         {/* How much there is still to check: nobody agrees with care to pages without an end in sight. */}
         {count > 1 ? (
-          <p className="text-muted-foreground text-xs">{t`Part ${n} of ${count}`}</p>
+          <Text size="xs" tone="muted">{t`Part ${n} of ${count}`}</Text>
         ) : null}
-        <ol className="flex w-full flex-col border-b text-left">
+        <ol {...stylex.props(styles.lines)}>
           {left.map(({ id, text }) => (
-            <li className="animate-in fade-in border-t duration-300" key={id}>
+            <li key={id} {...stylex.props(styles.item, arrive.in)}>
               <ReadBackLine
                 id={id}
                 text={text}
@@ -192,37 +269,42 @@ export const ReadBack = ({ room }: { room: number }) => {
           ))}
         </ol>
         {out.length > 0 ? (
-          <p aria-live="polite" className="text-muted-foreground text-xs">
-            {taken}{" "}
-            <button
-              className="hover:text-foreground focus-visible:ring-ring/50 rounded-sm underline underline-offset-4 outline-none focus-visible:ring-3"
+          <div aria-live="polite" {...stylex.props(styles.taken)}>
+            <Text element="span" size="xs" tone="muted">
+              {taken}
+            </Text>
+            <Button
               onClick={() => {
                 const ids = out.map(({ id }) => id);
                 update((now) => withFactsBack(now, ids));
               }}
-              type="button"
+              size="xs"
+              variant="ghost"
             >
               {t`Put back`}
-            </button>
-          </p>
+            </Button>
+          </div>
         ) : null}
-        <div className="flex w-full flex-col items-center gap-2">
+        <div {...stylex.props(looks.actions)}>
           <Button
-            className={cn("w-full max-w-sm")}
             disabled={loop.doing === "idle"}
+            layout={fullWidth.button}
             onClick={() => {
               agreeToPart(out.length > 0 ? `${agree}.` : undefined);
             }}
-            size="xl"
-            variant="highlight"
+            size="lg"
+            variant="ink"
           >
             {agree}
           </Button>
-          <p className="text-muted-foreground text-xs text-balance">{t`Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts.`}</p>
+          <Text
+            size="xs"
+            tone="muted"
+          >{t`Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts.`}</Text>
           {at === parts.length - 1 ? (
-            <p className="text-muted-foreground text-xs text-balance">
+            <Text size="xs" tone="muted">
               {promise}
-            </p>
+            </Text>
           ) : null}
         </div>
       </div>

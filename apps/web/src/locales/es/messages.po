@@ -14827,7 +14827,6 @@ msgstr "Autoaprobada: nadie más podía aprobarla"
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
-#: src/interview/composer.tsx
 msgid "Send"
 msgstr "Enviar"
 
@@ -16398,10 +16397,6 @@ msgstr "Esa dirección de correo ya inicia sesión con otra cuenta."
 #: src/projects/file-item-dialog.tsx
 msgid "That is {who}."
 msgstr "Es decir, {who}."
-
-#: src/interview/composer.tsx
-msgid "That is too long to send in one go. Send it in two parts."
-msgstr "Es demasiado largo para enviarlo de una vez. Envíalo en dos partes."
 
 #: src/pages/page-files.ts
 msgid "That isn't a file call."
@@ -19959,10 +19954,6 @@ msgstr "Inicias sesión en la propia página de {app}."
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "Te retiraste. Nada de lo que dijiste se usa a partir de ahora."
-
-#: src/interview/transcript.tsx
-msgid "You:"
-msgstr "Tú:"
 
 #: src/frame/part-words.tsx
 msgid "You're offline. Log in when you're back online."
