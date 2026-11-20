@@ -470,6 +470,14 @@ export const BrainAudience = ({
           choose a team if not everyone should have it.
         </Trans>
       </p>
+      {connection.status === "needs_reauth" ? (
+        <p className="text-muted-foreground">
+          <Trans>
+            Nobody can find what the Brain kept from {label} until someone signs
+            in again. None of it is erased.
+          </Trans>
+        </p>
+      ) : null}
       {erasing ? (
         <p className="text-muted-foreground">
           <Trans>

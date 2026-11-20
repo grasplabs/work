@@ -208,6 +208,23 @@ const scopePerson = async (
 };
 
 /**
+ * The person's own connections and the shared ones that need someone to
+ * sign in again (`needs_reauth`, GRA-2227), as connect lists them for the
+ * person, of entries an admin hasn't hidden (`offeredAmong`): those that
+ * can be connected again. Never an outside API, which the chat never
+ * calls.
+ */
+export const waitingConnections = async (
+  env: Env,
+  scope: Pick<AgentScope, "personId">
+): Promise<ConnectionSummary[]> => {
+  const listed = await env.CONNECT.listConnections(
+    await scopePerson(env, scope)
+  );
+  return await offeredAmong(env, listed, "needs_reauth");
+};
+
+/**
  * Tells the chat's watchers something waits for its person. A failure is
  * logged: the page reads it at its next change.
  */

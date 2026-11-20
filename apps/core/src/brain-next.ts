@@ -170,7 +170,11 @@ import {
   largeEnoughAudiences,
   teamsOfAtLeast,
 } from "./brain-share-audiences.ts";
-import { audiencesRead, sharedPlacesRead } from "./connection-audiences.ts";
+import {
+  activeAudiences,
+  audiencesRead,
+  sharedPlacesRead,
+} from "./connection-audiences.ts";
 import type { ConnectionAudience } from "./connection-audiences.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
@@ -1030,7 +1034,7 @@ const memberGroupsOf = async (
       companyGroup,
       membersGroup,
     ],
-    audiences: await withPlaces(audiences, places),
+    audiences: await withPlaces(await activeAudiences(env, audiences), places),
     accountGroups: held.accounts,
     sourceGroups: held.groups,
   };

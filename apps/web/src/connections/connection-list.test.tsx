@@ -707,6 +707,22 @@ describe("a shared connection's Brain audience, for an admin", () => {
     });
   });
 
+  it("says what the Brain kept is hidden, not erased, while the connection needs someone to sign in again", async () => {
+    const hidden =
+      "Nobody can find what the Brain kept from Notes until someone signs in again. None of it is erased.";
+    await asAdmin({ ...shared, status: "needs_reauth" }, { kind: "everyone" });
+    const waiting = document.body.textContent.includes(hidden);
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await asAdmin(shared, { kind: "everyone" });
+    expect({
+      waiting,
+      active: document.body.textContent.includes(hidden),
+    }).toStrictEqual({ waiting: true, active: false });
+  });
+
   it("is never shown to someone who isn't an admin, nor on a person's own connection", async () => {
     await asAdmin(connection({}));
     const own = document.querySelector("select");
