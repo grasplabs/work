@@ -22,7 +22,10 @@ export type ComposerMicrophoneStatus =
 /** What useComposerMicrophone gives. */
 export interface ComposerMicrophone {
   status: ComposerMicrophoneStatus;
-  /** Asks for the microphone and starts listening. Call it from a press. */
+  /**
+   * Asks for the microphone and starts listening. Call it from a press. Once per session: a start
+   * while it asks or listens is the same one, and a stream that arrives after `stop` is let go.
+   */
   start: () => Promise<ComposerMicrophoneStatus>;
   /** Lets the microphone go. */
   stop: () => void;
@@ -141,29 +144,48 @@ const close = (on: Listening | null) => {
 export const useComposerMicrophone = (): ComposerMicrophone => {
   const [status, setStatus] = useState<ComposerMicrophoneStatus>("idle");
   const listening = useRef<Listening | null>(null);
+  // Which session is current: `stop` and unmounting end it, so a stream that arrives later is let go.
+  const session = useRef(0);
+  const asking = useRef<Promise<ComposerMicrophoneStatus> | null>(null);
   useEffect(
     () => () => {
+      session.current += 1;
       close(listening.current);
       listening.current = null;
     },
     []
   );
+  const ask = async (mine: number): Promise<ComposerMicrophoneStatus> => {
+    setStatus("asking");
+    const opened = await open();
+    if (session.current !== mine) {
+      if (typeof opened !== "string") {
+        close(opened);
+      }
+      return "idle";
+    }
+    asking.current = null;
+    if (typeof opened === "string") {
+      setStatus(opened);
+      return opened;
+    }
+    listening.current = opened;
+    setStatus("on");
+    return "on";
+  };
   return {
     status,
     start: async () => {
-      close(listening.current);
-      listening.current = null;
-      setStatus("asking");
-      const opened = await open();
-      if (typeof opened === "string") {
-        setStatus(opened);
-        return opened;
+      if (listening.current !== null) {
+        return "on";
       }
-      listening.current = opened;
-      setStatus("on");
-      return "on";
+      const pending = asking.current ?? ask(session.current);
+      asking.current = pending;
+      return await pending;
     },
     stop: () => {
+      session.current += 1;
+      asking.current = null;
       close(listening.current);
       listening.current = null;
       setStatus("idle");

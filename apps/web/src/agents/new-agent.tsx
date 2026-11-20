@@ -275,7 +275,8 @@ export const NewAgent = ({
   const { failure, run } = useCoreAction();
   const [draft, setDraft] = useState<Draft>({
     ...blank,
-    audience: company ? "nobody" : "me",
+    // An admin's starts as the company's, as the guided setup's does.
+    audience: company ? "everyone" : "me",
   });
   const [at, setAt] = useState(0);
   const [answers, setAnswers] = useState<Partial<Record<Step, QuestionAnswer>>>(
@@ -434,15 +435,15 @@ export const NewAgent = ({
         kind: "single" as const,
         options: [
           {
-            value: "nobody",
-            label: words.audienceNames.nobody,
-            description: t`You choose people and teams on its page`,
-            recommended: true,
-          },
-          {
             value: "everyone",
             label: words.audienceNames.everyone,
             description: t`It does nothing yet until you allow it`,
+            recommended: true,
+          },
+          {
+            value: "nobody",
+            label: words.audienceNames.nobody,
+            description: t`You choose people and teams on its page`,
           },
           ...(own
             ? [
