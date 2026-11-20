@@ -12,9 +12,10 @@ import { apiOf, peopleIn } from "./people.ts";
 // its integration's page, a row each with where it stands, signs in again
 // to one whose access ran out and disconnects one from its own row; an
 // admin sees which Apps hold a permission for a shared connection and
-// revokes it there, and reads a Composio connection's consent. The connections are what finished flows
-// leave behind (e2e/connections-seed.ts): the flows through Entra and
-// Composio are core's tests.
+// revokes it there, and reads a Composio connection's consent. The
+// connections are what finished flows leave behind
+// (e2e/connections-seed.ts): the flows through Entra and Composio are
+// core's tests.
 
 /** The row for `connection` among the accounts on its integration's page. */
 const rowOf = (page: Page, { account }: SeededConnection): Locator =>
@@ -71,7 +72,7 @@ test("a person comes back from connecting Microsoft 365, sees each account on it
     name: "Microsoft 365 is connected",
   });
   await expect(done.getByText("Just for you")).toBeVisible();
-  // Its footer's Close; the corner's is the same.
+  // A Close, the footer's or the corner's: both close it.
   await done.getByRole("button", { name: "Close" }).first().click();
   // Hidden from the start of its way out, it still takes the page's
   // clicks until it is gone.
@@ -152,10 +153,14 @@ test("a person comes back from connecting Microsoft 365, sees each account on it
   // disconnecting to each account's row: the test stack has no Microsoft
   // tenant set up, so core refuses the start, and the dialog says so.
   await page.getByRole("button", { name: "Manage", exact: true }).click();
+  const another = page.getByRole("menuitem", {
+    name: "Connect another account",
+  });
+  await expect(another).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Disconnect" })).toHaveCount(
     0
   );
-  await page.getByRole("menuitem", { name: "Connect another account" }).click();
+  await another.click();
   const connecting = page.getByRole("dialog", {
     name: "Connect Microsoft 365",
   });
@@ -288,7 +293,10 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   const holders = page.getByRole("heading", {
     name: "Apps and agents with a permission",
   });
-  const holder = page.getByRole("listitem").filter({ hasText: appName });
+  const holder = page
+    .getByRole("list", { name: "Apps and agents with a permission" })
+    .getByRole("listitem")
+    .filter({ hasText: appName });
   await expect(holders).toBeVisible();
   await expect(holder).toContainText(`App ${appName}`);
   await expect(holder).toContainText("mail.read on the whole connection");

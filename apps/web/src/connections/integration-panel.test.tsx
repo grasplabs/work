@@ -399,4 +399,26 @@ describe("an app's panel", () => {
       "Sign in to Microsoft 365 again"
     );
   });
+
+  it("disconnects its one account under Manage, as the panel has no rows", async () => {
+    const sent = await opened("microsoft", [
+      {
+        id: "c1",
+        source: "native",
+        provider: "microsoft",
+        scope: "personal",
+        status: "active",
+        ownerUserId: "u1",
+        connectedBy: "u1",
+        connectedByName: "Ada",
+        accountName: "ada@example.com",
+        createdAt: "2026-10-01T00:00:00.000Z",
+      },
+    ]);
+    await press(buttons("Manage")[0]);
+    await press(buttons("Disconnect")[0]);
+    await press(dialogAction("Disconnect"));
+
+    expect(sent).toStrictEqual([{ disconnected: "c1" }]);
+  });
 });
