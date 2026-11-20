@@ -247,15 +247,24 @@ const constructed = (make: () => object): object =>
  * microphone that gives no sound, and a line on which core says it isn't
  * set up for this deployment and hangs up, as core does.
  */
-const transcriptionNotSetUp = (): void => {
+const transcriptionNotSetUp = (): (() => boolean) => {
+  const tracks: { stopped: boolean; stop: () => void }[] = [];
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: {
-      getUserMedia: async () =>
-        await Promise.resolve({
-          getAudioTracks: () => [],
-          getTracks: () => [],
-        }),
+      getUserMedia: async () => {
+        const track = {
+          stopped: false,
+          stop: () => {
+            track.stopped = true;
+          },
+        };
+        tracks.push(track);
+        return await Promise.resolve({
+          getAudioTracks: () => [track],
+          getTracks: () => [track],
+        });
+      },
     },
   });
   Reflect.set(
@@ -316,6 +325,7 @@ const transcriptionNotSetUp = (): void => {
       });
     })
   );
+  return () => tracks.some((track) => !track.stopped);
 };
 
 /** The model and effort control's name, as a screen reader hears it. */
@@ -614,7 +624,7 @@ describe(ChatComposer, () => {
       AudioContext: Reflect.get(globalThis, "AudioContext"),
       WebSocket: Reflect.get(globalThis, "WebSocket"),
     };
-    transcriptionNotSetUp();
+    const recording = transcriptionNotSetUp();
     try {
       await shown();
       const before = offersDictation();
@@ -629,6 +639,7 @@ describe(ChatComposer, () => {
       const said = document.body.textContent.includes(
         "Dictation isn't set up here yet. What you typed is kept."
       );
+      const during = { microphone: offersDictation(), recording: recording() };
       await press(button("Dismiss"));
       const after = offersDictation();
       act(() => {
@@ -637,14 +648,19 @@ describe(ChatComposer, () => {
       document.body.replaceChildren();
       await shown();
 
-      expect({ before, said, after, another: offersDictation() }).toStrictEqual(
-        {
-          before: true,
-          said: true,
-          after: false,
-          another: false,
-        }
-      );
+      expect({
+        before,
+        said,
+        during,
+        after,
+        another: offersDictation(),
+      }).toStrictEqual({
+        before: true,
+        said: true,
+        during: { microphone: false, recording: false },
+        after: false,
+        another: false,
+      });
     } finally {
       if (given.mediaDevices === undefined) {
         Reflect.deleteProperty(navigator, "mediaDevices");

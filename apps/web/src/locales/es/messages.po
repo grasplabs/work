@@ -5340,7 +5340,7 @@ msgstr "No se pudo aceptar esa respuesta"
 
 #: src/frame/part-words.tsx
 msgid "Couldn't write that down. What you typed is kept."
-msgstr "No se pudo escribir. Lo que escribiste se conserva."
+msgstr "No se pudo transcribir. Lo que escribiste se conserva."
 
 #: src/frame/part-words.tsx
 msgid "Counted in the page's words. Code view marks them in its source."

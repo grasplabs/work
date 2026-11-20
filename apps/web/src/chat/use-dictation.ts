@@ -170,6 +170,13 @@ export const useDictation = (
           );
         },
         problem: (problem, unavailable = false) => {
+          // A problem that stops it lets the microphone go at once: the
+          // band stands over a box that takes text again, and the browser
+          // would otherwise go on showing it recording.
+          if (problem !== "unheard" && source.current === chosen) {
+            chosen.cancel();
+            microphone.stop();
+          }
           setRun((was) => {
             if (was === undefined) {
               return was;
@@ -197,8 +204,8 @@ export const useDictation = (
     return {};
   }
   return {
-    dictateLabel: t`Dictate`,
-    onDictate: listen,
+    // No microphone beside a band saying dictation can't work here.
+    ...(possible ? { dictateLabel: t`Dictate`, onDictate: listen } : {}),
     ...(run === undefined
       ? {}
       : {
