@@ -116,16 +116,6 @@ export const auditActorSchema = z.discriminatedUnion("type", [
     via: z.literal("console").optional(),
   }),
   /**
-   * Someone who isn't a member, in a guest chat an App invited them to
-   * (`@grasp-os/shared/guests`), for the member it was made for.
-   */
-  z.object({
-    type: z.literal("guest"),
-    chatId: identifierSchema,
-    appId: appIdSchema,
-    invitedBy: identifierSchema,
-  }),
-  /**
    * Someone who isn't a member, opening a published App at its link
    * (`@grasp-os/shared/app-visitors`): by their session once they signed
    * in, by the App alone while they ask for a code.

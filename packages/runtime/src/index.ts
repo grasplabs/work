@@ -46,7 +46,6 @@ export type {
   AiClient,
   BrainClient,
   ConnectionClient,
-  GuestsClient,
   HttpClient,
 } from "./permission-clients.ts";
 export type {
@@ -59,8 +58,6 @@ export type {
   ConnectionPermission,
   FilesPermission,
   GraspPermission,
-  GuestsOperation,
-  GuestsPermission,
   LinksPermission,
   PermissionKind,
   WorkflowConfig,

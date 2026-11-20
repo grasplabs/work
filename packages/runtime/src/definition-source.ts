@@ -294,9 +294,8 @@ const permissionOf = (
     case "grasp": {
       return call(permission, "grasp");
     }
-    case "guests":
     case "files": {
-      return call(permission, declared["~permission"], [
+      return call(permission, "files", [
         objectOf([["operations", literal(declared.operations)]]),
       ]);
     }
@@ -334,7 +333,6 @@ const permissionKinds = [
   ["workflows", true],
   ["grasp", false],
   ["files", false],
-  ["guests", false],
   ["links", false],
 ] as const;
 

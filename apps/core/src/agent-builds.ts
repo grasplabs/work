@@ -1900,8 +1900,8 @@ build: {
    * teams by ID (\`{ type: "platform", teams: ["<team id>"] }\`): a recall
    * then also answers, of them, the teams the person it is for is in, and
    * the App can be shared only with people in all of them; its skills stay
-   * the company's. An App that recalls answers no visitor and invites no
-   * guest. Today everything in the Brain is one person's own: nothing
+   * the company's. An App that recalls answers no visitor. Today
+   * everything in the Brain is one person's own: nothing
    * readable by the whole company or by a team, so a recall returns an
    * empty pack, with teams named or not: say so, and never build a feature
    * that depends on it finding something. A write is refused, saying

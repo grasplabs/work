@@ -281,7 +281,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     expect({
       undeclared: await refusal({ alias: "mailer" }),
       otherKind: await refusal({
-        target: { kind: "guests", permissionId: crypto.randomUUID() },
+        target: { kind: "grasp", permissionId: crypto.randomUUID() },
       }),
       notAllowed: await refusal({
         target: { kind: "model", model: "openai/gpt-5.4" },

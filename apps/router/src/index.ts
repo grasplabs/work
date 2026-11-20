@@ -3,7 +3,6 @@ import { channelsApiPath } from "@grasp-os/shared/channels";
 import { requestErrors } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { eventSourcePath } from "@grasp-os/shared/event-source-path";
-import { guestApiPath } from "@grasp-os/shared/guests";
 import {
   readAtMost,
   requestIdHeader,
@@ -157,10 +156,9 @@ const bounceReason = (answer: unknown): string => {
 const authBasePath = "/api/auth";
 
 /**
- * The limits' window, as `AUTH_RATE_LIMIT`, `GUEST_RATE_LIMIT`,
- * `INTERVIEW_RATE_LIMIT`, `CHANNELS_RATE_LIMIT`, `VISITOR_RATE_LIMIT` and
- * `WEBHOOK_RATE_LIMIT` all have it in
- * wrangler.jsonc.
+ * The limits' window, as `AUTH_RATE_LIMIT`, `INTERVIEW_RATE_LIMIT`,
+ * `CHANNELS_RATE_LIMIT`, `VISITOR_RATE_LIMIT` and `WEBHOOK_RATE_LIMIT` all
+ * have it in wrangler.jsonc.
  */
 const limitPeriodS = 60;
 
@@ -183,12 +181,12 @@ const withinLimitOf = async (
  * Whether a request is within `limiter`'s limit for its hostname and
  * client address: core's sign-in routes (Better Auth's own limiter is off
  * in core, as behind the router every request comes from the router's
- * address), and the endpoints of a guest chat and of an interview link,
- * which have no session to limit by. Keyed by the client's IPv4 address or IPv6 /64 (`clientAddress`),
+ * address), and the endpoints of an interview link, which have no
+ * session to limit by. Keyed by the client's IPv4 address or IPv6 /64 (`clientAddress`),
  * so rotating through a /64 buys no fresh budget, and by hostname too, so
  * one office behind one address counts separately for each client. When
  * the limiter itself fails, the request goes through (and is logged):
- * sign-in and guests stay up.
+ * sign-in and interviews stay up.
  */
 const withinLimit = async (
   limiter: RateLimit,
@@ -266,7 +264,6 @@ const interviewLinkPaths: ReadonlySet<string> = new Set([
 /** The rate limiter bindings, in wrangler.jsonc. */
 type LimitBinding =
   | "AUTH_RATE_LIMIT"
-  | "GUEST_RATE_LIMIT"
   | "VISITOR_RATE_LIMIT"
   | "CHANNELS_RATE_LIMIT"
   | "INTERVIEW_RATE_LIMIT"
@@ -284,11 +281,6 @@ const limitFor = (pathname: string): LimitBinding | undefined => {
     pathname === authBasePath || pathname.startsWith(`${authBasePath}/`);
   if (isAuth && pathname !== signOutPath) {
     return "AUTH_RATE_LIMIT";
-  }
-  // A guest chat's endpoint (core's src/guests.ts), which anyone with a
-  // link, or without one, can reach.
-  if (pathname === guestApiPath) {
-    return "GUEST_RATE_LIMIT";
   }
   // A visitor's endpoint (core's src/app-visitors.ts), where anyone can
   // ask for a code or try one.

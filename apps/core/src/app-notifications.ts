@@ -73,9 +73,9 @@ import type { CallingAgent } from "./workflow-start-intents.ts";
 //   it names was told: only members call the App, and only they can ask.
 //   The row goes in only while they still are one (`activeMember`), and
 //   is listed only while they can still open the App.
-// - A visitor, or a run, telling people: a visitor's call (a published
-//   App's guest, who is no member) and a call from a workflow's run have
-//   no `people` on their invocation (app-functions.ts), so their send is
+// - A visitor, or a run, telling people: a visitor's call (someone who
+//   is no member, opening a published App) and a call from a workflow's
+//   run have no `people` on their invocation (app-functions.ts), so their send is
 //   refused (`permission.unavailable`), never narrowed: the safer of the two,
 //   as nothing a visitor does reaches a member through the App.
 // - Flooding: a title and body within their limits (checked as it is

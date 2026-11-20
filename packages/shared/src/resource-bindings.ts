@@ -8,7 +8,7 @@ import { appIdSchema, permissionIdSchema } from "./ids.ts";
 // declaration in App code is a requirement and grants nothing; an admin's
 // binding, together with the live grant it names, is what lets an action
 // reach a model (`ai`), a connection, the Brain, another
-// App, the platform's own functions (`grasp`) or guest chats.
+// App or the platform's own functions (`grasp`).
 //
 // A binding is the host's record, never part of a sealed manifest: it is
 // approved after a release is sealed and can be revoked at any time. It pins
@@ -39,11 +39,7 @@ const modelNameSchema = z
  * - `grasp` (`grasp`): the platform's own read-only
  *   functions, under one of the App's `{ type: "platform" }` permissions
  *   to read the platform's statistics (`statistics`), checked on every
- *   call;
- * - `guests` (`guests`): one of the App's `{ type: "platform" }`
- *   permissions to invite guests (`guests`), checked on every call, and by
- *   every guest's link of a chat invited through it, which the binding's
- *   revocation stops too.
+ *   call.
  */
 export const bindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("model"), model: modelNameSchema }),
@@ -57,10 +53,6 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     kind: z.literal("grasp"),
-    permissionId: permissionIdSchema,
-  }),
-  z.strictObject({
-    kind: z.literal("guests"),
     permissionId: permissionIdSchema,
   }),
 ]);
@@ -138,8 +130,8 @@ export interface ConnectorChoice {
 
 /**
  * One of the App's `{ type: "platform" }` permissions, as the platform's
- * functions' (`grasp`), a guests or a brain permission's choice: to read
- * the platform's statistics, to invite guests, or to read the Brain.
+ * functions' (`grasp`) or a brain permission's choice: to read the
+ * platform's statistics, or to read the Brain.
  */
 export interface PlatformChoice {
   permissionId: string;
@@ -153,8 +145,7 @@ export interface PlatformChoice {
  *   the declared contract and allow the tool of every declared action;
  * - `brain`: the App's own active permissions to read the Brain;
  * - `grasp`: the App's own active permissions to read the platform's
- *   statistics;
- * - `guests`: the App's own active permissions to invite guests.
+ *   statistics.
  *
  * Approving checks the choice again: one that stopped serving since is
  * refused (`permission.target_invalid`). `truncated` says some were left
@@ -166,7 +157,6 @@ export type BindingChoices = { truncated: boolean } & (
   | { kind: "connector"; permissions: ConnectorChoice[] }
   | { kind: "brain"; permissions: PlatformChoice[] }
   | { kind: "grasp"; permissions: PlatformChoice[] }
-  | { kind: "guests"; permissions: PlatformChoice[] }
 );
 
 /**
@@ -193,8 +183,8 @@ export interface DeclaredResource {
   /** A connection's declared actions; empty for the other kinds. */
   actions: string[];
   /**
-   * The Brain's declared operations, another App's or the platform's
-   * functions, by path, or guests'; empty for the other kinds.
+   * The Brain's declared operations, or another App's or the platform's
+   * functions, by path; empty for the other kinds.
    */
   operations: string[];
   /** AI's output token ceiling; null for the other kinds. */

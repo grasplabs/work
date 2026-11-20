@@ -11,7 +11,7 @@ import { e2eModel } from "./stack.ts";
 // it, reviews it again from the list, retags a statement, and saves it:
 // the source is then listed as saved, in the App's own store, and the
 // draft is gone. And sends notes to be read by a model, following the
-// reading on the screen, and invites a stakeholder to a chat by link.
+// reading on the screen.
 
 const intake = "intake";
 
@@ -21,10 +21,7 @@ const intake = "intake";
  */
 const installedMs = 30_000;
 
-/**
- * An App `admin` created from the intake, its guest chats permission
- * approved and bound, and its model bound.
- */
+/** An App `admin` created from the intake, its model bound. */
 const intakeFor = async (admin: Person): Promise<string> => {
   const { core, api } = apiOf(admin);
   try {
@@ -48,19 +45,6 @@ const intakeFor = async (admin: Person): Promise<string> => {
     // Live, for the people it is shared with (until then, its
     // builders' alone).
     await api.versions.rollback({ kind: "app", id: created.app.id }, 1);
-    // Its stakeholder chats, through the permission just granted, bound as
-    // an admin binds them on the App's Resources tab.
-    const guests = created.permissions.find(
-      ({ binding }) => binding === "GUESTS"
-    );
-    if (guests !== undefined) {
-      await api.resourceBindings.approve({
-        app: created.app.id,
-        alias: "guests",
-        target: { kind: "guests", permissionId: guests.id },
-        reviewed: { version: 1 },
-      });
-    }
     // The model its reading goes through: the `ai` of the `extract`
     // workflow the copy got (the one it asked to start), approved as an admin
     // approves it on the workflow's page, for the stack's first model
@@ -195,67 +179,4 @@ test("an admin sends notes to be read, and sees the reading wait while the AI pr
   });
   // Nothing to dismiss: it hasn't ended, and keeps no draft.
   await expect(item.getByRole("button", { name: "Dismiss" })).toHaveCount(0);
-});
-
-test("an admin invites a stakeholder, who opens the link without an account, writes, and finishes the chat", async ({
-  newContext,
-  pageOf,
-}) => {
-  const { admin } = peopleIn("intake");
-  const name = `Ben ${crypto.randomUUID().slice(0, 8)}`;
-  const app = await intakeFor(admin);
-  const page = await pageOf(admin);
-  const appPage = await openIntake(page, app);
-
-  const chats = appPage;
-  await chats.getByLabel("Name").fill(name);
-  await chats.getByRole("button", { name: "Invite" }).click();
-  const linkField = chats.getByLabel(`Link for ${name}`);
-  await expect(linkField).toBeVisible();
-  const link = await linkField.inputValue();
-  expect(new URL(link).pathname).toBe("/guest");
-
-  // The guest: a browser with nobody signed in.
-  const context = await newContext();
-  const guestPage = await context.newPage();
-  await guestPage.goto(link);
-  await expect(
-    guestPage.getByRole("heading", { name: `Hi ${name}` })
-  ).toBeVisible();
-  await guestPage.getByLabel("Your message").fill("I approve invoices.");
-  await guestPage.getByRole("button", { name: "Send" }).click();
-  // The local stack's provider refuses unscripted requests' keys: the message
-  // isn't taken, and says so, and what was typed stays to send again.
-  await expect(guestPage.getByRole("alert")).toHaveText(
-    /^The chat can't answer right now\. Try sending it again in a while\. Reference: [\da-f-]{36}$/u
-  );
-  await expect(guestPage.getByLabel("Your message")).toHaveText(
-    "I approve invoices."
-  );
-  await guestPage.getByRole("button", { name: "Finish" }).click();
-  await expect(guestPage.getByRole("status")).toHaveText(
-    "You finished this chat. Thank you for your time."
-  );
-  await expect(guestPage.getByRole("button", { name: "Send" })).toHaveCount(0);
-
-  // Another link pasted over this one opens that one, never this chat
-  // with its secret: a made-up one opens nothing.
-  await guestPage.evaluate((made) => {
-    window.location.hash = made;
-  }, "A".repeat(43));
-  await expect(
-    guestPage.getByRole("heading", { name: `Hi ${name}` })
-  ).toHaveCount(0);
-  await expect(guestPage.getByRole("alert")).toHaveText(
-    /^This link doesn't work\. Ask whoever sent it for a new one\. Reference: [\da-f-]{36}$/u
-  );
-
-  // Back on the intake: the chat has ended.
-  await page.reload();
-  const again = await openIntake(page, app);
-  const row = again
-    .getByRole("table", { name: "Stakeholder chats" })
-    .getByRole("row")
-    .filter({ hasText: name });
-  await expect(row.getByRole("cell").nth(1)).toHaveText("finished");
 });

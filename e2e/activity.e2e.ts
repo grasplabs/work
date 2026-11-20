@@ -32,8 +32,8 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     await api.permissions.request({
       subject: { type: "app", appId },
       object: { type: "platform" },
-      actions: ["guests"],
-      binding: "GUESTS",
+      actions: ["brain"],
+      binding: "BRAIN",
     });
   } finally {
     core[Symbol.dispose]();
@@ -57,11 +57,11 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   ).toHaveCount(1);
   await expect(reading).toHaveCount(0);
 
-  const inviting = await toCard(
+  const recalling = await toCard(
     page,
-    new RegExp(`^${appName}: guests on Guest chats\\.`, "u")
+    new RegExp(`^${appName}: brain on Company Brain, read only\\.`, "u")
   );
-  await inviting.getByRole("button", { name: /^Reject /u }).click();
+  await recalling.getByRole("button", { name: /^Reject /u }).click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Reject", exact: true })
@@ -69,7 +69,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(
     page.getByRole("status").filter({ hasText: `Rejected: ${appName}` })
   ).toHaveCount(1);
-  await expect(inviting).toHaveCount(0);
+  await expect(recalling).toHaveCount(0);
 
   // The approval is in the log, found by what it granted, once the log has
   // taken its events from core's outbox, which it does in the background.
@@ -156,21 +156,21 @@ test("an admin approves an App's request only for the version the list shows", a
   try {
     const { id: appId } = await builds.api.apps.create({
       name: appName,
-      description: "Invites guests to the minutes",
+      description: "Reads the Brain for the minutes",
     });
     await release(builds.api, appId, { "README.md": "One" });
     await builds.api.permissions.request({
       subject: { type: "app", appId },
       object: { type: "platform" },
-      actions: ["guests"],
-      binding: "GUESTS",
+      actions: ["brain"],
+      binding: "BRAIN",
     });
 
     const page = await pageOf(admin);
     await page.goto("/dashboard");
     const card = await toCard(
       page,
-      new RegExp(`^${appName}: guests on Guest chats\\.`, "u")
+      new RegExp(`^${appName}: brain on Company Brain, read only\\.`, "u")
     );
     // Versions as people know them: YY.MM.N, the first this month.
     await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.1/u);
@@ -189,7 +189,7 @@ test("an admin approves an App's request only for the version the list shows", a
     await card.getByRole("button", { name: /^Approve /u }).click();
     await expect(
       page.getByRole("status").filter({
-        hasText: `Approved: ${appName}: guests on Guest chats.`,
+        hasText: `Approved: ${appName}: brain on Company Brain, read only.`,
       })
     ).toHaveCount(1);
     await expect(card).toHaveCount(0);

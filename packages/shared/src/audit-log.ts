@@ -453,13 +453,6 @@ const typeRules: readonly {
   { action: "store.cascade_batch", type: "action" },
   { action: "store.cascade_finished", type: "action" },
   { action: "store.cascade_failed", type: "action" },
-  // Guest chats (core's src/guests.ts): an App inviting someone, revoking
-  // the link, and reading back what they wrote; the guest opening the
-  // chat, sending a message and finishing it.
-  { action: "guest.read", type: "read" },
-  { action: "guest.invited", type: "permission" },
-  { action: "guest.revoked", type: "permission" },
-  { action: "guest", type: "action" },
   // The log's own events, each named, so an `audit` action added later has
   // no type until it gets a rule: retention moving events out and purging
   // them, gaps (outbox rows the log can't take, moved aside), then reading
@@ -504,7 +497,6 @@ const actorTypes = [
   "app",
   "workflow",
   "staff",
-  "guest",
   "visitor",
   "system",
 ] as const satisfies readonly AuditActor["type"][];
