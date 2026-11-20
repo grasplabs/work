@@ -8,7 +8,6 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { intervieweeOf, kernOf } from "../brain/article-kern.ts";
@@ -40,6 +39,7 @@ import {
   SourceDocument,
   SourceInterview,
   SourceQuotes,
+  SourceTabs,
   SourceTranscript,
 } from "../brain/source-interview.tsx";
 import type { TranscribedSource } from "../brain/source-interview.tsx";
@@ -56,7 +56,6 @@ import { Collapsible } from "../grasp/collapsible/index.ts";
 import { focus } from "../grasp/focus/focus.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Brain as BrainMark } from "../grasp/icons/index.ts";
-import { useInterview } from "../grasp/interview/index.ts";
 import {
   Tabs,
   TabsContent,
@@ -92,20 +91,6 @@ const styles = stylex.create({
     color: grasp.text,
   },
   paragraph: { margin: 0 },
-  sourceTabs: {
-    paddingTop: grasp.space4,
-    borderTopWidth: grasp.hairline,
-    borderTopStyle: "solid",
-    borderTopColor: grasp.line,
-  },
-  tabRow: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    columnGap: grasp.space4,
-    rowGap: grasp.space2,
-  },
-  tabRowTabs: { minWidth: 0 },
   eventTitle: {
     color: "inherit",
     textDecorationLine: { default: "none", ":hover": "underline" },
@@ -256,71 +241,6 @@ const Article = ({
         </p>
       ))}
     </section>
-  );
-};
-
-/**
- * A conversation's page: its summary, and the whole conversation word for word with its statements
- * highlighted. It opens on the transcript, and a link to a statement always brings it there.
- */
-const SourceTabs = ({
-  activeId,
-  children,
-}: {
-  activeId: string | undefined;
-  children: ReactNode;
-}) => {
-  const { t } = useLingui();
-  const [tab, setTab] = useState("transcript");
-  const [opened, setOpened] = useState(activeId);
-  // A quote at the side that goes to its moment brings the transcript back too.
-  const asked = useInterview()?.asked ?? 0;
-  const [seen, setSeen] = useState(asked);
-  if (asked !== seen) {
-    setSeen(asked);
-    setTab("transcript");
-  }
-  // A link to another statement opens the transcript again, even after the reader went to the summary.
-  if (activeId !== opened) {
-    setOpened(activeId);
-    if (activeId !== undefined) {
-      setTab("transcript");
-    }
-  }
-  return (
-    <div {...stylex.props(styles.sourceTabs)}>
-      <Tabs
-        onValueChange={(value) => {
-          if (value !== null) {
-            setTab(value);
-          }
-        }}
-        value={tab}
-      >
-        <div {...stylex.props(styles.tabRow)}>
-          <div {...stylex.props(styles.tabRowTabs)}>
-            <TabsList>
-              <TabsTrigger value="summary">
-                {t({
-                  message: "Summary",
-                  context: "tab: an interview written up short",
-                })}
-              </TabsTrigger>
-              <TabsTrigger value="transcript">
-                {t({
-                  message: "Transcript",
-                  context: "tab: the whole conversation word for word",
-                })}
-              </TabsTrigger>
-            </TabsList>
-          </div>
-        </div>
-        <TabsContent value="summary">{children}</TabsContent>
-        <TabsContent value="transcript">
-          <SourceTranscript />
-        </TabsContent>
-      </Tabs>
-    </div>
   );
 };
 
@@ -975,8 +895,9 @@ const NoteContent = ({
       {forget.element}
     </NoteArticle>
   );
-  // A conversation's parts, in the body and at the side, share one Interview.
-  return transcribed === undefined ? (
+  // A conversation's parts, in the body and at the side, share one Interview; a document reads as a page.
+  return transcribed === undefined ||
+    transcribed.transcript.unit === "passage" ? (
     page
   ) : (
     <SourceInterview

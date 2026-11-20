@@ -16087,7 +16087,7 @@ msgstr "Voorgesteld"
 msgid "Summarise documents"
 msgstr "Documenten samenvatten"
 
-#: src/routes/_shell.brain.$noteId.tsx
+#: src/brain/source-interview.tsx
 msgctxt "tab: an interview written up short"
 msgid "Summary"
 msgstr "Samenvatting"
@@ -17871,14 +17871,18 @@ msgid "Track the month-end close"
 msgstr "De maandafsluiting bijhouden"
 
 #: src/brain/brain-markdown.ts
-#: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
 #: src/interview/page.tsx
 #: src/interview/transcript.tsx
 msgid "Transcript"
 msgstr "Transcript"
 
-#: src/routes/_shell.brain.$noteId.tsx
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Transcript"
+msgstr "Transcript"
+
+#: src/brain/source-interview.tsx
 msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcript"
