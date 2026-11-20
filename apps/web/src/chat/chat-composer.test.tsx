@@ -519,6 +519,50 @@ describe(ChatComposer, () => {
     });
   });
 
+  it("keeps what a member dictated when the browser's recognition fails mid-way", async () => {
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    type("Book the room");
+    await press(button("Dictate"));
+    const recognition = made();
+    act(() => {
+      recognition?.hears("for Friday", true);
+      recognition?.dispatchEvent(
+        Object.assign(new Event("error"), { error: "network" })
+      );
+    });
+
+    expect({
+      said: document.body.textContent.includes(
+        "Couldn't write that down. What you typed is kept."
+      ),
+      text: field().value,
+      listening: recognition?.listening,
+    }).toStrictEqual({
+      said: true,
+      text: "Book the room for Friday",
+      listening: false,
+    });
+  });
+
+  it("stops listening when the box goes away mid-dictation", async () => {
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    await press(button("Dictate"));
+    const recognition = made();
+    const before = recognition?.listening;
+    act(() => {
+      root?.unmount();
+    });
+
+    expect({ before, after: recognition?.listening }).toStrictEqual({
+      before: true,
+      after: false,
+    });
+  });
+
   it("says over the box that a dictation failed when the browser's recognition never starts, keeping what was typed, until it is dismissed", async () => {
     // A browser that can't reach its maker's service: it neither starts nor says why.
     Recognition.silent = true;

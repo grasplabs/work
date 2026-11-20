@@ -107,6 +107,15 @@ export const useDictation = (
   const [run, setRun] = useState<Run>();
   const [now, setNow] = useState(0);
   const source = useRef<DictationSource | null>(null);
+  // A box that goes away mid-dictation lets its source go: no microphone,
+  // line or recognition carries on with nothing on screen.
+  useEffect(
+    () => () => {
+      source.current?.cancel();
+      source.current = null;
+    },
+    []
+  );
   const words = useWords(run?.telling ?? false, run?.unavailable === true);
   // The time it has listened, a second at a time.
   const running = run !== undefined && run.phase === "listening";
@@ -149,6 +158,8 @@ export const useDictation = (
     const current = (): boolean => source.current === chosen;
     // A problem stopped it while it still stands in its band.
     let stopped = false;
+    // What it has heard so far, settled or not.
+    let heardSoFar = "";
     const begin = (): void => {
       if (!current()) {
         return;
@@ -186,6 +197,9 @@ export const useDictation = (
           if (!current()) {
             return;
           }
+          heardSoFar = [settled, interim]
+            .filter((part) => part !== "")
+            .join(" ");
           setRun((was) =>
             was === undefined ? was : { ...was, settled, interim }
           );
@@ -204,6 +218,15 @@ export const useDictation = (
           stopped = true;
           chosen.cancel();
           microphone.stop();
+          // What it heard before it stopped goes in after what was typed,
+          // as Done would put it.
+          if (heardSoFar !== "") {
+            onText(
+              [text.trimEnd(), heardSoFar]
+                .filter((part) => part !== "")
+                .join(" ")
+            );
+          }
           setRun((was) =>
             was === undefined
               ? was
