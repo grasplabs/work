@@ -9384,6 +9384,10 @@ msgid "It is published"
 msgstr "Sie veröffentlicht wird"
 
 #: src/connections/integration-facts.ts
+msgid "It isn't offered any more: offer it again to connect another account."
+msgstr "Es wird nicht mehr angeboten: Bieten Sie es wieder an, um ein weiteres Konto zu verbinden."
+
+#: src/connections/integration-facts.ts
 msgid "It isn't offered to your organization yet: offer it before connecting it."
 msgstr "Es wird Ihrer Organisation noch nicht angeboten: Bieten Sie es an, bevor Sie es verbinden."
 

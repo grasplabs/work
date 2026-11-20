@@ -103,12 +103,17 @@ export const useAppOf = (
   const { t } = useLingui();
   return (integration: Integration, { tools, uses, size }: AppOptions): App => {
     const primary = primaryOf(integration, uses);
-    // Every account counts: one that ran out beside one that works needs someone.
-    const state = rollUp(
-      integration.connections.map((each) =>
-        appStateOf(each, integration, identity)
-      )
-    );
+    // The one the company relies on, when it ran out, says how to fix it;
+    // else every account counts: one that ran out beside one that works
+    // needs someone.
+    const state =
+      primary === undefined || primary.status === "active"
+        ? rollUp(
+            integration.connections.map((each) =>
+              appStateOf(each, integration, identity)
+            )
+          )
+        : appStateOf(primary, integration, identity);
     const connection: AppConnection | undefined =
       primary === undefined || state === undefined
         ? undefined

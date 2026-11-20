@@ -37,7 +37,7 @@ import { DisconnectDialog } from "./connection-list.tsx";
 import { fixOf } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
 import { reliedOnLapsed } from "./integrations.ts";
-import { toolRules } from "./tool-choices.ts";
+import { allowedOf, toolRules } from "./tool-choices.ts";
 
 // What can be done to an app from its panel and its page, as the library's
 // app parts offer it (their `AppActions`): connect it, sign in to it again,
@@ -105,9 +105,19 @@ const ConnectToolkit = ({
       throw error;
     }
   };
+  const [old] = replacing;
   return (
     <ConnectAppConsent
-      again={replacing.length > 0}
+      again={old !== undefined}
+      // Connecting again starts from what the old connection allowed.
+      {...(old === undefined
+        ? {}
+        : {
+            initialTools: allowedOf(old).map(({ name, read }) => ({
+              id: name,
+              choice: read ? ("read" as const) : ("write" as const),
+            })),
+          })}
       app={shown}
       consent={composioConsentText}
       forWhom="everyone"
