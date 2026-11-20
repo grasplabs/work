@@ -3125,6 +3125,10 @@ msgstr "Ask for {app}"
 msgid "Ask for a change"
 msgstr "Ask for a change"
 
+#: src/guest-sign-in.tsx
+msgid "Ask for a new code"
+msgstr "Ask for a new code"
+
 #: src/apps/app-access-requests.tsx
 msgid "Ask for access"
 msgstr "Ask for access"
@@ -3314,6 +3318,7 @@ msgstr "Available, via Composio"
 #: src/brain/back-button.tsx
 #: src/chat/asked-questions.tsx
 #: src/chat/composer-menu.tsx
+#: src/guest-sign-in.tsx
 #: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
@@ -4200,6 +4205,7 @@ msgstr "Closing the books and producing the numbers leadership looks at."
 
 #: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
+#: src/guest-sign-in.tsx
 msgid "Code"
 msgstr "Code"
 
@@ -5538,6 +5544,10 @@ msgstr "Email and calendar"
 msgid "Email and sign-ins"
 msgstr "Email and sign-ins"
 
+#: src/guest-sign-in.tsx
+msgid "Email me a code"
+msgstr "Email me a code"
+
 #: src/workflows/trigger-description.ts
 msgid "Email trigger"
 msgstr "Email trigger"
@@ -6802,6 +6812,10 @@ msgstr "Grasp is still working out a proposal."
 msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 msgstr "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 
+#: src/guest-sign-in.tsx
+msgid "Grasp isn't open yet. Try again later."
+msgstr "Grasp isn't open yet. Try again later."
+
 #: src/apps/draft-changes.tsx
 msgid "Grasp itself"
 msgstr "Grasp itself"
@@ -6982,9 +6996,18 @@ msgstr "Group the apps and workflows of a process, a team or a goal in a project
 msgid "Groups of teams"
 msgstr "Groups of teams"
 
+#: src/settings/erasures.tsx
+#: src/settings/guests.tsx
+msgid "Guest"
+msgstr "Guest"
+
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Guest accounts can't sign in. Use your organization's own account."
+
+#: src/settings/guests.tsx
+msgid "Guests"
+msgstr "Guests"
 
 #: src/onboarding/about-story.tsx
 msgid "Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask."
@@ -7447,6 +7470,10 @@ msgstr "If it lasts, switch provider."
 msgid "If the rest of the month goes like the days so far"
 msgstr "If the rest of the month goes like the days so far"
 
+#: src/guest-sign-in.tsx
+msgid "If you were invited, a code is on its way to you. It works for five minutes."
+msgstr "If you were invited, a code is on its way to you. It works for five minutes."
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Import"
@@ -7628,13 +7655,25 @@ msgstr "Invite people, change roles, sign them out and remove them"
 msgid "Invite someone"
 msgstr "Invite someone"
 
+#: src/activity/audit-words.ts
+msgid "Invited a guest"
+msgstr "Invited a guest"
+
 #: src/settings/invitations.tsx
 msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 msgstr "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 
+#: src/routes/sign-in.tsx
+msgid "Invited as a guest? Sign in with a code"
+msgstr "Invited as a guest? Sign in with a code"
+
 #: src/brain/brain.ts
 msgid "Invited for step 2"
 msgstr "Invited for step 2"
+
+#: src/settings/guests.tsx
+msgid "Invited on {date}"
+msgstr "Invited on {date}"
 
 #: src/activity/audit-words.ts
 msgid "Invited someone"
@@ -10012,6 +10051,10 @@ msgstr "Nothing is sent or changed on {connection}."
 msgid "Nothing is shared with the project, so they lose no access."
 msgstr "Nothing is shared with the project, so they lose no access."
 
+#: src/guest-sign-in.tsx
+msgid "Nothing is shared with you yet"
+msgstr "Nothing is shared with you yet"
+
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
 msgstr "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
@@ -11059,6 +11102,10 @@ msgstr "People one by one are off"
 msgid "People outside it can't ask it anything, in Grasp or in a chat app."
 msgstr "People outside it can't ask it anything, in Grasp or in a chat app."
 
+#: src/settings/guests.tsx
+msgid "People outside your organization, invited to what is shared with them. They reach nothing else."
+msgstr "People outside your organization, invited to what is shared with them. They reach nothing else."
+
 #: src/dashboard/signals.tsx
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
@@ -11764,6 +11811,7 @@ msgstr "Reload"
 #: src/onboarding/document-drop.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/guests.tsx
 msgid "Remove"
 msgstr "Remove"
 
@@ -11772,6 +11820,10 @@ msgstr "Remove"
 msgctxt "take out of a project"
 msgid "Remove"
 msgstr "Remove"
+
+#: src/settings/guests.tsx
+msgid "Remove {email}?"
+msgstr "Remove {email}?"
 
 #: src/agents/agent-documents.tsx
 #: src/onboarding/document-drop.tsx
@@ -11852,6 +11904,10 @@ msgstr "Remove spaces at the start and end"
 #: src/apps/app-data-model.tsx
 msgid "Remove table"
 msgstr "Remove table"
+
+#: src/settings/guests.tsx
+msgid "Remove the guest {email}"
+msgstr "Remove the guest {email}"
 
 #: src/apps/indexes-view.tsx
 msgid "Remove the index {indexName}"
@@ -13306,6 +13362,7 @@ msgid "Sidebar"
 msgstr "Sidebar"
 
 #: src/connections/connect-dialog.tsx
+#: src/guest-sign-in.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Sign in"
 msgstr "Sign in"
@@ -13363,6 +13420,7 @@ msgid "Sign in with your organization's account."
 msgstr "Sign in with your organization's account."
 
 #: src/frame/person-menu.tsx
+#: src/guest-sign-in.tsx
 #: src/routes/_shell.settings.security.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
@@ -13412,6 +13470,10 @@ msgid "Signed in {time}"
 msgstr "Signed in {time}"
 
 #: src/activity/audit-words.ts
+msgid "Signed in as a guest"
+msgstr "Signed in as a guest"
+
+#: src/activity/audit-words.ts
 msgid "Signed in for the first time, after joining from the directory"
 msgstr "Signed in for the first time, after joining from the directory"
 
@@ -13447,6 +13509,10 @@ msgstr "Signing in is recorded by your company's sign-in, as every sign-in is."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "Signing out didn't work"
+
+#: src/guest-sign-in.tsx
+msgid "Signing out didn't work. Try again."
+msgstr "Signing out didn't work. Try again."
 
 #: src/settings/member-suspension.tsx
 msgid "Since {date}: the directory turned their account off."
@@ -14359,9 +14425,17 @@ msgstr "That account's email address isn't verified."
 msgid "That address wasn’t kept out."
 msgstr "That address wasn’t kept out."
 
+#: src/guest-sign-in.tsx
+msgid "That code didn't work. Check it, or ask for a new one."
+msgstr "That code didn't work. Check it, or ask for a new one."
+
 #: src/interview/api.ts
 msgid "That didn't work. Try again in a moment."
 msgstr "That didn't work. Try again in a moment."
+
+#: src/guest-sign-in.tsx
+msgid "That didn't work. Try again."
+msgstr "That didn't work. Try again."
 
 #: src/sign-in-errors.ts
 msgid "That email address already signs in with another account."
@@ -15256,6 +15330,10 @@ msgstr "These notes rest on nothing else and go too: {named}."
 msgid "They appear once your teams' interviews describe how their work runs."
 msgstr "They appear once your teams' interviews describe how their work runs."
 
+#: src/settings/guests.tsx
+msgid "They are signed out everywhere and cannot sign in again."
+msgstr "They are signed out everywhere and cannot sign in again."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
@@ -15761,6 +15839,10 @@ msgstr "Too large to read"
 #: src/pages/page-files.ts
 msgid "Too many files are moving at once. Try again shortly."
 msgstr "Too many files are moving at once. Try again shortly."
+
+#: src/guest-sign-in.tsx
+msgid "Too many tries. Wait a minute, then try again."
+msgstr "Too many tries. Wait a minute, then try again."
 
 #: src/activity/audit-words.ts
 msgid "Took a reply to a run's email"
@@ -16521,6 +16603,10 @@ msgstr "Was refused as an App's visitor"
 #: src/activity/audit-words.ts
 msgid "Was refused packages known as malware"
 msgstr "Was refused packages known as malware"
+
+#: src/activity/audit-words.ts
+msgid "Was sent a code to sign in as a guest"
+msgstr "Was sent a code to sign in as a guest"
 
 #: src/activity/audit-words.ts
 msgid "Was sent a code to visit an App"
@@ -17917,6 +18003,10 @@ msgstr "You’re about to visit an external website."
 msgid "You’re seeing your version."
 msgstr "You’re seeing your version."
 
+#: src/guest-sign-in.tsx
+msgid "You’re signed in as a guest with {email}. What someone shares with you shows here."
+msgstr "You’re signed in as a guest with {email}. What someone shares with you shows here."
+
 #: src/frame/person-menu.tsx
 msgid "You're still signed in. Try again in a moment."
 msgstr "You're still signed in. Try again in a moment."
@@ -18027,6 +18117,10 @@ msgstr "Your conversations in chat apps"
 #: src/brain/memories-page.tsx
 msgid "Your correction is kept as your own word, for you alone, and shown beside what the Brain holds. What others read stays as it is."
 msgstr "Your correction is kept as your own word, for you alone, and shown beside what the Brain holds. What others read stays as it is."
+
+#: src/guest-sign-in.tsx
+msgid "Your email address"
+msgstr "Your email address"
 
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."

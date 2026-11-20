@@ -53,6 +53,15 @@ import { SettingsSection } from "./settings-parts.tsx";
 /** How often an erasure under way is asked about again, in ms. */
 const followEveryMs = 2000;
 
+/**
+ * Who `person` is shown as: their name; a guest, who has none, by their
+ * address while it is kept, and as a guest once it is erased (`guest`).
+ */
+const shownAs = (
+  person: { name: string; email: string | null },
+  guest: string
+): string => (person.name === "" ? (person.email ?? guest) : person.name);
+
 /** Each area of an erasure, in the page's language, as core names them. */
 const areaLabels: Record<string, MessageDescriptor> = {
   identity: msg`Email and sign-ins`,
@@ -280,8 +289,11 @@ const EraseDialog = ({
     }
     setFailure(refused);
   };
-  const name = preview?.name ?? person.name;
-  const confirmed = preview !== undefined && typed === preview.name;
+  const name = shownAs(preview ?? person, t`Guest`);
+  // A guest, who has no name, is confirmed by their address.
+  const confirmed =
+    preview !== undefined &&
+    typed === (preview.name === "" ? preview.email : preview.name);
   return (
     <Dialog
       onOpenChange={(open) => {
@@ -324,8 +336,8 @@ const EraseDialog = ({
             ) : (
               <>
                 <p>
-                  <span className="font-medium">{preview.name}</span>
-                  {preview.email === null ? null : (
+                  <span className="font-medium">{name}</span>
+                  {preview.email === null || preview.name === "" ? null : (
                     <span className="text-muted-foreground">
                       {" "}
                       ({preview.email})
@@ -399,11 +411,12 @@ const ReleaseAddressDialog = ({
   onOpenChange: (open: boolean) => void;
 }) => {
   const router = useRouter();
+  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [email, setEmail] = useState("");
   const [answer, setAnswer] = useState<"released" | "not-theirs">();
   const emailId = useId();
-  const { name } = person;
+  const name = shownAs(person, t`Guest`);
   const release = async (): Promise<void> => {
     const result = await run(
       async (session) => await session.members.releaseAddress(email)
@@ -518,10 +531,13 @@ const Standing = ({ person }: { person: RemovedPerson }) => {
 const RemovedRow = ({ person }: { person: RemovedPerson }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState<"erase" | "release">();
-  const { name, erasure } = person;
+  const { erasure } = person;
+  const name = shownAs(person, t`Guest`);
   const date = formatDate(person.removedAt);
   const who =
-    person.email === null ? person.name : `${person.name} (${person.email})`;
+    person.email === null || person.name === ""
+      ? name
+      : `${person.name} (${person.email})`;
   return (
     <div className="flex items-center gap-3 border-t px-5 py-3">
       <Avatar className="size-8">

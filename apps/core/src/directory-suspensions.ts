@@ -1,5 +1,6 @@
 import { createAuditEvent } from "@grasp-os/shared/audit";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { guestRole } from "@grasp-os/shared/roles";
+import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -38,17 +39,19 @@ import type { DirectoryKind } from "./directory-ties.ts";
 //   made (`suspended_by = 'directory'`), and never touches a removal.
 
 /**
- * The user IDs of the members suspended now: whose own connections connect
- * reads nothing of in the background (clock.ts, GRA-2143).
+ * The user IDs of those who hold a membership but may not act now, as
+ * `mayAct` has it: members suspended, and guests (roles.ts `guestRole`),
+ * who are never someone in the company. Whose own connections connect reads
+ * nothing of in the background (clock.ts, GRA-2143).
  */
-export const suspendedUserIds = async (env: Env): Promise<string[]> => {
+export const pausedUserIds = async (env: Env): Promise<string[]> => {
   const rows = await drizzle(env.DB)
     .select({ userId: members.userId })
     .from(members)
     .where(
       and(
         eq(members.organizationId, organizationId),
-        isNotNull(members.suspendedAt)
+        or(isNotNull(members.suspendedAt), eq(members.role, guestRole))
       )
     );
   return rows.map(({ userId }) => userId);
