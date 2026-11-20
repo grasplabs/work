@@ -9,8 +9,11 @@ import { grasp, media } from "../tokens/tokens.stylex";
 
 const HOVER = media.hover;
 const ROW = "[data-slot=row-list-item]";
+// A list that stacks (RowList's `stack`): below 30rem of its own width, a row's detail goes under its name.
+const STACK = "@container row-list-stack (width < 30rem)";
 
 export const styles = stylex.create({
+  stack: { containerType: "inline-size", containerName: "row-list-stack" },
   list: {
     display: "grid",
     margin: 0,
@@ -23,11 +26,15 @@ export const styles = stylex.create({
     [iconVars.stroke]: grasp.iconStroke,
     position: "relative",
     display: "flex",
-    alignItems: "center",
+    alignItems: { default: "center", [STACK]: "flex-start" },
     gap: grasp.space2,
     boxSizing: "border-box",
     // One height for every row, whatever it holds.
-    height: grasp.inspectorRow,
+    height: { default: grasp.inspectorRow, [STACK]: "auto" },
+    minHeight: { default: null, [STACK]: grasp.inspectorRow },
+    flexWrap: { default: null, [STACK]: "wrap" },
+    rowGap: { default: null, [STACK]: 0 },
+    paddingBlock: { default: null, [STACK]: grasp.space2 },
     minWidth: 0,
     paddingInline: grasp.inspectorInset,
     // The first and last rows take the card's own corner where they meet it, so the ring drawn
@@ -85,6 +92,8 @@ export const styles = stylex.create({
   kind: {
     display: "inline-flex",
     flexShrink: 0,
+    alignItems: "center",
+    height: { default: null, [STACK]: grasp.inspectorTextLine },
     color: grasp.inspectorKind,
     // Above the band.
     position: "relative",
@@ -92,9 +101,11 @@ export const styles = stylex.create({
   name: {
     position: "relative",
     minWidth: 0,
+    flexBasis: { default: null, [STACK]: 0 },
+    flexGrow: { default: null, [STACK]: 1 },
     overflow: "hidden",
     textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    whiteSpace: { default: "nowrap", [STACK]: "normal" },
     fontWeight: grasp.weightMedium,
   },
   // A row that is one press: its name is a button whose target stretches over the whole row.
@@ -112,9 +123,11 @@ export const styles = stylex.create({
     textAlign: "start",
     cursor: "pointer",
     minWidth: 0,
+    flexBasis: { default: null, [STACK]: 0 },
+    flexGrow: { default: null, [STACK]: 1 },
     overflow: "hidden",
     textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    whiteSpace: { default: "nowrap", [STACK]: "normal" },
     outline: "none",
     "::after": {
       content: '""',
@@ -131,11 +144,21 @@ export const styles = stylex.create({
     color: grasp.quiet,
   },
   // The room between the name and what stands at the end.
-  spring: { flexGrow: 1 },
+  spring: { flexGrow: 1, display: { default: null, [STACK]: "none" } },
   detail: {
     position: "relative",
     flexShrink: 0,
-    maxWidth: "45%",
+    maxWidth: { default: "45%", [STACK]: "none" },
+    order: { default: null, [STACK]: 1 },
+    flexBasis: { default: null, [STACK]: "100%" },
+    // Under the name, past the kind's icon when the row has one.
+    paddingInlineStart: {
+      default: null,
+      [STACK]: {
+        default: null,
+        [`:is(${ROW}:has(> [data-row-kind]) > *)`]: `calc(${grasp.iconSm} + ${grasp.space2})`,
+      },
+    },
     // A pill in the detail (a Badge) stands past the column's end by its own inset, so its words
     // end where a plain detail's words end ("Owner" stopped 6px short of "Can read" above it). Its
     // pill keeps clear of the row's band.
@@ -177,7 +200,13 @@ export const styles = stylex.create({
   // sideways. It is where the others' bin appears under a pointer.
   held: {
     width: grasp.controlXs,
-    display: "flex",
+    // A list of rows that are each one press, with no actions anywhere, holds no room: the detail
+    // ends at the row's inset. A list whose rows can have actions keeps it, so its ends stay put.
+    display: {
+      default: "flex",
+      ":is([data-slot=row-list]:not(:has([data-row-actions])) > li:has(> [data-row-press]) > *)":
+        "none",
+    },
   },
   // The add row: the whole row is the button, its words and plus quiet.
   add: {

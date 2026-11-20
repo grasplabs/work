@@ -1,17 +1,19 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { brainLog, logColumns } from "./brain-log.ts";
+import { brainLog } from "./brain-log.ts";
 import { buildBrain } from "./brain.ts";
 import { testWorkspace } from "./test-workspace.ts";
 
 // The brain's log, on the brain's test company: what came in and what
-// Grasp asked, day by day; interviews only as a week's count.
+// Grasp asked, newest first, this week, last week and before; interviews
+// only as a week's count.
 
 describe(brainLog, () => {
   const ws = testWorkspace();
   const brain = buildBrain(ws);
-  const all = brainLog(ws, brain);
-  const entries = all.flatMap((day) => day.entries);
+  // A Wednesday: its week started on Monday 31 August.
+  const log = brainLog(ws, brain, "2026-09-02");
+  const entries = [...log.thisWeek, ...log.lastWeek, ...log.earlier];
 
   it("counts a week's interviews on its Monday, and never shows one conversation, its day or who gave it", () => {
     const conversations = new Set(
@@ -54,27 +56,34 @@ describe(brainLog, () => {
     );
     expect({
       by: answered?.by,
-      newestFirst: all
+      newestFirst: entries
         .map(({ day }) => day)
         .every((day, index, days) => (days[index - 1] ?? day) >= day),
-      documentsOnly: brainLog(ws, brain, "reading")
-        .flatMap((day) => day.entries)
-        .every(({ kind }) => kind === "reading"),
     }).toStrictEqual({
       by: "CFO",
       newestFirst: true,
-      documentsOnly: true,
     });
   });
 
-  it("draws every day up to today as a column, a dot for each interview of a week", () => {
-    const columns = logColumns(all, "2026-10-29");
-    const monday = columns.find(({ day }) => day === "2026-08-31");
+  it("puts each line in its week: this week from Monday, last week, and before", () => {
     expect({
-      last: columns.at(-1)?.day,
-      first: columns[0]?.day,
-    }).toStrictEqual({ last: "2026-10-29", first: all.at(-1)?.day });
-    // The week's twelve interviews, and whatever else came in that Monday.
-    expect(monday?.dots.length ?? 0).toBeGreaterThanOrEqual(12);
+      thisWeek: log.thisWeek.every(({ day }) => day >= "2026-08-31"),
+      lastWeek: log.lastWeek.every(
+        ({ day }) => day >= "2026-08-24" && day < "2026-08-31"
+      ),
+      earlier: log.earlier.every(({ day }) => day < "2026-08-24"),
+      weeks: [log.thisWeek, log.lastWeek].map(
+        (stretch) =>
+          stretch.find((entry) => entry.interviews !== undefined)?.interviews
+      ),
+    }).toStrictEqual({
+      thisWeek: true,
+      lastWeek: true,
+      earlier: true,
+      weeks: [
+        { count: 12, week: 36 },
+        { count: 9, week: 35 },
+      ],
+    });
   });
 });
