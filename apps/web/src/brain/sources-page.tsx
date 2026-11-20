@@ -39,6 +39,7 @@ import { ErrorText } from "../error-text.tsx";
 import {
   formatBytes,
   formatDateTime,
+  formatDate,
   formatDay,
   formatList,
 } from "../format.ts";
@@ -1620,7 +1621,7 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
       </Heading>
       <Text size="sm" tone="muted">
         <Trans>
-          Uploads shared with a team or everyone. Only an admin can erase one.
+          Uploads shared with a team or everyone, which only an admin can erase.
         </Trans>
       </Text>
       {listed.state === "refused" ? (
@@ -1638,9 +1639,9 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
             // Named only for an admin who may read it; else told apart by
             // its team, uploader and the day it was uploaded.
             const { name } = upload;
-            const uploaded = formatDay(upload.uploadedAt);
+            const uploaded = formatDate(upload.uploadedAt);
             const removed =
-              upload.removedAt === null ? null : formatDay(upload.removedAt);
+              upload.removedAt === null ? null : formatDate(upload.removedAt);
             let readBy = t`Everyone`;
             if (readers.kind === "team") {
               readBy =
@@ -1946,7 +1947,7 @@ export const SourcesPage = ({
             ]
               .filter(given)
               .join(" · "),
-            when: formatDay(each.addedAt),
+            when: formatDate(each.addedAt),
           },
           open: () => {
             open(each.source);

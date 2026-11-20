@@ -23,7 +23,7 @@ import type { ReactNode } from "react";
 
 import { useHeldCoreRead } from "../apps/use-core-read.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime, formatDay } from "../format.ts";
+import { formatDate, formatDateTime } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Card } from "../grasp/card/index.ts";
@@ -1001,7 +1001,7 @@ const OnlyYou = () => {
 /** A memory's marks: whose it is, disagreement, confirmation, origin and its dates. */
 const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
   const { endedAt, confirmed } = memory;
-  const learned = formatDay(memory.learnedAt);
+  const learned = formatDate(memory.learnedAt);
   const ended = endedAt === null ? null : formatDateTime(endedAt);
   const current = endedAt === null;
   return (

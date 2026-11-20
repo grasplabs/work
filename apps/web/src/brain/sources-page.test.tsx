@@ -36,7 +36,7 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { formatDateTime, formatDay } from "../format.ts";
+import { formatDate, formatDateTime } from "../format.ts";
 import { ms } from "../grasp/tokens/tokens.values.ts";
 import { SourcesPage } from "./sources-page.tsx";
 
@@ -926,7 +926,7 @@ describe(SourcesPage, () => {
       lastRead: listedText.split(`Last read ${formatDateTime(lastReadAt)}`)
         .length,
       // Each row says the day it was added, without the time.
-      added: [formatDay(addedAt), formatDateTime(addedAt)].map((text) =>
+      added: [formatDate(addedAt), formatDateTime(addedAt)].map((text) =>
         listedText.includes(text)
       ),
       newest: newest.includes("Invoices are paid on Fridays."),

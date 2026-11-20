@@ -19432,8 +19432,8 @@ msgid "Uploading…"
 msgstr "Import en cours…"
 
 #: src/brain/sources-page.tsx
-msgid "Uploads shared with a team or everyone. Only an admin can erase one."
-msgstr "Fichiers importés partagés avec une équipe ou tout le monde. Seul un administrateur peut en effacer un."
+msgid "Uploads shared with a team or everyone, which only an admin can erase."
+msgstr "Fichiers importés partagés avec une équipe ou tout le monde, que seul un administrateur peut effacer."
 
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"

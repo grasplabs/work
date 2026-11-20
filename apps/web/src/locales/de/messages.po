@@ -19432,8 +19432,8 @@ msgid "Uploading…"
 msgstr "Wird hochgeladen…"
 
 #: src/brain/sources-page.tsx
-msgid "Uploads shared with a team or everyone. Only an admin can erase one."
-msgstr "Mit einem Team oder allen geteilte Uploads. Nur ein Admin kann einen löschen."
+msgid "Uploads shared with a team or everyone, which only an admin can erase."
+msgstr "Mit einem Team oder allen geteilte Uploads, die nur ein Admin löschen kann."
 
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"

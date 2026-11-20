@@ -19432,8 +19432,8 @@ msgid "Uploading…"
 msgstr "Wordt geüpload…"
 
 #: src/brain/sources-page.tsx
-msgid "Uploads shared with a team or everyone. Only an admin can erase one."
-msgstr "Uploads die met een team of iedereen gedeeld zijn. Alleen een beheerder kan er een wissen."
+msgid "Uploads shared with a team or everyone, which only an admin can erase."
+msgstr "Uploads die met een team of iedereen gedeeld zijn, die alleen een beheerder kan wissen."
 
 #: src/chat/connection-requests.tsx
 msgid "Use {name} in this chat"

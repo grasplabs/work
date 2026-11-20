@@ -177,7 +177,7 @@ const BrainBody = ({ page }: { page: BrainPage }) => {
         {page === "memory" || page === "opportunities" ? (
           // Its kinds of record as tabs under the title, its records as Items.
           <PageSkeletonList
-            descriptionLines={0}
+            descriptionLines={1}
             rows={6}
             toolbar={<PageSkeletonToolbar variant="tabs" />}
             variant="items"
