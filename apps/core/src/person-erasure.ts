@@ -31,6 +31,7 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
+import { signInCodeOf } from "./auth/guest-codes.ts";
 import { eraseGapAnswerer } from "./brain-gaps.ts";
 import {
   erasePerson as eraseFromBrain,
@@ -75,6 +76,7 @@ import {
   brainSyncSources,
   runChatSources,
   runStateWriters,
+  verifications,
   workflowState,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -281,6 +283,8 @@ const identity: ErasureStep = {
       db
         .delete(appVisitorSessions)
         .where(eq(appVisitorSessions.address, theirAddress)),
+      // A guest's sign-in code, keyed by their address (auth/guest-codes.ts).
+      db.delete(verifications).where(signInCodeOf(theirAddress)),
       db
         .update(users)
         .set({

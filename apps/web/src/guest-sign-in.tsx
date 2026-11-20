@@ -21,11 +21,10 @@ import { ErrorText } from "./error-text.tsx";
 /** What core and Better Auth answer when they refuse. */
 const refusalSchema = z.object({ code: z.string() }).loose();
 
-/** What a refused code says, by the code Better Auth refuses it with. */
+/** What a refused code says, by the code core refuses it with. */
 const codeRefusals: Readonly<Record<string, MessageDescriptor>> = {
-  INVALID_OTP: msg`That code isn't right, or it was used up. Ask for a new one.`,
-  TOO_MANY_ATTEMPTS: msg`That code was tried too often. Ask for a new one.`,
-  OTP_EXPIRED: msg`That code ran out. Ask for a new one.`,
+  // Every refusal of a code alike: core answers them so (routes.ts).
+  INVALID_OTP: msg`That code didn't work. Check it, or ask for a new one.`,
   not_open_yet: msg`Grasp isn't open yet. Try again later.`,
   "request.rate_limited": msg`Too many tries. Wait a minute, then try again.`,
 };

@@ -393,7 +393,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
   },
   "core.verifications": {
-    kept: "a sign-in's state for its minutes, by a random identifier",
+    kept: "a sign-in's state for its minutes, by a random identifier; a guest's codes sent, by their ID; a guest's outstanding code, by their address, deleted with their removal and erasure",
   },
   "core.audit_outbox": { kept: "audit events on their way to the log (D2)" },
   "core.audit_outbox_rejected": { kept: "audit events the log refused (D2)" },

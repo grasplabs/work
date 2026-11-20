@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { errorResponse } from "../errors.ts";
 import { relayedAuthorizationUrl } from "../oauth-relay.ts";
-import { authBasePath, authFor } from "./auth.ts";
+import { authBasePath, authFor, notOpenYet } from "./auth.ts";
 import { signInConfig } from "./config.ts";
 import {
   guestCodeAsked,
@@ -103,6 +103,35 @@ const relayed = async (
   );
 };
 
+/** How Better Auth refuses: its code. */
+const refusedSchema = z.looseObject({ code: z.string() });
+
+/**
+ * What signing in with a code (`guestSignInPath`) answers when it signs
+ * nobody in: one answer for every refusal (a wrong code, one tried too
+ * often, one run out, no code at all, an address that is no guest's), so
+ * none tells anyone who is a guest. Only the gate's refusal, the same for
+ * everyone, says what it is.
+ */
+const codeRefusal = async (response: Response): Promise<Response> => {
+  if (response.ok) {
+    return response;
+  }
+  const refused = refusedSchema.safeParse(
+    await response
+      .clone()
+      .json()
+      .catch(() => null)
+  );
+  if (refused.success && refused.data.code === notOpenYet) {
+    return response;
+  }
+  return Response.json(
+    { code: "INVALID_OTP", message: "Invalid OTP" },
+    { status: 400 }
+  );
+};
+
 /** Serves `/api/auth/*`. */
 export const handleAuthRequest = async (
   request: Request,
@@ -125,6 +154,9 @@ export const handleAuthRequest = async (
       requestErrors.create("request.not_found"),
       requestId
     );
+  }
+  if (request.method === "POST" && path === guestSignInPath) {
+    return await codeRefusal(await auth.handler(request));
   }
   const starting = request.method === "POST" && path === "/sign-in/sso";
   // Read again once Better Auth has, for the provider it was asked for.

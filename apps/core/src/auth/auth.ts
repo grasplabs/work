@@ -13,6 +13,7 @@ import {
 import { guestRole, roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import type { SignInRefusal } from "@grasp-os/shared/sign-in";
+import type { AuthContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import {
   APIError,
@@ -1039,6 +1040,9 @@ const refuseNameOnListUnmade = async (env: Env, name: string) => {
   }
 };
 
+/** The code a sign-in is refused with while the gate is closed to all. */
+export const notOpenYet = "not_open_yet";
+
 /** What signing in with a code sends: the address it is for. */
 const codeSignInSchema = z.looseObject({ email: z.string() });
 
@@ -1046,25 +1050,35 @@ const codeSignInSchema = z.looseObject({ email: z.string() });
  * Refuses a sign-in with a code (`guestSignInPath`) before the plugin
  * reads or spends anything: while the gate keeps the company's own people
  * out, for everyone alike; then for any address that isn't a guest's now,
- * exactly as a wrong code is refused, so it says nothing of who is one.
- * Members never sign in with a code, and the plugin never strips an
- * unverified member's accounts (it does so for an address it signs in
- * that isn't verified yet).
+ * exactly as a wrong code is refused, so it says nothing of who is one:
+ * after the same reads a wrong code costs (the newest code's row, then
+ * spending it), against a row nobody but a guest ever has. Every refusal
+ * of the route answers alike besides (routes.ts). Members never sign in
+ * with a code, and the plugin never strips an unverified member's
+ * accounts (it does so for an address it signs in that isn't verified
+ * yet).
  */
 const refuseUnlessGuest = async (
   env: Env,
   config: SignInConfig,
   body: unknown,
-  codes: ReturnType<typeof emailOTP>
+  codes: ReturnType<typeof emailOTP>,
+  rows: Pick<
+    AuthContext["internalAdapter"],
+    "findVerificationValue" | "consumeVerificationValue"
+  >
 ): Promise<void> => {
   if (!(await mayComeIn(env, config))) {
     throw new APIError("FORBIDDEN", {
-      code: "not_open_yet",
+      code: notOpenYet,
       message: "Grasp isn't open yet.",
     });
   }
   const asked = codeSignInSchema.safeParse(body);
   if (!(asked.success && (await guestAddress(env, asked.data.email)))) {
+    const row = `sign-in-otp-${asked.data?.email.toLowerCase() ?? ""}`;
+    await rows.findVerificationValue(row);
+    await rows.consumeVerificationValue(row);
     throw APIError.from("BAD_REQUEST", codes.$ERROR_CODES.INVALID_OTP);
   }
 };
@@ -1263,7 +1277,13 @@ const createAuth = (
     hooks: {
       before: createAuthMiddleware(async (context) => {
         if (context.path === guestSignInPath) {
-          await refuseUnlessGuest(env, config, context.body, codes);
+          await refuseUnlessGuest(
+            env,
+            config,
+            context.body,
+            codes,
+            context.context.internalAdapter
+          );
           return;
         }
         if (!context.path.startsWith("/organization/")) {

@@ -14425,16 +14425,8 @@ msgid "That address wasn’t kept out."
 msgstr "Diese Adresse war nicht gesperrt."
 
 #: src/guest-sign-in.tsx
-msgid "That code isn't right, or it was used up. Ask for a new one."
-msgstr "Dieser Code stimmt nicht oder ist aufgebraucht. Fordere einen neuen an."
-
-#: src/guest-sign-in.tsx
-msgid "That code ran out. Ask for a new one."
-msgstr "Dieser Code ist abgelaufen. Fordere einen neuen an."
-
-#: src/guest-sign-in.tsx
-msgid "That code was tried too often. Ask for a new one."
-msgstr "Dieser Code wurde zu oft versucht. Fordere einen neuen an."
+msgid "That code didn't work. Check it, or ask for a new one."
+msgstr "Dieser Code hat nicht funktioniert. Prüfe ihn oder fordere einen neuen an."
 
 #: src/interview/api.ts
 msgid "That didn't work. Try again in a moment."

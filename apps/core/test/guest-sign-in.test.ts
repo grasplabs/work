@@ -103,8 +103,6 @@ const askCode = async (email: string) => {
   return answer;
 };
 
-const errorSchema = z.object({ code: z.string() }).loose();
-
 /** Signs in with `otp`: the session cookie, or what refused it. */
 const codeSignIn = async (
   email: string,
@@ -124,10 +122,12 @@ const codeSignIn = async (
   if (session !== undefined) {
     return { session };
   }
-  const body: unknown = await response.json().catch(() => null);
-  return {
-    refused: `${response.status} ${errorSchema.safeParse(body).data?.code ?? ""}`,
-  };
+  return { refused: `${response.status} ${await response.text()}` };
+};
+
+/** How every sign-in with a code that signs nobody in is answered. */
+const refused = {
+  refused: `400 ${JSON.stringify({ code: "INVALID_OTP", message: "Invalid OTP" })}`,
 };
 
 /** A code made for `email` by the plugin itself, as an attacker would want one. */
@@ -374,8 +374,8 @@ describe("a guest signing in with a code", () => {
       memberHeld: await heldBy(memberEmail),
       nobodyHeld: await heldBy(nobody),
     }).toStrictEqual({
-      member: { refused: "400 INVALID_OTP" },
-      nobody: { refused: "400 INVALID_OTP" },
+      member: refused,
+      nobody: refused,
       memberHeld,
       nobodyHeld: { users: 0, accounts: 0 },
     });
@@ -397,7 +397,7 @@ describe("a guest signing in with a code", () => {
     }).toStrictEqual({ mailed: guestCodesPerHour, other: 1 });
   });
 
-  it("takes few tries per code, works only for a short time, and only the newest", async () => {
+  it("takes few tries per code, works only for a short time, and only the newest, refusing each exactly as an address that is no guest's", async () => {
     const mail = await mailbox();
     const tried = await invited();
     await askCode(tried.address);
@@ -415,6 +415,10 @@ describe("a guest signing in with a code", () => {
     await askCode(replaced.address);
     const replacedFirst = await codeSignIn(replaced.address, first);
 
+    const noCode = await invited();
+    const withoutCode = await codeSignIn(noCode.address, "12345678");
+    const nobody = await codeSignIn(outsider(), "12345678");
+
     const late = await invited();
     await askCode(late.address);
     const lateCode = codeIn(mail, late.address);
@@ -426,31 +430,50 @@ describe("a guest signing in with a code", () => {
       vi.useRealTimers();
     }
 
-    expect({ wrong, usedUp, replacedFirst, expired }).toStrictEqual({
-      wrong: Array.from({ length: guestCodeTries }, () => ({
-        refused: "400 INVALID_OTP",
-      })),
-      usedUp: { refused: "403 TOO_MANY_ATTEMPTS" },
-      replacedFirst: { refused: "400 INVALID_OTP" },
-      expired: { refused: "400 OTP_EXPIRED" },
+    expect({
+      wrong,
+      usedUp,
+      replacedFirst,
+      expired,
+      withoutCode,
+      nobody,
+    }).toStrictEqual({
+      wrong: Array.from({ length: guestCodeTries }, () => refused),
+      usedUp: refused,
+      replacedFirst: refused,
+      expired: refused,
+      withoutCode: refused,
+      nobody: refused,
     });
   });
 
-  it("ends a guest's sessions and outstanding codes once an admin removes them", async () => {
+  it("ends a guest's sessions and outstanding codes once an admin removes them, and leaves no row naming them once erased", async () => {
     const guest = await signedInGuest();
     await askCode(guest.address);
     const outstanding = codeIn(guest.mail, guest.address);
+    const storedBefore = await storedFor(guest.address);
     await guest.admin.api.members.remove(guest.userId);
     const guests = await guest.admin.api.members.guests();
+    const storedRemoved = await storedFor(guest.address);
+    const code = await codeSignIn(guest.address, outstanding);
+    await guest.admin.api.members.erase(guest.userId, guest.address);
 
     expect({
       session: await sessionOf(guest.cookie),
-      code: await codeSignIn(guest.address, outstanding),
+      code,
       listed: guests.some(({ userId }) => userId === guest.userId),
+      storedBefore,
+      storedRemoved,
+      storedErased: await storedFor(guest.address),
+      held: await heldBy(guest.address),
     }).toStrictEqual({
       session: null,
-      code: { refused: "400 INVALID_OTP" },
+      code: refused,
       listed: false,
+      storedBefore: 1,
+      storedRemoved: 0,
+      storedErased: 0,
+      held: { users: 0, accounts: 0 },
     });
   });
 });
@@ -511,7 +534,7 @@ describe("the sign-in routes core serves", () => {
       teams: 403,
       others: others.map(() => 404),
       memberMailed: 0,
-      memberSignIn: { refused: "400 INVALID_OTP" },
+      memberSignIn: refused,
       memberSession: false,
     });
   });

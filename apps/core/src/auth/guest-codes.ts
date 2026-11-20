@@ -1,7 +1,9 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { keepAuditEvent } from "../audit-outbox.ts";
@@ -20,7 +22,9 @@ import { guestNow } from "./membership-sql.ts";
 // - Finding out who is invited: core answers a request for a code itself
 //   (`guestCodeAsked`), the same once the body parses, before anything is
 //   looked up; the rest runs after the answer. An address that is no
-//   guest now has nothing stored and nothing sent.
+//   guest now has nothing stored and nothing sent. Signing in answers
+//   every refusal alike (routes.ts), a wrong, used-up or run-out code as
+//   an address that is no guest's.
 // - Mail bombing, or guessing by asking again and again: at most
 //   `guestCodesPerHour` codes go to one address in an hour, counted and
 //   recorded in one statement in Better Auth's own `verifications` table,
@@ -96,8 +100,23 @@ export const guestAddress = async (
   return row.guest === 1;
 };
 
-/** Where an address's sends are counted, in `verifications`. */
-const sendsOf = (address: string): string => `guest-code-sent-${address}`;
+/**
+ * Where a guest's sends are counted, in `verifications`, by their user ID
+ * (`userId`, an ID or a column holding one): never by their address, which
+ * an erasure must leave nowhere.
+ */
+const sendsOf = (userId: SQL | SQLiteColumn): SQL =>
+  sql`'guest-code-sent-' || ${userId}`;
+
+/**
+ * The plugin's own row of the code outstanding for `address` (SQL holding
+ * a lower-case address), in `verifications`: the plugin keys it
+ * `sign-in-otp-<address>` (its `toOTPIdentifier`). A guest's removal and
+ * erasure delete it (members.ts, person-erasure.ts), so no row names the
+ * address afterwards.
+ */
+export const signInCodeOf = (address: SQL): SQL =>
+  sql`${verifications.identifier} = 'sign-in-otp-' || ${address}`;
 
 /** A code's mail, in plain words. */
 const codeMail = (to: string, code: string) => {
@@ -141,18 +160,17 @@ const sendGuestCode = async (
 ): Promise<void> => {
   const now = Date.now();
   const db = drizzle(env.DB);
-  const sends = sendsOf(address);
   // Counted and recorded in one statement, only for a guest now and under
   // the limit, so asks at the same time can't go past it. Better Auth
   // deletes these rows once they expire, as all of its own.
   const counted = await db
     .insert(verifications)
     .select(
-      sql`SELECT ${uuidSql}, ${sends}, ${users.id}, ${now + hourMs}, ${now}, ${now}
+      sql`SELECT ${uuidSql}, ${sendsOf(users.id)}, ${users.id}, ${now + hourMs}, ${now}, ${now}
         FROM ${users}
         WHERE ${users.email} = ${address} AND ${guestNow(users.id)}
           AND (SELECT count(*) FROM ${verifications}
-            WHERE ${verifications.identifier} = ${sends}
+            WHERE ${verifications.identifier} = ${sendsOf(users.id)}
               AND ${verifications.expiresAt} > ${now}) < ${guestCodesPerHour}`
     )
     .returning({ userId: verifications.value });

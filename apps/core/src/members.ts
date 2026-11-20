@@ -52,6 +52,7 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
+import { signInCodeOf } from "./auth/guest-codes.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
@@ -68,6 +69,7 @@ import {
   teamMembers,
   teamPins,
   users,
+  verifications,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { directoryPlacementOf } from "./directory-placement.ts";
@@ -373,6 +375,18 @@ const recordRemoval = async (
         )
       ),
     db.delete(sessions).where(and(eq(sessions.userId, userId), removed)),
+    // A sign-in code a guest still holds (auth/guest-codes.ts): its row
+    // names their address.
+    db
+      .delete(verifications)
+      .where(
+        and(
+          signInCodeOf(
+            sql`(SELECT lower(${users.email}) FROM ${users} WHERE ${users.id} = ${userId})`
+          ),
+          removed
+        )
+      ),
     // Their chat accounts too: the agent no longer knows them on any platform.
     db
       .delete(channelAccounts)
