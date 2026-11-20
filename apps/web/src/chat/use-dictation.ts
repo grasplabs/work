@@ -107,6 +107,11 @@ export const useDictation = (
   const [run, setRun] = useState<Run>();
   const [now, setNow] = useState(0);
   const source = useRef<DictationSource | null>(null);
+  // What is in the box now: a pick or a picture can change it mid-dictation.
+  const typed = useRef(text);
+  useEffect(() => {
+    typed.current = text;
+  });
   // A box that goes away mid-dictation lets its source go: no microphone,
   // line or recognition carries on with nothing on screen.
   useEffect(
@@ -156,8 +161,6 @@ export const useDictation = (
     // What a source says once it is no longer the box's (cancelled, or
     // another dictation begun) is not heard, and it never starts late.
     const current = (): boolean => source.current === chosen;
-    // A problem stopped it while it still stands in its band.
-    let stopped = false;
     // What it has heard so far, settled or not.
     let heardSoFar = "";
     const begin = (): void => {
@@ -173,7 +176,7 @@ export const useDictation = (
         await microphone.start();
         // Put away, or stopped by a problem, while the browser still asked:
         // the microphone it gave goes at once. A newer dictation keeps its own.
-        if (source.current === null || (current() && stopped)) {
+        if (source.current === null) {
           microphone.stop();
         }
       })();
@@ -215,14 +218,16 @@ export const useDictation = (
           // A problem that stops it lets the microphone go at once: the
           // band stands over a box that takes text again, and the browser
           // would otherwise go on showing it recording.
-          stopped = true;
+          // Let go, so nothing it or a pending Done says afterwards is heard;
+          // its band stands until it is put away.
           chosen.cancel();
           microphone.stop();
-          // What it heard before it stopped goes in after what was typed,
+          source.current = null;
+          // What it heard before it stopped goes in after what is in the box,
           // as Done would put it.
           if (heardSoFar !== "") {
             onText(
-              [text.trimEnd(), heardSoFar]
+              [typed.current.trimEnd(), heardSoFar]
                 .filter((part) => part !== "")
                 .join(" ")
             );
@@ -286,7 +291,7 @@ export const useDictation = (
                 stop();
                 if (said !== "") {
                   onText(
-                    [text.trimEnd(), said]
+                    [typed.current.trimEnd(), said]
                       .filter((part) => part !== "")
                       .join(" ")
                   );

@@ -528,6 +528,7 @@ describe(ChatComposer, () => {
     const recognition = made();
     act(() => {
       recognition?.hears("for Friday", true);
+      recognition?.hears("at ten", false);
       recognition?.dispatchEvent(
         Object.assign(new Event("error"), { error: "network" })
       );
@@ -541,7 +542,7 @@ describe(ChatComposer, () => {
       listening: recognition?.listening,
     }).toStrictEqual({
       said: true,
-      text: "Book the room for Friday",
+      text: "Book the room for Friday at ten",
       listening: false,
     });
   });
