@@ -44,7 +44,7 @@ describe(brainLog, () => {
   });
 
   it("dates an answered question on the day it was closed, and keeps the days newest first", () => {
-    const closed = ws.gaps.find((gap) => gap.closedAt !== undefined);
+    const closed = ws.gaps.find((gap) => gap.closedAt === "2026-09-15");
     const answered = entries.find(
       (entry) =>
         entry.question?.step === "answered" && entry.question.gap === closed?.id
@@ -55,9 +55,20 @@ describe(brainLog, () => {
         .map(({ day }) => day)
         .every((day, index, days) => (days[index - 1] ?? day) >= day),
     }).toStrictEqual({
-      day: closed?.closedAt?.slice(0, 10),
+      day: "2026-09-15",
       newestFirst: true,
     });
+  });
+
+  it("counts a Sunday in the week that began on the Monday before it", () => {
+    const sunday = brainLog(ws, brain, "2026-09-06");
+    expect(
+      [sunday.thisWeek, sunday.lastWeek].map(
+        (stretch) =>
+          stretch.find((entry) => entry.interviews !== undefined)?.interviews
+            ?.week
+      )
+    ).toStrictEqual([36, 35]);
   });
 
   it("puts each line in its week: this week from Monday, last week, and before", () => {

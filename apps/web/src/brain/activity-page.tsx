@@ -409,16 +409,16 @@ export const ActivityPage = () => {
   };
   const ask = async (gap: Gap): Promise<void> => {
     setFailed(undefined);
-    const done = await run(
-      async (session) => await session.brain.askAboutGap(gap.id),
+    // Busy until the brain is read again, so the question can't be asked twice.
+    await run(
+      async (session) => {
+        await session.brain.askAboutGap(gap.id);
+        await router.invalidate();
+      },
       (reason) => {
         setFailed({ gap: gap.id, reason });
       }
     );
-    if (done !== undefined) {
-      // The brain is read again: the question shows as asked.
-      await router.invalidate();
-    }
   };
   const words = {
     title: t({ message: "Activity", context: "the brain's log" }),

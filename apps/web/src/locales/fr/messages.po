@@ -11699,7 +11699,7 @@ msgstr "Rien trouvé"
 
 #: src/brain/activity-page.tsx
 msgid "Nothing has changed since {when}."
-msgstr "Rien n'a changé depuis le {when}."
+msgstr "Rien n’a changé depuis le {when}."
 
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -18877,7 +18877,7 @@ msgstr "En attente de l’approbation d’un administrateur"
 
 #: src/brain/activity-page.tsx
 msgid "Waiting for an answer"
-msgstr "En attente d'une réponse"
+msgstr "En attente d’une réponse"
 
 #: src/brain/work-knowledge.tsx
 msgid "Waiting for more voices"
@@ -18910,7 +18910,7 @@ msgstr "attend quelqu’un"
 
 #: src/brain/activity-page.tsx
 msgid "Waits on the {owner}, nobody asked yet"
-msgstr "Attend {owner}, personne n'a encore été sollicité"
+msgstr "Attend {owner}, personne n’a encore été sollicité"
 
 #: src/workflows/today-lanes.tsx
 msgid "waits on you"
