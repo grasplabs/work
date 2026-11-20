@@ -2739,7 +2739,7 @@ msgstr "Un administrateur approuve à nouveau son accès avant qu’il fonctionn
 
 #: src/frame/part-words.tsx
 msgid "An admin connects this"
-msgstr "Un administrateur le connecte"
+msgstr "Un admin le connecte"
 
 #: src/connections/integration-facts.ts
 msgid "An admin connects this for everyone."
