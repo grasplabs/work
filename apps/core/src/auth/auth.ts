@@ -85,6 +85,7 @@ import {
 // access checks read by the revocations this file reaches can use them.
 export {
   activeMember,
+  guestNow,
   mayAct,
   memberNotRemoved,
   notRemoved,

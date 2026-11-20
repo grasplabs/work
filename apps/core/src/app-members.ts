@@ -6,7 +6,7 @@ import {
   createAuditEvent,
 } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { roleSchema } from "@grasp-os/shared/roles";
+import { guestRole, isAdmin, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   newSubjectMemberSchema,
@@ -24,6 +24,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
+import { holdsAnySource } from "./app-access.ts";
 import {
   hasSources,
   readerOf,
@@ -39,7 +40,8 @@ import {
   outboxedEventWhere,
   storedEvent,
 } from "./audit-outbox.ts";
-import { activeMember, mayAct, organizationId } from "./auth/auth.ts";
+import { activeMember, guestNow, mayAct, organizationId } from "./auth/auth.ts";
+import { isGuest } from "./auth/identity.ts";
 import {
   apps,
   appMembers,
@@ -61,6 +63,7 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import {
   memberEntry,
+  organizationGuests,
   requireNotStaff,
   requireSharable,
   shareCandidates,
@@ -76,14 +79,25 @@ import type { SharingRules } from "./sharing.ts";
 
 type Row = typeof appMembers.$inferSelect;
 
-const toMember = (row: Row, name: string | null): SubjectMember => ({
+const toMember = (
+  row: Row,
+  name: string | null,
+  guest: boolean
+): SubjectMember => ({
   type: row.memberType,
   id: row.memberId,
   name,
   role: row.role,
   addedBy: row.addedBy,
   addedAt: row.addedAt.toISOString(),
+  ...(guest ? { guest: true } : {}),
 });
+
+/** That an `app_members` row is a person's who is a guest now. */
+const guestRow = and(
+  eq(appMembers.memberType, "person"),
+  guestNow(appMembers.memberId)
+);
 
 /** The rows of `app` that are `member`. */
 const rowOf = (app: App, member: SubjectMemberRef) =>
@@ -104,7 +118,12 @@ const namedMembers = async (
   where: SQL | undefined
 ): Promise<SubjectMember[]> => {
   const rows = await drizzle(env.DB)
-    .select({ row: appMembers, person: users.name, team: teams.name })
+    .select({
+      row: appMembers,
+      person: users.name,
+      team: teams.name,
+      guest: sql<number>`${guestRow}`,
+    })
     .from(appMembers)
     .leftJoin(
       users,
@@ -124,13 +143,14 @@ const namedMembers = async (
     .where(
       and(
         where,
-        // Only people in the organization now, and teams that still exist:
-        // the rest reach nothing.
+        // Only people in the organization now, its guests now, and teams
+        // that still exist: the rest reach nothing.
         or(
           and(
             eq(appMembers.memberType, "person"),
             activeMember(appMembers.memberId)
           ),
+          guestRow,
           and(eq(appMembers.memberType, "team"), isNotNull(teams.id)),
           and(
             eq(appMembers.memberType, "project"),
@@ -151,12 +171,13 @@ const namedMembers = async (
       .filter(({ row }) => row.memberType === "project")
       .map(({ row }) => row.memberId)
   );
-  return rows.map(({ row, person, team }) =>
+  return rows.map(({ row, person, team, guest }) =>
     toMember(
       row,
       row.memberType === "project"
         ? (projectNames.get(row.memberId) ?? null)
-        : (person ?? team)
+        : (person ?? team),
+      guest === 1
     )
   );
 };
@@ -171,6 +192,7 @@ const sharingRules = (app: App, member: NewSubjectMember): SharingRules => ({
   invalid,
   ownerIssue: "id: They own the App, and always build it.",
   buildsIssue: "role: Only the organization's admins and builders build Apps.",
+  guestIssue: "role: A guest only ever uses an App, and never builds it.",
 });
 
 /** The audit entry of a change by `by` to whom `app` is shared with. */
@@ -234,7 +256,7 @@ const checkedPeople = async (
         and(
           eq(members.organizationId, organizationId),
           inList(members.userId, others),
-          mayAct(members.userId)
+          or(mayAct(members.userId), guestNow(members.userId))
         )
       ),
     db
@@ -255,6 +277,10 @@ const checkedPeople = async (
     teamsByPerson.set(userId, teamIds);
   }
   return roles.flatMap(({ userId, role }) => {
+    // A guest reads as an App's user, in no team (guest-access.ts).
+    if (role === guestRole) {
+      return [readerOf(userId, [], "user")];
+    }
     // A role that isn't one of ours is no access, as auth/identity.ts has it.
     const known = roleSchema.safeParse(role);
     if (!known.success) {
@@ -323,6 +349,38 @@ const requireReadable = async (
   });
 };
 
+/**
+ * Refuses sharing `app` with a guest unless `by` is an admin, when the
+ * App holds any source (`holdsAnySource`, GRA-2235), with
+ * `app.guest_sources`; the refusal is audited. The same rule holds on
+ * each of the guest's requests (app-access.ts `requireAppRole`).
+ */
+const requireGuestShareable = async (
+  env: Env,
+  by: Identity,
+  app: App,
+  member: NewSubjectMember
+): Promise<void> => {
+  if (isAdmin(by.role) || !(await holdsAnySource(env, app.id))) {
+    return;
+  }
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      actor: actorOf(by),
+      action: "app.member.refused",
+      target: { type: "app", id: app.id },
+      detail: {
+        memberType: member.type,
+        member: member.id,
+        role: member.role,
+        reason: "app.guest_sources",
+      },
+    }),
+  ]);
+  throw appErrors.create("app.guest_sources");
+};
+
 /** Whom an App is shared with, in the order they were shared or changed. */
 export const listMembers = async (
   env: Env,
@@ -350,6 +408,10 @@ export const addMember = async (
   requireNotStaff(by);
   const member = appErrors.parse("app.invalid", newSubjectMemberSchema, input);
   await requireSharable(env, member, sharingRules(found, member), by);
+  const guest = member.type === "person" && (await isGuest(env, member.id));
+  if (guest) {
+    await requireGuestShareable(env, by, found, member);
+  }
   await requireReadable(env, by, found, member);
   const db = drizzle(env.DB);
   const row: Row = {
@@ -395,7 +457,12 @@ export const addMember = async (
       .onConflictDoUpdate({
         target: [appMembers.appId, appMembers.memberType, appMembers.memberId],
         set: { role: row.role, addedBy: row.addedBy, addedAt: row.addedAt },
-        setWhere: ne(appMembers.role, row.role),
+        // A guest's share records who made it too: an admin's sharing
+        // again is what gives them back an App that gained a source
+        // (app-access.ts `requireAppRole`).
+        setWhere: guest
+          ? or(ne(appMembers.role, row.role), ne(appMembers.addedBy, by.userId))
+          : ne(appMembers.role, row.role),
       }),
     outboxedEventWhere(db, event, sql`changes() > 0`),
     // Shared in the lowest role: a builder may have just become a user,
@@ -528,7 +595,18 @@ export class AppMembersRpc extends CoreRpcTarget implements SubjectMembersApi {
   async candidates(app: string): Promise<ShareCandidates> {
     return await withPerson(this.#check, async (by) => {
       await editableApp(this.#env, by, app);
-      return await shareCandidates(this.#env, by);
+      const [candidates, guests] = await Promise.all([
+        shareCandidates(this.#env, by),
+        organizationGuests(this.#env),
+      ]);
+      // An App may be shared with a guest too, marked as one.
+      return {
+        ...candidates,
+        people: [...candidates.people, ...guests].toSorted(
+          (one, other) =>
+            one.name.localeCompare(other.name) || one.id.localeCompare(other.id)
+        ),
+      };
     });
   }
 }

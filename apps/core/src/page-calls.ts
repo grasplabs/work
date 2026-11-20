@@ -37,10 +37,10 @@ import {
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { visitorCall, visitorStatusFor } from "./app-visitors.ts";
 import { currentVersionOf } from "./apps.ts";
-import { identify, identifyFull } from "./auth/identity.ts";
 import { callDraftOn } from "./draft-runs.ts";
 import { appPreview } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
+import { identifyAppUser, identifyAppUserFull } from "./guest-access.ts";
 import {
   delivering,
   personRefusal,
@@ -268,7 +268,8 @@ const admitMember = async (
   // not (staff-audit.ts).
   const person = await routeMember(
     env,
-    await identify(env, request.headers),
+    // A guest's too: page calls are open to guests (guest-access.ts).
+    await identifyAppUser(env, request.headers, operation),
     operation,
     { app }
   );
@@ -302,7 +303,8 @@ const admitMember = async (
       id,
       request.headers.get(pageLeaseHeader)
     ),
-    current: async () => await identifyFull(env, request.headers),
+    current: async () =>
+      await identifyAppUserFull(env, request.headers, operation),
   };
 };
 

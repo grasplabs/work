@@ -392,6 +392,7 @@ export const rpcParamNames: ParamNames = {
     "errors": ["app"],
     "frame": ["app","lease"],
     "open": ["app"],
+    "opensApps": [],
     "report": ["app","at","problem"],
     "sidebar": [],
     "surfaces": ["app"],

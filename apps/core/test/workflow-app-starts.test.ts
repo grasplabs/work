@@ -995,6 +995,37 @@ describe("an action starting a workflow", () => {
     });
   });
 
+  it("starts nothing for a guest the App is shared with: a run acts for someone in the company", async () => {
+    const fx = await fixture();
+    const outsider = await person("user");
+    // A guest (GRA-2235): an App's user from outside the company, whose
+    // identity only the routes open to guests make (guest-access.ts).
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE members SET role = 'guest' WHERE user_id = ?"
+      ).bind(outsider.userId),
+      env.DB.prepare(
+        "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+      ).bind(fx.app, outsider.userId, fx.admin.userId, Date.now()),
+    ]);
+    const guest: Identity = { ...outsider, role: "user", guest: true };
+
+    const listed = await call(fx, guest, "requests.list", {});
+    const started = await call(fx, guest, "requests.kickOff", {
+      who: "Guest",
+    });
+
+    expect({
+      listed: answerOf(listed),
+      started: answerOf(started),
+      receipts: await receiptsOf(fx.app),
+    }).toStrictEqual({
+      listed: 0,
+      started: "permission.unavailable",
+      receipts: [],
+    });
+  });
+
   it("refuses args the declaration doesn't take before anything starts", async () => {
     const fx = await fixture();
     const blank = await call(fx, fx.bob, "requests.kickOff", { who: "   " });
@@ -1820,7 +1851,7 @@ describe("what a start rechecks, and records", () => {
       .bind(fx.app)
       .all<{ input: string }>();
     expect({
-      started: started.ok,
+      started: answerOf(started),
       staged: staged.ok,
       inputs: results.map(({ input }) => input),
     }).toStrictEqual({
@@ -2197,7 +2228,7 @@ describe("what a start rechecks, and records", () => {
     );
     expect({
       raced: raced.done,
-      started: started.ok,
+      started: answerOf(started),
       receipts: await receiptCount(fx.app),
     }).toStrictEqual({ raced: true, started: true, receipts: 1 });
   });
