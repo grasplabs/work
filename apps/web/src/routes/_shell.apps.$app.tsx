@@ -11,7 +11,13 @@ import {
   projectSearchOf,
   readItemProject,
 } from "../frame/item-shell.tsx";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import {
+  APP_GENERAL,
+  Fill,
+  LoadingBar,
+  SettingsPending,
+} from "../frame/page-skeletons-b.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { AppWindow as AppWindowMark } from "../grasp/icons/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
@@ -66,6 +72,25 @@ const AppRoute = () => {
   );
 };
 
+/**
+ * The App before it is read: the bar, its name still to come, and the
+ * view the address names. Its settings wait as cards; the preview, the
+ * code and the data draw themselves in, as no skeleton has their shape.
+ */
+const AppPending = () => {
+  const { view } = Route.useSearch();
+  return (
+    <>
+      <LoadingBar />
+      <Fill>
+        {view === "settings" ? (
+          <SettingsPending sections={APP_GENERAL} />
+        ) : null}
+      </Fill>
+    </>
+  );
+};
+
 /** A view other than the preview named in an address; anything else is the preview. */
 const viewOf = (
   value: unknown
@@ -96,6 +121,7 @@ const validateSearch = (
   point?: number | undefined;
   version?: number | undefined;
   project?: string | undefined;
+  width?: "tablet" | "phone" | undefined;
 } => ({
   view: viewOf(search.view),
   section: settingsSectionOf(search.section),
@@ -110,13 +136,19 @@ const validateSearch = (
   version: whole(search.version),
   // The project it was started or opened from: the way back.
   project: projectSearchOf(search),
+  // How wide the preview is drawn, chosen in the sidebar (app-section.tsx):
+  // a desktop's unless it names another.
+  width:
+    search.width === "tablet" || search.width === "phone"
+      ? search.width
+      : undefined,
 });
 
 export const Route = createFileRoute("/_shell/apps/$app")({
   // Grasp's chat is no part of the live App; for its builders, the App's
   // chat docks beside the workspace, about it (chat/chat-subject.ts).
   staticData: { chat: chatPresence.hidden, page: "fill" },
-  pendingComponent: PageLoading,
+  pendingComponent: AppPending,
   component: AppRoute,
   validateSearch,
   loaderDeps: ({ search: { project } }) => ({ project }),

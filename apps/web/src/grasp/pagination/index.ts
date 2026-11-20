@@ -11,5 +11,8 @@ export type {
   PaginationContentProps,
   PaginationItemProps,
   PaginationLayoutStyle,
+  PaginationNextProps,
+  PaginationPreviousProps,
   PaginationProps,
+  PaginationRangeProps,
 } from "./pagination";

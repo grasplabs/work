@@ -56,7 +56,7 @@ const wordsOf = (children: ReactNode, label: string | undefined) => {
 /** A Button with `hold`: the trigger of its confirmation, holding the Button that is pressed. */
 export const HoldButton = (props: ButtonProps) => {
   const { hold, holdLabels, onClick, ref: callerRef, ...rest } = props;
-  const labels = useHoldLabels(holdLabels);
+  const labels = useHoldLabels(holdLabels, rest.words);
   const { variant = "quiet", disabled = false } = rest;
   const words = wordsOf(rest.children, rest.label);
   const busy = rest.state !== undefined && rest.state !== "idle";

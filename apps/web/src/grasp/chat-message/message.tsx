@@ -34,10 +34,15 @@ import { Shimmer } from "../shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords as useCatalogue, withGiven } from "../words/words";
 import { ChatMessageCopy } from "./copy";
+import { messageMarker } from "./message.stylex";
+import { withPictures } from "./picture";
+import type { ChatMessagePicture } from "./picture";
 import { Thoughts } from "./thoughts";
 import type { ChatMessageThoughtsLook } from "./thoughts";
 import { chatMessageWords } from "./words";
 import type { ChatMessageWords } from "./words";
+
+const noPictures: ChatMessagePicture[] = [];
 
 /** What a caller may style: where the message sits. Never its look. */
 export type ChatMessageLayoutStyle = LayoutStyle;
@@ -56,6 +61,13 @@ export interface ChatMessageProps {
   from: "person" | "agent";
   /** The words, or what the message holds. While streaming, what has arrived so far. */
   children?: ReactNode;
+  /**
+   * The pictures a person's message names, by the Composer's chips in its text
+   * (`@[Image 1](attachment:<id>)`): each drawn inline as the same chip, with this thumbnail.
+   */
+  pictures?: ChatMessagePicture[];
+  /** Opens a picture: a press on its chip in a person's message. */
+  onOpenPicture?: (id: string) => void;
   /** The agent's name ("Assistant"): the message's name for a screen reader. A person's messages need none. */
   name?: string;
   /**
@@ -177,6 +189,12 @@ export interface ChatMessageProps {
   style?: ChatMessageLayoutStyle;
   /** Layout only: margins and alignment. The look belongs to the message. */
   layout?: ChatMessageLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ actions: "Answer
+   * actions" }`). Any left out are the catalogue's, else English. A flat text prop given beside it still
+   * wins until the release's step 5.
+   */
+  words?: Partial<ChatMessageWords>;
 }
 
 // The foot coming into its kept room at the end of a message.
@@ -192,8 +210,8 @@ const styles = stylex.create({
     margin: 0,
     color: grasp.ink,
     fontFamily: grasp.fontSans,
-    fontSize: grasp.textMd,
-    lineHeight: grasp.textMdLine,
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
   },
   person: {
     justifyItems: "end",
@@ -229,13 +247,23 @@ const styles = stylex.create({
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,
   },
-  // The time at the message's foot, under its actions, at the message's own edge: small, muted,
-  // and as wide as its words, so it never stretches across the column.
   time: {
     justifySelf: "start",
     color: grasp.muted,
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
+    // Where a pointer hovers; on touch there is nothing to hover, so it always shows there.
+    opacity: {
+      default: 1,
+      [media.hover]: {
+        default: 0,
+        [stylex.when.ancestor(":hover", messageMarker)]: 1,
+        [stylex.when.ancestor(":focus-within", messageMarker)]: 1,
+      },
+    },
+    transitionProperty: "opacity",
+    transitionDuration: { default: grasp.durationHover, [media.reduced]: "0s" },
+    transitionTimingFunction: grasp.ease,
   },
   // The agent's words keep their line breaks, as a person's do; wide content (a line of code)
   // scrolls inside them rather than widening the page.
@@ -369,6 +397,14 @@ const styles = stylex.create({
     justifySelf: "end",
   },
   // A person's actions sit under the bubble, at the end, their last icon under its edge.
+  // A person's actions and time on one row at the bubble's end edge.
+  personFoot: {
+    display: "flex",
+    alignItems: "center",
+    justifySelf: "end",
+    gap: grasp.space3,
+    minWidth: 0,
+  },
   personActions: {
     marginInlineStart: 0,
     marginInlineEnd: `calc(-1 * (${grasp.controlSm} - ${grasp.iconSm}) / 2)`,
@@ -729,6 +765,13 @@ const markOnItsOwnLine = (streaming: boolean, asked: boolean, foot: boolean) =>
  * message is written the room is already there, its parts unseen, inert and not read out, and the
  * working mark stands in it; at the end they fade into that room, so the end moves nothing.
  */
+/** A time with no actions to stand beside: it keeps a line of its own under the words. */
+const timeAlone = (
+  copyText: string | undefined,
+  actions: ReactNode,
+  time: string | undefined
+) => filled(time) && !(filled(copyText) || present(actions));
+
 /** The room the message keeps at its foot while it is written: none without a foot to come. */
 const roomOf = (
   live: boolean,
@@ -739,7 +782,8 @@ const roomOf = (
   if (!live || !hasFoot(copyText, actions, time)) {
     return null;
   }
-  return filled(time) ? styles.roomTimed : styles.room;
+  // With actions the time stands on their row; only a time alone takes a line of its own.
+  return timeAlone(copyText, actions, time) ? styles.roomTimed : styles.room;
 };
 
 /** Whether the message was written on the page, not drawn done: only then does its foot fade in. */
@@ -773,10 +817,11 @@ const Foot = ({
 }: FootProps & { written: boolean }) => {
   const acts = filled(row.copyText) || present(row.actions);
   const ending = !live && (status === "stopped" || status === "failed");
+  const beside = acts;
   if (live) {
     // Kept: the room is the message's own padding (roomOf); only the mark, when asked for, stands in it.
     return hasFoot(row.copyText, row.actions, time) && mark ? (
-      <RoomMark timed={filled(time)} />
+      <RoomMark timed={timeAlone(row.copyText, row.actions, time)} />
     ) : null;
   }
   if (!ending && !hasFoot(row.copyText, row.actions, time)) {
@@ -806,9 +851,12 @@ const Foot = ({
               afterEnding={ending}
             />
           )}
+          {beside && filled(time) && (
+            <Stamp time={time} dateTime={dateTime} person={false} />
+          )}
         </div>
       )}
-      {filled(time) && (
+      {filled(time) && !beside && (
         <div {...stylex.props(styles.timeLine)}>
           <Stamp time={time} dateTime={dateTime} person={false} />
         </div>
@@ -988,6 +1036,8 @@ const givenOf = (
 export const ChatMessage = ({
   from,
   children,
+  pictures = noPictures,
+  onOpenPicture,
   name,
   nameHidden,
   time,
@@ -1011,13 +1061,14 @@ export const ChatMessage = ({
   thoughtSeconds,
   thoughtsLook,
   pace,
+  words: given,
   style: styleProp,
   layout,
 }: ChatMessageProps) => {
   const root = useRef<HTMLElement | null>(null);
   // Its own words: the product's, by its catalogue, else English; a text prop given still wins.
   const text = withGiven(
-    useCatalogue("chatMessage", chatMessageWords),
+    useCatalogue("chatMessage", chatMessageWords, given),
     givenOf({
       personLabel,
       failedLabel,
@@ -1085,11 +1136,30 @@ export const ChatMessage = ({
         aria-label={text.person}
         data-slot="chat-message"
         data-from="person"
-        {...stylex.props(styles.root, styles.person, layout ?? styleProp)}
+        {...stylex.props(
+          messageMarker,
+          styles.root,
+          styles.person,
+          layout ?? styleProp
+        )}
       >
-        <div {...stylex.props(styles.bubble)}>{children}</div>
-        {row}
-        <Stamp time={time} dateTime={dateTime} person />
+        <div {...stylex.props(styles.bubble)}>
+          {typeof children === "string"
+            ? withPictures(children, pictures, onOpenPicture)
+            : children}
+        </div>
+        {filled(copyText) || present(actions) ? (
+          // With actions, the time beside them on one row, mirrored: the time, then the actions, at the bubble's end.
+          <div
+            data-slot="chat-message-foot"
+            {...stylex.props(styles.personFoot)}
+          >
+            <Stamp time={time} dateTime={dateTime} person />
+            {row}
+          </div>
+        ) : (
+          <Stamp time={time} dateTime={dateTime} person />
+        )}
       </article>
     );
   }
@@ -1106,6 +1176,7 @@ export const ChatMessage = ({
       // keyboard is, for the keyboard only. A message is words with no box of its own, so the ring
       // is the one for words: a step off them, with the small corner.
       {...stylex.props(
+        messageMarker,
         styles.root,
         roomOf(live, copyText, actions, time),
         styles.focusable,

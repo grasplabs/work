@@ -5,6 +5,7 @@ export type { TableCaptionProps } from "./caption";
 export { TableHeader } from "./header";
 export type { TableHeaderProps } from "./header";
 export { TableBody } from "./body";
+export { tableAboveStatus } from "./row";
 export type { TableBodyProps } from "./body";
 export { TableFooter } from "./footer";
 export type { TableFooterProps } from "./footer";

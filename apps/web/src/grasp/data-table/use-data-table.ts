@@ -131,6 +131,57 @@ const startPinned = <Row>(
   };
 };
 
+/** The values a grouped table's groups take, in the order its rows give them. */
+const groupValuesOf = <Row>(props: DataTableProps<Row>) => {
+  const column = props.columns.find((each) => each.key === props.groupBy);
+  return column === undefined
+    ? []
+    : [...new Set(props.rows.map((row) => String(column.value(row))))];
+};
+
+/**
+ * The groups' open state as TanStack keeps it, from the groups closed by value: every group open
+ * but those. A group row's id is `${column}:${value}` (TanStack's grouped row model), so it is known
+ * on the first render, before the table is built: nothing opens and then shuts.
+ */
+const openState = (
+  groupBy: string,
+  values: readonly string[],
+  closed: readonly string[]
+): ExpandedState =>
+  closed.length === 0
+    ? true
+    : Object.fromEntries(
+        values
+          .filter((value) => !closed.includes(value))
+          .map((value) => [`${groupBy}:${value}`, true])
+      );
+
+/** The groups closed by value, from TanStack's open state. */
+const closedFrom = (
+  groupBy: string,
+  values: readonly string[],
+  state: ExpandedState
+) =>
+  state === true
+    ? []
+    : values.filter((value) => state[`${groupBy}:${value}`] !== true);
+
+/** A grouped table's closed groups: its own, or yours with `closedGroups`; given to TanStack as its open state. */
+const useGroups = <Row>(props: DataTableProps<Row>) => {
+  const [ownClosed, setOwnClosed] = useState<readonly string[]>(
+    props.defaultClosedGroups ?? noKeys
+  );
+  const closed = props.closedGroups ?? ownClosed;
+  const setClosed = (next: string[]) => {
+    if (props.closedGroups === undefined) {
+      setOwnClosed(next);
+    }
+    props.onClosedGroupsChange?.(next);
+  };
+  return { closed, setClosed };
+};
+
 /** The state a table keeps itself, or takes from its props where you keep it. */
 const useOwnState = <Row extends RowData>(props: DataTableProps<Row>) => {
   const [ownSort, setOwnSort] = useState<readonly DataTableSort[]>(() =>
@@ -152,9 +203,25 @@ const useOwnState = <Row extends RowData>(props: DataTableProps<Row>) => {
     startPinned(props.columns, props.stickyFirst === true)
   );
   const [widths, setWidths] = useState<ColumnSizingState>({});
-  const [expanded, setExpanded] = useState<ExpandedState>(() =>
-    props.groupBy === undefined ? {} : true
-  );
+  const [ownExpanded, setOwnExpanded] = useState<ExpandedState>({});
+  const groups = useGroups(props);
+  // Grouped, the open rows are the groups, kept by value (closedGroups); else rows opened by hand.
+  const { groupBy } = props;
+  const grouped =
+    groupBy !== undefined && has(props.pieces ?? noPieces, "grouping");
+  const values = grouped ? groupValuesOf(props) : [];
+  const expanded = grouped
+    ? openState(groupBy, values, groups.closed)
+    : ownExpanded;
+  const setExpanded = (updater: Updater<ExpandedState>) => {
+    if (grouped) {
+      groups.setClosed(
+        closedFrom(groupBy, values, functionalUpdate(updater, expanded))
+      );
+    } else {
+      setOwnExpanded((now) => functionalUpdate(updater, now));
+    }
+  };
   const sort = props.sort ?? ownSort;
   const query = props.query ?? ownQuery;
   const chosen = props.selected ?? ownChosen;
@@ -205,6 +272,8 @@ const useOwnState = <Row extends RowData>(props: DataTableProps<Row>) => {
     setWidths,
     expanded,
     setExpanded,
+    closedGroups: groups.closed,
+    setClosedGroups: groups.setClosed,
   };
 };
 export type OwnState = ReturnType<typeof useOwnState>;
@@ -429,7 +498,7 @@ const useTanStack = <Row extends RowData>(
       own.setWidths((now) => functionalUpdate(updater, now));
     },
     onExpandedChange: (updater) => {
-      own.setExpanded((now) => functionalUpdate(updater, now));
+      own.setExpanded(updater);
     },
     getSubRows:
       subRows === undefined ? undefined : (row) => [...(subRows(row) ?? [])],
@@ -572,6 +641,10 @@ export const useDataTable = <Row extends RowData>(
 
   const metaOf = (key: string) =>
     props.columns.find((column) => column.key === key);
+  // The breakpoint of the table's box a column goes below, if any (its head and cells).
+  const hideOf = (key: string) => metaOf(key)?.hideBelow;
+  // A column's info, if any, for the mark beside its name.
+  const infoOf = (key: string) => metaOf(key)?.info;
   const [first] = props.columns;
   // State is read from here, never through a row's or a column's own methods: TanStack keeps those
   // objects as they are while their state changes, so a component given one would not know.
@@ -619,6 +692,8 @@ export const useDataTable = <Row extends RowData>(
     move,
     drop,
     metaOf,
+    hideOf,
+    infoOf,
     name,
     filtered,
     pageNow,

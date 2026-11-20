@@ -94,7 +94,11 @@ const IfItLasts = ({ statusPage }: { statusPage: string | undefined }) => {
   return (
     <Trans>
       If it lasts, check{" "}
-      <Link external externalLabel={t`opens in a new tab`} href={statusPage}>
+      <Link
+        external
+        words={{ external: t`opens in a new tab` }}
+        href={statusPage}
+      >
         {page}
       </Link>{" "}
       or switch provider.

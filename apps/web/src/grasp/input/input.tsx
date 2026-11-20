@@ -84,7 +84,8 @@ export interface InputProps extends Omit<
   required?: boolean;
   /**
    * Can be read, selected and copied, and is sent with the form, but not changed. Drawn on a
-   * quieter fill, with no hover, so it does not invite typing.
+   * quieter fill, with no hover, caret or focus ring, so it does not invite typing; focus from the
+   * keys shows as its hairline a step stronger.
    * @default false
    */
   readOnly?: boolean;
@@ -116,6 +117,8 @@ export interface InputProps extends Omit<
 const HOVER = media.hover;
 const COARSE = media.coarse;
 const FORCED = media.forced;
+// Focus from the keys, never after a press (focus.ts marks a pointer's focus).
+const KEYBOARD = ":focus-visible:not([data-focus-pointer])";
 const CLIP_TEXT =
   "@supports (background-clip: text) and (not (-moz-appearance: none))";
 const FADE_END = `linear-gradient(to right, currentColor calc(100% - ${grasp.space5}), transparent), linear-gradient(transparent, transparent)`;
@@ -305,16 +308,15 @@ export const inputStyles = stylex.create({
       ":focus-visible": grasp.fieldFocus,
     },
   },
-  // Can be read and copied, not changed: settled. The soft ground (field-fill-read), a hairline and
-  // no lift or hover, its words a step quieter (field-ink-read). Between rest and disabled: disabled
-  // is the weaker look.
   readOnly: {
     backgroundColor: grasp.fieldFillRead,
     boxShadow: {
       default: `inset 0 0 0 1px ${grasp.fieldEdge}`,
-      ":focus-visible": grasp.fieldFocus,
+      [KEYBOARD]: `inset 0 0 0 1px ${grasp.fieldEdgeHover}`,
     },
     color: grasp.fieldInkRead,
+    caretColor: "transparent",
+    cursor: "default",
   },
   disabled: {
     opacity: grasp.dim,
@@ -471,7 +473,7 @@ export const Input = ({
               state.readOnly && styles.readOnly,
               state.disabled && styles.disabled,
               isInvalid(props["aria-invalid"]) && styles.invalid,
-              focus.field
+              state.readOnly ? focus.fieldRead : focus.field
             )}
           />
         )}

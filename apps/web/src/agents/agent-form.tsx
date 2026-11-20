@@ -16,7 +16,12 @@ import {
 } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import { Select } from "../grasp/select/index.ts";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+} from "../grasp/select/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 
 // What an admin says of an agent: its name, what it is for, the model its
@@ -150,7 +155,12 @@ export const AgentForm = ({
               });
             }}
             value={typed.model ?? askersOwn}
-          />
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent />
+          </Select>
         </Field>
       ) : null}
       {/* Alone, the card it stands in names it: its label and help are

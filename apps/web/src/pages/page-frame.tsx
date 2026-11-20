@@ -388,7 +388,7 @@ type Update = "none" | "asking" | "saving";
  * App's workspace, whose own bar names the App already (`bare`): there
  * only what the page is doing shows, while it does (`RunningStatus`).
  */
-export type FrameBar = { kind: "chrome"; label: string } | { kind: "bare" };
+export type FrameBar = { kind: "chrome"; label?: string } | { kind: "bare" };
 
 /** Whether `RunningStatus` has anything to say of `state`. */
 const saysSomething = (state: PageState): boolean =>
@@ -427,7 +427,7 @@ const FrameTop = ({
   }
   return (
     <header {...stylex.props(styles.bar, styles.chrome)}>
-      <Badge>{bar.label}</Badge>
+      {bar.label === undefined ? null : <Badge>{bar.label}</Badge>}
       <Heading level={embedded ? 2 : 1} size="ui-sm">
         {appName}
       </Heading>
@@ -720,6 +720,8 @@ interface PageFrameProps {
   onReload?: () => void;
   /** Called once the pages failed or their person signed out. */
   onEnded?: PageEnded;
+  /** Called each time the pages started and run. */
+  onRunning?: () => void;
 }
 
 /** How a frame ended: it failed, and why, or its person signed out. */
@@ -743,11 +745,12 @@ export const PageFrame = ({
   bare = false,
   onReload,
   onEnded,
+  onRunning,
 }: PageFrameProps) => {
   const { t } = useLingui();
   return (
     <FramedPage
-      bar={bare ? { kind: "bare" } : { kind: "chrome", label: t`App page` }}
+      bar={bare ? { kind: "bare" } : { kind: "chrome" }}
       embedded={embedded}
       source={{ app }}
       title={t`App`}
@@ -756,6 +759,7 @@ export const PageFrame = ({
       {...(ownPath === undefined ? {} : { ownPath })}
       {...(onReload === undefined ? {} : { onReload })}
       {...(onEnded === undefined ? {} : { onEnded })}
+      {...(onRunning === undefined ? {} : { onRunning })}
     />
   );
 };

@@ -13,14 +13,21 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
-import { ApprovalRequest } from "../grasp/approval-request/index.ts";
+import {
+  ApprovalRequest,
+  ApprovalRequestApprove,
+} from "../grasp/approval-request/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
+import { EmailDraft, EventDraft, TaskDraft } from "../grasp/draft/index.ts";
+import type { DraftStatus } from "../grasp/draft/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { draftOf, draftTimeZone } from "./held-drafts.ts";
+import type { DraftShown, HeldDraft } from "./held-drafts.ts";
 
 // The changes the chat's agent asked for in outside systems (sending,
 // booking, deleting), which connect holds until the person confirms or
@@ -33,6 +40,15 @@ import { useCore } from "../use-core.ts";
 // doesn't show all of it. On Grasp UI's Approval request, Confirm is held,
 // with its reason, until everything that will be sent has been shown in
 // full (`approveHeld`).
+//
+// A write that makes a thing (an email, an event, a task) stands as that
+// thing instead, on Grasp UI's draft (held-drafts.ts), read only until
+// core takes an input changed in place: its main action confirms it as
+// written, Discard rejects it. What the draft has no place for is listed
+// under it in its tool's words. A draft's main action can't be held, so
+// whenever the draft and that list might not show all of the input whole,
+// the exact input is open from the start: confirming is then never for
+// less than the person was shown.
 
 /** What the page read of the chat's held writes. */
 type Held =
@@ -414,10 +430,142 @@ export const HeldWriteDetails = ({
 };
 
 /**
- * A held write in the chat, on Grasp UI's Approval request: Confirm and
- * Reject, Confirm held with its reason until all it sends was shown.
+ * Characters a draft's one-line field or person's chip holds whole at a
+ * phone's width; a longer value may be cut at its edge.
  */
-export const HeldWrite = ({
+const lineCharacters = 40;
+
+/** Matches a line break, which a one-line field doesn't show. */
+const lineBreak = /[\r\n]/u;
+
+/**
+ * Whether a draft's fields grow with their words (`field-sizing`): where
+ * they don't, a long value scrolls inside its field, out of sight.
+ */
+const fieldsGrow = (): boolean =>
+  typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
+
+/** Whether the draft shows every value of one of the input's properties whole. */
+const shownWhole = ({ as, values }: DraftShown): boolean =>
+  values.every((value) => {
+    if (as === "line") {
+      return value.length <= lineCharacters && !lineBreak.test(value);
+    }
+    if (as === "grows") {
+      return fieldsGrow() && !isCutShort(value);
+    }
+    return as === "whole";
+  });
+
+/**
+ * The held write as its draft leaves it to the page: its description
+ * holds only what the draft has no place for, and is complete only when
+ * the draft and that list show every property of the input, each whole;
+ * else the exact input is open from the start.
+ */
+const draftRest = (action: PendingAction, draft: HeldDraft): PendingAction => {
+  const fields = (action.description?.fields ?? []).filter(({ input }) =>
+    draft.left.includes(input)
+  );
+  const complete =
+    draft.left.every((key) => fields.some(({ input }) => input === key)) &&
+    fields.every(
+      ({ value }) => typeof value !== "string" || !isCutShort(value)
+    ) &&
+    draft.shown.every(shownWhole);
+  return {
+    ...action,
+    description: {
+      title: action.description?.title ?? action.action,
+      fields,
+      complete,
+    },
+  };
+};
+
+/**
+ * A held write as the thing it makes, on Grasp UI's draft, read only: its
+ * main action (Send, Create event, Add task) confirms exactly the input,
+ * Discard rejects it. Under it, where it would act, what the draft has no
+ * place for, and the exact input. `onDecided` follows each decision,
+ * whether it went through (`done`) or core refused it, which the draft
+ * says in core's words.
+ */
+export const HeldWriteDraft = ({
+  action,
+  draft,
+  onDecided,
+}: {
+  action: PendingAction;
+  draft: HeldDraft;
+  onDecided: (done: boolean, confirmed: boolean) => Promise<void>;
+}) => {
+  const { failure, run } = useCoreAction();
+  const [status, setStatus] = useState<DraftStatus>("ready");
+  const rest = draftRest(action, draft);
+  const shown = useShown(rest);
+  const decide = async (confirming: boolean): Promise<void> => {
+    if (confirming) {
+      setStatus("sending");
+    }
+    const done = await run(async (session) => {
+      await (confirming ? confirmHeld(action) : declineHeld(action))(session);
+      return true;
+    });
+    if (done !== true && confirming) {
+      setStatus("failed");
+    }
+    await onDecided(done === true, confirming);
+  };
+  const confirm = async (): Promise<void> => {
+    // Never so as the page is built (the exact input is open whenever
+    // something may be unseen), and never confirmed if it were.
+    if (!shown.unseen) {
+      await decide(true);
+    }
+  };
+  const reject = () => {
+    void decide(false);
+  };
+  return (
+    <div {...stylex.props(styles.stack)}>
+      {draft.kind === "email" ? (
+        <EmailDraft
+          draft={draft.draft}
+          onDismiss={reject}
+          onSend={confirm}
+          status={status}
+        />
+      ) : null}
+      {draft.kind === "event" ? (
+        <EventDraft
+          draft={draft.draft}
+          onCreate={confirm}
+          onDismiss={reject}
+          status={status}
+          timeZone={draftTimeZone}
+        />
+      ) : null}
+      {draft.kind === "task" ? (
+        <TaskDraft
+          draft={draft.draft}
+          onAdd={confirm}
+          onDismiss={reject}
+          status={status}
+          timeZone={draftTimeZone}
+        />
+      ) : null}
+      <HeldWriteDetails action={rest} shown={shown} />
+      <ErrorText>{failure}</ErrorText>
+    </div>
+  );
+};
+
+/**
+ * A held write on Grasp UI's Approval request: Confirm and Reject, Confirm
+ * held with its reason until all it sends was shown.
+ */
+const HeldCard = ({
   action,
   onDecided,
 }: {
@@ -455,7 +603,6 @@ export const HeldWrite = ({
             ? t`Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm.`
             : undefined
         }
-        approveLabel={t`Confirm`}
         onApprove={async () => {
           await decide(confirmHeld(action));
         }}
@@ -465,11 +612,41 @@ export const HeldWrite = ({
         title={what}
         words={{ decline: t`Reject` }}
       >
+        <ApprovalRequestApprove>{t`Confirm`}</ApprovalRequestApprove>
         <HeldWriteDetails action={action} saysUnseen={false} shown={shown} />
       </ApprovalRequest>
       {/* Core's own words for a refusal, under the card's "Could not approve". */}
       <ErrorText>{failure}</ErrorText>
     </>
+  );
+};
+
+/**
+ * A held write in the chat: as its draft when it makes one, else on Grasp
+ * UI's Approval request.
+ */
+export const HeldWrite = ({
+  action,
+  onDecided,
+}: {
+  action: PendingAction;
+  onDecided: () => void;
+}) => {
+  const router = useRouter();
+  const draft = draftOf(action);
+  if (draft === undefined) {
+    return <HeldCard action={action} onDecided={onDecided} />;
+  }
+  return (
+    <HeldWriteDraft
+      action={action}
+      draft={draft}
+      onDecided={async () => {
+        // Read again however it went, as the card does.
+        onDecided();
+        await router.invalidate();
+      }}
+    />
   );
 };
 

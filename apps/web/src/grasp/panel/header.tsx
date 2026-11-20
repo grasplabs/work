@@ -15,7 +15,7 @@ import {
   TabsTab as TabsTabPrimitive,
 } from "@ui-sdk/react/tabs";
 import type { TabsTabState } from "@ui-sdk/react/tabs";
-import { Fragment, useEffect, useLayoutEffect, useRef } from "react";
+import { Fragment, use, useEffect, useLayoutEffect, useRef } from "react";
 import type { ReactNode, RefObject } from "react";
 
 import { focus } from "../focus/focus";
@@ -25,11 +25,17 @@ import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { RowListAction } from "../row-list";
+import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
 import { useWords, withGiven } from "../words/words";
 import { usePanel } from "./context";
+import { panelVars } from "./panel.stylex";
+import { PanelSeated } from "./seat";
+import type { PanelSeat } from "./seat";
+import { PanelTexture } from "./texture";
 import { panelWords } from "./words";
+import type { PanelWords } from "./words";
 
 /** One view of the object: a tab with an icon and a word. */
 export interface PanelHeaderView {
@@ -43,8 +49,12 @@ export interface PanelHeaderView {
 
 /** Every prop a PanelHeader takes. */
 export interface PanelHeaderProps {
-  /** The object's name, in sentence case ("Weekly pipeline digest"). The panel's heading. */
-  title: string;
+  /**
+   * The object's name, in sentence case ("Weekly pipeline digest"). The panel's heading. Left out,
+   * with no `icon`, `description` or `meta`, there is no head at all: the views stand alone at the
+   * panel's top (a note's side panel), and the Panel's `aria-label` names the panel.
+   */
+  title?: string;
   /** One line about it: what it does or holds. */
   description?: ReactNode;
   /** The object's own icon, in an IconTile, above the title. */
@@ -53,7 +63,7 @@ export interface PanelHeaderProps {
   meta?: ReactNode[];
   /** In the bar: the panel's own buttons, `xs`, the main one first ("Run agent", "Share", more). */
   actions?: ReactNode;
-  /** Shows a close button at the bar's end, after a short line. Runs when it is pressed. */
+  /** Shows a close button at the bar's end, after a short line. Runs when it is pressed. Left out in App shell's page-panel sheet, whose own close closes it. */
   onClose?: () => void;
   /**
    * The close button's name.
@@ -79,6 +89,24 @@ export interface PanelHeaderProps {
    * @default false
    */
   texture?: boolean;
+  /**
+   * The icon stands beside the title, on its line, instead of above it: for a head whose icon is a
+   * mark (an app's logo) and its title a short name. The description runs under both.
+   * @default false
+   */
+  iconBeside?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ close: "Close the details" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<PanelWords>;
+  /**
+   * The object is not there yet (a page's first paint): the title, and the line under it when
+   * `description` is given (even empty), are quiet placeholders in their own lines, so the head
+   * keeps its height. @default false
+   */
+  loading?: boolean;
 }
 
 const HOVER = media.hover;
@@ -96,7 +124,7 @@ const styles = stylex.create({
     boxSizing: "border-box",
     height: grasp.inspectorBar,
     paddingInline: grasp.space2,
-    backgroundColor: grasp.raised,
+    backgroundColor: panelVars.ground,
     // The hairline is there from the start, unseen; it shows once something scrolls under the bar.
     borderBlockEndWidth: grasp.hairline,
     borderBlockEndStyle: "solid",
@@ -135,23 +163,25 @@ const styles = stylex.create({
     paddingInline: grasp.inspectorPad,
     minWidth: 0,
   },
-  texture: {
-    position: "absolute",
-    insetInline: 0,
-    top: `calc(-1 * ${grasp.inspectorBar})`,
-    bottom: 0,
-    pointerEvents: "none",
-    opacity: grasp.inspectorDitherStrength,
-    backgroundImage: `radial-gradient(120% 90% at 0% 0%, ${grasp.mint}, transparent 70%)`,
-    maskImage: `radial-gradient(circle, black ${grasp.composerDot}, transparent calc(${grasp.composerDot} + ${grasp.hairline}))`,
-    maskSize: `${grasp.composerDither} ${grasp.composerDither}`,
-    maskRepeat: "repeat",
-    // Forced colours: no texture.
-    display: { default: "block", [media.forced]: "none" },
+  // Beside a page in App shell, under its bar and with no views: the head reaches inspector-head
+  // from the panel's top to its line, as a page band beside it does, so the two lines are one.
+  headBeside: {
+    minHeight: `calc(${grasp.inspectorHead} - ${grasp.inspectorBar} - ${grasp.inspectorPad})`,
   },
+  // The texture (PanelTexture) reaches up behind the bar, so the light starts at the panel's top.
+  texture: { insetBlockStart: `calc(-1 * ${grasp.inspectorBar})` },
   // With no bar above the head, the texture starts at the head's own top.
-  textureTopmost: { top: 0 },
+  textureTopmost: { insetBlockStart: 0 },
   tile: { position: "relative", marginBlockEnd: grasp.space3 },
+  // The icon beside the title (`iconBeside`): two columns, the icon and the title on one line, what
+  // follows across both.
+  headIconBeside: {
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    columnGap: grasp.space3,
+    alignItems: "center",
+  },
+  tileBeside: { marginBlockEnd: 0 },
+  across: { gridColumn: "1 / -1" },
   title: {
     position: "relative",
     margin: 0,
@@ -169,6 +199,15 @@ const styles = stylex.create({
     lineHeight: grasp.textSmLine,
     color: grasp.muted,
   },
+  // While loading: the title's line, one serif line tall, a placeholder its letters' height across it.
+  titleWaitLine: {
+    display: "flex",
+    alignItems: "center",
+    height: grasp.titleSmLine,
+  },
+  // Fixed widths: the head's lines size to their words, so a share of them would be nothing.
+  titleWait: { width: "10rem", maxWidth: "100%", height: grasp.titleSm },
+  descriptionWait: { width: "14rem", maxWidth: "100%" },
   meta: {
     position: "relative",
     display: "flex",
@@ -293,6 +332,25 @@ const styles = stylex.create({
     backgroundColor: grasp.line,
   },
   lineAlone: { marginBlockStart: grasp.inspectorPad },
+  // With no head and no bar, the views are the head: they never fold (there is nothing above them
+  // to scroll past), they keep their words, and they stand in a strip at the panel's top, the bar's
+  // height, that stays while the content scrolls under it, the closing line its foot.
+  viewsStrip: {
+    position: "sticky",
+    top: 0,
+    zIndex: 2,
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+    backgroundColor: panelVars.ground,
+  },
+  viewsStripRow: {
+    display: "flex",
+    alignItems: "center",
+    minHeight: grasp.inspectorBar,
+  },
+  viewsAlone: { position: "static", alignSelf: "center" },
+  lineFoot: { marginBlockStart: 0 },
 });
 
 const reduced = (): boolean =>
@@ -486,6 +544,45 @@ const Meta = ({ meta }: { meta: ReactNode[] }) => (
   </div>
 );
 
+/** The head's box: its dither behind, then its tile, then what the head says. */
+const HeadFrame = ({
+  icon,
+  texture,
+  topmost,
+  beside,
+  sideBySide,
+  loading,
+  children,
+}: {
+  icon: ReactNode;
+  texture: boolean;
+  topmost: boolean;
+  beside: boolean;
+  sideBySide: boolean;
+  loading: boolean;
+  children: ReactNode;
+}) => (
+  <div
+    data-slot="panel-head"
+    aria-busy={loading ? "true" : undefined}
+    {...stylex.props(
+      styles.head,
+      beside && styles.headBeside,
+      sideBySide && styles.headIconBeside
+    )}
+  >
+    {texture && (
+      <PanelTexture layout={topmost ? styles.textureTopmost : styles.texture} />
+    )}
+    {given(icon) && (
+      <span {...stylex.props(styles.tile, sideBySide && styles.tileBeside)}>
+        {icon}
+      </span>
+    )}
+    {children}
+  </div>
+);
+
 /** The head: the tile, the title, its line, and who and when. */
 const Head = ({
   title,
@@ -495,28 +592,51 @@ const Head = ({
   level,
   texture,
   topmost,
-}: Pick<PanelHeaderProps, "title" | "description" | "icon" | "meta"> & {
+  loading,
+  beside,
+  iconBeside,
+}: Pick<PanelHeaderProps, "description" | "icon" | "meta"> & {
+  title: string | undefined;
   level: 1 | 2;
   texture: boolean;
   topmost: boolean;
+  loading: boolean;
+  beside: boolean;
+  iconBeside: boolean;
 }) => {
+  const sideBySide = iconBeside && given(icon);
   const Heading = headings[level];
+  const frame = { icon, texture, topmost, beside, sideBySide, loading };
+  if (loading) {
+    return (
+      <HeadFrame {...frame}>
+        <div {...stylex.props(styles.titleWaitLine)}>
+          <Skeleton layout={styles.titleWait} />
+        </div>
+        {description !== undefined && (
+          <p {...stylex.props(styles.description, sideBySide && styles.across)}>
+            <Skeleton text="sm" layout={styles.descriptionWait} />
+          </p>
+        )}
+      </HeadFrame>
+    );
+  }
   return (
-    <div data-slot="panel-head" {...stylex.props(styles.head)}>
-      {texture && (
-        <span
-          aria-hidden
-          data-slot="panel-texture"
-          {...stylex.props(styles.texture, topmost && styles.textureTopmost)}
-        />
+    <HeadFrame {...frame}>
+      {title !== undefined && (
+        <Heading {...stylex.props(styles.title)}>{title}</Heading>
       )}
-      {given(icon) && <span {...stylex.props(styles.tile)}>{icon}</span>}
-      <Heading {...stylex.props(styles.title)}>{title}</Heading>
       {given(description) && (
-        <p {...stylex.props(styles.description)}>{description}</p>
+        <p {...stylex.props(styles.description, sideBySide && styles.across)}>
+          {description}
+        </p>
       )}
-      {meta !== undefined && meta.length > 0 && <Meta meta={meta} />}
-    </div>
+      {meta !== undefined && meta.length > 0 && (
+        <div {...stylex.props(sideBySide && styles.across)}>
+          <Meta meta={meta} />
+        </div>
+      )}
+    </HeadFrame>
   );
 };
 
@@ -525,19 +645,23 @@ const Views = ({
   views,
   label,
   list,
+  alone = false,
 }: {
   views: PanelHeaderView[];
   label: string;
   list: RefObject<HTMLDivElement | null>;
+  alone?: boolean;
 }) => {
-  const { folded } = usePanel();
+  const { folded: foldedHere } = usePanel();
+  // Alone at the panel's top they never fold.
+  const folded = foldedHere && !alone;
   return (
     <TabsListPrimitive
       ref={list}
       aria-label={label}
       data-slot="panel-views"
       data-folded={folded ? "" : undefined}
-      {...stylex.props(styles.views)}
+      {...stylex.props(styles.views, alone && styles.viewsAlone)}
     >
       {views.map((view) => (
         <TabsTabPrimitive
@@ -567,6 +691,22 @@ const Views = ({
   );
 };
 
+/** Whether there is any head to draw: a title, an icon, a line or who and when. */
+const hasHead = ({
+  title,
+  icon,
+  description,
+  meta,
+}: Pick<PanelHeaderProps, "title" | "icon" | "description" | "meta">) =>
+  title !== undefined ||
+  given(icon) ||
+  given(description) ||
+  (meta !== undefined && meta.length > 0);
+
+/** Whether the head reaches inspector-head: beside a page in App shell, under its bar, with no views. */
+const reachesHead = (seat: PanelSeat, holds: boolean, hasViews: boolean) =>
+  seat === "beside" && holds && !hasViews;
+
 /** The folding header: bar, head and views. */
 export const PanelHeader = ({
   title,
@@ -574,18 +714,24 @@ export const PanelHeader = ({
   icon,
   meta,
   actions,
-  onClose,
+  onClose: onCloseGiven,
   closeLabel: closeLabelGiven,
   views,
   viewsLabel: viewsLabelGiven,
   level: levelDeprecated,
   headingLevel: level = levelDeprecated ?? 2,
   texture = false,
+  iconBeside = false,
+  words,
+  loading = false,
 }: PanelHeaderProps) => {
   const { close: closeLabel, views: viewsLabel } = withGiven(
-    useWords("panel", panelWords),
+    useWords("panel", panelWords, words),
     { close: closeLabelGiven, views: viewsLabelGiven }
   );
+  // In App shell's sheet the sheet's own close closes it: one close, not two.
+  const seat = use(PanelSeated);
+  const onClose = seat === "sheet" ? undefined : onCloseGiven;
   const bar = useRef<HTMLDivElement>(null);
   const top = useRef<HTMLDivElement>(null);
   const fold = useRef<HTMLDivElement>(null);
@@ -594,6 +740,18 @@ export const PanelHeader = ({
   const hasViews = views !== undefined && views.length > 0;
   // With nothing to hold, the bar takes no room above the head: the head is the panel's top.
   const holds = given(actions) || onClose !== undefined;
+  // No title and nothing else of a head: no head, no empty room; the views are the panel's top.
+  const headed = hasHead({ title, icon, description, meta });
+  if (!headed && !holds && hasViews) {
+    return (
+      <div data-slot="panel-views-head" {...stylex.props(styles.viewsStrip)}>
+        <div {...stylex.props(styles.viewsStripRow)}>
+          <Views views={views} label={viewsLabel} list={list} alone />
+        </div>
+        <div aria-hidden {...stylex.props(styles.line, styles.lineFoot)} />
+      </div>
+    );
+  }
   return (
     <>
       {holds && (
@@ -607,15 +765,20 @@ export const PanelHeader = ({
       {holds && (
         <div ref={top} aria-hidden {...stylex.props(styles.sentinel)} />
       )}
-      <Head
-        title={title}
-        description={description}
-        icon={icon}
-        meta={meta}
-        level={level}
-        texture={texture}
-        topmost={!holds}
-      />
+      {headed && (
+        <Head
+          title={title}
+          description={description}
+          icon={icon}
+          meta={meta}
+          level={level}
+          texture={texture}
+          topmost={!holds}
+          loading={loading}
+          beside={reachesHead(seat, holds, hasViews)}
+          iconBeside={iconBeside}
+        />
+      )}
       {!holds && hasViews && <Bar bar={bar} closeLabel={closeLabel} bare />}
       {hasViews && (
         <div ref={fold} aria-hidden {...stylex.props(styles.viewsSentinel)} />
@@ -623,6 +786,7 @@ export const PanelHeader = ({
       {hasViews && <Views views={views} label={viewsLabel} list={list} />}
       <div
         aria-hidden
+        data-slot="panel-head-line"
         {...stylex.props(styles.line, !hasViews && styles.lineAlone)}
       />
     </>

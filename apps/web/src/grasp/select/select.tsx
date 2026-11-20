@@ -49,6 +49,7 @@ import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
 // UI SDK places a popup in pixels: popup-gap and popup-gutter, as the generator writes them.
 import { popup } from "../tokens/tokens.values";
+import { wrap } from "../wrap/wrap";
 import { selectPopupMarker } from "./select.stylex";
 
 const SCROLLS = "@supports (animation-timeline: scroll())";
@@ -268,8 +269,10 @@ const styles = stylex.create({
     },
     color: grasp.ink,
     fontFamily: grasp.fontSans,
-    // 16px on a phone or a touch screen (media.typing), as in an Input, so the two match in one form.
-    fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },
+    // Its size's own text at every width. An Input takes 16px on a phone so the phone does not zoom
+    // when it is focused to type; a Select's trigger is a button and takes no typing, so in a table
+    // row it stays the size of the words beside it.
+    fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightRegular,
     textAlign: "start",
@@ -387,7 +390,6 @@ const styles = stylex.create({
     flexGrow: 1,
     minWidth: 0,
     overflowWrap: "anywhere",
-    hyphens: "auto",
   },
   // truncate: one line, ending in an ellipsis; never hyphenated or broken inside a word.
   valueCut: {
@@ -735,6 +737,8 @@ export const SelectTrigger = ({
         <button
           type="button"
           {...props}
+          // Without truncate a long value wraps by design, so a second line is no fault (check-widths).
+          data-may-wrap={truncate ? undefined : ""}
           {...stylex.props(
             styles.trigger,
             sizeStyles[size],
@@ -779,6 +783,7 @@ export const SelectValue = ({ placeholder }: SelectValueProps) => {
       className={(value: SelectValueState) =>
         className(
           styles.value,
+          wrap.words,
           truncate && styles.valueCut,
           value.placeholder && styles.placeholder
         )

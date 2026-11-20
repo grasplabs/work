@@ -27,6 +27,7 @@ import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { WithTip } from "../tooltip/lazy-tip";
+import { wrap } from "../wrap/wrap";
 import { Dot } from "./dot";
 
 export type BadgeTone = "neutral" | "success" | "attention" | "danger" | "info";
@@ -130,7 +131,6 @@ const styles = stylex.create({
       ":is([data-slot=table-cell] *)": "nowrap",
     },
     overflowWrap: "break-word",
-    hyphens: "auto",
     textWrap: "balance",
     verticalAlign: "middle",
     // In forced colours fills and shadows are dropped, so an outline draws the pill there, inside
@@ -232,6 +232,7 @@ export const Badge = ({
       tabIndex={explained ? 0 : undefined}
       {...stylex.props(
         styles.badge,
+        wrap.words,
         styles[size],
         styles[tone],
         explained && styles.explained,

@@ -3,6 +3,19 @@
 // Palermo has none: it takes Grasp's small type and muted words, each step a link, the page you
 // are on in ink, a chevron between them that turns round in right-to-left text.
 //
+// Since release step 6 its levels are parts, as in shadcn's:
+//
+//   <Breadcrumb>
+//     <BreadcrumbList>
+//       <BreadcrumbItem><BreadcrumbLink href="/projects">Projects</BreadcrumbLink></BreadcrumbItem>
+//       <BreadcrumbItem><BreadcrumbPage>Atlas</BreadcrumbPage></BreadcrumbItem>
+//     </BreadcrumbList>
+//   </Breadcrumb>
+//
+// The list reads its items as written and draws them itself, with the chevrons between them: the
+// one after the parent turns into the back chevron and the "…" comes and goes with the room, so
+// neither is a part. The older shape keeps working until step 9:
+//
 //   <Breadcrumb items={[{ label: "Projects", href: "/projects" }, { label: "Atlas" }]} />
 //
 // It holds one line, always. When the path is wider than its room, the levels between the first
@@ -17,7 +30,16 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  createContext,
+  isValidElement,
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type { ReactNode } from "react";
 
 import { focus } from "../focus/focus";
 import { ChevronLeft, ChevronRight, Icon } from "../icons";
@@ -29,6 +51,7 @@ import { useWords, withGiven } from "../words/words";
 import { Current } from "./current";
 import { HiddenLevels } from "./hidden-levels";
 import { breadcrumbWords } from "./words";
+import type { BreadcrumbWords } from "./words";
 
 const PHONE = media.belowPhone;
 const COARSE = media.coarse;
@@ -36,8 +59,12 @@ const COARSE = media.coarse;
 /** What a caller may style: where the breadcrumb sits. Never its look. */
 export type BreadcrumbLayoutStyle = LayoutStyle;
 
-/** One step on the path. */
-export interface BreadcrumbItem {
+/**
+ * One step on the path, in the older shape's `items` (until release step 9). Its name was
+ * `BreadcrumbItem`, which is the part now.
+ * @deprecated Use `BreadcrumbItem`, the part, with a `BreadcrumbLink` or `BreadcrumbPage` in it.
+ */
+export interface BreadcrumbEntry {
   /** The page's name, as its own title says it. */
   label: string;
   /** Where the step goes. The last item, the page you are on, has none. */
@@ -46,8 +73,10 @@ export interface BreadcrumbItem {
 
 /** Every prop a Breadcrumb takes. */
 export interface BreadcrumbProps {
-  /** The steps, from the top of the site down to the page you are on, which comes last. */
-  items: BreadcrumbItem[];
+  /** Its BreadcrumbList. Leave it out only in the older shape, where `items` gives the steps. */
+  children?: ReactNode;
+  /** @deprecated Use `BreadcrumbList`, with a `BreadcrumbItem` for each step. */
+  items?: BreadcrumbEntry[];
   /**
    * `auto` shows the path, and under 640px only the parent as a back link. `back` always shows the
    * back link, for a header as narrow as a phone's.
@@ -67,6 +96,52 @@ export interface BreadcrumbProps {
   style?: BreadcrumbLayoutStyle;
   /** Layout only: margins and alignment. The look belongs to the breadcrumb. */
   layout?: BreadcrumbLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ name: "Folders" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<BreadcrumbWords>;
+}
+
+/**
+ * A step as the list draws it: an entry, and whether it is the page you are on. The older shape's
+ * last item always is; in the parts, only a BreadcrumbPage is.
+ */
+interface Step extends BreadcrumbEntry {
+  page?: boolean;
+}
+
+/** Every prop a BreadcrumbList takes. */
+export interface BreadcrumbListProps {
+  /** The steps, a BreadcrumbItem each, from the top of the site down to the page you are on, which comes last. */
+  children: ReactNode;
+}
+
+/** Every prop a BreadcrumbItem takes: one step on the path. */
+export interface BreadcrumbItemProps {
+  /** Its BreadcrumbLink, or for the page you are on, its BreadcrumbPage. */
+  children: ReactNode;
+}
+
+/** Every prop a BreadcrumbLink takes. */
+export interface BreadcrumbLinkProps {
+  /** The page's name, as its own title says it. */
+  children: string;
+  /**
+   * Where the step goes. Without it the step is its name alone, not a link: a plain step, as each
+   * folder of a file's path is. Last on the path, a plain step is not the page you are on.
+   */
+  href?: string;
+}
+
+/**
+ * Every prop a BreadcrumbPage takes: the page you are on, last on the path, said by
+ * `aria-current="page"`. Only the last step may be one; written earlier it is drawn as a plain step.
+ */
+export interface BreadcrumbPageProps {
+  /** The page's name, as its own title says it. */
+  children: string;
 }
 
 // A link stands a little wider than its words, into the gap round it, so its ring keeps off the
@@ -295,7 +370,7 @@ const measureLine = (
       .width ?? 0;
   const levels = all.filter((li) => li.dataset.ellipsis === undefined);
   // The page's name in full, to the fraction of a pixel, however much of it shows.
-  const name = last.querySelector('[aria-current="page"]');
+  const name = last.querySelector("[data-slot=breadcrumb-current]");
   const range = document.createRange();
   if (name !== null) {
     range.selectNodeContents(name);
@@ -330,7 +405,7 @@ const keepFocus = (ol: HTMLOListElement | null) => {
     "[data-ellipsis] button",
     "li[data-fold] a",
     "a",
-    "[aria-current]",
+    "[data-slot=breadcrumb-current]",
   ]
     .map((query) => [...ol.querySelectorAll<HTMLElement>(query)].find(seen))
     .find((element) => element !== undefined);
@@ -420,7 +495,7 @@ const Level = ({
   back,
   whole,
 }: {
-  item: BreadcrumbItem;
+  item: BreadcrumbEntry;
   isParent: boolean;
   back: boolean;
   whole: boolean;
@@ -472,20 +547,14 @@ const Level = ({
   );
 };
 
-/** The path from the top of the site to the page you are on, on one line. */
-export const Breadcrumb = ({
-  items,
-  form: formDeprecated,
-  variant: form = formDeprecated ?? "auto",
-  "aria-label": labelGiven,
-  hiddenLabel: hiddenLabelGiven,
-  style: styleProp,
-  layout,
-}: BreadcrumbProps) => {
-  const { name: label, hidden: hiddenLabel } = withGiven(
-    useWords("breadcrumb", breadcrumbWords),
-    { name: labelGiven, hidden: hiddenLabelGiven }
-  );
+// What the list reads from the root: the back form, and the "…" button's name.
+const Back = createContext(false);
+const HiddenWords = createContext("");
+
+/** The steps on one line, folded to fit: the list's own drawing, for the parts and the older shape. */
+const Trail = ({ items }: { items: Step[] }) => {
+  const back = useContext(Back);
+  const hiddenLabel = useContext(HiddenWords);
   // Until the script runs (and with none) nothing folds and the levels give way with an ellipsis,
   // so each carries its whole name as a title; the fold and the tooltip take over once it runs.
   const scripted = useSyncExternalStore(
@@ -504,7 +573,6 @@ export const Breadcrumb = ({
   });
   const count = items.length;
   const middle = middleOf(count);
-  const back = form === "back";
 
   // Measured on new items, a new fold, and the menu closing (what it held may unfold now).
   useLayoutEffect(() => {
@@ -538,7 +606,12 @@ export const Breadcrumb = ({
       {...stylex.props(...lookOf({ index, count, middle, back, state }))}
     >
       {index === count - 1 ? (
-        <Current label={item.label} cut={state.cut} whole={!scripted} />
+        <Current
+          label={item.label}
+          cut={state.cut}
+          whole={!scripted}
+          page={item.page ?? true}
+        />
       ) : (
         <Level
           item={item}
@@ -574,16 +647,99 @@ export const Breadcrumb = ({
   );
 
   return (
+    <ol ref={list} {...stylex.props(styles.list)}>
+      {levels.slice(0, 1)}
+      {ellipsis}
+      {levels.slice(1)}
+    </ol>
+  );
+};
+
+// ---- The parts (release step 6) --------------------------------------------------------------------
+// BreadcrumbItem, BreadcrumbLink and BreadcrumbPage say what the path is; BreadcrumbList reads them
+// and draws the line, so on their own they draw nothing.
+
+/** One step on the path: a BreadcrumbLink, or last, the BreadcrumbPage. Read by its BreadcrumbList. */
+export const BreadcrumbItem = (_props: BreadcrumbItemProps): ReactNode => null;
+
+/** A step's name and where it goes. Read by its BreadcrumbList. */
+export const BreadcrumbLink = (_props: BreadcrumbLinkProps): ReactNode => null;
+
+/** The page you are on: its name, last on the path. Read by its BreadcrumbList. */
+export const BreadcrumbPage = (_props: BreadcrumbPageProps): ReactNode => null;
+
+/** Children as a flat list: one child, or a list (as JSX writes several, or a `.map` returns). */
+const listOf = (children: ReactNode): ReactNode[] =>
+  Array.isArray(children)
+    ? children.flatMap((child: ReactNode) => listOf(child))
+    : [children];
+
+/** The steps written in a list: each BreadcrumbItem's link or page, as a name and where it goes. */
+const stepsOf = (children: ReactNode): Step[] =>
+  listOf(children).flatMap((child) => {
+    if (
+      !isValidElement<BreadcrumbItemProps>(child) ||
+      child.type !== BreadcrumbItem
+    ) {
+      return [];
+    }
+    return listOf(child.props.children).flatMap((part): Step[] => {
+      if (
+        isValidElement<BreadcrumbLinkProps>(part) &&
+        part.type === BreadcrumbLink
+      ) {
+        return [
+          part.props.href === undefined
+            ? { label: part.props.children, page: false }
+            : {
+                label: part.props.children,
+                href: part.props.href,
+                page: false,
+              },
+        ];
+      }
+      if (
+        isValidElement<BreadcrumbPageProps>(part) &&
+        part.type === BreadcrumbPage
+      ) {
+        return [{ label: part.props.children, page: true }];
+      }
+      return [];
+    });
+  });
+
+/** The steps, on one line: the levels between fold into a "…" menu when the line has no room. */
+export const BreadcrumbList = ({ children }: BreadcrumbListProps) => (
+  <Trail items={stepsOf(children)} />
+);
+
+/** The path from the top of the site to the page you are on, on one line. */
+export const Breadcrumb = ({
+  children,
+  items,
+  form: formDeprecated,
+  variant: form = formDeprecated ?? "auto",
+  "aria-label": labelGiven,
+  hiddenLabel: hiddenLabelGiven,
+  style: styleProp,
+  layout,
+  words,
+}: BreadcrumbProps) => {
+  const { name: label, hidden: hiddenLabel } = withGiven(
+    useWords("breadcrumb", breadcrumbWords, words),
+    { name: labelGiven, hidden: hiddenLabelGiven }
+  );
+  return (
     <nav
       aria-label={label}
       data-slot="breadcrumb"
       {...stylex.props(styles.nav, layout ?? styleProp)}
     >
-      <ol ref={list} {...stylex.props(styles.list)}>
-        {levels.slice(0, 1)}
-        {ellipsis}
-        {levels.slice(1)}
-      </ol>
+      <Back value={form === "back"}>
+        <HiddenWords value={hiddenLabel}>
+          {children ?? (items === undefined ? null : <Trail items={items} />)}
+        </HiddenWords>
+      </Back>
     </nav>
   );
 };

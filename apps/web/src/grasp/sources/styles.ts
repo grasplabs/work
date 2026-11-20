@@ -362,6 +362,9 @@ export const sourceStyles = stylex.create({
   },
   // Under a pointer the count steps aside as far as the last mark, so the room between them holds.
   pileCount: {
+    // "6 sources" is one label: it never breaks between the number and the word.
+    flexShrink: 0,
+    whiteSpace: "nowrap",
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,
@@ -381,16 +384,6 @@ export const sourceStyles = stylex.create({
     transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
-  // The kinds in words: on the column's start edge with the first mark. Each kind keeps its number
-  // ("1 code file" never splits), and the lines are balanced, so no word stands alone on a line.
-  pileKinds: {
-    margin: 0,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
-    color: grasp.muted,
-    textWrap: "balance",
-  },
-  pileKind: { whiteSpace: "nowrap" },
   pileMark: {
     position: "relative",
     display: "inline-grid",
@@ -494,8 +487,8 @@ export const sourceStyles = stylex.create({
   passage: {
     margin: 0,
     fontFamily: grasp.fontSerif,
-    fontSize: grasp.textMd,
-    lineHeight: grasp.textMdLine,
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
     color: grasp.ink,
     quotes: "none",
     overflowWrap: "anywhere",

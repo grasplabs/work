@@ -102,6 +102,12 @@ export interface PaginationProps {
   previousLabel?: string;
   /** The name of the step on, for a screen reader. @default "Next page" */
   nextLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ next: "Next results" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<PaginationWords>;
   /** @deprecated Use `layout`. */
   style?: PaginationLayoutStyle;
   /** Layout only: where it sits. */
@@ -110,6 +116,36 @@ export interface PaginationProps {
 
 /** What a list holds: its items, never a promise of them. */
 type PaginationItems = Exclude<ReactNode, PromiseLike<unknown>>;
+
+/** Every prop a PaginationRange takes. */
+export interface PaginationRangeProps {
+  /**
+   * This part's own words, over its Pagination's `words` and the catalogue's (GraspWords), key by key. Any left out
+   * are the Pagination's, else the catalogue's, else English. A flat text prop on the Pagination still wins until the
+   * release's step 5.
+   */
+  words?: Partial<PaginationWords>;
+}
+
+/** Every prop a PaginationPrevious takes. */
+export interface PaginationPreviousProps {
+  /**
+   * This part's own words, over its Pagination's `words` and the catalogue's (GraspWords), key by key. Any left out
+   * are the Pagination's, else the catalogue's, else English. A flat text prop on the Pagination still wins until the
+   * release's step 5.
+   */
+  words?: Partial<PaginationWords>;
+}
+
+/** Every prop a PaginationNext takes. */
+export interface PaginationNextProps {
+  /**
+   * This part's own words, over its Pagination's `words` and the catalogue's (GraspWords), key by key. Any left out
+   * are the Pagination's, else the catalogue's, else English. A flat text prop on the Pagination still wins until the
+   * release's step 5.
+   */
+  words?: Partial<PaginationWords>;
+}
 
 /** Every prop a PaginationContent takes: the list of the steps. */
 export interface PaginationContentProps {
@@ -272,8 +308,11 @@ const wordsOf = (
 ) => {
   const number = new Intl.NumberFormat(locale ?? "en-GB");
   const plural = new Intl.PluralRules(locale ?? "en-GB");
-  const unit: Partial<Record<Intl.LDMLPluralRule, string>> & { other: string } =
-    given.unit ?? words.unit;
+  const {
+    unit,
+  }: {
+    unit: Partial<Record<Intl.LDMLPluralRule, string>> & { other: string };
+  } = { unit: given.unit ?? words.unit };
   const unitFor = (count: number) => unit[plural.select(count)] ?? unit.other;
   return {
     format: (value: number) => number.format(value),
@@ -315,15 +354,22 @@ const Unit = createContext<PaginationProps["unit"]>(undefined);
 const PreviousWords = createContext<string | undefined>(undefined);
 const NextWords = createContext<string | undefined>(undefined);
 const LoadingWords = createContext<string | undefined>(undefined);
+// The Pagination's own `words`, for its parts to lay their own over.
+const Given = createContext<Partial<PaginationWords> | undefined>(undefined);
 
 /** What a part reads: the words (the provider's, the caller's where given) and where the list stands. */
-const usePagination = () => {
+const usePagination = (own?: Partial<PaginationWords>) => {
+  const fromRoot = useContext(Given);
   const current = useContext(At);
   const pageCount = useContext(Of);
   const total = useContext(Total);
   const size = useContext(Size);
   const said = wordsOf(
-    useWords("pagination", paginationWords),
+    useWords(
+      "pagination",
+      paginationWords,
+      own === undefined ? fromRoot : { ...fromRoot, ...own }
+    ),
     useWordsLocale(),
     {
       unit: useContext(Unit),
@@ -349,8 +395,8 @@ const usePagination = () => {
 };
 
 /** The items shown and the total, beside the steps ("Showing 21 – 30 of 100 items"). Said when it changes. */
-export const PaginationRange = () => {
-  const { range, loading, said } = usePagination();
+export const PaginationRange = ({ words }: PaginationRangeProps) => {
+  const { range, loading, said } = usePagination(words);
   return (
     <p
       aria-live="polite"
@@ -417,8 +463,8 @@ const Turning = () => (
 );
 
 /** The step back. While the next page loads it does nothing, and turns if it was pressed last. */
-export const PaginationPrevious = () => {
-  const { said, loading, went, setWent } = usePagination();
+export const PaginationPrevious = ({ words }: PaginationPreviousProps) => {
+  const { said, loading, went, setWent } = usePagination(words);
   const off = loading ? { "data-loading": "", "aria-disabled": true } : {};
   const wentBack = () => {
     setWent("previous");
@@ -443,8 +489,8 @@ export const PaginationPrevious = () => {
 };
 
 /** The step on. While the next page loads it does nothing, and turns if it was pressed last (or none was). */
-export const PaginationNext = () => {
-  const { said, loading, went, setWent } = usePagination();
+export const PaginationNext = ({ words }: PaginationNextProps) => {
+  const { said, loading, went, setWent } = usePagination(words);
   const off = loading ? { "data-loading": "", "aria-disabled": true } : {};
   const wentOn = () => {
     setWent("next");
@@ -508,11 +554,12 @@ export const Pagination = ({
   "aria-label": named,
   previousLabel,
   nextLabel,
+  words,
   style: styleProp,
   layout,
 }: PaginationProps) => {
   const said = wordsOf(
-    useWords("pagination", paginationWords),
+    useWords("pagination", paginationWords, words),
     useWordsLocale(),
     { loadingLabel, unit, previousLabel, nextLabel },
     named ?? labelDeprecated
@@ -552,15 +599,17 @@ export const Pagination = ({
                   <Went value={went}>
                     <Turn value={setWent}>
                       <Unit value={unit}>
-                        <PreviousWords value={previousLabel}>
-                          <NextWords value={nextLabel}>
-                            <LoadingWords value={loadingLabel}>
-                              {/* Said when it changes, so a step is heard to have moved. */}
-                              {!ranged && <Where />}
-                              {children ?? <Older show={show} />}
-                            </LoadingWords>
-                          </NextWords>
-                        </PreviousWords>
+                        <Given value={words}>
+                          <PreviousWords value={previousLabel}>
+                            <NextWords value={nextLabel}>
+                              <LoadingWords value={loadingLabel}>
+                                {/* Said when it changes, so a step is heard to have moved. */}
+                                {!ranged && <Where />}
+                                {children ?? <Older show={show} />}
+                              </LoadingWords>
+                            </NextWords>
+                          </PreviousWords>
+                        </Given>
                       </Unit>
                     </Turn>
                   </Went>

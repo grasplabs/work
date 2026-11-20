@@ -8,6 +8,7 @@ export const englishLabels: AppCardLabels = {
   building: "Being built",
   failed: "Didn't start",
   empty: "No preview yet",
+  newApp: "New app",
 };
 
 declare module "../words/words" {

@@ -18,6 +18,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { ToolPermissions } from "./tool-permissions.tsx";
+import { toolWords } from "./tool-rows.tsx";
 
 // An app's page letting an admin change what Grasp may do in it (GRA-993),
 // against core's connections as the page reaches them over RPC, faked:
@@ -140,7 +141,10 @@ const shown = async (
 /** The row of the tool named `name`. */
 const row = (name: string): HTMLElement => {
   const found = [...document.querySelectorAll("li")].find((each) =>
-    each.textContent?.includes(name)
+    // A tool shows in plain words; one no longer offered, by its name.
+    [name, toolWords(name, "hubspot")].some((label) =>
+      each.textContent?.includes(label)
+    )
   );
   if (found === undefined) {
     throw new Error(`No row for ${name}`);

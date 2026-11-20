@@ -213,7 +213,7 @@ const NewTeamButton = ({
         onClick={() => {
           setOpen(true);
         }}
-        size="sm"
+        size="xs"
         // Quiet: Invite is the page's one main action.
         variant="quiet"
       >
@@ -382,6 +382,7 @@ const TeamsList = ({
   const open = teams.find(({ id }) => id === opened);
   return (
     <SectionCard
+      variant="grouped"
       actions={<NewTeamButton onChanged={onChanged} teams={teams} />}
       density="compact"
       flush={teams.length > 0}
@@ -442,7 +443,7 @@ export const TeamsPanel = () => {
   };
   if (loaded === undefined) {
     return (
-      <SectionCard title={t`Teams`}>
+      <SectionCard variant="grouped" density="compact" title={t`Teams`}>
         <LoadingLines lines={3} />
       </SectionCard>
     );
@@ -450,7 +451,7 @@ export const TeamsPanel = () => {
   return loaded.state === "ready" ? (
     <TeamsList data={loaded.data} onChanged={reload} />
   ) : (
-    <SectionCard title={t`Teams`}>
+    <SectionCard variant="grouped" density="compact" title={t`Teams`}>
       <SectionNotLoaded
         onRetry={() => {
           void reload();

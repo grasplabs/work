@@ -19,6 +19,12 @@ export interface ComposerEffortProps {
   onValueChange: (value: string) => void;
   /** Its heading, and the radio group's name ("Effort"). */
   label: string;
+  /**
+   * The menu's Thinking row (model-effort.tsx): the heading on its own line, the segments whole
+   * under it, no note. The chosen level is said when it changes.
+   * @default false
+   */
+  row?: boolean;
 }
 
 const styles = stylex.create({
@@ -88,6 +94,22 @@ const styles = stylex.create({
     boxShadow: grasp.liftLow,
     outline: { default: null, [media.forced]: "2px solid Highlight" },
   },
+  // The menu's Thinking row: the heading on its own line, the segments whole on the line under it,
+  // for every model with levels (three or five alike), so the menu keeps one shape between models.
+  rootRow: {
+    gap: grasp.space2,
+  },
+  trackRow: {
+    flexWrap: "nowrap",
+  },
+  segmentRow: {
+    flexShrink: 0,
+  },
+  // On the row's own inset: the word starts where the menu's search icon does.
+  headingRow: {
+    paddingBlockStart: 0,
+    paddingInline: 0,
+  },
   // The chosen level's note, under the segments.
   note: {
     margin: 0,
@@ -133,6 +155,7 @@ export const ComposerEffort = ({
   value,
   onValueChange,
   label,
+  row = false,
 }: ComposerEffortProps) => {
   const name = useId();
   const heading = useId();
@@ -143,18 +166,22 @@ export const ComposerEffort = ({
       aria-labelledby={heading}
       data-slot="composer-effort"
       data-look="segments"
-      {...stylex.props(styles.root)}
+      {...stylex.props(styles.root, row && styles.rootRow)}
     >
-      <p id={heading} {...stylex.props(styles.heading)}>
+      <p
+        id={heading}
+        {...stylex.props(styles.heading, row && styles.headingRow)}
+      >
         {label}
       </p>
-      <div {...stylex.props(styles.track)}>
+      <div {...stylex.props(styles.track, row && styles.trackRow)}>
         {levels.map((level) => (
           <label
             key={level.value}
             data-checked={level.value === value || undefined}
             {...stylex.props(
               styles.segment,
+              row && styles.segmentRow,
               level.value === value && styles.segmentOn,
               focus.within
             )}
@@ -183,7 +210,7 @@ export const ComposerEffort = ({
           </label>
         ))}
       </div>
-      {chosen?.note !== undefined && chosen.note !== "" && (
+      {!row && chosen?.note !== undefined && chosen.note !== "" && (
         <p aria-hidden="true" {...stylex.props(styles.note)}>
           {chosen.note}
         </p>

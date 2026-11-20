@@ -4,7 +4,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 // moves to Grasp UI.
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useMatchRoute } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -16,8 +15,6 @@ import type { AppShellProps } from "../grasp/app-shell/index.ts";
 import { useGraspSidebar } from "../grasp/frame/grasp-sidebar.tsx";
 import { Sidebar } from "../grasp/sidebar/index.ts";
 import { Toaster } from "../grasp/toast/index.ts";
-import { TourLayer } from "../tour/tour-layer.tsx";
-import { useTour } from "../tour/tour-state.ts";
 import {
   FailingBanner,
   providersOf,
@@ -25,7 +22,9 @@ import {
 } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
 import { InFrame } from "./in-frame.ts";
-import { usePageFills } from "./page-fill.ts";
+import { useMatchLatest } from "./match-latest.ts";
+import { usePageFills, usePageWhole } from "./page-fill.ts";
+import { PagePanelProvider, usePagePanelSlot } from "./page-panel.tsx";
 import { PersonTheme } from "./person-theme.tsx";
 
 const styles = stylex.create({
@@ -59,8 +58,7 @@ const typing = (target: EventTarget | null): boolean =>
 /**
  * Cmd/Ctrl+B folds or opens the sidebar, as the kit's sidebar did, unless
  * someone is typing (Bold, in a text box). Grasp UI's Sidebar has no key of
- * its own yet. The tour holds every key before it reaches the window
- * (tour/tour-layer.tsx).
+ * its own yet.
  */
 const useFoldKey = (toggle: () => void) => {
   const onKey = useEffectEvent((event: KeyboardEvent) => {
@@ -121,12 +119,6 @@ const shellPanelsOf = (
  * the page, Grasp's chat (`panels`), docked or floating over it. A page outside the shell for someone
  * signed in, such as a decision opened from a link, has the frame with none
  * of them.
- *
- * While Stephen gives the tour, from his question whether the person is
- * ready to its end, the frame is inert: no press or key reaches a page
- * under him, as in the prototype. His card stands outside it, so it is
- * what is left to use. His offer alone doesn't hold it: the person may
- * pass it by and ask their own question.
  */
 export const AppFrame = ({
   core,
@@ -167,7 +159,11 @@ export const AppFrame = ({
   // A chat's own page has the whole card, edge to edge, its box at the foot
   // with no room under it (App shell's page for an open chat), and no dock
   // over its foot: the chat is the page.
-  const chatPage = useMatchRoute()({ to: "/chats/$chatId" }) !== false;
+  // The address being loaded, so a chat's pending state already has its frame.
+  const chatPage = useMatchLatest()({ to: "/chats/$chatId" }) !== false;
+  const whole = usePageWhole();
+  // A page's own side panel, which the shell seats (frame/page-panel.tsx).
+  const pagePanel = usePagePanelSlot();
   const sidebar = useGraspSidebar({
     core,
     identity,
@@ -184,12 +180,9 @@ export const AppFrame = ({
     providers: providersOf(core),
     ...(failing === undefined ? {} : { failing }),
   });
-  const { phase } = useTour();
-  const touring = phase === "opening" || phase === "running";
   return (
     <PersonTheme userId={identity.userId}>
-      {/* The chat inside it too, docked or floating, so the tour holds it as well. */}
-      <div inert={touring} {...stylex.props(styles.shell)}>
+      <div {...stylex.props(styles.shell)}>
         <AppShell
           banner={
             failingNow.length === 0 ? undefined : (
@@ -201,29 +194,36 @@ export const AppFrame = ({
           dockShown={dockShown}
           {...(dockShown ? {} : { roomBelow: "page" as const })}
           {...shellPanelsOf(panels)}
-          menuCloseLabel={t`Close the menu`}
-          menuLabel={t`Menu`}
+          {...pagePanel.shell}
+          words={{
+            closeMenu: t`Close the menu`,
+            menu: t`Menu`,
+            resize: t`Resize the chat`,
+            closePanel: t`Close the chat`,
+            togglePanel: t`Show or hide the chat`,
+          }}
           menuOpen={menuOpen}
           onMenuOpenChange={setMenuOpen}
-          page={chatPage ? "whole" : "padded"}
-          panelResizeLabel={t`Resize the chat`}
-          panelsCloseLabel={t`Close the chat`}
-          panelsToggleLabel={t`Show or hide the chat`}
-          sidebar={<Sidebar {...sidebar} />}
+          page={chatPage || whole ? "whole" : "padded"}
+          // No tree lines on nested rows: Ruben saw them and took them out (18 Nov 2026).
+          sidebar={<Sidebar {...sidebar} guides={false} />}
         >
           <div {...stylex.props(styles.page, fills && styles.fill)}>
-            <InFrame value>{children}</InFrame>
+            <PagePanelProvider value={pagePanel.frame}>
+              <InFrame value>{children}</InFrame>
+            </PagePanelProvider>
           </div>
         </AppShell>
       </div>
       {/* Grasp UI's toasts, for what the page and the chat say of an action. */}
       <Toaster
-        closeLabel={t`Close`}
-        failedLabel={t`Not done`}
+        words={{
+          close: t`Close`,
+          failed: t`Not done`,
+          pending: t`Still working`,
+        }}
         aria-label={t`Notifications`}
-        pendingLabel={t`Still working`}
       />
-      <TourLayer identity={identity} />
     </PersonTheme>
   );
 };

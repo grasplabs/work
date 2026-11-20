@@ -12,7 +12,9 @@
 //
 // On a phone, running across, only the current or a failed step shows its name; the others are
 // still read.
-// It shows progress; with `onSelect` a done step is also a way back to it. An ordered list, with the step you are
+// It shows progress; with `onSelect` a done step is also a way back to it, and with `reached` every step
+// up to the furthest one reached is a way there. With `labelsHidden` it shows the marks alone, each
+// step's name its tooltip. An ordered list, with the step you are
 // on marked `aria-current="step"` and each step's state said in words. Every value is a token
 // (src/tokens). A caller may set layout only (the `style` prop).
 "use client";
@@ -27,9 +29,11 @@ import { Cross, Icon, Tick } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { useWords } from "../words/words";
+import { useWords, withGiven } from "../words/words";
 import { LookStepper } from "./looks";
+import { canPress, shownState } from "./reach";
 import { stepperWords } from "./words";
+import type { StepperWords } from "./words";
 
 /** Where a step is: done, the one you are on, still to come, or failed. */
 export type StepperState = "done" | "current" | "coming" | "failed";
@@ -102,12 +106,31 @@ export interface StepperProps {
   /** @deprecated Use `loading`. */
   working?: boolean;
   /**
-   * Called with a done step's index when the person presses it, to go back to it. Given, every done
-   * step is a button (a 44px target); left out, the stepper only shows progress.
+   * Called with a done step's index when the person presses it, to go back to it (with `reached`,
+   * any step up to it). Given, every done step is a button (a 44px target); left out, the stepper
+   * only shows progress.
    */
   onValueChange?: (index: number) => void;
   /** @deprecated Use `onValueChange`. */
   onSelect?: (index: number) => void;
+  /**
+   * The furthest step the person has reached, counted from 0. Given with `onValueChange`, every
+   * step up to it is a button, forward as well as back (a 44px target), and the steps after it are
+   * not; never fewer than the done ones. A step after the current one that has been reached was
+   * done: its mark is drawn, and said, as done, while the line stays lit only to the current step.
+   * Left out, only a done step is a way back.
+   */
+  reached?: number;
+  /**
+   * Shows the marks alone: each step's name is its name for a screen reader and its tooltip on
+   * hover and on focus (every step takes focus), and nothing else changes: the same marks, the
+   * light on the line, `loading` and failed. Across, the marks stand a calm pitch apart instead of
+   * filling the width (a `layout` width still wins). On a phone, the row still folds to the marks
+   * and "Step 2 of 9 · Members". The light, dither and serif looks; the classic look keeps its
+   * names.
+   * @default false
+   */
+  labelsHidden?: boolean;
   /**
    * The words for where the person is, said to a screen reader when the step changes and shown
    * across a phone in place of the names.
@@ -119,6 +142,12 @@ export interface StepperProps {
    * @default "All steps done"
    */
   finishedLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ finished: "Every step is set" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<StepperWords>;
 }
 
 /** How a stepper is drawn: see `look`. */
@@ -411,12 +440,16 @@ const ClassicStepper = ({
   style: styleProp,
   layout,
   onSelect,
+  reached,
   finishedLabel: finishedGiven,
+  words,
 }: StepperProps) => {
-  // Its words: the product's, by its catalogue, else English; the caller's props still win.
-  const words = useWords("stepper", stepperWords);
-  const finishedLabel = finishedGiven ?? words.finished;
-  const said = { ...words.states, ...stateLabels };
+  // Its words: the instance's, else the product's by its catalogue, else English; the caller's props still win.
+  const { finished: finishedLabel, states } = withGiven(
+    useWords("stepper", stepperWords, words),
+    { finished: finishedGiven }
+  );
+  const said = { ...states, ...stateLabels };
   const across = orientation === "horizontal";
   const finished = across && current >= steps.length;
   return (
@@ -431,9 +464,17 @@ const ClassicStepper = ({
         )}
       >
         {steps.map((step, index) => {
-          const state = stateOf(step, index, current);
+          // Reached and come back from: drawn and said as done; the hairlines do not change.
+          const state = shownState(
+            stateOf(step, index, current),
+            index,
+            current,
+            reached
+          );
           const last = index === steps.length - 1;
-          const select = state === "done" ? onSelect : undefined;
+          const select = canPress(state, index, current, reached)
+            ? onSelect
+            : undefined;
           const name = (
             <span
               {...stylex.props(

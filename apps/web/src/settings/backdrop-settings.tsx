@@ -81,17 +81,19 @@ export const BackdropSettings = ({ userId }: { userId: string }) => {
   const words = useTileWords();
   return (
     <SectionCard
+      variant="grouped"
       actions={
         <Button
           onClick={() => {
             chooseLook(userId, randomLook(look));
           }}
-          size="sm"
+          size="xs"
           variant="quiet"
         >
           {t`Randomize`}
         </Button>
       }
+      density="compact"
       title={t`Chat background`}
     >
       <SettingsStack>

@@ -419,7 +419,7 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
                 t({ message: "mm", context: "a date's month, as typed" }),
                 t({ message: "yyyy", context: "a date's year, as typed" }),
               ]}
-              triggerLabel={t`Choose dates`}
+              words={{ trigger: t`Choose dates` }}
               size="sm"
               value={period}
             />
@@ -452,13 +452,15 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
               />
             </Field>
           )}
-          <Switch
-            checked={shown.archive}
-            label={t`Search the archive`}
-            onCheckedChange={(archive: boolean) => {
-              setShown({ ...shown, archive });
-            }}
-          />
+          <Field orientation="horizontal">
+            <FieldLabel>{t`Search the archive`}</FieldLabel>
+            <Switch
+              checked={shown.archive}
+              onCheckedChange={(archive: boolean) => {
+                setShown({ ...shown, archive });
+              }}
+            />
+          </Field>
         </div>
         <PopoverFooter>
           <PopoverAction

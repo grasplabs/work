@@ -14,17 +14,24 @@
 // still line that steps with the level at most four times a second, and words simply appear. In
 // forced colours the field hides and a level meter stands in its place. The level is never the only
 // signal: "Listening", the time and the polite announcements say it too.
+//
+// `variant="conversation"`: a spoken conversation that turns by itself (the product's voice
+// interview). There is no Done and no Cancel; the turns pass between `listening` (the person) and
+// `speaking` (the other voice, its level given as the person's is, its light a stop quieter, said
+// once as "Speaking", and its mark, `speaker`, standing in the time's place so the turn reads
+// without colour), and the footer ends with a small close (`onClose`: the voice ends, the host
+// gives the text back). The time starts on the words' start edge, as there is no Cancel before it. Left out, the variant is `dictation`: everything above, exactly as before.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
 import { Button } from "../button";
 import { Alert, Cross, Icon, Mic, MicOff, Retry, Tick } from "../icons";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { useComposerListen } from "./context";
+import { useComposerListen, useComposerRowTall } from "./context";
 import { useStill } from "./still-context";
 import { startVoiceField } from "./voice-field";
 import type { VoiceField, VoiceFieldMode } from "./voice-field";
@@ -42,20 +49,33 @@ export type ComposerVoiceProblem =
   | "failed"
   | "limited";
 
-/** Where a dictation is: asking for the microphone, listening, writing it down after Done, or stopped by a problem. */
+/**
+ * Where a dictation is: asking for the microphone, listening, writing it down after Done, or
+ * stopped by a problem. In a conversation, `speaking` is the other voice's turn.
+ */
 export type ComposerVoicePhase =
   | "asking"
   | "listening"
+  | "speaking"
   | "thinking"
   | "problem";
+
+/** A dictation the person ends with Done or Cancel, or a conversation that turns by itself. */
+export type ComposerVoiceVariant = "dictation" | "conversation";
 
 /** Every word ComposerVoice shows or says; the host translates them. */
 export interface ComposerVoiceWords {
   asking: string;
+  /** Asking, shown where the band is too narrow for `asking` whole; `asking` is still what is said. */
+  askingShort: string;
   listening: string;
+  /** The other voice's turn, in a conversation: said once as it starts. */
+  speaking: string;
   thinking: string;
   silent: string;
   muted: string;
+  /** The close that ends a conversation's voice. */
+  close: string;
   done: string;
   cancel: string;
   mute: string;
@@ -70,6 +90,12 @@ export interface ComposerVoiceWords {
 
 /** Every prop a ComposerVoice takes. */
 export interface ComposerVoiceProps {
+  /**
+   * `dictation` (the default): the person speaks and ends it with Done or Cancel. `conversation`:
+   * the turns pass between `listening` and `speaking` by themselves, with no Done and no Cancel,
+   * and a small close at the end (`onClose`).
+   */
+  variant?: ComposerVoiceVariant;
   phase: ComposerVoicePhase;
   /** What was typed before dictating: kept, in muted ink, before the dictation's words. */
   typed?: string;
@@ -95,11 +121,29 @@ export interface ComposerVoiceProps {
   /** The bands' energy now, low to high, 0 to 1 each, with `level`. */
   bands?: readonly number[];
   words?: Partial<ComposerVoiceWords>;
-  onDone: () => void;
-  /** Runs once this dictation's words have dissolved (at once under reduced motion). */
-  onCancel: () => void;
+  /**
+   * The other voice's mark, in a conversation: shown in the time's place while it speaks, so whose
+   * turn it is reads without colour. An AgentMark with `size="xs"` and no name of its own (the
+   * turn is said as "Speaking"). Give it with `variant="conversation"`.
+   */
+  speaker?: ReactNode;
+  /** A conversation's close, at the footer's end: the voice ends (the interview goes on typed). A dictation has Cancel instead. */
+  onClose?: () => void;
+  /** Done, in a dictation. A conversation has no Done. */
+  onDone?: () => void;
+  /** Cancel, in a dictation: runs once its words have dissolved (at once under reduced motion). A conversation has no Cancel. */
+  onCancel?: () => void;
   onMute: () => void;
   onRetry: () => void;
+  /**
+   * One row, for a one-row composer (its `compact`, which passes it): Cancel, the time, the band and
+   * the ways out stand in the row's own height, the words written inside the band, its latest
+   * words in view; nothing changes size as dictation starts or ends. A row that stood tall (its
+   * text over its controls) as Dictate was pressed stays tall: the words on the text's line, the
+   * ways out on the foot row.
+   * @default false
+   */
+  compact?: boolean;
 }
 
 /** The dictation's words in English, as the catalogue (words.ts) holds them. */
@@ -127,8 +171,8 @@ const styles = stylex.create({
     position: "relative",
     zIndex: 1,
     margin: 0,
-    fontSize: grasp.textMd,
-    lineHeight: grasp.textMdLine,
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
     color: grasp.ink,
     overflowWrap: "anywhere",
   },
@@ -153,6 +197,9 @@ const styles = stylex.create({
     animationIterationCount: "infinite",
   },
   caretQuiet: { opacity: 0, animationName: "none" },
+  // In the one row's tall form the caret takes no room on its line, as the field's own caret, so it
+  // never starts a line of its own past what was typed.
+  caretTall: { marginInlineEnd: "-3px" },
   // The band the light lies in: the footer's row between the time and the microphone, on its
   // centre line, as tall as the row's controls, so the footer is as tall listening as at rest. It
   // opens (its padding, read by the field as how open it is) as it starts listening and closes as
@@ -211,6 +258,18 @@ const styles = stylex.create({
     minWidth: 0,
     marginInline: `calc(${grasp.space2} - ${grasp.space4})`,
   },
+  // A conversation has no Cancel before the time: it starts on the words' start edge instead.
+  aligned: { marginInlineStart: `calc(${grasp.space4} - ${grasp.space2})` },
+  // In one row, while it asks for the microphone, the time (0:00, nothing heard yet) gives its room
+  // to the words saying so, where the row is narrow; it stands once listening starts.
+  timeAsking: {
+    display: {
+      default: null,
+      "@container composer-voice-row (width < 26rem)": "none",
+    },
+  },
+  // The other voice's mark, in the time's place while it speaks.
+  speaker: { flexShrink: 0, display: "flex", alignItems: "center" },
   time: {
     flexShrink: 0,
     margin: 0,
@@ -249,6 +308,85 @@ const styles = stylex.create({
     clipPath: "inset(50%)",
     whiteSpace: "nowrap",
   },
+  // ---- One row (compact): the row's own inset, 12px round 32px controls, as the one-row composer ----
+  surfaceRow: {
+    gap: 0,
+    padding: grasp.space3,
+    paddingBlockEnd: grasp.space3,
+    // The row answers to its own width: narrow, the band gives way to the words (bandRowGives).
+    containerType: "inline-size",
+    containerName: "composer-voice-row",
+  },
+  footRow: { marginInline: 0 },
+  // The words beside the light, after the time: one line from the start, as typed words stand; once
+  // they run past their room, its latest words stay in view (scrolled there) and the start fades.
+  wordsRow: {
+    position: "relative",
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    alignSelf: "stretch",
+    display: "flex",
+    alignItems: "center",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    maskImage: {
+      default: "none",
+      ":is([data-over])": {
+        default: `linear-gradient(to right, transparent, black ${grasp.space8})`,
+        ":dir(rtl)": `linear-gradient(to left, transparent, black ${grasp.space8})`,
+      },
+    },
+  },
+  wordsRowLine: {
+    flexShrink: 0,
+    margin: 0,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.ink,
+  },
+  // The light in one row: the whole room while nothing is heard yet, then a short band of its own
+  // beside the words, so a word never stands on the light.
+  bandRow: {
+    flexBasis: grasp.composerVoiceRowBand,
+    transitionProperty: "padding-block-end, flex-grow",
+  },
+  bandRowWritten: { flexGrow: 0 },
+  // Once words are written, where the room left to them would be narrower than about 10rem (the
+  // row's controls, 256px, and the band's own 96px taken from the row), the band gives way to
+  // them: the time and the words are the content, the light the ornament. The card's edge still
+  // listens.
+  bandRowGives: {
+    display: {
+      default: null,
+      "@container composer-voice-row (width < 26rem)": "none",
+    },
+  },
+  // Nothing written yet: the words' room takes none, so the light (or a state's words, as Asking
+  // for the microphone) has the row's whole room.
+  wordsRowEmpty: { flexGrow: 0 },
+  // ---- The one row's tall form (its text over the controls, as it stood when Dictate was pressed):
+  // the words on the text's line, drawn as the row's text is (its font, its line, its insets), over
+  // the foot row, so the card is as tall listening as it was typed in. ----
+  wordsTall: {
+    boxSizing: "border-box",
+    minWidth: 0,
+    // A finger needs 44px: on a touch screen the text's line is never shorter, as the field's.
+    minHeight: { default: 0, [media.coarse]: grasp.tap },
+    maxHeight: grasp.composerHeight,
+    overflow: "hidden",
+    margin: 0,
+    paddingInline: grasp.space1,
+    paddingBlockStart: grasp.space1,
+    paddingBlockEnd: grasp.space2,
+    // 16px on a phone or a touch screen, as the field the words stand in for.
+    fontSize: { default: grasp.chatText, [media.typing]: grasp.fieldTextTouch },
+    lineHeight: grasp.chatTextLine,
+    color: grasp.ink,
+    overflowWrap: "anywhere",
+  },
+  // A state's words on the text's line (Asking for the microphone), quiet, as a placeholder stands.
+  stateTall: { color: grasp.muted },
 });
 
 /** What an effect with nothing to undo returns. */
@@ -362,6 +500,9 @@ const modeOf = (
   if (phase === "thinking") {
     return "thinking";
   }
+  if (phase === "speaking") {
+    return "speaking";
+  }
   if (phase !== "listening") {
     return "off";
   }
@@ -393,11 +534,23 @@ const saidOf = (
   if (phase === "thinking") {
     return say.thinking;
   }
+  if (phase === "speaking") {
+    return say.speaking;
+  }
   if (muted) {
     return say.muted;
   }
   return say.listening;
 };
+
+/** The modes the band stands open in: a turn of either voice, and listening's quiet states. */
+const OPEN_MODES = new Set<VoiceFieldMode>([
+  "listening",
+  "speaking",
+  "silent",
+  "unheard",
+  "muted",
+]);
 
 /** The band the light lies in: the footer row's height, controlSm, 32px. */
 const BAND = 32;
@@ -581,7 +734,41 @@ interface BandProps {
   open: boolean;
   words: string;
   say: ComposerVoiceWords;
+  /** In one row: short beside the words once there are any. */
+  row: boolean;
+  written: boolean;
 }
+
+/**
+ * Whether a state's words are wider than their box: read before paint and again as the box resizes,
+ * from the whole words (kept in the box, unseen, while the short ones show), so it never flickers.
+ */
+const useTooWide = (box: RefObject<HTMLSpanElement | null>, words: string) => {
+  const [wide, setWide] = useState(false);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (element === null || words === "") {
+      return holdNothing;
+    }
+    const whole = element.querySelector<HTMLElement>(
+      "[data-slot=composer-voice-state-whole]"
+    );
+    const read = () => {
+      // The box's own overflow while the whole words show in it; theirs while they stand unseen.
+      setWide(
+        Math.max(element.scrollWidth, whole?.scrollWidth ?? 0) >
+          element.clientWidth + 1
+      );
+    };
+    read();
+    const watch = new ResizeObserver(read);
+    watch.observe(element);
+    return () => {
+      watch.disconnect();
+    };
+  }, [box, words]);
+  return wide;
+};
 
 const VoiceBand = ({
   band,
@@ -591,14 +778,26 @@ const VoiceBand = ({
   open,
   words,
   say,
+  row,
+  written,
 }: BandProps) => {
   const meterId = useId();
   const worded = words !== "";
+  const state = useRef<HTMLSpanElement>(null);
+  // Asking for the microphone, where the band is too narrow for it whole: the short word shows, the
+  // whole sentence stays what is read.
+  const short = useTooWide(state, words) && words === say.asking;
   return (
     <div
       ref={band}
       data-slot="composer-voice-band"
-      {...stylex.props(styles.band, open && !worded && styles.bandOpen)}
+      {...stylex.props(
+        styles.band,
+        open && !worded && styles.bandOpen,
+        row && styles.bandRow,
+        row && written && styles.bandRowWritten,
+        row && written && !worded && styles.bandRowGives
+      )}
     >
       {showField ? (
         <>
@@ -623,77 +822,314 @@ const VoiceBand = ({
       ) : null}
       {worded ? (
         <span
+          ref={state}
           data-slot="composer-voice-state"
           {...stylex.props(styles.bandWords)}
         >
-          {words}
+          <span
+            data-slot="composer-voice-state-whole"
+            {...stylex.props(short && styles.unseen)}
+          >
+            {words}
+          </span>
+          {short ? <span aria-hidden="true">{say.askingShort}</span> : null}
         </span>
       ) : null}
     </div>
   );
 };
 
-/** The ways out: Cancel, the time, the band, then Mute and Done, or Try again after a problem. */
+/** What the footer is given. */
+interface FootProps {
+  conversation: boolean;
+  phase: ComposerVoicePhase;
+  muted: boolean;
+  elapsedMs: number;
+  say: ComposerVoiceWords;
+  /** The band, between the time and the controls. */
+  children: ReactNode;
+  /** The other voice's mark, in the time's place while it speaks. */
+  speaker: ReactNode;
+  onCancel: () => void;
+  onMute: () => void;
+  onDone: (() => void) | undefined;
+  onClose: (() => void) | undefined;
+  onRetry: () => void;
+  /** One row, for a one-row composer. */
+  row: boolean;
+  /** In the one row (not its tall form), asking for the microphone: a narrow row leaves the time out. */
+  asking: boolean;
+}
+
+/**
+ * The ways out. A dictation: Cancel, the time, the band, then Mute and Done. A conversation: the
+ * time (the other voice's mark while it speaks) on the words' start edge, the band, Mute (on in
+ * either turn), then the close. Try again after a problem.
+ */
 const VoiceFoot = ({
+  conversation,
   phase,
   muted,
   elapsedMs,
   say,
   children,
+  speaker,
   onCancel,
   onMute,
   onDone,
+  onClose,
   onRetry,
-}: {
-  phase: ComposerVoicePhase;
-  muted: boolean;
-  elapsedMs: number;
-  say: ComposerVoiceWords;
-  children: ReactNode;
-  onCancel: () => void;
-  onMute: () => void;
-  onDone: () => void;
-  onRetry: () => void;
-}) => (
-  <div data-slot="composer-voice-foot" {...stylex.props(styles.foot)}>
-    <Button
-      variant="ghost"
-      size="sm"
-      icon={Cross}
-      aria-label={say.cancel}
-      onClick={onCancel}
-    />
-    <p {...stylex.props(styles.time)}>{say.time(elapsedMs)}</p>
-    {children}
-    {phase === "problem" ? (
-      <Button variant="quiet" size="sm" icon={Retry} onClick={onRetry}>
-        {say.retry}
-      </Button>
-    ) : (
-      <>
+  row,
+  asking,
+}: FootProps) => {
+  const turn = phase === "listening" || (conversation && phase === "speaking");
+  const marked =
+    conversation &&
+    phase === "speaking" &&
+    speaker !== undefined &&
+    speaker !== null;
+  return (
+    <div
+      data-slot="composer-voice-foot"
+      {...stylex.props(styles.foot, row && styles.footRow)}
+    >
+      {conversation ? null : (
         <Button
           variant="ghost"
           size="sm"
-          icon={muted ? MicOff : Mic}
-          aria-label={muted ? say.unmute : say.mute}
-          onClick={onMute}
-          disabled={phase !== "listening"}
+          icon={Cross}
+          aria-label={say.cancel}
+          onClick={onCancel}
         />
+      )}
+      {marked ? (
+        <span
+          data-slot="composer-voice-speaker"
+          {...stylex.props(styles.speaker, styles.aligned)}
+        >
+          {speaker}
+        </span>
+      ) : (
+        <p
+          data-slot="composer-voice-time"
+          {...stylex.props(
+            styles.time,
+            conversation && styles.aligned,
+            asking && styles.timeAsking
+          )}
+        >
+          {say.time(elapsedMs)}
+        </p>
+      )}
+      {children}
+      {phase === "problem" ? (
+        <Button variant="quiet" size="sm" icon={Retry} onClick={onRetry}>
+          {say.retry}
+        </Button>
+      ) : (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={muted ? MicOff : Mic}
+            aria-label={muted ? say.unmute : say.mute}
+            onClick={onMute}
+            disabled={!turn}
+          />
+          {/* Done draws as Send does in its place: bare and quiet while off, ink once there is something to write down. */}
+          {conversation ? null : (
+            <Button
+              variant={phase === "listening" ? "ink" : "ghost"}
+              size="sm"
+              icon={Tick}
+              aria-label={say.done}
+              onClick={onDone}
+              disabled={phase !== "listening"}
+            />
+          )}
+        </>
+      )}
+      {conversation ? (
         <Button
-          variant="ink"
+          variant="ghost"
           size="sm"
-          icon={Tick}
-          aria-label={say.done}
-          onClick={onDone}
-          disabled={phase !== "listening"}
+          icon={Cross}
+          aria-label={say.close}
+          onClick={onClose}
         />
-      </>
-    )}
-  </div>
-);
+      ) : null}
+    </div>
+  );
+};
+
+/** The words written: what was typed before, in muted ink, then each word as it resolves, and the caret. */
+interface WordsProps {
+  before: string;
+  words: readonly { text: string; settled: boolean }[];
+  still: boolean;
+  live: boolean;
+  /** The line's look: the card's text, the one row's, or the one row's tall form. */
+  look: "card" | "row" | "tall";
+  /** In the tall form, a state's words on the text's line while nothing is heard (asking). */
+  state: string;
+}
+
+const LINE_LOOK = {
+  card: styles.words,
+  row: styles.wordsRowLine,
+  tall: styles.wordsTall,
+} as const;
+
+const VoiceWords = ({
+  before,
+  words,
+  still,
+  live,
+  look,
+  state,
+}: WordsProps) => {
+  // In the tall form the space after what was typed goes with the first word, and the caret takes
+  // no room: the lines break as the field's did, so listening starts at the field's height.
+  const tall = look === "tall";
+  const typed = tall ? before.trimEnd() : before;
+  const lead = tall && typed !== "" ? " " : "";
+  return (
+    <p data-slot="composer-voice-words" {...stylex.props(LINE_LOOK[look])}>
+      {typed === "" ? null : (
+        <span {...stylex.props(styles.typed)}>{typed}</span>
+      )}
+      {state === "" || words.length > 0 ? null : (
+        <span
+          data-slot="composer-voice-state"
+          {...stylex.props(styles.stateTall)}
+        >
+          {state}
+        </span>
+      )}
+      {words.map((word, index) => (
+        <span key={`${index}-${word.text}`}>
+          {index === 0 ? lead : " "}
+          <Word text={word.text} settled={word.settled} still={still} />
+        </span>
+      ))}
+      <span
+        aria-hidden="true"
+        {...stylex.props(
+          styles.caret,
+          !live && styles.caretQuiet,
+          tall && styles.caretTall
+        )}
+      />
+    </p>
+  );
+};
+
+/**
+ * In one row, the latest words stay in view, and the start fades once they run past their room. In
+ * its tall form, the latest line stays in view once the words outgrow the field's height.
+ */
+const useRowInView = (
+  room: RefObject<HTMLDivElement | null>,
+  row: boolean,
+  tall: RefObject<HTMLDivElement | null>
+) => {
+  // After every render: the words may have grown.
+  useEffect(() => {
+    const lines = tall.current?.querySelector(
+      "[data-slot=composer-voice-words]"
+    );
+    lines?.scrollTo({ top: lines.scrollHeight });
+    const box = room.current;
+    if (!row || box === null) {
+      return;
+    }
+    box.toggleAttribute("data-over", box.scrollWidth > box.clientWidth + 1);
+    box.scrollTo({
+      left:
+        getComputedStyle(box).direction === "rtl"
+          ? -box.scrollWidth
+          : box.scrollWidth,
+    });
+  });
+};
+
+/** What the band says in its place: in one row, a stretch unheard or a problem too, so the row keeps its height. */
+const bandSays = (
+  row: boolean,
+  phase: ComposerVoicePhase,
+  muted: boolean,
+  silent: boolean,
+  problem: ComposerVoiceProblem | undefined,
+  say: ComposerVoiceWords
+) =>
+  row && problem !== undefined
+    ? say.problems[problem]
+    : bandWordsOf(phase, muted, silent, problem, say);
+
+/** The words' line: the card's text, the one row's, or the one row's tall form. */
+const lookOf = (compact: boolean, tall: boolean): WordsProps["look"] => {
+  if (!compact) {
+    return "card";
+  }
+  return tall ? "tall" : "row";
+};
+
+/**
+ * The one row's form: a row that stood tall as Dictate was pressed keeps it (the words on the
+ * text's line, the voice's controls on the foot row). Asking for the microphone, in the tall form
+ * with nothing typed, stands on the text's line as a placeholder would; elsewhere in the band, and
+ * a narrow row leaves the time (0:00) out while it asks.
+ */
+const formOf = (
+  compact: boolean,
+  rowTall: boolean,
+  phase: ComposerVoicePhase,
+  before: string
+) => {
+  const tall = compact && rowTall;
+  const row = compact && !tall;
+  const asking = phase === "asking";
+  return {
+    tall,
+    row,
+    look: lookOf(compact, tall),
+    askingOnLine: tall && asking && before === "",
+    timeOut: asking && (row || (tall && before !== "")),
+  };
+};
+
+/** Its words: the caller's where given, else the product's catalogue (GraspWords), else English. */
+const sayOf = (
+  catalogue: ComposerVoiceWords,
+  words: Partial<ComposerVoiceWords> | undefined
+): ComposerVoiceWords => ({
+  ...catalogue,
+  ...words,
+  problems: {
+    ...composerWords.voice.problems,
+    ...catalogue.problems,
+    ...words?.problems,
+  },
+});
+
+/** The field is there while either voice has its turn and while it writes it down; a problem shows none. */
+const fieldShown = (phase: ComposerVoicePhase) =>
+  phase === "listening" || phase === "speaking" || phase === "thinking";
+
+/** What was typed before dictating, with the space the dictation's words follow; nothing when empty. */
+const beforeOf = (typed: string) =>
+  typed.trim() === "" ? "" : `${typed.trimEnd()} `;
+
+/** The words to show: as they were when cancelled, else as the host gives them. */
+const heardOf = (
+  kept: { settled: string; interim: string } | null,
+  settled: string,
+  interim: string
+) => wordsOf(kept?.settled ?? settled, kept?.interim ?? interim);
 
 /** Dictation in a composer's place: the words arriving out of the light, the time, and the ways out. */
 export const ComposerVoice = ({
+  variant = "dictation",
   phase,
   typed = "",
   settled,
@@ -706,27 +1142,28 @@ export const ComposerVoice = ({
   level,
   bands,
   words,
+  speaker,
   onDone,
   onCancel,
+  onClose,
   onMute,
   onRetry,
+  compact = false,
 }: ComposerVoiceProps) => {
-  // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
-  const catalogue = useComposerWords("voice");
-  const say = {
-    ...catalogue,
-    ...words,
-    problems: {
-      ...composerWords.voice.problems,
-      ...catalogue.problems,
-      ...words?.problems,
-    },
-  };
+  const conversation = variant === "conversation";
+  const say = sayOf(useComposerWords("voice"), words);
   const still = useStill();
+  const before = beforeOf(typed);
+  const { tall, row, look, askingOnLine, timeOut } = formOf(
+    compact,
+    useComposerRowTall(),
+    phase,
+    before
+  );
   const room = useRef<HTMLDivElement>(null);
+  const tallRoom = useRef<HTMLDivElement>(null);
   const band = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const caret = useRef<HTMLSpanElement>(null);
   const meter = useRef<HTMLMeterElement>(null);
   // The latest of what the host gives, for the frame loop to read: kept in a ref by an effect.
   const reading = useRef<Reading>({});
@@ -735,8 +1172,7 @@ export const ComposerVoice = ({
   const [kept, setKept] = useState<{ settled: string; interim: string } | null>(
     null
   );
-  // The field is there while it listens and while it writes it down; a problem shows none.
-  const showField = phase === "listening" || phase === "thinking";
+  const showField = fieldShown(phase);
   const mode = modeOf(phase, muted, silent, problem, leaving);
 
   useEffect(() => {
@@ -745,71 +1181,96 @@ export const ComposerVoice = ({
 
   useVoiceField({ band, canvas, meter }, reading, mode, showField, still);
 
+  useRowInView(room, row, tallRoom);
+
   const cancel = () => {
-    const box = room.current;
+    const box = room.current ?? tallRoom.current;
     if (box === null || still || reduced()) {
-      onCancel();
+      onCancel?.();
       return;
     }
     setLeaving(true);
     setKept({ settled, interim });
-    window.setTimeout(onCancel, dissolve(box) ? DISSOLVE_MS : 160);
+    window.setTimeout(
+      () => {
+        onCancel?.();
+      },
+      dissolve(box) ? DISSOLVE_MS : 160
+    );
   };
 
-  const before = typed.trim() === "" ? "" : `${typed.trimEnd()} `;
-  const bandOpen =
-    mode === "listening" ||
-    mode === "silent" ||
-    mode === "unheard" ||
-    mode === "muted";
+  const bandOpen = OPEN_MODES.has(mode);
   const live = phase === "listening" && !muted && !leaving;
+
+  const heard = heardOf(kept, settled, interim);
+  const written = (
+    <VoiceWords
+      before={before}
+      words={heard}
+      still={still}
+      live={live}
+      look={look}
+      state={askingOnLine ? say.asking : ""}
+    />
+  );
+  const bandWords = askingOnLine
+    ? ""
+    : bandSays(compact, phase, muted, silent, problem, say);
 
   return (
     <div
       data-slot="composer-voice"
+      data-variant={variant}
       data-phase={phase}
       data-mode={mode}
-      {...stylex.props(styles.surface)}
+      data-compact={compact ? "" : undefined}
+      {...stylex.props(styles.surface, compact && styles.surfaceRow)}
     >
-      <div ref={room} {...stylex.props(styles.room)}>
-        <p data-slot="composer-voice-words" {...stylex.props(styles.words)}>
-          {before === "" ? null : (
-            <span {...stylex.props(styles.typed)}>{before}</span>
-          )}
-          {wordsOf(kept?.settled ?? settled, kept?.interim ?? interim).map(
-            (word, index) => (
-              <span key={`${index}-${word.text}`}>
-                {index === 0 ? "" : " "}
-                <Word text={word.text} settled={word.settled} still={still} />
-              </span>
-            )
-          )}
-          <span
-            ref={caret}
-            aria-hidden="true"
-            {...stylex.props(styles.caret, !live && styles.caretQuiet)}
-          />
-        </p>
-      </div>
-      <VoiceNotes phase={phase} problem={problem} say={say} />
+      {compact ? null : (
+        <div ref={room} {...stylex.props(styles.room)}>
+          {written}
+        </div>
+      )}
+      {tall ? <div ref={tallRoom}>{written}</div> : null}
+      {compact ? null : (
+        <VoiceNotes phase={phase} problem={problem} say={say} />
+      )}
       <VoiceFoot
+        conversation={conversation}
         phase={phase}
         muted={muted}
         elapsedMs={elapsedMs}
         say={say}
+        speaker={speaker}
+        row={compact}
+        asking={timeOut}
         onCancel={cancel}
         onMute={onMute}
         onDone={onDone}
+        onClose={onClose}
         onRetry={onRetry}
       >
+        {row ? (
+          <div
+            ref={room}
+            {...stylex.props(
+              styles.wordsRow,
+              before === "" && heard.length === 0 && styles.wordsRowEmpty
+            )}
+          >
+            {written}
+          </div>
+        ) : null}
         <VoiceBand
           band={band}
           canvas={canvas}
           meter={meter}
           showField={showField}
           open={bandOpen}
-          words={bandWordsOf(phase, muted, silent, problem, say)}
+          words={bandWords}
           say={say}
+          row={row}
+          written={before !== "" || heard.length > 0}
         />
       </VoiceFoot>
       <p aria-live="polite" {...stylex.props(styles.unseen)}>

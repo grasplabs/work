@@ -15,7 +15,14 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { Sidebar } from "../grasp/sidebar/index.ts";
+import {
+  Sidebar,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+} from "../grasp/sidebar/index.ts";
 import { tellChatsChanged } from "./chats-changed.ts";
 import { useRecentChats } from "./sidebar-chats.tsx";
 
@@ -82,10 +89,18 @@ const shown = async ({
   const Frame = () => {
     const recent = useRecentChats({ enabled });
     return (
-      <Sidebar
-        groups={[{ id: "chats", label: "Chats", rows: recent }]}
-        aria-label="Sidebar"
-      />
+      <Sidebar aria-label="Sidebar">
+        <SidebarGroup id="chats">
+          <SidebarGroupLabel>Chats</SidebarGroupLabel>
+          <SidebarMenu>
+            {recent.map((row) => (
+              <SidebarMenuItem key={row.label}>
+                <SidebarMenuButton {...row}>{row.label}</SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+      </Sidebar>
     );
   };
   const rootRoute = createRootRoute({ component: Frame });

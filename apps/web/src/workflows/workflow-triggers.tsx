@@ -43,7 +43,7 @@ import {
   DialogFooter,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
 import { Form, FormRow } from "../grasp/form/index.ts";
 import {
@@ -790,7 +790,12 @@ const AddTrigger = ({
                       );
                     }}
                     value={kind}
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent />
+                  </Select>
                 </Field>
                 <Field>
                   <FieldLabel>{t`Version it starts`}</FieldLabel>
@@ -803,7 +808,12 @@ const AddTrigger = ({
                       setChosen(Number(value));
                     }}
                     value={String(chosen)}
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent />
+                  </Select>
                 </Field>
               </FormRow>
               {kind === "schedule" ? (
@@ -891,7 +901,12 @@ const AddTrigger = ({
                           }
                         }}
                         value={event}
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent />
+                      </Select>
                     </Field>
                     <Field>
                       <FieldLabel>{t`Connection`}</FieldLabel>
@@ -1112,7 +1127,11 @@ const TriggersRead = ({
           : {})}
       >
         {read.triggers.length === 0 ? (
-          <Empty size="inline">{t`Nothing starts it on its own yet.`}</Empty>
+          <Empty size="sm">
+            <EmptyHeader>
+              <EmptyDescription>{t`Nothing starts it on its own yet.`}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <ItemGroup separated>
             {read.triggers.map((trigger) => (

@@ -1,29 +1,33 @@
-// A panel's head, for what the host puts in App shell's panels (a chat): one bar's height, the
-// panel's name at its start, then the control that switches it between beside the page and floating
-// over it, a link to its own page where the host has one, and the host's own actions. Floating, the
-// head is what moves the window: dragged (from the head, never from what the panel holds), or
-// focused and moved with the arrow keys; Escape goes back to the page.
-//
-// And the name in it (`AppShellPanelTitle`): always one line, faded out at its end when it runs
-// longer than its room, never wrapped. Given `onRename`, a double-click on it, or F2 or Enter while
-// it has focus, opens a small popup with a field: Enter keeps the new name, Escape the old one. The
-// host keeps the name.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { use, useEffect, useId, useState } from "react";
+import {
+  createContext,
+  isValidElement,
+  use,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import type {
   KeyboardEvent,
+  MouseEvent,
+  PointerEvent as ReactPointerEvent,
   ReactElement,
   ReactNode,
   SubmitEvent,
 } from "react";
 
 import { Button } from "../button";
+import { DropdownMenuMore } from "../dropdown-menu";
+import type { DropdownMenuAction } from "../dropdown-menu";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import {
   AppWindow,
+  Cross,
+  Edit,
   ExitFullScreen,
   Expand,
   External,
@@ -43,7 +47,8 @@ import { PanelPlaceContext } from "./float-window";
 import type { PanelPlacement } from "./float-window";
 import { appShellPanelWords } from "./words";
 
-const NARROW = "@container app-shell (width < 40rem)";
+// Below this the shell is a phone's: the panels lie over the page, so there is no placement to switch.
+const NARROW_REM = 40;
 // The panel's words and its Composer stand in one column: the page's room in from the panel's sides,
 // and, where the panel is wider than a chat's column (full screen), that column centred, the
 // Composer's width, as a chat's own page lays it out (patterns/chat-page). `cqi` is the panels'
@@ -97,8 +102,6 @@ const styles = stylex.create({
   },
   // The name itself takes presses again inside the room that passes them through.
   takesPresses: { pointerEvents: "auto" },
-  // The switch has nothing to switch on a phone, where both placements are the same panels.
-  wideOnly: { display: { default: "flex", [NARROW]: "none" } },
   // The name: one line, never wrapped, faded out at its end when it runs past its room.
   name: {
     display: "block",
@@ -159,11 +162,20 @@ const styles = stylex.create({
   },
 });
 
+const noItems: readonly DropdownMenuAction[] = [];
+
 /** Every prop an AppShellPanelHead takes. */
 export interface AppShellPanelHeadProps {
   /** The panel's name: an `AppShellPanelTitle`, or words of your own. */
   title: ReactNode;
-  /** Your own buttons at the head's end (a new chat, close), after the switch and the page's link. */
+  /**
+   * Your own items in the head's "…" menu, after its own (a new chat, delete): a host's extra
+   * actions are menu items, not icons, so the head keeps three buttons at most.
+   */
+  menu?: readonly DropdownMenuAction[];
+  /** Closes the panel: the head's last button. Without it, no close button. */
+  onClose?: () => void;
+  /** Buttons of your own before close, where an item in `menu` will not do. Each is one more icon in the head: prefer `menu`. */
   actions?: ReactNode;
   /** The panel's own page: a link to it, "Open as a page", where you give one. */
   pageHref?: string;
@@ -182,7 +194,58 @@ export interface AppShellPanelHeadProps {
   onExpandedChange?: (expanded: boolean) => void;
 }
 
-/** The head's own controls: the switch between docked and floating, full screen, the page's link. */
+/** A press on the head's Rename item: the title's rename opens (a count, so each press is new). */
+const RenameAsked = createContext(0);
+
+/** Whether the title can be renamed: an AppShellPanelTitle (or a name of the host's) given `onRename`. */
+const renamable = (title: ReactNode) =>
+  isValidElement<{ onRename?: unknown }>(title) &&
+  typeof title.props.onRename === "function";
+
+/** Whether the shell round the head is a phone's (under 40rem), where there is no placement to switch. */
+const useNarrow = (head: HTMLElement | null) => {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const watch = (shell: HTMLElement) => {
+      const rem =
+        Number(
+          getComputedStyle(document.documentElement).fontSize.replace("px", "")
+        ) || 16;
+      const observer = new ResizeObserver(() => {
+        setNarrow(shell.getBoundingClientRect().width < NARROW_REM * rem);
+      });
+      observer.observe(shell);
+      return () => {
+        observer.disconnect();
+      };
+    };
+    const shell = head?.closest<HTMLElement>("[data-slot=app-shell]");
+    return shell === null ||
+      shell === undefined ||
+      typeof ResizeObserver === "undefined"
+      ? undefined
+      : watch(shell);
+  }, [head]);
+  return narrow;
+};
+
+/** The "…" menu's items: the placement switch, the page's link, rename, then the host's own. */
+const menuOf = ({
+  placement,
+  page,
+  rename,
+  own,
+}: {
+  placement: DropdownMenuAction | undefined;
+  page: DropdownMenuAction | undefined;
+  rename: DropdownMenuAction | undefined;
+  own: readonly DropdownMenuAction[];
+}) =>
+  [placement, page, rename, ...own].filter(
+    (item): item is DropdownMenuAction => item !== undefined
+  );
+
+/** The head's own controls: full screen, then "…" with everything else. */
 const HeadControls = ({
   setPlacement,
   next,
@@ -190,6 +253,9 @@ const HeadControls = ({
   pageRender,
   expanded,
   onExpandedChange,
+  narrow,
+  onRename,
+  menu,
 }: {
   setPlacement?: (placement: PanelPlacement) => void;
   next: PanelPlacement;
@@ -197,23 +263,43 @@ const HeadControls = ({
   pageRender?: ReactElement;
   expanded: boolean;
   onExpandedChange?: (expanded: boolean) => void;
+  narrow: boolean;
+  onRename: (() => void) | undefined;
+  menu: readonly DropdownMenuAction[];
 }) => {
   const words = useWords("app-shell-panel", appShellPanelWords);
+  const said = useWords("rename", renameWords);
+  const page = pageHref !== undefined || pageRender !== undefined;
+  const items = menuOf({
+    // The switch has nothing to switch on a phone, where both placements are the same panels.
+    placement:
+      setPlacement === undefined || narrow
+        ? undefined
+        : {
+            label: next === "floating" ? words.float : words.dock,
+            icon: next === "floating" ? AppWindow : PanelToggle,
+            onSelect: () => {
+              setPlacement(next);
+            },
+          },
+    page: page
+      ? {
+          label: words.page,
+          icon: External,
+          href: pageHref,
+          render: isValidElement<Record<string, unknown>>(pageRender)
+            ? pageRender
+            : undefined,
+        }
+      : undefined,
+    rename:
+      onRename === undefined
+        ? undefined
+        : { label: said.rename, icon: Edit, onSelect: onRename },
+    own: menu,
+  });
   return (
     <>
-      {setPlacement !== undefined && (
-        <span {...stylex.props(styles.wideOnly)}>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={next === "floating" ? AppWindow : PanelToggle}
-            aria-label={next === "floating" ? words.float : words.dock}
-            onClick={() => {
-              setPlacement(next);
-            }}
-          />
-        </span>
-      )}
       {onExpandedChange !== undefined && (
         <Button
           variant="ghost"
@@ -226,14 +312,8 @@ const HeadControls = ({
           }}
         />
       )}
-      {(pageHref !== undefined || pageRender !== undefined) && (
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={External}
-          aria-label={words.page}
-          render={pageRender ?? <a href={pageHref} aria-label={words.page} />}
-        />
+      {items.length > 0 && (
+        <DropdownMenuMore actions={items} label={words.more} />
       )}
     </>
   );
@@ -242,6 +322,8 @@ const HeadControls = ({
 /** The head of what stands in App shell's panels: its name, the placement switch, and your actions. */
 export const AppShellPanelHead = ({
   title,
+  menu = noItems,
+  onClose,
   actions,
   pageHref,
   pageRender,
@@ -249,12 +331,16 @@ export const AppShellPanelHead = ({
   onExpandedChange,
 }: AppShellPanelHeadProps) => {
   const place = use(PanelPlaceContext);
+  const [head, setHead] = useState<HTMLDivElement | null>(null);
+  const narrow = useNarrow(head);
+  const [renameAsked, setRenameAsked] = useState(0);
   const words = useWords("app-shell-panel", appShellPanelWords);
   const { setPlacement, handleMovePress, handleMoveKey } = place;
   const hint = useId();
   const next = place.placement === "floating" ? "docked" : "floating";
   return (
     <div
+      ref={setHead}
       data-slot="app-shell-panel-head"
       data-floating={place.floating ? "" : undefined}
       {...stylex.props(
@@ -288,13 +374,14 @@ export const AppShellPanelHead = ({
         </span>
       )}
       <div
+        data-head-title=""
         {...stylex.props(
           styles.title,
           styles.above,
           (place.floating || place.pullable) && styles.passThrough
         )}
       >
-        {title}
+        <RenameAsked value={renameAsked}>{title}</RenameAsked>
       </div>
       <div {...stylex.props(styles.actions, styles.above)}>
         <HeadControls
@@ -304,8 +391,26 @@ export const AppShellPanelHead = ({
           pageRender={pageRender}
           expanded={expanded}
           onExpandedChange={onExpandedChange}
+          narrow={narrow}
+          onRename={
+            renamable(title)
+              ? () => {
+                  setRenameAsked(renameAsked + 1);
+                }
+              : undefined
+          }
+          menu={menu}
         />
         {actions}
+        {onClose === undefined ? null : (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={Cross}
+            aria-label={words.close}
+            onClick={onClose}
+          />
+        )}
       </div>
     </div>
   );
@@ -386,6 +491,9 @@ const watchFit = (element: HTMLElement, setOver: (over: boolean) => void) => {
   };
 };
 
+/** How far a press may travel and still be a press, not a move: a few pixels. */
+const MOVED = 4;
+
 /** Whether a key on the name opens the rename: F2, or Enter as on any button. */
 const opensRename = (event: KeyboardEvent<HTMLElement>) =>
   event.key === "F2" || event.key === "Enter";
@@ -412,10 +520,38 @@ export const AppShellPanelTitle = ({
         : watchFit(element, setOver),
     [element]
   );
-  const renamable = onRename !== undefined;
+  const canRename = onRename !== undefined;
   const start = () => {
     setDraft(children);
     setOpen(true);
+  };
+  // The head's Rename item: each press of it opens the field once.
+  const asked = use(RenameAsked);
+  const [seenAsk, setSeenAsk] = useState(asked);
+  if (asked !== seenAsk) {
+    setSeenAsk(asked);
+    if (canRename) {
+      setDraft(children);
+      setOpen(true);
+    }
+  }
+  // A press renames, unless it moved a floating window: where it went down, to tell the two apart.
+  const pressedAt = useRef<{ x: number; y: number } | null>(null);
+  const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    pressedAt.current = { x: event.clientX, y: event.clientY };
+    handleMovePress?.(event);
+  };
+  const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+    const from = pressedAt.current;
+    pressedAt.current = null;
+    // A key's click (Enter) is the key handler's; only a pointer's press that stayed put renames here.
+    if (
+      from === null ||
+      Math.hypot(event.clientX - from.x, event.clientY - from.y) > MOVED
+    ) {
+      return;
+    }
+    start();
   };
   const save = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -428,9 +564,9 @@ export const AppShellPanelTitle = ({
   const look = stylex.props(
     styles.name,
     over && styles.fades,
-    renamable && styles.renamable,
-    renamable && styles.takesPresses,
-    renamable && focus.ring
+    canRename && styles.renamable,
+    canRename && styles.takesPresses,
+    canRename && focus.ring
   );
   const words = <span {...stylex.props(styles.words)}>{children}</span>;
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -442,9 +578,9 @@ export const AppShellPanelTitle = ({
   };
   return (
     <>
-      {renamable ? (
-        // A press on the name still moves a floating window (the head's handle lies under it); a
-        // double-click, F2 or Enter renames it.
+      {canRename ? (
+        // A press on the name renames it, unless the press moved a floating window (the head's
+        // handle lies under it); so do a double-click, F2 and Enter.
         <button
           ref={setButton}
           type="button"
@@ -452,9 +588,10 @@ export const AppShellPanelTitle = ({
           title={over ? children : undefined}
           aria-haspopup="dialog"
           aria-describedby={hint}
+          onClick={handleClick}
           onDoubleClick={start}
           onKeyDown={handleKeyDown}
-          onPointerDown={handleMovePress}
+          onPointerDown={handlePointerDown}
           {...look}
         >
           {words}
@@ -469,12 +606,12 @@ export const AppShellPanelTitle = ({
           {words}
         </span>
       )}
-      {renamable && (
+      {canRename && (
         <span id={hint} {...stylex.props(visuallyHidden)}>
-          {said.hint}
+          {said.hintPress}
         </span>
       )}
-      {renamable && element !== null && (
+      {canRename && element !== null && (
         <Popover
           open={open}
           onOpenChange={(next) => {

@@ -42,6 +42,7 @@ import { useComposerDisabled, useOpenMentions } from "./context";
 import { cornerStyles } from "./corner";
 import { stopEscape } from "./escape";
 import { useComposerWords } from "./words";
+import type { ComposerWords } from "./words";
 
 /** One kind of thing a person can add to a message. */
 export interface ComposerKind {
@@ -123,6 +124,12 @@ export interface ComposerAddProps {
    * @default "Agent"
    */
   agentLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords) `composer.add` group, key by key
+   * (`{ upload: "Add a file" }`). Any left out are the catalogue's, else English. A flat text prop given beside it
+   * (`aria-label`, `actionsLabel`, `uploadLabel`, `agentLabel`) still wins until the release's step 5.
+   */
+  words?: Partial<ComposerWords["add"]>;
 }
 
 const noKinds: ComposerKind[] = [];
@@ -352,10 +359,11 @@ export const ComposerAdd = ({
   all,
   defaultAgent,
   agentLabel: agentGiven,
+  words: own,
 }: ComposerAddProps) => {
   const disabled = useComposerDisabled();
   // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
-  const words = useComposerWords("add");
+  const words = useComposerWords("add", own);
   const actionsLabel = actionsGiven ?? words.actions;
   const label = labelGiven ?? labelDeprecated ?? words.label;
   const uploadLabel = uploadGiven ?? words.upload;

@@ -56,13 +56,17 @@ const styles = stylex.create({
   // enough; under it on a narrow one.
   split: {
     display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: grasp.space6,
+    alignItems: "start",
+    minWidth: 0,
+  },
+  // Room for the lesson beside the list only while one is in hand.
+  splitPicked: {
     gridTemplateColumns: {
       default: "minmax(0, 1fr)",
       [media.fromSidebar]: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
     },
-    gap: grasp.space6,
-    alignItems: "start",
-    minWidth: 0,
   },
   list: { display: "grid", gap: grasp.space2, minWidth: 0 },
   // A lesson's versions in the panel's card, newest first.
@@ -371,7 +375,12 @@ export const LessonsView = ({ admin }: { admin: boolean }) => {
   const [picked, setPicked] = useState<string>();
   const [changes, setChanges] = useState(0);
   return (
-    <div {...stylex.props(styles.split)}>
+    <div
+      {...stylex.props(
+        styles.split,
+        picked !== undefined && styles.splitPicked
+      )}
+    >
       <div {...stylex.props(styles.list)}>
         <LessonList key={changes} onPick={setPicked} picked={picked} />
       </div>

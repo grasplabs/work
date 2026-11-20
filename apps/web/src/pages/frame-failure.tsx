@@ -147,8 +147,7 @@ export const FrameFailure = ({
         <Collapsible fit title={t`Technical details`}>
           <CodeBlock
             code={detail === undefined ? reason : `${reason}\n${detail}`}
-            copiedLabel={t`Copied`}
-            copyLabel={t`Copy the details`}
+            words={{ copied: t`Copied`, copy: t`Copy the details` }}
             lineNumbers={false}
             wrap
           />

@@ -16,10 +16,16 @@ export const MakeSomethingLink = ({
   kind,
   project,
   size = "default",
+  variant = "quiet",
+  label,
 }: {
   kind: ChatPlanKind;
+  /** Its words where the page says what is made ("Build new app"); else Make something. */
+  label?: string;
   project?: string;
   size?: "default" | "sm";
+  /** In ink where it is the page's one main action. */
+  variant?: "quiet" | "ink";
 }) => {
   const { t } = useLingui();
   return (
@@ -34,8 +40,9 @@ export const MakeSomethingLink = ({
         />
       }
       size={size === "sm" ? "sm" : "md"}
+      variant={variant}
     >
-      {t`Make something`}
+      {label ?? t`Make something`}
     </Button>
   );
 };

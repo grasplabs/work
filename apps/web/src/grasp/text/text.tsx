@@ -48,6 +48,13 @@ export interface TextProps {
    * @default "words"
    */
   wrap?: "words" | "anywhere" | "truncate";
+  /**
+   * `body`, Geist, as running text is. `display`, the serif (Geist Serif) at the same size and line,
+   * with the title's tracking: one line that opens a card or a section, as a lead in the display
+   * face ("Choose the AI that Grasp's chat, agents and workflows run on.").
+   * @default "body"
+   */
+  variant?: "body" | "display";
   /** An id, so `aria-describedby` can point at it. */
   id?: string;
   /** @deprecated Use `layout`. */
@@ -73,6 +80,8 @@ const styles = stylex.create({
   tone: { color: grasp.text },
   muted: { color: grasp.muted },
   quiet: { color: grasp.quiet },
+  // The display face: the serif with the title's tracking, at the size and line given.
+  display: { fontFamily: grasp.fontSerif, letterSpacing: grasp.trackingTitle },
   // How a long line breaks; `words` is the text's own.
   words: {},
   anywhere: { overflowWrap: "anywhere" },
@@ -91,6 +100,7 @@ export const Text = ({
   tone = "text",
   element: Tag = "p",
   wrap = "words",
+  variant = "body",
   id,
   style: styleProp,
   layout,
@@ -107,6 +117,7 @@ export const Text = ({
       styles[weight],
       tone === "text" ? styles.tone : styles[tone],
       styles[wrap],
+      variant === "display" && styles.display,
       layout ?? styleProp
     )}
   >

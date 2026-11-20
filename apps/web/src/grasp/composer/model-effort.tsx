@@ -4,13 +4,14 @@
 import * as stylex from "@stylexjs/stylex";
 import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
 import { mergeProps } from "@ui-sdk/react/primitive";
-import { useEffect, useId, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 
 import { focus } from "../focus/focus";
-import { ChevronDown, ChevronRight, Icon, Tick } from "../icons";
+import { visuallyHidden } from "../hidden/hidden";
+import { ChevronDown, Icon } from "../icons";
 import type { IconData } from "../icons";
-import { iconVars } from "../icons/icon.stylex";
+import { simply } from "../motion/simply.stylex";
 import { popoverStyles } from "../popover/styles";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
@@ -19,11 +20,18 @@ import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
 import { ComposerEffort } from "./effort";
 import { stopEscape } from "./escape";
-import type { ComposerModelMaker, ComposerModelOption } from "./model";
+import { ModelMenu } from "./model";
+import type {
+  ComposerModelMaker,
+  ComposerModelOption,
+  ModelMenuWords,
+} from "./model";
 import { LitEdge } from "./reasoning";
 import type { ComposerReasoningOption } from "./reasoning";
+import { rowMarker } from "./row.stylex";
 import { tabOutTarget } from "./tab-out";
 import { useComposerWords } from "./words";
+import type { ComposerWords } from "./words";
 
 /** One model, with the levels of effort it offers. */
 export interface ComposerModelEffortOption extends ComposerModelOption {
@@ -53,148 +61,101 @@ export interface ComposerModelEffortProps {
   /** @deprecated Use `aria-label`. */
   label?: string;
   /**
-   * The list of models' name.
-   * @default "Model"
+   * Not shown: the menu has no model row of its own since 18 November; it is named by `aria-label`.
+   * Kept, with no effect, for hosts that still pass it (to be deprecated with a codemod later).
    */
   modelLabel?: string;
   /**
-   * The effort's heading and the slider's name.
-   * @default "Effort"
+   * The Thinking row's word, and the name of its levels.
+   * @default "Thinking"
    */
+  thinkingLabel?: string;
+  /** The Thinking row's word by its earlier name: `thinkingLabel` wins when both are given (to be deprecated with a codemod later). */
   effortLabel?: string;
   /**
-   * Said in the effort's place when the model has one level.
-   * @default "This model has one level of effort."
+   * Not shown: a model with one level has no Thinking row, so nothing is said in its place. Kept,
+   * with no effect, for hosts that still pass it (to be deprecated with a codemod later).
    */
   noEffortLabel?: string;
+  /** Models to list under the star at the top of the rail. Without them there is no star. */
+  favourites?: string[];
+  /** A row at the top of a maker's list, such as a Connect action for linking an account. */
+  connect?: Record<string, ReactNode>;
+  /**
+   * The search field's name and placeholder.
+   * @default "Search models"
+   */
+  searchLabel?: string;
+  /**
+   * The name of the rail of makers, for a screen reader.
+   * @default "Makers"
+   */
+  makersLabel?: string;
+  /**
+   * The rail's name for favourites.
+   * @default "Favourites"
+   */
+  favouritesLabel?: string;
+  /**
+   * What the list says when nothing matches.
+   * @default "No models found"
+   */
+  emptyLabel?: string;
   /**
    * At the strongest level (a level's `top`), the working light round the chip. Off, the word
    * "Max" says it alone.
    * @default false
    */
   topLight?: boolean;
+  /**
+   * The chip says the model's name before its level, as it did before 18 November. Without it the
+   * chip is the maker's mark and the level alone, the name in its tooltip; a model with one level
+   * says its name, which is then its only word.
+   * @default false
+   */
+  showName?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords) `composer.modelEffort` group, key by key
+   * (`{ effort: "Thinking" }`). Any left out are the catalogue's, else English. A flat text prop given beside it
+   * (`aria-label`, `modelLabel`, `effortLabel`, `noEffortLabel`) still wins until the release's step 5.
+   */
+  words?: Partial<ComposerWords["modelEffort"]>;
 }
 
 const noMakers: ComposerModelMaker[] = [];
+const noFavourites: string[] = [];
 const noLevels: ComposerReasoningOption[] = [];
 
 const styles = stylex.create({
-  panel: {
-    width: `min(${grasp.modelMenuWidth}, 100vw - 2 * ${grasp.popupGutter})`,
-    maxHeight: `min(${grasp.popupHeight}, var(--available-height, ${grasp.popupHeight}))`,
-    overflowY: "auto",
-    transformOrigin: "var(--transform-origin)",
-  },
-  surface: {
-    [iconVars.size]: grasp.iconSm,
-    [iconVars.stroke]: grasp.iconStroke,
+  // The Thinking row's room: it opens and closes as a model with levels or with one is chosen, so
+  // the menu's height eases rather than jumps (instant under reduced motion).
+  fold: {
     display: "grid",
-    gap: grasp.space2,
-    padding: grasp.space2,
+    gridTemplateRows: "0fr",
+    transitionProperty: "grid-template-rows",
+    transitionDuration: { default: simply.ui, [media.reduced]: "0s" },
+    transitionTimingFunction: grasp.ease,
   },
-  // The model, as a row at the top: it opens the list in the effort's place.
-  header: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-    width: "100%",
-    boxSizing: "border-box",
-    minHeight: { default: grasp.controlSm, [media.coarse]: grasp.tap },
-    margin: 0,
-    paddingInline: grasp.space2,
-    borderWidth: 0,
-    borderRadius: `min(${grasp.corner}, calc(${grasp.controlSm} / 2))`,
-    cornerShape: grasp.cornerShape,
-    backgroundColor: {
-      default: "transparent",
-      ":hover": { default: null, [media.hover]: grasp.itemFillHighlight },
-      ":is([aria-expanded=true])": grasp.itemFillHighlight,
-    },
-    color: grasp.ink,
-    fontFamily: grasp.fontSans,
-    fontSize: grasp.textSm,
-    lineHeight: grasp.textSmLine,
-    fontWeight: grasp.weightMedium,
-    textAlign: "start",
-    cursor: "pointer",
-  },
-  headerName: {
-    flexGrow: 1,
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  headerMark: {
-    display: "flex",
-    flexShrink: 0,
-    color: grasp.muted,
-  },
-  // No inset of its own: its heading, its levels' names and its note stand on the model row's
-  // mark, its tick under the model row's chevron, and its rows' fill spans as the model row's does.
-  effort: {
-    display: "grid",
-    minWidth: 0,
-    paddingBlockStart: grasp.space1,
+  foldOpen: { gridTemplateRows: "1fr" },
+  foldInner: { minHeight: 0, overflow: "hidden" },
+  // The menu's foot: the Thinking row, under a hairline, on the menu's own inset.
+  thinking: {
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.space3,
     borderBlockStartWidth: grasp.hairline,
     borderBlockStartStyle: "solid",
     borderBlockStartColor: grasp.line,
   },
-  none: {
-    margin: 0,
-    paddingBlock: grasp.space2,
-    paddingInline: grasp.space2,
-    color: grasp.muted,
-    fontFamily: grasp.fontSans,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
+  // The surface's slot, with no box of its own: the menu lays out against the panel.
+  surface: {
+    display: "contents",
   },
-  list: {
-    display: "grid",
-    gap: 0,
-    margin: 0,
-    padding: 0,
-    listStyle: "none",
-  },
-  row: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-    width: "100%",
-    boxSizing: "border-box",
-    minHeight: { default: grasp.controlSm, [media.coarse]: grasp.tap },
-    margin: 0,
-    paddingBlock: grasp.space1,
-    paddingInline: grasp.space2,
-    borderWidth: 0,
-    borderRadius: `min(${grasp.corner}, calc(${grasp.controlSm} / 2))`,
-    cornerShape: grasp.cornerShape,
-    backgroundColor: {
-      default: "transparent",
-      ":hover": { default: null, [media.hover]: grasp.itemFillHighlight },
-    },
-    color: grasp.ink,
-    fontFamily: grasp.fontSans,
-    fontSize: grasp.textSm,
-    lineHeight: grasp.textSmLine,
-    textAlign: "start",
-    cursor: { default: "pointer", ":is([aria-disabled=true])": "default" },
-    opacity: { default: 1, ":is([aria-disabled=true])": grasp.dim },
-  },
-  rowWords: {
-    display: "grid",
-    flexGrow: 1,
-    minWidth: 0,
-  },
-  rowWhy: {
-    color: grasp.muted,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
-  },
-  tick: {
-    display: "flex",
-    flexShrink: 0,
-    width: grasp.iconSm,
+  panel: {
+    width: `min(${grasp.modelMenuWidth}, 100vw - 2 * ${grasp.popupGutter})`,
+    maxHeight: `min(${grasp.popupHeight}, var(--available-height, ${grasp.popupHeight}))`,
+    // The menu scrolls its own list; the panel itself never does.
+    overflow: "hidden",
+    transformOrigin: "var(--transform-origin)",
   },
   lit: {
     color: grasp.ink,
@@ -254,92 +215,21 @@ const styles = stylex.create({
   chipLevelGone: {
     display: "none",
   },
+  // In a narrow one row (a phone), the level folds to the maker's mark, so the text keeps its room;
+  // the tooltip and the chip's name still say both.
+  effortFolds: {
+    // And wherever the row says so (data-fold): with this row's controls the text would go under its least width.
+    display: {
+      default: "inline",
+      "@container composer-row (width < 24rem)": "none",
+      [stylex.when.ancestor(":is([data-fold])", rowMarker)]: "none",
+    },
+  },
   chipShrinks: {
     flexShrink: 1,
     maxWidth: "100%",
   },
 });
-
-/** Moves the focus among the list's rows with the arrow keys, Home and End. */
-const moveAmongRows = (event: KeyboardEvent<HTMLButtonElement>) => {
-  const next = { ArrowDown: 1, ArrowUp: -1 }[event.key];
-  const list = event.currentTarget.closest("ul");
-  if (
-    list === null ||
-    (next === undefined && event.key !== "Home" && event.key !== "End")
-  ) {
-    return;
-  }
-  const rows = [...list.querySelectorAll("button")];
-  let to = rows.indexOf(event.currentTarget) + (next ?? 0);
-  if (event.key === "Home") {
-    to = 0;
-  } else if (event.key === "End") {
-    to = rows.length - 1;
-  }
-  event.preventDefault();
-  rows[(to + rows.length) % rows.length]?.focus();
-};
-
-/** The models, the chosen one ticked and where the keys arrive. */
-const ModelList = ({
-  id,
-  models,
-  makers,
-  chosen,
-  label,
-  onPick,
-}: {
-  id: string;
-  models: ComposerModelEffortOption[];
-  makers: ComposerModelMaker[];
-  chosen: string | undefined;
-  label: string;
-  onPick: (value: string) => void;
-}) => (
-  <ul
-    id={id}
-    aria-label={label}
-    data-slot="composer-model-effort-list"
-    {...stylex.props(styles.list)}
-  >
-    {models.map((option) => {
-      const on = option.value === chosen;
-      const off = option.disabled === true;
-      const own = makers.find((maker) => maker.value === option.maker)?.icon;
-      return (
-        <li key={option.value}>
-          <button
-            type="button"
-            aria-current={on || undefined}
-            aria-disabled={off || undefined}
-            // The list opens from its header, and the keys go to the chosen model.
-            autoFocus={on}
-            title={option.description}
-            onKeyDown={moveAmongRows}
-            onClick={() => {
-              if (!off) {
-                onPick(option.value);
-              }
-            }}
-            {...stylex.props(styles.row, focus.ring)}
-          >
-            <span aria-hidden="true" {...stylex.props(styles.tick)}>
-              {on ? <Icon icon={Tick} /> : null}
-            </span>
-            {own === undefined ? null : <Icon icon={own} />}
-            <span {...stylex.props(styles.rowWords)}>
-              <span>{option.label}</span>
-              {off && option.reason !== undefined && option.reason !== "" ? (
-                <span {...stylex.props(styles.rowWhy)}>{option.reason}</span>
-              ) : null}
-            </span>
-          </button>
-        </li>
-      );
-    })}
-  </ul>
-);
 
 /** The chip: the maker's mark, the model's name, its level in a word, and the chevron. */
 /** A computed length in pixels ("8px"), or 0 for one that is not ("normal"). */
@@ -512,6 +402,50 @@ const Chip = ({
   );
 };
 
+/** The chip at rest: the maker's mark, the level in a word, the chevron. The name is in its tooltip. */
+const EffortChip = ({
+  props,
+  mark,
+  level,
+  lit,
+  value,
+}: {
+  props: Record<string, unknown>;
+  mark: IconData | undefined;
+  level: string;
+  lit: boolean;
+  value: string;
+}) => (
+  <button
+    {...props}
+    type="button"
+    data-slot="composer-model-effort"
+    data-top={lit || undefined}
+    {...stylex.props(
+      controlStyles.control,
+      styles.chipShrinks,
+      focus.ring,
+      lit && styles.lit
+    )}
+  >
+    <span aria-hidden="true" {...stylex.props(controlStyles.reach)} />
+    {lit ? <LitEdge /> : null}
+    <span key={value} {...stylex.props(controlStyles.value, styles.chipValue)}>
+      {mark === undefined ? null : <Icon icon={mark} />}
+      <span
+        data-slot="composer-model-effort-level"
+        {...stylex.props(
+          controlStyles.words,
+          mark !== undefined && styles.effortFolds
+        )}
+      >
+        {level}
+      </span>
+    </span>
+    <Icon icon={ChevronDown} />
+  </button>
+);
+
 /** What the chip and the surface show for the chosen model and level. */
 const readChoice = (
   models: ComposerModelEffortOption[],
@@ -539,35 +473,65 @@ const readChoice = (
   };
 };
 
-/** The effort: every level by name on segments, or for a model with one level a line that says so. */
-const EffortPart = ({
+/** A model's levels as one key, so a new array with the same levels is the same row. */
+const levelsKey = (levels: readonly ComposerReasoningOption[]) =>
+  levels.map((level) => level.value).join("\u0000");
+
+/**
+ * The menu's foot: the chosen model's levels under "Thinking". A model with one level has none: the
+ * row closes, its height easing, the last model's levels kept (and inert) until it has closed.
+ */
+const ThinkingRow = ({
   levels,
   value,
   onValueChange,
   label,
-  noneLabel,
 }: {
   levels: ComposerReasoningOption[];
   value: string;
   onValueChange: (value: string) => void;
   label: string;
-  noneLabel: string;
-}) => (
-  <div {...stylex.props(styles.effort)}>
-    {levels.length > 1 ? (
-      <ComposerEffort
-        levels={levels}
-        value={value}
-        onValueChange={onValueChange}
-        label={label}
-      />
-    ) : (
-      <p {...stylex.props(styles.none)}>{noneLabel}</p>
-    )}
-  </div>
-);
+}) => {
+  const open = levels.length > 1;
+  const [kept, setKept] = useState(levels);
+  // The levels to show while the row closes: those of the last model that had any.
+  if (open && levelsKey(kept) !== levelsKey(levels)) {
+    setKept(levels);
+  }
+  const shown = open ? levels : kept;
+  return (
+    <div
+      data-slot="composer-model-thinking-fold"
+      data-open={open ? "" : undefined}
+      inert={!open}
+      // Closed: the kept levels go once the height has eased away.
+      onTransitionEnd={(event) => {
+        if (!open && event.target === event.currentTarget) {
+          setKept(noLevels);
+        }
+      }}
+      {...stylex.props(styles.fold, open && styles.foldOpen)}
+    >
+      <div {...stylex.props(styles.foldInner)}>
+        {shown.length > 1 ? (
+          <div
+            data-slot="composer-model-thinking"
+            {...stylex.props(styles.thinking)}
+          >
+            <ComposerEffort
+              row
+              levels={shown}
+              value={value}
+              onValueChange={onValueChange}
+              label={label}
+            />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+};
 
-/** The model and its effort, as one control: a chip, and a surface with the effort first. */
 export const ComposerModelEffort = ({
   models,
   makers = noMakers,
@@ -577,24 +541,33 @@ export const ComposerModelEffort = ({
   onEffortChange,
   label: labelDeprecated,
   "aria-label": labelGiven,
-  modelLabel: modelGiven,
-  effortLabel: effortGiven,
-  noEffortLabel: noEffortGiven,
+  thinkingLabel: thinkingGiven,
+  effortLabel: effortDeprecated,
+  favourites = noFavourites,
+  connect,
+  searchLabel: searchGiven,
+  makersLabel: makersGiven,
+  favouritesLabel: favouritesGiven,
+  emptyLabel: emptyGiven,
   topLight = false,
+  showName = false,
+  words: own,
 }: ComposerModelEffortProps) => {
   const disabled = useComposerDisabled();
   // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
-  const words = useComposerWords("modelEffort");
+  const words = useComposerWords("modelEffort", own);
+  const modelWords = useComposerWords("model");
   const label = labelGiven ?? labelDeprecated ?? words.label;
-  const modelLabel = modelGiven ?? words.model;
-  const effortLabel = effortGiven ?? words.effort;
-  const noEffortLabel = noEffortGiven ?? words.none;
+  const thinkingLabel = thinkingGiven ?? effortDeprecated ?? words.thinking;
+  const menuWords: ModelMenuWords = {
+    label,
+    search: searchGiven ?? modelWords.search,
+    makers: makersGiven ?? modelWords.makers,
+    favourites: favouritesGiven ?? modelWords.favourites,
+    empty: emptyGiven ?? modelWords.empty,
+  };
   const [open, setOpen] = useState(false);
-  const [listing, setListing] = useState(false);
-  const header = useRef<HTMLButtonElement | null>(null);
-  const listId = useId();
   const {
-    current,
     name,
     mark,
     levels,
@@ -604,16 +577,12 @@ export const ComposerModelEffort = ({
     said,
   } = readChoice(models, makers, model, effort);
   const lit = topLight && top;
+  // The chosen level, said when it changes while the menu is open.
+  const [levelSaid, setLevelSaid] = useState("");
 
-  const back = () => {
-    setListing(false);
-    header.current?.focus();
-  };
-
-  // One Escape does one thing: with the list open it goes back to the effort; otherwise it closes
-  // the surface. Either way no listener of the host's hears it.
+  // Escape closes the menu, and no listener of the host's hears it. Tab from its last stop goes on
+  // to the next stop after the chip, the menu closed.
   const keys = (event: KeyboardEvent<HTMLElement>) => {
-    // Tab from the surface's last stop: on to the next stop after the chip, the surface closed.
     const out =
       event.key === "Tab"
         ? tabOutTarget(event.currentTarget, event.target, event.shiftKey)
@@ -626,11 +595,7 @@ export const ComposerModelEffort = ({
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      if (listing) {
-        back();
-      } else {
-        setOpen(false);
-      }
+      setOpen(false);
     }
     stopEscape(event);
   };
@@ -640,28 +605,45 @@ export const ComposerModelEffort = ({
       open={open}
       onOpenChange={(next: boolean) => {
         setOpen(next);
-        setListing(false);
+        setLevelSaid("");
       }}
     >
       <PopoverTrigger
         disabled={disabled}
         aria-label={`${label}: ${said}`}
-        // Too narrow for its words, the chip shows them whole in a tooltip.
-        render={(props: Record<string, unknown>) => (
-          <ChipTip
-            label={said}
-            render={(tip) => (
-              <Chip
-                props={mergeProps(props, tip)}
-                mark={mark}
-                name={name}
-                level={level}
-                lit={lit}
-                value={`${model} ${effort}`}
-              />
-            )}
-          />
-        )}
+        // The name in the chip: too narrow for its words, it shows them whole in a tooltip. The level
+        // alone: the tooltip always says the model and its level.
+        render={(props: Record<string, unknown>) =>
+          showName || level === undefined ? (
+            <ChipTip
+              label={said}
+              render={(tip) => (
+                <Chip
+                  props={mergeProps(props, tip)}
+                  mark={mark}
+                  name={name}
+                  level={level}
+                  lit={lit}
+                  value={`${model} ${effort}`}
+                />
+              )}
+            />
+          ) : (
+            <ChipTip
+              always
+              label={said}
+              render={(tip) => (
+                <EffortChip
+                  props={mergeProps(props, tip)}
+                  mark={mark}
+                  level={level}
+                  lit={lit}
+                  value={`${model} ${effort}`}
+                />
+              )}
+            />
+          )
+        }
       />
       <PopoverContent
         onKeyDown={keys}
@@ -680,47 +662,36 @@ export const ComposerModelEffort = ({
           data-slot="composer-model-effort-surface"
           {...stylex.props(styles.surface)}
         >
-          <button
-            ref={header}
-            type="button"
-            aria-expanded={listing}
-            aria-controls={listing ? listId : undefined}
-            aria-label={`${modelLabel}: ${name}`}
-            onClick={() => {
-              setListing(!listing);
-            }}
-            data-slot="composer-model-effort-model"
-            {...stylex.props(styles.header, focus.ring)}
+          {/* ComposerModel's own menu. Choosing a model keeps it open, so its level can be set next. */}
+          <ModelMenu
+            models={models}
+            makers={makers}
+            value={model}
+            favourites={favourites}
+            connect={connect}
+            words={menuWords}
+            onPick={onModelChange}
+            foot={
+              <ThinkingRow
+                levels={levels}
+                value={at === -1 ? (levels[0]?.value ?? "") : effort}
+                onValueChange={(next) => {
+                  onEffortChange(next);
+                  setLevelSaid(
+                    `${thinkingLabel}: ${levels.find((each) => each.value === next)?.label ?? ""}`
+                  );
+                }}
+                label={thinkingLabel}
+              />
+            }
+          />
+          <p
+            aria-live="polite"
+            data-slot="composer-model-thinking-said"
+            {...stylex.props(visuallyHidden)}
           >
-            {mark === undefined ? null : (
-              <span aria-hidden="true" {...stylex.props(styles.headerMark)}>
-                <Icon icon={mark} />
-              </span>
-            )}
-            <span {...stylex.props(styles.headerName)}>{name}</span>
-            <Icon icon={listing ? ChevronDown : ChevronRight} />
-          </button>
-          {listing ? (
-            <ModelList
-              id={listId}
-              models={models}
-              makers={makers}
-              chosen={current?.value}
-              label={modelLabel}
-              onPick={(value) => {
-                onModelChange(value);
-                back();
-              }}
-            />
-          ) : (
-            <EffortPart
-              levels={levels}
-              value={at === -1 ? (levels[0]?.value ?? "") : effort}
-              onValueChange={onEffortChange}
-              label={effortLabel}
-              noneLabel={noEffortLabel}
-            />
-          )}
+            {levelSaid}
+          </p>
         </div>
       </PopoverContent>
     </Popover>

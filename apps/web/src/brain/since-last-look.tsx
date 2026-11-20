@@ -31,8 +31,8 @@ import { keepLooked, lastLooked } from "./last-looked.ts";
 // (brain-log.tsx) is built from what the brain holds, this from what
 // changed. Once read, the moment it was asked counts as their last look.
 
-/** How many changes a page shows. */
-const pageSize = 20;
+/** How many changes a page shows: a few, so the log below stays in view. */
+const pageSize = 5;
 
 /** What a read of the changes came to. */
 type Read =

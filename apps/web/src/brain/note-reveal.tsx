@@ -61,9 +61,6 @@ const styles = stylex.create({
   },
 });
 
-/** The canvas takes its look as a class: StyleX's for the layer. */
-const overLayer = { className: stylex.props(styles.layer).className ?? "" };
-
 /** The layer itself. It sits beside the brain and the note, inside what holds them, and covers exactly that. */
 export const NoteReveal = () => {
   const { t } = useLingui();
@@ -79,7 +76,7 @@ export const NoteReveal = () => {
   }
   return (
     <DotsBuild
-      {...overLayer}
+      layer={styles.layer}
       from={dots}
       label={t`Opening the note`}
       onEnd={endNoteReveal}

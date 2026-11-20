@@ -16,7 +16,6 @@ import {
 } from "../dropdown-menu";
 import { More } from "../icons";
 import { grasp } from "../tokens/tokens.stylex";
-import type { BreadcrumbItem } from "./breadcrumb";
 
 const styles = stylex.create({
   // The trigger is a small ghost Button; the margins round it hand back what it is taller than the
@@ -37,7 +36,8 @@ const styles = stylex.create({
 });
 
 interface HiddenLevelsProps {
-  levels: BreadcrumbItem[];
+  /** The folded levels, in the order of the path: each its name and where it goes. */
+  levels: { label: string; href?: string }[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   label: string;

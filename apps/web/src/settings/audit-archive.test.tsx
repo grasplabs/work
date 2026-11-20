@@ -183,7 +183,12 @@ const press = async (name: string) => {
 /** The archived events listed. */
 const listed = (): number => document.querySelectorAll("table tbody tr").length;
 
-const text = (): string => document.body.textContent ?? "";
+/** What the page shows: its words, and the values in its fields that only read. */
+const text = (): string =>
+  [
+    document.body.textContent ?? "",
+    ...[...document.querySelectorAll("input")].map((input) => input.value),
+  ].join(" ");
 
 const kept: AuditRetention = { auditDays: 180, archiveDays: 2555, runDays: 30 };
 

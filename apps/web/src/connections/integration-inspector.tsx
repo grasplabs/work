@@ -10,7 +10,13 @@ import { formatDate } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyDescription,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import type { KeyValueItem } from "../grasp/key-value/index.ts";
 import { PanelSection } from "../grasp/panel-section/index.ts";
@@ -30,7 +36,6 @@ import {
   allowedToolsOf,
   newestOf,
   toolGroups,
-  useReaches,
   useWhyNoConnect,
 } from "./integration-facts.ts";
 import type { Integration } from "./integrations.ts";
@@ -52,6 +57,13 @@ import type { ConnectionUses } from "./workflows-using.tsx";
 // connection this person may remove.
 
 const styles = stylex.create({
+  // The facts on the section card's inset, as the inspector's rows stand.
+  facts: {
+    marginInline: grasp.inspectorInset,
+    marginBlock: grasp.space2,
+  },
+  // The one thing to do now, first under the app's name, across the panel.
+  main: { display: "grid", paddingInline: grasp.inspectorInset },
   foot: {
     display: "flex",
     flexWrap: "wrap",
@@ -74,8 +86,10 @@ const Tools = ({
   if (tools === undefined) {
     return (
       <PanelSection label={t`What Grasp may do`}>
-        <Empty size="inline">
-          {t`The catalog doesn't list ${app}, so its tools can't be shown.`}
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`The catalog doesn't list ${app}, so its tools can't be shown.`}</EmptyDescription>
+          </EmptyHeader>
         </Empty>
       </PanelSection>
     );
@@ -94,8 +108,14 @@ const Tools = ({
         if (loaded.state !== "ready") {
           return (
             <PanelSection label={t`What Grasp may do`}>
-              <Empty size="inline" tone="danger">
-                {notLoadedText(loaded, i18n)}
+              <Empty size="sm" tone="danger">
+                <EmptyHeader>
+                  <EmptyMedia />
+                  <EmptyTitle />
+                  <EmptyDescription>
+                    {notLoadedText(loaded, i18n)}
+                  </EmptyDescription>
+                </EmptyHeader>
               </Empty>
             </PanelSection>
           );
@@ -103,7 +123,11 @@ const Tools = ({
         if (loaded.data.length === 0) {
           return (
             <PanelSection label={t`What Grasp may do`}>
-              <Empty size="inline">{t`${app} has no tools.`}</Empty>
+              <Empty size="sm">
+                <EmptyHeader>
+                  <EmptyDescription>{t`${app} has no tools.`}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             </PanelSection>
           );
         }
@@ -142,7 +166,6 @@ const Account = ({
   identity: Identity;
 }) => {
   const { t } = useLingui();
-  const reachesOf = useReaches();
   const newest = newestOf(integration);
   if (newest === undefined) {
     return null;
@@ -158,21 +181,22 @@ const Account = ({
       value:
         state === "personal" ? t`Only you` : t`Everyone in the organization`,
     },
-    { key: t`Reaches`, value: reachesOf(integration) },
     { key: t`Connected by`, value: by },
     { key: t`Connected on`, value: formatDate(newest.createdAt) },
   ];
   if (newest.accountName !== null) {
-    items.unshift({ key: t`Account`, value: newest.accountName });
+    items.unshift({ key: t`Signed in as`, value: newest.accountName });
   }
   return (
     <PanelSection label={t`Account`}>
-      <KeyValueList items={items} variant="inline" />
+      <div {...stylex.props(styles.facts)}>
+        <KeyValueList items={items} variant="inline" />
+      </div>
     </PanelSection>
   );
 };
 
-/** The one thing to do about it now, in the panel's bar: sign in again, or connect. */
+/** The one thing to do about it now, first under the app's name: sign in again, or connect. */
 const MainAction = ({
   integration,
   identity,
@@ -189,12 +213,11 @@ const MainAction = ({
     return null;
   }
   return (
-    <>
+    <div {...stylex.props(styles.main)}>
       <Button
         onClick={() => {
           setOpen(true);
         }}
-        size="xs"
         variant="ink"
       >
         {again === undefined ? t`Connect` : t`Sign in again`}
@@ -206,7 +229,7 @@ const MainAction = ({
         onOpenChange={setOpen}
         open={open}
       />
-    </>
+    </div>
   );
 };
 
@@ -282,8 +305,7 @@ export const IntegrationInspector = ({
       {...(layout === undefined ? {} : { layout })}
     >
       <PanelHeader
-        actions={<MainAction identity={identity} integration={integration} />}
-        closeLabel={t`Close`}
+        words={{ close: t`Close` }}
         {...(about === undefined ? {} : { description: about })}
         icon={
           <ProviderMark
@@ -294,9 +316,12 @@ export const IntegrationInspector = ({
           />
         }
         {...(onClose === undefined ? {} : { onClose })}
+        iconBeside
+        texture
         title={integration.name}
       />
       <PanelView>
+        <MainAction identity={identity} integration={integration} />
         {why === undefined ? null : <Alert title={why} />}
         <Account identity={identity} integration={integration} />
         <Tools

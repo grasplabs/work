@@ -32,7 +32,10 @@ import type { LanguageOption } from "./options";
 import { Pair } from "./pair";
 import { styles } from "./styles";
 import { languageSwitchWords } from "./words";
-import type { LanguageSwitchWords } from "./words";
+import type {
+  LanguageSwitchCatalogueWords,
+  LanguageSwitchWords,
+} from "./words";
 
 // False on the server and while hydrating, true after: a store that never changes.
 const never = () => () => {
@@ -119,6 +122,12 @@ export interface LanguageSwitchProps {
   style?: LanguageSwitchLayoutStyle;
   /** Layout only: where it sits. */
   layout?: LanguageSwitchLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ label: "Taal" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<LanguageSwitchCatalogueWords>;
 }
 
 export const LanguageSwitch = ({
@@ -142,6 +151,7 @@ export const LanguageSwitch = ({
   buttonLabel: buttonLabelGiven,
   style: styleProp,
   layout,
+  words,
 }: LanguageSwitchProps) => {
   // Its words: the product's, by its catalogue, else English; the caller's props still win.
   const {
@@ -153,7 +163,7 @@ export const LanguageSwitch = ({
     empty: emptyLabel,
     helpTranslate: helpTranslateLabel,
     button: buttonLabel,
-  } = withGiven(useWords("languageSwitch", languageSwitchWords), {
+  } = withGiven(useWords("languageSwitch", languageSwitchWords, words), {
     label: labelGiven,
     search: searchLabelGiven,
     clearSearch: clearSearchLabelGiven,
@@ -175,7 +185,7 @@ export const LanguageSwitch = ({
     setOwn(code);
     onValueChange?.(code);
   };
-  const words: LanguageSwitchWords = {
+  const shownWords: LanguageSwitchWords = {
     label,
     search: searchLabel,
     clearSearch: clearSearchLabel,
@@ -188,7 +198,7 @@ export const LanguageSwitch = ({
     options,
     value: current,
     onChoose: choose,
-    words,
+    words: shownWords,
     suggested,
     secondNames: secondNames && hydrated,
     helpTranslateHref,

@@ -355,16 +355,12 @@ export const ForgetButton = ({
 }: {
   label: string;
   onClick: () => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Button
-      aria-label={label}
-      icon={Trash}
-      onClick={onClick}
-      size="sm"
-      title={t`Remove from the brain`}
-      variant="ghost"
-    />
-  );
-};
+}) => (
+  <Button
+    aria-label={label}
+    icon={Trash}
+    onClick={onClick}
+    size="sm"
+    variant="ghost"
+  />
+);

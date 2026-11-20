@@ -1,7 +1,9 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import type { RenderProp } from "@ui-sdk/react/primitive";
+import { renderElement } from "@ui-sdk/react/primitive";
+import { isValidElement, useEffect, useLayoutEffect, useRef } from "react";
 import type {
   KeyboardEvent,
   MouseEvent,
@@ -13,7 +15,7 @@ import type {
 import { announce } from "../announce/announce";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
-import { Icon } from "../icons";
+import { ChevronLeft, Icon } from "../icons";
 import type { IconData } from "../icons";
 import { glide, spanOf } from "../motion/glide";
 import { simply } from "../motion/simply.stylex";
@@ -21,8 +23,11 @@ import { tabStyles } from "../tabs/tabs";
 import { rowMarker } from "../tabs/tabs.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
-import { useWords } from "../words/words";
+import { Tip, withTip } from "../tooltip/tip";
+import { useWords, withGiven } from "../words/words";
+import { useSidebarGivenWords } from "./shell";
 import { sidebarWords } from "./words";
+import type { SidebarWords } from "./words";
 
 const HOVER = media.hover;
 const COARSE = media.coarse;
@@ -175,6 +180,82 @@ const styles = stylex.create({
     transitionDuration: `${simply.ui}, ${grasp.durationHover}`,
     transitionTimingFunction: grasp.ease,
   },
+  // Back and the home as one segment: raised out of the track as a chosen tab, its two parts each a
+  // press of its own, a row's height (a fingertip's on a touch screen), with its own hover fill and
+  // focus ring inside the shape, and a hairline between them.
+  homeSegment: {
+    display: "flex",
+    flexGrow: 1,
+    alignItems: "stretch",
+    minWidth: 0,
+    borderRadius: TAB_CORNER,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: { default: grasp.shellCard, [FORCED]: "Canvas" },
+    backgroundImage: { default: VEIL, [FORCED]: "none" },
+    boxShadow: { default: grasp.liftLow, [FORCED]: "none" },
+    outline: { default: null, [FORCED]: `${grasp.hairline} solid CanvasText` },
+  },
+  homePart: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    boxSizing: "border-box",
+    minHeight: { default: grasp.shellRow, [COARSE]: grasp.tap },
+    cornerShape: grasp.cornerShape,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightMedium,
+    letterSpacing: grasp.shellTracking,
+    textDecoration: "none",
+    backgroundColor: {
+      default: "transparent",
+      [HOVER]: { default: "transparent", ":hover": grasp.shellHover },
+    },
+    transitionProperty: "color, background-color",
+    transitionDuration: grasp.shellAnswer,
+    transitionTimingFunction: grasp.ease,
+  },
+  // Back: the chevron alone, centred on the rows' icon column (the track's inset and half its width
+  // put it there), the segment's start corners.
+  homeBack: {
+    justifyContent: "center",
+    flexShrink: 0,
+    width: { default: grasp.shellIconButton, [COARSE]: grasp.tap },
+    borderStartStartRadius: TAB_CORNER,
+    borderEndStartRadius: TAB_CORNER,
+    color: {
+      default: grasp.shellTextSecondary,
+      [HOVER]: { default: grasp.shellTextSecondary, ":hover": grasp.shellText },
+      [FORCED]: "LinkText",
+    },
+  },
+  homeRule: {
+    flexShrink: 0,
+    alignSelf: "center",
+    width: grasp.hairline,
+    height: grasp.space4,
+    backgroundColor: { default: grasp.shellRule, [FORCED]: "CanvasText" },
+  },
+  // The section's name: a heading that holds its link, with no room of its own.
+  homeHeading: {
+    display: "flex",
+    flexGrow: 1,
+    minWidth: 0,
+    margin: 0,
+    fontSize: "inherit",
+    fontWeight: "inherit",
+  },
+  // The home: the section's icon and name, in the shell's ink, the segment's end corners.
+  home: {
+    flexGrow: 1,
+    gap: grasp.shellIconGap,
+    minWidth: 0,
+    paddingInline: `calc(${grasp.shellRowInline} - ${INSET})`,
+    borderStartEndRadius: TAB_CORNER,
+    borderEndEndRadius: TAB_CORNER,
+    color: { default: grasp.shellText, [FORCED]: "LinkText" },
+  },
   // Chosen: its ink, and its own ground only until the thumb stands (and always in forced colours).
   tabChosen: {
     color: { default: grasp.shellText, [FORCED]: "HighlightText" },
@@ -290,6 +371,16 @@ export interface SectionHeadProps {
   backLabel?: string;
   /** Draws the Back row with the sidebar's own row part. */
   renderBack: (back: SidebarBack & { label: string }) => ReactElement;
+  /** The section's own first page (SidebarSection's `home`): its name, above Back, opens it. */
+  home?: RenderProp;
+  /** That page is the one open. */
+  homeCurrent?: boolean;
+  /**
+   * This instance's own words, over its Sidebar's `words` and the catalogue's (GraspWords), key by key (`{ back: "All settings" }`). Any left out
+   * are the Sidebar's, else the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SidebarWords>;
 }
 
 /** Back, then the section's name: where the tabs would stand on the main list. */
@@ -300,9 +391,19 @@ export const SectionHead = ({
   back,
   backLabel: backGiven,
   renderBack,
+  home,
+  homeCurrent = false,
+  words,
 }: SectionHeadProps) => {
-  const words = useWords("sidebar", sidebarWords);
-  const backLabel = backGiven ?? words.back;
+  const fromSidebar = useSidebarGivenWords();
+  const backLabel = withGiven(
+    useWords(
+      "sidebar",
+      sidebarWords,
+      words === undefined ? fromSidebar : { ...fromSidebar, ...words }
+    ),
+    { back: backGiven }
+  ).back;
   let lead: ReactNode = null;
   if (mark !== undefined) {
     lead = (
@@ -312,6 +413,80 @@ export const SectionHead = ({
     );
   } else if (icon !== undefined) {
     lead = <Icon icon={icon} />;
+  }
+  if (home !== undefined) {
+    return (
+      <div
+        data-slot="sidebar-section-head"
+        {...stylex.props(styles.sectionHead)}
+      >
+        <div
+          {...stylex.props(
+            rowMarker,
+            tabStyles.list,
+            tabStyles.listSegmented,
+            styles.tabs
+          )}
+        >
+          <div
+            data-slot="sidebar-section-home"
+            {...stylex.props(styles.homeSegment)}
+          >
+            <Tip
+              name
+              tooltip={backLabel}
+              render={(tip: Record<string, unknown>) =>
+                renderElement(
+                  "a",
+                  withTip(
+                    {
+                      href: back.href,
+                      onClick: back.onClick,
+                      "aria-label": backLabel,
+                      "data-slot": "sidebar-back",
+                      className: stylex.props(
+                        styles.homePart,
+                        styles.homeBack,
+                        focus.inside
+                      ).className,
+                      children: <Icon icon={ChevronLeft} />,
+                    },
+                    tip
+                  ),
+                  isValidElement<Record<string, unknown>>(back.render)
+                    ? back.render
+                    : undefined
+                )
+              }
+            />
+            <span aria-hidden="true" {...stylex.props(styles.homeRule)} />
+            <h2
+              data-slot="sidebar-section-title"
+              {...stylex.props(styles.homeHeading)}
+            >
+              {renderElement(
+                "a",
+                {
+                  "aria-current": homeCurrent ? "page" : undefined,
+                  className: stylex.props(
+                    styles.homePart,
+                    styles.home,
+                    focus.inside
+                  ).className,
+                  children: (
+                    <>
+                      {lead}
+                      <span {...stylex.props(styles.titleWords)}>{title}</span>
+                    </>
+                  ),
+                },
+                home
+              )}
+            </h2>
+          </div>
+        </div>
+      </div>
+    );
   }
   return (
     <div data-slot="sidebar-section-head" {...stylex.props(styles.sectionHead)}>
@@ -395,41 +570,48 @@ const Tab = ({
   tab,
   chosen,
   onChoose,
+  panel,
+  iconOnly,
 }: {
   id: string;
   tab: SidebarTab;
   chosen: boolean;
   onChoose: (value: string) => void;
+  /** Ties it to the tab panel round the rows; a section's views have none. */
+  panel: boolean;
+  /** Its icon alone: its words are its name, and its tooltip. */
+  iconOnly: boolean;
 }) => {
   const counted = tab.count !== undefined && tab.count > 0;
-  return (
-    <button
-      type="button"
-      role="tab"
-      id={tabId(id, tab.value)}
-      aria-selected={chosen}
-      aria-controls={tabPanelId(id)}
-      tabIndex={chosen ? 0 : -1}
-      data-sidebar-tab={tab.value}
-      onKeyDown={(event) => {
-        const next = tabFor(event);
-        if (next !== null) {
-          event.preventDefault();
-          next.focus();
-          next.click();
-        }
-      }}
-      onClick={() => {
-        onChoose(tab.value);
-      }}
-      {...stylex.props(
-        tabStyles.tab,
-        tabStyles.segment,
-        styles.tab,
-        chosen ? styles.tabChosen : tabStyles.segmentLive,
-        focus.inside
-      )}
-    >
+  const own = {
+    role: "tab",
+    id: tabId(id, tab.value),
+    "aria-selected": chosen,
+    "aria-controls": panel ? tabPanelId(id) : undefined,
+    tabIndex: chosen ? 0 : -1,
+    "data-sidebar-tab": tab.value,
+    onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => {
+      const next = tabFor(event);
+      if (next !== null) {
+        event.preventDefault();
+        // Chosen, then focused: a press closes a tab's tooltip, so focus after it opens the tip.
+        next.click();
+        next.focus();
+      }
+    },
+    onClick: () => {
+      onChoose(tab.value);
+    },
+    ...stylex.props(
+      tabStyles.tab,
+      tabStyles.segment,
+      styles.tab,
+      chosen ? styles.tabChosen : tabStyles.segmentLive,
+      focus.inside
+    ),
+  };
+  const drawn = (trigger: Record<string, unknown>) => (
+    <button type="button" {...withTip(own, trigger)}>
       <span
         aria-hidden="true"
         {...stylex.props(
@@ -444,15 +626,25 @@ const Tab = ({
           {counted && <TabCount />}
         </span>
       )}
-      <span {...stylex.props(styles.hold)}>
-        <span data-slot="sidebar-tab-words" {...stylex.props(styles.tabWords)}>
-          {tab.label}
+      {iconOnly ? (
+        <Unseen>{tab.label}</Unseen>
+      ) : (
+        <span {...stylex.props(styles.hold)}>
+          <span
+            data-slot="sidebar-tab-words"
+            {...stylex.props(styles.tabWords)}
+          >
+            {tab.label}
+          </span>
+          {counted && tab.icon === undefined && <TabCount atWords />}
         </span>
-        {counted && tab.icon === undefined && <TabCount atWords />}
-      </span>
+      )}
       {counted && <Unseen>{` ${tab.countLabel ?? String(tab.count)}`}</Unseen>}
     </button>
   );
+  // The tip repeats the name, so it describes nothing (`name`): a screen reader hears it once. It is
+  // imported, not loaded lazily, as an icon-only Button's is: a late swap drops focus and refs.
+  return iconOnly ? <Tip name tooltip={tab.label} render={drawn} /> : drawn({});
 };
 
 /** The chosen tab in the switch. */
@@ -579,19 +771,36 @@ const crossfade = (panel: HTMLElement | null) => {
   });
 };
 
-/** The tabs at the top of the main list: one tab stop, ←/→, Home and End move and choose. */
+/** Whether three or more tabs, each with an icon: worded, they would cut their words in the sidebar's width. */
+const crowded = (tabs: readonly SidebarTab[]) =>
+  tabs.length > 2 && tabs.every((tab) => tab.icon !== undefined);
+
+/** The tabs at the top of the main list, or a section's views: one tab stop, ←/→, Home and End move and choose. */
 export const SidebarTabs = ({
   id,
   tabs,
   value,
   label,
   onChoose,
+  panel = true,
+  iconOnly = crowded(tabs),
 }: {
   id: string;
   tabs: readonly SidebarTab[];
   value: string;
   label: string;
   onChoose: (value: string) => void;
+  /**
+   * The tabs switch the rows under them, in a tab panel (each tab's `aria-controls`, the lists'
+   * crossfade). False for a section's views, which switch what its page shows, not the rows.
+   * @default true
+   */
+  panel?: boolean;
+  /**
+   * Each tab its icon alone, its words its name and its tooltip.
+   * @default true from three tabs that all have an icon
+   */
+  iconOnly?: boolean;
 }) => {
   useCountVoice(tabs);
   return (
@@ -619,8 +828,10 @@ export const SidebarTabs = ({
             id={id}
             tab={tab}
             chosen={tab.value === value}
+            panel={panel}
+            iconOnly={iconOnly}
             onChoose={(next) => {
-              if (next !== value) {
+              if (panel && next !== value) {
                 crossfade(
                   document.querySelector<HTMLElement>(
                     `#${CSS.escape(tabPanelId(id))}`

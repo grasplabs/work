@@ -8,10 +8,9 @@ import { useState } from "react";
 
 import { copyText } from "../copy.ts";
 import { downloadCsv } from "../csv.ts";
-import type { Interviews } from "../dashboard/waiting.ts";
 import { formatDate, formatList } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar } from "../grasp/avatar/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { ArrowRight, Copy, Download, Tick } from "../grasp/icons/index.ts";
@@ -34,6 +33,7 @@ import { fullLink, linksCsv, linksOf } from "../onboarding/links-to-send.ts";
 import { closesOn, listeningOf, teamNumbersOf } from "../onboarding/setup.ts";
 import type { Listening } from "../onboarding/setup.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import type { Interviews } from "./waiting.ts";
 
 // The onboarding's interviews as the inbox's pinned item, for the admins
 // Settings, Onboarding was for: what keeps the links from going out, how
@@ -187,14 +187,16 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
       flush
       title={t`Links to send`}
     >
-      {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
       <ItemGroup aria-label={t`Links to send`} separated>
         {links.map((link) => {
           const { name } = link;
           return (
             <Item key={link.person} size="xs">
               <ItemMedia>
-                <Avatar name={name} size="xs" />
+                <Avatar name={name} size="xs">
+                  <AvatarFallback />
+                </Avatar>
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>{name}</ItemTitle>
@@ -242,7 +244,7 @@ const Notes = ({
         </Text>
       ) : null}
       {view.paused ? (
-        <Alert variant="attention">
+        <Alert tone="attention">
           {t`Paused: no link opens and none goes out.`}
         </Alert>
       ) : null}
@@ -252,12 +254,12 @@ const Notes = ({
         </Alert>
       )}
       {failed.length === 0 ? null : (
-        <Alert variant="danger">
+        <Alert tone="danger">
           {t`Our email didn’t reach ${unreached}. Copy their link below and send it yourself.`}
         </Alert>
       )}
       {quiet === undefined ? null : (
-        <Alert variant="attention">
+        <Alert tone="attention">
           {t`${quietTeam} is quiet. A word from ${quietLead}, their lead, usually helps.`}
         </Alert>
       )}

@@ -26,6 +26,7 @@ import { useWords, withGiven } from "../words/words";
 import { inputStyles, isInvalid, sizeStyles, targetStyles } from "./input";
 import type { InputLayoutStyle, InputSize } from "./input";
 import { inputWords } from "./words";
+import type { InputWords } from "./words";
 
 type PrimitiveProps = ComponentProps<typeof PasswordInputPrimitive>;
 
@@ -65,6 +66,12 @@ export interface PasswordInputProps {
   style?: InputLayoutStyle;
   /** Layout only: margins, alignment and width. */
   layout?: InputLayoutStyle;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ showPassword: "Show the key" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<InputWords>;
 }
 
 const COARSE = media.coarse;
@@ -147,10 +154,11 @@ export const PasswordInput = ({
   placeholder,
   showLabel: showLabelGiven,
   hideLabel: hideLabelGiven,
+  words,
   ...options
 }: PasswordInputProps) => {
   const { showPassword: showLabel, hidePassword: hideLabel } = withGiven(
-    useWords("input", inputWords),
+    useWords("input", inputWords, words),
     { showPassword: showLabelGiven, hidePassword: hideLabelGiven }
   );
   return (
@@ -177,7 +185,7 @@ export const PasswordInput = ({
               state.readOnly && inputStyles.readOnly,
               state.disabled && inputStyles.disabled,
               isInvalid(props["aria-invalid"]) && inputStyles.invalid,
-              focus.field
+              state.readOnly ? focus.fieldRead : focus.field
             )}
           />
         )}

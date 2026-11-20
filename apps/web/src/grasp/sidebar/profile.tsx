@@ -35,8 +35,10 @@ import { iconVars } from "../icons/icon.stylex";
 import { switchStyles } from "../theme-switch/styles";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
-import { useWords } from "../words/words";
+import { useWords, withGiven } from "../words/words";
+import { useSidebarGivenWords } from "./shell";
 import { sidebarWords } from "./words";
+import type { SidebarWords } from "./words";
 
 /** One option in a submenu of choices. */
 export interface SidebarChoice {
@@ -135,6 +137,12 @@ export interface SidebarProfileProps {
    * @default "Appearance"
    */
   themeLabel?: string;
+  /**
+   * This instance's own words, over its Sidebar's `words` and the catalogue's (GraspWords), key by key (`{ appearance: "Theme" }`). Any left out
+   * are the Sidebar's, else the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SidebarWords>;
 }
 
 const defaultThemes: readonly SidebarChoice[] = [
@@ -584,9 +592,17 @@ export const SidebarProfile = ({
   onThemeChange,
   themes = defaultThemes,
   themeLabel: themeGiven,
+  words,
 }: SidebarProfileProps) => {
-  const words = useWords("sidebar", sidebarWords);
-  const themeLabel = themeGiven ?? words.appearance;
+  const fromSidebar = useSidebarGivenWords();
+  const themeLabel = withGiven(
+    useWords(
+      "sidebar",
+      sidebarWords,
+      words === undefined ? fromSidebar : { ...fromSidebar, ...words }
+    ),
+    { appearance: themeGiven }
+  ).appearance;
   // The theme's submenu stands where `items` says "appearance", or else before the first
   // separator, or at the end when there is none.
   const entries: SidebarMenuEntry[] = [...items];

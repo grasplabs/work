@@ -7,42 +7,31 @@ import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { Alert } from "../grasp/alert/index.ts";
-import { Badge } from "../grasp/badge/index.ts";
-import { BrandIcon } from "../grasp/brand-icon/index.ts";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "../grasp/item/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
-import { loadFromCore } from "../load-from-core.tsx";
+import { formatList } from "../format.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Retry } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { RowAlert, SettingRow } from "../grasp/setting-row/index.ts";
+import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { LoadingLines, SectionNotLoaded } from "./section.tsx";
+import { controlStyles } from "./workspace-name.tsx";
 
 // Settings › Workspace › Sign-in, for admins: how the organization's
 // people sign in, as Grasp set it up for the deployment
-// (`orgSettings.signIn`): Microsoft 365 or Google Workspace, each by its
-// logo, whose accounts it takes (the organization's own tenant or
-// Workspace), and, only when it is missing, that the sign-in page doesn't
-// offer it yet (its secret isn't set).
-// Nothing here changes it, and core never sends a secret, only whether
-// one is set. The sign-in domains are on the Workspace section above,
-// and Grasp staff's access has a section of its own. The section reads
+// (`orgSettings.signIn`), as one row of the Organization card. Microsoft
+// 365 or Google Workspace stands in a field that only reads, whose
+// accounts it takes (the organization's own tenant or Workspace) behind
+// the row's info mark, and, only when it is missing, that the sign-in page
+// doesn't offer it yet (its secret isn't set). Nothing here changes it,
+// and core never sends a secret, only whether one is set. The row reads
 // core itself, so the page's own read stays as it is.
 
 /** Whose accounts a way to sign in takes, in words; nothing when core doesn't say. */
-const usePinned = ({
-  provider,
-  tenantId,
-  hostedDomain,
-}: SignInProvider): string | undefined => {
-  const { t } = useLingui();
+const pinnedOf = (
+  { provider, tenantId, hostedDomain }: SignInProvider,
+  t: ReturnType<typeof useLingui>["t"]
+): string | undefined => {
   if (provider === "microsoft" && tenantId !== undefined) {
     return t`Only your organization’s work accounts.`;
   }
@@ -52,45 +41,11 @@ const usePinned = ({
   return undefined;
 };
 
-/**
- * One way to sign in, as a row: its logo and name, whose accounts it
- * takes, and, only when something is wrong, that it isn't offered yet.
- */
-const ProviderRow = ({ provider }: { provider: SignInProvider }) => {
-  const { t } = useLingui();
-  const pinned = usePinned(provider);
-  const microsoft = provider.provider === "microsoft";
-  return (
-    <Item size="xs">
-      <ItemMedia>
-        <BrandIcon
-          brand={microsoft ? "microsoft" : "google"}
-          decorative
-          size="md"
-          tile={false}
-        />
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle>
-          {microsoft ? "Microsoft 365" : "Google Workspace"}
-        </ItemTitle>
-        {pinned === undefined ? null : (
-          <ItemDescription>{pinned}</ItemDescription>
-        )}
-      </ItemContent>
-      {/* Offered is how it should be, and needs no word; missing does. */}
-      {provider.offered ? null : (
-        <ItemActions>
-          <Badge size="sm" tone="attention">
-            {t`Not on the sign-in page yet`}
-          </Badge>
-        </ItemActions>
-      )}
-    </Item>
-  );
-};
+/** A way to sign in by its product's name, as its maker names it. */
+const providerName = ({ provider }: SignInProvider): string =>
+  provider === "microsoft" ? "Microsoft 365" : "Google Workspace";
 
-/** How people sign in, as core answered an admin. */
+/** How people sign in, as core answered an admin, as a row. */
 export const SignInView = ({
   signIn,
   onRetry,
@@ -100,39 +55,64 @@ export const SignInView = ({
   /** Reads it again, once it didn't load. */
   onRetry?: () => void;
 }) => {
-  const { t } = useLingui();
-  const title = t`Sign-in`;
-  if (
-    signIn?.state === "ready" &&
-    signIn.data.configured &&
-    signIn.data.providers.length > 0
-  ) {
+  const { t, i18n } = useLingui();
+  const label = t`Sign-in`;
+  if (signIn !== undefined && signIn.state !== "ready") {
     return (
-      <SectionCard density="compact" flush title={title}>
-        <ItemGroup aria-label={title} separated>
-          {signIn.data.providers.map((provider) => (
-            <ProviderRow key={provider.provider} provider={provider} />
-          ))}
-        </ItemGroup>
-      </SectionCard>
+      <SettingRow error={notLoadedText(signIn, i18n)} label={label}>
+        <Button
+          disabled={onRetry === undefined}
+          icon={Retry}
+          onClick={onRetry}
+          size="sm"
+        >
+          {t`Try again`}
+        </Button>
+      </SettingRow>
     );
   }
+  const providers =
+    signIn?.data.configured === true ? signIn.data.providers : [];
+  if (signIn !== undefined && providers.length === 0) {
+    // Nobody can sign in: someone should look.
+    return (
+      <RowAlert variant="attention">
+        {t`Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up.`}
+      </RowAlert>
+    );
+  }
+  const pinned = providers.flatMap((provider) => {
+    const words = pinnedOf(provider, t);
+    return words === undefined ? [] : [words];
+  });
   return (
-    <SectionCard density="compact" title={title}>
-      {signIn === undefined ? <LoadingLines lines={2} /> : null}
-      {signIn !== undefined && signIn.state !== "ready" ? (
-        <SectionNotLoaded
-          page={signIn}
-          {...(onRetry === undefined ? {} : { onRetry })}
-        />
-      ) : null}
-      {signIn?.state === "ready" ? (
-        // Nobody can sign in: someone should look.
-        <Alert tone="attention">
-          {t`Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up.`}
-        </Alert>
-      ) : null}
-    </SectionCard>
+    <>
+      <SettingRow
+        {...(pinned.length === 0 ? {} : { info: pinned.join(" ") })}
+        label={label}
+      >
+        {(field) => (
+          <Input
+            {...field}
+            layout={controlStyles.fill}
+            readOnly
+            size="sm"
+            value={formatList(providers.map(providerName))}
+          />
+        )}
+      </SettingRow>
+      {/* Offered is how it should be, and needs no word; missing does. */}
+      {providers
+        .filter((provider) => !provider.offered)
+        .map((provider) => {
+          const name = providerName(provider);
+          return (
+            <RowAlert key={provider.provider} variant="attention">
+              {t`${name} isn’t on the sign-in page yet.`}
+            </RowAlert>
+          );
+        })}
+    </>
   );
 };
 
@@ -160,8 +140,8 @@ const SignInRead = ({ onRetry }: { onRetry: () => void }) => {
   return <SignInView onRetry={onRetry} signIn={signIn} />;
 };
 
-/** The sign-in section, for admins only: core is asked only for them. */
-export const SignInSection = () => {
+/** The sign-in row, for admins only: core is asked only for them. */
+export const SignInRow = () => {
   const { identity } = useRouteContext({ from: "/_shell" });
   // Each try at reading it: Try again reads it anew.
   const [attempt, setAttempt] = useState(0);

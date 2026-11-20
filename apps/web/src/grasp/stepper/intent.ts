@@ -35,6 +35,14 @@ export const intent = {
       when: "Down, with room for each step's description.",
     },
     {
+      name: "labelsHidden",
+      when: "Many steps in little room: the marks alone, each step's name its tooltip.",
+    },
+    {
+      name: "reached",
+      when: "The person may move forward again to any step already reached, not only back.",
+    },
+    {
       name: "working",
       when: "The current step is under way: its ring gives way to the working light, travelling toward the next step.",
     },

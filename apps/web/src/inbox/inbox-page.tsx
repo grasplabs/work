@@ -1,32 +1,29 @@
-import type { AuditRecord } from "@grasp-os/shared/audit-log";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
+import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Await, Link, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
-import { actorOf } from "../activity/audit-log.tsx";
-import { actionWords } from "../activity/audit-words.ts";
-import { typeLabels } from "../activity/type-labels.ts";
-import type { LatestActivity } from "../dashboard/activity.tsx";
-import type { Directory } from "../directory.ts";
-import { formatDateTime, formatDayMonth } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
-import { RouterLink } from "../frame/router-link.tsx";
+import { formatDayMonth } from "../format.ts";
+import { PagePanel } from "../frame/page-panel.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { useWide } from "../frame/wide.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar } from "../grasp/avatar/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
+import { Button, useAction } from "../grasp/button/index.ts";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
-import { Agent } from "../grasp/icons/index.ts";
+import { ChevronLeft, ChevronRight } from "../grasp/icons/index.ts";
 import {
   Item,
   ItemContent,
@@ -36,13 +33,9 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "../grasp/tabs/index.ts";
+import { PanelSection } from "../grasp/panel-section/index.ts";
+import { Panel, PanelView } from "../grasp/panel/index.ts";
+import { RowList, RowListItem } from "../grasp/row-list/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { notLoadedText } from "../load-from-core.tsx";
@@ -52,60 +45,58 @@ import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import { ItemDetail } from "./item-detail.tsx";
 import { groupOf, listed } from "./items.ts";
 import type { Group, InboxItem } from "./items.ts";
+import { orderOf, skip, stepFrom } from "./walk.ts";
 
-// The inbox, on Grasp UI: what waits on the person, to work through
-// quickly. The list on one side, by group (what blocks first), and the
-// item on the other, answered in place; on a narrow page one at a time,
-// the item with its way back. The open item is the page's address
-// (`?item=<id>`), as the sidebar's Inbox view and the dashboard lead to
-// it, so a link, Back and a reload keep it. J and K (or the arrow keys in
-// the list) go to the next and the one before. A settled item leaves the
-// list, and the one after it opens in its place. For admins, Activity
-// holds the latest of the audit trail. Items come from items.ts; each
-// action goes through the same calls as the dashboard's pile.
-
-/**
- * The page's own width at which the list and the item stand side by side.
- * Written out here as in item-detail.tsx: StyleX reads a key only from
- * the file it is in.
- */
-const WIDE = "@container inbox (width >= 52rem)";
+// The Inbox, on Grasp UI: what waits on the person, to work through
+// quickly. The list is the page, in the shell's own room; its inspector is
+// the shell's page panel (frame/page-panel.tsx), always open beside a wide
+// page: the walk through what waits at its head ("1 of 3", back, next,
+// Skip), the item to decide, then its facts (Ruben's pick, 18 November). On
+// a phone the list stands alone and a row opens the panel as the shell's
+// sheet. The open item is the page's address (`?item=<id>`), so a link, Back
+// and a reload keep it; J and K (or the arrow keys in the list) go to the
+// next and the one before; a settled item leaves the list and the one after
+// it opens in its place. No tabs: the sidebar's Inbox view is the Inbox's
+// filter, and what happened is Settings' audit trail. The weekly report
+// stands at the head of the list once it is ready. Items come from items.ts.
+//
+// The shell unmounts the panel's content while the panel has given way to
+// the docked chat or its sheet is closed: where the walk stands, what was
+// skipped and what was said are the page's, kept here. The panel keeps only
+// what an item keeps until it is stepped away from (an answer being typed).
 
 const styles = stylex.create({
-  page: {
-    containerName: "inbox",
-    containerType: "inline-size",
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space4,
-    width: "100%",
-  },
-  split: {
-    display: "grid",
-    gridTemplateColumns: {
-      default: "minmax(0, 1fr)",
-      [WIDE]: "minmax(18rem, 24rem) minmax(0, 1fr)",
-    },
-    alignItems: "start",
-    gap: grasp.space4,
-  },
+  // The list, the page itself, in the shell's room.
   list: {
     display: "flex",
     flexDirection: "column",
     gap: grasp.space3,
+    width: "100%",
     minWidth: 0,
   },
-  // On a narrow page, the list makes way for the item that was opened.
-  listAway: { display: { default: "none", [WIDE]: "flex" } },
-  // The item stays in view while the list beside it scrolls.
-  item: {
-    position: { default: null, [WIDE]: "sticky" },
-    top: 0,
-    maxHeight: { default: null, [WIDE]: "calc(100dvh - 6rem)" },
-    overflowY: { default: null, [WIDE]: "auto" },
-    minWidth: 0,
+  // Nothing in the list: its state in the middle of the page.
+  listEmpty: {
+    flexGrow: 1,
+    justifyContent: "center",
   },
-  itemAway: { display: { default: "none", [WIDE]: "block" } },
+  // The walk's head: where in what waits the item is, between its arrows, and Skip apart.
+  walk: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+  },
+  place: {
+    fontVariantNumeric: "tabular-nums",
+  },
+  skip: {
+    marginInlineStart: "auto",
+  },
+  // Nothing waits: the report's item stands under the Empty, at a list's width.
+  emptyFoot: {
+    width: "100%",
+    maxWidth: "24rem",
+    marginInline: "auto",
+  },
   unseen: {
     position: "absolute",
     width: grasp.hairline,
@@ -134,9 +125,6 @@ export const groupLabel: Record<Group, MessageDescriptor> = {
 /** The groups in the filter's order; the address (`?group=`) takes these. */
 // Workflows' and Apps' asks are one group, Approvals (Ruben, 17 November).
 export const groupOrder = ["asked", "brain", "approvals", "outcomes"] as const;
-
-const isGroup = (value: string | null): value is Group =>
-  value === "all" || groupOrder.some((each) => each === value);
 
 /** What a row says under its name: its own words, or its kind and date when it has one. */
 const rowLine = (item: InboxItem, kind: string): string => {
@@ -201,7 +189,7 @@ const ItemList = ({
   }, []);
   return (
     <div ref={element}>
-      <ItemGroup aria-label={t`What waits on you`} separated>
+      <ItemGroup aria-label={t`What waits on you`}>
         {list.map((item) => (
           <Item
             current={item.id === selected?.id}
@@ -220,7 +208,9 @@ const ItemList = ({
               <ItemMedia icon={kindMark[item.kind]} iconLook="inline" />
             ) : (
               <ItemMedia>
-                <Avatar name={item.face} size="xs" />
+                <Avatar name={item.face} size="xs">
+                  <AvatarFallback />
+                </Avatar>
               </ItemMedia>
             )}
             <ItemContent>
@@ -248,45 +238,220 @@ const ItemList = ({
   );
 };
 
-/** The list and the item beside it, or on a narrow page one at a time. */
+/**
+ * Nothing in the list: nothing waits, with the report's row under it; or
+ * nothing loaded, said as a failure with Try again, never as an empty inbox.
+ */
+const NoItems = ({
+  failed,
+  foot,
+}: {
+  failed: readonly string[];
+  foot: ReactNode;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  // Nothing loaded: Try again reads the inbox again, and works until it has.
+  const retry = useAction(
+    async () => {
+      await router.invalidate({ sync: true });
+    },
+    { working: t`Trying again…`, done: t`Loaded`, failed: t`Not loaded` }
+  );
+  if (failed.length === 0) {
+    return (
+      <>
+        <Empty size="lg">
+          <EmptyHeader>
+            <EmptyMedia picture="done" />
+            <EmptyTitle>{t`Nothing waits for you`}</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
+        {foot === undefined ? null : (
+          <div {...stylex.props(styles.emptyFoot)}>{foot}</div>
+        )}
+      </>
+    );
+  }
+  return (
+    <Empty size="lg" tone="danger">
+      <EmptyHeader>
+        <EmptyMedia />
+        <EmptyTitle>{t`The inbox didn't load`}</EmptyTitle>
+        <EmptyDescription>{failed.join(" ")}</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button variant="ink" {...retry.props}>
+          {t`Try again`}
+        </Button>
+      </EmptyContent>
+    </Empty>
+  );
+};
+
+/**
+ * The walk's head over the item: where in what waits it is, the one before
+ * and the next (round and round), and Skip, which puts it at the back.
+ */
+const WalkHead = ({
+  place,
+  count,
+  onStep,
+  onSkip,
+}: {
+  place: number;
+  count: number;
+  onStep: (by: 1 | -1) => void;
+  onSkip: () => void;
+}) => {
+  const { t } = useLingui();
+  // One alone has nowhere to go: no head.
+  if (count < 2) {
+    return null;
+  }
+  return (
+    <div {...stylex.props(styles.walk)}>
+      <Button
+        aria-label={t`The one before`}
+        icon={ChevronLeft}
+        onClick={() => {
+          onStep(-1);
+        }}
+        size="sm"
+        variant="ghost"
+      />
+      <span {...stylex.props(styles.place)}>
+        <Text element="span" size="sm" tone="muted">
+          <Trans>
+            {place} of {count}
+          </Trans>
+        </Text>
+      </span>
+      <Button
+        aria-label={t`The next one`}
+        icon={ChevronRight}
+        onClick={() => {
+          onStep(1);
+        }}
+        size="sm"
+        variant="ghost"
+      />
+      {/* Skipping is no answer: it stands apart from the item's own. */}
+      <Button layout={styles.skip} onClick={onSkip} size="sm" variant="ghost">
+        <Trans context="put a to-do card at the back of the pile">Skip</Trans>
+      </Button>
+    </div>
+  );
+};
+
+/**
+ * What the shell's page panel holds: the walk's head, the item to decide,
+ * answered in place, then what is known about it.
+ */
+const Inspector = ({
+  selected,
+  head,
+  onSaid,
+}: {
+  selected: InboxItem;
+  /** The walk through what waits. */
+  head: ReactNode;
+  onSaid: (said: string) => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    // No name of its own: the shell names the panel, and its sheet, by the item's kind.
+    <Panel framed={false}>
+      <PanelView>
+        {/* In the view, not a PanelHeader: a header with only actions keeps an empty room and a line under its bar. */}
+        {head}
+        {/* The request is the one title here: the row already names its kind. */}
+        <ItemDetail item={selected} key={selected.id} onSaid={onSaid} />
+        {selected.facts.length === 0 ? null : (
+          <PanelSection label={t`Facts`}>
+            <RowList aria-label={t`Facts`}>
+              {selected.facts.map(({ label, value }) => (
+                <RowListItem detail={label} key={label} name={value} />
+              ))}
+            </RowList>
+          </PanelSection>
+        )}
+      </PanelView>
+    </Panel>
+  );
+};
+
+/**
+ * Whether the page asks its panel open, as the shell takes it: open once a
+ * row is chosen, which opens its sheet on a phone and sends a docked chat
+ * floating; closed once it gave way to the docked chat or its sheet was
+ * closed; else the shell's own (open beside a wide page, a closed sheet on
+ * a phone).
+ */
+const panelOpen = (reading: boolean, gaveWay: boolean): boolean | undefined => {
+  if (reading) {
+    return true;
+  }
+  return gaveWay ? false : undefined;
+};
+
+/**
+ * The list and, in the shell's page panel, the walk through it: the item
+ * shown with its head. On a phone the list stands alone, and a row opens
+ * the panel as a sheet.
+ */
 const ToDo = ({
   items,
   chosen,
   group,
   notLoaded,
-  olderFailures,
   onSaid,
+  foot,
+  tail,
 }: {
   items: readonly InboxItem[];
   chosen: string | undefined;
   /** The group in view, as the address has it (`?group=`). */
   group: Group;
   notLoaded: readonly Loaded<unknown>[];
-  olderFailures: boolean;
   onSaid: (said: string) => void;
+  /** What stands at the head of the list: the weekly report, once it is ready. */
+  foot: ReactNode;
+  /** What stands quietly under the list: the week's report so far. */
+  tail: ReactNode;
 }) => {
-  const { t, i18n } = useLingui();
+  const { i18n } = useLingui();
   const navigate = useNavigate();
+  // Only for which row is marked: the shell decides where the panel stands.
+  const wide = useWide();
+  // The panel gave way to the docked chat, or its sheet was closed: it
+  // stays away until a row is chosen.
+  const [gaveWay, setGaveWay] = useState(false);
   // Where the open item stood, so the one after it opens once it is settled.
   const [at, setAt] = useState(0);
+  // What was skipped this visit, last skipped last: it waits at the back.
+  const [skipped, setSkipped] = useState<readonly string[]>([]);
   const counts = new Map<Group, number>();
   for (const item of items) {
     const each = groupOf[item.kind];
     counts.set(each, (counts.get(each) ?? 0) + 1);
   }
-  const shownGroups = groupOrder.filter((each) => counts.has(each));
   // A group that has emptied falls back to everything.
   const current = group === "all" || counts.has(group) ? group : "all";
-  const list = listed(items, current, "urgent");
-  const count = list.length;
+  const inGroup = listed(items, current, "urgent");
+  const ids = inGroup.map(({ id }) => id);
+  const list = orderOf(ids, skipped).flatMap(
+    (id) => inGroup.find((item) => item.id === id) ?? []
+  );
   const index = list.findIndex(({ id }) => id === chosen);
   if (index !== -1 && index !== at) {
     setAt(index);
   }
   const selected =
     index === -1 ? list[Math.min(at, list.length - 1)] : list[index];
-  // On a narrow page the item takes the list's place once one is asked for.
+  // A row was chosen: the panel is asked open, on a phone as its sheet.
   const reading = chosen !== undefined && selected !== undefined;
+  const place = list.findIndex(({ id }) => id === selected?.id);
 
   const open = (id: string, focus: boolean) => {
     void navigate({
@@ -304,6 +469,25 @@ const ToDo = ({
           )
           ?.focus();
       });
+    }
+  };
+  const step = (by: 1 | -1) => {
+    const next = list[stepFrom(list.length, place, by)];
+    if (next !== undefined) {
+      open(next.id, false);
+    }
+  };
+  const skipShown = () => {
+    if (selected === undefined) {
+      return;
+    }
+    const after = skip(ids, {
+      at: { id: selected.id, index: place },
+      skipped,
+    });
+    setSkipped(after.skipped);
+    if (after.at !== null) {
+      open(after.at.id, false);
     }
   };
   const back = () => {
@@ -345,221 +529,73 @@ const ToDo = ({
 
   const failed = notLoaded.flatMap((part) => notLoadedText(part, i18n) ?? []);
   if (items.length === 0) {
-    return failed.length === 0 ? (
-      <Empty size="lg">
-        <EmptyHeader>
-          <EmptyMedia picture="done" />
-          <EmptyTitle>{t`Nothing waits for you`}</EmptyTitle>
-        </EmptyHeader>
-      </Empty>
-    ) : (
-      <Empty size="lg" tone="danger">
-        <EmptyHeader>
-          <EmptyMedia />
-          <EmptyTitle>{t`The inbox didn't load`}</EmptyTitle>
-          <EmptyDescription>{failed.join(" ")}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+    return (
+      <div {...stylex.props(styles.list, styles.listEmpty)}>
+        <NoItems failed={failed} foot={foot ?? tail} />
+      </div>
     );
   }
+  // The row of the item the panel shows; none while the panel is away.
+  const shown = reading || (wide && !gaveWay);
   return (
-    <div {...stylex.props(styles.split)}>
-      <div {...stylex.props(styles.list, reading && styles.listAway)}>
+    <>
+      {/* The list as the page: no card, no tabs (the sidebar's Inbox view
+          is the filter), the report's item at its head. */}
+      <div {...stylex.props(styles.list)}>
         {failed.map((text) => (
-          <Alert key={text} variant="attention">
+          <Alert key={text} tone="attention">
             {text}
           </Alert>
         ))}
-        {shownGroups.length < 2 ? null : (
-          <Tabs
-            onValueChange={(value) => {
-              if (isGroup(value)) {
-                // In the address, so the sidebar's views and Back follow it.
-                void navigate({
-                  from: "/inbox",
-                  to: "/inbox",
-                  search: (before) => ({
-                    ...before,
-                    group: value === "all" ? undefined : value,
-                  }),
-                  replace: true,
-                });
-              }
-            }}
-            value={current}
-            variant="segmented"
-          >
-            <TabsList aria-label={t`Show`}>
-              {(["all", ...shownGroups] as const).map((each) => (
-                <TabsTrigger key={each} value={each}>
-                  {i18n._(groupLabel[each])}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        )}
-        <SectionCard
-          density="compact"
-          flush
-          title={t`${plural(count, { one: "# item", other: "# items" })}`}
+        {foot}
+        <ItemList
+          list={list}
+          onOpen={open}
+          selected={shown ? selected : undefined}
+        />
+        {tail}
+      </div>
+      {selected === undefined ? null : (
+        <PagePanel
+          label={i18n._(kindLabel[selected.kind])}
+          onOpenChange={(next) => {
+            // The chat docked, or the sheet was closed: the item is open no more.
+            if (!next) {
+              setGaveWay(true);
+              back();
+            }
+          }}
+          open={panelOpen(reading, gaveWay)}
         >
-          <ItemList list={list} onOpen={open} selected={selected} />
-        </SectionCard>
-        {olderFailures ? (
-          <Text size="xs" tone="muted">
-            <Trans>
-              Older failed workflows are on the{" "}
-              <RouterLink to="/dashboard">dashboard</RouterLink>.
-            </Trans>
-          </Text>
-        ) : null}
-      </div>
-      <div {...stylex.props(styles.item, !reading && styles.itemAway)}>
-        {selected === undefined ? null : (
-          <ItemDetail
-            item={selected}
-            key={selected.id}
-            onBack={reading ? back : undefined}
+          <Inspector
+            head={
+              <WalkHead
+                count={list.length}
+                onSkip={skipShown}
+                onStep={step}
+                place={place + 1}
+              />
+            }
             onSaid={onSaid}
+            selected={selected}
           />
-        )}
-      </div>
-    </div>
-  );
-};
-
-/** What the activity tab read: the latest of the trail, with the names to show. */
-export interface InboxActivity extends LatestActivity {
-  directory: Directory;
-}
-
-type Who = "all" | "grasp" | "people";
-
-const isWho = (value: string | null): value is Who =>
-  value === "all" || value === "grasp" || value === "people";
-
-/** Whether Grasp or its agents, Apps and runs did it, rather than a person. */
-const byGrasp = (record: AuditRecord): boolean => {
-  const type = record.event?.actor.type;
-  return type !== "person" && type !== "staff" && type !== "guest";
-};
-
-const ActivityRow = ({
-  record,
-  directory,
-}: {
-  record: AuditRecord;
-  directory: Directory;
-}) => {
-  const { i18n, t } = useLingui();
-  const action = record.event?.action;
-  const text = action === undefined ? undefined : actionWords(action);
-  let sentence = t`Unreadable event`;
-  if (text !== undefined) {
-    sentence = i18n._(text);
-  } else if (action !== undefined) {
-    sentence = action;
-  }
-  const actor =
-    record.event === null ? "–" : actorOf(record.event.actor, directory).label;
-  return (
-    <Item size="xs">
-      {/* Who did it: a person's face, or Grasp's mark for what Grasp and its agents did. */}
-      {byGrasp(record) ? (
-        <ItemMedia icon={Agent} iconLook="inline" />
-      ) : (
-        <ItemMedia>
-          <Avatar name={actor} size="xs" />
-        </ItemMedia>
+        </PagePanel>
       )}
-      <ItemContent>
-        <ItemTitle>
-          {sentence}
-          {record.type === null ? null : (
-            <ItemNote>
-              <Badge size="sm">{i18n._(typeLabels[record.type])}</Badge>
-            </ItemNote>
-          )}
-        </ItemTitle>
-        <ItemDescription>
-          {`${actor} · ${formatDateTime(record.receivedAt)}`}
-        </ItemDescription>
-      </ItemContent>
-    </Item>
-  );
-};
-
-/**
- * What happened, newest first: what Grasp and its agents did by
- * themselves, and what people did. The full, searchable list is the audit
- * trail in Settings.
- */
-const ActivityList = ({ activity }: { activity: InboxActivity }) => {
-  const { t } = useLingui();
-  const [who, setWho] = useState<Who>("all");
-  const shown = activity.records.filter((record) => {
-    if (who === "all") {
-      return true;
-    }
-    return who === "grasp" ? byGrasp(record) : !byGrasp(record);
-  });
-  return (
-    <SectionCard
-      actions={
-        <>
-          <Tabs
-            onValueChange={(value) => {
-              if (isWho(value)) {
-                setWho(value);
-              }
-            }}
-            value={who}
-            variant="segmented"
-          >
-            <TabsList aria-label={t`Show activity by`}>
-              <TabsTrigger value="all">
-                <Trans context="activity filter: everyone">All</Trans>
-              </TabsTrigger>
-              <TabsTrigger value="grasp">Grasp</TabsTrigger>
-              <TabsTrigger value="people">
-                <Trans context="activity filter: what people did">People</Trans>
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <RouterLink to="/settings/audit">
-            <Trans>The full audit trail</Trans>
-          </RouterLink>
-        </>
-      }
-      density="compact"
-      flush
-      title={t`Latest activity`}
-    >
-      <ItemGroup aria-label={t`Latest activity`} separated>
-        {shown.map((record) => (
-          <ActivityRow
-            directory={activity.directory}
-            key={record.seq}
-            record={record}
-          />
-        ))}
-      </ItemGroup>
-    </SectionCard>
+    </>
   );
 };
 
 /**
  * The inbox. `notLoaded` are the parts of what waits that couldn't be
  * read, said above the list rather than left to look like nothing waits.
- * `activity` is the latest of the audit trail, for admins only.
  */
 export const InboxPage = ({
   items,
   chosen,
   group,
   notLoaded,
-  olderFailures,
-  activity,
+  foot,
+  tail,
 }: {
   items: readonly InboxItem[];
   /** The item open, by its ID: the list's first when none is, or it waits no more. */
@@ -567,63 +603,25 @@ export const InboxPage = ({
   /** The group in view, as the address has it; all when it has none. */
   group?: Exclude<Group, "all">;
   notLoaded: readonly Loaded<unknown>[];
-  /** Whether core has failed workflows older than the ones listed: the dashboard shows them. */
-  olderFailures: boolean;
-  activity: Promise<Loaded<InboxActivity>> | undefined;
+  /** What stands at the head of the list: the weekly report, once it is ready. */
+  foot?: ReactNode;
+  /** What stands quietly under the list: the week's report so far. */
+  tail?: ReactNode;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const [said, setSaid] = useState("");
-  const toDo = (
-    <ToDo
-      chosen={chosen}
-      group={group ?? "all"}
-      items={items}
-      notLoaded={notLoaded}
-      olderFailures={olderFailures}
-      onSaid={setSaid}
-    />
-  );
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Inbox` }]} />
-      <div {...stylex.props(styles.page)}>
-        {activity === undefined ? (
-          toDo
-        ) : (
-          <Tabs defaultValue="todo">
-            <TabsList aria-label={t`Inbox`}>
-              <TabsTrigger value="todo">
-                <Trans context="inbox tab: what waits on you">To do</Trans>
-              </TabsTrigger>
-              <TabsTrigger value="activity">
-                <Trans context="inbox tab: what Grasp and people did">
-                  Activity
-                </Trans>
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="todo">{toDo}</TabsContent>
-            <TabsContent value="activity">
-              <Await fallback={<LoadingLines />} promise={activity}>
-                {(loaded) =>
-                  loaded.state === "ready" ? (
-                    <ActivityList activity={loaded.data} />
-                  ) : (
-                    <Empty tone="danger">
-                      <EmptyHeader>
-                        <EmptyMedia />
-                        <EmptyTitle />
-                        <EmptyDescription>
-                          {notLoadedText(loaded, i18n) ?? t`It didn't load`}
-                        </EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  )
-                }
-              </Await>
-            </TabsContent>
-          </Tabs>
-        )}
-      </div>
+      <ToDo
+        chosen={chosen}
+        foot={foot}
+        group={group ?? "all"}
+        tail={tail}
+        items={items}
+        notLoaded={notLoaded}
+        onSaid={setSaid}
+      />
       {/* What was done with an item, for a screen reader: the list only loses it. */}
       <output {...stylex.props(styles.unseen)}>{said}</output>
     </>

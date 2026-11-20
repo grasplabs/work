@@ -25,15 +25,17 @@ const styles = stylex.create({
   },
 });
 
-/** The page you are on: its name, and its tooltip when the name is cut off (its title before the script runs). */
+/** The last step: its name, and its tooltip when the name is cut off (its title before the script runs). */
 export const Current = ({
   label,
   cut,
   whole,
+  page,
 }: {
   label: string;
   cut: boolean;
   whole: boolean;
+  page: boolean;
 }) => {
   // Focus already on the name keeps it there when the name stops being cut off.
   const [held, setHeld] = useState(false);
@@ -58,7 +60,8 @@ export const Current = ({
         }: Record<string, unknown>) => (
           <span
             {...props}
-            aria-current="page"
+            // The page you are on, when it is one: a path's last plain step (a file's) is not.
+            aria-current={page ? "page" : undefined}
             data-slot="breadcrumb-current"
             data-cut={cut ? "" : undefined}
             // Its tooltip, which a screen reader is not told of; before the script runs, a title.

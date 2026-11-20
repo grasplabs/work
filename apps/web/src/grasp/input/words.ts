@@ -5,6 +5,8 @@ export const inputWords = {
   showPassword: "Show password",
   /** The same button while the password shows. */
   hidePassword: "Hide password",
+  /** A saved secret's button that empties the field for a new one (SecretInput). */
+  replace: "Replace",
 };
 
 export type InputWords = typeof inputWords;

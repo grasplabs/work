@@ -26,16 +26,18 @@ import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
 
 const styles = stylex.create({
-  // Under the page's bar, the state fills what is left of the card.
+  // Under the page's bar, the state fills what is left of the card, in its middle.
   inFrame: {
     display: "flex",
     flexDirection: "column",
+    justifyContent: "center",
     flexGrow: 1,
   },
-  // Outside the frame, it fills the window.
+  // Outside the frame, it fills the window, in its middle.
   alone: {
     display: "flex",
     flexDirection: "column",
+    justifyContent: "center",
     minHeight: "100svh",
   },
   lines: {
@@ -127,7 +129,7 @@ const reachCore = async (
 const GoToChat = () => {
   const { t } = useLingui();
   return (
-    <Button render={<Link to="/" />} variant="ghost">
+    <Button render={<Link to="/" />} variant="quiet">
       {t`Go to Chat`}
     </Button>
   );
@@ -148,7 +150,9 @@ export const NotFoundState = ({
   const { t } = useLingui();
   const inFrame = use(InFrame);
   return (
-    <Empty>
+    // The whole page when it stands for the page, as the library's empty
+    // page is; a section's size inside a page that keeps its own frame.
+    <Empty {...(heading === "h1" ? { size: "lg" as const } : {})}>
       <EmptyHeader>
         {icon === undefined ? (
           <EmptyMedia picture="lost" />

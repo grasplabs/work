@@ -12,8 +12,11 @@ import type { ComponentProps, MouseEvent } from "react";
 
 import { Button } from "../button";
 import type { ActionState, ButtonVariant, ButtonWords } from "../button";
+import { buttonWords } from "../button/words";
+import type { ButtonOwnWords } from "../button/words";
 import type { IconData } from "../icons";
 import { ms } from "../tokens/tokens.values";
+import { useWords } from "../words/words";
 import { useStill } from "./still-context";
 import { drawerStyles as styles } from "./styles";
 
@@ -43,6 +46,12 @@ interface ActionBase extends Omit<
    * `danger` action asks with its own words when this is left out.
    */
   agentConfirm?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ actionFailed: "Could not save" }`): Button's
+   * (`button`), as the action is one. Any left out are the catalogue's, else English. Its
+   * `workingLabel` and `failedLabel` stay its own props and win.
+   */
+  words?: Partial<ButtonOwnWords>;
 }
 
 /** An action that only closes, such as Cancel. */
@@ -63,8 +72,12 @@ interface WithWork {
   action: (event: Event | undefined, details: { source: string }) => unknown;
   /** The words while the work runs ("Renaming"). Leave it out to keep the button's own words. */
   workingLabel?: string;
-  /** The words when the work failed, said plainly on the button and to a screen reader ("Could not rename"). */
-  failedLabel: string;
+  /**
+   * The words when the work failed, said plainly on the button and to a screen reader ("Could not rename"). Leave it out for
+   * the neutral one, from Button's catalogue.
+   * @default "Could not finish"
+   */
+  failedLabel?: string;
 }
 
 /** Every prop a DrawerAction takes: these, and the rest of UI SDK's DrawerClose. */
@@ -100,7 +113,7 @@ interface ActionButtonProps {
   error: unknown;
   look: Pick<ActionBase, "children" | "variant" | "icon" | "agentConfirm"> & {
     workingLabel?: string;
-    failedLabel?: string;
+    failedLabel: string;
   };
   /** It has work to do, so it shows the work's life: Cancel has none, and keeps its own width. */
   life: boolean;
@@ -140,7 +153,7 @@ const ActionButton = ({
         state: currentOf(state, failed),
         workingLabel,
         doneLabel: words ?? "",
-        failedLabel: failedLabel ?? "",
+        failedLabel,
       }
     : {};
   return (
@@ -256,10 +269,13 @@ export const DrawerAction = (props: DrawerActionProps) => {
     icon,
     action,
     workingLabel,
-    failedLabel,
+    failedLabel: failedGiven,
     agentConfirm,
+    words,
     ...rest
   } = props;
+  const { actionFailed } = useWords("button", buttonWords, words);
+  const failedLabel = failedGiven ?? actionFailed;
   const look = {
     children,
     variant,

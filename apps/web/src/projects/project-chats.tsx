@@ -16,7 +16,7 @@ import {
   DialogFooter,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Chat, Minus, Plus, Search } from "../grasp/icons/index.ts";
 import {
   InputGroup,
@@ -142,7 +142,11 @@ export const AddChat = ({
           <DialogTitle>{t`Add a chat`}</DialogTitle>
           <DialogBody>
             {offered !== undefined && offered.length === 0 ? (
-              <Empty size="inline">{t`You have no chats to add.`}</Empty>
+              <Empty size="sm">
+                <EmptyHeader>
+                  <EmptyDescription>{t`You have no chats to add.`}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               <div {...stylex.props(styles.picker)}>
                 <InputGroup>
@@ -157,7 +161,11 @@ export const AddChat = ({
                 </InputGroup>
                 <ScrollArea aria-label={t`Your chats`} layout={styles.list}>
                   {offered !== undefined && found.length === 0 ? (
-                    <Empty size="inline">{t`No chat by that name.`}</Empty>
+                    <Empty size="sm">
+                      <EmptyHeader>
+                        <EmptyDescription>{t`No chat by that name.`}</EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
                   ) : (
                     <ItemGroup aria-label={t`Your chats`} separated>
                       {found.map((chat) => (
