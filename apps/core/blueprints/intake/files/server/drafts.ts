@@ -11,8 +11,8 @@ import {
 // Drafts of a source and the statements taken from it, reviewed and
 // edited before they are saved as a `source` and its `statements`. Each
 // draft is typed in by hand (`create`), or proposed (`propose`) with
-// what a run of the `extract` workflow took out of someone's notes or a
-// stakeholder's chat. Only the App's builders reach any of it:
+// what a run of the `extract` workflow took out of someone's notes. Only
+// the App's builders reach any of it:
 // the store refuses everyone else (its tables' access).
 
 /** Most drafts the review lists: the newest. */
@@ -59,8 +59,8 @@ const tagsInOrder = <Tag extends string>(tags: readonly Tag[]): Tag[] => [
 
 /**
  * Whether the caller may review drafts: true, or refused by the store
- * (`data.access_denied`) for anyone but the App's builders. The intake's
- * actions check it first (chats.ts), and the page asks it through them.
+ * (`data.access_denied`) for anyone but the App's builders. The page asks
+ * it first.
  */
 export const reviewer = query({
   args: {},
@@ -106,7 +106,6 @@ const savedSummary = v.object({
   medium: v.enum(sourceMedia),
   date: v.string(),
   from: v.string(),
-  guest: v.boolean(),
   createdAt: v.timestamp(),
 });
 
@@ -131,7 +130,6 @@ export const saved = query({
       medium: found.medium,
       date: found.date,
       from: found.from,
-      guest: found.guest,
       createdAt: found._createdAt,
     }));
   },
@@ -173,16 +171,13 @@ export const create = mutation({
 });
 
 /**
- * Keeps, for review, what a run of `extract` found: in notes, or in a
- * stakeholder's chat (`guest`), whose words are untrusted. The page
+ * Keeps, for review, what a run of `extract` found in notes. The page
  * proposes it once the run is done, as the builder reviewing it; called
  * by anyone else who may write drafts (a builder), it keeps a draft as
- * theirs to review, as `create` does. `guest` records where the draft
- * came from, not who may be trusted: the App's builders are, and one may
- * mark a draft either way.
+ * theirs to review, as `create` does.
  */
 export const propose = mutation({
-  args: { ...draftArgs, guest: v.boolean() },
+  args: draftArgs,
   returns: v.id("drafts"),
   handler: async (ctx, args) => {
     requireDate(args.source.date);
@@ -192,15 +187,15 @@ export const propose = mutation({
         ...statement,
         tags: tagsInOrder(statement.tags),
       })),
-      origin: args.guest ? "guest" : "notes",
+      origin: "notes",
     });
   },
 });
 
 /**
  * Keeps the edits of a draft, without saving it yet. Where it came from
- * never changes: an edit of a stakeholder's draft is still theirs
- * (`data.conflict` when someone saved or discarded it since).
+ * never changes (`data.conflict` when someone saved or discarded it
+ * since).
  */
 export const keep = mutation({
   args: { id: v.id("drafts"), ...draftArgs },
@@ -232,8 +227,7 @@ export const discard = mutation({
  * Saves a draft, as it was edited: its source, a
  * statement for each claim naming it, and drops the draft, all in one
  * commit, so a save is whole or not at all, and a save run again under
- * its key saves nothing twice. A stakeholder's draft (`guest`) is saved
- * marked as theirs, which only this sets. A draft needs a statement
+ * its key saves nothing twice. A draft needs a statement
  * (`intake.no_statements`).
  */
 export const save = mutation({
@@ -254,11 +248,7 @@ export const save = mutation({
         "This draft is gone: someone saved or discarded it."
       );
     }
-    const guest = stored.origin === "guest";
-    const savedSource = await ctx.db.insert("sources", {
-      ...args.source,
-      guest,
-    });
+    const savedSource = await ctx.db.insert("sources", args.source);
     for (const statement of args.statements) {
       // oxlint-disable-next-line no-await-in-loop -- staged in order, committed together
       await ctx.db.insert("statements", {
@@ -266,7 +256,6 @@ export const save = mutation({
         tags: tagsInOrder(statement.tags),
         source: savedSource,
         date: args.source.date,
-        guest,
       });
     }
     await ctx.db.delete("drafts", args.id);

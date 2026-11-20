@@ -20,7 +20,6 @@ import type { FakeProvider } from "./model-provider.ts";
 import {
   openRpc,
   outcome,
-  routed,
   signedIn,
   signedInApi,
   staffPerson,
@@ -40,7 +39,7 @@ import {
 
 // A conversation with the agent in a chat app is never a chat in Grasp
 // (GRA-1919, `shownInGrasp` in src/workspace.ts): through the real Teams
-// door, nothing a person, an admin, Grasp staff or a guest reads in Grasp
+// door, nothing a person, an admin or Grasp staff reads in Grasp
 // lists, finds or opens it, and asked for by its ID it answers exactly as
 // a chat that doesn't exist; it goes on in Teams with all it was told,
 // compacted as any chat; and its person deletes it, and what was kept of
@@ -200,20 +199,6 @@ const shownTo = async (api: Api, word: string) => {
   };
 };
 
-/** What a guest's page is told for a link naming `token`. */
-const guestOpens = async (token: string) => {
-  const response = await routed("/api/guest", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "open", token }),
-  });
-  // Its words and code: its request ID is each request's own.
-  const { code, message } = z
-    .object({ code: z.string(), message: z.string() })
-    .parse(await response.json());
-  return { status: response.status, code, message };
-};
-
 /** The model requests that answered a message saying `text`, the person's own turns only. */
 const answering = (provider: FakeProvider, text: string): string[] =>
   provider.requests
@@ -254,7 +239,7 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
     ]);
   });
 
-  it("is no chat in Grasp for an admin or Grasp staff either, nor anything a guest's link opens", async () => {
+  it("is no chat in Grasp for an admin or Grasp staff either", async () => {
     const word = `narwhal${unique()}`;
     const { userId, teams } = await member(idp, says("Noted."));
     const admin = await signedInApi(idp, "admin");
@@ -279,7 +264,6 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
         hidden: await answersFor(staff, conversation),
         forget: await outcome(staff.channelAccounts.forgetConversations()),
       },
-      guest: await guestOpens(conversation),
     }).toStrictEqual({
       admin: {
         listed: [],
@@ -291,7 +275,6 @@ describe("a conversation with the agent in Teams", setUpTime, () => {
         hidden: await answersFor(staff, missing),
         forget: "role.forbidden",
       },
-      guest: await guestOpens(missing),
     });
   });
 

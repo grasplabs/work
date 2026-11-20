@@ -16,7 +16,7 @@ export default defineSchema({
       tags: v.array(v.enum(["goal", "blocker", "time_sink", "handover", "tool", "rule"])).min(1).max(6),
       quote: v.string().trim().max(1000)
     })).max(90),
-    origin: v.enum(["manual", "notes", "guest"])
+    origin: v.enum(["manual", "notes"])
   }).index("by_created", ["_createdAt"]).access({
     read: "appBuilders",
     write: "appBuilders"
@@ -26,8 +26,7 @@ export default defineSchema({
     medium: v.enum(["interview", "chat", "document", "other"]),
     date: v.string().min(10).max(10),
     from: v.string().trim().max(200),
-    notes: v.string().trim().max(30000),
-    guest: v.boolean()
+    notes: v.string().trim().max(30000)
   }).index("by_created", ["_createdAt"]).access({
     read: "appBuilders",
     write: "appBuilders"
@@ -37,8 +36,7 @@ export default defineSchema({
     tags: v.array(v.enum(["goal", "blocker", "time_sink", "handover", "tool", "rule"])).min(1).max(6),
     quote: v.string().trim().max(1000),
     source: v.id("sources"),
-    date: v.string().min(10).max(10),
-    guest: v.boolean()
+    date: v.string().min(10).max(10)
   }).index("by_source", ["source"]).access({
     read: "appBuilders",
     write: "appBuilders"

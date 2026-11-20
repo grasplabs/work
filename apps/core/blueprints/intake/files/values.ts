@@ -20,11 +20,8 @@ export const statementTags = [
 /** How a source was given. */
 export const sourceMedia = ["interview", "chat", "document", "other"] as const;
 
-/**
- * Where a draft came from: typed in by hand, taken out of notes by a
- * model, or out of a stakeholder's chat, whose words are untrusted.
- */
-export const draftOrigins = ["manual", "notes", "guest"] as const;
+/** Where a draft came from: typed in by hand, or taken out of notes by a model. */
+export const draftOrigins = ["manual", "notes"] as const;
 
 /** Longest title, name or claim. */
 export const shortTextMax = 200;

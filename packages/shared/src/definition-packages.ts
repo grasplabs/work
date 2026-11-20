@@ -44,7 +44,6 @@ export const appBindingKinds = [
   "connections",
   "brain",
   "grasp",
-  "guests",
   "files",
   "links",
 ] as const;

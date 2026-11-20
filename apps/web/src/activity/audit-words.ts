@@ -424,13 +424,6 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   // An App or a workflow reading entities: each named exactly.
   { action: "brain.entities.get", text: msg`Read entities from the Brain` },
   { action: "brain.entities.find", text: msg`Read entities from the Brain` },
-  { action: "guest.invited", text: msg`Invited a guest` },
-  { action: "guest.revoked", text: msg`Took back a guest's link` },
-  { action: "guest.read", text: msg`Read what a guest wrote` },
-  { action: "guest.opened", text: msg`A guest opened their chat` },
-  { action: "guest.message", text: msg`A guest wrote a message` },
-  { action: "guest.finished", text: msg`A guest finished their chat` },
-  { action: "guest", text: msg`A guest chat changed` },
   {
     action: "audit.archived",
     text: msg`Moved old entries out of the audit trail`,

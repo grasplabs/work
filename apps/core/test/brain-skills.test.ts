@@ -165,7 +165,6 @@ describe("skills in the Brain", setUpTime, () => {
       whole: read.map(({ name, text }) => text === shipped(name)),
       selected: [
         await first("Draw the workflow for paying supplier invoices"),
-        await first("Interview a stakeholder about their work"),
         await first("Run a baseline of how the company works today"),
         await first("Write the board page before the meeting"),
       ],
@@ -175,19 +174,14 @@ describe("skills in the Brain", setUpTime, () => {
     }).toStrictEqual({
       listed: shippedSkills.map(({ name }) => ["grasp", name]),
       whole: shippedSkills.map(() => true),
-      selected: [
-        "draw-a-workflow",
-        "interview-a-stakeholder",
-        "run-a-baseline",
-        "write-board-page",
-      ],
+      selected: ["draw-a-workflow", "run-a-baseline", "write-board-page"],
       unrelated: [],
     });
   });
 
   it("replaces a skill with the next release's text, keeps the version a task pinned, writes nothing for an unchanged one, and audits each install by count", async () => {
     const { agent } = await memberAgent();
-    const name = "interview-a-stakeholder";
+    const name = "draw-a-workflow";
     const before = await listedNamed(agent, name);
     if (before === undefined) {
       throw new Error(`${name} isn't listed`);

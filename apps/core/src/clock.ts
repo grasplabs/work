@@ -27,7 +27,6 @@ import { readReaderGroups } from "./directory-reader-groups.ts";
 import { pausedUserIds } from "./directory-suspensions.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
-import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
@@ -247,7 +246,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: deleteExpiredEmail,
   },
-  { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
   { name: "visitors.sweep", period: "quarterHour", run: sweepAppVisitors },
   // Connector triggers' holds and tombstones of events long settled or no
   // longer coming (src/workflows/connector-triggers.ts).

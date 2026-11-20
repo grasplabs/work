@@ -5,11 +5,7 @@ import { defineApp, permission, v } from "@grasp-os/sdk";
 export const permissions = {
   extract: permission.workflow("extract", {
     args: v.object({
-      notes: v.string().min(1).max(30000),
-      lines: v.array(v.object({
-        role: v.enum(["guest", "question"]),
-        text: v.string()
-      }))
+      notes: v.string().min(1).max(30000)
     }),
     returns: v.object({
       statements: v.array(v.object({
@@ -18,15 +14,11 @@ export const permissions = {
         quote: v.string()
       }))
     })
-  }),
-  guests: permission.guests({
-    operations: ["invite", "list", "read", "revoke"]
   })
 };
 export default defineApp({
   name: "Intake",
   permissions: {
-    workflows: [permissions.extract],
-    guests: permissions.guests
+    workflows: [permissions.extract]
   }
 });

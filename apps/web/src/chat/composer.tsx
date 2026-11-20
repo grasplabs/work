@@ -322,7 +322,6 @@ export interface FieldProps {
   label: string | undefined;
   describedBy: string | undefined;
   placeholder: string | undefined;
-  maxLength: number | undefined;
   onPasteFiles: ((files: File[]) => void) | undefined;
   onBackspaceEmpty: (() => void) | undefined;
   editor: Ref<PromptEditorHandle>;
@@ -338,7 +337,6 @@ const QuestionField = ({
   label,
   describedBy,
   placeholder,
-  maxLength,
   onPasteFiles,
   onBackspaceEmpty,
   editor,
@@ -356,7 +354,7 @@ const QuestionField = ({
       describedBy={describedBy}
       kinds={kinds}
       label={label ?? t`Your question`}
-      maxLength={maxLength ?? maxQuestionLength}
+      maxLength={maxQuestionLength}
       onBackspaceEmpty={onBackspaceEmpty}
       mentions={mentions}
       onChange={({ text: typed, mentions: mentioned }) => {
@@ -448,8 +446,6 @@ export const Composer = ({
   children,
   actions,
   subject,
-  maxLength,
-  disabled = false,
   files = noFiles,
   onAttach,
   onRemoveFile,
@@ -464,8 +460,8 @@ export const Composer = ({
   onMentions?: (mentions: readonly PromptMention[]) => void;
   /**
    * The models a question may name, the default first, and the one it
-   * names; none where nobody picks one, such as a guest's chat, and
-   * undefined too while core hasn't said which yet.
+   * names; none where nobody picks one, and undefined too while core
+   * hasn't said which yet.
    */
   models?: readonly string[];
   model?: string;
@@ -488,8 +484,7 @@ export const Composer = ({
   onStop?: () => void;
   /**
    * One line that grows as it is typed in, its button beside it and no
-   * model to pick (the default model asks): the chat dock and the guest
-   * page.
+   * model to pick (the default model asks): the chat dock.
    */
   compact?: boolean;
   /** What the box is called; "Your question" without it. */
@@ -503,10 +498,6 @@ export const Composer = ({
   actions?: ReactNode;
   /** What the question is about, on the bar above a full box: a page's subject (`PromptInputSubjectBar`). */
   subject?: ReactNode;
-  /** The longest message it takes; a question's by default. */
-  maxLength?: number;
-  /** Takes nothing for now, while something else is on its way to core. */
-  disabled?: boolean;
   /** The files the question will carry, each shown as a card. */
   files?: readonly CardFile[];
   /** Adds files to the question; without it, the box takes none. */
@@ -532,8 +523,7 @@ export const Composer = ({
   const form = useRef<HTMLFormElement>(null);
   const editor = useRef<PromptEditorHandle>(null);
   // A question names a model where there are any to name.
-  const canSend =
-    !running && !busy && !disabled && !empty && !lacksModel(model);
+  const canSend = !running && !busy && !empty && !lacksModel(model);
   // Pasting files adds them, and Backspace in an empty box takes the last off.
   const last = files.at(-1);
   const field: FieldProps = {
@@ -547,7 +537,6 @@ export const Composer = ({
     label,
     describedBy,
     placeholder,
-    maxLength,
     onPasteFiles: onAttach,
     onBackspaceEmpty:
       onRemoveFile === undefined || last === undefined
@@ -569,7 +558,7 @@ export const Composer = ({
       }}
     >
       {compact ? (
-        // One line, its button beside it: the chat dock and the guest page.
+        // One line, its button beside it: the chat dock.
         <InputGroup size="chat">
           <QuestionField {...field} size="compact" />
           <InputGroupAddon align="inline-end" className="self-end">
@@ -626,7 +615,7 @@ export const Composer = ({
                   </>
                 )}
                 <ComposerMenu
-                  disabled={busy || disabled}
+                  disabled={busy}
                   onAttach={onAttach}
                   onMention={(mentioned, trigger) => {
                     editor.current?.insertMention(mentioned, trigger);

@@ -2296,7 +2296,7 @@ export const appResourceBindings = sqliteTable(
       .references(() => apps.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["model", "connector", "brain", "grasp", "guests"],
+      enum: ["model", "connector", "brain", "grasp"],
     }).notNull(),
     target: text().notNull(),
     declarationHash: text("declaration_hash").notNull(),
@@ -2925,8 +2925,8 @@ export const runBrainEvidence = sqliteTable(
  * (resource-brain.ts, GRA-2218), from the first such read on: written
  * before what it read is handed over, never removed, as what it read may
  * stay in its data. Counted as a grant to read the Brain is
- * (app-provenance.ts `recallsTheBrain`): such an App answers no visitor
- * and invites no guest. `subject_type` leaves room for a workflow's.
+ * (app-provenance.ts `recallsTheBrain`): such an App answers no visitor.
+ * `subject_type` leaves room for a workflow's.
  */
 export const brainDefaultReads = sqliteTable(
   "brain_default_reads",
@@ -4646,53 +4646,39 @@ export const notifications = sqliteTable(
 );
 
 /**
- * A guest chat (src/guests.ts): someone who isn't a member, invited by an
- * App for one of its people, chatting with a model through a link. The
- * link's secret is never stored, only its SHA-256 (`token_hash`). A chat
- * takes one turn at a time: `busy_until` is set while one is under way,
- * and a turn claims it only when it is unset or past.
+ * A chat an App once opened, through a link, for someone who wasn't a
+ * member, with a model.
+ *
+ * Unused since that feature went (GRA-2234): nothing reads or writes it.
+ * Kept so a rollback to the release before still has it; a later release
+ * drops it (expand, then contract).
  */
 export const guestChats = sqliteTable(
   "guest_chats",
   {
     id: text().primaryKey(),
     appId: text("app_id").notNull(),
-    /** The permission it was made under: each turn needs it still active. */
     permissionId: text("permission_id").notNull(),
-    /** The member it was made for: its turns spend their model budget. */
     invitedBy: text("invited_by").notNull(),
     name: text().notNull(),
     skill: text().notNull(),
-    /** The model it talks with, the deployment's first when invited. */
     model: text().notNull(),
     tokenHash: text("token_hash").notNull(),
     turns: integer().notNull(),
     busyUntil: timestamp("busy_until"),
     createdAt: timestamp("created_at").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
-    /** When the guest first opened it. */
     openedAt: timestamp("opened_at"),
-    /** When the guest finished it, or it was revoked. */
     endedAt: timestamp("ended_at"),
     ended: text({ enum: ["finished", "revoked"] }),
-    /**
-     * The alias of the guests binding a sealed function invited it through
-     * (resource-guests.ts): its link works only while an active binding of
-     * that alias still names its permission. Null for one an App's v1
-     * server invited, under its permission alone.
-     */
     bindingAlias: text("binding_alias"),
   },
   (table) => [
     uniqueIndex("guest_chats_token_idx").on(table.tokenHash),
-    // An App's chats, newest first.
     index("guest_chats_app_idx").on(table.appId, table.createdAt, table.id),
-    // An App's chats that haven't ended, newest first: listed first, and
-    // counted as it invites. Expired ones stay in it until they are swept.
     index("guest_chats_open_idx")
       .on(table.appId, table.createdAt, table.id)
       .where(sql`ended IS NULL`),
-    // What the retention sweep deletes, oldest first.
     index("guest_chats_expires_idx").on(table.expiresAt),
   ]
 );
@@ -4798,7 +4784,10 @@ export const appVisitorSessions = sqliteTable(
   ]
 );
 
-/** A guest chat's messages, in order: the guest's, and the model's answers. */
+/**
+ * The messages of a chat in `guest_chats`. Unused since GRA-2234, and kept
+ * for a rollback to the release before, as that table is.
+ */
 export const guestMessages = sqliteTable(
   "guest_messages",
   {

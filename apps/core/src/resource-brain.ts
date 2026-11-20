@@ -130,7 +130,7 @@ export const brainAdapter: ResourceAdapter<"brain"> = {
  * read finds a member now, as every reader of the Brain. A visitor's
  * call never gets here: it is bound no resource. The App is marked
  * (`brain_default_reads`), for good, before anything is read: from then
- * on it answers no visitor and invites no guest, as a granted App
+ * on it answers no visitor, as a granted App
  * (app-provenance.ts `recallsTheBrain`). A mark that can't be written
  * refuses the read.
  */

@@ -75,8 +75,6 @@ import { mustConfirmForOthers } from "./private-reads.ts";
 //   grants or revokes a personal one.
 // - The agent grants itself: its code reaches only its env's stubs; the
 //   decision is on `/rpc` alone, behind the person's session.
-// - A guest chat: guests have no agent, no code and no session; nothing
-//   here is in their reach.
 // - A card replayed or forged: a decision names a request by ID only, and
 //   only a waiting request of that very chat and person changes, in one
 //   conditional update; anything else is refused as if there were none,

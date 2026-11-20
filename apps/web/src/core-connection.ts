@@ -119,13 +119,12 @@ export interface CoreConnectionOptions {
  * notifications, and the App frames it runs (pages/tab-link.ts), each
  * of which reaches its App through a capability of its own on it (core's
  * `pages.frame`). (A draft's preview alone keeps a connection of its
- * own, pages/core-link.ts.) It opens when first used (a guest's page
- * never uses it) and connects again whenever it drops, for as long as it
- * takes, after a pause of up to 1 to 30 s (`reconnectDelay`), cut short
- * when the page comes back to the tab or online, or a person asks for it
- * (trying again need not wait out the pause; an App frame never cuts it,
- * `Waiting`). Once per pause at most: an attempt starts the next, longer
- * one. Whoever asks for it
+ * own, pages/core-link.ts.) It opens when first used and connects again
+ * whenever it drops, for as long as it takes, after a pause of up to 1
+ * to 30 s (`reconnectDelay`), cut short when the page comes back to the
+ * tab or online, or a person asks for it (trying again need not wait out
+ * the pause; an App frame never cuts it, `Waiting`). Once per pause at
+ * most: an attempt starts the next, longer one. Whoever asks for it
  * meanwhile waits for the next connection, in the order they asked: the
  * shell for a few seconds per call (`deadline()`), App frames for as long
  * as it takes. A call already on its way when the connection drops fails,

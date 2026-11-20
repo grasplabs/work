@@ -5,7 +5,6 @@ import {
   useQuery,
   useWorkflow,
 } from "@grasp-os/sdk/react";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Table,
@@ -29,10 +28,9 @@ import {
   refusal,
   settle,
 } from "../components/intake";
-import type { DraftSource, GuestChat, OpenedDraft } from "../components/intake";
+import type { OpenedDraft } from "../components/intake";
 import { NotesForm } from "../components/notes-form";
 import type { NotesInput } from "../components/notes-form";
-import { Stakeholders } from "../components/stakeholders";
 
 /**
  * What the page shows: the drafts, a new source typed in (the
@@ -76,17 +74,9 @@ const IntakeHeader = ({
   </div>
 );
 
-/** What the intake shows the person (server/chats.ts `overview`). */
-interface Overview {
-  /** Whether they may review drafts: intake is the App's builders'. */
-  writable: boolean;
-  /** Stakeholder chats; null while the App can't invite anyone. */
-  chats: GuestChat[] | null;
-}
-
 /** Why intake shows nothing, when it isn't the person's to take. */
-const AccessNote = ({ overview }: { overview: Overview | null }) =>
-  overview?.writable === false ? (
+const AccessNote = ({ writable }: { writable: boolean | null }) =>
+  writable === false ? (
     <p className="text-muted-foreground text-sm">
       Only the App&apos;s builders take intake.
     </p>
@@ -162,14 +152,7 @@ const SavedList = () => {
       <TableBody>
         {saved.map((source) => (
           <TableRow key={source.id}>
-            <TableCell>
-              {source.title}
-              {source.guest ? (
-                <Badge variant="secondary" className="ml-2">
-                  stakeholder&apos;s words
-                </Badge>
-              ) : null}
-            </TableCell>
+            <TableCell>{source.title}</TableCell>
             <TableCell>{mediumLabels[source.medium]}</TableCell>
             <TableCell>{source.date}</TableCell>
             <TableCell>{source.from}</TableCell>
@@ -186,14 +169,15 @@ const SavedList = () => {
  */
 const Intake = () => {
   const client = useClient();
-  const [overview, setOverview] = useState<Overview | null>(null);
+  // Whether the person may review drafts (server/drafts.ts `reviewer`):
+  // intake is the App's builders'. Null until the store answered.
+  const [writable, setWritable] = useState<boolean | null>(null);
   const [view, setView] = useState<View>({ kind: "list" });
   const [problem, setProblem] = useState("");
   const [notice, setNotice] = useState("");
-  // Each overview and opening asked for, numbered: an answer to any but
-  // the latest, arriving late, is dropped, as it would show what the
-  // person moved away from.
-  const listings = useRef(0);
+  // Each opening asked for, numbered: an answer to any but the latest,
+  // arriving late, is dropped, as it would show what the person moved
+  // away from.
   const openings = useRef(0);
   const counts = useRef(0);
   const extract = useWorkflow(workflows.extract);
@@ -205,39 +189,24 @@ const Intake = () => {
   // its first lands keeps no second draft.
   const reviewing = useRef(new Set<string>());
 
-  const list = async (): Promise<void> => {
-    listings.current += 1;
-    const asked = listings.current;
-    const answer = await settle(
-      async () => await client.action(api.chats.overview, {})
-    );
-    if (asked !== listings.current) {
-      return;
-    }
-    if ("error" in answer) {
-      setProblem(refusal(answer.error));
-      return;
-    }
-    setProblem("");
-    setOverview(answer.ok);
-  };
-
   useEffect(() => {
     let mounted = true;
     const first = async (): Promise<void> => {
-      listings.current += 1;
-      const asked = listings.current;
       const answer = await settle(
-        async () => await client.action(api.chats.overview, {})
+        async () => await client.query(api.drafts.reviewer, {})
       );
-      if (!mounted || asked !== listings.current) {
+      if (!mounted) {
         return;
       }
       if ("error" in answer) {
+        if (answer.error === "data.access_denied") {
+          setWritable(false);
+          return;
+        }
         setProblem(refusal(answer.error));
         return;
       }
-      setOverview(answer.ok);
+      setWritable(true);
     };
     void first();
     return () => {
@@ -282,46 +251,29 @@ const Intake = () => {
   };
 
   /**
-   * Starts reading notes, or a stakeholder's chat, called `title` while
-   * it is read, and says why it didn't start, if it didn't. A chat is read
-   * as notes by the App's own action first (`chats.notes`): the workflow
-   * only reads what it is given.
+   * Starts reading notes, called `title` while they are read, and says
+   * why it didn't start, if it didn't.
    */
   const startReading = async (
-    input: NotesInput | { chat: string },
+    input: NotesInput,
     title: string
   ): Promise<string | undefined> => {
-    let source: DraftSource;
-    let lines: { role: "guest" | "question"; text: string }[] = [];
-    let guest = false;
-    if ("chat" in input) {
-      const read = await settle(
-        async () => await client.action(api.chats.notes, { chat: input.chat })
-      );
-      if ("error" in read) {
-        return refusal(read.error);
-      }
-      source = { ...read.ok.source, notes: read.ok.notes };
-      ({ lines } = read.ok);
-      guest = true;
-    } else {
-      source = { ...input.source, notes: input.notes };
-    }
+    const source = { ...input.source, notes: input.notes };
     const started = await settle(
-      async () => await extract.start({ notes: source.notes, lines })
+      async () => await extract.start({ notes: source.notes })
     );
     if ("error" in started) {
       return refusal(started.error);
     }
     const { runId } = started.ok;
-    setReading((runs) => [{ id: runId, title, source, guest }, ...runs]);
+    setReading((runs) => [{ id: runId, title, source }, ...runs]);
     showList();
     return undefined;
   };
 
   /**
-   * Keeps what a finished reading found as a draft, as its source's (a
-   * chat's marked a guest's), and opens it for review.
+   * Keeps what a finished reading found as a draft, as its source's, and
+   * opens it for review.
    */
   const review = async (read: Reading, found: Found): Promise<void> => {
     if (reviewing.current.has(read.id)) {
@@ -333,7 +285,6 @@ const Intake = () => {
         await propose({
           source: read.source,
           statements: found.statements,
-          guest: read.guest,
         })
     );
     if ("error" in kept) {
@@ -376,11 +327,8 @@ const Intake = () => {
     }
   };
 
-  const writable = overview?.writable === true;
-  // Stakeholder chats, while the App may invite: null otherwise.
-  const chats = overview?.chats ?? null;
   // The lists, for someone who takes intake, while nothing is open.
-  const listing = view.kind === "list" && writable;
+  const listing = view.kind === "list" && writable === true;
   return (
     <main className="flex flex-col gap-4 p-6">
       <IntakeHeader
@@ -399,7 +347,7 @@ const Intake = () => {
       />
       <Problem text={problem} />
       {notice === "" ? null : <output className="text-sm">{notice}</output>}
-      <AccessNote overview={overview} />
+      <AccessNote writable={writable} />
       {listing ? (
         <Extractions
           started={reading}
@@ -408,21 +356,6 @@ const Intake = () => {
           }}
           onDismiss={(run) => {
             setReading((runs) => runs.filter(({ id }) => id !== run));
-          }}
-        />
-      ) : null}
-      {listing && chats !== null ? (
-        <Stakeholders
-          chats={chats}
-          onChanged={list}
-          onRead={(chat) => {
-            void (async () => {
-              const why = await startReading(
-                { chat: chat.id },
-                `Chat with ${chat.name}`
-              );
-              setProblem(why ?? "");
-            })();
           }}
         />
       ) : null}

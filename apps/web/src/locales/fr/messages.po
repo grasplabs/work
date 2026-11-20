@@ -1657,22 +1657,6 @@ msgstr "Un ancien membre"
 msgid "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp."
 msgstr "Une lacune : cette connexion ne peut pas dire à Grasp ce qui y a changé, donc Grasp ne voit que ce qui y est fait via Grasp."
 
-#: src/activity/audit-words.ts
-msgid "A guest chat changed"
-msgstr "Une discussion d’invité a changé"
-
-#: src/activity/audit-words.ts
-msgid "A guest finished their chat"
-msgstr "Un invité a terminé sa discussion"
-
-#: src/activity/audit-words.ts
-msgid "A guest opened their chat"
-msgstr "Un invité a ouvert sa discussion"
-
-#: src/activity/audit-words.ts
-msgid "A guest wrote a message"
-msgstr "Un invité a écrit un message"
-
 #: src/workflows/resource-params.tsx
 msgid "A JSON value"
 msgstr "Une valeur JSON"
@@ -6233,10 +6217,6 @@ msgstr "Trouver un enregistrement par son ID"
 msgid "Find Stephen under Apps in your Slack workspace."
 msgstr "Vous trouverez Stephen sous Apps dans votre espace de travail Slack."
 
-#: src/routes/guest.tsx
-msgid "Finish"
-msgstr "Terminer"
-
 #: src/onboarding/setup-steps.tsx
 msgid "First I need your staff list."
 msgstr "Il me faut d’abord votre liste du personnel."
@@ -6730,7 +6710,6 @@ msgstr "Grasp demande"
 
 #: src/chat/global-chat.tsx
 #: src/core.ts
-#: src/guest/api.ts
 #: src/interview/api.ts
 #: src/load-from-core.tsx
 #: src/routes/_shell.tsx
@@ -7024,15 +7003,6 @@ msgstr "Invité"
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Les comptes invités ne peuvent pas se connecter. Utilisez un compte propre à votre organisation."
 
-#: src/activity/pending.tsx
-msgid "Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-msgstr "Chats invités. Cette application peut inviter des personnes non membres à un court chat avec un modèle via un lien, et relire ce qu’elles écrivent. Les invités n’accèdent à rien d’autre ; leurs chats consomment le budget de modèles de la personne qui les invite"
-
-#: src/activity/audit-log.tsx
-msgid "Guest of {app}, invited for {person}"
-msgstr "Invité de {app}, invité pour {person}"
-
-#: src/apps/resource-bindings.tsx
 #: src/settings/guests.tsx
 msgid "Guests"
 msgstr "Invités"
@@ -7117,10 +7087,6 @@ msgstr "Bonjour, ravi de vous voir ici. Tout cela peut sembler beaucoup, alors j
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Bonjour {admin}, je suis Stephen"
-
-#: src/routes/guest.tsx
-msgid "Hi {name}"
-msgstr "Bonjour {name}"
 
 #: src/interview/sound-check.tsx
 msgid "Hi {name}, I’m {who}, an AI. Can you hear me?"
@@ -7689,7 +7655,7 @@ msgstr "Inviter quelqu’un"
 
 #: src/activity/audit-words.ts
 msgid "Invited a guest"
-msgstr "A invité un invité"
+msgstr "A ajouté un invité"
 
 #: src/settings/invitations.tsx
 msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
@@ -8859,7 +8825,6 @@ msgid "Mentioned"
 msgstr "Cités"
 
 #: src/chat/thread.tsx
-#: src/routes/guest.tsx
 msgid "Messages"
 msgstr "Messages"
 
@@ -10723,10 +10688,6 @@ msgstr "Ouvertes : {open}"
 msgid "Opening Grasp"
 msgstr "Grasp s’ouvre"
 
-#: src/routes/guest.tsx
-msgid "Opening the chat…"
-msgstr "Ouverture du chat…"
-
 #: src/brain/note-reveal.tsx
 msgid "Opening the note"
 msgstr "Ouverture de la note"
@@ -11185,10 +11146,6 @@ msgid "Permission for the platform's statistics"
 msgstr "Autorisation pour les statistiques de la plateforme"
 
 #: src/apps/resource-bindings.tsx
-msgid "Permission to invite guests"
-msgstr "Autorisation d'inviter des invités"
-
-#: src/apps/resource-bindings.tsx
 msgid "Permission to read the Brain"
 msgstr "Autorisation de lire le Cerveau"
 
@@ -11617,10 +11574,6 @@ msgid "Read their own"
 msgstr "Lire ce qui est à eux"
 
 #: src/activity/audit-words.ts
-msgid "Read what a guest wrote"
-msgstr "A lu ce qu’un invité a écrit"
-
-#: src/activity/audit-words.ts
 msgid "Read what changed at a connection"
 msgstr "A lu ce qui a changé sur une connexion"
 
@@ -11681,10 +11634,6 @@ msgstr "Lecture de l’espace de travail"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "La lecture de ce qui a changé sur une connexion a échoué"
-
-#: src/routes/guest.tsx
-msgid "Reading what you wrote"
-msgstr "Lecture de ce que vous avez écrit"
 
 #: src/people/person-picker.tsx
 msgid "Reading who can own it…"
@@ -14486,7 +14435,6 @@ msgstr "Ce code a expiré. Demandez-en un nouveau."
 msgid "That code was tried too often. Ask for a new one."
 msgstr "Ce code a été essayé trop de fois. Demandez-en un nouveau."
 
-#: src/guest/api.ts
 #: src/interview/api.ts
 msgid "That didn't work. Try again in a moment."
 msgstr "Cela n’a pas fonctionné. Réessayez dans un instant."
@@ -14603,10 +14551,6 @@ msgstr "La réponse a été coupée à la limite du modèle."
 #: src/brain/gap-actions.tsx
 msgid "The answer, and who gave it, are taken away for good. The question stays closed."
 msgstr "La réponse, et qui l’a donnée, sont retirées définitivement. La question reste fermée."
-
-#: src/apps/resource-bindings.tsx
-msgid "The App has no permission to invite guests. Grant one first."
-msgstr "L’application n'a aucune autorisation d'inviter des invités. Accordez-en une d'abord."
 
 #: src/apps/resource-bindings.tsx
 msgid "The App has no permission to read the Brain. Grant one first."
@@ -15033,10 +14977,6 @@ msgstr "L’intervention est supprimée maintenant, tout comme ce que j’y ai m
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."
 msgstr "Le lien n’a pas été ouvert."
-
-#: src/routes/guest.tsx
-msgid "The link works until {until}."
-msgstr "Le lien fonctionne jusqu’au {until}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
@@ -15518,22 +15458,6 @@ msgstr "Cela modifie les données de l’App d’une façon qui demande une migr
 msgid "This chat account is linked to someone else. They need to unlink it first."
 msgstr "Ce compte de chat est relié à quelqu’un d’autre. Cette personne doit d’abord le dissocier."
 
-#: src/routes/guest.tsx
-msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
-msgstr "Ce chat vous demande comment votre travail est fait. Tout ce que vous écrivez est conservé et lu par les personnes qui vous ont invité, qui peuvent le copier dans leurs propres dossiers et l’y garder. Ne partagez pas de mots de passe, de coordonnées bancaires ni rien que vous ne mettriez pas dans un e-mail."
-
-#: src/routes/guest.tsx
-msgid "This chat can't be opened"
-msgstr "Ce chat ne peut pas être ouvert"
-
-#: src/routes/guest.tsx
-msgid "This chat has been closed by whoever sent you the link."
-msgstr "Ce chat a été fermé par la personne qui vous a envoyé le lien."
-
-#: src/routes/guest.tsx
-msgid "This chat has reached its length. Press Finish to end it."
-msgstr "Ce chat a atteint sa longueur maximale. Cliquez sur Terminer pour le clore."
-
 #: src/chat/held-writes.tsx
 msgid "This chat read private or restricted data: this may send it out"
 msgstr "Ce chat a lu des données privées ou restreintes : ceci peut les envoyer à l’extérieur"
@@ -15610,7 +15534,6 @@ msgstr "Voici ta nouvelle App, avec des données d'exemple."
 msgid "This link can’t be used"
 msgstr "Ce lien ne peut pas être utilisé"
 
-#: src/routes/guest.tsx
 #: src/routes/interview.tsx
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "Ce lien ne fonctionne pas. Demandez-en un nouveau à la personne qui l’a envoyé."
@@ -15618,10 +15541,6 @@ msgstr "Ce lien ne fonctionne pas. Demandez-en un nouveau à la personne qui l�
 #: src/settings/chat-accounts.tsx
 msgid "This link has been used already. Each link works once."
 msgstr "Ce lien a déjà été utilisé. Chaque lien ne fonctionne qu’une fois."
-
-#: src/routes/guest.tsx
-msgid "This link has expired. Ask whoever sent it for a new one."
-msgstr "Ce lien a expiré. Demandez-en un nouveau à la personne qui l’a envoyé."
 
 #: src/settings/chat-accounts.tsx
 msgid "This link has expired. Write to Grasp in the chat app for a new one."
@@ -15934,10 +15853,6 @@ msgstr "Trop d’essais. Attendez une minute, puis réessayez."
 #: src/activity/audit-words.ts
 msgid "Took a reply to a run's email"
 msgstr "A reçu une réponse à l’e-mail d’une exécution"
-
-#: src/activity/audit-words.ts
-msgid "Took back a guest's link"
-msgstr "A retiré le lien d’un invité"
 
 #: src/activity/audit-words.ts
 msgid "Took back the approval of a page's code"
@@ -17890,10 +17805,6 @@ msgstr "Écriture"
 msgid "Write a skill"
 msgstr "Écrire un skill"
 
-#: src/routes/guest.tsx
-msgid "Write your answer"
-msgstr "Écrivez votre réponse"
-
 #: src/workflows/workflow-settings.tsx
 msgid "Writes a model may steer:"
 msgstr "Écritures qu’un modèle peut orienter :"
@@ -18045,10 +17956,6 @@ msgstr "C’est vous qui décidez. Vous pouvez arrêter quand vous voulez, passe
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "Vous n’avez pas accès à cette organisation. Demandez à un admin."
 
-#: src/routes/guest.tsx
-msgid "You finished this chat. Thank you for your time."
-msgstr "Vous avez terminé ce chat. Merci pour votre temps."
-
 #: src/brain/sources-page.tsx
 msgid "You have no connections yet."
 msgstr "Vous n'avez encore aucune connexion."
@@ -18091,7 +17998,6 @@ msgid "You withdrew. What the Brain kept of it is being removed."
 msgstr "Vous vous êtes retiré. Ce que le Cerveau en a gardé est en cours de suppression."
 
 #: src/interview/transcript.tsx
-#: src/routes/guest.tsx
 msgid "You:"
 msgstr "Vous :"
 
@@ -18241,10 +18147,6 @@ msgstr "Les fichiers de votre export"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
 msgstr "Vos instructions"
-
-#: src/routes/guest.tsx
-msgid "Your message"
-msgstr "Votre message"
 
 #: src/frame/person-menu.tsx
 msgid "Your onboarding"

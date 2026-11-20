@@ -131,7 +131,7 @@ type Who = "all" | "grasp" | "people";
 /** Whether Grasp or its agents, Apps and runs did it, rather than a person. */
 const byGrasp = (record: AuditRecord): boolean => {
   const type = record.event?.actor.type;
-  return type !== "person" && type !== "staff" && type !== "guest";
+  return type !== "person" && type !== "staff";
 };
 
 const ActivityRow = ({

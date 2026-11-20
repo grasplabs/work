@@ -13,7 +13,7 @@ import type { Idp } from "./idp.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import { calledAs } from "./sealed-apps.ts";
-import { routed, signedInApi, unique } from "./sign-in.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 
 /**
  * The intake's harness, shared by the intake*.test.ts files: the App
@@ -86,7 +86,6 @@ export const sourceSchema = z.object({
   medium: z.string(),
   date: z.string(),
   from: z.string(),
-  guest: z.boolean(),
   createdAt: z.number(),
 });
 
@@ -98,7 +97,6 @@ export const savedSourceSchema = z
     date: z.string(),
     from: z.string(),
     notes: z.string(),
-    guest: z.boolean(),
   })
   .loose();
 
@@ -108,7 +106,6 @@ export const statementSchema = z.object({
   quote: z.string(),
   source: z.string(),
   date: z.string(),
-  guest: z.boolean(),
 });
 
 export const savedSchema = z.object({
@@ -211,12 +208,11 @@ export const workflowOf = async (
 /**
  * An App created from the intake by `admin`, its requests granted: to
  * start its `extract` workflow, whose `extractor` an admin approves for
- * the test's model unless `model` is false, and the guest chats
- * permission, which its `guests` is bound to when `guests` is true.
+ * the test's model unless `model` is false.
  */
 export const copyOf = async (
   admin: Person,
-  { model = true, guests = false }: { model?: boolean; guests?: boolean } = {}
+  { model = true }: { model?: boolean } = {}
 ): Promise<AppId> => {
   await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
   const made = await admin.api.apps.blueprints.create(intake, {
@@ -238,17 +234,6 @@ export const copyOf = async (
         reviewed: { version: 1 },
       }
     );
-  }
-  const permission = made.permissions.find(
-    ({ binding }) => binding === "GUESTS"
-  );
-  if (guests && permission !== undefined) {
-    await admin.api.resourceBindings.approve({
-      app: made.app.id,
-      alias: "guests",
-      target: { kind: "guests", permissionId: permission.id },
-      reviewed: { version: 1 },
-    });
   }
   await ordinaryData(made.app.id);
   return appIdSchema.parse(made.app.id);
@@ -278,8 +263,8 @@ export const memberIn =
 
 /**
  * The company connected an AI provider and chose its model, which the
- * intake's workflow is approved to read with and a stakeholder's chat is
- * invited with; a test that has the model answer connects its own.
+ * intake's workflow is approved to read with; a test that has the model
+ * answer connects its own.
  */
 export const connected = async (): Promise<void> => {
   await fakeProvider();
@@ -345,26 +330,4 @@ export const interviewSource = (title: string, date = "2026-09-22") => ({
   medium: "interview",
   date,
   from: "Anna",
-});
-
-/** A guest's page's request to core, and core's answer. */
-export const guest = async (body: unknown): Promise<unknown> => {
-  const response = await routed("/api/guest", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return await response.json();
-};
-
-/** A chat as `chats.notes` reads it, for the page to have it read. */
-export const chatNotesSchema = z.object({
-  source: z.object({
-    title: z.string(),
-    medium: z.string(),
-    date: z.string(),
-    from: z.string(),
-  }),
-  notes: z.string(),
-  lines: z.array(z.object({ role: z.string(), text: z.string() })),
 });
