@@ -226,7 +226,7 @@ describe("the Integrations overview", () => {
       "Acme CRMAsked for by 2 people",
     ]);
     expect(host.textContent).toContain(
-      "From your Microsoft 365, your documents, and what people asked for."
+      "From your Microsoft 365, your documents and what people asked for."
     );
   });
 
@@ -249,6 +249,9 @@ describe("the Integrations overview", () => {
     ].find((each) => heard(each).startsWith("Google Workspace"));
     expect(tile === undefined ? "" : heard(tile)).toBe(
       "Google WorkspaceWaiting for an admin"
+    );
+    expect(host.querySelector("section")?.textContent).toContain(
+      "1 app waits for an admin"
     );
   });
 

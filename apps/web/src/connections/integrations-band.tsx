@@ -1,26 +1,28 @@
 import type { Identity } from "@grasp-os/shared/rpc";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useId } from "react";
 
-import { AppsState } from "../grasp/blocks/app-integration/app-integration.tsx";
+import {
+  AppsState,
+  needsYou,
+} from "../grasp/blocks/app-integration/app-integration.tsx";
 import { Heading } from "../grasp/heading/index.ts";
 import { PanelTexture } from "../grasp/panel/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { useAppOf } from "./app-of.tsx";
+import { fixOf } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
-import { ProviderMark } from "./provider-mark.tsx";
 
 // The Integrations overview's slim band (Ruben's direction B, RUB-68), as
 // the library's pattern draws it (Grasp UI, app-integrations-recommended):
-// what Grasp reaches in one line on the dither, and the connected apps'
-// marks stacked at its end, and one line that sums them up (the library's
-// AppsState): how many need someone, in amber, else how many are
-// connected. Which app it is, and its fix, is on its own tile.
-
-/** Most connected apps' marks in the stack; the count says the rest. */
-const marksShown = 4;
+// what Grasp reaches in one line on the dither, and at its end the
+// library's AppsState, which sums up the connected apps: how many need
+// someone, in amber, else how many are connected; to someone who can fix
+// none of them, that they wait for an admin. Which app it is, and its fix,
+// is on its own tile.
 
 const styles = stylex.create({
   band: {
@@ -41,27 +43,11 @@ const styles = stylex.create({
   },
   texture: { zIndex: -1 },
   words: { display: "grid", gap: grasp.space1, minWidth: 0 },
-  stack: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
+  state: {
     color: grasp.muted,
     fontFamily: grasp.fontSans,
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
-  },
-  marks: { display: "flex" },
-  mark: {
-    display: "inline-flex",
-    padding: grasp.space1,
-    borderRadius: grasp.corner,
-    cornerShape: grasp.cornerShape,
-    backgroundColor: grasp.raised,
-    boxShadow: `0 0 0 ${grasp.hairline} ${grasp.line}`,
-    marginInlineStart: {
-      default: `calc(-1 * ${grasp.space2})`,
-      ":first-child": 0,
-    },
   },
 });
 
@@ -80,6 +66,14 @@ export const IntegrationsBand = ({
     (integration) => integration.connections.length > 0
   );
   const count = connected.length;
+  const apps = connected.map((integration) => ({
+    integration,
+    app: appOf(integration, { size: "sm" }),
+  }));
+  const waiting = apps.filter(({ app }) => needsYou(app));
+  const onlyAnAdmin =
+    waiting.length > 0 &&
+    waiting.every(({ integration }) => fixOf(integration, identity) === "none");
   return (
     <section aria-labelledby={id} {...stylex.props(styles.band)}>
       <PanelTexture layout={styles.texture} />
@@ -92,22 +86,17 @@ export const IntegrationsBand = ({
         </Text>
       </div>
       {count === 0 ? null : (
-        <span {...stylex.props(styles.stack)}>
-          <span aria-hidden="true" {...stylex.props(styles.marks)}>
-            {connected.slice(0, marksShown).map((integration) => (
-              <span key={integration.key} {...stylex.props(styles.mark)}>
-                <ProviderMark
-                  id={integration.id}
-                  logo={integration.logo}
-                  name={integration.name}
-                />
-              </span>
-            ))}
-          </span>
+        <span {...stylex.props(styles.state)}>
           <AppsState
-            apps={connected.map((integration) =>
-              appOf(integration, { size: "sm" })
-            )}
+            apps={apps.map(({ app }) => app)}
+            words={
+              onlyAnAdmin
+                ? {
+                    appsNeedYou: (waits) =>
+                      t`${plural(waits, { one: "# app waits for an admin", other: "# apps wait for an admin" })}`,
+                  }
+                : undefined
+            }
           />
         </span>
       )}

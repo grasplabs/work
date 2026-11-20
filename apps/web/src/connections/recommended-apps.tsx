@@ -35,22 +35,19 @@ const styles = stylex.create({
   },
 });
 
-const suiteNames = { microsoft: "Microsoft 365", google: "Google Workspace" };
-
-/** A reason, as the tile says it. */
-const Why = ({ reason }: { reason: Reason }) => {
+/** A reason, as the tile says it; `name`, the app's, names the suite. */
+const Why = ({ reason, name }: { reason: Reason; name: string }) => {
   const { t } = useLingui();
   let mark = <Icon icon={Doc} />;
   let words: string;
   if (reason.kind === "suite") {
-    const suite = suiteNames[reason.suite];
     mark = <BrandIcon brand={reason.suite} decorative size="xs" tile={false} />;
-    words = t`You work in ${suite}`;
+    words = t`You work in ${name}`;
   } else if (reason.kind === "documents") {
     const teams = formatList(reason.teams);
     words =
       reason.teams.length === 0
-        ? t`In your documents`
+        ? t`In the company's documents`
         : t`In ${teams} documents`;
   } else {
     mark = <Icon icon={People} />;
@@ -67,26 +64,18 @@ const Why = ({ reason }: { reason: Reason }) => {
   );
 };
 
-/** Where the reasons come from, as one sentence, naming only those given. */
+/**
+ * Where Grasp looks for its reasons, as one sentence: the suite the
+ * kickoff names, when it names one Grasp recommends, then the documents
+ * and the requests.
+ */
 const useSources = (recommended: readonly Recommendation[]): string => {
   const { t } = useLingui();
-  const kinds = new Set(recommended.map(({ reason }) => reason.kind));
-  const [suite] = recommended.flatMap(({ reason }) =>
-    reason.kind === "suite" ? [reason.suite] : []
-  );
-  const sources: string[] = [];
-  if (suite !== undefined) {
-    const name = suiteNames[suite];
-    sources.push(t`your ${name}`);
-  }
-  if (kinds.has("documents")) {
-    sources.push(t`your documents`);
-  }
-  if (kinds.has("asked")) {
-    sources.push(t`what people asked for`);
-  }
-  const list = formatList(sources);
-  return t`From ${list}.`;
+  const suite = recommended.find(({ reason }) => reason.kind === "suite")
+    ?.integration.name;
+  return suite === undefined
+    ? t`From your documents and what people asked for.`
+    : t`From your ${suite}, your documents and what people asked for.`;
 };
 
 /** The apps to connect first, each saying why; nothing when there are none. */
@@ -118,7 +107,7 @@ export const RecommendedApps = ({
       <ItemGrid aria-label={title}>
         {recommended.map(({ integration, reason }) => (
           <IntegrationTile
-            fact={<Why reason={reason} />}
+            fact={<Why name={integration.name} reason={reason} />}
             identity={identity}
             integration={integration}
             key={integration.key}

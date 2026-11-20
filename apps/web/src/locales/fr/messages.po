@@ -1641,6 +1641,10 @@ msgstr "{waiting, plural, one {# workflow a besoin de vous} other {# workflows o
 msgid "{waiting, plural, one {It uses # new kind of access. An admin approves that once.} other {It uses # new kinds of access. An admin approves those once.}}"
 msgstr "{waiting, plural, one {Il utilise # nouveau type d’accès. Un administrateur l’approuve une fois.} other {Il utilise # nouveaux types d’accès. Un administrateur les approuve une fois.}}"
 
+#: src/connections/integrations-band.tsx
+msgid "{waits, plural, one {# app waits for an admin} other {# apps wait for an admin}}"
+msgstr "{waits, plural, one {# app attend un administrateur} other {# apps attendent un administrateur}}"
+
 #: src/chat/held-writes.tsx
 msgid "{what} didn't go through."
 msgstr "{what} n’a pas abouti."
@@ -7817,10 +7821,6 @@ msgstr "De {from}"
 msgid "From {from} · {job}"
 msgstr "De {from} · {job}"
 
-#: src/connections/recommended-apps.tsx
-msgid "From {list}."
-msgstr "D’après {list}."
-
 #: src/brain/memories-page.tsx
 msgid "From a chat, version {version}"
 msgstr "D’une discussion, version {version}"
@@ -7870,9 +7870,17 @@ msgstr "D’après ce que disent des personnes de toute l’entreprise, version 
 msgid "From what your team said, version {version}"
 msgstr "D’après ce qu’a dit votre équipe, version {version}"
 
+#: src/connections/recommended-apps.tsx
+msgid "From your {suite}, your documents and what people asked for."
+msgstr "D’après votre {suite}, vos documents et ce que les gens ont demandé."
+
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "From your Apps"
 msgstr "De vos applications"
+
+#: src/connections/recommended-apps.tsx
+msgid "From your documents and what people asked for."
+msgstr "D’après vos documents et ce que les gens ont demandé."
 
 #: src/onboarding/setup-steps.tsx
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
@@ -9008,6 +9016,10 @@ msgstr "En cours"
 msgid "In the brain"
 msgstr "Dans le Cerveau"
 
+#: src/connections/recommended-apps.tsx
+msgid "In the company's documents"
+msgstr "Dans les documents de l’entreprise"
+
 #: src/agents/setup/schedule-step.tsx
 msgid "in the company's time zone"
 msgstr "dans le fuseau horaire de l’entreprise"
@@ -9036,10 +9048,6 @@ msgstr "Dans Workflows"
 #: src/agents/setup/abilities-step.tsx
 msgid "In your apps"
 msgstr "Dans vos apps"
-
-#: src/connections/recommended-apps.tsx
-msgid "In your documents"
-msgstr "Dans vos documents"
 
 #: src/onboarding/setup-steps.tsx
 msgid "In your documents I saw {tools}."
@@ -14140,7 +14148,7 @@ msgstr "Exécutions récentes"
 #: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Recommended"
-msgstr "Recommandées"
+msgstr "Recommandés"
 
 #: src/connections/recommended-apps.tsx
 msgctxt "apps to connect first"
@@ -14150,7 +14158,7 @@ msgstr "Recommandées"
 #: src/chat/asked-questions.tsx
 msgctxt "the option the assistant would pick"
 msgid "Recommended"
-msgstr "Recommandées"
+msgstr "Recommandé"
 
 #: src/apps/app-data.tsx
 msgid "record"
@@ -19988,10 +19996,6 @@ msgctxt "a source of the Brain"
 msgid "What people across the company say"
 msgstr "Ce que disent les personnes de toute l’entreprise"
 
-#: src/connections/recommended-apps.tsx
-msgid "what people asked for"
-msgstr "ce que les gens ont demandé"
-
 #: src/workflows/workflow-settings.tsx
 msgid "What people see instead of {name}."
 msgstr "Ce que les personnes voient à la place de {name}."
@@ -21145,8 +21149,8 @@ msgid "You withdrew. What the Brain kept of it is being removed."
 msgstr "Vous vous êtes retiré. Ce que le Cerveau en a gardé est en cours de suppression."
 
 #: src/connections/recommended-apps.tsx
-msgid "You work in {suite}"
-msgstr "Vous travaillez avec {suite}"
+msgid "You work in {name}"
+msgstr "Vous travaillez avec {name}"
 
 #. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
 #: src/frame/part-words.tsx
@@ -21164,10 +21168,6 @@ msgstr "Vous voyez votre version."
 #: src/frame/person-menu.tsx
 msgid "You're still signed in. Try again in a moment."
 msgstr "Vous êtes toujours connecté. Réessayez dans un instant."
-
-#: src/connections/recommended-apps.tsx
-msgid "your {name}"
-msgstr "votre {name}"
 
 #: src/agents/agents-overview.tsx
 msgid "Your agents"
@@ -21271,10 +21271,6 @@ msgstr "Vos conversations dans les applications de chat"
 #: src/brain/memories-page.tsx
 msgid "Your correction is kept as your own word, for you alone, and shown beside what the Brain holds. What others read stays as it is."
 msgstr "Votre correction est conservée comme votre propre parole, pour vous seul, et affichée à côté de ce que retient le Brain. Ce que lisent les autres reste inchangé."
-
-#: src/connections/recommended-apps.tsx
-msgid "your documents"
-msgstr "vos documents"
 
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's model"
