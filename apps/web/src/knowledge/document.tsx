@@ -400,14 +400,15 @@ export const useDocumentPage = ({
   const versions = read?.versions ?? [];
   // The version shown, by its document and number.
   const key = doc === undefined ? undefined : `${doc.id}@${doc.version.number}`;
+  let texts: ReadonlyMap<number, string> = new Map();
+  if (doc !== undefined && loaded !== undefined && loaded.docId === doc.id) {
+    ({ texts } = loaded);
+  }
   const history: DocumentHistory = {
     open,
     onOpenChange: setOpen,
     versions: versions.flatMap((version) => {
-      const markdown =
-        loaded?.docId === doc?.id
-          ? loaded?.texts.get(version.number)
-          : undefined;
+      const markdown = texts.get(version.number);
       const { number, restoredFrom } = version;
       return markdown === undefined
         ? []
