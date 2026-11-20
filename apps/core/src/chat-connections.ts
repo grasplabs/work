@@ -191,7 +191,7 @@ const actionsOf = async (
  */
 const scopePerson = async (
   env: Env,
-  scope: AgentScope
+  scope: Pick<AgentScope, "personId">
 ): Promise<ConnectionPerson> => {
   const [member, user] = await Promise.all([
     memberOf(env.DB, scope.personId),
@@ -230,7 +230,7 @@ const waitingChanged = async (env: Env, scope: AgentScope): Promise<void> => {
  */
 export const askableConnections = async (
   env: Env,
-  scope: AgentScope
+  scope: Pick<AgentScope, "personId">
 ): Promise<AskableConnection[]> => {
   const person = await scopePerson(env, scope);
   // Connect asked once: what it lists is both what the chat is offered

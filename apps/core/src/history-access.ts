@@ -27,6 +27,7 @@ import type {
 import { audienceOf } from "./chat-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { personErasures } from "./db/core/schema.ts";
+import { ownConnectionReadOf } from "./own-connection-reads.ts";
 import { grantedPermissions } from "./permissions.ts";
 
 // What a chat's earlier code results may still send to the model (GRA-690).
@@ -598,7 +599,10 @@ const withheldKindOf = (source: string): WithheldKind => {
   ) {
     return "passages";
   }
-  if (connectionReadOf(source) !== undefined) {
+  if (
+    connectionReadOf(source) !== undefined ||
+    ownConnectionReadOf(source) !== undefined
+  ) {
     return "connections";
   }
   return appReadOf(source) === undefined ? "unknown" : "apps";
@@ -704,6 +708,37 @@ const readableConnections = async (
   );
 };
 
+/**
+ * Of the reads of the person's own connections with no grant in `sources`
+ * (own-connection-reads.ts), those still theirs: a connection that is
+ * still the person's own and not disconnected, as `readableConnections`
+ * holds a granted one.
+ */
+const readableOwnConnectionReads = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<string[]> => {
+  const reads = sources.flatMap((source) => {
+    const connectionId = ownConnectionReadOf(source);
+    return connectionId === undefined ? [] : [{ source, connectionId }];
+  });
+  if (reads.length === 0) {
+    return [];
+  }
+  const owners = await connectionOwnersOf(env, [
+    ...new Set(reads.map(({ connectionId }) => connectionId)),
+  ]);
+  const theirs = new Set(
+    owners.flatMap(({ id, ownerUserId, status }) =>
+      ownerUserId === scope.personId && status !== "disconnected" ? [id] : []
+    )
+  );
+  return reads.flatMap(({ source, connectionId }) =>
+    theirs.has(connectionId) ? [source] : []
+  );
+};
+
 /** Of the App reads in `sources`, those the agent may make for its person now. */
 const readableApps = async (
   env: Env,
@@ -757,6 +792,8 @@ const obsoleteBrainGrantPin = "brain-grant";
  * connection call a grant the agent holds in this chat now covers, on a
  * connection not disconnected that the person may use themselves; an App
  * read the agent's grants and the person's role in the App allow now; a
+ * read of the person's own connection with no grant, while it is still
+ * theirs and not disconnected; a
  * version of the Brain, while the person may read it (their teams and
  * the company, for what code's recall handed over); a memory of the new
  * Brain, while the person (or, as the company read it, the company) may
@@ -782,6 +819,7 @@ export const readableSources = async (
   const [
     apps,
     connections,
+    ownConnections,
     versions,
     teamVersions,
     companyVersions,
@@ -791,6 +829,7 @@ export const readableSources = async (
   ] = await Promise.all([
     readableApps(env, scope, sourceIds),
     readableConnections(env, scope, sourceIds),
+    readableOwnConnectionReads(env, scope, sourceIds),
     readableBrainVersions(env, scope, sourceIds),
     readableAt(env, scope, sourceIds, brainTeamVersionPrefix, "teams"),
     readableBrainCompanyVersions(env, scope, sourceIds, cut),
@@ -802,6 +841,7 @@ export const readableSources = async (
   const readable = new Set([
     ...apps,
     ...connections,
+    ...ownConnections,
     ...versions,
     ...teamVersions,
     ...companyVersions,
