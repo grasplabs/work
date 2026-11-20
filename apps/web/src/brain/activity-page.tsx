@@ -4,7 +4,6 @@ import type {
   Gap,
   Source,
 } from "@grasp-os/shared/brain";
-import { brainChangesMaxLimit } from "@grasp-os/shared/brain";
 import { failureText } from "@grasp-os/shared/errors";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { plural } from "@lingui/core/macro";
@@ -94,37 +93,28 @@ const styles = stylex.create({
 type Fresh =
   | { state: "loading" }
   | { state: "failed"; reason: string }
-  | { state: "ready"; since: string; changes: BrainChange[] };
+  | { state: "ready"; since: string; changes: BrainChange[]; more: boolean };
+
+/** How many of the changes since the last look the page lists: the newest, so the log stays in view. */
+const freshShown = 10;
 
 /**
- * Every change after `since`, page by page. Outside the component, as the
- * React Compiler can't compile `try`/`catch` around a value it returns.
+ * The newest changes after `since`. Outside the component, as the React
+ * Compiler can't compile `try`/`catch` around a value it returns.
  */
 const readChanges = async (
   core: Pick<CoreConnection, "withSession">,
-  since: string,
-  cursor?: string
-): Promise<{ changes: BrainChange[] } | { reason: string }> => {
-  let page: BrainChangePage;
+  since: string
+): Promise<{ page: BrainChangePage } | { reason: string }> => {
   try {
-    page = await core.withSession(
+    const page = await core.withSession(
       async (session) =>
-        await session.brain.changes({
-          since,
-          limit: brainChangesMaxLimit,
-          ...(cursor === undefined ? {} : { cursor }),
-        })
+        await session.brain.changes({ since, limit: freshShown })
     );
+    return { page };
   } catch (error) {
     return { reason: failureText(error) };
   }
-  if (page.next === null) {
-    return { changes: page.changes };
-  }
-  const rest = await readChanges(core, since, page.next);
-  return "reason" in rest
-    ? rest
-    : { changes: [...page.changes, ...rest.changes] };
 };
 
 /** Today, as an ISO date where the reader is. */
@@ -152,6 +142,19 @@ interface Opened {
   ask?: Gap;
 }
 
+/** A line of the page, and what it opens beside it. */
+interface Listed {
+  line: BrainActivityLine;
+  opened: Opened;
+}
+
+const listed = (
+  id: string,
+  opened: Opened,
+  detail: string,
+  name = opened.title
+): Listed => ({ line: { id, icon: opened.icon, name, detail }, opened });
+
 /** What changed since the last look, read as the page opens; the look then counts as seen. */
 const useFresh = (): Fresh => {
   const core = useCore();
@@ -170,7 +173,12 @@ const useFresh = (): Fresh => {
         setFresh({ state: "failed", reason: answer.reason });
         return;
       }
-      setFresh({ state: "ready", since, changes: answer.changes });
+      setFresh({
+        state: "ready",
+        since,
+        changes: answer.page.changes,
+        more: answer.page.next !== null,
+      });
       keepLooked(identity.userId, asked);
     };
     void load();
@@ -187,7 +195,9 @@ export const ActivityPage = () => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const navigate = useNavigate();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
+  const { busy, run } = useCoreAction();
+  // Why asking failed, beside the question it was about.
+  const [failed, setFailed] = useState<{ gap: string; reason: string }>();
   const fresh = useFresh();
   const [open, setOpen] = useState<string>();
 
@@ -227,7 +237,7 @@ export const ActivityPage = () => {
   };
   // A question: where it was noticed, who it waits on or who answered, and what it is about.
   const gapOpened = (gap: Gap): Opened => {
-    const noticed = sources.get(gap.sourceId)?.title;
+    const source = sources.get(gap.sourceId)?.title;
     const { owner } = gap;
     const { answer } = gap;
     let state = t`Waits on the ${owner}, nobody asked yet`;
@@ -242,10 +252,7 @@ export const ActivityPage = () => {
     return {
       title: gap.question,
       icon: Question,
-      meta: [
-        ...(noticed === undefined ? [] : [t`Noticed in ${noticed}`]),
-        state,
-      ],
+      meta: [...(source === undefined ? [] : [t`Noticed in ${source}`]), state],
       kept: [],
       changed: pagesOf(gap.about),
       ...(notes.has(gap.id) ? { goes: { to: "note", id: gap.id } } : {}),
@@ -272,7 +279,7 @@ export const ActivityPage = () => {
     }
     return title;
   };
-  const entryOpened = (entry: LogEntry): Opened | undefined => {
+  const entryOpened = (entry: LogEntry): Opened => {
     const gap =
       entry.question === undefined ? undefined : gaps.get(entry.question.gap);
     if (gap !== undefined) {
@@ -324,52 +331,38 @@ export const ActivityPage = () => {
     };
   };
 
-  const opened = new Map<string, Opened>();
-  const line = (
-    id: string,
-    said: Opened,
-    detail?: string
-  ): BrainActivityLine => {
-    opened.set(id, said);
-    return {
-      id,
-      icon: said.icon,
-      name: said.title,
-      ...(detail === undefined ? {} : { detail }),
-    };
-  };
-  const freshLines =
+  const freshListed =
     fresh.state === "ready"
-      ? fresh.changes.map((change) => {
-          const key =
+      ? fresh.changes.map((change) =>
+          listed(
             change.kind === "source"
               ? `fresh:source:${change.source.id}`
-              : `fresh:document:${change.document.id}`;
-          return line(key, changeOpened(change), formatDateTime(change.at));
-        })
+              : `fresh:document:${change.document.id}`,
+            changeOpened(change),
+            formatDateTime(change.at)
+          )
+        )
       : [];
-  const waiting = workspace.gaps
+  const waitingListed = workspace.gaps
     .filter((gap) => gap.closedAt === undefined)
-    .map((gap) => line(`waiting:${gap.id}`, gapOpened(gap), gap.owner));
+    .map((gap) => listed(`waiting:${gap.id}`, gapOpened(gap), gap.owner));
   const log = brainLog(workspace, brain, todayHere());
-  const logLines = (entries: LogEntry[]) =>
-    entries.flatMap((entry) => {
-      const said = entryOpened(entry);
-      return said === undefined
-        ? []
-        : [
-            {
-              ...line(entry.id, said, formatDay(entry.day)),
-              name: nameOf(entry),
-              icon: icons[entry.kind],
-            },
-          ];
-    });
-  const groups = [
-    { id: "this-week", label: t`This week`, lines: logLines(log.thisWeek) },
-    { id: "last-week", label: t`Last week`, lines: logLines(log.lastWeek) },
-    { id: "earlier", label: t`Earlier`, lines: logLines(log.earlier) },
+  const logListed = (entries: LogEntry[]) =>
+    entries.map((entry) =>
+      listed(entry.id, entryOpened(entry), formatDay(entry.day), nameOf(entry))
+    );
+  const stretches = [
+    { id: "this-week", label: t`This week`, listed: logListed(log.thisWeek) },
+    { id: "last-week", label: t`Last week`, listed: logListed(log.lastWeek) },
+    { id: "earlier", label: t`Earlier`, listed: logListed(log.earlier) },
   ];
+  const opened = new Map(
+    [
+      ...freshListed,
+      ...waitingListed,
+      ...stretches.flatMap((stretch) => stretch.listed),
+    ].map(({ line, opened: said }) => [line.id, said])
+  );
 
   let description: string | undefined;
   if (fresh.state === "failed") {
@@ -377,10 +370,16 @@ export const ActivityPage = () => {
     description = t`What changed since you last looked couldn't be read: ${reason}`;
   } else if (fresh.state === "ready") {
     const when = formatDateTime(fresh.since);
-    description =
-      fresh.changes.length === 0
-        ? t`Nothing has changed since you last looked, ${when}.`
-        : t`You last looked ${when}.`;
+    const shown = fresh.changes.length;
+    description = t`You last looked on ${when}.`;
+    if (shown === 0) {
+      description = t`Nothing has changed since you last looked, ${when}.`;
+    } else if (fresh.more) {
+      description = plural(shown, {
+        one: `You last looked on ${when}. The newest change since is shown.`,
+        other: `You last looked on ${when}. The newest # changes since are shown.`,
+      });
+    }
   }
 
   const inHand = open === undefined ? undefined : opened.get(open);
@@ -396,8 +395,12 @@ export const ActivityPage = () => {
     });
   };
   const ask = async (gap: Gap): Promise<void> => {
+    setFailed(undefined);
     const done = await run(
-      async (session) => await session.brain.askAboutGap(gap.id)
+      async (session) => await session.brain.askAboutGap(gap.id),
+      (reason) => {
+        setFailed({ gap: gap.id, reason });
+      }
     );
     if (done !== undefined) {
       // The brain is read again: the question shows as asked.
@@ -422,10 +425,14 @@ export const ActivityPage = () => {
         <div {...stylex.props(inHand !== undefined && styles.pageBeside)}>
           <PageBrainActivity
             description={description}
-            fresh={freshLines}
-            groups={groups}
+            fresh={freshListed.map(({ line }) => line)}
+            groups={stretches.map(({ id, label, listed: lines }) => ({
+              id,
+              label,
+              lines: lines.map(({ line }) => line),
+            }))}
             onOpen={setOpen}
-            waiting={waiting}
+            waiting={waitingListed.map(({ line }) => line)}
             words={words}
           />
         </div>
@@ -470,7 +477,9 @@ export const ActivityPage = () => {
               icon={inHand.icon}
               kept={inHand.kept}
               meta={
-                failure === undefined ? inHand.meta : [...inHand.meta, failure]
+                failed !== undefined && failed.gap === inHand.ask?.id
+                  ? [...inHand.meta, failed.reason]
+                  : inHand.meta
               }
               onClose={() => {
                 setOpen(undefined);

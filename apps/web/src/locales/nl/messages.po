@@ -1334,6 +1334,10 @@ msgstr "{shared, plural, one {# document werd gedeeld of gevonden, en gelezen.} 
 msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {# integratie getoond} other {# integraties getoond}}"
 
+#: src/brain/activity-page.tsx
+msgid "{shown, plural, one {You last looked on {when}. The newest change since is shown.} other {You last looked on {when}. The newest # changes since are shown.}}"
+msgstr "{shown, plural, one {Je keek laatst op {when}. De nieuwste wijziging sindsdien staat hier.} other {Je keek laatst op {when}. De # nieuwste wijzigingen sindsdien staan hier.}}"
+
 #: src/workflows/listed-count.tsx
 msgid "{shown} entries or more"
 msgstr "{shown} regels of meer"
@@ -11843,9 +11847,6 @@ msgid "Noticed in"
 msgstr "Opgemerkt in"
 
 #: src/brain/activity-page.tsx
-msgid "Noticed in {noticed}"
-msgstr "Opgemerkt in {noticed}"
-
 #: src/brain/brain.ts
 msgid "Noticed in {source}"
 msgstr "Opgemerkt in {source}"
@@ -20310,8 +20311,8 @@ msgid "You have no recent runs whose input is still kept, so there was nothing t
 msgstr "Je hebt geen recente runs waarvan de invoer nog bewaard is, dus er was niets om op te testen."
 
 #: src/brain/activity-page.tsx
-msgid "You last looked {when}."
-msgstr "Je keek laatst {when}."
+msgid "You last looked on {when}."
+msgstr "Je keek laatst op {when}."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."

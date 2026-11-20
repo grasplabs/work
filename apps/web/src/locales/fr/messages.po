@@ -1334,6 +1334,10 @@ msgstr "{shared, plural, one {# document a été partagé ou trouvé, et lu.} ot
 msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {# intégration affichée} other {# intégrations affichées}}"
 
+#: src/brain/activity-page.tsx
+msgid "{shown, plural, one {You last looked on {when}. The newest change since is shown.} other {You last looked on {when}. The newest # changes since are shown.}}"
+msgstr "{shown, plural, one {Dernière visite le {when}. Le changement le plus récent depuis est affiché.} other {Dernière visite le {when}. Les # changements les plus récents depuis sont affichés.}}"
+
 #: src/workflows/listed-count.tsx
 msgid "{shown} entries or more"
 msgstr "{shown} entrées ou plus"
@@ -11843,9 +11847,6 @@ msgid "Noticed in"
 msgstr "Repéré dans"
 
 #: src/brain/activity-page.tsx
-msgid "Noticed in {noticed}"
-msgstr "Repérée dans {noticed}"
-
 #: src/brain/brain.ts
 msgid "Noticed in {source}"
 msgstr "Repéré dans {source}"
@@ -20310,8 +20311,8 @@ msgid "You have no recent runs whose input is still kept, so there was nothing t
 msgstr "Vous n’avez aucune exécution récente dont l’entrée est encore conservée : il n’y avait rien à tester."
 
 #: src/brain/activity-page.tsx
-msgid "You last looked {when}."
-msgstr "Dernière visite : {when}."
+msgid "You last looked on {when}."
+msgstr "Dernière visite le {when}."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."
