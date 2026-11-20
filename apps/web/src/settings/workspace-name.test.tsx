@@ -129,7 +129,7 @@ const shown = async (
   await settled();
 };
 
-/** Presses Edit, types `name` into the field and presses Enter, as a person renames it. */
+/** Presses Edit, types `name` into the dialog's field and presses Save, as a person renames it. */
 const rename = async (name: string): Promise<void> => {
   await act(async () => {
     document
@@ -137,14 +137,14 @@ const rename = async (name: string): Promise<void> => {
       ?.click();
     await Promise.resolve();
   });
+  await settled();
   const field = document.querySelector<HTMLInputElement>(
-    'input[aria-label="Name"]'
+    '[role="dialog"] input'
   );
   if (field === null) {
     throw new TypeError("No name field");
   }
   await act(async () => {
-    field.focus();
     Reflect.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       "value"
@@ -152,11 +152,14 @@ const rename = async (name: string): Promise<void> => {
     field.dispatchEvent(new Event("input", { bubbles: true }));
     await Promise.resolve();
   });
+  const save = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+  ].find((button) => button.textContent.includes("Save"));
+  if (save === undefined) {
+    throw new TypeError("No Save button");
+  }
   await act(async () => {
-    field.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
-    );
-    field.blur();
+    save.click();
     await Promise.resolve();
   });
   await settled();
@@ -188,7 +191,7 @@ describe("Settings › Workspace › Name", () => {
     });
   });
 
-  it("keeps the old name in the sidebar when core refuses the rename, and says why on the card", async () => {
+  it("keeps the old name in the sidebar when core refuses the rename, and says why in the dialog", async () => {
     const { organization } = fakeOrganization("Noordkade Finance", true);
     await shown(organization);
 

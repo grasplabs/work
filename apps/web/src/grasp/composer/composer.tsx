@@ -753,6 +753,10 @@ const styles = stylex.create({
     height: grasp.iconSm,
     backgroundColor: { default: grasp.line, [media.forced]: "CanvasText" },
   },
+  // At rest in a narrow one row, folded away so the placeholder keeps its least width (useRowFit).
+  controlsAway: {
+    display: "none",
+  },
   controls: {
     display: "flex",
     alignItems: "center",
@@ -1060,6 +1064,35 @@ const useFileDrop = (
 // oxlint-disable-next-line unicorn/prefer-number-coercion -- a length reads "8px", which Number() makes NaN
 const px = (value: string) => Number.parseFloat(value) || 0;
 
+/**
+ * The one row's end side as it stands with its controls, folded away or not: what each of the row's
+ * answers is read from. While the controls show, their width and the gap after them are kept in `room`.
+ */
+const endWithControls = (
+  end: HTMLElement,
+  drop: boolean,
+  room: { current: number }
+) => {
+  const controls = end.querySelector<HTMLElement>(
+    ":scope > [data-slot=composer-controls]"
+  );
+  if (!drop && controls !== null) {
+    room.current =
+      controls.getBoundingClientRect().width +
+      px(getComputedStyle(end).columnGap);
+  }
+  return {
+    controls,
+    width: end.getBoundingClientRect().width + (drop ? room.current : 0),
+  };
+};
+
+/** A length token's value (rem or px), in pixels. */
+const lengthPx = (value: string) =>
+  value.trim().endsWith("rem")
+    ? px(value) * px(getComputedStyle(document.documentElement).fontSize)
+    : px(value);
+
 /** What an effect with nothing to undo returns. */
 const holdNothing = () => {
   // Nothing was started.
@@ -1070,7 +1103,10 @@ const holdNothing = () => {
  * than the room between the plus and the controls), or the field would go under its least width
  * (composer-field-least) even with the level folded; the text then takes the row and the controls drop
  * under it. `fold`: the model's level folds to its maker's mark, first, because with it the field would
- * go under that least width. The text never gives. Every width is read from the card and its two
+ * go under that least width. The text never gives. At rest the least is the placeholder's
+ * (composer-placeholder-least) and the row stays one line: after the level, `drop` folds the controls
+ * away, and they come back once something is typed. Only where nothing is left to fold does the
+ * placeholder give, cut with an ellipsis. Every width is read from the card and its two
  * sides, which stand alike in both forms, so the answer never depends on the form it changes: nothing
  * flickers at the edge. Read before paint as the text changes, and again as the card or a side changes
  * width (a chip laid out late, a level folded). While a takeover holds the card the answer stands
@@ -1084,12 +1120,15 @@ const useRowFit = (
 ) => {
   const [tall, setTall] = useState(false);
   const [fold, setFold] = useState(false);
+  const [drop, setDrop] = useState(false);
   // What was last set, so a read that finds the same answer sets nothing. A set to the same value
   // can still cost a render of the whole card (React bails out late when the card has just updated
   // itself, as on a send that clears the text), and that render landed in the Enter key's frame.
-  const last = useRef({ tall: false, fold: false });
+  const last = useRef({ tall: false, fold: false, drop: false });
   // The end side's width while the level shows: what unfolding would need again.
   const wideEnd = useRef(0);
+  // The controls' width and the gap after them while they show: what they need to come back.
+  const controlsRoom = useRef(0);
   useLayoutEffect(() => {
     const box = card.current;
     if (!on || box === null) {
@@ -1108,6 +1147,12 @@ const useRowFit = (
       if (next !== said.fold) {
         said.fold = next;
         setFold(next);
+      }
+    };
+    const putDrop = (next: boolean) => {
+      if (next !== said.drop) {
+        said.drop = next;
+        setDrop(next);
       }
     };
     const pen = document.createElement("canvas").getContext("2d");
@@ -1130,7 +1175,11 @@ const useRowFit = (
       const level = end.querySelector<HTMLElement>(
         "[data-slot=composer-model-effort-level]"
       );
-      const endWidth = end.getBoundingClientRect().width;
+      const { controls, width: endWidth } = endWithControls(
+        end,
+        drop,
+        controlsRoom
+      );
       if (!fold && level !== null && level.getClientRects().length > 0) {
         wideEnd.current = endWidth;
       }
@@ -1140,7 +1189,10 @@ const useRowFit = (
         px(look.paddingInlineEnd);
       const sides =
         start.getBoundingClientRect().width + 2 * px(look.columnGap);
-      const least = px(getComputedStyle(slot).minWidth);
+      const resting = text === "";
+      const least = resting
+        ? lengthPx(look.getPropertyValue("--grasp-composer-placeholder-least"))
+        : px(getComputedStyle(slot).minWidth);
       // Folded only while the level would leave the field under its least width.
       const folding =
         level !== null &&
@@ -1150,10 +1202,17 @@ const useRowFit = (
         // The sides change width with the fold: read again once it is drawn.
         return;
       }
+      // At rest, after the level, the controls fold away while the placeholder would be under its least.
+      const dropping =
+        resting && controls !== null && inner - sides - endWidth < least;
+      putDrop(dropping);
+      if (dropping !== drop) {
+        return;
+      }
       const room = inner - sides - endWidth;
       const words = text;
       // At rest there are no words to keep whole: the placeholder ends in an ellipsis on one line.
-      if (words === "") {
+      if (resting) {
         putTall(false);
         return;
       }
@@ -1181,8 +1240,8 @@ const useRowFit = (
     return () => {
       observer.disconnect();
     };
-  }, [on, text, card, area, fold]);
-  return { tall, fold };
+  }, [on, text, card, area, fold, drop]);
+  return { tall, fold, drop };
 };
 
 /** The card's look: its surface, the one row (and tall in it), a takeover, a file dragged over. */
@@ -2439,6 +2498,8 @@ interface InsideProps {
   compact: boolean;
   /** In the one row, the text no longer fits its line: it takes the row, the controls go under it. */
   tall: boolean;
+  /** In the one row at rest, the controls are folded away so the placeholder keeps its least width. */
+  drop: boolean;
   start: ReactNode;
   end: ReactNode;
   last: ReactNode;
@@ -2464,6 +2525,7 @@ const ComposerInside = ({
   takeover,
   compact,
   tall,
+  drop,
   start,
   end,
   last,
@@ -2538,7 +2600,7 @@ const ComposerInside = ({
           {Boolean(controls) && (
             <div
               data-slot="composer-controls"
-              {...stylex.props(styles.controls)}
+              {...stylex.props(styles.controls, drop && styles.controlsAway)}
             >
               {controls}
             </div>
@@ -2837,7 +2899,7 @@ const ComposerForm = (props: Resolved) => {
   });
   const { pictures } = words;
   // The row's fit reads the text as the field shows it (a chip by its characters).
-  const { tall, fold } = useRowFit(row, words.shown, card, area);
+  const { tall, fold, drop } = useRowFit(row, words.shown, card, area);
   // Said when a chip is taken out.
   const [pictureSaid, setPictureSaid] = useState("");
   const files = useFileDrop(props.onAttach, disabled);
@@ -3139,6 +3201,7 @@ const ComposerForm = (props: Resolved) => {
                           takeover={takeover}
                           compact={compact}
                           tall={tall}
+                          drop={drop}
                           start={props.start}
                           end={still.end}
                           last={last}

@@ -60,6 +60,7 @@ import { dropdownMenuWords } from "../grasp/dropdown-menu/words.ts";
 import { emptyWords } from "../grasp/empty/words.ts";
 import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
 import { filterBuilderWords } from "../grasp/filter-builder/words.ts";
+import { identityCardWords } from "../grasp/identity-card/words.ts";
 import { inputWords } from "../grasp/input/words.ts";
 import { englishWords as inspectorPanelWords } from "../grasp/inspector-panel/words.ts";
 import { englishWords as interviewWords } from "../grasp/interview/words.ts";
@@ -191,6 +192,7 @@ export const englishPartWords: GraspWordsCatalog = {
   empty: emptyWords,
   fileUpload: fileUploadWords,
   filterBuilder: filterBuilderWords,
+  identityCard: identityCardWords,
   imageWell: imageWellWords,
   input: inputWords,
   inspectorPanel: inspectorPanelWords,
@@ -391,6 +393,9 @@ export const usePartWords = (): GraspWordsCatalog => {
       notSent: (name) => t`Could not upload ${name}.`,
       remove: (name) => t`Remove ${name}`,
       refused: (name, reason) => refusedFile(name, reason, false),
+    },
+    identityCard: {
+      facts: t`Details`,
     },
     imageWell: {
       change: t`Change picture`,

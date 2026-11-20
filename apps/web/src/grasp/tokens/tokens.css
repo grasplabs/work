@@ -1610,6 +1610,8 @@
   --grasp-composer-row-least: 20rem;
   /* The least width of the one row's text: narrower, the model's level folds to its mark, then the controls drop under the text. The text never gives. */
   --grasp-composer-field-least: 8rem;
+  /* The least width of the one row's placeholder at rest: narrower, the model's level folds to its mark, then the controls fold away until something is typed. Only where nothing is left to fold does the placeholder give, cut with an ellipsis. */
+  --grasp-composer-placeholder-least: 6rem;
   /* The working light: lime, sea and mint in beams with dark gaps between, ending as it starts so it loops without a seam. */
   --grasp-composer-light: linear-gradient(
     90deg,

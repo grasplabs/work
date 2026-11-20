@@ -2033,7 +2033,6 @@ msgstr "A workflow"
 
 #: src/activity/audit-event.tsx
 #: src/apps/app-settings.tsx
-#: src/settings/org-card.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "About"
 msgstr "About"
@@ -3891,10 +3890,6 @@ msgid "Billing API"
 msgstr "Billing API"
 
 #: src/settings/billing-card.tsx
-msgid "Billing details"
-msgstr "Billing details"
-
-#: src/settings/billing-card.tsx
 msgid "Billing email"
 msgstr "Billing email"
 
@@ -4209,6 +4204,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
+#: src/settings/org-card.tsx
 #: src/settings/staff-access.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/team-members-dialog.tsx
@@ -4891,6 +4887,7 @@ msgstr "Cliffs"
 #: src/settings/event-source-activity.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
+#: src/settings/org-card.tsx
 #: src/settings/stephen-settings.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
@@ -6234,6 +6231,7 @@ msgstr "Desktop"
 #: src/activity/audit-log.tsx
 #: src/agents/agent-page.tsx
 #: src/chat/approval-words.ts
+#: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/workflows/run-detail.tsx
@@ -12173,6 +12171,7 @@ msgstr "Not revoked"
 #: src/brain/goals-editor.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
+#: src/settings/org-card.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
 msgid "Not saved"
@@ -13157,6 +13156,10 @@ msgstr "Order"
 #: src/settings/org-card.tsx
 msgid "Organization"
 msgstr "Organization"
+
+#: src/settings/org-card.tsx
+msgid "Organization name"
+msgstr "Organization name"
 
 #: src/connections/http-connections.tsx
 msgid "Origin"
@@ -15369,6 +15372,7 @@ msgstr "Sand"
 #: src/projects/project-dialog.tsx
 #: src/settings/billing-card.tsx
 #: src/settings/instruction-file.tsx
+#: src/settings/org-card.tsx
 #: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Save"
@@ -15466,6 +15470,7 @@ msgstr "Saved."
 #: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
+#: src/settings/org-card.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
