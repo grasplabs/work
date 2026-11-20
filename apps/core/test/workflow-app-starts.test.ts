@@ -1851,7 +1851,7 @@ describe("what a start rechecks, and records", () => {
       .bind(fx.app)
       .all<{ input: string }>();
     expect({
-      started: answerOf(started),
+      started: started.ok,
       staged: staged.ok,
       inputs: results.map(({ input }) => input),
     }).toStrictEqual({
@@ -2228,7 +2228,7 @@ describe("what a start rechecks, and records", () => {
     );
     expect({
       raced: raced.done,
-      started: answerOf(started),
+      started: started.ok,
       receipts: await receiptCount(fx.app),
     }).toStrictEqual({ raced: true, started: true, receipts: 1 });
   });
