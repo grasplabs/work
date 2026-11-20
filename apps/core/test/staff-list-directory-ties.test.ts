@@ -191,7 +191,8 @@ describe("an entry of the staff list tied to its directory person", () => {
 
   it("keeps its tie through a save from the list as shown, which never shows it, until its address or name changes, and never takes one to someone erased", async () => {
     const { admin } = await connectedDirectory(idp);
-    const [daanId, eveId, erasedId] = [
+    const [daanId, eveId, erasedId, fayId] = [
+      crypto.randomUUID(),
       crypto.randomUUID(),
       crypto.randomUUID(),
       crypto.randomUUID(),
@@ -202,28 +203,36 @@ describe("an entry of the staff list tied to its directory person", () => {
     await directoryHolds([
       user({ id: daanId, displayName: "Daan", mail: "daan@acme.test" }),
       user({ id: eveId, displayName: "Eve", mail: "eve@acme.test" }),
+      user({ id: fayId, displayName: "Fay", mail: "fay@acme.test" }),
       // Still in the directory after their erasure in Grasp.
       user({ id: erasedId, displayName: "Gone", mail: "gone@acme.test" }),
     ]);
     const read = await admin.api.onboarding.readDirectory();
-    const [daan, eve, gone] = [
+    const [daan, eve, fay, gone] = [
       entryOf(read, daanId),
       entryOf(read, eveId),
+      entryOf(read, fayId),
       entryOf(read, erasedId),
     ];
     // Daan twice, under another entry: one ID ties one entry, the first.
     const copy = { ...daan, id: "p-daan-copy" };
-    await saveList(admin, [daan, copy, eve, gone]);
+    await saveList(admin, [daan, copy, eve, fay, gone]);
     const { roster } = await admin.api.onboarding.view();
     if (roster === null) {
       throw new Error("Expected the list");
     }
-    // The admin confirms the list as shown, Eve's address put right.
+    // The admin confirms the list as shown, Eve's address and Fay's name
+    // put right.
+    const putRight: Record<string, Partial<(typeof roster.people)[number]>> = {
+      [eve.id]: { email: "eve@other.test" },
+      [fay.id]: { name: "Fay Renamed" },
+    };
     await admin.api.onboarding.confirmRoster({
       ...roster,
-      people: roster.people.map((person) =>
-        person.id === eve.id ? { ...person, email: "eve@other.test" } : person
-      ),
+      people: roster.people.map((person) => ({
+        ...person,
+        ...putRight[person.id],
+      })),
     });
 
     expect({
@@ -242,21 +251,34 @@ describe("an entry of the staff list tied to its directory person", () => {
         [daan.id]: daanId,
         [copy.id]: null,
         [eve.id]: null,
+        [fay.id]: null,
         [gone.id]: null,
       },
     });
   });
 
-  it("shows as left once the daily read no longer holds them, never before a read, and no longer once it holds them again", async () => {
+  it("shows as left once the daily read no longer holds them, or holds them only deleted, never before a read, and no longer once it holds them again", async () => {
     const { admin } = await connectedDirectory(idp);
-    const [finId, gusId] = [crypto.randomUUID(), crypto.randomUUID()];
-    const both = [
+    const [finId, gusId, idaId] = [
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+    ];
+    // Ida signed in: the read keeps a deleted account only of someone an
+    // account names (directory-people.ts `carriedOf`).
+    await microsoftMember(idaId);
+    const all = [
       user({ id: finId, displayName: "Fin", mail: "fin@acme.test" }),
       user({ id: gusId, displayName: "Gus", mail: "gus@acme.test" }),
+      user({ id: idaId, displayName: "Ida", mail: "ida@acme.test" }),
     ];
-    await directoryHolds(both);
+    await directoryHolds(all);
     const read = await admin.api.onboarding.readDirectory();
-    const [fin, gus] = [entryOf(read, finId), entryOf(read, gusId)];
+    const [fin, gus, ida] = [
+      entryOf(read, finId),
+      entryOf(read, gusId),
+      entryOf(read, idaId),
+    ];
     // Hanna is on the list from a file: nothing ties her to anyone.
     const hanna = {
       id: "p-hanna",
@@ -265,9 +287,10 @@ describe("an entry of the staff list tied to its directory person", () => {
       team: "everyone",
       title: "",
     };
-    await saveList(admin, [fin, gus, hanna]);
-    // Fin gone from the directory before any daily read was applied.
-    await directoryHolds([both[1] ?? {}]);
+    await saveList(admin, [fin, gus, ida, hanna]);
+    // Fin gone from the directory, and Ida held only as a deleted account,
+    // before any daily read was applied.
+    await directoryHolds([all[1] ?? {}], [{ id: idaId }]);
     const beforeRead = await listed(admin);
 
     await dailyRead();
@@ -278,7 +301,7 @@ describe("an entry of the staff list tied to its directory person", () => {
       await admin.api.onboarding.saveRoster(roster);
     }
     const saved = await listed(admin);
-    await directoryHolds(both);
+    await directoryHolds(all);
     await dailyRead();
 
     expect({
@@ -290,21 +313,25 @@ describe("an entry of the staff list tied to its directory person", () => {
       beforeRead: {
         [fin.id]: { name: "Fin", left: false },
         [gus.id]: { name: "Gus", left: false },
+        [ida.id]: { name: "Ida", left: false },
         "p-hanna": { name: "Hanna", left: false },
       },
       gone: {
         [fin.id]: { name: "Fin", left: true },
         [gus.id]: { name: "Gus", left: false },
+        [ida.id]: { name: "Ida", left: true },
         "p-hanna": { name: "Hanna", left: false },
       },
       saved: {
         [fin.id]: { name: "Fin", left: true },
         [gus.id]: { name: "Gus", left: false },
+        [ida.id]: { name: "Ida", left: true },
         "p-hanna": { name: "Hanna", left: false },
       },
       back: {
         [fin.id]: { name: "Fin", left: false },
         [gus.id]: { name: "Gus", left: false },
+        [ida.id]: { name: "Ida", left: false },
         "p-hanna": { name: "Hanna", left: false },
       },
     });
