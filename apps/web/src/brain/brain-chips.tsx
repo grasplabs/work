@@ -63,7 +63,7 @@ const dots = stylex.create({
   app: { boxShadow: `inset 0 0 0 ${grasp.hairline} ${hue.tools}` },
 });
 
-/** The same hue as a soft fill, for a kind's label and for what was marked in a transcript. */
+/** The same hue as a soft fill, for a kind's label. */
 const tints = stylex.create({
   company: { backgroundColor: grasp.soft },
   vision: { backgroundColor: soft(hue.vision, "15%") },
@@ -75,28 +75,11 @@ const tints = stylex.create({
   sources: { backgroundColor: soft(hue.sources, "30%") },
 });
 
-/** What a transcript marks with the brain's hues: the search's hits, and the strip beside its statements. */
-export const brainMarks = stylex.create({
-  hit: {
-    borderRadius: grasp.cornerMark,
-    backgroundColor: soft(hue.vision, "25%"),
-  },
-  // The hit being stepped to stands out.
-  hitCurrent: {
-    borderRadius: grasp.cornerMark,
-    backgroundColor: soft(hue.vision, "40%"),
-    boxShadow: `0 0 0 ${grasp.hairline} ${hue.vision}`,
-  },
-  stripMark: { fill: hue.statements },
-  stripMarkActive: { fill: grasp.ink },
-});
-
 const dotOf = (kind: NoteKind) =>
   kind === "app" ? dots.app : dots[groupOf[kind]];
 
 /** The soft fill of `kind`'s group, for a label or a passage marked in it. */
-export const tintOf = (kind: NoteKind): (typeof tints)[Group] =>
-  tints[groupOf[kind]];
+const tintOf = (kind: NoteKind): (typeof tints)[Group] => tints[groupOf[kind]];
 
 /** The colour dot of a note's kind. */
 export const KindDot = ({ kind }: { kind: NoteKind }) => (

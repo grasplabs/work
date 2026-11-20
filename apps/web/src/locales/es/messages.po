@@ -24,6 +24,12 @@ msgstr "«{word}» ya está añadido."
 msgid "(company)"
 msgstr "(empresa)"
 
+#: src/frame/part-words.tsx
+#: src/settings/ai-providers.tsx
+msgctxt "a field that may stay empty"
+msgid "(optional)"
+msgstr "(opcional)"
+
 #: src/brain/brain-source-contents.tsx
 msgctxt "a number that changed: what it was before"
 msgid "(was {before})"
@@ -303,6 +309,10 @@ msgstr "{count, plural, one {{names} trabajan aquí, en # trabajo que salió en 
 msgid "{count, plural, one {# binding} other {# bindings}}"
 msgstr "{count, plural, one {# vínculo} other {# vínculos}}"
 
+#: src/frame/part-words.tsx
+msgid "{count, plural, one {# block} other {# blocks}}"
+msgstr "{count, plural, one {# bloque} other {# bloques}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# blocker} other {# blockers}}"
 msgstr "{count, plural, one {# bloqueo} other {# bloqueos}}"
@@ -375,6 +385,15 @@ msgstr "{count, plural, one {# app más en la que trabajó este chat} other {# a
 msgid "{count, plural, one {# new message} other {# new messages}}"
 msgstr "{count, plural, one {# mensaje nuevo} other {# mensajes nuevos}}"
 
+#: src/brain/brain-home.tsx
+msgid "{count, plural, one {# note} other {# notes}}"
+msgstr "{count, plural, one {# nota} other {# notas}}"
+
+#: src/frame/part-words.tsx
+msgctxt "questions waiting for an answer"
+msgid "{count, plural, one {# open} other {# open}}"
+msgstr "{count, plural, one {# abierta} other {# abiertas}}"
+
 #: src/apps/publish.tsx
 msgid "{count, plural, one {# other file} other {# other files}}"
 msgstr "{count, plural, one {# otro archivo} other {# otros archivos}}"
@@ -437,10 +456,6 @@ msgstr "{count, plural, one {# cosa te espera} other {# cosas te esperan}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
 msgstr "{count, plural, one {# pérdida de tiempo} other {# pérdidas de tiempo}}"
-
-#: src/knowledge/timeline.tsx
-msgid "{count, plural, one {# version} other {# versions}}"
-msgstr "{count, plural, one {# versión} other {# versiones}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# wish} other {# wishes}}"
@@ -672,7 +687,6 @@ msgid "{firstShown}–{lastShown}"
 msgstr "{firstShown}–{lastShown}"
 
 #. Earlier events on a timeline, folded away
-#: src/knowledge/timeline.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
 msgstr "{folded, plural, one {# anterior} other {# anteriores}}"
@@ -854,10 +868,6 @@ msgstr "{longer, plural, one {Un término sigue en # palabra o dirección más l
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
 msgstr "{mapped, plural, one {Un trabajo está mapeado y listo para ti.} other {# trabajos están mapeados y listos para ti.}}"
 
-#: src/brain/brain-transcript.tsx
-msgid "{match} of {matches}"
-msgstr "{match} de {matches}"
-
 #: src/workflows/share-workflow.tsx
 msgid "{memberName} (team)"
 msgstr "{memberName} (equipo)"
@@ -895,11 +905,6 @@ msgstr "{name} · con {teams}"
 #: src/people/people-apart.ts
 msgid "{name} ({apart})"
 msgstr "{name} ({apart})"
-
-#. A kind of statement in the transcript's filter, and how many of that kind were said
-#: src/brain/brain-transcript.tsx
-msgid "{name} ({count})"
-msgstr "{name} ({count})"
 
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
@@ -940,6 +945,10 @@ msgstr "{name} tiene algo para ti"
 #: src/settings/stephen-settings.tsx
 msgid "{name} in {appName}"
 msgstr "{name} en {appName}"
+
+#: src/settings/ai-providers.tsx
+msgid "{name} is connected already."
+msgstr "{name} ya está conectado."
 
 #: src/onboarding/connect-steps.tsx
 msgid "{name} is connected. I’ll only read what you share with me."
@@ -1073,10 +1082,6 @@ msgstr "{name}: {hours, plural, one {# hora a la semana} other {# horas a la sem
 #: src/frame/part-words.tsx
 msgid "{name}: {reason}"
 msgstr "{name}: {reason}"
-
-#: src/brain/sources-page.tsx
-msgid "{name}: agents search it live when you ask. The Brain keeps nothing from it."
-msgstr "{name}: los agentes lo buscan en directo cuando preguntas. El cerebro no guarda nada de ello."
 
 #: src/frame/part-words.tsx
 msgid "{name}: busy {from} to {to}"
@@ -1612,10 +1617,6 @@ msgstr "{who}, preguntando."
 #: src/interview/sound-check.tsx
 msgid "{who}, drawn in dots."
 msgstr "{who}, en puntos."
-
-#: src/brain/brain-article/kern.tsx
-msgid "{who}, interviewed {day}"
-msgstr "{who}, entrevistado el {day}"
 
 #: src/interview/talk.tsx
 msgid "{who}, listening."
@@ -2236,6 +2237,10 @@ msgstr "Añadir {section}"
 msgid "Add {what}"
 msgstr "Añadir {what}"
 
+#: src/frame/part-words.tsx
+msgid "Add a block below"
+msgstr "Añadir un bloque debajo"
+
 #: src/projects/project-chats.tsx
 msgid "Add a chat"
 msgstr "Añadir un chat"
@@ -2366,10 +2371,6 @@ msgstr "Añade personas o grupos"
 msgid "Add people, teams or projects"
 msgstr "Añade personas, equipos o proyectos"
 
-#: src/settings/ai-providers.tsx
-msgid "Add provider"
-msgstr "Añadir proveedor"
-
 #: src/apps/indexes-view.tsx
 msgid "Add search"
 msgstr "Añadir búsqueda"
@@ -2486,7 +2487,6 @@ msgstr "Añadir una app o un flujo de trabajo no lo comparte con nadie. Aquí so
 #: src/apps/app-webhooks.tsx
 #: src/apps/publish.tsx
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
 msgid "Address"
 msgstr "Dirección"
@@ -2580,6 +2580,10 @@ msgstr "Agentes"
 #: src/knowledge/new-collection.tsx
 msgid "Agents read this before they look inside."
 msgstr "Los agentes leen esto antes de mirar dentro."
+
+#: src/brain/sources-page.tsx
+msgid "Agents search it live. The Brain keeps nothing."
+msgstr "Los agentes lo buscan en directo. El cerebro no guarda nada."
 
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain.ts
@@ -3021,6 +3025,11 @@ msgstr "¿Hay algo que deba saber siempre?"
 msgid "App"
 msgstr "Aplicación"
 
+#: src/frame/part-words.tsx
+msgctxt "what an embed opens"
+msgid "App"
+msgstr "App"
+
 #: src/apps/app-data.tsx
 #: src/connections/connection-list.tsx
 msgid "App {app}"
@@ -3309,6 +3318,11 @@ msgstr "Tal como lo llama tu endpoint, por ejemplo llama-3.3-70b."
 msgid "Ask"
 msgstr "Preguntar"
 
+#: src/frame/part-words.tsx
+msgctxt "ask someone a page's question"
+msgid "Ask"
+msgstr "Preguntar"
+
 #. placeholder {0}: gap.owner
 #: src/chat/brain-questions.tsx
 msgid "Ask {0}"
@@ -3322,7 +3336,12 @@ msgstr "Pide a {owner} que quite Grasp en {link}."
 msgid "Ask {owner} to remove Grasp's access in {app}'s settings for connected apps."
 msgstr "Pide a {owner} que quite el acceso de Grasp en la configuración de aplicaciones conectadas de {app}."
 
+#: src/frame/part-words.tsx
+msgid "Ask {who}: {question}"
+msgstr "Preguntar a {who}: {question}"
+
 #: src/chat/thread.tsx
+#: src/frame/part-words.tsx
 msgid "Ask again"
 msgstr "Volver a preguntar"
 
@@ -3402,6 +3421,11 @@ msgstr "Pide a tu administrador que conecte un proveedor de IA."
 msgid "Asked"
 msgstr "Solicitado"
 
+#: src/frame/part-words.tsx
+msgctxt "a question gone out"
+msgid "Asked"
+msgstr "Preguntado"
+
 #: src/decision-confirmation.tsx
 msgctxt "what a decision asks"
 msgid "Asked"
@@ -3414,6 +3438,10 @@ msgstr "Pedido de nuevo (concedido antes por {person} el {date})"
 #: src/activity/pending.tsx
 msgid "Asked again after {label} was published (previously granted by {person} on {date})"
 msgstr "Solicitado de nuevo tras publicarse {label} (concedido antes por {person} el {date})"
+
+#: src/frame/part-words.tsx
+msgid "Asked again. Undo brings the last answer back."
+msgstr "Preguntado de nuevo. Deshacer recupera la última respuesta."
 
 #: src/connections/requested-apps.tsx
 msgid "Asked by {asker}"
@@ -3443,6 +3471,14 @@ msgstr "Pidió un permiso"
 #: src/inbox/request-details.tsx
 msgid "asked for by the agent, in their chat"
 msgstr "pedido por el agente, en su chat"
+
+#: src/frame/part-words.tsx
+msgid "Asked from chat"
+msgstr "Preguntado desde el chat"
+
+#: src/frame/part-words.tsx
+msgid "Asked in this page"
+msgstr "Preguntado en esta página"
 
 #: src/inbox/item-detail.tsx
 msgid "Asked of the {owner}"
@@ -3495,6 +3531,11 @@ msgid "Asked: {title}"
 msgstr "Preguntada: {title}"
 
 #: src/apps/app-access-requests.tsx
+msgid "Asking"
+msgstr "Preguntando"
+
+#: src/frame/part-words.tsx
+msgctxt "a question going out"
 msgid "Asking"
 msgstr "Preguntando"
 
@@ -3741,6 +3782,10 @@ msgstr "Vínculos"
 msgid "Bindings of version {version}"
 msgstr "Vínculos de la versión {version}"
 
+#: src/frame/part-words.tsx
+msgid "Block menu"
+msgstr "Menú del bloque"
+
 #: src/brain/brain.ts
 msgid "Blocker"
 msgstr "Bloqueo"
@@ -3762,6 +3807,10 @@ msgstr "Dirección"
 #: src/brain/goals-editor.tsx
 msgid "Board goals"
 msgstr "Objetivos del consejo"
+
+#: src/frame/part-words.tsx
+msgid "Bold"
+msgstr "Negrita"
 
 #: src/apps/app-workflows.tsx
 #: src/apps/resource-bindings.tsx
@@ -3855,6 +3904,10 @@ msgstr "Crea Apps y flujos de trabajo, y pide los permisos que necesita."
 msgid "Built approved packages"
 msgstr "Compiló paquetes aprobados"
 
+#: src/frame/part-words.tsx
+msgid "Bulleted list"
+msgstr "Lista con viñetas"
+
 #: src/workflows/workflow-settings.tsx
 msgid "Business process"
 msgstr "Proceso de negocio"
@@ -3916,6 +3969,11 @@ msgstr "Llamó a un modelo"
 #: src/activity/audit-words.ts
 msgid "Called another App"
 msgstr "Llamó a otra aplicación"
+
+#: src/frame/part-words.tsx
+msgctxt "a kind of block"
+msgid "Callout"
+msgstr "Destacado"
 
 #: src/activity/pending.tsx
 msgid "Calls {path} of {app}. Each run can read or change whatever that function reads or changes in the App, as the person it runs for"
@@ -4567,6 +4625,7 @@ msgid "Cites a source you no longer have access to"
 msgstr "Cita una fuente a la que ya no tienes acceso"
 
 #: src/activity/audit-log.tsx
+#: src/brain/sources-page.tsx
 msgid "Clear"
 msgstr "Borrar"
 
@@ -4579,10 +4638,6 @@ msgstr "Borrar"
 #: src/workflows/start-run.tsx
 msgid "Clear {0}"
 msgstr "Borrar {0}"
-
-#: src/brain/brain-transcript.tsx
-msgid "Clear filters"
-msgstr "Borrar filtros"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/frame/part-words.tsx
@@ -4732,6 +4787,11 @@ msgctxt "an app's workspace view"
 msgid "Code"
 msgstr "Código"
 
+#: src/frame/part-words.tsx
+msgctxt "text formatted as code"
+msgid "Code"
+msgstr "Código"
+
 #: src/apps/app-code.tsx
 msgid "Code of {file}"
 msgstr "Código de {file}"
@@ -4739,6 +4799,10 @@ msgstr "Código de {file}"
 #: src/projects/project-dialog.tsx
 msgid "Coins"
 msgstr "Monedas"
+
+#: src/frame/part-words.tsx
+msgid "Collapsible section"
+msgstr "Sección plegable"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
@@ -4749,6 +4813,7 @@ msgid "Colleagues talked"
 msgstr "Compañeros que hablaron"
 
 #: src/apps/app-access-requests.tsx
+#: src/knowledge/document.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection"
 msgstr "Colección"
@@ -5098,11 +5163,6 @@ msgctxt "a filter's operator"
 msgid "contains"
 msgstr "contiene"
 
-#: src/brain/brain-transcript.tsx
-msgctxt "heading: the headings of a document, as a table of contents"
-msgid "Contents"
-msgstr "Contenido"
-
 #: src/brain/lessons-view.tsx
 msgctxt "lesson evidence"
 msgid "Contested"
@@ -5243,8 +5303,10 @@ msgstr "Copiar la URL"
 msgid "Copy the URL of {name}"
 msgstr "Copiar la URL de {name}"
 
+#: src/brain/note-actions.tsx
 #: src/chat/chat-more.tsx
 #: src/copy.ts
+#: src/knowledge/document.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Copying didn't work"
 msgstr "No se ha podido copiar"
@@ -5698,6 +5760,11 @@ msgstr "Versión de la definición"
 msgid "Delete"
 msgstr "Eliminar"
 
+#: src/frame/part-words.tsx
+msgctxt "a block in a document"
+msgid "Delete"
+msgstr "Eliminar"
+
 #: src/workflows/workflow-triggers.tsx
 msgctxt "delete a trigger"
 msgid "Delete"
@@ -5829,6 +5896,10 @@ msgstr "Denegar"
 #: src/apps/app-start.tsx
 msgid "Describe the App"
 msgstr "Describe la App"
+
+#: src/knowledge/document.tsx
+msgid "Description"
+msgstr "Descripción"
 
 #: src/frame/part-words.tsx
 msgctxt "an event's"
@@ -6032,6 +6103,21 @@ msgstr "Acoplar junto a la página"
 msgid "Document"
 msgstr "Documento"
 
+#: src/frame/part-words.tsx
+msgctxt "a document's text, named"
+msgid "Document"
+msgstr "Documento"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Document"
+msgstr "Documento"
+
+#: src/frame/part-words.tsx
+msgctxt "what an embed opens"
+msgid "Document"
+msgstr "Documento"
+
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Document not found"
 msgstr "Documento no encontrado"
@@ -6186,11 +6272,15 @@ msgstr "Descargar {name}"
 msgid "Download {path}"
 msgstr "Descargar {path}"
 
+#: src/brain/note-actions.tsx
 #: src/chat/chat-more.tsx
+#: src/knowledge/document.tsx
 msgid "Download as Markdown"
 msgstr "Descargar como Markdown"
 
+#: src/brain/note-actions.tsx
 #: src/chat/chat-more.tsx
+#: src/knowledge/document.tsx
 msgid "Download as PDF"
 msgstr "Descargar como PDF"
 
@@ -6290,6 +6380,10 @@ msgstr "Vence"
 #: src/settings/backdrop-settings.tsx
 msgid "Dunes"
 msgstr "Dunas"
+
+#: src/frame/part-words.tsx
+msgid "Duplicate"
+msgstr "Duplicar"
 
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
@@ -6440,10 +6534,6 @@ msgstr "Disparador de correo"
 msgid "Ember"
 msgstr "Brasa"
 
-#: src/brain/brain-article/kern.tsx
-msgid "Employee"
-msgstr "Empleado"
-
 #: src/brain/brain.ts
 msgid "Employee interviews"
 msgstr "Entrevistas con empleados"
@@ -6487,7 +6577,6 @@ msgid "Enter a name for the team."
 msgstr "Escribe un nombre para el equipo."
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgid "Enter an address that starts with https://."
 msgstr "Escribe una dirección que empiece por https://."
 
@@ -6500,7 +6589,6 @@ msgid "Enter the email of at least one person to invite."
 msgstr "Escribe el correo de al menos una persona para invitarla."
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgid "Enter your endpoint's address."
 msgstr "Escribe la dirección de tu endpoint."
 
@@ -6606,6 +6694,10 @@ msgstr "Cada {chosenDays} a las {time}, {name} trabaja por su cuenta y te envía
 #: src/agents/setup/review-step.tsx
 msgid "Every {days} at {time}"
 msgstr "Cada {days} a las {time}"
+
+#: src/frame/part-words.tsx
+msgid "Every change, with who made it. Restore brings a version back as a new one; nothing is lost."
+msgstr "Cada cambio, con quién lo hizo. Restaurar recupera una versión como una nueva; no se pierde nada."
 
 #: src/workflows/business-process.tsx
 msgid "Every client question or complaint, from the first message until it is solved."
@@ -7066,11 +7158,6 @@ msgstr "Rellena este campo."
 msgid "Filter"
 msgstr "Filtrar"
 
-#: src/brain/brain-transcript.tsx
-msgctxt "open the filters"
-msgid "Filter"
-msgstr "Filtrar"
-
 #: src/frame/part-words.tsx
 msgid "Filter {name}"
 msgstr "Filtrar {name}"
@@ -7348,6 +7435,11 @@ msgstr "Para cuando el proveedor del modelo predeterminado no responda"
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Para quién"
+
+#: src/frame/part-words.tsx
+msgctxt "a document's format bar"
+msgid "Format"
+msgstr "Formato"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -7669,6 +7761,10 @@ msgstr "No se pudo contactar con Grasp. Vuelve a intentarlo."
 msgid "Grasp could not reach its servers. Nothing you saved is lost."
 msgstr "Grasp no pudo conectar con sus servidores. No se ha perdido nada de lo que guardaste."
 
+#: src/frame/part-words.tsx
+msgid "Grasp couldn't answer again. The last answer stays."
+msgstr "Grasp no pudo responder de nuevo. Se mantiene la última respuesta."
+
 #: src/chat/use-ask.ts
 msgid "Grasp couldn't be reached, so your question wasn't sent. It's kept here: send it again."
 msgstr "No se pudo conectar con Grasp, así que tu pregunta no se envió. Sigue aquí: envíala de nuevo."
@@ -7709,6 +7805,10 @@ msgstr "Grasp aún no ha confirmado tu pregunta. Se queda aquí y se envía en c
 msgid "Grasp is answering"
 msgstr "Grasp está respondiendo"
 
+#: src/frame/part-words.tsx
+msgid "Grasp is asking again"
+msgstr "Grasp está preguntando de nuevo"
+
 #: src/apps/app-workspace.tsx
 #: src/frame/part-words.tsx
 msgid "Grasp is building"
@@ -7717,6 +7817,10 @@ msgstr "Grasp está construyendo"
 #: src/frame/setting-up.tsx
 msgid "Grasp is building it. This takes a minute or two."
 msgstr "Grasp lo está construyendo. Tarda uno o dos minutos."
+
+#: src/frame/part-words.tsx
+msgid "Grasp is rewriting"
+msgstr "Grasp está reescribiendo"
 
 #: src/inbox/interviews-item.tsx
 msgid "Grasp is still putting the agreements in place. The links go out once that is done."
@@ -7975,6 +8079,16 @@ msgstr "Deja de responder en todas partes fuera de Grasp y lo dice una vez a qui
 msgid "Header name"
 msgstr "Nombre de la cabecera"
 
+#: src/frame/part-words.tsx
+msgctxt "a kind of block"
+msgid "Heading"
+msgstr "Encabezado"
+
+#: src/frame/part-words.tsx
+msgctxt "an empty heading"
+msgid "Heading"
+msgstr "Encabezado"
+
 #: src/interview/before.tsx
 msgid "Hear both again"
 msgstr "Escuchar a los dos otra vez"
@@ -8053,6 +8167,10 @@ msgid "Hide people one by one"
 msgstr "Ocultar personas una a una"
 
 #: src/frame/part-words.tsx
+msgid "Hide section"
+msgstr "Ocultar sección"
+
+#: src/frame/part-words.tsx
 msgid "Hide the outline"
 msgstr "Ocultar el esquema"
 
@@ -8085,7 +8203,12 @@ msgid "Hire-to-Retire"
 msgstr "Hire-to-Retire"
 
 #: src/apps/app-data.tsx
-#: src/knowledge/timeline.tsx
+#: src/knowledge/document.tsx
+msgid "History"
+msgstr "Historial"
+
+#: src/frame/part-words.tsx
+msgctxt "a page's saved versions"
 msgid "History"
 msgstr "Historial"
 
@@ -8201,10 +8324,6 @@ msgstr "Cómo lo notamos"
 #: src/brain/goals-editor.tsx
 msgid "How will the company see that it is met?"
 msgstr "¿Cómo verá la empresa que se ha cumplido?"
-
-#: src/brain/sources-page.tsx
-msgid "How your connections feed the Brain"
-msgstr "Cómo tus conexiones alimentan el cerebro"
 
 #: src/settings/sign-in-settings.tsx
 msgid "How your people sign in"
@@ -8403,6 +8522,11 @@ msgstr "Imagen {number}"
 msgid "Import"
 msgstr "Importar"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Import"
+msgstr "Importación"
+
 #: src/apps/app-data.tsx
 msgid "Import from CSV"
 msgstr "Importar desde CSV"
@@ -8532,6 +8656,11 @@ msgstr "Entrada"
 msgid "Input, as JSON"
 msgstr "Entrada, en JSON"
 
+#: src/frame/part-words.tsx
+msgctxt "a menu of blocks to add"
+msgid "Insert"
+msgstr "Insertar"
+
 #: src/chat/saved-memory.tsx
 msgid "Instruction"
 msgstr "Instrucción"
@@ -8565,6 +8694,16 @@ msgstr "Integridad"
 #: src/settings/audit-chain.tsx
 msgid "Integrity and archive"
 msgstr "Integridad y archivo"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Interview"
+msgstr "Entrevista"
+
+#: src/frame/part-words.tsx
+msgctxt "what an embed opens"
+msgid "Interview"
+msgstr "Entrevista"
 
 #: src/frame/part-words.tsx
 msgctxt "where a quote comes from"
@@ -8952,6 +9091,10 @@ msgid "It's gone, or you can't read it."
 msgstr "Ya no existe o no puedes leerla."
 
 #: src/frame/part-words.tsx
+msgid "Italic"
+msgstr "Cursiva"
+
+#: src/frame/part-words.tsx
 msgctxt "pagination, one"
 msgid "item"
 msgstr "elemento"
@@ -9242,7 +9385,6 @@ msgstr "Ocultó al modelo algo que el chat ya no puede leer"
 
 #: src/frame/part-words.tsx
 #: src/onboarding/ai-step.tsx
-#: src/settings/ai-providers.tsx
 #: src/workflows/kept-state.tsx
 msgid "Key"
 msgstr "Clave"
@@ -9264,12 +9406,9 @@ msgid "Keyboard shortcuts"
 msgstr "Atajos de teclado"
 
 #: src/apps/resource-bindings.tsx
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "Kind"
 msgstr "Tipo"
-
-#: src/brain/brain-transcript.tsx
-msgid "Kind of statement"
-msgstr "Tipo de afirmación"
 
 #: src/connections/integrations-sidebar.tsx
 msgid "Kinds of app"
@@ -9332,6 +9471,10 @@ msgstr "Última pregunta en un chat"
 #: src/settings/audit-chain.tsx
 msgid "Last check"
 msgstr "Última comprobación"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Last heard"
+msgstr "Última vez escuchado"
 
 #: src/brain/brain-article/kern.tsx
 msgid "Last heard {day}"
@@ -9591,8 +9734,19 @@ msgstr "Línea antes"
 msgid "Link"
 msgstr "Enlace"
 
-#: src/apps/publish.tsx
 #: src/frame/part-words.tsx
+msgctxt "make text a link"
+msgid "Link"
+msgstr "Enlace"
+
+#: src/frame/part-words.tsx
+msgid "Link address"
+msgstr "Dirección del enlace"
+
+#: src/apps/publish.tsx
+#: src/brain/note-actions.tsx
+#: src/frame/part-words.tsx
+#: src/knowledge/document.tsx
 msgid "Link copied"
 msgstr "Enlace copiado"
 
@@ -10266,6 +10420,11 @@ msgstr "Más para {title}"
 msgid "More for this chat"
 msgstr "Más opciones de este chat"
 
+#: src/brain/note-actions.tsx
+#: src/knowledge/document.tsx
+msgid "More for this page"
+msgstr "Más para esta página"
+
 #: src/interview/words.ts
 msgid "More of the steps."
 msgstr "Más pasos."
@@ -10333,6 +10492,10 @@ msgid "Move {value} up"
 msgstr "Subir {value}"
 
 #: src/frame/part-words.tsx
+msgid "Move down"
+msgstr "Bajar"
+
+#: src/frame/part-words.tsx
 msgid "Move earlier"
 msgstr "Mover antes"
 
@@ -10347,6 +10510,10 @@ msgstr "Mover el panel"
 #: src/brain/region-edit.tsx
 msgid "Move to"
 msgstr "Mover a"
+
+#: src/frame/part-words.tsx
+msgid "Move up"
+msgstr "Subir"
 
 #: src/activity/audit-words.ts
 msgid "Moved old entries out of the audit trail"
@@ -10623,6 +10790,10 @@ msgstr "Nuevo: «{label}»"
 msgid "Newer"
 msgstr "Más recientes"
 
+#: src/brain/sources-page.tsx
+msgid "Newest first"
+msgstr "Más recientes primero"
+
 #: src/agents/new-agent.tsx
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
@@ -10635,7 +10806,6 @@ msgstr "Siguiente"
 msgid "Next {nextMoment}"
 msgstr "Próxima {nextMoment}"
 
-#: src/brain/brain-transcript.tsx
 #: src/frame/part-words.tsx
 msgid "Next match"
 msgstr "Siguiente coincidencia"
@@ -10764,6 +10934,10 @@ msgstr "No hay chats archivados"
 msgid "No billing details yet"
 msgstr "Aún no hay datos de facturación"
 
+#: src/frame/part-words.tsx
+msgid "No block called “{query}”"
+msgstr "Ningún bloque llamado «{query}»"
+
 #: src/workflows/business-process.tsx
 msgid "No business process"
 msgstr "Ningún proceso de negocio"
@@ -10866,7 +11040,6 @@ msgstr "Ya no se ofrece"
 msgid "No longer where it was"
 msgstr "Ya no está donde estaba"
 
-#: src/brain/brain-transcript.tsx
 #: src/frame/part-words.tsx
 msgid "No matches"
 msgstr "Sin coincidencias"
@@ -11150,10 +11323,19 @@ msgstr "No permitida"
 msgid "not an email address"
 msgstr "no es una dirección de correo"
 
+#: src/frame/part-words.tsx
+msgctxt "a page's open question"
+msgid "Not answered yet"
+msgstr "Aún sin respuesta"
+
 #: src/brain/brain.ts
 msgctxt "a question to the board without an answer"
 msgid "Not answered yet"
 msgstr "Aún sin respuesta"
+
+#: src/frame/part-words.tsx
+msgid "Not asked"
+msgstr "No preguntado"
 
 #: src/apps/resource-bindings.tsx
 msgid "Not bound"
@@ -11470,6 +11652,11 @@ msgctxt "tab: a piece of work's note in the brain"
 msgid "Note"
 msgstr "Nota"
 
+#: src/frame/part-words.tsx
+msgctxt "what an embed opens"
+msgid "Note"
+msgstr "Nota"
+
 #: src/agents/agent-templates.ts
 msgid "Note anything unusual or risky."
 msgstr "Señala todo lo inusual o arriesgado."
@@ -11531,10 +11718,6 @@ msgstr "Todavía no se ha ejecutado nada."
 #: src/onboarding/place-picker.tsx
 msgid "Nothing here"
 msgstr "Aquí no hay nada"
-
-#: src/brain/brain-transcript.tsx
-msgid "Nothing here matches the filter."
-msgstr "Nada aquí coincide con el filtro."
 
 #: src/projects/project-view.tsx
 msgid "Nothing in it that you can open."
@@ -11686,6 +11869,11 @@ msgctxt "the end of a time line: this moment"
 msgid "now"
 msgstr "ahora"
 
+#: src/frame/part-words.tsx
+msgctxt "the page's newest version"
+msgid "now"
+msgstr "ahora"
+
 #: src/apps/app-history.tsx
 msgid "Now"
 msgstr "Ahora"
@@ -11698,6 +11886,10 @@ msgstr "Cifra"
 msgctxt "a kind of field"
 msgid "Number"
 msgstr "Número"
+
+#: src/frame/part-words.tsx
+msgid "Numbered list"
+msgstr "Lista numerada"
 
 #: src/knowledge/purge.tsx
 msgid "Occurrences removed"
@@ -11936,10 +12128,6 @@ msgstr "Solo un administrador crea una colección para todos o para equipos."
 msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
 msgstr "Solo un administrador restablece los datos de una App: todos los registros desaparecen para siempre y su versión actual vuelve a ejecutarse sin registros."
 
-#: src/brain/brain-transcript.tsx
-msgid "Only highlighted turns"
-msgstr "Solo intervenciones destacadas"
-
 #: src/workflows/workflow-diagram.tsx
 msgid "Only if its condition holds"
 msgstr "Solo si se cumple su condición"
@@ -11957,7 +12145,6 @@ msgid "Only its builders open it, and its triggers don't fire, until it is share
 msgstr "Solo quienes lo construyen lo abren, y sus disparadores no se activan, hasta que se comparte con el equipo."
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgid "Only its last four characters are shown again."
 msgstr "Solo se volverán a mostrar sus últimos cuatro caracteres."
 
@@ -12263,11 +12450,6 @@ msgstr "Opportunity-to-Cash"
 msgid "Option {place}"
 msgstr "Opción {place}"
 
-#: src/frame/part-words.tsx
-msgctxt "a field that may stay empty"
-msgid "Optional"
-msgstr "Opcional"
-
 #: src/apps/field-editor.tsx
 msgid "Options"
 msgstr "Opciones"
@@ -12565,7 +12747,6 @@ msgid "Paste several at once, split by commas or lines."
 msgstr "Pega varias a la vez, separadas por comas o líneas."
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgid "Paste the key."
 msgstr "Pega la clave."
 
@@ -12992,7 +13173,6 @@ msgstr "Anterior"
 msgid "Previous hash"
 msgstr "Hash anterior"
 
-#: src/brain/brain-transcript.tsx
 #: src/frame/part-words.tsx
 msgid "Previous match"
 msgstr "Coincidencia anterior"
@@ -13038,6 +13218,11 @@ msgctxt "kind of app"
 msgid "Projects and tasks"
 msgstr "Proyectos y tareas"
 
+#: src/frame/part-words.tsx
+msgctxt "a page's facts"
+msgid "Properties"
+msgstr "Propiedades"
+
 #: src/brain/brain-article/team-work.tsx
 msgctxt "a link Grasp proposed that nobody confirmed yet"
 msgid "Proposed"
@@ -13053,7 +13238,6 @@ msgid "Proposed packages"
 msgstr "Propuso paquetes"
 
 #: src/onboarding/ai-step.tsx
-#: src/settings/ai-providers.tsx
 msgid "Provider"
 msgstr "Proveedor"
 
@@ -13163,6 +13347,11 @@ msgstr "En cola"
 #: src/agents/setup/thinking-step.tsx
 msgid "Quick and careful. Good for most jobs."
 msgstr "Rápido y cuidadoso. Bueno para la mayoría de tareas."
+
+#: src/frame/part-words.tsx
+msgctxt "a kind of block"
+msgid "Quote"
+msgstr "Cita"
 
 #: src/agents/agent-templates.ts
 msgid "Quote the document's own words for numbers and dates."
@@ -13594,10 +13783,6 @@ msgstr "Quitar {name} de los modelos de reserva"
 msgid "Remove {name}?"
 msgstr "¿Quitar a {name}?"
 
-#: src/routes/_shell.brain.$noteId.tsx
-msgid "Remove {title} from the brain"
-msgstr "Eliminar {title} del cerebro"
-
 #: src/apps/field-editor.tsx
 msgid "Remove {value}"
 msgstr "Quitar {value}"
@@ -13615,7 +13800,7 @@ msgid "Remove {words}"
 msgstr "Quitar {words}"
 
 #: src/brain/brain-article/kern.tsx
-#: src/brain/brain-transcript.tsx
+#: src/brain/note-actions.tsx
 msgid "Remove from the brain"
 msgstr "Eliminar del cerebro"
 
@@ -13664,7 +13849,7 @@ msgid "Remove the webhook to {url}?"
 msgstr "¿Quitar el webhook a {url}?"
 
 #: src/brain/brain-article/kern.tsx
-#: src/brain/brain-transcript.tsx
+#: src/brain/source-interview.tsx
 msgid "Remove this from the brain"
 msgstr "Eliminar esto del cerebro"
 
@@ -13927,7 +14112,6 @@ msgstr "Recursos"
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
 #: src/apps/apps-overview.tsx
-#: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Restaurar"
 
@@ -13944,11 +14128,11 @@ msgstr "Restáurala para volver a cambiarla."
 msgid "Restore this earlier state?"
 msgstr "¿Restaurar este estado anterior?"
 
-#: src/knowledge/timeline.tsx
-msgid "Restore version {number}"
-msgstr "Restaurar la versión {number}"
+#: src/frame/part-words.tsx
+msgid "Restore this version"
+msgstr "Restaurar esta versión"
 
-#: src/knowledge/timeline.tsx
+#: src/knowledge/document.tsx
 msgid "Restored version {restoredFrom}"
 msgstr "Versión {restoredFrom} restaurada"
 
@@ -14046,8 +14230,8 @@ msgid "Review and answer"
 msgstr "Revisar y responder"
 
 #: src/knowledge/document.tsx
-msgid "Review by {review}"
-msgstr "Revisar antes del {review}"
+msgid "Review by"
+msgstr "Revisar antes del"
 
 #. placeholder {0}: lesson.revision
 #. placeholder {0}: record.revision
@@ -14189,6 +14373,10 @@ msgid "Reword the goal"
 msgstr "Reformular el objetivo"
 
 #: src/frame/part-words.tsx
+msgid "Rewritten by Grasp"
+msgstr "Reescrito por Grasp"
+
+#: src/frame/part-words.tsx
 msgid "Right arrow for more"
 msgstr "Flecha derecha para más"
 
@@ -14298,6 +14486,11 @@ msgstr "Ejecutar"
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
 msgstr "Ejecución"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Run log"
+msgstr "Registro de ejecución"
 
 #: src/brain/brain.ts
 msgid "Run logs"
@@ -14750,7 +14943,6 @@ msgstr "Buscar en el archivo"
 msgid "Search the Brain"
 msgstr "Buscar en el cerebro"
 
-#: src/brain/brain-transcript.tsx
 #: src/frame/part-words.tsx
 msgid "Search the transcript"
 msgstr "Buscar en la transcripción"
@@ -14823,6 +15015,10 @@ msgstr "Secreto"
 #: src/settings/event-sources.tsx
 msgid "Secret revoked"
 msgstr "Secreto revocado"
+
+#: src/frame/part-words.tsx
+msgid "Section title"
+msgstr "Título de la sección"
 
 #: src/settings/sections.ts
 msgid "Security"
@@ -15101,6 +15297,12 @@ msgstr "Forma"
 msgid "Share"
 msgstr "Compartir"
 
+#: src/brain/note-actions.tsx
+#: src/knowledge/document.tsx
+msgctxt "a Brain page's link"
+msgid "Share"
+msgstr "Compartir"
+
 #: src/workflows/share-workflow.tsx
 msgctxt "share a workflow with someone"
 msgid "Share"
@@ -15294,6 +15496,10 @@ msgstr "Mostrar contraseña"
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
 msgstr "Mostrar personas una a una"
+
+#: src/frame/part-words.tsx
+msgid "Show section"
+msgstr "Mostrar sección"
 
 #: src/projects/file-item-dialog.tsx
 msgid "Show the apps and workflows"
@@ -15582,6 +15788,7 @@ msgstr "No se añadió todo. Puedo leer PDF, Word, Excel, PowerPoint y texto."
 msgid "Some teams"
 msgstr "Algunos equipos"
 
+#: src/knowledge/document.tsx
 #: src/workflows/requests/request-parts.tsx
 msgid "Someone"
 msgstr "Alguien"
@@ -15723,6 +15930,11 @@ msgctxt "the Brain's sources page"
 msgid "Sources"
 msgstr "Fuentes"
 
+#: src/frame/part-words.tsx
+msgctxt "where an answer comes from"
+msgid "Sources"
+msgstr "Fuentes"
+
 #: src/brain/sources-page.tsx
 msgid "Sources you may read"
 msgstr "Fuentes que puedes leer"
@@ -15762,10 +15974,6 @@ msgstr "Detecta leads que se han enfriado y redacta un seguimiento."
 #: src/sign-in-errors.ts
 msgid "Staff access to this organization isn't open."
 msgstr "El acceso del personal a esta organización no está abierto."
-
-#: src/brain/brain-article/kern.tsx
-msgid "Stakeholder"
-msgstr "Responsable"
 
 #: src/brain/brain.ts
 msgid "Stakeholder changed to the {role}"
@@ -15904,7 +16112,6 @@ msgstr "Inicia la versión {workflowVersion}"
 msgid "Statement"
 msgstr "Afirmación"
 
-#: src/brain/brain-transcript.tsx
 #: src/brain/brain.ts
 msgid "Statements"
 msgstr "Afirmaciones"
@@ -16111,7 +16318,7 @@ msgstr "Sugeridos"
 msgid "Summarise documents"
 msgstr "Resumir documentos"
 
-#: src/routes/_shell.brain.$noteId.tsx
+#: src/brain/source-interview.tsx
 msgctxt "tab: an interview written up short"
 msgid "Summary"
 msgstr "Resumen"
@@ -16174,6 +16381,11 @@ msgstr "Sistema"
 
 #: src/apps/app-data.tsx
 #: src/frame/part-words.tsx
+msgid "Table"
+msgstr "Tabla"
+
+#: src/frame/part-words.tsx
+msgctxt "a kind of block"
 msgid "Table"
 msgstr "Tabla"
 
@@ -16406,6 +16618,11 @@ msgstr "Texto"
 
 #: src/frame/part-words.tsx
 msgctxt "a diff's text"
+msgid "Text"
+msgstr "Texto"
+
+#: src/frame/part-words.tsx
+msgctxt "a kind of block"
 msgid "Text"
 msgstr "Texto"
 
@@ -16838,8 +17055,10 @@ msgstr "Los eventos que admite su contrato"
 msgid "The example data doesn't fit the change"
 msgstr "Los datos de ejemplo no encajan con el cambio"
 
+#: src/brain/note-actions.tsx
 #: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
+#: src/knowledge/document.tsx
 msgid "The export didn't work. Try again."
 msgstr "La exportación no ha funcionado. Inténtalo de nuevo."
 
@@ -16858,6 +17077,10 @@ msgstr "Los primeros enlaces salen"
 #: src/activity/audit-event.tsx
 msgid "the hash"
 msgstr "el hash"
+
+#: src/knowledge/document.tsx
+msgid "The history didn't load. Try again."
+msgstr "El historial no se cargó. Inténtalo de nuevo."
 
 #: src/apps/app-history.tsx
 msgid "The history of your changes couldn't be read. Try again in a moment."
@@ -16921,8 +17144,8 @@ msgid "The logo could not be removed"
 msgstr "No se pudo quitar el logotipo"
 
 #: src/brain/brain-home.tsx
-msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
-msgstr "Los archivos de memoria, las skills y los archivos subidos que leen tus agentes están en <0>Conocimiento</0>."
+msgid "The memory files, skills and uploads your agents read are in [Knowledge](/knowledge)."
+msgstr "Los archivos de memoria, las skills y los archivos subidos que leen tus agentes están en [Conocimiento](/knowledge)."
 
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
@@ -17527,6 +17750,10 @@ msgstr "Esto es correcto"
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "Este es el consentimiento tal como lo redacta Grasp ahora. El registro de auditoría guarda un hash del texto exacto que se mostró."
 
+#: src/frame/part-words.tsx
+msgid "This is the page now"
+msgstr "Así es la página ahora"
+
 #: src/frame/ai-key-banner.tsx
 msgid "This is usually an outage on their side; Grasp keeps retrying."
 msgstr "Suele ser una caída por su parte; Grasp sigue reintentando."
@@ -17890,10 +18117,6 @@ msgstr "Tema"
 msgid "topics"
 msgstr "temas"
 
-#: src/brain/brain-transcript.tsx
-msgid "Topics"
-msgstr "Temas"
-
 #: src/make/examples.ts
 msgid "Track the month-end close"
 msgstr "Llevar el cierre de mes"
@@ -17905,7 +18128,12 @@ msgstr "Llevar el cierre de mes"
 msgid "Transcript"
 msgstr "Transcripción"
 
-#: src/routes/_shell.brain.$noteId.tsx
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Transcript"
+msgstr "Transcripción"
+
+#: src/brain/source-interview.tsx
 msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcripción"
@@ -17971,6 +18199,10 @@ msgstr "Reintentando…"
 #: src/agents/agent-templates.ts
 msgid "Turn a full inbox into a short list of what needs a person today."
 msgstr "Convierte una bandeja llena en una lista breve de lo que necesita a una persona hoy."
+
+#: src/frame/part-words.tsx
+msgid "Turn into"
+msgstr "Convertir en"
 
 #: src/workflows/workflow-triggers.tsx
 msgctxt "turn a trigger off"
@@ -18111,6 +18343,10 @@ msgstr "Deshacer"
 msgid "Undo changes"
 msgstr "Deshacer los cambios"
 
+#: src/frame/part-words.tsx
+msgid "Undo rewrite"
+msgstr "Deshacer la reescritura"
+
 #: src/apps/app-history.tsx
 msgid "Undo the changes only you see?"
 msgstr "¿Deshacer los cambios que solo ves tú?"
@@ -18208,6 +18444,10 @@ msgstr "Sin título"
 #: src/frame/part-words.tsx
 msgid "Up to {most}."
 msgstr "Hasta {most}."
+
+#: src/knowledge/document.tsx
+msgid "Updated"
+msgstr "Actualizado"
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"
@@ -18401,6 +18641,7 @@ msgstr "Verificado hasta {entries}"
 
 #: src/apps/app-workflows.tsx
 #: src/inbox/items.ts
+#: src/knowledge/document.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/version-source.tsx
@@ -18423,18 +18664,13 @@ msgstr "versión {0}; ahora está en la versión {1}"
 msgid "Version {liveVersion} has run for the team since {since}"
 msgstr "La versión {liveVersion} funciona para el equipo desde {since}"
 
-#: src/knowledge/timeline.tsx
+#: src/knowledge/document.tsx
 msgid "Version {number}"
 msgstr "Versión {number}"
-
-#: src/knowledge/timeline.tsx
-msgid "Version {number}, current"
-msgstr "Versión {number}, actual"
 
 #: src/apps/app-workflows.tsx
 #: src/brain/brain.ts
 #: src/brain/sources-page.tsx
-#: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -18489,6 +18725,11 @@ msgctxt "a lesson's revisions"
 msgid "Versions"
 msgstr "Versiones"
 
+#: src/frame/part-words.tsx
+msgctxt "a page's saved versions"
+msgid "Versions"
+msgstr "Versiones"
+
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
 msgid "Versions"
@@ -18533,6 +18774,10 @@ msgstr "Vista"
 #: src/apps/app-history.tsx
 msgid "View changes"
 msgstr "Ver cambios"
+
+#: src/brain/note-actions.tsx
+msgid "View in map"
+msgstr "Ver en el mapa"
 
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx
@@ -18851,6 +19096,10 @@ msgstr "¿Qué puede hacer {name}?"
 #: src/knowledge/document.tsx
 msgid "What changed"
 msgstr "Qué cambió"
+
+#: src/frame/part-words.tsx
+msgid "What changed since {who}, {when}"
+msgstr "Qué cambió desde {who}, {when}"
 
 #: src/apps/publish.tsx
 msgid "What changes"
@@ -19821,6 +20070,10 @@ msgstr "Escritura"
 msgid "Write a summary"
 msgstr "Escribir un resumen"
 
+#: src/frame/part-words.tsx
+msgid "Write here. Use # for a heading, 1. for steps and - for a list."
+msgstr "Escribe aquí. Usa # para un encabezado, 1. para pasos y - para una lista."
+
 #: src/agents/new-agent-start.tsx
 msgid "Write its name, its job and what it should know."
 msgstr "Escribe su nombre, su tarea y lo que debe saber."
@@ -19948,7 +20201,7 @@ msgstr "ti"
 #: src/connections/connection-list.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/items.ts
-#: src/knowledge/timeline.tsx
+#: src/knowledge/document.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
 msgid "You"
@@ -20202,6 +20455,10 @@ msgstr "las cuentas de trabajo de tu organización"
 #: src/onboarding/ai-step.tsx
 msgid "Your own contract with Anthropic, OpenAI, Mistral or another provider. You pay them directly."
 msgstr "Tu propio contrato con Anthropic, OpenAI, Mistral u otro proveedor. Les pagas directamente."
+
+#: src/settings/ai-providers.tsx
+msgid "Your own endpoint"
+msgstr "Tu propio endpoint"
 
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."

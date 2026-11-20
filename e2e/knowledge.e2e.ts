@@ -29,7 +29,23 @@ const fixture = (name: string): string =>
 const pageRead = { timeout: 15_000 };
 
 /** The documents that link to the one on the page, each a row that opens it. */
-const usedBy = (page: Page) => page.getByRole("region", { name: "Used by" });
+const usedBy = (page: Page) =>
+  page
+    .locator('[data-slot="page-properties"]')
+    .locator(
+      'xpath=.//dt[normalize-space()="Used by"]/following-sibling::dd[1]'
+    );
+
+/** Opens the page's Properties, where a document's facts and links stand. */
+const openProperties = async (page: Page): Promise<void> => {
+  await page.locator("summary", { hasText: "Properties" }).click();
+};
+
+/** Chooses `item` in the page's "…" in the bar. */
+const more = async (page: Page, item: string): Promise<void> => {
+  await page.getByRole("button", { name: "More for this page" }).click();
+  await page.getByRole("menuitem", { name: item }).click();
+};
 
 /** A purge's count, by the name it stands under. */
 const count = (dialog: Locator, name: string) =>
@@ -37,16 +53,11 @@ const count = (dialog: Locator, name: string) =>
     `xpath=.//dt[normalize-space()="${name}"]/following-sibling::dd[1]`
   );
 
-/** The history's row for `version`: the one whose link names it. */
-const versionRow = (page: Page, version: number) =>
-  page
-    .getByRole("region", { name: "History" })
-    .getByRole("listitem")
-    .filter({
-      has: page.getByRole("link", {
-        name: new RegExp(`^Version ${version}(, current)?$`, "u"),
-      }),
-    });
+/** History's versions, the newest first, as it opens from the bar's "…". */
+const history = async (page: Page): Promise<Locator> => {
+  await more(page, "History");
+  return page.getByRole("dialog", { name: "History" }).getByRole("listitem");
+};
 
 test("a person searches, edits a document, meets a newer version instead of overwriting it, and restores an earlier one", async ({
   pageOf,
@@ -137,33 +148,36 @@ test("a person searches, edits a document, meets a newer version instead of over
     await expect(
       article.getByRole("heading", { name: "Parental leave" })
     ).toBeVisible();
-    // Nothing in the text runs or loads: the unsafe link is text, the safe
-    // ones (a `#heading` too) open apart from this page, and raw HTML is
-    // dropped.
+    // Nothing in the text runs or loads: the unsafe link keeps no address,
+    // the safe ones (a `#heading` too) give this page nothing, and raw HTML
+    // is dropped.
     await expect(article.getByText("Run this")).toBeVisible();
-    await expect(article.getByRole("link", { name: "Run this" })).toHaveCount(
-      0
-    );
+    await expect(article.locator('a[href^="javascript:"]')).toHaveCount(0);
     for (const name of ["the law", "back to the top"]) {
-      const link = article.getByRole("link", { name });
       // oxlint-disable-next-line no-await-in-loop -- one link at a time
-      await expect(link).toHaveAttribute("rel", "noopener noreferrer");
-      // oxlint-disable-next-line no-await-in-loop -- one link at a time
-      await expect(link).toHaveAttribute("target", "_blank");
+      await expect(article.getByRole("link", { name })).toHaveAttribute(
+        "rel",
+        "noopener noreferrer"
+      );
     }
     await expect(article.locator("img")).toHaveCount(0);
     // The frontmatter is a detail, not text.
     await expect(article.getByText("description:")).toHaveCount(0);
-    // When to use it is the one sentence under its title.
+    // When to use it is a property, one press away.
+    await openProperties(page);
     await expect(page.getByText("Who gets how much leave")).toBeVisible();
 
     // A `[[link]]` opens the document it names here, and each lists the
     // other as using it. The title is the page's heading (the text may
     // start with the same one).
-    await article.getByRole("link", { name: "the pay policy" }).click();
+    await article
+      .locator('[data-slot="document-editor"]')
+      .getByRole("link", { name: "the pay policy" })
+      .click();
     await expect(
       page.getByRole("heading", { level: 1, name: "Pay" }).first()
     ).toBeVisible();
+    await openProperties(page);
     await usedBy(page)
       .getByRole("link", { name: "Leave", exact: true })
       .click();
@@ -172,12 +186,13 @@ test("a person searches, edits a document, meets a newer version instead of over
         .getByRole("heading", { level: 1, name: "Leave", exact: true })
         .first()
     ).toBeVisible();
+    await openProperties(page);
     await expect(
       usedBy(page).getByRole("link", { name: "Pay", exact: true })
     ).toBeVisible();
 
     // An edit is a new version, with what changed.
-    await page.getByRole("button", { name: "Edit" }).click();
+    await more(page, "Edit");
     await page
       .getByRole("textbox", { name: "Text" })
       .fill(original.replace("sixteen", "twenty"));
@@ -186,11 +201,13 @@ test("a person searches, edits a document, meets a newer version instead of over
       .fill("Longer leave");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(article.getByText(/twenty weeks/u)).toBeVisible();
-    await expect(versionRow(page, 2)).toContainText("Longer leave");
+    const saved = await history(page);
+    await expect(saved.first()).toContainText("Longer leave");
+    await page.keyboard.press("Escape");
 
     // A save from another tab while the editor is open: saving shows that
     // version and keeps this text, and only an explicit step replaces it.
-    await page.getByRole("button", { name: "Edit" }).click();
+    await more(page, "Edit");
     await mine.api.knowledge.saveDocument({
       collectionId,
       path: "handbook/leave.md",
@@ -213,20 +230,28 @@ test("a person searches, edits a document, meets a newer version instead of over
       .getByRole("button", { name: "Replace version 3 with mine" })
       .click();
     await expect(article.getByText(/twenty-six weeks/u)).toBeVisible();
-    await expect(versionRow(page, 4)).toBeVisible();
-    await expect(versionRow(page, 3)).toContainText("From another tab");
+    const versions = await history(page);
+    await expect(versions).toHaveCount(4);
+    await expect(versions.nth(1)).toContainText("From another tab");
 
     // Restoring an earlier version saves its text as the next one.
-    await page.getByRole("button", { name: "Restore version 1" }).click();
-    await expect(versionRow(page, 5)).toContainText("Restored version 1");
+    await versions.filter({ hasText: "Version 1" }).getByRole("button").click();
+    await page.getByRole("button", { name: "Restore this version" }).click();
     await expect(article.getByText(/sixteen weeks/u)).toBeVisible();
+    const restored = await history(page);
+    await expect(restored.first()).toContainText("Restored version 1");
+    await page.keyboard.press("Escape");
 
     // An earlier version opens for reading, with the way back to the
     // current one, and no editor.
-    await versionRow(page, 2).getByRole("link", { name: "Version 2" }).click();
+    const earlier = new URL(page.url());
+    earlier.searchParams.set("version", "2");
+    await page.goto(`${earlier.pathname}${earlier.search}`);
     await expect(page.getByText("You're reading version 2")).toBeVisible();
     await expect(article.getByText(/twenty weeks/u)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
+    await page.getByRole("button", { name: "More for this page" }).click();
+    await expect(page.getByRole("menuitem", { name: "Edit" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await page
       .getByRole("link", { name: "Back to the current version" })
       .click();
@@ -414,10 +439,10 @@ test("someone who may only read a collection is offered no upload, edit or resto
   // Its owner, an admin, may change it.
   const owner = await pageOf(admin);
   await owner.goto(`/knowledge/${collectionId}?doc=${documentId}`);
-  await expect(owner.getByRole("button", { name: "Edit" })).toBeVisible();
-  await expect(
-    owner.getByRole("button", { name: "Restore version 1" })
-  ).toBeVisible();
+  await owner.getByRole("button", { name: "More for this page" }).click();
+  await expect(owner.getByRole("menuitem", { name: "Edit" })).toBeVisible();
+  await expect(owner.getByRole("menuitem", { name: "History" })).toBeVisible();
+  await owner.keyboard.press("Escape");
   // Uploading is on the collection's own page.
   await owner.goto(`/knowledge/${collectionId}`);
   await expect(owner.getByRole("region", { name: "Upload" })).toBeVisible();
@@ -426,8 +451,10 @@ test("someone who may only read a collection is offered no upload, edit or resto
   const page = await pageOf(reader);
   await page.goto(`/knowledge/${collectionId}?doc=${documentId}`);
   await expect(page.getByText("Twenty weeks.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^Restore/u })).toHaveCount(0);
+  await page.getByRole("button", { name: "More for this page" }).click();
+  await expect(page.getByRole("menuitem", { name: "Edit" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "History" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await page.goto(`/knowledge/${collectionId}`);
   // The page reads its navigation (memory, collections) beside the
   // collection: more than one read, so a loaded runner waits longer.
@@ -479,7 +506,9 @@ test("a person makes a private collection and a document in it, and an admin a s
   await expect(
     page.getByRole("heading", { level: 1, name: "kickoff" })
   ).toBeVisible(pageRead);
-  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await page.getByRole("button", { name: "More for this page" }).click();
+  await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // The same path again is taken, and nothing is overwritten.
   await page.getByRole("link", { name: mine }).first().click();

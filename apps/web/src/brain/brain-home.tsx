@@ -1,15 +1,11 @@
-import { Trans, useLingui } from "@lingui/react/macro";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import { CardLink, CardMedia, CardTitle } from "../grasp/card/index.ts";
-import { Link as TextLink } from "../grasp/link/index.ts";
-import { PageHeader } from "../grasp/page-header/index.ts";
-import { Separator } from "../grasp/separator/index.ts";
-import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { escapeMarkdown } from "./brain-markdown.ts";
 import { brainSections, findFolder, shownCount } from "./brain-sections.ts";
 import { folderTree, groupLabel } from "./brain.ts";
 import type { Brain, Group } from "./brain.ts";
@@ -224,9 +220,6 @@ const styles = stylex.create({
     marginTop: grasp.space2,
   },
   count: { flexShrink: 0, fontVariantNumeric: "tabular-nums" },
-  // The home as a page.
-  page: { display: "flex", flex: 1, minHeight: 0 },
-  article: { flex: 1, minWidth: 0, overflowY: "auto" },
   column: {
     display: "flex",
     flexDirection: "column",
@@ -237,8 +230,6 @@ const styles = stylex.create({
     marginInline: "auto",
     paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
   },
-  header: { display: "flex", flexDirection: "column", gap: grasp.space3 },
-  footer: { display: "flex", flexDirection: "column", gap: grasp.space4 },
 });
 
 /** The grid of blocks, a block's name row, and the page's column, for a part's own page. */
@@ -591,93 +582,31 @@ export const Drawing = ({
 /* ── The home ─────────────────────────────────────────────────────────────────────────────────── */
 
 /**
- * The company note as the brain's home, a page to go on from: one block per part of the brain,
- * each with a picture in its group's colour and what it holds. A block opens the part's own page,
- * where its notes are blocks in turn.
+ * The company's page, the brain's home, as a Brain page's text: how the brain works in a few
+ * sentences, then a section for each part of it, its name a link to the part's page, with how many
+ * notes it holds; last the way to Knowledge, where the memory, skills and uploads are, which the
+ * brain's own navigation has no place for. The company's own words stay plain: in its name a team
+ * such as Finance would read as a link.
  */
-export const BrainHome = ({ brain }: { brain: Brain }) => {
-  const { i18n } = useLingui();
-  const tree = folderTree(brain.notes);
-  return (
-    <section {...stylex.props(styles.blocks)}>
-      {brainSections.map((section) => {
-        const folder = findFolder(tree, section.key);
-        if (!folder) {
-          return null;
-        }
-        return (
-          <CardLink
-            key={section.key}
-            render={
-              <Link
-                params={{ sectionId: section.slug }}
-                to="/brain/sections/$sectionId"
-              />
-            }
-          >
-            <CardMedia>
-              <Panel group={section.group}>
-                <Drawing group={section.group} />
-              </Panel>
-            </CardMedia>
-            <div {...stylex.props(styles.nameRow)}>
-              <CardTitle headingLevel={2}>
-                {i18n._(groupLabel[section.group])}
-              </CardTitle>
-              <span {...stylex.props(styles.count)}>
-                <Text element="span" size="sm" tone="muted">
-                  {shownCount(folder)}
-                </Text>
-              </span>
-            </div>
-          </CardLink>
-        );
-      })}
-    </section>
-  );
-};
-
-/**
- * The brain's home as a page, as the prototype shows the company note: the company's name, how the
- * brain works in a few sentences, then a block for each part of it, to go on from. Under them, the
- * way to Knowledge, where the memory, skills and uploads are: the brain's own navigation has no
- * place for it.
- */
-export const HomePage = ({
-  brain,
-  toolbar,
-}: {
-  brain: Brain;
-  toolbar?: ReactNode;
-}) => {
+export const useCompanyText = (brain: Brain): string => {
+  const { t, i18n } = useLingui();
   const company = brain.notes.find((note) => note.kind === "company");
-  return (
-    <div {...stylex.props(styles.page)}>
-      <article {...stylex.props(styles.article)}>
-        <div {...stylex.props(styles.column)}>
-          <header {...stylex.props(styles.header)}>
-            {toolbar}
-            <PageHeader title={company?.title} />
-            {/* In plain words: in the company’s own name a team such as Finance would read as a link. */}
-            {(company?.article ?? []).map((paragraph) => (
-              <Text key={paragraph} size="sm" tone="muted">
-                {paragraph}
-              </Text>
-            ))}
-          </header>
-          <BrainHome brain={brain} />
-          <footer {...stylex.props(styles.footer)}>
-            <Separator />
-            <Text size="sm" tone="muted">
-              <Trans>
-                The memory files, skills and uploads your agents read are in{" "}
-                <TextLink render={<Link to="/knowledge" />}>Knowledge</TextLink>
-                .
-              </Trans>
-            </Text>
-          </footer>
-        </div>
-      </article>
-    </div>
-  );
+  const tree = folderTree(brain.notes);
+  const sections = brainSections.flatMap((section) => {
+    const folder = findFolder(tree, section.key);
+    if (!folder) {
+      return [];
+    }
+    const name = escapeMarkdown(i18n._(groupLabel[section.group]));
+    const count = shownCount(folder);
+    return [
+      `## [${name}](/brain/sections/${section.slug})`,
+      t`${plural(count, { one: "# note", other: "# notes" })}`,
+    ];
+  });
+  return [
+    ...(company?.article ?? []).map(escapeMarkdown),
+    ...sections,
+    t`The memory files, skills and uploads your agents read are in [Knowledge](/knowledge).`,
+  ].join("\n\n");
 };

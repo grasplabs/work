@@ -5,7 +5,6 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { formatDay, isoWeek } from "../../format.ts";
-import { Avatar, AvatarFallback } from "../../grasp/avatar/index.ts";
 import { Collapsible } from "../../grasp/collapsible/index.ts";
 import { focus } from "../../grasp/focus/focus.ts";
 import { Heading } from "../../grasp/heading/index.ts";
@@ -18,7 +17,7 @@ import {
   TooltipTrigger,
 } from "../../grasp/tooltip/index.ts";
 import { ClaimBasis } from "../aggregate.tsx";
-import type { Interviewee, Kern, StatementRow } from "../article-kern.ts";
+import type { Kern, StatementRow } from "../article-kern.ts";
 import { Drawing, Panel } from "../brain-home.tsx";
 import { given, groupOf, isTeamClaim, statementWords } from "../brain.ts";
 import type { Note } from "../brain.ts";
@@ -43,21 +42,6 @@ const styles = stylex.create({
     height: grasp.severityDot,
     borderRadius: grasp.cornerCircle,
     backgroundColor: grasp.success,
-  },
-  people: {
-    display: "flex",
-  },
-  // Each face after the first stands a little back over the one before; the one pointed at comes forward.
-  person: {
-    position: "relative",
-    display: "inline-flex",
-    borderRadius: grasp.cornerCircle,
-    textDecorationLine: "none",
-    marginInlineStart: {
-      default: `calc(-1 * ${grasp.space2})`,
-      ":first-child": 0,
-    },
-    zIndex: { default: null, ":hover": 1, ":focus-visible": 1 },
   },
   header: {
     display: "flex",
@@ -123,8 +107,6 @@ const styles = stylex.create({
     textDecorationLine: { default: "none", ":hover": "underline" },
   },
   remove: { alignSelf: "center" },
-  // Each line of who a face is, on its own line in the tooltip.
-  tipLine: { display: "block" },
   partHeading: {
     display: "flex",
     flexWrap: "wrap",
@@ -156,65 +138,6 @@ export const LastHeard = ({ date }: { date: string }) => {
     </span>
   );
 };
-
-/** Who an interviewee is, as their face says when pointed at: name, role, and how and when they were interviewed. */
-const useWhoLines = (person: Interviewee): string[] => {
-  const { t } = useLingui();
-  const day = formatDay(person.date);
-  return [
-    person.label,
-    person.label === person.role ? undefined : person.role,
-    [person.stakeholder ? t`Stakeholder` : t`Employee`, person.how, day]
-      .filter(given)
-      .join(" · "),
-  ].filter(given);
-};
-
-/** One interviewee's face, a link to their interview. */
-const Face = ({ person }: { person: Interviewee }) => {
-  const { t } = useLingui();
-  const day = formatDay(person.date);
-  const who = person.label;
-  const lines = useWhoLines(person);
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Link
-            aria-label={t`${who}, interviewed ${day}`}
-            params={{ noteId: person.sourceId }}
-            to="/brain/$noteId"
-            {...stylex.props(styles.person, focus.ring)}
-          >
-            <Avatar decorative name={person.label} size="md">
-              <AvatarFallback>{person.initials}</AvatarFallback>
-            </Avatar>
-          </Link>
-        }
-      />
-      <TooltipContent>
-        {lines.map((line) => (
-          <span key={line} {...stylex.props(styles.tipLine)}>
-            {line}
-          </span>
-        ))}
-      </TooltipContent>
-    </Tooltip>
-  );
-};
-
-/**
- * Everyone the team was heard through in an interview, as initials on the banner. Pointing at one
- * says who it is as the source names them (Grasp keeps no names), their role, and how and when they
- * were interviewed; a click opens the interview.
- */
-export const Interviewed = ({ people }: { people: Interviewee[] }) => (
-  <div {...stylex.props(styles.people)}>
-    {people.map((person) => (
-      <Face key={person.sourceId} person={person} />
-    ))}
-  </div>
-);
 
 /**
  * The top of a note's page: the banner of the part it belongs to, as the part's own page shows it,

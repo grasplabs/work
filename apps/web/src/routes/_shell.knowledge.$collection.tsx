@@ -40,7 +40,11 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { CopySkill, isSkill } from "../knowledge/copy-skill.tsx";
-import { DocumentView } from "../knowledge/document.tsx";
+import {
+  DocumentActions,
+  DocumentView,
+  useDocumentPage,
+} from "../knowledge/document.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
 import { loadKnowledgeNav } from "../knowledge/nav-data.ts";
 import { NewDocument } from "../knowledge/new-document.tsx";
@@ -278,6 +282,30 @@ const CollectionNotLoaded = ({
   return open === undefined ? null : <NotLoaded page={open} />;
 };
 
+/** The open document's actions in the bar: for an admin, adapting a skill Grasp ships in Our skills; then its own. */
+const OpenDocumentActions = ({
+  doc,
+  shipped,
+  onEdit,
+  onHistory,
+}: {
+  doc: DocumentRead;
+  /** Whether its collection is one Grasp ships. */
+  shipped: boolean;
+  onEdit: (() => void) | undefined;
+  onHistory: (() => void) | undefined;
+}) => {
+  const { identity } = Route.useRouteContext();
+  return (
+    <>
+      {shipped && isSkill(doc) && isAdmin(identity.role) ? (
+        <CopySkill doc={doc} />
+      ) : null}
+      <DocumentActions doc={doc} onEdit={onEdit} onHistory={onHistory} />
+    </>
+  );
+};
+
 const CollectionView = () => {
   const { collection, open, nav } = Route.useLoaderData();
   const { t } = useLingui();
@@ -299,10 +327,25 @@ const CollectionView = () => {
       : t`Collection`;
   const missing = missingOf(collection, open);
   const { collection: collectionId } = Route.useParams();
-  const document = open?.state === "ready" ? open.data.doc : undefined;
+  const read = open?.state === "ready" ? open.data : undefined;
+  const document = read?.doc;
   const documentOpen = document !== undefined;
+  const page = useDocumentPage({ read, me: identity.userId, writable });
   return (
     <KnowledgeFrame
+      actions={
+        document === undefined ? undefined : (
+          <OpenDocumentActions
+            doc={document}
+            onEdit={page.handleEdit}
+            onHistory={page.handleHistory}
+            shipped={
+              collection.state === "ready" &&
+              collection.data.collection.source === "grasp"
+            }
+          />
+        )
+      }
       at={{
         collection: collectionId,
         ...(collection.state === "ready"
@@ -373,24 +416,16 @@ const CollectionView = () => {
       </div>
       {open?.state === "ready" ? (
         <DocumentView
-          // A new document starts with its editor closed.
-          key={`${open.data.doc.id}@${open.data.doc.version.number}`}
+          key={page.key}
           backlinks={open.data.backlinks}
           collection={name}
           doc={open.data.doc}
-          me={identity.userId}
+          editing={page.editing}
+          history={page.history}
+          onEditingChange={(editing) => {
+            page.onEditingChange(editing);
+          }}
           resolve={(path) => paths.get(path)}
-          versions={open.data.versions}
-          writable={writable}
-          actions={
-            // A skill Grasp ships, for an admin to adapt in Our skills.
-            collection.state === "ready" &&
-            collection.data.collection.source === "grasp" &&
-            isSkill(open.data.doc) &&
-            isAdmin(identity.role) ? (
-              <CopySkill doc={open.data.doc} />
-            ) : null
-          }
         />
       ) : null}
     </KnowledgeFrame>
@@ -399,7 +434,7 @@ const CollectionView = () => {
 
 export const Route = createFileRoute("/_shell/knowledge/$collection")({
   // It fills the page\'s card, its panes scrolling on their own (frame/page-fill.ts).
-  staticData: { page: "fill" },
+  staticData: { page: "whole" },
   validateSearch: (
     search: Record<string, unknown>
   ): { doc?: string; version?: number } => {

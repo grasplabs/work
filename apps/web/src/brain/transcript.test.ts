@@ -8,9 +8,6 @@ import {
   placeLabel,
   placeOf,
   position,
-  searchHits,
-  turnParts,
-  voices,
 } from "./transcript.ts";
 
 // The prototype's tests of statements as highlights in their
@@ -109,39 +106,6 @@ describe("transcripts", () => {
     expect(chapterOfTurns(transcript)).toStrictEqual([0, 0, 1, 1]);
   });
 
-  it("finds every place a search matches, ignoring case, and nothing for one letter", () => {
-    expect(searchHits(transcript.turns, "documents")).toStrictEqual([
-      { turn: 1, start: 19 },
-      { turn: 2, start: 6 },
-    ]);
-    expect(searchHits(transcript.turns, "d")).toStrictEqual([]);
-  });
-
-  it("splits a turn at its highlight and at a search hit inside it", () => {
-    const highlights = highlightsOf({ id: "src-a", transcript }, [
-      statement("a", "Checking documents takes all week"),
-    ]);
-    const parts = turnParts(
-      transcript.turns[1]?.text ?? "",
-      highlights,
-      [{ start: 19, index: 0 }],
-      "documents".length
-    );
-    expect(
-      parts.map((part) => [
-        part.text,
-        part.statement?.id ?? null,
-        part.hit ?? null,
-      ])
-    ).toStrictEqual([
-      ["Honestly? ", null, null],
-      ["Checking ", "a", null],
-      ["documents", "a", 0],
-      [" takes all week", "a", null],
-      [". And chasing.", null, null],
-    ]);
-  });
-
   it("places a statement at its minute, with the turn before and after it", () => {
     const { sources } = testWorkspace();
     const place = placeOf(statementIn("st-check"), sources);
@@ -188,12 +152,5 @@ describe("transcripts", () => {
         .map((flaw) => `${source.id}: ${String(flaw)}`);
     });
     expect(flaws).toStrictEqual([]);
-  });
-
-  it("gives each person in a conversation a place by when they first speak, leaving Grasp out", () => {
-    const vision = testWorkspace().sources.find(
-      (source) => source.id === "src-vision"
-    )?.transcript;
-    expect(voices(vision?.turns ?? [])).toStrictEqual(["CEO", "COO", "CFO"]);
   });
 });

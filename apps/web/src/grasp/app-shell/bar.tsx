@@ -223,14 +223,12 @@ const styles = stylex.create({
       // The Menu button's glyph (an icon, iconSm) at the page's edge, then the bar's gap.
       [NARROW]: `calc(${grasp.shellPageInline} + ${grasp.iconSm} + ${grasp.space3})`,
     },
-    // On a phone with panels their button floats at the row's end (app-shell.tsx, F20): the same.
+    // With panels their button floats at the row's end (app-shell.tsx, F20), on a phone and, with
+    // the host's `onPanelsOpenChange`, at every width: the same room, so it never covers the actions.
     paddingInlineEnd: {
       default: grasp.shellPageInline,
-      [NARROW]: {
-        default: grasp.shellPageInline,
-        [stylex.when.ancestor("[data-shell-panels]")]:
-          `calc(${grasp.shellPageInline} + ${grasp.iconSm} + ${grasp.space3})`,
-      },
+      [stylex.when.ancestor("[data-shell-panels]")]:
+        `calc(${grasp.shellPageInline} + ${grasp.iconSm} + ${grasp.space3})`,
     },
   },
   // The crumbs' list (F02, A3-shell-02): one line, the page's name first to take its room and the
