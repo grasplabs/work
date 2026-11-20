@@ -1,15 +1,16 @@
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatch } from "@tanstack/react-router";
 
-import { AgentMark } from "../grasp/agent-mark/index.ts";
+import { AgentFigure } from "../grasp/agent-figure/index.ts";
 import { CalendarIcon, Lock, Note } from "../grasp/icons/index.ts";
 import type { SidebarSection } from "../grasp/sidebar/index.ts";
 import { wakesOn } from "./agent-facts.tsx";
 import { agentTabOf } from "./agent-page.tsx";
 import type { AgentTab } from "./agent-page.tsx";
+import { lookOf } from "./figure/look.ts";
 
 // One agent as the sidebar's section while an admin is on its page, as
-// Settings is (grasp/frame/grasp-sidebar.tsx): the agent's mark and name
+// Settings is (grasp/frame/grasp-sidebar.tsx): the agent's figure and name
 // first, above Back, the press that opens its overview (the library's
 // `home`, as the Brain has it); Back to the Agents page; then a row per
 // other part of its page. The parts
@@ -60,7 +61,8 @@ export const useAgentSection = (): SidebarSection | undefined => {
   return {
     id: "agent",
     title: name,
-    mark: <AgentMark name={name} size="xs" />,
+    // Its own figure, as its card on the Agents page has it.
+    mark: <AgentFigure look={lookOf(agent)} size="icon" />,
     navLabel: t`${name}'s pages`,
     // Its name, above Back, opens its overview, as the Brain's does: no
     // Overview row of its own.

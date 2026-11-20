@@ -1,19 +1,3 @@
-// AgentFigure: an agent's figure, AgentMark's big sibling. Damsko's Stephen, lit and dithered, in a
-// shape and a palette of its own (look.ts, kept by the agent's id with `agentFigureOf`), in one of
-// five poses: asleep, idle, listening, thinking, done. Taken over from the product (Ruben: "use
-// Damsko's Stephen so each agent gets its own colours and shape").
-// The main agent's look (`stephensLook`) has one eye in its orb's middle, alive (eye.ts): it follows
-// the pointer on a spring, glances, blinks, and takes each state as a mood.
-//
-//   <AgentFigure look={agentFigureOf(agent.id)} size="md" state="idle" />
-//   <AgentFigure look={look} size="xl" state="listening" follow aria-label="Stephen" />
-//
-// It paints cells on a small 2D canvas, scaled up crisp: no WebGL, so a page of any number holds no
-// GPU context. Every figure on the page shares one frame loop, steps only while it is in view and
-// the tab is shown, and repaints only when a cell changed. Nothing reacts to hover; only `follow`
-// (on by default for the main agent) turns its attention to the pointer, a touch or a focused control. A new pose stands within 300ms. With reduced motion, or
-// `still` (the default at list sizes), one picture of its pose. In forced colours: a plain ring.
-// Decorative by default: the agent's name is its host's; `aria-label` makes it an image with a name.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -27,13 +11,14 @@ import type { LiveFigure } from "./live";
 import { paletteColours, restingColours } from "./look";
 import type { AgentFigureLook } from "./look";
 
-/** xs 24 and sm 48 for a list, md 72, lg 128, xl 200 pixels. */
-export type AgentFigureSize = "xs" | "sm" | "md" | "lg" | "xl";
+/** icon 16 in a row's icon box, xs 24 and sm 48 for a list, md 72, lg 128, xl 200 pixels. */
+export type AgentFigureSize = "icon" | "xs" | "sm" | "md" | "lg" | "xl";
 
 /** What a caller may style: where it sits. Never its look or its size. */
 export type AgentFigureLayoutStyle = LayoutStyle;
 
 const pixels: Record<AgentFigureSize, number> = {
+  icon: 16,
   xs: 24,
   sm: 48,
   md: 72,
@@ -59,6 +44,7 @@ const styles = stylex.create({
     width: "100%",
     height: "100%",
   },
+  icon: { width: "16px", height: "16px" },
   xs: { width: "24px", height: "24px" },
   sm: { width: "48px", height: "48px" },
   md: { width: "72px", height: "72px" },
@@ -86,7 +72,8 @@ const seedOf = (look: AgentFigureLook): number =>
   (look.shape.length * 7 + look.palette.length * 3) % 11;
 
 /** The list sizes, where a figure is still unless asked otherwise. */
-const isListSize = (size: AgentFigureSize) => size === "xs" || size === "sm";
+const isListSize = (size: AgentFigureSize) =>
+  size === "icon" || size === "xs" || size === "sm";
 
 /** The colours a figure is drawn in: its palette, pulled toward moon's greys while it is asleep. */
 const coloursOf = (look: AgentFigureLook, state: FigureState) =>
@@ -107,7 +94,8 @@ export interface AgentFigureProps {
   /** Its shape and palette: `agentFigureOf(agent.id)` keeps one by the agent's id. */
   look: AgentFigureLook;
   /**
-   * xs 24 and sm 48 in a list, md 72 in a card, lg 128 and xl 200 for the one agent a screen is about.
+   * icon 16 in a row's icon box (the sidebar's section head), xs 24 and sm 48 in a list, md 72 in a
+   * card, lg 128 and xl 200 for the one agent a screen is about.
    * @default "md"
    */
   size?: AgentFigureSize;
@@ -126,7 +114,7 @@ export interface AgentFigureProps {
   follow?: boolean;
   /**
    * One picture of its pose, never moving: a page of many figures in a list.
-   * @default true at xs and sm, false above
+   * @default true at icon, xs and sm, false above
    */
   still?: boolean;
   /** Its name, when nothing beside it says it: then an image with that name. Left out, it is decoration. */

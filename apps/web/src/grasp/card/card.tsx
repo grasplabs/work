@@ -368,6 +368,8 @@ export type CardLinkProps = Pick<
   render?: RenderProp;
   /** Its name, when its title and words do not say where it goes. */
   "aria-label"?: string;
+  /** The IDs of what describes it beyond its name, said after the name (an agent's facts). */
+  "aria-describedby"?: string;
 };
 
 /**
@@ -383,6 +385,7 @@ export const CardLink = ({
   padding = "md",
   layout,
   "aria-label": ariaLabel,
+  "aria-describedby": describedBy,
 }: CardLinkProps) =>
   renderElement(
     "a",
@@ -391,6 +394,7 @@ export const CardLink = ({
       "data-slot": "card",
       "data-card-link": "",
       "aria-label": ariaLabel,
+      "aria-describedby": describedBy,
       className: stylex.props(
         cardLinkMarker,
         styles.card,

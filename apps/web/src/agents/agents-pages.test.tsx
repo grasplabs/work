@@ -261,15 +261,6 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** Waits `ms` of real time: a hover card opens only after the pointer rests. */
-const waited = async (ms: number): Promise<void> => {
-  const { promise, resolve } = Promise.withResolvers<boolean>();
-  setTimeout(() => {
-    resolve(true);
-  }, ms);
-  await promise;
-};
-
 const press = async (element: Element | null | undefined) => {
   if (!(element instanceof HTMLElement)) {
     throw new TypeError("Nothing to press");
@@ -440,7 +431,7 @@ describe("the company's agents, on pages of their own", () => {
         groups: ["Yours", "Only you see and ask these.", "Your company's"].map(
           (words) => text.includes(words)
         ),
-        alone: scribesCard?.text.includes("Only you"),
+        alone: scribesCard?.text.includes("Just for me"),
         paused: idlesCard?.text.includes("Paused"),
         newAgent: document.querySelector("a[href='/agents/new']") !== null,
       }).toStrictEqual({
@@ -675,7 +666,7 @@ describe("the company's agents, on pages of their own", () => {
       }).toStrictEqual({ listed: true, takeOn: null });
     });
 
-    it("shows an admin every agent under the tab for whom it answers, each card opening its page with one fact at its foot", async () => {
+    it("shows an admin every agent under the tab for whom it answers, each card opening its page with whom it answers at its foot", async () => {
       await mounted(
         <Overview
           makes
@@ -722,19 +713,19 @@ describe("the company's agents, on pages of their own", () => {
       const [milansCard] = mine.cards;
       const [stephensCard, clairesCard] = cards();
       expect({
-        // Its next run at its foot, and whom it answers for a touch screen.
-        claire: ["Next", "Finance"].map((words) =>
-          clairesCard?.text.includes(words)
-        ),
-        stephen: ["Everyone with Grasp", "Last run failed"].map((words) =>
+        // Whom each answers, and how it stands.
+        claire: clairesCard?.text.includes("Finance"),
+        stephen: ["Everyone", "Last run failed"].map((words) =>
           stephensCard?.text.includes(words)
         ),
-        milanPaused: milansCard?.text.includes("Paused"),
+        milan: ["Just for me", "Paused"].map((words) =>
+          milansCard?.text.includes(words)
+        ),
         newAgent: document.querySelector("a[href='/agents/new']") !== null,
       }).toStrictEqual({
-        claire: [true, true],
+        claire: true,
         stephen: [true, true],
-        milanPaused: true,
+        milan: [true, true],
         newAgent: true,
       });
     });
@@ -794,7 +785,7 @@ describe("the company's agents, on pages of their own", () => {
       expect({
         tabs: tabs(),
         cards: cards().map(({ name, to, chat }) => ({ name, to, chat })),
-        alone: scribesCard?.text.includes("Only you"),
+        alone: scribesCard?.text.includes("Just for me"),
       }).toStrictEqual({
         tabs: [
           { name: "My agents", chosen: true },
@@ -808,7 +799,7 @@ describe("the company's agents, on pages of their own", () => {
       });
     });
 
-    it("tells an admin resting on a card what is worth knowing before opening it", async () => {
+    it("says with an admin's card what is worth knowing before opening it", async () => {
       await mounted(
         <Overview
           at="organization"
@@ -819,30 +810,18 @@ describe("the company's agents, on pages of their own", () => {
           usable={[chatAgent(stephen)]}
         />
       );
+      // What the card's link is described by: read out with its name, and
+      // what grows inside the card for who rests on it.
       const card = document.querySelector("a[href='/agents/agent-claire']");
-      await act(async () => {
-        card?.dispatchEvent(
-          new PointerEvent("pointerenter", {
-            bubbles: true,
-            pointerType: "mouse",
-          })
-        );
-        card?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-        card?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
-        await waited(800);
-      });
-      const said = document.body.textContent ?? "";
+      const said = (card?.getAttribute("aria-describedby") ?? "")
+        .split(" ")
+        .map((id) => document.querySelector(`#${id}`)?.textContent ?? "")
+        .join(" ");
       expect(
-        [
-          "Answers",
-          "Finance",
-          "3 of 6 kinds of work",
-          "$12.50 · 40 requests · 4 people",
-          "Last asked",
-        ].map((words) => said.includes(words))
+        ["Finance", "On its own", "Model", "This month", "$12.50"].map(
+          (words) => said.includes(words)
+        )
       ).toStrictEqual([true, true, true, true, true]);
-      // Milan was never asked this month: nothing about what it cost.
-      expect(said).not.toContain("$0.00");
     });
   });
 
@@ -981,7 +960,7 @@ describe("the company's agents, on pages of their own", () => {
       );
       const [firstCard, clairesCard] = cards();
       const onCards = {
-        first: firstCard?.text.includes("Everyone with Grasp"),
+        first: firstCard?.text.includes("Everyone"),
         claire: clairesCard?.text.includes("Access not shown"),
         claireEveryone: clairesCard?.text.includes("Everyone"),
       };

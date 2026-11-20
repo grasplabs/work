@@ -1,9 +1,3 @@
-// The main agent's eye, alive (Ruben, 19 November: "the eye should obviously follow my cursor, and
-// it should feel so smooth ... it's like almost a living being"). Where it looks, on a spring (a
-// little overshoot, then it settles: never a linear chase); the tiny movements it makes while
-// awake; its blinks at uneven intervals, now and then twice; the lid's twitch while it dreams; its
-// breath asleep; the squint of a job done. Each state is a mood: where it looks, how far it
-// wanders, how slowly it blinks. body.ts draws it; this only keeps its life. Pure numbers.
 import type { FigureState } from "./body";
 import { TAU, hash } from "./solid";
 

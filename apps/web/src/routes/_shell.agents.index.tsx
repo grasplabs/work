@@ -3,7 +3,11 @@ import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { AgentsOverview, agentsTabOf } from "../agents/agents-overview.tsx";
+import {
+  AgentsOverview,
+  AgentTabsWaiting,
+  agentsTabOf,
+} from "../agents/agents-overview.tsx";
 import type { AgentsTab, ManagedAgents } from "../agents/agents-overview.tsx";
 import type { OwnAgentsAdmin } from "../agents/own-agents-admin.tsx";
 import type { Session } from "../core.ts";
@@ -137,11 +141,16 @@ const AgentsPage = () => {
  * agents skeleton, its grid of portrait cards on the page's own paper, with
  * New agent in its place for whoever may make one: anyone but Grasp's
  * staff, as people may make their own until an admin turns that off
- * (`ownAgentsDefault`), which the page knows only once it has loaded.
+ * (`ownAgentsDefault`), which the page knows only once it has loaded. The
+ * tabs stand in their place for the company's admins, who have them on the
+ * loaded page.
  */
 const AgentsLoading = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
+  const { tab } = Route.useSearch();
+  // As the loader reads it: whoever gets the tabs on the loaded page.
+  const admin = isAdmin(identity.role);
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Agents` }]} />
@@ -154,6 +163,7 @@ const AgentsLoading = () => {
           )
         }
         cards={4}
+        toolbar={admin ? <AgentTabsWaiting tab={tab} /> : undefined}
       />
     </>
   );
