@@ -938,8 +938,8 @@ const accessFor = async (
  * the company (`person`); those teams and the company, as no person
  * (`teams`); or the company alone, as no person and no team (`company`),
  * which reads only what every member may. Every reach of a current member
- * holds the company: what everyone may read, each of them may. A guest or
- * a visitor is never a member, so never a reader here.
+ * holds the company: what everyone may read, each of them may. A guest is
+ * never a member, so never a reader here.
  */
 export type Reach = "person" | "teams" | "company";
 

@@ -611,62 +611,46 @@ export const sourcesOf = async (env: Env, app: AppId): Promise<AppSources> => {
 };
 
 /**
- * Whether App `app` may hold what the Brain recalled: it, or a workflow
- * or App it reaches through grants (`reachedThroughCalls`: on workflows,
- * and a workflow's on an App's functions), whatever the depth, was ever
- * granted the platform's `brain`, or read it by default (GRA-2218). What code recalls is what everyone in the company may read
- * (brain-recall.ts), so this matters only for someone outside it: a
- * visitor (app-visitors.ts). One query past the walk.
+ * Whether App `app` holds any source (GRA-2235): a connection it was ever
+ * granted, shared ones too, any grant to read the Brain, or a Brain read
+ * by default (resource-brain.ts `brainByDefault`), itself or through the
+ * workflows and Apps whose data it may hold (`reachedThroughCalls`), or
+ * an App the walk can't place. A source once held counts for good,
+ * revoked or not. Such an App takes no guests (app-members.ts,
+ * app-access.ts `requireAppRole`). One walk, and one round trip past it.
  */
-export const recallsTheBrain = async (
+export const holdsAnySource = async (
   env: Env,
   app: AppId
 ): Promise<boolean> => {
-  // Every node whose data the App may hold, one level of `edgesOf` at a
-  // time until a level adds none: each node is queried once, so it ends,
-  // on cycles too, after as many levels as the grants make, with no cap
-  // (the sharing walk's caps are for its many Apps at once).
-  const reached = new Set<string>([appNode(app)]);
-  let frontier: string[] = [appNode(app)];
-  while (frontier.length > 0) {
-    // oxlint-disable-next-line no-await-in-loop -- one level at a time
-    const edges = await edgesOf(env, {
-      apps: frontier.flatMap((id) =>
-        id.startsWith(workflowPrefix) ? [] : [appIdSchema.parse(id)]
-      ),
-      workflows: frontier.flatMap((id) =>
-        id.startsWith(workflowPrefix) ? [id.slice(workflowPrefix.length)] : []
-      ),
-    });
-    const next = new Set<string>();
-    for (const { from, to } of [...edges.values()].flat()) {
-      if (reached.has(from) && !reached.has(to)) {
-        next.add(to);
-      }
-    }
-    for (const node of next) {
-      reached.add(node);
-    }
-    frontier = [...next];
+  const walked = await reachedThroughCalls(env, [app]);
+  const reach = walked.get(app);
+  if (reach === undefined || reach.unresolved.size > 0) {
+    return true;
   }
-  const nodes = [...reached];
+  const nodes = [...reach.nodes];
   const reachedApps = nodes.filter((id) => !id.startsWith(workflowPrefix));
   const reachedWorkflows = nodes.flatMap((id) =>
     id.startsWith(workflowPrefix) ? [id.slice(workflowPrefix.length)] : []
   );
-  const brainGrant = and(
-    eq(permissions.objectType, "platform"),
-    isNotNull(permissions.grantedAt),
-    sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = 'brain')`
-  );
   const db = drizzle(env.DB);
-  const [granted, read] = await Promise.all([
+  const [[granted], [read]] = await db.batch([
     db
       .select({ id: permissions.id })
       .from(permissions)
       .where(
         and(
-          brainGrant,
+          isNotNull(permissions.grantedAt),
+          or(
+            eq(permissions.objectType, "connection"),
+            and(
+              eq(permissions.objectType, "platform"),
+              or(
+                isNotNull(permissions.teams),
+                sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = 'brain')`
+              )
+            )
+          ),
           or(
             and(
               eq(permissions.subjectType, "app"),
@@ -679,10 +663,9 @@ export const recallsTheBrain = async (
           )
         )
       )
-      .limit(1)
-      .get(),
-    // Or read the Brain by default, declaring no permission to: counted
-    // exactly as a grant (resource-brain.ts `brainByDefault`, GRA-2218).
+      .limit(1),
+    // A Brain read by default, declaring no permission to, counts exactly
+    // as a grant (GRA-2218).
     db
       .select({ id: brainDefaultReads.subjectId })
       .from(brainDefaultReads)
@@ -698,8 +681,7 @@ export const recallsTheBrain = async (
           )
         )
       )
-      .limit(1)
-      .get(),
+      .limit(1),
   ]);
   return granted !== undefined || read !== undefined;
 };

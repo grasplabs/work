@@ -3,7 +3,6 @@ import { z } from "zod";
 import type { AppDataApi } from "./app-data.ts";
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
 import type { AppReview, AppPreviewApi } from "./app-review.ts";
-import type { AppVisitorEntry, AppVisitorGrants } from "./app-visitors.ts";
 import type { AppWebhooksApi } from "./app-webhooks.ts";
 import { businessProcessSchema } from "./business-processes.ts";
 import type { BusinessProcess } from "./business-processes.ts";
@@ -621,39 +620,6 @@ export interface AppsApi {
    * (`app.not_found`), so a link tells nothing of an App they can't open.
    */
   openLink: (link: string) => Promise<{ app: AppId }>;
-  /**
-   * Who may open the App without being a member (`@grasp-os/shared/app-
-   * visitors`): the addresses and domains its builders listed. For its
-   * builders.
-   */
-  visitors: (app: string) => Promise<AppVisitorEntry[]>;
-  /**
-   * Sets who may open the App without being a member, the whole list at
-   * once, for its builders: `visitor.invalid` for an address or domain it
-   * can't be, or more than 50. Audited. Whoever leaves the list can't open
-   * it from their next request on.
-   */
-  setVisitors: (
-    app: string,
-    list: AppVisitorEntry[]
-  ) => Promise<AppVisitorEntry[]>;
-  /**
-   * The functions the App's current version grants its visitors, by path,
-   * for its builders: visitors call these as the App itself, and nothing
-   * else.
-   */
-  visitorGrants: (app: string) => Promise<AppVisitorGrants>;
-  /**
-   * Grants visitors these functions of the App's current version, the
-   * whole set at once, for its builders: public queries and mutations
-   * only (`visitor.invalid` otherwise). Audited. A version starts with
-   * none, and taking one away stops calls already running before they
-   * commit.
-   */
-  setVisitorGrants: (
-    app: string,
-    functions: string[]
-  ) => Promise<AppVisitorGrants>;
   /**
    * Archives the App, for its builders: nobody opens its pages or calls
    * it, its triggers stop, and its unfinished runs are cancelled, each

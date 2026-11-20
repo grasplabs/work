@@ -932,15 +932,15 @@ describe("reading a table with row rules", () => {
     });
   });
 
-  it("refuses someone with no role in the App, as a visitor, before any row", async () => {
+  it("refuses someone with no role in the App before any row", async () => {
     const of = await world();
     await filled(of);
-    const visitor = await person("user");
+    const outsider = await person("user");
     expect(
       outcome(
         await call(
           of,
-          visitor,
+          outsider,
           "listRequests",
           {},
           { roles: { appMember: false, appBuilder: false } }

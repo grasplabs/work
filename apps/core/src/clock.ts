@@ -9,7 +9,6 @@ import { retryAccessRevocations } from "./access-revocations.ts";
 import { startDueAgentWakes } from "./agent-wakes.ts";
 import { cancelArchivedRuns } from "./app-status.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
-import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { expireEvents, workBrain } from "./brain-next.ts";
@@ -246,7 +245,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: deleteExpiredEmail,
   },
-  { name: "visitors.sweep", period: "quarterHour", run: sweepAppVisitors },
   // Connector triggers' holds and tombstones of events long settled or no
   // longer coming (src/workflows/connector-triggers.ts).
   {

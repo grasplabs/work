@@ -1854,10 +1854,6 @@ msgstr "Un tipo que declara el código de la App"
 msgid "A version's definition and source"
 msgstr "Definición y código fuente de una versión"
 
-#: src/apps/app-data.tsx
-msgid "A visitor"
-msgstr "Un visitante"
-
 #: src/dashboard/widget-board.tsx
 msgid "A widget Grasp made"
 msgstr "Un widget que hizo Grasp"
@@ -8357,10 +8353,6 @@ msgid "Let an App's data go to a webhook"
 msgstr "Permitió que los datos de una aplicación vayan a un webhook"
 
 #: src/activity/audit-words.ts
-msgid "Let an App's visitors use one of its functions"
-msgstr "Permitió a los visitantes de una aplicación usar una de sus funciones"
-
-#: src/activity/audit-words.ts
 msgid "Let an erased member's old address in again"
 msgstr "Volvió a admitir la dirección antigua de un miembro borrado"
 
@@ -8387,10 +8379,6 @@ msgstr "Permitir pedirle a Stephen que lo inicie"
 #: src/agents/own-agents-admin.tsx
 msgid "Let people make agents of their own"
 msgstr "Permitir que las personas creen agentes propios"
-
-#: src/activity/audit-words.ts
-msgid "Let someone visit an App"
-msgstr "Permitió que alguien visite una aplicación"
 
 #: src/settings/directory-placement.tsx
 msgid "Let the directory decide"
@@ -13432,17 +13420,9 @@ msgstr "Inició sesión por primera vez, tras unirse desde el directorio"
 msgid "Signed in to a connection again"
 msgstr "Volvió a iniciar sesión en una conexión"
 
-#: src/activity/audit-words.ts
-msgid "Signed in to an App as a visitor"
-msgstr "Inició sesión en una aplicación como visitante"
-
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in with"
 msgstr "Sesión iniciada con"
-
-#: src/activity/audit-words.ts
-msgid "Signed out of an App as a visitor"
-msgstr "Cerró sesión en una aplicación como visitante"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -13955,10 +13935,6 @@ msgid "Stopped a schedule that kept failing"
 msgstr "Detuvo una programación que fallaba una y otra vez"
 
 #: src/activity/audit-words.ts
-msgid "Stopped an App's visitors using one of its functions"
-msgstr "Dejó de permitir a los visitantes de una aplicación usar una de sus funciones"
-
-#: src/activity/audit-words.ts
 msgid "Stopped following what changes at a connection"
 msgstr "Dejó de seguir lo que cambia en una conexión"
 
@@ -13966,10 +13942,6 @@ msgstr "Dejó de seguir lo que cambia en una conexión"
 msgctxt "inbox item kind"
 msgid "Stopped schedule"
 msgstr "Programación detenida"
-
-#: src/activity/audit-words.ts
-msgid "Stopped someone visiting an App"
-msgstr "Dejó de permitir que alguien visite una aplicación"
 
 #: src/activity/audit-words.ts
 msgid "Stopped the Brain using someone's workflow results, as they lost the workflow"
@@ -16195,10 +16167,6 @@ msgstr "Se usó {tool}"
 msgid "Used a connected tool"
 msgstr "Usó una herramienta conectada"
 
-#: src/activity/audit-words.ts
-msgid "Used an App's function as a visitor"
-msgstr "Usó una función de una aplicación como visitante"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Used by"
@@ -16366,10 +16334,6 @@ msgstr "Página de visión"
 msgid "Vision page confirmed"
 msgstr "Página de visión confirmada"
 
-#: src/activity/audit-log.tsx
-msgid "Visitor of {app}"
-msgstr "Visitante de {app}"
-
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volumen"
@@ -16528,16 +16492,8 @@ msgid "Was refused approving packages that couldn't be checked"
 msgstr "No pudo aprobar paquetes que no se pudieron comprobar"
 
 #: src/activity/audit-words.ts
-msgid "Was refused as an App's visitor"
-msgstr "Fue rechazado como visitante de una aplicación"
-
-#: src/activity/audit-words.ts
 msgid "Was refused packages known as malware"
 msgstr "Se rechazaron paquetes conocidos como malware"
-
-#: src/activity/audit-words.ts
-msgid "Was sent a code to visit an App"
-msgstr "Recibió un código para visitar una aplicación"
 
 #: src/brain/brain.ts
 msgid "Was the {role}"

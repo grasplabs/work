@@ -81,11 +81,7 @@ export const rpcParamNames: ParamNames = {
     "restore": ["app"],
     "review": ["app"],
     "setLink": ["app","link"],
-    "setVisitorGrants": ["app","functions"],
-    "setVisitors": ["app","list"],
     "update": ["app","changes"],
-    "visitorGrants": ["app"],
-    "visitors": ["app"],
   },
   "AuditRpc": {
     "export": ["filter","format","options"],

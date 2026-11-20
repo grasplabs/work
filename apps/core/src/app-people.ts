@@ -34,7 +34,7 @@ import { inList } from "./db/d1.ts";
 //
 // - A page or App code makes up who calls: the user is read here from
 //   core's own record of the call (the member's verified session, the
-//   person a run acts for, the visitor's session), never from a request;
+//   person a run acts for), never from a request;
 //   no read takes a person to be. A page that shows another name fools
 //   only itself: the App's server code decides with
 //   `ctx.auth.getUser()`, which no page reaches.
@@ -43,10 +43,10 @@ import { inList } from "./db/d1.ts";
 //   which its versions' review shows); any other read is refused
 //   (`permission.denied`) and recorded (`app.people.refused`). An agent
 //   reads it only through such an App.
-// - A visitor reads the directory: a visitor's call has no directory,
-//   only who they are (their session's ID and address). Asking for it is
-//   refused as a function the App doesn't grant them, and recorded
-//   (`app.visitor_refused`), from a page and from App code alike.
+// - A guest reads the directory: a guest is told who they are, and every
+//   directory read is refused (`permission.denied`) and recorded
+//   (`app.people.refused`, reason `guest`), from a page and from App code
+//   alike.
 // - Someone removed, or not a member, is read or reads: every read is of
 //   the organization's current members only (a membership, and no removal
 //   recorded); a caller who lost theirs is refused
@@ -460,24 +460,6 @@ export const memberPeople = (env: Env, reader: MemberReader): PeopleAccess => {
     },
   };
 };
-
-/**
- * A visitor's access: who they are (their session's principal and
- * address), and no directory: `refuse` records and refuses each read.
- */
-export const visitorPeople = ({
-  principal,
-  email,
-  refuse,
-}: {
-  readonly principal: string;
-  readonly email: string;
-  readonly refuse: (name: PeopleFunctionName) => Promise<never>;
-}): PeopleAccess => ({
-  user: async () =>
-    await Promise.resolve({ id: principal, name: email, email, roles: [] }),
-  refuse,
-});
 
 /**
  * What an App's tests are told of people (app-tests.ts): the fixture

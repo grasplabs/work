@@ -1720,9 +1720,7 @@ const buildDeclaration = `/**
  * Grasp's sign-in, with no permission: \`{ id, name, email, roles }\`
  * (\`email\` null for someone who never signed in; \`roles\` their roles
  * in the App, \`["builder", "user"]\` for a builder, \`["user"]\` for
- * anyone else with a role, \`[]\` for a visitor the App was shared with,
- * whose \`id\` changes each session: key a visitor's records by
- * \`email\`). Decide who may see or do what with it, on the server
+ * anyone else with a role). Decide who may see or do what with it, on the server
  * (\`user.id\` for "my requests", "assigned to me",
  * \`user.roles.includes("builder")\` for what only builders do; never a
  * read of a table only builders may read). Reading other members needs the App to
@@ -1730,7 +1728,7 @@ const buildDeclaration = `/**
  * only then \`ctx.people\` reads them: \`find(ids)\`,
  * \`search(query, { limit?, cursor? })\` (at least 2 letters or digits)
  * and \`team(teamId, { limit?, cursor? })\`, at most 100 a read, each
- * person \`{ id, name, email, teams }\`; a visitor is refused it. Pages
+ * person \`{ id, name, email, teams }\`; a guest is refused it. Pages
  * get the same from \`@grasp-os/sdk/react\`: \`useUser()\` (undefined
  * while loading; for showing, never deciding) and \`usePeople()\` (the same
  * three reads). The top-level \`people\` path is the platform's: no
@@ -1744,7 +1742,7 @@ const buildDeclaration = `/**
  * (anyone else is skipped), at most 50 people a send and 200 notifications
  * an App an hour, a title of 120 characters and a body of 1000. A
  * mutation's \`ctx.sendEvent(event, ...)\` is a workflow run's event, not
- * this. A visitor's call can't tell anyone. For the rest, read Grasp's
+ * this. For the rest, read Grasp's
  * docs (\`searchDocs\`, \`readDocs\`).
  *
  * A connection's declared actions are typed methods of its alias:
@@ -1900,7 +1898,7 @@ build: {
    * teams by ID (\`{ type: "platform", teams: ["<team id>"] }\`): a recall
    * then also answers, of them, the teams the person it is for is in, and
    * the App can be shared only with people in all of them; its skills stay
-   * the company's. An App that recalls answers no visitor. Today
+   * the company's. An App that recalls can't be shared with a guest. Today
    * everything in the Brain is one person's own: nothing
    * readable by the whole company or by a team, so a recall returns an
    * empty pack, with teams named or not: say so, and never build a feature

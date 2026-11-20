@@ -17,7 +17,6 @@ import {
   pageErrors,
   pageLeaseHeader,
   pageLimits,
-  pageVisitorHeader,
   streamCallActions,
 } from "@grasp-os/shared/pages";
 import type { StreamCallAction } from "@grasp-os/shared/pages";
@@ -36,7 +35,6 @@ import {
   refusalOf,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
-import { visitorCall, visitorStatusFor } from "./app-visitors.ts";
 import { currentVersionOf } from "./apps.ts";
 import { callDraftOn } from "./draft-runs.ts";
 import { appPreview } from "./durable-objects.ts";
@@ -56,8 +54,7 @@ import { routeMember } from "./staff-audit.ts";
 
 // Every page's one way to call its App's functions (spec 32.6):
 // `POST /api/app-functions/<app>`, the call as the body. A running App's
-// page, a builder's preview of their draft and a visitor's page of a
-// public App all call here; their live queries go over the page's socket
+// page and a builder's preview of their draft both call here; their live queries go over the page's socket
 // (pages-rpc.ts, `PageFrameRpc`), decided the same way. What a call runs
 // on is the lease core signed for the frame (page-delivery.ts): the App's
 // current release on the App's store, or the builder's draft on a
@@ -65,13 +62,6 @@ import { routeMember } from "./staff-audit.ts";
 // the socket, so its bytes are bounded as they are read, before anything
 // parses them. Threat model, and how each is closed:
 //
-// - A visitor calling a builder's draft. A draft's lease is signed only
-//   for a member who builds the App, when their chat's preview opens
-//   (chats-rpc.ts), and names them: a visitor's calls are checked against
-//   `visitor:<session>`, which no member's ID is, so such a lease is no
-//   lease for them; and their calls never reach the draft runner at all
-//   (`visitorCall` takes only a release's lease, `leasedBuild`, and
-//   refuses a draft's).
 // - A preview reaching the App's real store or a resource. No store is
 //   ever named by a page: it follows from what the signed lease runs on.
 //   A draft runs on its throwaway store, which no inventory lists, with
@@ -84,25 +74,22 @@ import { routeMember } from "./staff-audit.ts";
 //   alone, and the lease is signed over it: another App's lease is no
 //   lease here, so the call is code core didn't serve, refused unless the
 //   App's data is `ordinary` (page-delivery.ts), and then only as the
-//   person, with their own role in this App. A visitor's session opens
-//   its own App and no other.
+//   person, with their own role in this App.
 // - Forged release, draft or store. Each is in the lease, under a MAC
 //   only core can make, over the person, the App, the build and the
 //   target; anything else is no lease. A draft's chat is looked up in the
 //   person's own Workspace object, which knows no one else's.
-// - Another person's lease, or session. A lease is signed for one person
-//   (or one visitor's session), and checked against who calls now; the
+// - Another person's lease, or session. A lease is signed for one person,
+//   and checked against who calls now; the
 //   page names the person its frame is for, and a call whose session is
 //   anyone else's is refused before it is counted or read
-//   (`personRefusal`), so nothing the frame sends again runs as them. A
-//   visitor's token is a header, never a cookie, so no other site's
-//   request carries it; another site can't call as a member either: only
-//   the deployment's own pages (`Origin`), and only with a JSON body,
+//   (`personRefusal`), so nothing the frame sends again runs as them.
+//   Another site can't call as them either: only the deployment's own
+//   pages (`Origin`), and only with a JSON body,
 //   which no form sends without a preflight core never answers.
 // - Skipping the rate limits. Every call is counted before its body is
-//   read: a member's against their requests of the App's pages, whether
-//   on the release or a draft (`admitted`); a visitor's against theirs and
-//   the App's visitors' together.
+//   read: against the person's requests of the App's pages, whether on
+//   the release or a draft (`admitted`).
 // - A request or an answer too large: the body is read no further than
 //   `functionRequestMaxBytes`, whatever `content-length` says; an answer
 //   larger than a frame takes is refused (`page.answer_too_large`).
@@ -131,7 +118,7 @@ import { routeMember } from "./staff-audit.ts";
 // A plain action sent under a key runs in the same object, without
 // progress (`streaming: false`), so a lost answer is recovered by its key:
 // the resend joins the run under way or answers its receipt, never runs it
-// again. A visitor's page has no streams, and no actions at all.
+// again.
 
 /** How long a page waits for a function's answer. */
 const pageCallMs = 30_000;
@@ -183,7 +170,7 @@ export const statusOf = (code: string): number => {
   if (code.startsWith("auth.")) {
     return 401;
   }
-  return visitorStatusFor[code] ?? 403;
+  return 403;
 };
 
 /** `answer`, unless it is more than a frame takes in one call. */
@@ -596,8 +583,7 @@ const memberCall = async (
 /**
  * `POST /api/app-functions/<app>`: calls a function of the App for whoever
  * the page is for, as their page running what its lease names (see the
- * header): a visitor by their session's token, otherwise the member signed
- * in. Answers the call's `FunctionAnswer`, whatever its result; a refusal
+ * header): the person signed in. Answers the call's `FunctionAnswer`, whatever its result; a refusal
  * before the call as an error response.
  */
 const appFunctionResponse = async (
@@ -607,17 +593,6 @@ const appFunctionResponse = async (
   requestId: string
 ): Promise<Response> => {
   try {
-    const token = request.headers.get(pageVisitorHeader);
-    if (token !== null) {
-      return Response.json(
-        await visitorCall(env, {
-          token,
-          app,
-          lease: request.headers.get(pageLeaseHeader),
-          read: async () => await boundedBody(request),
-        })
-      );
-    }
     const admittedCall = await admitMember(
       request,
       env,
@@ -834,7 +809,7 @@ const streamRequestOf = (
  * (action-invocation.ts), relayed only while the person and the build
  * still get the App's data; `cancel` asks it to stop, answering
  * `{ requested }`: whether it was still running, never what stopping did,
- * which its result says. A visitor has no streams.
+ * which its result says.
  */
 const appStreamResponse = async (
   request: Request,
@@ -844,9 +819,6 @@ const appStreamResponse = async (
   requestId: string
 ): Promise<Response> => {
   try {
-    if (request.headers.has(pageVisitorHeader)) {
-      throw functionErrors.create("contract.invalid_request");
-    }
     const admittedCall = await admitMember(
       request,
       env,

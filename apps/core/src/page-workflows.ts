@@ -89,8 +89,7 @@ import { runWaits, withRespond } from "./workflows/run-waits.ts";
 // workflow-reference-queries.ts). All of these are a person's page's
 // alone (app-functions.ts, `FunctionCallOptions.page`): an agent's, a
 // Code Mode run's or the App's own server code's call of them names no
-// function (`function.not_found`), a visitor's is refused as not granted,
-// and a preview's is its side effect (`app.preview_side_effect`). Threat
+// function (`function.not_found`), and a preview's is its side effect (`app.preview_side_effect`). Threat
 // model on GRA-626, and how each is closed:
 //
 // - A run started twice: by a render, a remount, a reconnect or a lost

@@ -2052,6 +2052,13 @@
       "when": 1795188500876,
       "tag": "0292_guest_chats_emptied",
       "breakpoints": true
+    },
+    {
+      "idx": 293,
+      "version": "6",
+      "when": 1795196195034,
+      "tag": "0293_app_visitors_emptied",
+      "breakpoints": true
     }
   ]
 }

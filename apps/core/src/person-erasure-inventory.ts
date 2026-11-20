@@ -296,27 +296,16 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   // Unused since GRA-2234, kept for a rollback to the release before.
   "core.guest_chats": { company: "guest chats they opened for an App" },
-  // An App's visitor list (app-visitors.ts): the company's, as its builders
-  // keep it, with the builder who listed each entry (`added_by`). An entry
-  // may be a member's own address; it stays, the list's to change, never
-  // the erasure's (a decision for Nick: see the PR).
+  // Unused since GRA-2235 and emptied by a migration, kept for a rollback
+  // to the release before.
   "core.app_visitor_entries": {
     company: "an App's visitor list, and the builder who listed each",
   },
-  // The App functions a version grants its visitors (app-visitor-grants.ts),
-  // with the builder who granted each (`granted_by`): the App's own
-  // settings, as other settings a builder changed are.
   "core.app_visitor_grants": {
     company: "the functions builders granted an App's visitors",
   },
-  // A visitor's codes and sessions name them only by address, mostly an
-  // outside visitor's, and are short-lived: a code works 10 minutes and
-  // its row goes an hour after, a session lasts 8 hours at most, and the
-  // sweep deletes both. A member's own address may be listed (or their
-  // domain), so the rows under the address that was theirs go with their
-  // email, in the identity area's batch.
-  "core.app_visitor_codes": { erased: "identity" },
-  "core.app_visitor_sessions": { erased: "identity" },
+  "core.app_visitor_codes": { none: "emptied, and nothing writes it" },
+  "core.app_visitor_sessions": { none: "emptied, and nothing writes it" },
   // An App's webhooks (app-webhooks.ts): the company's settings, naming
   // the builder who added each and the admin who approved its URL, as
   // other settings name who changed them.
