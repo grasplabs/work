@@ -2,6 +2,7 @@ import type { TurnRecallReads } from "@grasp-os/shared/audit";
 
 import {
   agentCallEntry,
+  auditToolCall,
   endedBy,
   recordRunReads,
   recordToolCall,
@@ -194,8 +195,8 @@ export const searchBrainFor = async (
   question: string
 ): Promise<unknown> => {
   await requireOpenRun(env, scope, turnRecallMethod);
+  const reads = ownReadsAs(scope.ownChat === true);
   try {
-    const reads = ownReadsAs(scope.ownChat === true);
     const { pack, fromOwn } = await recallOwnedAs(env, scope.personId, {
       question: asQuestion(question),
       budget: searchBrainBudget,
@@ -209,10 +210,15 @@ export const searchBrainFor = async (
     await recordToolCall(env, scope, call);
     return forModel(pack, undefined, searchedLead);
   } catch (error) {
-    await recordToolCall(
+    // However it ended, in the audit log as in the chat, as the recall
+    // before a question records its own (`auditToolCall`).
+    await auditToolCall(
       env,
       scope,
-      { method: turnRecallMethod },
+      {
+        method: turnRecallMethod,
+        detail: { run: scope.runId, reads: readsOf(reads) },
+      },
       endedBy(error)
     );
     throw error;

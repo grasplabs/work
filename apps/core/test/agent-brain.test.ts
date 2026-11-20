@@ -1,5 +1,6 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -19,7 +20,8 @@ import {
 } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import { answeringProvider } from "./model-provider.ts";
+import { outcome, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // The company brain for a chat's code (`env.brain`): read as the chat's
 // person, by every agent with no grant (GRA-2203), and every call
@@ -282,6 +284,43 @@ const searchedBrainOf = async (
   return { memory, memoryId, own, everyone };
 };
 
+/**
+ * The audit event of the model's own search in chat `chatId` (never the
+ * recall before its question, whose run is a `recall_…` call's), once it
+ * is in the log.
+ */
+const searchEventOf = async (
+  stub: Parameters<typeof toolResults>[0],
+  chatId: string
+): Promise<AuditEvent> => {
+  const runs = await runInDurableObject(stub, (_object, state) =>
+    state.storage.sql
+      .exec<{ id: string }>(
+        "SELECT id FROM chat_code_runs WHERE chat_id = ? AND tool_call_id NOT LIKE 'recall\\_%' ESCAPE '\\'",
+        chatId
+      )
+      .toArray()
+      .map(({ id }) => id)
+  );
+  return await vi.waitFor(
+    async () => {
+      const events = await allEvents();
+      const found = events.find(
+        ({ action, detail }) =>
+          action === "agent.call" &&
+          detail.method === turnRecallMethod &&
+          typeof detail.run === "string" &&
+          runs.includes(detail.run)
+      );
+      if (found === undefined) {
+        throw new Error("No audit event of the search yet");
+      }
+      return found;
+    },
+    { timeout: 10_000, interval: 50 }
+  );
+};
+
 describe("the model's search of the brain", setUpTime, () => {
   it("searches the whole brain in one call: an old memory of the person's own the recall before the question didn't hand over, their document and what everyone may read, and marks the chat", async () => {
     const person = await signedInWithRole(idp, "user");
@@ -319,6 +358,51 @@ describe("the model's search of the brain", setUpTime, () => {
       everyone: true,
       handed: true,
       marked: true,
+    });
+    // One `brain.recall` event of its own, with what it read as and how
+    // many it handed over, never what they say.
+    const { detail } = await searchEventOf(stub, chat.id);
+    expect({
+      outcome: detail.outcome,
+      reads: detail.reads,
+      memories: detail.memories,
+      versions: typeof detail.versions === "number" && detail.versions >= 2,
+      says: JSON.stringify(detail).includes(depot),
+    }).toStrictEqual({
+      outcome: "ok",
+      reads: "person",
+      memories: 1,
+      versions: true,
+      says: false,
+    });
+    // What it found as the person counts as their use (`memoriesUsed`).
+    const used = await stub.memoriesUsed(Date.now());
+    expect(used.some(({ memory }) => memory === held.memoryId)).toBeTruthy();
+  });
+
+  it("records a search refused for a person suspended mid-turn in the audit log", async () => {
+    const person = await signedInWithRole(idp, "user");
+    const depot = word();
+    await searchedBrainOf(person.userId, depot);
+    const { stub, chat, ask } = await chatOf(person.userId);
+    // Suspended as the model answers, before its search runs.
+    await answeringProvider(async (requests) => {
+      if (requests.length === 1) {
+        await env.DB.prepare(
+          "UPDATE members SET suspended_at = ?, suspended_by = 'directory' WHERE user_id = ?"
+        )
+          .bind(Date.now(), person.userId)
+          .run();
+        return toolStep("searchBrain", { question: `depot ${depot}` });
+      }
+      return says("Nothing.");
+    });
+    await outcome(ask("When can I drop the pallets off?"));
+
+    const { detail } = await searchEventOf(stub, chat.id);
+    expect({ outcome: detail.outcome, reads: detail.reads }).toStrictEqual({
+      outcome: "refused",
+      reads: "person",
     });
   });
 
