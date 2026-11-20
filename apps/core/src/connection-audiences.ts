@@ -3,6 +3,7 @@ import {
   brainConnectionIdSchema,
   connectionBrainAudienceSchema,
   connectionErrors,
+  connectionOwnersMax,
 } from "@grasp-os/shared/connect";
 import type {
   ConnectionBrainAudience,
@@ -82,6 +83,37 @@ export const audiencesRead = (db: DrizzleD1Database) =>
     // past the bound of groups leaves out the same places each read
     // (brain-next.ts `readerGroupsOf`).
     .orderBy(connectionBrainAudiences.connectionId);
+
+/**
+ * Of `audiences`, those of a connection connect holds as active now, read
+ * from connect at each read (GRA-2227). One the provider revoked, which
+ * connect marks as needing someone to sign in again (`needs_reauth`),
+ * gives nobody what the Brain kept of it, and keeps all of it: signing in
+ * again to the same account makes the same connection active, and it is
+ * read as before. One connect doesn't know gives nobody anything either.
+ * Only a disconnect in Grasp, or an un-pick, erases (shared-reads.ts,
+ * brain-sync.ts).
+ */
+export const activeAudiences = async <Row extends ConnectionAudience>(
+  env: Pick<Env, "CONNECT">,
+  audiences: readonly Row[]
+): Promise<Row[]> => {
+  const pages: string[][] = [];
+  for (let start = 0; start < audiences.length; start += connectionOwnersMax) {
+    pages.push(
+      audiences
+        .slice(start, start + connectionOwnersMax)
+        .map(({ connectionId }) => connectionId)
+    );
+  }
+  const owners = await Promise.all(
+    pages.map(async (page) => await env.CONNECT.connectionOwners(page))
+  );
+  const active = new Set(
+    owners.flat().flatMap(({ id, status }) => (status === "active" ? [id] : []))
+  );
+  return audiences.filter(({ connectionId }) => active.has(connectionId));
+};
 
 /**
  * The read of every place a shared connection syncs into the Brain now

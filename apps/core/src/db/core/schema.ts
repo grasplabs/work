@@ -2915,6 +2915,24 @@ export const runBrainEvidence = sqliteTable(
 );
 
 /**
+ * Each App that read the Brain by default, declaring no permission to
+ * (resource-brain.ts, GRA-2218), from the first such read on: written
+ * before what it read is handed over, never removed, as what it read may
+ * stay in its data. Counted as a grant to read the Brain is
+ * (app-provenance.ts `recallsTheBrain`): such an App answers no visitor
+ * and invites no guest. `subject_type` leaves room for a workflow's.
+ */
+export const brainDefaultReads = sqliteTable(
+  "brain_default_reads",
+  {
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    firstReadAt: timestamp("first_read_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.subjectType, table.subjectId] })]
+);
+
+/**
  * Every version of the Brain a run's recalls handed it (workflows/
  * run-evidence.ts), by its source as its producer names it and its
  * number, with the permission to read the Brain it came through:

@@ -210,7 +210,9 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       widened: outcomeOf(widened),
       sent: provider.requests.length,
       // Code that reaches for a permission its version doesn't list has
-      // nothing to reach it with, though the binding is still active.
+      // nothing to reach it with, though the binding is still active: only
+      // the Brain's reads every App has by default (GRA-2218), which never
+      // go through a binding, so nothing of what was approved.
       sneak: outcomeOf(await call(env, dropped, "desk.sneak", {})),
       // Nor does a call through the last version's reference to the
       // function that read through it reach the binding.
@@ -221,7 +223,7 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
       brainStillActive: "active",
       widened: { failed: "permission.unavailable" },
       sent: 0,
-      sneak: "absent",
+      sneak: JSON.stringify(["recall", "skills", "entities"]),
       find: { failed: "function.not_found" },
     });
   });

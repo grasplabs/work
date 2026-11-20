@@ -589,46 +589,59 @@ describe("a chat's connections", setUpTime, () => {
     ]);
   });
 
-  it("withhold what a connection returned from the model once it is disconnected, but not while it only needs signing in again", async () => {
-    const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
-    const { mail, chat, grant } = await setUp(
-      codeStep(
-        `export default async (self, env) => (await env.connections.call("MAIL", "mail.search", { query: ${JSON.stringify(marker)} })).output;`
-      ),
-      says("Found it."),
-      says("Still there."),
-      says("Gone.")
-    );
-    await grant(mail.id, "MAIL");
-    const setStatus = async (status: string) => {
-      await connectDb()
-        .prepare("UPDATE connections SET status = ? WHERE id = ?")
-        .bind(status, mail.id)
-        .run();
-    };
+  it.each([
+    // While a shared connection waits for a sign-in, nobody is shown what
+    // was read through that connection (GRA-2227); a person's own one
+    // keeps their access.
+    { whose: "shared", whileWaiting: false },
+    { whose: "own", whileWaiting: true },
+  ])(
+    "withhold what a $whose connection returned from the model once it is disconnected, and while it needs signing in again unless it is the person's own",
+    async ({ whose, whileWaiting }) => {
+      const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
+      const { person, chat, grant } = await setUp(
+        codeStep(
+          `export default async (self, env) => (await env.connections.call("MAIL", "mail.search", { query: ${JSON.stringify(marker)} })).output;`
+        ),
+        says("Found it."),
+        says("Still there."),
+        says("Gone.")
+      );
+      const mail = await mailConnection(
+        [],
+        mailWithSearch,
+        whose === "own" ? { owner: person.userId } : {}
+      );
+      await grant(mail.id, "MAIL");
+      const setStatus = async (status: string) => {
+        await connectDb()
+          .prepare("UPDATE connections SET status = ? WHERE id = ?")
+          .bind(status, mail.id)
+          .run();
+      };
 
-    await chat.ask("Find the mail.");
-    await setStatus("needs_reauth");
-    await chat.ask("And now?");
-    await setStatus("disconnected");
-    await chat.ask("And now?");
+      await chat.ask("Find the mail.");
+      await setStatus("needs_reauth");
+      await chat.ask("And now?");
+      await setStatus("disconnected");
+      await chat.ask("And now?");
 
-    expect(
-      chat.provider.requests.slice(1).map(({ body }) => {
-        const sent = JSON.stringify(body);
-        return {
-          found: sent.includes(`${marker}-1`),
-          withheld: sent.includes(withheldResult),
-        };
-      })
-    ).toStrictEqual([
-      // Its result, as the code read it.
-      { found: true, withheld: false },
-      // Signing in again changes nobody's access.
-      { found: true, withheld: false },
-      { found: false, withheld: true },
-    ]);
-  });
+      expect(
+        chat.provider.requests.slice(1).map(({ body }) => {
+          const sent = JSON.stringify(body);
+          return {
+            found: sent.includes(`${marker}-1`),
+            withheld: sent.includes(withheldResult),
+          };
+        })
+      ).toStrictEqual([
+        // Its result, as the code read it.
+        { found: true, withheld: false },
+        { found: whileWaiting, withheld: !whileWaiting },
+        { found: false, withheld: true },
+      ]);
+    }
+  );
 
   it("withhold what a connection returned from the model once the grant it was read under goes, though a narrower one stays, and audit it", async () => {
     const person = await signedInApi(idp, "user");
@@ -1196,6 +1209,101 @@ describe(
         { found: true, withheld: false },
         { found: false, withheld: true },
       ]);
+    });
+
+    it("lists one waiting for a sign-in only while its entry is offered, as only then can it be connected again", async () => {
+      const [person, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const provider = `mail-${crypto.randomUUID().slice(0, 8)}`;
+      const mail = await mailConnection([], mailWithSearch, { provider });
+      await chooseAudience(admin.api, mail.id, { kind: "everyone" });
+      await connectDb()
+        .prepare("UPDATE connections SET status = 'needs_reauth' WHERE id = ?")
+        .bind(mail.id)
+        .run();
+      const listing = codeStep(
+        "export default async (self, env) => await env.connections.list();"
+      );
+      const chat = await chatOf(
+        person.userId,
+        listing,
+        says("Listed."),
+        listing,
+        says("Listed again.")
+      );
+      await chat.ask("What can you read?");
+      // An admin hides its entry: reconnecting it is refused until offered.
+      await env.DB.prepare(
+        "INSERT INTO hidden_connectors (source, connector_id, hidden_by, hidden_at) VALUES ('composio', ?, ?, ?)"
+      )
+        .bind(provider, admin.userId, Date.now())
+        .run();
+      try {
+        await chat.ask("And now?");
+      } finally {
+        await env.DB.prepare(
+          "DELETE FROM hidden_connectors WHERE source = 'composio' AND connector_id = ?"
+        )
+          .bind(provider)
+          .run();
+      }
+
+      const [offered, hidden] = await codeResults(chat.stub, chat.chat.id);
+      expect({
+        offered: offered?.text.includes(`"connectionId":"${mail.id}"`),
+        hidden: hidden?.text.includes(`"connectionId":"${mail.id}"`),
+      }).toStrictEqual({ offered: true, hidden: false });
+    });
+
+    it("withholds what was read through it while the provider refuses its grant, lists it with no actions, and says it needs connecting again", async () => {
+      const [person, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
+      const mail = await mailConnection([], mailWithSearch);
+      await chooseAudience(admin.api, mail.id, { kind: "everyone" });
+      const chat = await chatOf(
+        person.userId,
+        calling(mail.id, "mail.search", { query: marker }),
+        says("Found it."),
+        codeStep(
+          "export default async (self, env) => await env.connections.list();"
+        ),
+        calling(mail.id, "mail.search", { query: marker }),
+        says("It needs connecting again.")
+      );
+      await chat.ask("Find the mail.");
+      // The provider refused the grant (connect's tokens.ts `markDead`).
+      await connectDb()
+        .prepare("UPDATE connections SET status = 'needs_reauth' WHERE id = ?")
+        .bind(mail.id)
+        .run();
+      await chat.ask("And now?");
+
+      const results = await codeResults(chat.stub, chat.chat.id);
+      const [listed, read] = results.slice(-2);
+      const lastRequest = JSON.stringify(chat.provider.requests.at(-1)?.body);
+      expect({
+        listed: listed?.text.includes(
+          JSON.stringify({
+            name: mail.id,
+            connectionId: mail.id,
+            resource: null,
+            actions: [],
+          })
+        ),
+        read: read?.text.includes("connect.connection_inactive"),
+        found: lastRequest.includes(`${marker}-1`),
+        withheld: lastRequest.includes(withheldResult),
+      }).toStrictEqual({
+        listed: true,
+        read: true,
+        found: false,
+        withheld: true,
+      });
     });
   }
 );

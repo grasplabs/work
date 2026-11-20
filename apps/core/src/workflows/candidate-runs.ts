@@ -20,7 +20,10 @@ import type {
   WorkflowRunStatus,
 } from "@grasp-os/shared/workflow-resources";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
-import { definitionFormat } from "@grasp-os/workflow-schema/format";
+import {
+  brainDefaultAlias,
+  definitionFormat,
+} from "@grasp-os/workflow-schema/format";
 import {
   and,
   eq,
@@ -590,6 +593,19 @@ const loadedCandidateRun = async (
         bindings: new Map(),
         restricted: false,
         candidate: new Map([
+          // The Brain's reads by default, under its alias, unless the
+          // draft declares a permission there (GRA-2228).
+          [
+            brainDefaultAlias,
+            {
+              kind: "brain",
+              contractId: "",
+              fingerprint: "",
+              answer: Object.hasOwn(fixtures, brainDefaultAlias)
+                ? fixtures[brainDefaultAlias]?.result
+                : undefined,
+            },
+          ] as const,
           ...sealed.bindings.map(
             ({ alias, kind, contractId, fingerprint }) =>
               [

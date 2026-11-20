@@ -22,7 +22,11 @@ import {
 import { inList } from "../db/d1.ts";
 import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
-import { runAuthority, runContext } from "./resource-authority.ts";
+import {
+  brainDefaultId,
+  runAuthority,
+  runContext,
+} from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import {
   erasedChatPin,
@@ -241,11 +245,15 @@ const ownEvidenceChecked = async (
   await chatPinsChecked(env, evidence.pins, checked);
   // Each permission its recalls came through still the run's, active, now
   // (`authorize`): decided by the run's workflow and person, once each.
+  // None for what it read by default (`brainDefaultId`), with no grant to
+  // revoke: it is checked below as every read is.
   const granted = groupedBy(
     (grants ? [...rows, ...memoryRows] : []).flatMap(
       ({ runId, permissionId }) => {
         const run = byId.get(runId);
-        return run === undefined ? [] : [{ run, permissionId }];
+        return run === undefined || permissionId === brainDefaultId
+          ? []
+          : [{ run, permissionId }];
       }
     ),
     ({ run, permissionId }) =>

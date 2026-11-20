@@ -284,6 +284,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
       "which Brain versions a run recalled, identifiers only, as runs are (D3)",
   },
   "core.kept_run_evidence": noPerson,
+  "core.brain_default_reads": {
+    none: "which App or workflow read the Brain by default: its subject is one of those, by id, never a person",
+  },
   "core.run_state_writers": {
     none: "which runs a run started from the kept state of: its writer is a run, by id, never a person",
   },
@@ -854,6 +857,8 @@ export const reviewedPersonColumns: Readonly<
   "core.app_workflow_bindings": ["bound_by", "removed_by"],
   "core.apps": ["archived_by", "owner_id", "removed_by", "status_changed_by"],
   "core.blueprints": ["marked_by"],
+  // An App or a workflow, never a person (`brain_default_reads` above).
+  "core.brain_default_reads": ["subject_id", "subject_type"],
   "core.brain_gap_states": ["answered_by"],
   "core.business_store_members": ["added_by", "member_id", "member_type"],
   "core.brain_run_sources": ["person_id"],

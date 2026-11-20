@@ -403,6 +403,16 @@ const refusal = (answer: unknown): string =>
   typeof answer === "string" ? "refused" : "answered";
 
 /** A permission row, granted, as an admin's grant writes it. */
+/**
+ * An App or a workflow marked as having read the Brain by default, as
+ * core's default read marks it (resource-brain.ts, GRA-2218;
+ * workflows/brain-calls.ts, GRA-2228).
+ */
+const readByDefault = (subject: "app" | "workflow", id: string) =>
+  env.DB.prepare(
+    "INSERT INTO brain_default_reads (subject_type, subject_id, first_read_at) VALUES (?, ?, ?)"
+  ).bind(subject, id, Date.now());
+
 const grantedRow = (
   subjectType: "app" | "workflow",
   subject: string,
@@ -1194,6 +1204,63 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       grantAgain: "visitor.not_granted",
       listNone: "ok",
       grantNone: "ok",
+    });
+  });
+
+  it("are refused once the App read the Brain by default, or reaches an App or a workflow that did, though they were let in first, and no visitor is let in again", async () => {
+    const domain = newDomain();
+    const [direct, twoHops, called] = [
+      await portal(domain),
+      await portal(domain),
+      await portal(domain),
+    ];
+    const mail = await mailbox();
+    for (const { builder, app } of [direct, twoHops, called]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
+    }
+    const ana = await visitor(mail, direct.link, `ana@${domain}`);
+    const bo = await visitor(mail, twoHops.link, `bo@${domain}`);
+    const cy = await visitor(mail, called.link, `cy@${domain}`);
+    const visits = async () => [
+      await call(direct.app, direct.version, ana, "portal.mine"),
+      await call(twoHops.app, twoHops.version, bo, "portal.mine"),
+      await call(called.app, called.version, cy, "portal.mine"),
+    ];
+    const before = await visits();
+    // Then one App reads the Brain by default, declaring no permission to;
+    // App A does, which starts workflow W, which calls the second; and
+    // workflow W2 does, which calls the third: as core's default reads
+    // mark each, with no grant to read the Brain anywhere.
+    const [a, w, w2] = [crypto.randomUUID(), workflowId(), workflowId()];
+    await env.DB.batch([
+      readByDefault("app", direct.app),
+      readByDefault("app", a),
+      grantedRow("app", a, "workflow", w, ["start"]),
+      grantedRow("workflow", w, "app", twoHops.app, ["call"]),
+      readByDefault("workflow", w2),
+      grantedRow("workflow", w2, "app", called.app, ["call"]),
+    ]);
+    expect({
+      before,
+      after: await visits(),
+      listAgain: await outcome(
+        direct.builder.api.apps.setVisitors(direct.app, [
+          { kind: "domain", value: domain },
+        ])
+      ),
+      grantAgain: await outcome(
+        direct.builder.api.apps.setVisitorGrants(direct.app, ["portal.mine"])
+      ),
+    }).toStrictEqual({
+      before: [[], [], []],
+      after: [
+        "visitor.not_granted",
+        "visitor.not_granted",
+        "visitor.not_granted",
+      ],
+      listAgain: "visitor.not_granted",
+      grantAgain: "visitor.not_granted",
     });
   });
 

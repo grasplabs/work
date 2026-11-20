@@ -109,6 +109,14 @@ export interface RecallCaller {
    */
   readonly permissionId: PermissionId | null;
   /**
+   * An App's or a workflow run's read with no grant, as core makes it for
+   * one that declares no permission to read the Brain (resource-brain.ts
+   * `brainByDefault`, GRA-2218; workflows/brain-calls.ts, GRA-2228): set
+   * by core alone, with a null `permissionId`, and read as the company
+   * alone.
+   */
+  readonly byDefault?: true;
+  /**
    * For a chat's code and its `searchBrain` alone: `teams` reads its
    * person's teams and the company, only in their own chat, in Grasp or
    * their direct message, in a turn they started (agent-brain.ts);
@@ -135,15 +143,20 @@ export interface RecallCaller {
  * workflow without its grant to read it, active, its person still a
  * member (`authorize`). A chat's agent needs no grant: every agent reads
  * the Brain, as far as where its turn reads lets it (`reach`; Nick's
- * decision on GRA-2203). Its person is checked by each read itself, as
+ * decision on GRA-2203). Nor does an App's or a run's default read
+ * (`byDefault`), as the company alone. Its person is checked by each read itself, as
  * every reader of the Brain is (brain-next.ts reads them through
  * `currentMembership`): one suspended or removed reads nothing.
  */
 const requireBrainReader = async (
   env: Env,
-  caller: Pick<RecallCaller, "authority" | "context" | "permissionId">
+  caller: Pick<
+    RecallCaller,
+    "authority" | "context" | "permissionId" | "byDefault"
+  >
 ): Promise<void> => {
-  if (caller.authority.subject.type === "agent") {
+  const { subject } = caller.authority;
+  if (subject.type === "agent" || caller.byDefault === true) {
     return;
   }
   if (caller.permissionId === null) {

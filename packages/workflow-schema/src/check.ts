@@ -21,6 +21,7 @@ import {
   aliasedPermissions,
   bindingsOf,
   brainActions,
+  brainDefaultAlias,
   durationMs,
   eachStep,
   expressionRoots,
@@ -884,6 +885,9 @@ const checkDuration = (
   }
 };
 
+/** What the Brain's alias binds when no permission is declared under it. */
+const brainByDefault: Binding = { kind: "brain", contract: "" };
+
 /**
  * The permission `alias`, at `pointer`, names, if it is of one of
  * `kinds`; `under` says where the step's kind is declared.
@@ -895,9 +899,33 @@ const permissionFor = (
   under: string,
   pointer: string
 ): Binding | undefined => {
-  const binding = Object.hasOwn(walk.bindings, alias)
+  const declared = Object.hasOwn(walk.bindings, alias)
     ? walk.bindings[alias]
     : undefined;
+  // An App's permission is no binding (`bindingsOf`), but holds its alias
+  // all the same: none of these steps calls it. (One a binding shares is
+  // refused as a duplicate alias already.)
+  if (
+    declared === undefined &&
+    Object.hasOwn(walk.document.permissions?.apps ?? {}, alias)
+  ) {
+    problem(
+      walk,
+      pointer,
+      "workflow.permission_kind",
+      `\`${alias}\` is an App permission; this step calls ${kinds.join(" or ")}.`,
+      `Name a permission under \`permissions.${under}\`.`
+    );
+    return undefined;
+  }
+  // The Brain's reads, by its own alias, need no declaration: a permission
+  // declared under it, of any kind, wins.
+  const binding =
+    declared === undefined &&
+    alias === brainDefaultAlias &&
+    kinds.includes("brain")
+      ? brainByDefault
+      : declared;
   if (binding === undefined) {
     problem(
       walk,

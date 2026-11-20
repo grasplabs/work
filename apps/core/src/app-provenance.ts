@@ -9,7 +9,11 @@ import { z } from "zod";
 
 import { storedTeamsOf, unreadableTeam } from "./brain-grant-teams.ts";
 import { connectionOwnersOf } from "./connections.ts";
-import { apps as appsTable, permissions } from "./db/core/schema.ts";
+import {
+  apps as appsTable,
+  brainDefaultReads,
+  permissions,
+} from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 
 // Provenance on sharing. An App keeps what it reads (in its storage, its
@@ -610,7 +614,7 @@ export const sourcesOf = async (env: Env, app: AppId): Promise<AppSources> => {
  * Whether App `app` may hold what the Brain recalled: it, or a workflow
  * or App it reaches through grants (`reachedThroughCalls`: on workflows,
  * and a workflow's on an App's functions), whatever the depth, was ever
- * granted the platform's `brain`. What code recalls is what everyone in the company may read
+ * granted the platform's `brain`, or read it by default (GRA-2218). What code recalls is what everyone in the company may read
  * (brain-recall.ts), so this matters only for someone outside it: a
  * visitor (app-visitors.ts). One query past the walk.
  */
@@ -655,27 +659,49 @@ export const recallsTheBrain = async (
     isNotNull(permissions.grantedAt),
     sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = 'brain')`
   );
-  const found = await drizzle(env.DB)
-    .select({ id: permissions.id })
-    .from(permissions)
-    .where(
-      and(
-        brainGrant,
-        or(
-          and(
-            eq(permissions.subjectType, "app"),
-            inList(permissions.subjectId, reachedApps)
-          ),
-          and(
-            eq(permissions.subjectType, "workflow"),
-            inList(permissions.subjectId, reachedWorkflows)
+  const db = drizzle(env.DB);
+  const [granted, read] = await Promise.all([
+    db
+      .select({ id: permissions.id })
+      .from(permissions)
+      .where(
+        and(
+          brainGrant,
+          or(
+            and(
+              eq(permissions.subjectType, "app"),
+              inList(permissions.subjectId, reachedApps)
+            ),
+            and(
+              eq(permissions.subjectType, "workflow"),
+              inList(permissions.subjectId, reachedWorkflows)
+            )
           )
         )
       )
-    )
-    .limit(1)
-    .get();
-  return found !== undefined;
+      .limit(1)
+      .get(),
+    // Or read the Brain by default, declaring no permission to: counted
+    // exactly as a grant (resource-brain.ts `brainByDefault`, GRA-2218).
+    db
+      .select({ id: brainDefaultReads.subjectId })
+      .from(brainDefaultReads)
+      .where(
+        or(
+          and(
+            eq(brainDefaultReads.subjectType, "app"),
+            inList(brainDefaultReads.subjectId, reachedApps)
+          ),
+          and(
+            eq(brainDefaultReads.subjectType, "workflow"),
+            inList(brainDefaultReads.subjectId, reachedWorkflows)
+          )
+        )
+      )
+      .limit(1)
+      .get(),
+  ]);
+  return granted !== undefined || read !== undefined;
 };
 
 /**

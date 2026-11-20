@@ -1,5 +1,10 @@
 import type { AppManifest } from "./app-types.ts";
-import type { AnyPermission, AppPermission } from "./permission-types.ts";
+import { permissionAliases } from "./permission-types.ts";
+import type {
+  AnyPermission,
+  AppPermission,
+  BrainPermission,
+} from "./permission-types.ts";
 
 /** A permission's kind, as a manifest files it (`~permission`). */
 type AppPermissionKind = AppPermission["~permission"];
@@ -75,6 +80,42 @@ export const actionPermission = (
     ? declared
     : undefined;
 };
+
+/**
+ * The Brain's reads: what an App that declares no `brain` permission
+ * reads by default (GRA-2218), of only what everyone in the company may
+ * read. Remembering, forgetting and a team's content need the
+ * declaration, and an admin's approval of it.
+ */
+export const brainReads = [
+  "recall",
+  "skills.select",
+  "skills.read",
+  "entities.get",
+  "entities.find",
+] as const;
+
+/** The Brain an App reaches when it declares none: its reads. */
+export const brainByDefault: BrainPermission<typeof brainReads> = Object.freeze(
+  {
+    "~permission": "brain",
+    alias: permissionAliases.brain,
+    operations: brainReads,
+  }
+);
+
+/**
+ * The Brain an action reaches by default under `alias` (`brainByDefault`):
+ * only when `alias` is the Brain's and `permissions` hold no permission
+ * under it, so declaring one, of any kind, always wins.
+ */
+export const defaultPermission = (
+  permissions: Readonly<Record<string, unknown>>,
+  alias: unknown
+): BrainPermission<typeof brainReads> | undefined =>
+  alias === permissionAliases.brain && !Object.hasOwn(permissions, alias)
+    ? brainByDefault
+    : undefined;
 
 /** The permissions an action reaches that `manifest` declares, in alias order. */
 export const actionPermissions = (
