@@ -26,6 +26,7 @@ import { failureMessage } from "../chat/failure.ts";
 import type { Session } from "../core.ts";
 import { formatDollars } from "../format.ts";
 import { tellProvidersChanged } from "../frame/ai-key-banner.tsx";
+import { AddConnection } from "../grasp/add-connection/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { ConnectService } from "../grasp/blocks/connect-service/connect-service.tsx";
@@ -49,7 +50,7 @@ import {
   FieldError,
   FieldLabel,
 } from "../grasp/field/index.ts";
-import { EU, Flag, US } from "../grasp/flags/index.ts";
+import { EU, US } from "../grasp/flags/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import {
   Cable,
@@ -57,7 +58,6 @@ import {
   ChevronUp,
   Cross,
   Icon,
-  Plus,
 } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import {
@@ -70,7 +70,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   FactRow,
@@ -91,7 +90,9 @@ import { ReadOnlyRow } from "./read-only-row.tsx";
 // `aiProviders`, @grasp-os/shared/ai-providers), which pay for its model
 // calls: each a row with its mark, its name, its key as dots and its last
 // four, how its calls go, and Test, one tiny call that says Works or why
-// not. Its key is replaced or deleted in a small dialog. A key is pasted
+// not. Its key is replaced or deleted in a small dialog. Another provider is
+// added in the library's Add connection sheet, its key tested as it is
+// added (an endpoint's once a model it serves is named). A key is pasted
 // once into a password field, goes straight to core and on to connect,
 // which seals it, and is never back on the page. Then the default model
 // and its fallbacks, the providers' main models first. The organization's
@@ -122,6 +123,15 @@ const keyStarts: Readonly<Record<OrganizationProviderId, string | undefined>> =
     "openai-compatible": undefined,
   };
 
+/** Where each provider makes its keys, linked from the key step; none for an endpoint of one's own. */
+const keyPages: Readonly<Record<OrganizationProviderId, string | undefined>> = {
+  anthropic: "https://console.anthropic.com/settings/keys",
+  openai: "https://platform.openai.com/api-keys",
+  mistral: "https://console.mistral.ai/api-keys",
+  openrouter: "https://openrouter.ai/settings/keys",
+  "openai-compatible": undefined,
+};
+
 /** Each provider's mark, where the Brand icons have it. */
 const marks: Readonly<Record<OrganizationProviderId, Brand | undefined>> = {
   anthropic: "claude",
@@ -148,12 +158,6 @@ const testFailures: Readonly<Record<string, MessageDescriptor>> = {
 };
 
 const styles = stylex.create({
-  // A flag, then the place it stands for.
-  place: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: grasp.space2,
-  },
   // Every control fills the rows' shared control column.
   control: { width: "100%" },
   ends: { display: "flex", alignItems: "center", gap: grasp.space2 },
@@ -532,91 +536,6 @@ const ProviderRow = ({
   );
 };
 
-/** A provider to choose in the dialog: its mark, its name, and where it runs. */
-const ProviderChoice = ({
-  provider,
-  label,
-}: {
-  provider: OrganizationProviderId;
-  label: string;
-}) => (
-  <span {...stylex.props(styles.named)}>
-    <Mark provider={provider} />
-    {label}
-  </span>
-);
-
-/**
- * Where a provider runs, as the page's language says it, with its flag: the
- * name is on the line above, so this says only the place.
- */
-const WhereItRuns = ({ provider }: { provider: OrganizationProviderId }) => {
-  const { t } = useLingui();
-  const { region } = aiProviders[provider];
-  if (region === "custom") {
-    return t`Wherever your endpoint runs`;
-  }
-  return (
-    <span {...stylex.props(styles.place)}>
-      <Flag flag={region === "eu" ? EU : US} />
-      {region === "eu" ? t`European Union` : t`United States`}
-    </span>
-  );
-};
-
-/** A custom endpoint's address. */
-const AddressField = ({
-  value,
-  onValueChange,
-}: {
-  value: string;
-  onValueChange: (value: string) => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Field>
-      <FieldLabel>{t`Address`}</FieldLabel>
-      <Input
-        inputMode="url"
-        onValueChange={onValueChange}
-        placeholder="https://models.example.com/v1"
-        required
-        type="url"
-        value={value}
-      />
-      <FieldError match="valueMissing">{t`Enter your endpoint's address.`}</FieldError>
-      <FieldError match="typeMismatch">{t`Enter an address that starts with https://.`}</FieldError>
-    </Field>
-  );
-};
-
-/** A new provider's key, with what becomes of it. */
-const KeyField = ({
-  provider,
-  value,
-  onValueChange,
-}: {
-  provider: OrganizationProviderId;
-  value: string;
-  onValueChange: (value: string) => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Field>
-      <FieldLabel>{t`Key`}</FieldLabel>
-      <KeyInput
-        onValueChange={onValueChange}
-        provider={provider}
-        value={value}
-      />
-      <FieldDescription>
-        {t`Only its last four characters are shown again.`}
-      </FieldDescription>
-      <FieldError match="valueMissing">{t`Paste the key.`}</FieldError>
-    </Field>
-  );
-};
-
 /** Adds a provider's key, with a custom endpoint's address; throws, with why, where it failed. */
 type Connect = (
   provider: OrganizationProviderId,
@@ -624,123 +543,115 @@ type Connect = (
   baseUrl: string
 ) => Promise<void>;
 
-/** Adding a provider, in a dialog: which one, by its mark; a custom endpoint's address; its key. */
-const AddProviderDialog = ({
+/** `work`, with `onBusy` told while it runs. Outside components, as the React Compiler can't compile `finally`. */
+const whileBusy = async (
+  work: () => Promise<void>,
+  onBusy: (busy: boolean) => void
+): Promise<void> => {
+  onBusy(true);
+  try {
+    await work();
+  } finally {
+    onBusy(false);
+  }
+};
+
+/**
+ * Adding a provider once one is connected: the library's Add connection
+ * sheet, the providers not connected yet as tiles, grouped by where they
+ * run, then the chosen one's key, with the link to where its keys are made.
+ * `connect` adds and tests it, and throws with the provider's reason, which
+ * the sheet says under the key. The tiles stay as they were when the sheet
+ * opened, so the provider just connected keeps its sheet open on its
+ * connected step while the page reads again. While a key is checked the
+ * sheet stays open, so its answer always lands on the provider it is for.
+ */
+const AddProviderSheet = ({
   offered,
-  onAdd,
+  connect,
 }: {
   offered: AiProvidersListing["offered"];
-  onAdd: Connect;
+  connect: Connect;
 }) => {
   const { t } = useLingui();
-  const formId = useId();
   const [open, setOpen] = useState(false);
-  const [chosen, setChosen] = useState<OrganizationProviderId | undefined>();
-  const [key, setKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const close = (): void => {
-    setOpen(false);
-    setKey("");
-    setBaseUrl("");
-    setChosen(undefined);
-  };
-  const provider =
-    offered.find((each) => each.provider === chosen) ?? offered[0];
-  const add = useAction(
-    async () => {
-      if (provider !== undefined) {
-        await onAdd(provider.provider, key, baseUrl);
-        close();
-      }
-    },
-    { working: t`Saving`, done: t`Saved`, failed: t`Not saved` }
-  );
-  if (provider === undefined) {
+  const [shown, setShown] = useState(offered);
+  const [checking, setChecking] = useState(false);
+  if (!open && offered.length === 0) {
     return null;
   }
-  const custom = provider.provider === "openai-compatible";
+  const regions = [
+    { id: "eu", label: t`European Union` },
+    { id: "us", label: t`United States` },
+    { id: "custom", label: t`Your own endpoint` },
+  ] as const;
+  const groups = regions
+    .map(({ id, label }) => ({
+      id,
+      label,
+      providers: shown
+        .filter(({ provider }) => aiProviders[provider].region === id)
+        .map(({ provider, label: name }) => {
+          const brand = marks[provider];
+          const keyHint = keyStarts[provider];
+          const keyUrl = keyPages[provider];
+          const [address] = Object.values(aiProviders[provider].baseUrls);
+          return {
+            id: provider,
+            name: providerName(provider, name),
+            host:
+              address === undefined
+                ? t`Wherever your endpoint runs`
+                : new URL(address).host,
+            ...(brand === undefined ? { icon: Cable } : { brand }),
+            ...(keyHint === undefined ? {} : { keyHint }),
+            ...(keyUrl === undefined ? {} : { keyUrl }),
+            ...(provider === "openai-compatible" ? { address: true } : {}),
+          };
+        }),
+    }))
+    .filter(({ providers }) => providers.length > 0);
   return (
-    <>
-      <Button
-        icon={Plus}
-        onClick={() => {
-          setOpen(true);
-        }}
-        size="sm"
-        variant="ink"
-      >
-        {t`Add a provider`}
-      </Button>
-      <Dialog
-        onOpenChange={(next) => {
-          if (next) {
-            setOpen(true);
-          } else {
-            close();
-          }
-        }}
-        open={open}
-      >
-        <DialogContent closeLabel={t`Close`}>
-          <DialogTitle>{t`Add a provider`}</DialogTitle>
-          <DialogBody>
-            <Form
-              aria-label={t`Add a provider`}
-              id={formId}
-              onSubmit={(event) => {
-                // Sent only once every field is right; sent here, not by the browser.
-                event.preventDefault();
-                void add.run();
-              }}
-            >
-              <RadioGroup
-                aria-label={t`Provider`}
-                onValueChange={(value) => {
-                  setChosen(
-                    offered.find((each) => each.provider === value)?.provider
-                  );
-                }}
-                value={provider.provider}
-              >
-                {offered.map((each) => (
-                  <Field key={each.provider} orientation="horizontal">
-                    <RadioGroupItem value={each.provider} />
-                    <FieldContent>
-                      <FieldLabel>
-                        <ProviderChoice
-                          label={providerName(each.provider, each.label)}
-                          provider={each.provider}
-                        />
-                      </FieldLabel>
-                      <FieldDescription>
-                        <WhereItRuns provider={each.provider} />
-                      </FieldDescription>
-                    </FieldContent>
-                  </Field>
-                ))}
-              </RadioGroup>
-              {custom ? (
-                <AddressField onValueChange={setBaseUrl} value={baseUrl} />
-              ) : null}
-              <KeyField
-                onValueChange={setKey}
-                provider={provider.provider}
-                value={key}
-              />
-              {add.error === null || add.error === undefined ? null : (
-                <Alert tone="danger">{reasonOf(add.error)}</Alert>
-              )}
-            </Form>
-          </DialogBody>
-          <DialogFooter>
-            <DialogAction>{t`Cancel`}</DialogAction>
-            <Button form={formId} type="submit" variant="ink" {...add.status}>
-              {t`Add provider`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+    <AddConnection
+      groups={groups}
+      onConnect={async ({ provider, key, address }) => {
+        // Connected since the sheet opened (its tile stays for the connected
+        // step): adding it again would replace its working key, and remove
+        // it when the new one is refused. Its key is replaced from its row.
+        const addable = offered.find((each) => each.provider === provider);
+        if (addable === undefined) {
+          const tile = shown.find((each) => each.provider === provider);
+          const name =
+            tile === undefined
+              ? provider
+              : providerName(tile.provider, tile.label);
+          throw new Error(t`${name} is connected already.`);
+        }
+        await whileBusy(async () => {
+          await withReason(connect(addable.provider, key, address ?? ""));
+        }, setChecking);
+      }}
+      onOpenChange={(next) => {
+        if (!next && checking) {
+          return;
+        }
+        if (next) {
+          setShown(offered);
+        }
+        setOpen(next);
+      }}
+      open={open}
+      words={{
+        trigger: t`Add a provider`,
+        title: t`Add a provider`,
+        // In brackets, as the page's other optional fields say it; English
+        // takes the library's own words, which have none.
+        nameOptional: t({
+          message: "(optional)",
+          context: "a field that may stay empty",
+        }),
+      }}
+    />
   );
 };
 
@@ -1357,9 +1268,11 @@ export const AiProvidersSettings = ({
       {unanswered ? null : (
         <SectionCard
           variant="grouped"
-          {...(editable && addable.length > 0
+          {...(editable
             ? {
-                actions: <AddProviderDialog offered={addable} onAdd={addKey} />,
+                actions: (
+                  <AddProviderSheet connect={connect} offered={addable} />
+                ),
               }
             : {})}
           density="compact"

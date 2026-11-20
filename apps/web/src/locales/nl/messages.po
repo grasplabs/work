@@ -24,6 +24,12 @@ msgstr "“{word}” is al toegevoegd."
 msgid "(company)"
 msgstr "(bedrijf)"
 
+#: src/frame/part-words.tsx
+#: src/settings/ai-providers.tsx
+msgctxt "a field that may stay empty"
+msgid "(optional)"
+msgstr "(optioneel)"
+
 #: src/brain/brain-source-contents.tsx
 msgctxt "a number that changed: what it was before"
 msgid "(was {before})"
@@ -939,6 +945,10 @@ msgstr "{name} heeft iets voor je"
 #: src/settings/stephen-settings.tsx
 msgid "{name} in {appName}"
 msgstr "{name} in {appName}"
+
+#: src/settings/ai-providers.tsx
+msgid "{name} is connected already."
+msgstr "{name} is al verbonden."
 
 #: src/onboarding/connect-steps.tsx
 msgid "{name} is connected. I’ll only read what you share with me."
@@ -2361,10 +2371,6 @@ msgstr "Voeg mensen of groepen toe"
 msgid "Add people, teams or projects"
 msgstr "Voeg mensen, teams of projecten toe"
 
-#: src/settings/ai-providers.tsx
-msgid "Add provider"
-msgstr "Aanbieder toevoegen"
-
 #: src/apps/indexes-view.tsx
 msgid "Add search"
 msgstr "Zoeken toevoegen"
@@ -2481,7 +2487,6 @@ msgstr "Een app of workflow toevoegen deelt die met niemand. Alleen wie er toega
 #: src/apps/app-webhooks.tsx
 #: src/apps/publish.tsx
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
 msgid "Address"
 msgstr "Adres"
@@ -6568,7 +6573,6 @@ msgid "Enter a name for the team."
 msgstr "Vul een naam voor het team in."
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgid "Enter an address that starts with https://."
 msgstr "Vul een adres in dat met https:// begint."
 
@@ -6581,7 +6585,6 @@ msgid "Enter the email of at least one person to invite."
 msgstr "Vul het e-mailadres in van minstens één persoon om uit te nodigen."
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgid "Enter your endpoint's address."
 msgstr "Vul het adres van je endpoint in."
 
@@ -9378,7 +9381,6 @@ msgstr "Iets wat de chat niet meer kan lezen, voor het model weggehouden"
 
 #: src/frame/part-words.tsx
 #: src/onboarding/ai-step.tsx
-#: src/settings/ai-providers.tsx
 #: src/workflows/kept-state.tsx
 msgid "Key"
 msgstr "Sleutel"
@@ -12139,7 +12141,6 @@ msgid "Only its builders open it, and its triggers don't fire, until it is share
 msgstr "Alleen de bouwers openen het, en de triggers gaan niet af, tot het met het team gedeeld is."
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgid "Only its last four characters are shown again."
 msgstr "Alleen de laatste vier tekens worden nog getoond."
 
@@ -12445,11 +12446,6 @@ msgstr "Opportunity-to-Cash"
 msgid "Option {place}"
 msgstr "Optie {place}"
 
-#: src/frame/part-words.tsx
-msgctxt "a field that may stay empty"
-msgid "Optional"
-msgstr "Optioneel"
-
 #: src/apps/field-editor.tsx
 msgid "Options"
 msgstr "Opties"
@@ -12747,7 +12743,6 @@ msgid "Paste several at once, split by commas or lines."
 msgstr "Plak er meerdere tegelijk, gescheiden door komma's of regels."
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgid "Paste the key."
 msgstr "Plak de sleutel."
 
@@ -13239,7 +13234,6 @@ msgid "Proposed packages"
 msgstr "Pakketten voorgesteld"
 
 #: src/onboarding/ai-step.tsx
-#: src/settings/ai-providers.tsx
 msgid "Provider"
 msgstr "Aanbieder"
 
@@ -20457,6 +20451,10 @@ msgstr "werkaccounts van je organisatie"
 #: src/onboarding/ai-step.tsx
 msgid "Your own contract with Anthropic, OpenAI, Mistral or another provider. You pay them directly."
 msgstr "Je eigen contract met Anthropic, OpenAI, Mistral of een andere aanbieder. Je betaalt hen rechtstreeks."
+
+#: src/settings/ai-providers.tsx
+msgid "Your own endpoint"
+msgstr "Eigen endpoint"
 
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."

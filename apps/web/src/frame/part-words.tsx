@@ -1368,7 +1368,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       }),
       name: t`Name`,
       nameOptional: t({
-        message: "Optional",
+        message: "(optional)",
         context: "a field that may stay empty",
       }),
       nameNote: t`To tell this key from others.`,
