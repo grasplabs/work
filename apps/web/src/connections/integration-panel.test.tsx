@@ -191,10 +191,11 @@ const press = async (element: Element | null | undefined): Promise<void> => {
   await settled();
 };
 
-/** The buttons named `text`, wherever they stand (the panel and its dialog are layers of their own). */
+/** The buttons named `text`, by their label or their words, wherever they stand (the panel and its dialog are layers of their own). */
 const buttons = (text: string): HTMLElement[] =>
   [...document.querySelectorAll<HTMLElement>("button, [role=menuitem]")].filter(
-    (each) => each.textContent.trim() === text
+    (each) =>
+      (each.getAttribute("aria-label") ?? each.textContent.trim()) === text
   );
 
 /** The connect dialog's own Connect, which carries its working and failed words too. */
