@@ -1,4 +1,4 @@
-import { authFor } from "../auth/auth.ts";
+import { authFor, mayNotAct } from "../auth/auth.ts";
 import { signInConfig } from "../auth/config.ts";
 import type { LinkCaller } from "./store.ts";
 
@@ -21,6 +21,10 @@ import type { LinkCaller } from "./store.ts";
 // - A session for someone's interview alone reaching anything else: this
 //   is the only place it is read (identity.ts `sessionIdentity` answers
 //   nobody for it).
+// - A guest (roles.ts `guestRole`), or anyone else who may no longer act
+//   (removed, suspended): no interview opens for them, whatever address
+//   their account holds. Someone signed in for their interview alone is
+//   no member, and may act (membership-sql.ts `mayAct`).
 
 /** Where a request may come from: the page itself, or a navigation typed in. */
 const sameSiteFetches = new Set(["same-origin", "none"]);
@@ -31,7 +35,8 @@ export type NoCaller = "cross_site" | "sign_in";
 /**
  * Who calls: the account behind the request's session cookie and the
  * address the company's sign-in verified for it; `cross_site` for a request
- * another site sent; `sign_in` with no session, or Grasp staff's.
+ * another site sent; `sign_in` with no session, Grasp staff's, or one of
+ * someone who may not act.
  */
 export const interviewCaller = async (
   env: Env,
@@ -43,7 +48,7 @@ export const interviewCaller = async (
   }
   const auth = await authFor(env, signInConfig(env));
   const found = await auth?.api.getSession({ headers });
-  if (!found || found.session.staff) {
+  if (!found || found.session.staff || (await mayNotAct(env, found.user.id))) {
     return "sign_in";
   }
   return { account: found.user.id, address: found.user.email };

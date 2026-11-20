@@ -1,3 +1,4 @@
+import { guestRole } from "@grasp-os/shared/roles";
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -27,24 +28,28 @@ export const notRemoved = (
     AND ${memberRemovals.userId} = ${userId}
 )`;
 
-/** `members`, as `mayAct` reads it for a suspension: apart from any caller's. */
-const suspendedMembership = alias(members, "suspended_membership");
+/** `members`, as `mayAct` reads it for a suspension or a guest: apart from any caller's. */
+const standingMembership = alias(members, "standing_membership");
 
 /**
  * That `userId` (an ID, or a column holding one) may act, and be read as,
  * in the organization now, as a SQL condition: the one check everything
  * that decides so shares (sign-in, every RPC, Apps, agents and workflows
- * acting for them, Teams and Slack, the counts of a team's people).
- * Neither removed by an admin (`notRemoved`, which alone serves removal
- * itself, erasure's "removed first" and the directory's tie) nor
- * suspended (`members.suspended_at`, directory-suspensions.ts).
+ * acting for them, Teams and Slack, the counts of a team's people, the
+ * Brain's readers, sharing and the people directory). Neither removed by
+ * an admin (`notRemoved`, which alone serves removal itself, erasure's
+ * "removed first" and the directory's tie), nor suspended
+ * (`members.suspended_at`, directory-suspensions.ts), nor a guest
+ * (roles.ts `guestRole`): someone outside the company, who is never
+ * someone in it.
  */
 export const mayAct = (userId: string | SQLiteColumn | SQL): SQL =>
   sql`${notRemoved(userId)} AND NOT EXISTS (
-    SELECT 1 FROM ${members} AS ${suspendedMembership}
-    WHERE ${suspendedMembership.organizationId} = ${organizationId}
-      AND ${suspendedMembership.userId} = ${userId}
-      AND ${suspendedMembership.suspendedAt} IS NOT NULL
+    SELECT 1 FROM ${members} AS ${standingMembership}
+    WHERE ${standingMembership.organizationId} = ${organizationId}
+      AND ${standingMembership.userId} = ${userId}
+      AND (${standingMembership.suspendedAt} IS NOT NULL
+        OR ${standingMembership.role} = ${guestRole})
   )`;
 
 /** `members`, as `activeMember` reads it: apart from any caller's. */
