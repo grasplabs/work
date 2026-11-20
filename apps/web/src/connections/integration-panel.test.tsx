@@ -278,7 +278,7 @@ describe("an app's panel", () => {
     });
   });
 
-  it("has an admin connect a stopped toolkit again, its stopped connection disconnected first", async () => {
+  it("has an admin connect a stopped toolkit again from what it allowed, its stopped connection disconnected first", async () => {
     const stopped: ListedConnection = {
       id: "c-hubspot",
       source: "composio",
@@ -290,16 +290,28 @@ describe("an app's panel", () => {
       connectedByName: "Ada",
       accountName: null,
       createdAt: "2026-10-01T00:00:00.000Z",
-      tools: ["HUBSPOT_LIST_CONTACTS"],
+      // A tool the catalog no longer lists starts off, not as it was.
+      tools: [
+        "HUBSPOT_LIST_CONTACTS",
+        "HUBSPOT_CREATE_NOTE",
+        "HUBSPOT_DROPPED",
+      ],
       readTools: ["HUBSPOT_LIST_CONTACTS"],
+      toolResources: { HUBSPOT_CREATE_NOTE: "contactId" },
     };
     const sent = await opened("hubspot", [stopped]);
     await press(buttons("Connect again")[0]);
     await press(dialogAction("Connect"));
 
     expect(
-      sent.map((each) => ("toolkit" in each ? "connect" : each))
-    ).toStrictEqual([{ disconnected: "c-hubspot" }, "connect"]);
+      sent.map((each) => ("toolkit" in each ? each.tools : each))
+    ).toStrictEqual([
+      { disconnected: "c-hubspot" },
+      [
+        { name: "HUBSPOT_LIST_CONTACTS", read: true },
+        { name: "HUBSPOT_CREATE_NOTE", resource: "contactId" },
+      ],
+    ]);
   });
 
   it("has an admin connect Microsoft 365 for everyone, saying where they'll sign in", async () => {

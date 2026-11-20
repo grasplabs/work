@@ -296,6 +296,7 @@ describe("the Integrations overview", () => {
       "Microsoft 365Needs you",
       "Google WorkspaceSign in again",
       "Acme CRM3 tools",
+      "Ledger3 tools",
     ]);
   });
 });

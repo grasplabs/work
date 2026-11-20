@@ -27,19 +27,19 @@ export const useWhyNoConnect = () => {
     if (identity.staff) {
       return t`Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people.`;
     }
-    // An app the catalog doesn't list can't be offered: its own notice says so.
-    if (!integration.offered && integration.listed) {
-      if (integration.connections.length > 0) {
-        return isAdmin(identity.role)
-          ? t`It isn't offered any more: offer it again to connect another account.`
-          : undefined;
-      }
-      return isAdmin(identity.role)
-        ? t`It isn't offered to your organization yet: offer it before connecting it.`
-        : t`It isn't offered to your organization.`;
-    }
     if (integration.auth === "own") {
       return t`Connecting it needs your organization's own sign-in app, which Grasp can't use yet.`;
+    }
+    // An app the catalog doesn't list can't be offered: its own notice says so.
+    if (!integration.offered && integration.listed) {
+      if (integration.connections.length === 0) {
+        return isAdmin(identity.role)
+          ? t`It isn't offered to your organization yet: offer it before connecting it.`
+          : t`It isn't offered to your organization.`;
+      }
+      if (isAdmin(identity.role)) {
+        return t`It isn't offered any more, so no one can connect it again.`;
+      }
     }
     return integration.source === "composio" &&
       integration.connections.length === 0

@@ -67,22 +67,40 @@ const ConnectToolkit = ({
   app: shown,
   integration,
   replacing,
+  catalog,
   size,
 }: {
   app: App;
   integration: Integration;
   /** The connections that stopped working, which connecting again replaces. */
   replacing: readonly ListedConnection[];
+  /** The toolkit's tools as the catalog lists them now. */
+  catalog: readonly CatalogTool[];
   size: "xs" | "sm";
 }) => {
   const core = useCore();
+  const [old] = replacing;
+  // What the old connection allowed of what the catalog still lists: where
+  // connecting again starts, each tool keeping the resource it was held to.
+  const listed = new Set(catalog.map(({ name }) => name));
+  const before =
+    old === undefined
+      ? []
+      : allowedOf(old).filter(({ name }) => listed.has(name));
   const connect = async ({
     tools,
     consent,
   }: ConnectAppConsentChoice): Promise<void> => {
     const allowed = tools
       .filter(({ choice }) => choice !== "never")
-      .map(({ id, choice }) => ({ name: id, read: choice === "read" }));
+      .map(({ id, choice }) => {
+        const resource = before.find(({ name }) => name === id)?.resource;
+        return {
+          name: id,
+          read: choice === "read",
+          ...(resource === undefined ? {} : { resource }),
+        };
+      });
     try {
       const started = await core.withSession(async (session) => {
         await Promise.all(
@@ -105,15 +123,13 @@ const ConnectToolkit = ({
       throw error;
     }
   };
-  const [old] = replacing;
   return (
     <ConnectAppConsent
       again={old !== undefined}
-      // Connecting again starts from what the old connection allowed.
       {...(old === undefined
         ? {}
         : {
-            initialTools: allowedOf(old).map(({ name, read }) => ({
+            initialTools: before.map(({ name, read }) => ({
               id: name,
               choice: read ? ("read" as const) : ("write" as const),
             })),
@@ -292,6 +308,7 @@ export const useAppActions = ({
     actions.connect = (
       <ConnectToolkit
         app={app}
+        catalog={tools?.state === "ready" ? tools.data : []}
         integration={integration}
         replacing={stopped}
         size={size}
