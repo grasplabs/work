@@ -298,5 +298,8 @@ describe("the Integrations overview", () => {
       "Acme CRM3 tools",
       "Ledger3 tools",
     ]);
+    expect(host.querySelector("section")?.textContent).toContain(
+      "2 apps need you"
+    );
   });
 });
