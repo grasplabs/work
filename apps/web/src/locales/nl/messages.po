@@ -5649,6 +5649,7 @@ msgstr "Je teams uit je Brain wissen?"
 msgid "Erase…"
 msgstr "Wissen…"
 
+#: src/onboarding/setup-steps.tsx
 #: src/settings/erasures.tsx
 msgid "Erased"
 msgstr "Gewist"

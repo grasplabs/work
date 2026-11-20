@@ -5649,6 +5649,7 @@ msgstr "¿Borrar tus equipos de tu Brain?"
 msgid "Erase…"
 msgstr "Borrar…"
 
+#: src/onboarding/setup-steps.tsx
 #: src/settings/erasures.tsx
 msgid "Erased"
 msgstr "Borrado"
