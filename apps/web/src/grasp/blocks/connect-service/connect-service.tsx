@@ -337,9 +337,10 @@ const Tiles = ({
       <div
         {...stylex.props(
           styles.tiles,
-          [styles.three, styles.four, styles.five, styles.six][
-            services.length - 3
-          ]
+          services.length === 3 && styles.three,
+          services.length === 4 && styles.four,
+          services.length === 5 && styles.five,
+          services.length === 6 && styles.six
         )}
       >
         {services.map((service, index) => (
