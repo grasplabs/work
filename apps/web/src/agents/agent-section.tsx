@@ -2,15 +2,17 @@ import { useLingui } from "@lingui/react/macro";
 import { Link, useMatch } from "@tanstack/react-router";
 
 import { AgentMark } from "../grasp/agent-mark/index.ts";
-import { CalendarIcon, Info, Lock, Note } from "../grasp/icons/index.ts";
+import { CalendarIcon, Lock, Note } from "../grasp/icons/index.ts";
 import type { SidebarSection } from "../grasp/sidebar/index.ts";
 import { wakesOn } from "./agent-facts.tsx";
 import { agentTabOf } from "./agent-page.tsx";
 import type { AgentTab } from "./agent-page.tsx";
 
 // One agent as the sidebar's section while an admin is on its page, as
-// Settings is (grasp/frame/grasp-sidebar.tsx): Back to the Agents page,
-// the agent's mark and name, then a row per part of its page. The parts
+// Settings is (grasp/frame/grasp-sidebar.tsx): the agent's mark and name
+// first, above Back, the press that opens its overview (the library's
+// `home`, as the Brain has it); Back to the Agents page; then a row per
+// other part of its page. The parts
 // are its page's tabs, kept in the address (`?tab=`), so a row is a link
 // the page reads. What it shows is what the agent's route read: no read
 // of its own.
@@ -38,7 +40,7 @@ export const useAgentSection = (): SidebarSection | undefined => {
   const { name } = agent;
   const tab = agentTabOf(match.search.tab);
   const scheduled = wakesOn(page.data.managed.wakes[agent.id] ?? []).length;
-  const row = (value: AgentTab, label: string, icon: typeof Info) => ({
+  const row = (value: AgentTab, label: string, icon: typeof Note) => ({
     label,
     icon,
     render: (
@@ -58,11 +60,20 @@ export const useAgentSection = (): SidebarSection | undefined => {
     title: name,
     mark: <AgentMark name={name} size="xs" />,
     navLabel: t`${name}'s pages`,
-    back: { label: t`Agents`, render: <Link to="/agents" /> },
+    // Its name, above Back, opens its overview, as the Brain's does: no
+    // Overview row of its own.
+    home: (
+      <Link
+        params={{ agent: agent.id }}
+        search={{ tab: undefined }}
+        to="/agents/$agent"
+      />
+    ),
+    homeCurrent: tab === "overview",
+    back: { label: t`Back`, render: <Link to="/agents" /> },
     groups: [
       {
         rows: [
-          row("overview", t`Overview`, Info),
           row("instructions", t`Instructions`, Note),
           row("access", t`Access`, Lock),
           {

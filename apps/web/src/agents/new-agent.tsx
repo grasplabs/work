@@ -4,6 +4,16 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
+import {
+  AgentFigure,
+  AgentFigureAura,
+  agentFigurePalettes,
+} from "../grasp/agent-figure/index.ts";
+import type {
+  AgentFigureLook,
+  AgentFigurePalette,
+  AgentFigureShape,
+} from "../grasp/agent-figure/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
   Card,
@@ -40,14 +50,22 @@ import type {
 } from "../grasp/question-tool/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { briefOf, instructionsOf } from "./agent-brief.ts";
 import { AgentFailure } from "./agent-facts.tsx";
 import { agentTemplates } from "./agent-templates.ts";
 import { cronOf } from "./agent-wakes.tsx";
-import { AgentAura, AgentFigure } from "./figure/agent-figure.tsx";
-import { figureShapes } from "./figure/body.ts";
-import type { FigureShape } from "./figure/body.ts";
-import { faceOf, figurePalettes, lookFromName } from "./figure/look.ts";
-import type { FigureLook, FigurePalette } from "./figure/look.ts";
+import { faceOf, lookFromName } from "./figure/look.ts";
+
+/** The shapes the shape question offers: the library's lit bodies a person can tell apart. */
+const offeredShapes = [
+  "orb",
+  "trio",
+  "pair",
+  "swarm",
+  "prism",
+  "crystal",
+  "planet",
+] as const satisfies readonly AgentFigureShape[];
 
 // A new agent, for the company's admins: Grasp asks what it should be, one question at a time,
 // on Damsko's Question tool, the way a chat asks: what it should do (a starting point or the
@@ -84,7 +102,7 @@ interface Draft {
   template: string | undefined;
   job: string;
   name: string;
-  look: FigureLook;
+  look: AgentFigureLook;
   audience: "everyone" | "nobody";
   schedule: Schedule;
   instructions: string;
@@ -134,7 +152,7 @@ const styles = stylex.create({
 /** The words each question, choice and answer is said in. */
 const useWording = () => {
   const { t } = useLingui();
-  const shapeNames: Record<FigureShape, string> = {
+  const shapeNames: Partial<Record<AgentFigureShape, string>> = {
     orb: t`Orb`,
     trio: t`Three circling`,
     pair: t`Pair in orbit`,
@@ -143,7 +161,7 @@ const useWording = () => {
     crystal: t`Crystal`,
     planet: t`Planet`,
   };
-  const paletteNames: Record<FigurePalette, string> = {
+  const paletteNames: Record<AgentFigurePalette, string> = {
     evergreen: t`Evergreen`,
     meadow: t`Meadow`,
     ember: t`Ember`,
@@ -174,7 +192,7 @@ const useWording = () => {
     const byStep: Record<Step, () => string> = {
       job: () => draft.job,
       name: () => draft.name,
-      shape: () => shapeNames[draft.look.shape],
+      shape: () => shapeNames[draft.look.shape] ?? "",
       palette: () => paletteNames[draft.look.palette],
       audience: () => audienceNames[draft.audience],
       schedule: () => scheduleNames[draft.schedule],
@@ -200,10 +218,10 @@ const Forming = ({ draft }: { draft: Draft }) => {
     <Card>
       <CardMedia>
         <span {...stylex.props(styles.stage)}>
-          <AgentAura look={draft.look} />
+          <AgentFigureAura ground="page" look={draft.look} />
           <AgentFigure
             follow
-            label={draft.name === "" ? t`The new agent` : draft.name}
+            aria-label={draft.name === "" ? t`The new agent` : draft.name}
             look={draft.look}
             size="xl"
             state="idle"
@@ -262,8 +280,8 @@ export const NewAgent = ({
     setAnswers({ ...answers, [step]: next });
     // The figure answers a choice as it is pointed at, before Next.
     const [value] = next.values;
-    const shape = figureShapes.find((each) => each === value);
-    const palette = figurePalettes.find((each) => each === value);
+    const shape = offeredShapes.find((each) => each === value);
+    const palette = agentFigurePalettes.find((each) => each === value);
     if (step === "shape" && shape !== undefined) {
       setDraft({ ...draft, look: { ...draft.look, shape } });
     }
@@ -305,7 +323,7 @@ export const NewAgent = ({
           job: i18n._(chosen.job),
           name,
           look: chosenLook ? draft.look : lookFromName(name),
-          instructions: i18n._(chosen.instructions),
+          instructions: instructionsOf(briefOf(chosen, i18n), i18n),
         };
       },
       name: () => ({
@@ -366,9 +384,9 @@ export const NewAgent = ({
       shape: () => ({
         question: t`What shape should it take?`,
         kind: "single" as const,
-        options: figureShapes.map((shape): QuestionOption => ({
+        options: offeredShapes.map((shape): QuestionOption => ({
           value: shape,
-          label: words.shapeNames[shape],
+          label: words.shapeNames[shape] ?? shape,
         })),
         other: false,
         columns: 2 as const,
@@ -376,7 +394,7 @@ export const NewAgent = ({
       palette: () => ({
         question: t`Which colours should it have?`,
         kind: "single" as const,
-        options: figurePalettes.map((palette): QuestionOption => ({
+        options: agentFigurePalettes.map((palette): QuestionOption => ({
           value: palette,
           label: words.paletteNames[palette],
         })),

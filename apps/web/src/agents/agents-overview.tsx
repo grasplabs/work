@@ -14,6 +14,8 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
+import { AgentFigure, AgentFigureAura } from "../grasp/agent-figure/index.ts";
+import type { AgentFigureState } from "../grasp/agent-figure/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Card, CardDescription, CardLink } from "../grasp/card/index.ts";
@@ -45,8 +47,6 @@ import {
   wakesOn,
 } from "./agent-facts.tsx";
 import { useLast } from "./agent-wakes.tsx";
-import { AgentAura, AgentFigure } from "./figure/agent-figure.tsx";
-import type { FigureState } from "./figure/body.ts";
 import { lookOf } from "./figure/look.ts";
 
 // The Agents page: the company's agents as portraits, Ruben's pick of the card concepts (E). Each
@@ -87,7 +87,8 @@ const styles = stylex.create({
   },
   // The hover card's anchor: the card's own box.
   anchor: { display: "grid" },
-  // The portrait: the agent's night, dark in either theme, its words light on it.
+  // The portrait: the agent's light on the page's own ground, light in a light
+  // theme and deep in a dark one, its words in the theme's own ink.
   portrait: {
     position: "relative",
     display: "grid",
@@ -99,8 +100,6 @@ const styles = stylex.create({
     borderRadius: "inherit",
     cornerShape: grasp.cornerShape,
     isolation: "isolate",
-    colorScheme: "dark",
-    color: grasp.text,
   },
   // Large, and cropped by the card's end corner.
   figure: {
@@ -294,7 +293,7 @@ const useFacts = (teams: StephenReach["teams"]) => {
 /** The figure's pose: asleep while paused, listening while a pointer rests on its card. */
 const usePose = (paused: boolean) => {
   const [near, setNear] = useState(false);
-  let state: FigureState = "idle";
+  let state: AgentFigureState = "idle";
   if (paused) {
     state = "asleep";
   } else if (near) {
@@ -368,8 +367,10 @@ const Portrait = ({
   return (
     <span {...near} {...stylex.props(styles.portrait)}>
       {/* Mounted anew when it pauses or wakes: its light is drawn for one or the other. */}
-      <AgentAura
+      <AgentFigureAura
         bright={paused ? 0.45 : 1}
+        // On the page's own ground: light green in a light theme, deep in a dark one (Ruben).
+        ground="page"
         key={paused ? "asleep" : "awake"}
         look={look}
       />
