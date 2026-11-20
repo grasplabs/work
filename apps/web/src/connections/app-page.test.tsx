@@ -470,4 +470,38 @@ describe("changing what Grasp may do in a connected app", () => {
       staff: { state: "reconnect", buttons: 0 },
     });
   });
+
+  it("opens signing in again from the row of the account whose access ran out", async () => {
+    const lapsed: ListedConnection = {
+      id: "connection-1",
+      source: "native",
+      provider: "microsoft",
+      scope: "personal",
+      status: "needs_reauth",
+      ownerUserId: "u1",
+      connectedBy: "u1",
+      connectedByName: "Ada",
+      accountName: "ops@acme.test",
+      createdAt: "2026-10-01T00:00:00.000Z",
+    };
+    await shown(lapsed, {
+      app: {
+        ...entry,
+        source: "native",
+        id: "microsoft",
+        name: "Microsoft 365",
+      },
+    });
+    await press(
+      document.querySelector(
+        '[aria-label="Sign in to Microsoft 365 (ops@acme.test) again"]'
+      )
+    );
+
+    expect(
+      [...document.querySelectorAll('[role="dialog"]')].map(
+        (dialog) => dialog.querySelector("h2")?.textContent
+      )
+    ).toStrictEqual(["Sign in to Microsoft 365 again"]);
+  });
 });
