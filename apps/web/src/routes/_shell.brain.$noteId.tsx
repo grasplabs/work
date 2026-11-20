@@ -26,12 +26,6 @@ import { HomePage } from "../brain/brain-home.tsx";
 import { noteFileName, noteMarkdown } from "../brain/brain-markdown.ts";
 import { SourceContentsTable } from "../brain/brain-source-contents.tsx";
 import {
-  DocumentView,
-  TranscriptRail,
-  TranscriptView,
-} from "../brain/brain-transcript.tsx";
-import type { TranscribedSource } from "../brain/brain-transcript.tsx";
-import {
   given,
   mentionParts,
   statementWords,
@@ -42,7 +36,14 @@ import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
 import { ForgetButton, useCanForget, useForget } from "../brain/forget.tsx";
 import { GapActions } from "../brain/gap-actions.tsx";
 import { loadTranscript, withTranscript } from "../brain/note-transcript.ts";
-import { placeOf } from "../brain/transcript.ts";
+import {
+  SourceDocument,
+  SourceInterview,
+  SourceQuotes,
+  SourceTranscript,
+} from "../brain/source-interview.tsx";
+import type { TranscribedSource } from "../brain/source-interview.tsx";
+import { highlightsOf, placeOf } from "../brain/transcript.ts";
 import { labelOf } from "../brain/witness.ts";
 import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
@@ -55,6 +56,7 @@ import { Collapsible } from "../grasp/collapsible/index.ts";
 import { focus } from "../grasp/focus/focus.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Brain as BrainMark } from "../grasp/icons/index.ts";
+import { useInterview } from "../grasp/interview/index.ts";
 import {
   Tabs,
   TabsContent,
@@ -104,7 +106,6 @@ const styles = stylex.create({
     rowGap: grasp.space2,
   },
   tabRowTabs: { minWidth: 0 },
-  tabRowTools: { marginInlineStart: "auto" },
   eventTitle: {
     color: "inherit",
     textDecorationLine: { default: "none", ":hover": "underline" },
@@ -263,23 +264,22 @@ const Article = ({
  * highlighted. It opens on the transcript, and a link to a statement always brings it there.
  */
 const SourceTabs = ({
-  source,
-  statements,
   activeId,
-  onRemove,
   children,
 }: {
-  source: TranscribedSource;
-  statements: Workspace["statements"];
   activeId: string | undefined;
-  onRemove: ((statement: Statement) => void) | undefined;
   children: ReactNode;
 }) => {
   const { t } = useLingui();
   const [tab, setTab] = useState("transcript");
   const [opened, setOpened] = useState(activeId);
-  // The transcript's search and filter sit in the tab row, beside the tabs.
-  const [toolbar, setToolbar] = useState<HTMLElement | null>(null);
+  // A quote at the side that goes to its moment brings the transcript back too.
+  const asked = useInterview()?.asked ?? 0;
+  const [seen, setSeen] = useState(asked);
+  if (asked !== seen) {
+    setSeen(asked);
+    setTab("transcript");
+  }
   // A link to another statement opens the transcript again, even after the reader went to the summary.
   if (activeId !== opened) {
     setOpened(activeId);
@@ -314,18 +314,10 @@ const SourceTabs = ({
               </TabsTrigger>
             </TabsList>
           </div>
-          <div ref={setToolbar} {...stylex.props(styles.tabRowTools)} />
         </div>
         <TabsContent value="summary">{children}</TabsContent>
-        <TabsContent keepMounted value="transcript">
-          {/* The transcript stays mounted behind the summary, so its tools only take the row while it shows. */}
-          <TranscriptView
-            activeId={activeId}
-            onRemove={onRemove}
-            source={source}
-            statements={statements}
-            toolbarIn={tab === "transcript" ? toolbar : null}
-          />
+        <TabsContent value="transcript">
+          <SourceTranscript />
         </TabsContent>
       </Tabs>
     </div>
@@ -818,37 +810,17 @@ const NoteBody = ({
     <Article byId={byId} nameable={nameable} paragraphs={note.article} />
   );
   if (transcribed?.transcript.unit === "passage") {
-    // A document is read as a page: its own text, with what was tagged in it highlighted.
+    // A document is read as a page: its own text, with what was tagged in it in the margin.
     return (
-      <DocumentView
-        activeId={activeId}
-        source={transcribed}
-        statements={workspace.statements}
-      />
+      <SourceDocument source={transcribed} statements={workspace.statements} />
     );
   }
   if (transcribed && note.article === undefined) {
     // A short conversation without a write-up, such as an employee's chat interview: only its words.
-    return (
-      <TranscriptView
-        activeId={activeId}
-        onRemove={onRemove}
-        source={transcribed}
-        statements={workspace.statements}
-      />
-    );
+    return <SourceTranscript />;
   }
   if (transcribed) {
-    return (
-      <SourceTabs
-        activeId={activeId}
-        onRemove={onRemove}
-        source={transcribed}
-        statements={workspace.statements}
-      >
-        {article}
-      </SourceTabs>
-    );
+    return <SourceTabs activeId={activeId}>{article}</SourceTabs>;
   }
   // An import has no text of its own: what it brought in is its content.
   const source = workspace.sources.find(
@@ -937,15 +909,16 @@ const NoteContent = ({
   const details = note.points.length > 0 || note.linked.length > 0;
   const timeline = events > 0 || note.open.length > 0;
   const tabs: SideTab[] = [
-    ...(transcribed === undefined || transcribed.transcript.unit === "passage"
+    ...(transcribed === undefined ||
+    transcribed.transcript.unit === "passage" ||
+    highlightsOf(transcribed, workspace.statements).length === 0
       ? []
       : [
           {
             value: "conversation",
             label: t`In this conversation`,
             content: (
-              <TranscriptRail
-                activeId={activeId}
+              <SourceQuotes
                 onRemove={onRemove}
                 source={transcribed}
                 statements={workspace.statements}
@@ -977,7 +950,7 @@ const NoteContent = ({
       : []),
   ];
 
-  return (
+  const page = (
     <NoteArticle
       footer={note.mentions.length > 0 ? <Mentions note={note} /> : undefined}
       header={
@@ -1001,6 +974,18 @@ const NoteContent = ({
       />
       {forget.element}
     </NoteArticle>
+  );
+  // A conversation's parts, in the body and at the side, share one Interview.
+  return transcribed === undefined ? (
+    page
+  ) : (
+    <SourceInterview
+      activeId={activeId}
+      source={transcribed}
+      statements={workspace.statements}
+    >
+      {page}
+    </SourceInterview>
   );
 };
 

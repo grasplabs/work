@@ -20,17 +20,6 @@ export interface Highlight {
   end: number;
 }
 
-/** Whether Grasp asked this turn: a consultant, the voice agent, the chat link or the agent all speak as "Grasp …". */
-export const isGrasp = (speaker: string): boolean =>
-  speaker === "Grasp" || speaker.startsWith("Grasp ");
-
-/** The people in a transcript besides Grasp, in the order they first speak, so each keeps one colour. */
-export const voices = (turns: Pick<TranscriptTurn, "speaker">[]): string[] => [
-  ...new Set(
-    turns.map((turn) => turn.speaker).filter((speaker) => !isGrasp(speaker))
-  ),
-];
-
 /** How a place in a transcript is written: a minute as it is, a passage as "§ 3". */
 export const placeLabel = (
   transcript: Pick<Transcript, "unit">,
@@ -81,73 +70,6 @@ export const chapterOfTurns = (transcript: Transcript): number[] => {
       }
     }
     return chapter;
-  });
-};
-
-/** Every place a search finds in the transcript, in order: the turn and where in its text. */
-export const searchHits = (
-  turns: TranscriptTurn[],
-  query: string
-): { turn: number; start: number }[] => {
-  const needle = query.trim().toLowerCase();
-  if (needle.length < 2) {
-    return [];
-  }
-  return turns.flatMap((turn, index) => {
-    const text = turn.text.toLowerCase();
-    const hits: { turn: number; start: number }[] = [];
-    for (
-      let start = text.indexOf(needle);
-      start >= 0;
-      start = text.indexOf(needle, start + needle.length)
-    ) {
-      hits.push({ turn: index, start });
-    }
-    return hits;
-  });
-};
-
-/** A run of a turn's text: plain, part of a highlight, a place the search found, or both. */
-export interface TurnPart {
-  text: string;
-  statement?: Statement;
-  /** The index of the search hit this run belongs to, when the search found it. */
-  hit?: number;
-}
-
-/**
- * A turn's text split at its highlights and at the search hits in it, so each run can be drawn
- * once. `hits` are the transcript's hits with their running index, of which only this turn's count.
- */
-export const turnParts = (
-  text: string,
-  highlights: Highlight[],
-  hits: { start: number; index: number }[],
-  length: number
-): TurnPart[] => {
-  const cuts = new Set([0, text.length]);
-  for (const highlight of highlights) {
-    cuts.add(highlight.start);
-    cuts.add(highlight.end);
-  }
-  for (const hit of hits) {
-    cuts.add(hit.start);
-    cuts.add(Math.min(text.length, hit.start + length));
-  }
-  const points = [...cuts].toSorted((a, b) => a - b);
-  return points.slice(0, -1).map((from, index) => {
-    const to = points[index + 1] ?? from;
-    const statement = highlights.find(
-      (highlight) => highlight.start <= from && to <= highlight.end
-    )?.statement;
-    const hit = hits.find(
-      (each) => each.start <= from && to <= each.start + length
-    )?.index;
-    return {
-      text: text.slice(from, to),
-      ...(statement ? { statement } : {}),
-      ...(hit === undefined ? {} : { hit }),
-    };
   });
 };
 
