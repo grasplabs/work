@@ -923,8 +923,7 @@ describe(SourcesPage, () => {
       moreGone: listedText.includes("Show more"),
       // Once, for the one source core gave a read time, in the page's
       // own date format.
-      lastRead: listedText.split(`Last read ${formatDateTime(lastReadAt)}`)
-        .length,
+      lastRead: listedText.split(`Last read ${formatDate(lastReadAt)}`).length,
       // Each row says the day it was added, without the time.
       added: [formatDate(addedAt), formatDateTime(addedAt)].map((text) =>
         listedText.includes(text)
