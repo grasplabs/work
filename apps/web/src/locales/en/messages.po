@@ -4877,6 +4877,7 @@ msgstr "Cliffs"
 #: src/brain/forget.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/memories-page.tsx
+#: src/brain/sources-page.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
@@ -5716,6 +5717,10 @@ msgstr "Couldn't stop sharing"
 #: src/agents/new-agent.tsx
 msgid "Couldn't take that answer"
 msgstr "Couldn't take that answer"
+
+#: src/brain/sources-page.tsx
+msgid "Couldn't upload"
+msgstr "Couldn't upload"
 
 #: src/frame/part-words.tsx
 msgid "Couldn't write that down. What you typed is kept."
@@ -9626,10 +9631,6 @@ msgstr "It stops where it is and never goes on. What it already did stays done. 
 #: src/workflows/start-run.tsx
 msgid "It takes {fields}."
 msgstr "It takes {fields}."
-
-#: src/brain/sources-page.tsx
-msgid "It takes {types} files of up to {size}. Who may read it stays as you choose: to share it with others, upload it again for them."
-msgstr "It takes {types} files of up to {size}. Who may read it stays as you choose: to share it with others, upload it again for them."
 
 #: src/pages/frame-failure.tsx
 msgid "It took too long to start: the connection may be slow, or the page never finished drawing."
@@ -13547,6 +13548,10 @@ msgstr "Payment pal"
 #: src/export/export-menu.tsx
 msgid "PDF"
 msgstr "PDF"
+
+#: src/brain/sources-page.tsx
+msgid "PDF, Word, Excel or transcripts, up to {size}."
+msgstr "PDF, Word, Excel or transcripts, up to {size}."
 
 #: src/agents/agent-documents.tsx
 msgid "PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each."
@@ -18866,7 +18871,6 @@ msgid "This week"
 msgstr "This week"
 
 #: src/brain/memories-page.tsx
-#: src/brain/sources-page.tsx
 msgid "Those marked Only you are yours alone: nobody else sees them, admins included."
 msgstr "Those marked Only you are yours alone: nobody else sees them, admins included."
 
