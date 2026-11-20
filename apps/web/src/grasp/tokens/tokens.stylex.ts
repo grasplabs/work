@@ -262,6 +262,7 @@ export const grasp = stylex.defineConsts({
   fieldFocusHalo: "var(--grasp-field-focus-halo)",
   fieldFocusHaloInvalid: "var(--grasp-field-focus-halo-invalid)",
   fieldFocus: "var(--grasp-field-focus)",
+  composerEdgeFocus: "var(--grasp-composer-edge-focus)",
   fieldFocusRead: "var(--grasp-field-focus-read)",
   fieldFocusInvalid: "var(--grasp-field-focus-invalid)",
   fieldTextTouch: "var(--grasp-field-text-touch)",

@@ -1,83 +1,43 @@
-// ComposerTakeover: what replaces a composer's text and footer while the assistant needs one thing
-// before it can go on (composer.tsx), after Palermo's "Pick a brand to continue": a line, then a
-// row of choices. Escape leaves it, when the composer is given `onTakeoverDismiss`. For a question
-// with numbered choices and Other, give the composer a QuestionTool with `embedded` instead.
+// ComposerTakeover, now QuestionTool's row of buttons (`<QuestionTool embedded kind="single"
+// variant="buttons">`, given as the composer's `takeover`): a thin wrapper for one step, so nothing
+// breaks. It draws the same line and row of choices. The codemod moves each use:
+//
+//   <ComposerTakeover prompt="Pick a project to continue." choices={projects} onChoose={choose} />
+//   becomes <QuestionTool embedded kind="single" variant="buttons" question="Pick a project to continue."
+//     options={projects} onSubmit={(answer) => choose(answer[0] ?? "")} />
 "use client";
 
-import * as stylex from "@stylexjs/stylex";
-import { Button as PressPrimitive } from "@ui-sdk/react/button";
-import { useId } from "react";
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 3: Composer takeover stays a wrapper over QuestionTool's buttons until step 9 removes it (handover/audit/RELEASE.md §7). */
+import { QuestionTool } from "../question-tool";
+import type { QuestionOption } from "../question-tool";
 
-import { Button } from "../button";
-import { grasp } from "../tokens/tokens.stylex";
+/** @deprecated Use `QuestionOption`, from `@/components/grasp/question-tool`. */
+export type ComposerChoice = Pick<QuestionOption, "value" | "label">;
 
-/** One choice in a takeover. */
-export interface ComposerChoice {
-  /** What `onChoose` receives. */
-  value: string;
-  /** Its words ("Spring launch"). */
-  label: string;
-}
-
-/** Every prop a ComposerTakeover takes. */
+/** @deprecated Use `QuestionToolProps`, from `@/components/grasp/question-tool`, with `variant="buttons"`. */
 export interface ComposerTakeoverProps {
   /** The line that says what is needed ("Pick a project to continue."). It names the choices. */
   prompt: string;
   /** The choices, as buttons in a row. */
   choices: ComposerChoice[];
-  /** Runs with the chosen value. Return a Promise and the button shows it is working. */
+  /** Runs with the chosen value. */
   onChoose: (value: string) => unknown;
 }
 
-const styles = stylex.create({
-  root: {
-    display: "grid",
-    gap: grasp.space3,
-    padding: grasp.space4,
-  },
-  prompt: {
-    margin: 0,
-    color: grasp.ink,
-    fontSize: grasp.chatText,
-    lineHeight: grasp.chatTextLine,
-    overflowWrap: "anywhere",
-  },
-  choices: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: grasp.space2,
-  },
-});
-
-/** A line and a row of choices, in place of the text. */
+/** @deprecated Use `QuestionTool`, from `@/components/grasp/question-tool`, with `embedded`, `kind="single"` and `variant="buttons"`. */
 export const ComposerTakeover = ({
   prompt,
   choices,
   onChoose,
-}: ComposerTakeoverProps) => {
-  const id = useId();
-  return (
-    <div data-slot="composer-takeover" {...stylex.props(styles.root)}>
-      <p id={id} {...stylex.props(styles.prompt)}>
-        {prompt}
-      </p>
-      {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a <fieldset> brings its own border, padding and min-width */}
-      <div role="group" aria-labelledby={id} {...stylex.props(styles.choices)}>
-        {choices.map((choice) => (
-          <PressPrimitive
-            key={choice.value}
-            onClick={() => {
-              onChoose(choice.value);
-            }}
-            pendingAnnouncement=""
-            render={(props: Record<string, unknown>) => (
-              <Button {...props} variant="quiet" size="sm">
-                {choice.label}
-              </Button>
-            )}
-          />
-        ))}
-      </div>
-    </div>
-  );
-};
+}: ComposerTakeoverProps) => (
+  <QuestionTool
+    embedded
+    kind="single"
+    variant="buttons"
+    question={prompt}
+    options={choices}
+    onSubmit={(answer) => {
+      onChoose(answer[0] ?? "");
+    }}
+  />
+);

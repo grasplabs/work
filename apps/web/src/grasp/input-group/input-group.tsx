@@ -84,7 +84,7 @@ const styles = stylex.create({
       ":has(input:read-only:not(:disabled))": grasp.fieldFillRead,
     },
     // The group shows what its input is doing: the edge deepens under a pointer, takes the focus
-    // colour while you type, and turns red when the input is wrong.
+    // edge while you type, and turns red when the input is wrong.
     boxShadow: {
       default: edge,
       // Only an input open for typing hovers, so a wrong one stays red under a pointer.
@@ -95,10 +95,11 @@ const styles = stylex.create({
         },
       ":has(input:focus-visible)": grasp.fieldFocus,
       ":has(input[aria-invalid=true])": grasp.fieldInvalid,
-      // Read only: settled, its hairline and no lift; focus from the keys shows as the hairline one
-      // step stronger, no ring (Input's readOnly).
+      // Read only: settled, its hairline and no lift; focus from the keys darkens the hairline
+      // (field-focus-read), no halo (Input's readOnly).
       ":has(input:read-only:not(:disabled))": `inset 0 0 0 1px ${grasp.fieldEdge}`,
-      ":has(input:read-only:not(:disabled):focus-visible:not([data-focus-pointer]))": `inset 0 0 0 1px ${grasp.fieldEdgeHover}`,
+      ":has(input:read-only:not(:disabled):focus-visible:not([data-focus-pointer]))":
+        grasp.fieldFocusRead,
       ":has(input[aria-invalid=true]:focus-visible)": grasp.fieldFocusInvalid,
       ":has(input:disabled)": `inset 0 0 0 1px ${grasp.fieldEdge}`,
     },
@@ -108,7 +109,7 @@ const styles = stylex.create({
       ":has(input:read-only:not(:disabled))": "default",
       ":has(input:disabled)": "not-allowed",
     },
-    // Focus, the ring for the keyboard and a real outline in forced colours: focus.fieldWithinEditable.
+    // Focus is the group's edge (field-focus); a real outline in forced colours: focus.fieldWithinEditable.
     color: grasp.ink,
     fontFamily: grasp.fontSans,
     fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },

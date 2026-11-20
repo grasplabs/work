@@ -677,6 +677,11 @@
   --grasp-field-focus:
     inset 0 0 0 1px var(--grasp-field-edge-focus), var(--grasp-field-lift),
     0 0 0 3px var(--grasp-field-focus-halo);
+  /* The Composer's edge while you type in it: lighter than a field's (field-edge-focus), a hairline only a little stronger than rest, because the card is large, lifted and already the one place to type (Ruben, 20 November: "still too dark … make it lighter, less visible"). About 1.7:1 in light and 2.2:1 in dark; the halo and the caret carry the rest. */
+  --grasp-composer-edge-focus: light-dark(
+    oklch(0.173 0.028 169.36 / 0.24),
+    oklch(0.96 0.02 150 / 0.26)
+  );
   /* A read-only field in focus: only the darker hairline, no halo and no lift, so it never looks open for typing. */
   --grasp-field-focus-read: inset 0 0 0 1px var(--grasp-field-edge-focus);
   /* A wrong field in focus: its red hairline stays and the faint halo turns red, so it stays wrong while you type. */

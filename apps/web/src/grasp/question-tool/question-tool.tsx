@@ -7,6 +7,7 @@
 //   <QuestionTool kind="multi" ... />        several choices
 //   <QuestionTool kind="text" ... />         free text
 //   <QuestionTool loading ... />             before its question arrives: quiet lines in its boxes
+//   <QuestionTool embedded kind="single" variant="buttons" ... />    a row of buttons in a composer
 //
 // The choices are UI SDK's RadioGroup and CheckboxGroup, the text UI SDK's Input and Textarea, and
 // Send answer UI SDK's Button, so an agent can answer by name, and an answer that fails to send fails for
@@ -154,6 +155,14 @@ export interface QuestionToolProps {
    */
   embedded?: boolean;
   /**
+   * How a `single` question draws. `list`: numbered choices, Other, Skip and Send answer. `buttons`:
+   * the question as one line and its choices as a row of quiet buttons, no Other and no Send; a
+   * press answers at once (`onSubmit` with that one value). For one thing an assistant needs before
+   * it goes on, in a Composer's `takeover` with `embedded`, after Palermo's "Pick a brand to continue".
+   * @default "list"
+   */
+  variant?: "list" | "buttons";
+  /**
    * One of several questions asked in turn: its place ("2 of 3") shows at the head's end. Give
    * a QuestionToolSubmit "Next" on all but the last, and drive the steps from `onSubmit`.
    */
@@ -222,6 +231,28 @@ const settled = async <T,>(
     after();
   }
 };
+
+// A single question as a row of buttons (`variant="buttons"`): a line, then a row of choices, in the
+// composer's room, as Palermo's "Pick a brand to continue".
+const buttonStyles = stylex.create({
+  root: {
+    display: "grid",
+    gap: grasp.space3,
+    padding: grasp.space4,
+  },
+  question: {
+    margin: 0,
+    color: grasp.ink,
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
+    overflowWrap: "anywhere",
+  },
+  choices: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: grasp.space2,
+  },
+});
 
 const HOVER = media.hover;
 const FORCED = media.forced;
@@ -1341,11 +1372,63 @@ const QuestionCard = (props: Resolved) => {
   );
 };
 
+/**
+ * A single question as a row of buttons (`variant="buttons"`): the question as one line, then its
+ * choices; a press answers with its value. Each is UI SDK's Button, so an agent presses it by name.
+ */
+const QuestionButtons = ({
+  question,
+  options,
+  onSubmit,
+  layout,
+}: Pick<QuestionToolProps, "question" | "options" | "onSubmit" | "layout">) => {
+  const id = useId();
+  const row = stylex.props(buttonStyles.choices);
+  return (
+    <div
+      data-slot="question-tool"
+      data-variant="buttons"
+      {...stylex.props(buttonStyles.root, layout)}
+    >
+      <p id={id} {...stylex.props(buttonStyles.question)}>
+        {question}
+      </p>
+      {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a <fieldset> brings its own border, padding and min-width */}
+      <div role="group" aria-labelledby={id} {...row}>
+        {(options ?? noOptions).map((option) => (
+          <PressPrimitive
+            key={option.value}
+            onClick={() => {
+              onSubmit([option.value]);
+            }}
+            pendingAnnouncement=""
+            render={(pressProps: Record<string, unknown>) => (
+              <Button {...pressProps} variant="quiet" size="sm">
+                {option.label}
+              </Button>
+            )}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 /** An assistant's question, answered by a choice, several choices or the person's own words. */
 export const QuestionTool = (props: QuestionToolProps) => {
   const words = useWords("questionTool", questionToolWords, props.words);
   if (props.loading === true) {
     return <QuestionWaiting {...props} {...withDefaults(props, words)} />;
+  }
+  if (props.kind === "single" && props.variant === "buttons") {
+    return (
+      <QuestionButtons
+        question={props.question}
+        options={props.options}
+        onSubmit={props.onSubmit}
+        layout={props.layout ?? props.style}
+      />
+    );
   }
   return <QuestionCard {...props} {...withDefaults(props, words)} />;
 };

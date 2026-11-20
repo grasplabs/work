@@ -1,38 +1,3 @@
-// Focus: the one way Damsko shows where the keyboard is. Every component and every site block
-// takes its focus look from here, last in its stylex.props(), and sets no outline of its own.
-//
-//   stylex.props(styles.button, focus.ring)        a control: button, checkbox, tab, segment, chip
-//   stylex.props(styles.box, focus.mark)          a small mark whose own edge is a line (a checkbox,
-//                                                  a radio, a switch): the ring stands off it
-//   stylex.props(styles.thumb, focus.within)       a part whose focus is on a hidden input inside it
-//                                                  (a slider's thumb): the ring on the part itself
-//   stylex.props(styles.link, focus.words)         words: a link, a row's name
-//   stylex.props(styles.scroller, focus.inside)    a box its parent clips: a code view, a nav row
-//   stylex.props(styles.page, inFrame && focus.frame)  the box round an iframe, while focus is in
-//                                                  the frame (the component says when)
-//   stylex.props(styles.input, focus.field)        a field you type in: the ring for the keyboard,
-//                                                  its soft halo for a press (fieldWithin, fieldSlot,
-//                                                  fieldInside for a field drawn as a box round it)
-//   stylex.props(styles.row, focus.row)            the row of an item that holds focus and its
-//                                                  children too (a tree's item): the ring on the row
-//   stylex.props(styles.tab, focusMarker, focus.carrier)  a control drawn edge to edge with no
-//   stylex.props(styles.words, focus.label)        corner of its own (a line tab): the ring goes
-//                                                  round its words, with a small corner, not round
-//                                                  the whole box
-//
-// A control shows focus only for the keyboard (:focus-visible), so a click shows nothing extra.
-// A field shows it whenever it has focus (a text field always matches :focus-visible), because
-// typing needs to know where it goes. The ring sits on the control's edge and follows its shape:
-// one mark, not a second frame.
-//
-// A field (focus.field on the field itself, focus.fieldWithin on a box round the input that types,
-// focus.fieldSlot on a cell of a one-time code) takes the same ring as every control when the
-// keyboard brought focus to it, on its own edge, and drops its soft halo: the ring wins. A pointer
-// press keeps the soft halo (grasp.fieldFocus) and no ring. A text field matches :focus-visible on
-// a press as well, so the press is told apart here: a pointer press marks the element it focuses
-// with data-focus-pointer until it loses focus (watchPointerFocus, below), and the ring asks for
-// :focus-visible without it. In forced colours, where shadows are dropped, a pointer-focused field
-// keeps a thin real outline and a keyboard-focused one the thick Highlight ring.
 import * as stylex from "@stylexjs/stylex";
 
 import { grasp, media } from "../tokens/tokens.stylex";
@@ -53,8 +18,6 @@ const KEY_IN =
   ":has(:is(input, textarea):focus-visible:not([data-focus-pointer]))";
 const ANY_KEY_IN = ":has(:focus-visible:not([data-focus-pointer]))";
 const ANY_IN = ":has(:is(input, textarea):focus-visible)";
-const KEY_IN_EDITABLE =
-  ":has(:is(input, textarea):not(:read-only):focus-visible:not([data-focus-pointer]))";
 
 /**
  * Marks an element a pointer press focuses with data-focus-pointer, and takes it off when it loses
@@ -171,19 +134,18 @@ export const focus = stylex.create({
     outline: { default: "none", [KEY]: line },
     outlineOffset: `calc(-1 * ${grasp.ringWidth})`,
   },
+  // A field you type in: its own edge and halo (field-focus) show focus, so no ring here, only the
+  // system's line in forced colours, where that edge is dropped.
   field: {
     outline: {
       default: "none",
       ":focus-visible": { default: "none", [media.forced]: forcedThin },
-      [KEY]: { default: line, [media.forced]: forcedLine },
+      [KEY]: { default: "none", [media.forced]: forcedLine },
     },
     outlineOffset: {
       default: grasp.ringOffset,
       [media.forced]: grasp.ringOffsetMark,
     },
-    // The keyboard's focus: the field's own focus look (its halo) becomes its rest, the ring alone shows.
-    "--grasp-field-focus": { default: null, [KEY]: grasp.fieldRest },
-    "--grasp-field-focus-invalid": { default: null, [KEY]: grasp.fieldInvalid },
   },
   // A read-only field: it takes focus, so its words can be selected and copied, but it shows no
   // ring, which would invite typing; the field's own hairline goes a step stronger instead (its
@@ -198,25 +160,16 @@ export const focus = stylex.create({
       [media.forced]: grasp.ringOffsetMark,
     },
   },
-  // fieldWithin for a group whose input may be read only (Input group): the ring only round an
-  // input open for typing; a read-only one shows focus by the group's hairline, as fieldRead.
+  // fieldWithin for a group whose input may be read only (Input group): in forced colours, the
+  // system's line round it while its input has focus.
   fieldWithinEditable: {
     outline: {
       default: "none",
       [ANY_IN]: { default: "none", [media.forced]: forcedLine },
-      [KEY_IN_EDITABLE]: { default: line, [media.forced]: forcedLine },
     },
     outlineOffset: {
       default: grasp.ringOffset,
       [media.forced]: grasp.ringOffsetMark,
-    },
-    "--grasp-field-focus": {
-      default: null,
-      [KEY_IN_EDITABLE]: grasp.fieldRest,
-    },
-    "--grasp-field-focus-invalid": {
-      default: null,
-      [KEY_IN_EDITABLE]: grasp.fieldInvalid,
     },
   },
   // A field whose box sits flush in a surface (Command's search): the ring drawn just inside it.
@@ -231,22 +184,18 @@ export const focus = stylex.create({
       [media.forced]: `calc(-2 * ${grasp.ringWidth})`,
     },
   },
-  // A box round the input that types (Number input, Tag input, Date picker, Input group): the
-  // ring on the box while its input has the keyboard's focus. The input inside takes focus.carrier.
+  // A box round the input that types (Number input, Tag input, Date picker): the box's own edge
+  // and halo show focus, as focus.field; in forced colours the system's line goes round the box.
+  // The input inside takes focus.carrier.
   fieldWithin: {
     outline: {
       default: "none",
       [ANY_IN]: { default: "none", [media.forced]: forcedThin },
-      [KEY_IN]: { default: line, [media.forced]: forcedLine },
+      [KEY_IN]: { default: "none", [media.forced]: forcedLine },
     },
     outlineOffset: {
       default: grasp.ringOffset,
       [media.forced]: grasp.ringOffsetMark,
-    },
-    "--grasp-field-focus": { default: null, [KEY_IN]: grasp.fieldRest },
-    "--grasp-field-focus-invalid": {
-      default: null,
-      [KEY_IN]: grasp.fieldInvalid,
     },
   },
   // A control made of parts, one rounded box (Filter builder's segments): the ring round the whole
@@ -271,21 +220,13 @@ export const focus = stylex.create({
         [media.forced]: forcedThin,
       },
       [stylex.when.ancestor(KEY_IN, focusMarker)]: {
-        default: line,
+        default: "none",
         [media.forced]: forcedLine,
       },
     },
     outlineOffset: {
       default: grasp.ringOffset,
       [media.forced]: grasp.ringOffsetMark,
-    },
-    "--grasp-field-focus": {
-      default: null,
-      [stylex.when.ancestor(KEY_IN, focusMarker)]: grasp.fieldRest,
-    },
-    "--grasp-field-focus-invalid": {
-      default: null,
-      [stylex.when.ancestor(KEY_IN, focusMarker)]: grasp.fieldInvalid,
     },
   },
   // A control whose ring is drawn on its words (focus.label): it draws none itself.

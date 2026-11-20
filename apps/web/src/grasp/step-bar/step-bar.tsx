@@ -17,7 +17,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { Button as PressPrimitive } from "@ui-sdk/react/button";
 import { useId, useRef } from "react";
-import type { RefCallback, RefObject } from "react";
+import type { ReactElement, RefCallback, RefObject } from "react";
 
 import { Button } from "../button";
 import { ArrowLeft, ArrowRight } from "../icons";
@@ -62,6 +62,14 @@ export interface StepBarProps {
    */
   loading?: boolean;
   /**
+   * Before the flow's data (a page's first paint): the bar stands in its place, Back and Next as
+   * their own empty frames (their size and corner, a hairline, nothing in them) and the bar's track
+   * still and empty; nothing in it can be pressed, and it says it is busy. Not `loading`, which is
+   * Next at work.
+   * @default false
+   */
+  waiting?: boolean;
+  /**
    * Its keys: Enter, Mod+Enter and Alt+←. Off where the host has its own.
    * @default true
    */
@@ -101,7 +109,40 @@ const styles = stylex.create({
     whiteSpace: "nowrap",
   },
   end: { display: "flex", justifyContent: "flex-end" },
+  // A button waiting: its own frame (its corner, a hairline, no fill) round it, the button unseen
+  // inside, so the frame is exactly the button's size.
+  frame: {
+    display: "inline-flex",
+    borderRadius: `min(${grasp.corner}, calc(${grasp.controlSm} / 2))`,
+    cornerShape: grasp.cornerShape,
+    boxShadow: `inset 0 0 0 1px ${grasp.fieldEdge}`,
+  },
+  // Opacity, not visibility: Button sets its own parts visible.
+  unseen: { display: "inline-flex", opacity: 0 },
 });
+
+/** A button waiting: its own empty frame round it, the button unseen inside so the frame keeps its size. */
+const Framed = ({
+  waiting,
+  children,
+}: {
+  waiting: boolean;
+  children: ReactElement;
+}) =>
+  waiting ? (
+    <span data-slot="step-bar-frame" {...stylex.props(styles.frame)}>
+      <span {...stylex.props(styles.unseen)}>{children}</span>
+    </span>
+  ) : (
+    children
+  );
+
+/** The bar's marks while it waits: busy, inert, and a data mark a check can read. */
+const waitingMarks = (waiting: boolean) =>
+  waiting ? { inert: true, "aria-busy": true, "data-waiting": "" } : {};
+
+/** Whether its keys are on: not while it waits. */
+const keysOn = (keys: boolean, waiting: boolean) => keys && !waiting;
 
 /** Whether this is the last step. */
 const isLast = (step: { index: number; count: number }) =>
@@ -260,6 +301,7 @@ export const StepBar = ({
   keys = true,
   words: given,
   layout,
+  waiting = false,
 }: StepBarProps) => {
   const words = useWords("stepBar", stepBarWords, given);
   const bar = useRef<HTMLDivElement>(null);
@@ -273,20 +315,30 @@ export const StepBar = ({
       onBack();
     }
   };
-  useStepKeys(keys, bar, next, goBack);
+  useStepKeys(keysOn(keys, waiting), bar, next, goBack);
   const reason = reasonOf(disabled, disabledReason);
   const said = words.step(step.index + 1, step.count);
   return (
-    <div ref={bar} data-slot="step-bar" {...stylex.props(styles.bar, layout)}>
+    <div
+      ref={bar}
+      data-slot="step-bar"
+      {...waitingMarks(waiting)}
+      {...stylex.props(styles.bar, layout)}
+    >
       {onBack === undefined ? (
         <span />
       ) : (
-        <BackArrow first={first} go={goBack} label={words.back} />
+        // On the first step Back is hidden with its room kept: no frame there either.
+        <Framed waiting={waiting && !first}>
+          <BackArrow first={first} go={goBack} label={words.back} />
+        </Framed>
       )}
       <span {...stylex.props(styles.middle)}>
         <Progress
           label={said}
-          value={Math.round(((step.index + 1) / step.count) * 100)}
+          value={
+            waiting ? 0 : Math.round(((step.index + 1) / step.count) * 100)
+          }
           size="sm"
           showLabel={false}
           valueText={() => said}
@@ -299,16 +351,18 @@ export const StepBar = ({
         ) : null}
       </span>
       <span {...stylex.props(styles.end)}>
-        <NextArrow
-          next={next}
-          onNext={onNext}
-          label={last ? (finishLabel ?? words.next) : words.next}
-          last={last}
-          disabled={disabled}
-          reason={reason}
-          reasonId={reasonId}
-          loading={loading}
-        />
+        <Framed waiting={waiting}>
+          <NextArrow
+            next={next}
+            onNext={onNext}
+            label={last ? (finishLabel ?? words.next) : words.next}
+            last={last}
+            disabled={disabled}
+            reason={reason}
+            reasonId={reasonId}
+            loading={loading}
+          />
+        </Framed>
         {reason === undefined ? null : (
           <span id={reasonId} hidden>
             {reason}
