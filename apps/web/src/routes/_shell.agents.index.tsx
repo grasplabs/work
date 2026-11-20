@@ -3,8 +3,8 @@ import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { AgentsOverview } from "../agents/agents-overview.tsx";
-import type { ManagedAgents } from "../agents/agents-overview.tsx";
+import { AgentsOverview, agentsTabOf } from "../agents/agents-overview.tsx";
+import type { AgentsTab, ManagedAgents } from "../agents/agents-overview.tsx";
 import type { Session } from "../core.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -17,7 +17,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 // talk to (`chats.agents`), and for the company's own admins every agent
 // with what core keeps of it. Only admins read the rest, as core checks
 // on every call; the first agent's reach is Settings › Stephen's, so only
-// the others' is read here.
+// the others' is read here. The tab an admin is on is in the address
+// (`?tab=`), so a link or a reload leads back to it.
 
 /** What an admin reads of every agent: its reach, its classes and its wake-ups. */
 export const readManaged = async (session: Session): Promise<ManagedAgents> => {
@@ -69,6 +70,8 @@ export const readManaged = async (session: Session): Promise<ManagedAgents> => {
 const AgentsPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  const { tab } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Agents` }]} page={page} />;
@@ -79,6 +82,11 @@ const AgentsPage = () => {
       <AgentsOverview
         makes={isMemberAdmin(identity)}
         managed={page.data.managed}
+        onTab={(chosen) => {
+          // In place of the address it leaves: Back goes to the page before Agents.
+          void navigate({ search: { tab: chosen }, replace: true });
+        }}
+        tab={tab}
         usable={page.data.usable}
       />
     </>
@@ -113,6 +121,12 @@ const AgentsLoading = () => {
 export const Route = createFileRoute("/_shell/agents/")({
   pendingComponent: AgentsLoading,
   component: AgentsPage,
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { tab?: AgentsTab | undefined } => {
+    const tab = agentsTabOf(search.tab);
+    return tab === undefined ? {} : { tab };
+  },
   loader: async ({ context: { core, identity } }) =>
     await loadFromCore(core, async (session) => {
       const [usable, managed] = await Promise.all([

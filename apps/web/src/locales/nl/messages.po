@@ -2577,6 +2577,10 @@ msgstr "Agent niet gevonden"
 msgid "Agents"
 msgstr "Agents"
 
+#: src/agents/agents-overview.tsx
+msgid "Agents only you can use stand here."
+msgstr "Hier staan de agents die alleen jij kunt gebruiken."
+
 #: src/knowledge/new-collection.tsx
 msgid "Agents read this before they look inside."
 msgstr "Agents lezen dit voordat ze erin kijken."
@@ -10543,6 +10547,10 @@ msgctxt "your microphone is off for a moment"
 msgid "Muted"
 msgstr "Gedempt"
 
+#: src/agents/agents-overview.tsx
+msgid "My agents"
+msgstr "Mijn agents"
+
 #: src/apps/apps-overview.tsx
 msgid "My apps"
 msgstr "Mijn apps"
@@ -12479,6 +12487,7 @@ msgstr "Bol"
 msgid "Order"
 msgstr "Volgorde"
 
+#: src/agents/agents-overview.tsx
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/org-card.tsx
 msgid "Organization"
@@ -14019,7 +14028,6 @@ msgctxt "column: billed requests"
 msgid "Requests"
 msgstr "Verzoeken"
 
-#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.workflows.requests.tsx
 msgctxt "Stephen's requests: the page"
 msgid "Requests"
