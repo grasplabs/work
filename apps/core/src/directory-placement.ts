@@ -1,4 +1,5 @@
 import type {
+  DepartmentLink,
   DirectoryMover,
   DirectoryPlacement,
   PlacedMember,
@@ -27,8 +28,9 @@ import { directoryKinds } from "./directory-ties.ts";
 // What the directory leaves for an admin to place, and what admins placed
 // by hand (GRA-2056, slice 4; GRA-2110, GRA-2135): read for Settings ›
 // Members › Teams, whose admin places people by hand through Better
-// Auth's team routes, which pin the pair (auth.ts), and releases a pin
-// with `releaseTeamPin` (members.ts). It writes nothing. The caller checks
+// Auth's team routes, which pin the pair (auth.ts), releases a pin with
+// `releaseTeamPin` and links a department to a team with `linkDepartment`
+// (members.ts). It writes nothing. The caller checks
 // the role. All of it is read in one batch, one snapshot, from the tables
 // the daily read writes (directory-people.ts, directory-teams.ts):
 //
@@ -46,6 +48,8 @@ import { directoryKinds } from "./directory-ties.ts";
 //   team a department fills is likewise never one that follows groups.
 // - Pins: those on a member tied to the directory, whom the read places;
 //   on anyone else a pin changes nothing the read does.
+// - Department links: those admins made by hand (GRA-2247, members.ts
+//   `linkDepartment`), which only an admin undoes.
 
 /** A member tied to the directory: their department there, and the team it fills. */
 interface Tie {
@@ -62,7 +66,7 @@ export const directoryPlacementOf = async (
 ): Promise<DirectoryPlacement> => {
   const db = drizzle(env.DB);
   const providers = directoryKinds.map(({ provider }) => provider);
-  const [acting, tied, memberships, pins] = await db.batch([
+  const [acting, tied, memberships, pins, links] = await db.batch([
     db
       .select({ userId: users.id, name: users.name, email: users.email })
       .from(members)
@@ -151,6 +155,22 @@ export const directoryPlacementOf = async (
       // person-erasure.ts), and a pin is written only for an active member.
       .where(eq(teams.organizationId, organizationId))
       .orderBy(asc(teams.name), asc(users.name), asc(users.id)),
+    // One per department and team, whichever directories list it.
+    db
+      .selectDistinct({
+        department: directoryDepartments.department,
+        teamId: teams.id,
+        teamName: teams.name,
+      })
+      .from(directoryDepartments)
+      .innerJoin(teams, eq(teams.id, directoryDepartments.teamId))
+      .where(
+        and(
+          eq(directoryDepartments.byHand, true),
+          eq(teams.organizationId, organizationId)
+        )
+      )
+      .orderBy(asc(directoryDepartments.department), asc(teams.name)),
   ]);
   const ties = new Map<string, Tie>();
   for (const { userId, department, teamId, teamName } of tied) {
@@ -203,5 +223,11 @@ export const directoryPlacementOf = async (
       team: { id: teamId, name: teamName },
       pinnedAt: pinnedAt.toISOString(),
     }));
-  return { unplaced, movers, pins: shownPins };
+  const departmentLinks: DepartmentLink[] = links.map(
+    ({ department, teamId, teamName }) => ({
+      department,
+      team: { id: teamId, name: teamName },
+    })
+  );
+  return { unplaced, movers, pins: shownPins, departmentLinks };
 };

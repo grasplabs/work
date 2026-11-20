@@ -4,6 +4,7 @@ import {
   disconnectPersonalMaxOwners,
   oauthFlowLifetimeMs,
 } from "@grasp-os/shared/connect";
+import { directoryErrors } from "@grasp-os/shared/directory";
 import type { CodedError } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -55,6 +56,8 @@ import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
   channelAccounts,
+  directoryDepartments,
+  directoryGroupTeams,
   directoryPeople,
   directoryReads,
   invitations,
@@ -66,6 +69,7 @@ import {
   skillShares,
   teamMembers,
   teamPins,
+  teams,
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -567,6 +571,119 @@ const releaseTeamPin = async (
     throw refusal(by, roleErrors.create("role.forbidden"));
   }
   return { released: released.length > 0 };
+};
+
+/** A department as the directory keeps it: none is empty. */
+const departmentSchema = z.string().min(1);
+
+/**
+ * Links the directory's `department` to team `teamId` by hand (GRA-2247;
+ * the threat model is on the issue), for each of the organization's
+ * directories that lists it: the read's own row (directory-teams.ts), so
+ * its next run places everyone in it there, leaving pinned pairs as the
+ * admins set them. Nobody is placed here. Written only where, as the
+ * statement runs, the admin still is one, the team is the organization's
+ * and follows none of that directory's groups (no department fills such
+ * a team), and no team is linked to the department yet: a link is never
+ * overwritten, the read's by name or another admin's. Audited once.
+ */
+const linkDepartment = async (
+  env: Env,
+  by: Identity,
+  department: unknown,
+  teamId: unknown
+): Promise<void> => {
+  requireMemberAdmin(by);
+  const named = departmentSchema.safeParse(department);
+  const team = identifierSchema.safeParse(teamId);
+  if (!(named.success && team.success)) {
+    throw refusal(
+      by,
+      directoryErrors.create("directory.department_not_linked")
+    );
+  }
+  const providers = directoryKinds.map(({ provider }) => provider);
+  const db = drizzle(env.DB);
+  const [linked] = await auditedBatch(env, db, [
+    db
+      .insert(directoryDepartments)
+      .select(
+        sql`SELECT DISTINCT ${directoryPeople.provider}, ${named.data}, ${team.data}, 1
+          FROM ${directoryPeople}
+          WHERE ${inList(directoryPeople.provider, providers)}
+            AND ${directoryPeople.department} = ${named.data}
+            AND EXISTS (
+              SELECT 1 FROM ${teams}
+              WHERE ${teams.id} = ${team.data} AND ${teams.organizationId} = ${organizationId}
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM ${directoryGroupTeams}
+              WHERE ${directoryGroupTeams.provider} = ${directoryPeople.provider}
+                AND ${directoryGroupTeams.teamId} = ${team.data}
+                AND ${directoryGroupTeams.readAt} IS NOT NULL
+            )
+            AND ${isActiveAdmin(by.userId)}`
+      )
+      // A department linked already keeps its link.
+      .onConflictDoNothing()
+      .returning({ provider: directoryDepartments.provider }),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "directory.department_linked",
+      target: { type: "team", id: team.data },
+    }),
+  ]);
+  if (linked.length > 0) {
+    return;
+  }
+  if (!(await stillAdmin(env, by.userId))) {
+    throw refusal(by, roleErrors.create("role.forbidden"));
+  }
+  throw refusal(by, directoryErrors.create("directory.department_not_linked"));
+};
+
+/**
+ * Undoes an admin's link of `department` to team `teamId`
+ * (`linkDepartment`), in every directory: never a link the read made by
+ * name, which its next run would make again. The read then places nobody
+ * new by it and takes nobody away. Only while the admin still is one, in
+ * the same statement; audited when a link went.
+ */
+const unlinkDepartment = async (
+  env: Env,
+  by: Identity,
+  department: unknown,
+  teamId: unknown
+): Promise<{ unlinked: boolean }> => {
+  requireMemberAdmin(by);
+  const named = departmentSchema.safeParse(department);
+  const team = identifierSchema.safeParse(teamId);
+  if (!(named.success && team.success)) {
+    return { unlinked: false };
+  }
+  const db = drizzle(env.DB);
+  const [unlinked] = await auditedBatch(env, db, [
+    db
+      .delete(directoryDepartments)
+      .where(
+        and(
+          eq(directoryDepartments.department, named.data),
+          eq(directoryDepartments.teamId, team.data),
+          eq(directoryDepartments.byHand, true),
+          isActiveAdmin(by.userId)
+        )
+      )
+      .returning({ provider: directoryDepartments.provider }),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "directory.department_unlinked",
+      target: { type: "team", id: team.data },
+    }),
+  ]);
+  if (unlinked.length === 0 && !(await stillAdmin(env, by.userId))) {
+    throw refusal(by, roleErrors.create("role.forbidden"));
+  }
+  return { unlinked: unlinked.length > 0 };
 };
 
 /**
@@ -1110,6 +1227,23 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await directoryPlacement(this.#env, person)
+    );
+  }
+
+  async linkDepartment(department: string, teamId: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await linkDepartment(this.#env, person, department, teamId);
+    });
+  }
+
+  async unlinkDepartment(
+    department: string,
+    teamId: string
+  ): Promise<{ unlinked: boolean }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await unlinkDepartment(this.#env, person, department, teamId)
     );
   }
 

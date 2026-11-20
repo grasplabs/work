@@ -659,8 +659,9 @@ export const directoryPeople = sqliteTable(
  * Which members' team each department of the directory fills (GRA-2056,
  * directory-teams.ts): by the team's id, linked by name once, when the
  * read first met the department and exactly one team had its name
- * (`teamNameKey`); held by id after, so a rename of either never breaks
- * it. Goes with the team. Names a department and a team, no person.
+ * (`teamNameKey`), or by an admin by hand (GRA-2247); held by id after,
+ * so a rename of either never breaks it. Goes with the team. Names a
+ * department and a team, no person.
  */
 export const directoryDepartments = sqliteTable(
   "directory_departments",
@@ -671,6 +672,11 @@ export const directoryDepartments = sqliteTable(
     teamId: text("team_id")
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
+    /**
+     * Linked by an admin by hand (GRA-2247, members.ts `linkDepartment`),
+     * not by the read by name: the only links an admin undoes.
+     */
+    byHand: integer("by_hand", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({ columns: [table.provider, table.department] }),

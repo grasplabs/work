@@ -308,6 +308,7 @@ export const rpcParamNames: ParamNames = {
     "erasure": ["userId"],
     "invitations": [],
     "invite": ["email","role"],
+    "linkDepartment": ["department","teamId"],
     "list": [],
     "releaseAddress": ["email"],
     "releaseTeamPin": ["userId","teamId"],
@@ -316,6 +317,7 @@ export const rpcParamNames: ParamNames = {
     "revokeSessions": ["userId"],
     "setRole": ["userId","role"],
     "teams": [],
+    "unlinkDepartment": ["department","teamId"],
     "withdrawInvitation": ["invitationId"],
   },
   "ModelsRpc": {

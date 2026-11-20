@@ -11,6 +11,14 @@ msgstr ""
 msgid "“{action}” doesn't exist yet"
 msgstr "« {action} » n’existe pas encore"
 
+#: src/settings/directory-placement.tsx
+msgid "“{department}” couldn't be linked to that team. A team that follows the directory’s groups takes no department."
+msgstr "« {department} » n’a pas pu être lié à cette équipe. Une équipe qui suit les groupes de l’annuaire ne prend aucun service."
+
+#: src/settings/directory-placement.tsx
+msgid "“{department}” is linked to {team}."
+msgstr "« {department} » est lié à {team}."
+
 #. A statement, quoted. Use the quotation marks of your language.
 #: src/brain/brain.ts
 msgid "“{text}”"
@@ -5077,6 +5085,10 @@ msgstr "Refuser"
 msgid "Deny the packages for {subject}"
 msgstr "Refuser les paquets pour {subject}"
 
+#: src/settings/directory-placement.tsx
+msgid "Departments linked by hand"
+msgstr "Services liés à la main"
+
 #: src/apps/app-start.tsx
 msgid "Describe the App"
 msgstr "Décrivez l'App"
@@ -8447,6 +8459,10 @@ msgstr "Lignes"
 #: src/settings/chat-accounts.tsx
 msgid "Link"
 msgstr "Lien"
+
+#: src/settings/directory-placement.tsx
+msgid "Link department"
+msgstr "Lier le service"
 
 #. placeholder {0}: app.name
 #: src/apps/app-own-link.tsx
@@ -14199,6 +14215,10 @@ msgstr "L’équipe ne correspond pas à l’annuaire"
 msgid "Team for {who}"
 msgstr "Équipe pour {who}"
 
+#: src/settings/directory-placement.tsx
+msgid "Team for the department “{department}”"
+msgstr "Équipe pour le service « {department} »"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
 msgstr "responsables ont parlé"
@@ -14801,6 +14821,10 @@ msgstr "L’annuaire les a mis dans une équipe à laquelle leur service n’est
 msgid "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
 msgstr "L’annuaire a refusé de les lister, donc personne n’a été suspendu pour un compte supprimé dans l’annuaire ; tout le reste a été lu. Le compte qui a connecté l’annuaire n’a peut-être pas le droit de les lister : demandez au support de Grasp."
 
+#: src/settings/directory-placement.tsx
+msgid "The directory’s daily read puts everyone in each department in its team, except anyone an admin took off it by hand. Undoing a link takes nobody off."
+msgstr "La lecture quotidienne de l’annuaire place chaque personne de chaque service dans son équipe, sauf celles qu’un administrateur en a retirées à la main. Annuler un lien ne retire personne."
+
 #: src/settings/directory-reads.tsx
 msgid "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
 msgstr "La liste de l’annuaire n’a pas répondu sous forme de liste, donc personne n’a été suspendu pour un compte supprimé dans l’annuaire ; tout le reste a été lu. Grasp réessaie à sa prochaine lecture quotidienne. Si cela persiste, demandez au support de Grasp."
@@ -14893,6 +14917,10 @@ msgstr "Les dernières exécutions, les plus récentes en premier."
 #: src/interview/transcript.tsx
 msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
 msgstr "L’intervention est supprimée maintenant, tout comme ce que j’y ai marqué. Ce que j’en ai noté figure dans ce que je vous relis à la fin : retirez-le là, et il sera supprimé pour de bon une fois notre échange terminé. Cette action est irréversible."
+
+#: src/settings/directory-placement.tsx
+msgid "The link couldn't be undone. Try again."
+msgstr "Le lien n’a pas pu être annulé. Réessayez."
 
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."
@@ -15964,6 +15992,7 @@ msgstr "En cours"
 
 #: src/chat/saved-memory.tsx
 #: src/drafts/share-with-team.tsx
+#: src/settings/directory-placement.tsx
 msgid "Undo"
 msgstr "Annuler"
 
@@ -15994,6 +16023,10 @@ msgstr "Annuler les modifications"
 #: src/drafts/draft-history.tsx
 msgid "Undo the changes only you see?"
 msgstr "Annuler les modifications que vous seul voyez ?"
+
+#: src/settings/directory-placement.tsx
+msgid "Undo the link of “{department}” to {team}"
+msgstr "Annuler le lien de « {department} » avec {team}"
 
 #: src/drafts/draft-history.tsx
 msgid "Undone changes"

@@ -44,8 +44,10 @@ import type { DirectoryKind } from "./directory-ties.ts";
 //   by the membership's own key, which goes with the membership).
 // - A department taken for a team it isn't: a department fills a team by
 //   the team's id, linked by name once, when exactly one team has the
-//   department's name and still has it as the link is written. No team is
-//   ever made here; a department with none, or none at all, places nobody.
+//   department's name and still has it as the link is written, or by an
+//   admin by hand (GRA-2247, members.ts `linkDepartment`), which the read
+//   never overwrites. No team is ever made here; a department with none,
+//   or none at all, places nobody.
 // - Someone moved out of every team: a member leaves a team the read made
 //   them a member of only for another their department fills now; a
 //   department cleared, or one no team is linked to, takes nobody away.
@@ -492,7 +494,7 @@ export const placementStatements = (
       db
         .insert(directoryDepartments)
         .select(
-          sql`SELECT ${kind.provider}, value ->> 0, value ->> 1 FROM json_each(${value}) WHERE ${linkable}`
+          sql`SELECT ${kind.provider}, value ->> 0, value ->> 1, 0 FROM json_each(${value}) WHERE ${linkable}`
         )
         .onConflictDoNothing(),
     ]),

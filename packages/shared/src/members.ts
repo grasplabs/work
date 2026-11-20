@@ -96,11 +96,24 @@ export interface TeamPin extends PlacedMember {
   pinnedAt: string;
 }
 
+/**
+ * A department of the directory an admin linked to a team by hand
+ * (GRA-2247): the directory's read places everyone in it there, as it
+ * does for a department named like a team. Undone only by an admin.
+ */
+export interface DepartmentLink {
+  /** The department as the directory holds it. */
+  department: string;
+  team: TeamName;
+}
+
 /** Who the directory leaves for an admin to place, and what admins placed by hand. */
 export interface DirectoryPlacement {
   unplaced: UnplacedMember[];
   movers: DirectoryMover[];
   pins: TeamPin[];
+  /** The departments admins linked to a team by hand. */
+  departmentLinks: DepartmentLink[];
 }
 
 /**
@@ -304,9 +317,27 @@ export interface MembersApi {
   /**
    * Who of the members the directory leaves for an admin to place (in no
    * team; in a team its read made that their department no longer fills),
-   * and every hand pin on a member tied to the directory.
+   * every hand pin on a member tied to the directory, and the departments
+   * admins linked by hand.
    */
   directoryPlacement: () => Promise<DirectoryPlacement>;
+  /**
+   * Links the directory's `department`, which no team is linked to, to
+   * the team `teamId`, audited: the directory's next daily read places
+   * everyone in it there, leaving an admin's hand changes as they are.
+   * For each of the organization's directories that lists the
+   * department. Refused for a team that follows the directory's groups.
+   */
+  linkDepartment: (department: string, teamId: string) => Promise<void>;
+  /**
+   * Undoes an admin's link of `department` to team `teamId`, audited: the
+   * read places nobody new by it, and takes nobody away. Answers whether
+   * there was one.
+   */
+  unlinkDepartment: (
+    department: string,
+    teamId: string
+  ) => Promise<{ unlinked: boolean }>;
 }
 
 /** Why an admin's change to a member was refused or not finished. */
