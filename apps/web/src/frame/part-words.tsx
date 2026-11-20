@@ -248,6 +248,45 @@ export const usePartWords = (): GraspWordsCatalog => {
     }
     return t`${name}: ${reason}`;
   };
+  // A tool group's name by its key (the library's groupKeyOf): what a suite's
+  // part acts on, translated, and its products by their own names, which
+  // stay as they are. A key not here is named from the tools' English names.
+  const toolGroups = new Map([
+    ["mail", t({ message: "Mail", context: "a group of an app's tools" })],
+    [
+      "calendar",
+      t({ message: "Calendar", context: "a group of an app's tools" }),
+    ],
+    ["chats", t({ message: "Chats", context: "a group of an app's tools" })],
+    ["files", t({ message: "Files", context: "a group of an app's tools" })],
+    [
+      "meetings",
+      t({ message: "Meetings", context: "a group of an app's tools" }),
+    ],
+    ["lists", t({ message: "Lists", context: "a group of an app's tools" })],
+    [
+      "sheets",
+      t({
+        message: "Sheets",
+        context: "Google's spreadsheets, a group of tools",
+      }),
+    ],
+    [
+      "contacts",
+      t({ message: "Contacts", context: "a group of an app's tools" }),
+    ],
+    [
+      "pull requests",
+      t({ message: "Pull requests", context: "a group of an app's tools" }),
+    ],
+    ["excel", "Excel"],
+    ["word", "Word"],
+    ["onenote", "OneNote"],
+    ["planner", "Planner"],
+    ["todo", "To Do"],
+    ["sharepoint", "SharePoint"],
+    ["onedrive", "OneDrive"],
+  ]);
   return {
     approvalRequest: {
       ...approval,
@@ -1480,6 +1519,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       showTools: (group, count) =>
         t`${plural(count, { one: `Show the # ${group} tool`, other: `Show the # ${group} tools` })}`,
       other: t`Other`,
+      toolGroup: (key) => toolGroups.get(key),
       readsWord: t`Reads`,
       changesWord: t`Changes`,
       showMore: t`Show more`,

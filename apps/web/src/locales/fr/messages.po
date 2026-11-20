@@ -4081,6 +4081,11 @@ msgctxt "a change's source"
 msgid "by the App"
 msgstr "par l’application"
 
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Calendar"
+msgstr "Calendrier"
+
 #: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "A appelé un modèle"
@@ -4573,6 +4578,11 @@ msgstr "Discuter avec {name}"
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Chats"
 msgstr "Discussions"
+
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Chats"
+msgstr "Conversations"
 
 #. Folder of the chats people had with a Grasp agent
 #: src/brain/brain.ts
@@ -5307,6 +5317,11 @@ msgstr "Consentir et se connecter"
 msgctxt "what the Brain remembers about something"
 msgid "Contact"
 msgstr "Contact"
+
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Contacts"
+msgstr "Contacts"
 
 #: src/frame/part-words.tsx
 msgctxt "a filter's operator"
@@ -7463,6 +7478,11 @@ msgstr "Fichier {where} : {message}"
 #: src/apps/app-code.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/items.ts
+msgid "Files"
+msgstr "Fichiers"
+
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
 msgid "Files"
 msgstr "Fichiers"
 
@@ -10316,6 +10336,11 @@ msgstr "Liste ce qui a été terminé, et par qui."
 msgid "Listening"
 msgstr "À l’écoute"
 
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Lists"
+msgstr "Listes"
+
 #: src/agents/agent-templates.ts
 msgid "Lists what matters today from mail, tasks and calendar."
 msgstr "Liste ce qui compte aujourd’hui dans le courrier, les tâches et l’agenda."
@@ -10501,6 +10526,11 @@ msgstr "Madrid"
 msgid "Mail"
 msgstr "E-mail"
 
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Mail"
+msgstr "Courrier"
+
 #: src/settings/stephen-settings.tsx
 msgid "Mail and messages to other people, after they press a card with every recipient."
 msgstr "Courriels et messages à d'autres personnes, après avoir appuyé sur une carte avec chaque destinataire."
@@ -10678,6 +10708,11 @@ msgid "Meeting prep"
 msgstr "Préparation des réunions"
 
 #: src/brain/sources-page.tsx
+msgid "Meetings"
+msgstr "Réunions"
+
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
 msgid "Meetings"
 msgstr "Réunions"
 
@@ -13822,6 +13857,11 @@ msgstr "Publier {name}"
 msgid "Publishing undone"
 msgstr "Publication annulée"
 
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Pull requests"
+msgstr "Pull requests"
+
 #. Product name: keep it as it is
 #: src/brain/brain-atlas.ts
 #: src/brain/brain.ts
@@ -15907,6 +15947,11 @@ msgstr "Partage"
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Partage"
+
+#: src/frame/part-words.tsx
+msgctxt "Google's spreadsheets, a group of tools"
+msgid "Sheets"
+msgstr "Sheets"
 
 #: src/agents/new-agent.tsx
 msgid "Should it work on its own?"

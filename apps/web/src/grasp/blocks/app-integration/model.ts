@@ -25,8 +25,9 @@ export interface AppTool {
   /** What Grasp may do with it now. */
   choice: AppToolChoice;
   /**
-   * What it acts on, in the plural ("Contacts"), when its name does not say it plainly. Without it
-   * the group is read from the name (tools.ts).
+   * Its group's name, in the page's language: what it acts on, in the plural ("Contacts"), or the
+   * part of a suite it belongs to, as the host names it ("Excel", "To Do"). Without it the group is
+   * read from the id's part before a dot ("todo.lists"), else from the name (tools.ts).
    */
   group?: string;
 }

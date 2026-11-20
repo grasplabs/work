@@ -101,7 +101,7 @@ const sectionsOf = (
   }
   if (tools.length > 0) {
     // The groups with the most allowed first; before it is connected, the largest.
-    const groups = groupTools(tools)
+    const groups = groupTools(tools, words.toolGroup)
       .filter((group) => group.name !== null)
       .toSorted(
         (a, b) => b.allowed - a.allowed || b.tools.length - a.tools.length

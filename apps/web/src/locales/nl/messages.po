@@ -4081,6 +4081,11 @@ msgctxt "a change's source"
 msgid "by the App"
 msgstr "door de app"
 
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Calendar"
+msgstr "Agenda"
+
 #: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "Een model aangeroepen"
@@ -4571,6 +4576,11 @@ msgid "Chat with {name}"
 msgstr "Chatten met {name}"
 
 #: src/grasp/frame/grasp-sidebar.tsx
+msgid "Chats"
+msgstr "Chats"
+
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
 msgid "Chats"
 msgstr "Chats"
 
@@ -5307,6 +5317,11 @@ msgstr "Toestemming geven en aanmelden"
 msgctxt "what the Brain remembers about something"
 msgid "Contact"
 msgstr "Contactpersoon"
+
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Contacts"
+msgstr "Contactpersonen"
 
 #: src/frame/part-words.tsx
 msgctxt "a filter's operator"
@@ -7463,6 +7478,11 @@ msgstr "Bestand {where}: {message}"
 #: src/apps/app-code.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/items.ts
+msgid "Files"
+msgstr "Bestanden"
+
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
 msgid "Files"
 msgstr "Bestanden"
 
@@ -10316,6 +10336,11 @@ msgstr "Zet op een rij wat is afgerond, en wie het deed."
 msgid "Listening"
 msgstr "Luistert"
 
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Lists"
+msgstr "Lijsten"
+
 #: src/agents/agent-templates.ts
 msgid "Lists what matters today from mail, tasks and calendar."
 msgstr "Zet op een rij wat vandaag telt uit mail, taken en agenda."
@@ -10501,6 +10526,11 @@ msgstr "Madrid"
 msgid "Mail"
 msgstr "E-mail"
 
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Mail"
+msgstr "E-mail"
+
 #: src/settings/stephen-settings.tsx
 msgid "Mail and messages to other people, after they press a card with every recipient."
 msgstr "Mail en berichten aan anderen, nadat ze op een kaart met elke ontvanger drukken."
@@ -10678,6 +10708,11 @@ msgid "Meeting prep"
 msgstr "Vergadervoorbereiding"
 
 #: src/brain/sources-page.tsx
+msgid "Meetings"
+msgstr "Vergaderingen"
+
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
 msgid "Meetings"
 msgstr "Vergaderingen"
 
@@ -13822,6 +13857,11 @@ msgstr "{name} publiceren"
 msgid "Publishing undone"
 msgstr "Publicatie ongedaan gemaakt"
 
+#: src/frame/part-words.tsx
+msgctxt "a group of an app's tools"
+msgid "Pull requests"
+msgstr "Pull requests"
+
 #. Product name: keep it as it is
 #: src/brain/brain-atlas.ts
 #: src/brain/brain.ts
@@ -15907,6 +15947,11 @@ msgstr "Delen"
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Delen"
+
+#: src/frame/part-words.tsx
+msgctxt "Google's spreadsheets, a group of tools"
+msgid "Sheets"
+msgstr "Spreadsheets"
 
 #: src/agents/new-agent.tsx
 msgid "Should it work on its own?"
