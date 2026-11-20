@@ -56,6 +56,7 @@ import {
   Doc01Icon,
   Dollar01Icon,
   Download01Icon,
+  DragDropVerticalIcon,
   EditOff03Icon,
   File01Icon,
   FileEditIcon,
@@ -102,6 +103,7 @@ import {
   MoreHorizontalIcon,
   Note01Icon,
   Notification03Icon,
+  ParagraphIcon,
   PauseIcon,
   Pdf01Icon,
   PencilEdit02Icon,
@@ -133,6 +135,7 @@ import {
   StarIcon,
   StopIcon,
   Sun03Icon,
+  Table01Icon,
   TableIcon,
   Tablet01Icon,
   Tag01Icon,
@@ -585,3 +588,9 @@ export const ListBulleted: IconData = LeftToRightListBulletIcon;
 export const QuoteText: IconData = QuoteDownIcon;
 /** A section that folds: its summary, and what it hides. ListCollapseIcon. */
 export const FoldSection: IconData = ListCollapseIcon;
+/** A block's handle in a document: press for its menu, drag to move it. DragDropVerticalIcon. */
+export const BlockHandle: IconData = DragDropVerticalIcon;
+/** Plain text, a paragraph: what a block turns back into. ParagraphIcon. */
+export const TextParagraph: IconData = ParagraphIcon;
+/** A table in a document: rows and columns. Table01Icon. */
+export const TableGrid: IconData = Table01Icon;

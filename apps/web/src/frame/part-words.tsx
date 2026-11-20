@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { useApprovalWords } from "../chat/approval-words.ts";
 import { formatBytes, formatList, formatNumber } from "../format.ts";
+import { addConnectionWords } from "../grasp/add-connection/words.ts";
 import { agentActivityWords } from "../grasp/agent-activity/words.ts";
 import { alertWords } from "../grasp/alert/words.ts";
 import { appBuildingWords } from "../grasp/app-building/words.ts";
@@ -209,6 +210,7 @@ export const englishPartWords: GraspWordsCatalog = {
   carousel: carouselWords,
   connectionRow: connectionRowWords,
   connectService: connectServiceWords,
+  addConnection: addConnectionWords,
   appIntegration: appIntegrationWords,
   connectApp: connectAppWords,
   signIn: signInWords,
@@ -1252,6 +1254,45 @@ export const usePartWords = (): GraspWordsCatalog => {
       keyLine: (last, region) =>
         region === undefined ? t`Key …${last}` : t`Key …${last} · ${region}`,
       connectName: (label) => t`Connect ${label}`,
+    },
+    addConnection: {
+      trigger: t`Add a connection`,
+      title: t`Add a connection`,
+      close: t`Close`,
+      search: t`Search providers`,
+      clearSearch: t`Clear search`,
+      noResults: (query) => t`Nothing matches “${query}”.`,
+      addAnother: t`Add another`,
+      connected: t`Connected`,
+      back: t`All providers`,
+      stepName: (label) => t`Connect ${label}`,
+      key: t`Key`,
+      keyMissing: t`Paste the key.`,
+      showKey: t`Show key`,
+      hideKey: t`Hide key`,
+      paste: t({
+        message: "Paste",
+        context: "put the copied key in the field",
+      }),
+      name: t`Name`,
+      nameOptional: t({
+        message: "Optional",
+        context: "a field that may stay empty",
+      }),
+      nameNote: t`To tell this key from others.`,
+      address: t`Address`,
+      // An address, the same in every language.
+      addressPlaceholder: "https://models.example.com/v1",
+      addressMissing: t`Enter your endpoint's address.`,
+      addressWrong: t`Enter an address that starts with https://.`,
+      getKey: (provider) => t`Get a key from ${provider}`,
+      cancel: t`Cancel`,
+      connect: t`Connect`,
+      connecting: t`Connecting`,
+      refused: t`That key didn't work.`,
+      connectedTitle: (provider) => t`${provider} is connected`,
+      connectedDetail: t`Its models are ready to use.`,
+      done: t`Done`,
     },
     appIntegration: {
       connect: t`Connect`,
