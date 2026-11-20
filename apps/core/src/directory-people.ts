@@ -613,14 +613,15 @@ const failedWith = async (
 };
 
 /**
- * Reads `kind`'s directory of the deployment's own tenant and applies it,
- * once a day: when no read was applied in the day before `at`. Nothing
- * when none is connected.
+ * Reads `kind`'s directory of the deployment's own tenant and applies it:
+ * `daily`, only when no read was applied in the day before `at`; else
+ * whenever asked. Nothing when none is connected.
  */
 const readKind = async (
   env: Env,
   kind: DirectoryKind,
-  at: Date
+  at: Date,
+  daily: boolean
 ): Promise<void> => {
   const [status] = await drizzle(env.DB)
     .select({ readAt: directoryReads.readAt })
@@ -645,6 +646,7 @@ const readKind = async (
     return;
   }
   if (
+    daily &&
     status?.readAt !== null &&
     status?.readAt !== undefined &&
     at.getTime() - status.readAt.getTime() < dayMs - readAheadMs
@@ -707,6 +709,31 @@ const readKind = async (
 export const readDirectories = async (env: Env, at: Date): Promise<void> => {
   for (const kind of directoryKinds) {
     // oxlint-disable-next-line no-await-in-loop -- one provider at a time
-    await readKind(env, kind, at);
+    await readKind(env, kind, at, true);
+  }
+};
+
+/**
+ * Each connected directory read and applied now, past the day the clock
+ * waits (GRA-2248): when a confirm of the onboarding's staff list made
+ * teams in Settings › Members, so its people are in them from then on,
+ * not from the next daily read. The daily read itself, the one way
+ * people are placed: a read already running, or one started after this,
+ * is settled as two of the clock's are, by the later start; a directory
+ * that needs reconnecting is recorded as the clock records it. For
+ * `waitUntil`: never throws; what isn't the directory's own failure (and
+ * so recorded) is logged.
+ */
+export const readDirectoriesNow = async (env: Env): Promise<void> => {
+  for (const kind of directoryKinds) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one provider at a time
+      await readKind(env, kind, new Date(), false);
+    } catch (error) {
+      log.error("directory.read_now_failed", {
+        provider: kind.provider,
+        ...errorFields(error),
+      });
+    }
   }
 };

@@ -1,5 +1,6 @@
 import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import {
+  noTeamId,
   onboardingPeopleMax,
   onboardingTeamsMax,
   rosterSchema,
@@ -37,6 +38,19 @@ const inDirectory = (
   manager: null,
   ...fields,
 });
+
+/** A staff list with Bo in `team`. */
+const rowsOf = (team: string) => [
+  ["Name", "Email", "Team"],
+  ["Ada Bos", "ada@x.com", "Sales"],
+  ["Bo Kok", "bo@x.com", team],
+];
+
+/** The team Bo is in. */
+const teamOfBo = (roster: Roster) =>
+  roster.teams.find(
+    ({ id }) => id === roster.people.find(({ name }) => name === "Bo Kok")?.team
+  );
 
 describe("a staff list as rows", () => {
   it("reads commas, semicolons or tabs, whichever the first line uses, with quoted cells", () => {
@@ -401,6 +415,39 @@ describe("a staff list shared again", () => {
       ada: "t-sales",
       bo: "t-sales-2",
       valid: true,
+    });
+  });
+
+  it("keeps the team for people without one under its own id in every language, and never as a saved team of its name", () => {
+    const english = staffListOf(rowsOf(""), "Other").roster;
+    // Saved in English, read again in Dutch; and a saved team that took
+    // the name the list gives it, from before it had an id of its own.
+    const savedOther: Roster = rosterSchema.parse({
+      teams: [
+        { id: "members-other", name: "Overig", lead: null },
+        ...english.teams,
+      ],
+      people: [{ id: "ada", name: "Ada Bos", team: "members-other" }],
+    });
+    const dutch = withSaved(
+      staffListOf(rowsOf(""), "Overig").roster,
+      savedOther
+    );
+    expect({
+      english: teamOfBo(english),
+      dutch: teamOfBo(dutch),
+      // Named as the team for people without one: that team.
+      named: teamOfBo(staffListOf(rowsOf("other"), "Other").roster)?.id,
+    }).toStrictEqual({
+      english: {
+        id: noTeamId,
+        name: "Other",
+        lead: null,
+        does: "",
+        off: false,
+      },
+      dutch: { id: noTeamId, name: "Overig", lead: null, does: "", off: false },
+      named: noTeamId,
     });
   });
 
