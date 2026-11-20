@@ -617,8 +617,12 @@ const styles = stylex.create({
   },
   compactField: {
     gridArea: "field",
-    // The text never gives: narrower, the level folds, then the row goes tall (useRowFit).
-    minWidth: grasp.composerFieldLeast,
+    // The text never gives: narrower, the level folds, then the row goes tall (useRowFit). At rest
+    // the placeholder gives instead, cut with an ellipsis, so the row stays one line.
+    minWidth: {
+      default: grasp.composerFieldLeast,
+      ":has(textarea:placeholder-shown)": 0,
+    },
   },
   compactFieldTall: {
     // Its words stand where they stood in the row's text, over the foot row.
@@ -1147,12 +1151,13 @@ const useRowFit = (
       }
       const room = inner - sides - endWidth;
       const words = text;
-      if (room < least || words.includes("\n")) {
-        putTall(true);
-        return;
-      }
+      // At rest there are no words to keep whole: the placeholder ends in an ellipsis on one line.
       if (words === "") {
         putTall(false);
+        return;
+      }
+      if (room < least || words.includes("\n")) {
+        putTall(true);
         return;
       }
       if (pen !== null) {
