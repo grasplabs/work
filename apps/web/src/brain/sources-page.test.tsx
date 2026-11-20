@@ -36,7 +36,7 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { formatDateTime } from "../format.ts";
+import { formatDateTime, formatDay } from "../format.ts";
 import { SourcesPage } from "./sources-page.tsx";
 
 // The Brain's Sources page, against core's `brainSources` as the page
@@ -64,6 +64,9 @@ const unnamed: BrainSourceRef = { producer: "upload", id: "u-4" };
 /** The teams the person is in. */
 const teams = [{ id: "t-1", name: "Finance" }];
 
+/** When each listed source was added. */
+const addedAt = "2026-11-10T09:00:00.000Z";
+
 const listed = (
   source: BrainSourceRef,
   firstLine: string,
@@ -72,7 +75,7 @@ const listed = (
 ): BrainSourceListed => ({
   source,
   version: versions,
-  addedAt: "2026-11-10T09:00:00.000Z",
+  addedAt,
   firstLine,
   personal,
   versions,
@@ -519,11 +522,52 @@ const submitted = async (form: HTMLFormElement): Promise<void> => {
   await settle();
 };
 
-/** The upload's file picker as it stands: it starts afresh after each upload. */
+/** The upload's dialog, while it is open. */
+const uploadDialog = (): Element | null =>
+  document.querySelector('[role="dialog"]');
+
+/** The text of the upload's dialog, or nothing while it is closed. */
+const uploadText = (): string => uploadDialog()?.textContent ?? "";
+
+/** Opens the upload's dialog by the page head's Upload, unless it is open. */
+const openUpload = async (): Promise<void> => {
+  if (uploadDialog() !== null) {
+    return;
+  }
+  const trigger = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      'button[aria-haspopup="dialog"]'
+    ),
+  ].find((each) => each.textContent.trim() === "Upload");
+  if (trigger === undefined) {
+    throw new TypeError("No Upload in the page's head");
+  }
+  await act(async () => {
+    trigger.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** Closes the upload's dialog by its Cancel. */
+const cancelUpload = async (): Promise<void> => {
+  const cancel = [...(uploadDialog()?.querySelectorAll("button") ?? [])].find(
+    (each) => each.textContent.trim().startsWith("Cancel")
+  );
+  if (cancel === undefined) {
+    throw new TypeError("No Cancel in the upload's dialog");
+  }
+  await act(async () => {
+    cancel.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
+/** The upload's file picker as it stands, in its dialog: it starts afresh each time the dialog opens. */
 const uploadPicker = (): HTMLInputElement => {
-  const picker = [...document.querySelectorAll("input")].find(
-    (input) =>
-      input.type === "file" && input.closest("[data-slot=panel]") === null
+  const picker = [...(uploadDialog()?.querySelectorAll("input") ?? [])].find(
+    (input) => input.type === "file"
   );
   if (!picker) {
     throw new TypeError("No upload picker");
@@ -858,20 +902,24 @@ describe(SourcesPage, () => {
         "No first line",
         "2 versions",
         "Only you",
-        "Those marked Only you are yours alone",
       ].map((text) => listedText.includes(text)),
       moreGone: listedText.includes("Show more"),
       // Once, for the one source core gave a read time, in the page's
       // own date format.
       lastRead: listedText.split(`Last read ${formatDateTime(lastReadAt)}`)
         .length,
+      // Each row says the day it was added, without the time.
+      added: [formatDay(addedAt), formatDateTime(addedAt)].map((text) =>
+        listedText.includes(text)
+      ),
       newest: newest.includes("Invoices are paid on Fridays."),
       oldest: oldest.includes("Invoices are paid monthly."),
       calls,
     }).toStrictEqual({
-      listed: [true, true, true, true, true, true],
+      listed: [true, true, true, true, true],
       moreGone: false,
       lastRead: 2,
+      added: [true, false],
       newest: true,
       oldest: true,
       calls: [
@@ -1029,26 +1077,12 @@ describe(SourcesPage, () => {
     }).toStrictEqual({ nothing: [true, false], some: true });
   });
 
-  it("says what Only you means only when there are sources to mark", async () => {
+  it("says when there is nothing in the Brain the person may read", async () => {
     await shown([], { empty: true });
-    const empty = document.body.textContent;
-    act(() => {
-      root?.unmount();
-    });
-    document.body.replaceChildren();
-    await shown([]);
-    const listedText = document.body.textContent;
 
-    expect({
-      empty: {
-        onlyYou: empty.includes("Those marked Only you"),
-        nothing: empty.includes("Nothing in the Brain you may read yet"),
-      },
-      listed: listedText.includes("Those marked Only you"),
-    }).toStrictEqual({
-      empty: { onlyYou: false, nothing: true },
-      listed: true,
-    });
+    expect(document.body.textContent).toContain(
+      "Nothing in the Brain you may read yet"
+    );
   });
 
   it("asks one search at a time: a question sent while one is searched is not asked", async () => {
@@ -1208,6 +1242,7 @@ describe(SourcesPage, () => {
     // React says what it can't render right (two children of one key) here.
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const { calls } = await shown([]);
+    await openUpload();
     await pick(
       uploadPicker(),
       new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" })
@@ -1224,6 +1259,7 @@ describe(SourcesPage, () => {
     await settle();
     await submitted(uploadForm());
     await settle();
+    const dialogClosed = uploadDialog() === null;
     await press("Handbook");
     await settle();
     const opened = panel();
@@ -1234,6 +1270,7 @@ describe(SourcesPage, () => {
     expect({
       options,
       errors: errors.mock.calls.map(([message]) => String(message)),
+      dialogClosed,
       opened: [
         "Team Finance can read this upload.",
         "Upload new version",
@@ -1244,6 +1281,7 @@ describe(SourcesPage, () => {
     }).toStrictEqual({
       options: ["Only me", "Team Finance", "Everyone"],
       errors: [],
+      dialogClosed: true,
       opened: [true, true, true],
       closed: "",
       calls: [
@@ -1261,20 +1299,24 @@ describe(SourcesPage, () => {
   it("chooses Only me until the person picks other readers, and says why an upload or an upload's details were refused", async () => {
     const refused = "Files are being read for many people at the moment.";
     await shown([], { uploadRefusal: refused });
+    await openUpload();
     const picker = uploadPicker();
     const chosen = readersChosen();
     await pick(picker, new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" }));
     await submitted(uploadForm());
-    const uploadText = section("Upload a file");
+    const refusedText = uploadText();
+    await cancelUpload();
     await press("Handbook");
     await settle();
 
     expect({
       chosen,
       accepts: picker.accept.split(",").map((type) => type.trim()),
-      // The types and the limit, as core's own lists hold them.
-      says: uploadText.includes(".xlsx, and .vtt files of up to 10 MB."),
-      uploadSaysWhy: uploadText.includes(refused),
+      // The limit, as core's own holds it.
+      says: refusedText.includes(
+        "PDF, Word, Excel or transcripts, up to 10 MB."
+      ),
+      uploadSaysWhy: refusedText.includes(refused),
       panelSaysWhy: panel().includes(refused),
     }).toStrictEqual({
       chosen: "Only me",
@@ -1294,8 +1336,10 @@ describe(SourcesPage, () => {
         message: "Core's own words",
       },
     });
-    // The picker starts afresh after an upload: each choice finds it anew.
+    // The dialog closes once a file is uploaded, and its picker starts
+    // afresh when it opens again: each choice finds it anew.
     const choose = async (name: string) => {
+      await openUpload();
       await pick(
         uploadPicker(),
         new File(["WEBVTT"], name, { type: "text/vtt" })
@@ -1306,10 +1350,10 @@ describe(SourcesPage, () => {
     };
     await choose("long.vtt");
     await submit();
-    const whileHeld = section("Upload a file");
+    const whileHeld = uploadText();
     held.resolve(true);
     await settle();
-    const refusedText = section("Upload a file");
+    const refusedText = uploadText();
     await submit();
     await choose("other.vtt");
     await submit();
@@ -1337,6 +1381,7 @@ describe(SourcesPage, () => {
   it("keeps the file picker out of reach while a file uploads, so the next file chosen isn't lost", async () => {
     const held = Promise.withResolvers<boolean>();
     await shown([], { uploading: held.promise });
+    await openUpload();
     await pick(
       uploadPicker(),
       new File(["WEBVTT"], "first.vtt", { type: "text/vtt" })
@@ -1346,6 +1391,7 @@ describe(SourcesPage, () => {
     const whileUploading = uploadPicker().disabled;
     held.resolve(true);
     await settle();
+    await openUpload();
 
     expect({
       before,
@@ -1506,9 +1552,11 @@ describe(SourcesPage, () => {
   it("refuses a file past the limit, new or as a new version, before reading or sending it", async () => {
     const { calls, uploadIds, versionIds } = await shown([]);
     const tooLarge = uploadMaxBytes + 1;
+    await openUpload();
     await pick(uploadPicker(), fileSized("large.vtt", tooLarge));
     await submitted(uploadForm());
-    const uploadText = section("Upload a file");
+    const refusedText = uploadText();
+    await cancelUpload();
     await press("Handbook");
     await settle();
     const version = versionFormOf();
@@ -1518,7 +1566,7 @@ describe(SourcesPage, () => {
     expect({
       sent: [uploadIds.length, versionIds.length],
       calls: calls.filter((call) => call.startsWith("upload")),
-      said: [uploadText, panel()].map((text) =>
+      said: [refusedText, panel()].map((text) =>
         text.includes("This file is over the upload limit of 10 MB.")
       ),
     }).toStrictEqual({ sent: [0, 0], calls: [], said: [true, true] });
@@ -1593,6 +1641,7 @@ describe(SourcesPage, () => {
   it("reads an admin's shared uploads again after an upload", async () => {
     const { calls } = await shown([], { admin: true });
     const before = calls.length;
+    await openUpload();
     await pick(
       uploadPicker(),
       new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" })

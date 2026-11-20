@@ -55,9 +55,19 @@ import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+  DialogTrigger,
+} from "../grasp/dialog/index.ts";
 import { Empty, EmptyHeader, EmptyTitle } from "../grasp/empty/index.ts";
-import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
 import { FileUpload } from "../grasp/file-upload/index.ts";
+import { Form } from "../grasp/form/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Cable, Search as SearchIcon, Trash } from "../grasp/icons/index.ts";
 import {
@@ -671,7 +681,7 @@ const SearchResults = ({
   );
 };
 
-/** Uploading a file into the Brain: the file, and who may read it. */
+/** Uploading a file into the Brain: the file, and who may read it, then Upload. */
 const UploadForm = ({
   teams,
   onUploaded,
@@ -681,16 +691,14 @@ const UploadForm = ({
 }) => {
   const { t } = useLingui();
   const core = useCore();
+  const formId = useId();
   // The upload's id, minted for the file chosen and sent again when it is
   // retried, so a retry after a lost answer is the same upload.
   const [file, setFile] = useState<{ chosen: File; uploadId: string }>();
-  // Each upload done starts the picker afresh, without the file it sent.
-  const [uploads, setUploads] = useState(0);
   const [choice, setChoice] = useState("me");
   const [sent, setSent] = useState<Read<{ source: BrainSourceRef }>>();
   const busy = sent?.state === "loading";
-  // What an upload takes, from core's own limits.
-  const types = formatList(Object.keys(uploadTypes).map((type) => `.${type}`));
+  // The limit, from core's own.
   const size = formatBytes(uploadMaxBytes);
   const readers = [
     { value: "me", label: t`Only me` },
@@ -698,87 +706,123 @@ const UploadForm = ({
     { value: "everyone", label: t`Everyone` },
   ];
   return (
-    <form
-      {...stylex.props(styles.stack)}
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (file === undefined || busy) {
-          return;
-        }
-        setSent({ state: "loading" });
-        void (async () => {
-          const answer = await readFrom(
-            core,
-            async (sources) =>
-              await sources.upload(
-                await fileOf(file.chosen),
-                readersOf(choice),
-                file.uploadId
-              )
-          );
-          setSent(answer);
-          if (answer.state === "ready") {
-            setFile(undefined);
-            setUploads((before) => before + 1);
-            onUploaded(answer.data.source);
-          }
-        })();
-      }}
-    >
-      <div {...stylex.props(styles.fields)}>
-        <Field layout={styles.grow}>
-          <FieldLabel>
-            <Trans>File</Trans>
-          </FieldLabel>
-          <FileUpload
-            accept={uploadAccept}
-            // Out of reach while a file uploads: the picker starts afresh
-            // when it is done, which would drop a file chosen meanwhile.
-            disabled={busy}
-            key={uploads}
-            onValueChange={([chosen]) => {
-              setFile(
-                chosen === undefined
-                  ? undefined
-                  : { chosen, uploadId: crypto.randomUUID() }
+    <>
+      <DialogTitle>
+        <Trans>Upload a file</Trans>
+      </DialogTitle>
+      <DialogBody>
+        <Form
+          id={formId}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (file === undefined || busy) {
+              return;
+            }
+            setSent({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(
+                core,
+                async (sources) =>
+                  await sources.upload(
+                    await fileOf(file.chosen),
+                    readersOf(choice),
+                    file.uploadId
+                  )
               );
-            }}
-            variant="button"
-          />
-        </Field>
-        <Field layout={styles.grow}>
-          <FieldLabel>
-            <Trans context="a file uploaded into the Brain">
-              Who may read it
-            </Trans>
-          </FieldLabel>
-          <Select
-            items={readers}
-            onValueChange={(value) => {
-              if (value !== null) {
-                setChoice(value);
+              setSent(answer);
+              if (answer.state === "ready") {
+                onUploaded(answer.data.source);
               }
-            }}
-            value={choice}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent />
-          </Select>
-        </Field>
-        <Button disabled={file === undefined || busy} type="submit">
+            })();
+          }}
+        >
+          <Field>
+            <FieldLabel>
+              <Trans>File</Trans>
+            </FieldLabel>
+            <FileUpload
+              accept={uploadAccept}
+              // Out of reach while a file uploads: the dialog closes when
+              // it is done, which would drop a file chosen meanwhile.
+              disabled={busy}
+              onValueChange={([chosen]) => {
+                setFile(
+                  chosen === undefined
+                    ? undefined
+                    : { chosen, uploadId: crypto.randomUUID() }
+                );
+              }}
+              variant="button"
+            />
+            <FieldDescription>
+              <Trans>PDF, Word, Excel or transcripts, up to {size}.</Trans>
+            </FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel>
+              <Trans context="a file uploaded into the Brain">
+                Who may read it
+              </Trans>
+            </FieldLabel>
+            <Select
+              items={readers}
+              onValueChange={(value) => {
+                if (value !== null) {
+                  setChoice(value);
+                }
+              }}
+              value={choice}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          </Field>
+          {sent?.state === "refused" ? <UploadRefusal refused={sent} /> : null}
+        </Form>
+      </DialogBody>
+      <DialogFooter>
+        <DialogAction>{t`Cancel`}</DialogAction>
+        <Button
+          disabled={file === undefined || busy}
+          form={formId}
+          type="submit"
+          variant="ink"
+        >
           {busy ? t`Uploading…` : t`Upload`}
         </Button>
-      </div>
-      <Text size="sm" tone="muted">
-        <Trans>
-          It takes {types} files of up to {size}. Who may read it stays as you
-          choose: to share it with others, upload it again for them.
-        </Trans>
-      </Text>
-      {sent?.state === "refused" ? <UploadRefusal refused={sent} /> : null}
-    </form>
+      </DialogFooter>
+    </>
+  );
+};
+
+/**
+ * The page's Upload, in its head: a dialog with the upload's form, which
+ * starts afresh each time it opens and closes once the file is uploaded.
+ */
+const UploadDialog = ({
+  teams,
+  onUploaded,
+}: {
+  teams: Team[];
+  onUploaded: (source: BrainSourceRef) => void;
+}) => {
+  const { t } = useLingui();
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog onOpenChange={setOpen} open={open}>
+      <DialogTrigger>{t`Upload`}</DialogTrigger>
+      <DialogContent closeLabel={t`Close`}>
+        <UploadForm
+          onUploaded={(source) => {
+            setOpen(false);
+            onUploaded(source);
+          }}
+          teams={teams}
+        />
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -1741,7 +1785,7 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
   );
 };
 
-/** The Brain's sources page: search, uploading, then every source, newest first; the connections and the person's own export last. */
+/** The Brain's sources page: Upload in its head, search, then every source, newest first; the connections and the person's own export last. */
 export const SourcesPage = ({
   sources,
   connections,
@@ -1770,7 +1814,6 @@ export const SourcesPage = ({
     version?: number;
     opening: number;
   }>();
-  const uploadHeading = useId();
   // Each change to the sources counts, so the shared uploads read them again.
   const [listing, setListing] = useState(0);
   const [listed, setListed] = useState<Read<BrainSourcePage>>({
@@ -1926,7 +1969,7 @@ export const SourcesPage = ({
             ]
               .filter(given)
               .join(" · "),
-            when: formatDateTime(each.addedAt),
+            when: formatDay(each.addedAt),
           },
           open: () => {
             open(each.source);
@@ -1951,24 +1994,18 @@ export const SourcesPage = ({
     <div {...stylex.props(styles.pane)}>
       <div {...stylex.props(styles.column)}>
         <PageHeader
+          actions={
+            <UploadDialog
+              onUploaded={(source) => {
+                relist();
+                open(source);
+              }}
+              teams={teams}
+            />
+          }
           title={<Trans context="the Brain's sources page">Sources</Trans>}
         />
         <Search onOpen={open} titleOf={titleOf} />
-        <section
-          aria-labelledby={uploadHeading}
-          {...stylex.props(styles.section)}
-        >
-          <Heading id={uploadHeading} level={2} size="ui-sm">
-            <Trans>Upload a file</Trans>
-          </Heading>
-          <UploadForm
-            onUploaded={(source) => {
-              relist();
-              open(source);
-            }}
-            teams={teams}
-          />
-        </section>
         {listed.state === "refused" ? (
           <ErrorText>{listed.message}</ErrorText>
         ) : null}
@@ -2016,14 +2053,6 @@ export const SourcesPage = ({
                   </div>
                 </section>
               )}
-              {kept.some((each) => each.personal) ? (
-                <Text size="sm" tone="muted">
-                  <Trans>
-                    Those marked Only you are yours alone: nobody else sees
-                    them, admins included.
-                  </Trans>
-                </Text>
-              ) : null}
               {more?.state === "refused" ? (
                 <ErrorText>{more.message}</ErrorText>
               ) : null}

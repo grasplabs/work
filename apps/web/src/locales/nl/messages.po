@@ -4877,6 +4877,7 @@ msgstr "Kliffen"
 #: src/brain/forget.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/memories-page.tsx
+#: src/brain/sources-page.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
@@ -9627,10 +9628,6 @@ msgstr "Hij stopt waar hij is en gaat nooit verder. Wat hij al deed, blijft geda
 msgid "It takes {fields}."
 msgstr "Het neemt {fields}."
 
-#: src/brain/sources-page.tsx
-msgid "It takes {types} files of up to {size}. Who may read it stays as you choose: to share it with others, upload it again for them."
-msgstr "Je kunt {types}-bestanden van maximaal {size} uploaden. Wie het mag lezen blijft zoals je kiest: wil je het met anderen delen, upload het dan opnieuw voor hen."
-
 #: src/pages/frame-failure.tsx
 msgid "It took too long to start: the connection may be slow, or the page never finished drawing."
 msgstr "Het starten duurde te lang: de verbinding is misschien traag, of de pagina werd nooit helemaal getekend."
@@ -13547,6 +13544,10 @@ msgstr "Betaalmaatje"
 #: src/export/export-menu.tsx
 msgid "PDF"
 msgstr "PDF"
+
+#: src/brain/sources-page.tsx
+msgid "PDF, Word, Excel or transcripts, up to {size}."
+msgstr "PDF, Word, Excel of transcripten, tot {size}."
 
 #: src/agents/agent-documents.tsx
 msgid "PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each."
@@ -18866,7 +18867,6 @@ msgid "This week"
 msgstr "Deze week"
 
 #: src/brain/memories-page.tsx
-#: src/brain/sources-page.tsx
 msgid "Those marked Only you are yours alone: nobody else sees them, admins included."
 msgstr "Wat met Alleen jij is gemarkeerd, is van jou alleen: niemand anders ziet het, ook geen beheerders."
 
