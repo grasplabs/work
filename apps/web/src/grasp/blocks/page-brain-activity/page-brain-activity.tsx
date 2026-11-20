@@ -88,7 +88,6 @@ export const pageBrainActivityWords: PageBrainActivityWords = {
 };
 
 const styles = stylex.create({
-  page: { paddingBlock: grasp.space8 },
   kept: {
     display: "grid",
     gap: grasp.space2,
@@ -225,11 +224,7 @@ export const PageBrainActivity = ({
     </RowList>
   );
   return (
-    <div
-      ref={root}
-      data-slot="page-brain-activity"
-      {...stylex.props(styles.page)}
-    >
+    <div ref={root} data-slot="page-brain-activity">
       <PageColumn measure="page">
         <PageHeader
           title={said.title}
