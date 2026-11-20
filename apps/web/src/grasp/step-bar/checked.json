@@ -1,0 +1,21 @@
+{
+  "states": {
+    "passed": 0,
+    "total": 0,
+    "variants": []
+  },
+  "contrast": {
+    "lowest": null,
+    "pair": ""
+  },
+  "target": {
+    "smallest": 44,
+    "buttons": 13
+  },
+  "size": {
+    "bytes": 33478,
+    "js": 25813,
+    "css": 7665
+  },
+  "source": "dbf9a6c80f9e7696"
+}

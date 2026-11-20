@@ -12,7 +12,7 @@ import { useAction } from "../grasp/button/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { arrive } from "../grasp/motion/arrive.ts";
 import { Shimmer } from "../grasp/shimmer/index.ts";
-import { StepFoot } from "../grasp/step-foot/index.ts";
+import { StepBar } from "../grasp/step-bar/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { briefOf, instructionsOf, ownBrief } from "./agent-brief.ts";
@@ -84,7 +84,7 @@ const styles = stylex.create({
   // agent above, Back and Next under.
   stage: {
     display: "grid",
-    // The agent and the foot keep their room; a question taller than what
+    // The bar and the agent keep their room; a question taller than what
     // is left scrolls in its own middle row, never the page.
     gridTemplateRows:
       "minmax(min-content, 1fr) minmax(0, auto) minmax(min-content, 1fr)",
@@ -141,7 +141,8 @@ const styles = stylex.create({
   // The `hidden` attribute alone loses to the stage's own display.
   away: { display: "none" },
   // The foot under the answer, as wide as its column.
-  foot: { alignSelf: "start", width: "100%", maxWidth: "40rem" },
+  // The bar at the top, as wide as the answer's column.
+  bar: { width: "100%", maxWidth: "40rem" },
 });
 
 /** The pose the figure takes at a step: listening while it is told about itself, done at the end. */
@@ -377,6 +378,20 @@ export const ManualAgent = ({
         {...stylex.props(styles.stage, phase !== "setup" && styles.away)}
       >
         <div {...stylex.props(styles.top)}>
+          {/* The library's quiet bar at the top of a guided flow (Ruben):
+              ghost Back and Next round the thin progress, "Make agent" on
+              the last step; nothing under the answer. Next submits this
+              form; Enter and Mod+Enter go on, Alt+← goes back. */}
+          <StepBar
+            disabled={!ready[step]}
+            finishLabel={t`Make agent`}
+            layout={styles.bar}
+            loading={making.status.status === "working"}
+            onBack={() => {
+              setAt(at - 1);
+            }}
+            step={{ index: at, count: stepCount }}
+          />
           {/* The last step's card shows the agent itself. */}
           {step === "review" ? null : <Becoming setup={setup} step={step} />}
         </div>
@@ -396,19 +411,6 @@ export const ManualAgent = ({
             />
           </div>
         </div>
-        {/* The library's guided-flow foot (Ruben): Back, how far through,
-            Next as the step's one action, "Make agent" on the last. Next
-            submits this form; Enter and Mod+Enter go on, Alt+← goes back. */}
-        <StepFoot
-          disabled={!ready[step]}
-          finishLabel={t`Make agent`}
-          layout={styles.foot}
-          loading={making.status.status === "working"}
-          onBack={() => {
-            setAt(at - 1);
-          }}
-          step={{ index: at, count: stepCount }}
-        />
       </form>
     </Backdrop>
   );
