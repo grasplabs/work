@@ -13,8 +13,8 @@ import { sectionsFor } from "../settings/sections.ts";
 // (settings/sections.ts); the sidebar lists them while the person is in
 // Settings (grasp/frame/grasp-sidebar.tsx), on a phone in its sheet.
 //
-// A section stands in one column in the page's middle, as wide as the
-// library's settings column: a settings page needs no more, and its rows
+// A section stands in one column in the page's middle, the library's
+// settings column (40rem): a settings page needs no more, and its rows
 // read as one group. Its loading state stands in the same column. Only a
 // section that needs the room (the Audit trail's log beside its details)
 // says `wide` and keeps the page's whole width.
@@ -50,7 +50,7 @@ const SettingsLayout = () => {
             <Outlet />
           </>
         ) : (
-          <PageColumn align="center">
+          <PageColumn measure="settings" align="center">
             {header}
             <Outlet />
           </PageColumn>

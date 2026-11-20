@@ -202,7 +202,12 @@ const WorkspaceSettings = ({
   return (
     <>
       <OrgCard canChange={canChange} organization={organization} />
-      <SectionCard aria-label={t`Settings`} density="compact" flush>
+      <SectionCard
+        variant="grouped"
+        density="compact"
+        flush
+        title={t`Settings`}
+      >
         <SettingsRows>
           <TimeZoneField
             canChange={canChange}
@@ -269,10 +274,7 @@ const WorkspacePending = () => {
   return (
     <>
       <OrgCardLoading canChange={isMemberAdmin(identity)} />
-      <PageSkeletonSettings
-        header={false}
-        sections={[{ rows: 2, title: false }, 1]}
-      />
+      <PageSkeletonSettings header={false} sections={[2, 1]} />
     </>
   );
 };
