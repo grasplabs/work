@@ -3012,6 +3012,10 @@ msgstr "Apps die het gebruikt"
 msgid "Apps it works in"
 msgstr "Apps waarin hij werkt"
 
+#: src/routes/guest.tsx
+msgid "Apps shared with you"
+msgstr "Apps die met je gedeeld zijn"
+
 #: src/chat/agent-change-card.tsx
 msgid "Apps taken off"
 msgstr "Weggehaalde apps"
@@ -7001,6 +7005,7 @@ msgstr "Groepeer de apps en workflows van een proces, een team of een doel in ee
 msgid "Groups of teams"
 msgstr "Groepen van teams"
 
+#: src/people/person-picker.tsx
 #: src/settings/erasures.tsx
 #: src/settings/guests.tsx
 msgid "Guest"
@@ -10059,6 +10064,10 @@ msgstr "Niets is met het project gedeeld, dus ze verliezen geen toegang."
 #: src/guest-sign-in.tsx
 msgid "Nothing is shared with you yet"
 msgstr "Er is nog niets met je gedeeld"
+
+#: src/routes/guest.tsx
+msgid "Nothing is shared with you yet."
+msgstr "Er is nog niets met je gedeeld."
 
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
@@ -13427,6 +13436,7 @@ msgstr "Log in met het account van je organisatie."
 #: src/frame/person-menu.tsx
 #: src/guest-sign-in.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"

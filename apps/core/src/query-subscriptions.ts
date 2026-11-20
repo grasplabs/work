@@ -397,6 +397,12 @@ export interface LiveReads<By extends Reader> {
   /** Drops the latest reading of who reads, so `check` reads now. */
   forget: () => void;
   /**
+   * Whether `by`'s access is read again before every push, never kept
+   * for `accessCacheMs`: a guest's (guest-access.ts), whose App closes to
+   * them the moment it gains a source (app-access.ts). None: kept.
+   */
+  readonly uncached?: (by: By) => boolean;
+  /**
    * Reads the query `request` names as `by`, as `build`, by
    * `deadline`; a throw is a refusal that ends the subscription.
    * `refusalsKept` holds the refused uses the subscription kept already,
@@ -461,6 +467,8 @@ export const pageReads = (
 ): LiveReads<Identity> => ({
   check,
   access,
+  // A guest's access is read before every push (GRA-2235).
+  uncached: (by) => by.guest === true,
   roles: async (by, app) => await rolesOf(env, by, app),
   admit: async (by, app) => await appHost(env, app).admitLiveRead(by.userId),
   revocable: true,
@@ -981,7 +989,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     const key = canonicalJson([app, leaseKey(build)]);
     const now = Date.now();
     let cached = this.#cleared.get(key);
-    if (cached === undefined || cached.by !== by || cached.until <= now) {
+    if (
+      cached === undefined ||
+      cached.by !== by ||
+      cached.until <= now ||
+      this.#reads.uncached?.(by) === true
+    ) {
       cached = {
         by,
         until: now + accessCacheMs,

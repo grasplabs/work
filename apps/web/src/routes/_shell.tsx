@@ -126,6 +126,11 @@ export const Route = createFileRoute("/_shell")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/staff", replace: true });
     }
+    // A guest reaches the Apps shared with them alone (routes/guest.tsx).
+    if (identity.guest === true) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/guest", replace: true });
+    }
     // Just back from signing in, an admin with screens of their company's
     // onboarding left starts in the onboarding. Core out of reach for it: home, as ever.
     const landing = takeJustSignedIn()

@@ -19,6 +19,7 @@ import { staffMayStay } from "../onboarding/gate.ts";
 import { reachesWorkspace } from "../session-check.ts";
 import { authFor, currentMembership, organizationId } from "./auth.ts";
 import { providerIds, signInConfig } from "./config.ts";
+import { isGuestNow } from "./guest-codes.ts";
 
 /**
  * A member's reads as `memberOf` makes them, for one batch with others,
@@ -128,6 +129,26 @@ export const memberOf = async (
 };
 
 /**
+ * Who `userId` is now as someone an App may act for after their call
+ * (a committed mutation's notification, app-notifications.ts): a member
+ * (`memberOf`), or a guest (guest-access.ts), an App's user in no team.
+ * `undefined` for neither. What they may do in the App is then
+ * `functionRoles`' to decide, as for their call itself.
+ */
+export const appUserOf = async (
+  database: D1Database,
+  userId: string
+): Promise<(Member & Pick<Identity, "guest">) | undefined> => {
+  const member = await memberOf(database, userId);
+  if (member !== undefined) {
+    return member;
+  }
+  return (await isGuestNow({ DB: database }, userId))
+    ? { userId, role: "user", teams: [], staff: false, guest: true }
+    : undefined;
+};
+
+/**
  * A Grasp staff member's role now, from the sign-in config:
  * `undefined` once the staff window has closed, they are no longer on the
  * staff list the admin keeps, the company's admin ended staff access,
@@ -170,9 +191,9 @@ export const staffRole = async (
  *
  * So is a guest's (roles.ts `guestRole`): `memberOf` finds no member in
  * them, so every route that asks who a request comes from, the ones
- * added later included, answers a guest as nobody signed in. A route
- * open to guests reads their session itself, as the interview's routes
- * read theirs; none is yet.
+ * added later included, answers a guest as nobody signed in. What is
+ * open to guests is named in one place (guest-access.ts), which alone
+ * reads their identity (`guestIdentity`).
  *
  * A staff session reaches the onboarding alone, whatever the config's
  * staff scope: Grasp's staff identity is for managing a deployment, never
@@ -223,6 +244,38 @@ export const sessionIdentity = async (
   return { ...person, ...member, staff: false };
 };
 
+/** A session, as `sessionIdentity` and `guestIdentity` read it. */
+type ReadSession = Parameters<typeof sessionIdentity>[1];
+
+/**
+ * Who a current session's person is as a guest (roles.ts `guestRole`),
+ * read now: an App's user, in no team, marked `guest`. `undefined` for
+ * anyone else, a member, Grasp staff and an interview's session among
+ * them, and once they are no guest (removed). Only what a guest's
+ * session may reach asks this (guest-access.ts): everything else asks
+ * `sessionIdentity`, which answers a guest as nobody.
+ */
+const guestIdentity = async (
+  env: Env,
+  session: ReadSession
+): Promise<Identity | undefined> => {
+  if (session.staff || session.interview) {
+    return undefined;
+  }
+  return (await isGuestNow(env, session.userId))
+    ? {
+        userId: session.userId,
+        email: session.email,
+        name: session.name,
+        expiresAt: session.expiresAt.toISOString(),
+        role: "user",
+        teams: [],
+        staff: false,
+        guest: true,
+      }
+    : undefined;
+};
+
 /** A signed-in session, as Better Auth and core's records have it now. */
 export interface SignedInSession {
   /** Its ID: never its token, which only its cookie carries. */
@@ -237,7 +290,12 @@ export interface SignedInSession {
  */
 export const signedInSession = async (
   env: Env,
-  headers: Headers
+  headers: Headers,
+  /**
+   * Whether a guest's session counts, as their identity (`guestIdentity`):
+   * only for what guest-access.ts opens to guests.
+   */
+  { guests = false }: { guests?: boolean } = {}
 ): Promise<SignedInSession | undefined> => {
   const config = signInConfig(env);
   const auth = await authFor(env, config);
@@ -249,14 +307,17 @@ export const signedInSession = async (
     return undefined;
   }
   const { session, user } = found;
-  const person = await sessionIdentity(env, {
+  const read: ReadSession = {
     userId: user.id,
     email: user.email,
     name: user.name,
     expiresAt: session.expiresAt,
     staff: session.staff,
     interview: session.interview,
-  });
+  };
+  const person =
+    (await sessionIdentity(env, read)) ??
+    (guests ? await guestIdentity(env, read) : undefined);
   return person === undefined
     ? undefined
     : { sessionId: session.id, expiresAt: session.expiresAt, person };

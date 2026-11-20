@@ -3012,6 +3012,10 @@ msgstr "Apps que usa"
 msgid "Apps it works in"
 msgstr "Apps en las que trabaja"
 
+#: src/routes/guest.tsx
+msgid "Apps shared with you"
+msgstr "Apps compartidas contigo"
+
 #: src/chat/agent-change-card.tsx
 msgid "Apps taken off"
 msgstr "Apps quitadas"
@@ -7001,6 +7005,7 @@ msgstr "Agrupa las apps y los flujos de trabajo de un proceso, un equipo o un ob
 msgid "Groups of teams"
 msgstr "Grupos de equipos"
 
+#: src/people/person-picker.tsx
 #: src/settings/erasures.tsx
 #: src/settings/guests.tsx
 msgid "Guest"
@@ -10059,6 +10064,10 @@ msgstr "No hay nada compartido con el proyecto, así que no pierden ningún acce
 #: src/guest-sign-in.tsx
 msgid "Nothing is shared with you yet"
 msgstr "Aún no se ha compartido nada contigo"
+
+#: src/routes/guest.tsx
+msgid "Nothing is shared with you yet."
+msgstr "Todavía no se ha compartido nada contigo."
 
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
@@ -13427,6 +13436,7 @@ msgstr "Inicia sesión con la cuenta de tu organización."
 #: src/frame/person-menu.tsx
 #: src/guest-sign-in.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"

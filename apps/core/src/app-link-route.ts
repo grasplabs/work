@@ -23,10 +23,10 @@ import { drizzle } from "drizzle-orm/d1";
 import { loadRelease } from "./app-releases.ts";
 import { usableApp } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
-import { identify } from "./auth/identity.ts";
 import { policyOf } from "./data-policy.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
+import { identifyAppUser } from "./guest-access.ts";
 import { delivering, leasedBuild, personRefusal } from "./page-delivery.ts";
 import { admitted } from "./pages-rpc.ts";
 import { requireNotRevoked } from "./release-runner.ts";
@@ -285,7 +285,8 @@ export const appLinkResponse = async (
   // not (staff-audit.ts).
   const person = await routeMember(
     env,
-    await identify(env, request.headers),
+    // A guest's too: an App's links are open to guests (guest-access.ts).
+    await identifyAppUser(env, request.headers, "app.links"),
     `app.link.${route.kind}`,
     {
       app: route.app,
