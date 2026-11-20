@@ -50,9 +50,10 @@ import { useCore } from "../use-core.ts";
 // organization sets that up (Settings › Workspace).
 //
 // The Chat apps card (settings/chat-accounts.tsx) holds the chat accounts
-// linked to the person, as quiet rows when there are any; a link a chat app
-// sent, which lands here (routes/chat-link.tsx), while one waits in this
-// tab; and deleting the person's conversations with Stephen in chat apps.
+// linked to the person, as quiet rows when there are any, and deleting the
+// person's conversations with Stephen in chat apps. A link a chat app sent,
+// which lands here (routes/chat-link.tsx), stands above it while one waits
+// in this tab.
 // Never for Grasp staff, who aren't the company's people. Devices show the
 // newest ten, and all on a press.
 
