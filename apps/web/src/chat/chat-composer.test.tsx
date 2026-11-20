@@ -244,18 +244,33 @@ const constructed = (make: () => object): object =>
 
 /**
  * Core's live transcription, faked where it reaches the browser: a
- * microphone that gives no sound, and a line on which core says it isn't
- * set up for this deployment and hangs up, as core does.
+ * microphone that gives no sound once `asked` settles (the person's answer
+ * to the browser), and a line on which core says it isn't set up for this
+ * deployment and hangs up, as core does. Says whether a microphone is still
+ * recording, and how many lines were opened.
  */
-const transcriptionNotSetUp = (): void => {
+const transcriptionNotSetUp = (
+  asked: Promise<unknown> = Promise.resolve()
+): { recording: () => boolean; lines: () => number } => {
+  const tracks: { stopped: boolean; stop: () => void }[] = [];
+  let lines = 0;
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: {
-      getUserMedia: async () =>
-        await Promise.resolve({
-          getAudioTracks: () => [],
-          getTracks: () => [],
-        }),
+      getUserMedia: async () => {
+        await asked;
+        const track = {
+          stopped: false,
+          stop: () => {
+            track.stopped = true;
+          },
+        };
+        tracks.push(track);
+        return await Promise.resolve({
+          getAudioTracks: () => [track],
+          getTracks: () => [track],
+        });
+      },
     },
   });
   Reflect.set(
@@ -290,6 +305,7 @@ const transcriptionNotSetUp = (): void => {
     globalThis,
     "WebSocket",
     constructed(() => {
+      lines += 1;
       const line = new EventTarget();
       queueMicrotask(() => {
         line.dispatchEvent(new Event("open"));
@@ -316,6 +332,10 @@ const transcriptionNotSetUp = (): void => {
       });
     })
   );
+  return {
+    recording: () => tracks.some((track) => !track.stopped),
+    lines: () => lines,
+  };
 };
 
 /** The model and effort control's name, as a screen reader hears it. */
@@ -499,7 +519,52 @@ describe(ChatComposer, () => {
     });
   });
 
-  it("says a dictation failed when the browser's recognition never starts, keeping what was typed", async () => {
+  it("keeps what a member dictated when the browser's recognition fails mid-way", async () => {
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    type("Book the room");
+    await press(button("Dictate"));
+    const recognition = made();
+    act(() => {
+      recognition?.hears("for Friday", true);
+      recognition?.hears("at ten", false);
+      recognition?.dispatchEvent(
+        Object.assign(new Event("error"), { error: "network" })
+      );
+    });
+
+    expect({
+      said: document.body.textContent.includes(
+        "Couldn't write that down. What you typed is kept."
+      ),
+      text: field().value,
+      listening: recognition?.listening,
+    }).toStrictEqual({
+      said: true,
+      text: "Book the room for Friday at ten",
+      listening: false,
+    });
+  });
+
+  it("stops listening when the box goes away mid-dictation", async () => {
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    await press(button("Dictate"));
+    const recognition = made();
+    const before = recognition?.listening;
+    act(() => {
+      root?.unmount();
+    });
+
+    expect({ before, after: recognition?.listening }).toStrictEqual({
+      before: true,
+      after: false,
+    });
+  });
+
+  it("says over the box that a dictation failed when the browser's recognition never starts, keeping what was typed, until it is dismissed", async () => {
     // A browser that can't reach its maker's service: it neither starts nor says why.
     Recognition.silent = true;
     window.SpeechRecognition = Recognition;
@@ -513,13 +578,27 @@ describe(ChatComposer, () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
 
+      const failed = "Couldn't write that down. What you typed is kept.";
+      const said = document.body.textContent.includes(failed);
+      const offersRetry = [...document.querySelectorAll("button")].some(
+        (each) => each.textContent === "Try again"
+      );
+      const kept = field().value;
+      await press(button("Dismiss"));
+
       expect({
-        said: document.body.textContent.includes(
-          "The words couldn't be written down. What you typed is kept."
-        ),
-        // The dictation's card shows what was typed in the field's place.
-        kept: document.body.textContent.includes("Book the room"),
-      }).toStrictEqual({ said: true, kept: true });
+        said,
+        offersRetry,
+        kept,
+        gone: !document.body.textContent.includes(failed),
+        after: field().value,
+      }).toStrictEqual({
+        said: true,
+        offersRetry: true,
+        kept: "Book the room",
+        gone: true,
+        after: "Book the room",
+      });
     } finally {
       vi.useRealTimers();
       Recognition.silent = false;
@@ -538,19 +617,35 @@ describe(ChatComposer, () => {
     }
   });
 
-  it("tells a member, the first time they dictate, that their browser's maker writes it down", async () => {
+  it("tells a member, the first time they dictate, that their browser's maker writes it down, and never listens once they cancel", async () => {
     Recognition.made = undefined;
     window.SpeechRecognition = Recognition;
     localStorage.removeItem("grasp-dictation-told:grace");
     await shown({}, member);
-    await press(button("Dictate"));
-
-    expect({
-      told: document.body.textContent.includes(
+    vi.useFakeTimers();
+    try {
+      await press(button("Dictate"));
+      const told = document.body.textContent.includes(
         "Your browser's maker writes down what you say."
-      ),
-      listening: made()?.listening ?? false,
-    }).toStrictEqual({ told: true, listening: false });
+      );
+      const listeningWhileTold = made()?.listening ?? false;
+      await press(button("Cancel"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect({
+        told,
+        listeningWhileTold,
+        listeningAfter: made()?.listening ?? false,
+      }).toStrictEqual({
+        told: true,
+        listeningWhileTold: false,
+        listeningAfter: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("draws Grasp at work in the look the person chose in Appearance", async () => {
@@ -593,6 +688,49 @@ describe(ChatComposer, () => {
     });
   });
 
+  it("lets the microphone go and opens no line when an admin cancels while the browser asks for it", async () => {
+    const given = {
+      mediaDevices: Object.getOwnPropertyDescriptor(navigator, "mediaDevices"),
+      AudioContext: Reflect.get(globalThis, "AudioContext"),
+      WebSocket: Reflect.get(globalThis, "WebSocket"),
+    };
+    const answer = Promise.withResolvers<boolean>();
+    const { recording, lines } = transcriptionNotSetUp(answer.promise);
+    try {
+      await shown();
+      await press(button("Dictate"));
+      await press(button("Cancel"));
+      // Cancel plays its leaving first; the browser's answer comes after.
+      await vi.waitFor(() => {
+        if (document.querySelector("[data-slot=composer-voice-foot]")) {
+          throw new Error("Still leaving");
+        }
+      });
+      await act(async () => {
+        answer.resolve(true);
+        const { promise, resolve } = Promise.withResolvers<boolean>();
+        setTimeout(() => {
+          resolve(true);
+        }, 0);
+        await promise;
+      });
+
+      expect({
+        recording: recording(),
+        lines: lines(),
+        microphone: offersDictation(),
+      }).toStrictEqual({ recording: false, lines: 0, microphone: true });
+    } finally {
+      if (given.mediaDevices === undefined) {
+        Reflect.deleteProperty(navigator, "mediaDevices");
+      } else {
+        Object.defineProperty(navigator, "mediaDevices", given.mediaDevices);
+      }
+      Reflect.set(globalThis, "AudioContext", given.AudioContext);
+      Reflect.set(globalThis, "WebSocket", given.WebSocket);
+    }
+  });
+
   // Last: what it notes lasts for the rest of the visit, as it should.
   it("says once that core's dictation isn't set up, then offers no microphone in any box for the rest of the visit", async () => {
     const given = {
@@ -600,7 +738,7 @@ describe(ChatComposer, () => {
       AudioContext: Reflect.get(globalThis, "AudioContext"),
       WebSocket: Reflect.get(globalThis, "WebSocket"),
     };
-    transcriptionNotSetUp();
+    const { recording } = transcriptionNotSetUp();
     try {
       await shown();
       const before = offersDictation();
@@ -615,7 +753,14 @@ describe(ChatComposer, () => {
       const said = document.body.textContent.includes(
         "Dictation isn't set up here yet. What you typed is kept."
       );
-      await press(button("Cancel"));
+      const during = {
+        microphone: offersDictation(),
+        retry: [...document.querySelectorAll("button")].some(
+          (each) => each.textContent === "Try again"
+        ),
+        recording: recording(),
+      };
+      await press(button("Dismiss"));
       const after = offersDictation();
       act(() => {
         root?.unmount();
@@ -623,14 +768,19 @@ describe(ChatComposer, () => {
       document.body.replaceChildren();
       await shown();
 
-      expect({ before, said, after, another: offersDictation() }).toStrictEqual(
-        {
-          before: true,
-          said: true,
-          after: false,
-          another: false,
-        }
-      );
+      expect({
+        before,
+        said,
+        during,
+        after,
+        another: offersDictation(),
+      }).toStrictEqual({
+        before: true,
+        said: true,
+        during: { microphone: false, retry: false, recording: false },
+        after: false,
+        another: false,
+      });
     } finally {
       if (given.mediaDevices === undefined) {
         Reflect.deleteProperty(navigator, "mediaDevices");

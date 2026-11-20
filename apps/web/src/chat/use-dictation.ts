@@ -10,6 +10,7 @@ import type {
   ComposerVoiceProblem,
   ComposerVoiceWords,
 } from "../grasp/composer/index.ts";
+import { useComposerWords } from "../grasp/composer/words.ts";
 import { isLocale } from "../i18n.ts";
 import { sourceFor, useCanDictate } from "./dictation.ts";
 import type { DictationSource } from "./dictation.ts";
@@ -58,36 +59,29 @@ const keepTold = (userId: string): void => {
   }
 };
 
-/** What the dictation says, in the page's language. */
+/**
+ * What this dictation says beyond the parts' catalogue (frame/part-words.tsx),
+ * which has the rest: who writes it down, the first time, and that this
+ * deployment has no transcription, in place of a browser that can't.
+ */
 const useWords = (
   telling: boolean,
   unavailable: boolean
 ): Partial<ComposerVoiceWords> => {
   const { t } = useLingui();
+  const { problems } = useComposerWords("voice");
   return {
-    asking: telling
-      ? t`Your browser's maker writes down what you say.`
-      : t`Asking for the microphone`,
-    listening: t`Listening`,
-    thinking: t`Writing it down`,
-    silent: t`Paused`,
-    muted: t`Muted`,
-    done: t`Done`,
-    cancel: t`Cancel`,
-    mute: t`Mute`,
-    unmute: t`Unmute`,
-    retry: t`Try again`,
-    level: t`Level`,
-    problems: {
-      blocked: t`The microphone is blocked for this site.`,
-      missing: t`No microphone was found.`,
-      unsupported: t`This browser can't dictate.`,
-      unheard: t`A part couldn't be made out. What came before is kept.`,
-      failed: unavailable
-        ? t`Dictation isn't set up here yet. What you typed is kept.`
-        : t`The words couldn't be written down. What you typed is kept.`,
-      limited: t`That's as long as one dictation can be.`,
-    },
+    ...(telling
+      ? { asking: t`Your browser's maker writes down what you say.` }
+      : {}),
+    ...(unavailable
+      ? {
+          problems: {
+            ...problems,
+            unsupported: t`Dictation isn't set up here yet. What you typed is kept.`,
+          },
+        }
+      : {}),
   };
 };
 
@@ -113,6 +107,20 @@ export const useDictation = (
   const [run, setRun] = useState<Run>();
   const [now, setNow] = useState(0);
   const source = useRef<DictationSource | null>(null);
+  // What is in the box now: a pick or a picture can change it mid-dictation.
+  const typed = useRef(text);
+  useEffect(() => {
+    typed.current = text;
+  });
+  // A box that goes away mid-dictation lets its source go: no microphone,
+  // line or recognition carries on with nothing on screen.
+  useEffect(
+    () => () => {
+      source.current?.cancel();
+      source.current = null;
+    },
+    []
+  );
   const words = useWords(run?.telling ?? false, run?.unavailable === true);
   // The time it has listened, a second at a time.
   const running = run !== undefined && run.phase === "listening";
@@ -150,15 +158,33 @@ export const useDictation = (
       muted: false,
       telling,
     });
+    // What a source says once it is no longer the box's (cancelled, or
+    // another dictation begun) is not heard, and it never starts late.
+    const current = (): boolean => source.current === chosen;
+    // What it has heard so far, settled or not.
+    let heardSoFar = "";
     const begin = (): void => {
+      if (!current()) {
+        return;
+      }
       if (telling) {
         keepTold(identity.userId);
         // Told: now it asks for the microphone, as it says.
         setRun((was) => (was === undefined ? was : { ...was, telling: false }));
       }
-      void microphone.start();
+      void (async () => {
+        await microphone.start();
+        // Put away, or stopped by a problem, while the browser still asked:
+        // the microphone it gave goes at once. A newer dictation keeps its own.
+        if (source.current === null) {
+          microphone.stop();
+        }
+      })();
       chosen.start({
         ready: () => {
+          if (!current()) {
+            return;
+          }
           setRun((was) =>
             was === undefined
               ? was
@@ -171,19 +197,53 @@ export const useDictation = (
           );
         },
         heard: ({ settled, interim }) => {
+          if (!current()) {
+            return;
+          }
+          heardSoFar = [settled, interim]
+            .filter((part) => part !== "")
+            .join(" ");
           setRun((was) =>
             was === undefined ? was : { ...was, settled, interim }
           );
         },
         problem: (problem, unavailable = false) => {
-          setRun((was) => {
-            if (was === undefined) {
-              return was;
-            }
-            return problem === "unheard"
-              ? { ...was, problem }
-              : { ...was, phase: "problem", problem, unavailable };
-          });
+          if (!current()) {
+            return;
+          }
+          if (problem === "unheard") {
+            setRun((was) => (was === undefined ? was : { ...was, problem }));
+            return;
+          }
+          // A problem that stops it lets the microphone go at once: the
+          // band stands over a box that takes text again, and the browser
+          // would otherwise go on showing it recording.
+          // Let go, so nothing it or a pending Done says afterwards is heard;
+          // its band stands until it is put away.
+          chosen.cancel();
+          microphone.stop();
+          source.current = null;
+          // What it heard before it stopped goes in after what is in the box,
+          // as Done would put it.
+          if (heardSoFar !== "") {
+            onText(
+              [typed.current.trimEnd(), heardSoFar]
+                .filter((part) => part !== "")
+                .join(" ")
+            );
+          }
+          setRun((was) =>
+            was === undefined
+              ? was
+              : {
+                  ...was,
+                  phase: "problem",
+                  // Not set up here: no use trying again, as the band says
+                  // for a browser that can't dictate.
+                  problem: unavailable ? "unsupported" : problem,
+                  unavailable,
+                }
+          );
         },
       });
     };
@@ -203,8 +263,8 @@ export const useDictation = (
     return {};
   }
   return {
-    dictateLabel: t`Dictate`,
-    onDictate: listen,
+    // No microphone beside a band saying dictation can't work here.
+    ...(possible ? { dictateLabel: t`Dictate`, onDictate: listen } : {}),
     ...(run === undefined
       ? {}
       : {
@@ -224,10 +284,14 @@ export const useDictation = (
               );
               void (async () => {
                 const said = (await chosen?.finish()) ?? "";
+                // Cancelled while it was written down: nothing goes in.
+                if (chosen === null || source.current !== chosen) {
+                  return;
+                }
                 stop();
                 if (said !== "") {
                   onText(
-                    [text.trimEnd(), said]
+                    [typed.current.trimEnd(), said]
                       .filter((part) => part !== "")
                       .join(" ")
                   );

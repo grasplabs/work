@@ -51,14 +51,14 @@ const englishVoiceWords: ComposerVoiceWords = {
   mute: "Mute",
   unmute: "Unmute",
   retry: "Try again",
+  dismiss: "Dismiss",
   level: "Level",
   problems: {
-    blocked:
-      "The microphone is blocked for this site. Allow it in the browser's settings.",
+    blocked: "Allow the microphone in the browser's settings.",
     missing: "No microphone was found.",
     unsupported: "This browser can't dictate.",
     unheard: "A part couldn't be made out. What came before is kept.",
-    failed: "The words couldn't be written down. What you typed is kept.",
+    failed: "Couldn't write that down. What you typed is kept.",
     limited: "That's as long as one dictation can be.",
   },
   time: (ms) => {

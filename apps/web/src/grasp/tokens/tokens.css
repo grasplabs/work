@@ -297,9 +297,9 @@
   /* Sizes: targets and controls. */
   /* The smallest thing a finger can hit. */
   --grasp-tap: 44px;
-  /* A compact control inside a card's footer or a composer. */
+  /* A compact Button inside a card's footer or a composer, where no field stands: fields start at sm. */
   --grasp-control-xs: 28px;
-  /* A small control in a dense toolbar or table. */
+  /* A small control in a dense toolbar or table, a setting row, or beside a section's heading: the field and its Button alike. */
   --grasp-control-sm: 32px;
   /* The default control height with a pointer. */
   --grasp-control-md: 36px;
@@ -416,13 +416,13 @@
   /* How strongly a disabled control is drawn: half. */
   --grasp-dim: 0.5;
   /* Controls: bevels. */
-  /* The face of the ink bevel: a line of light along the top, a deeper outline and a shade at the foot. */
+  /* The face of the ink bevel: a line of light along the top, a deeper outline and a soft shade at the foot, short and light, so the filled button reads no taller than a quiet one beside it. */
   --grasp-bevel-ink-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)),
     inset 0 0 0 1px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
-    inset 0 -6px 12px
-      light-dark(oklch(0.12 0.03 162 / 0.45), oklch(0.29 0.05 162 / 0.08));
+    inset 0 -2px 4px
+      light-dark(oklch(0.12 0.03 162 / 0.12), oklch(0.29 0.05 162 / 0.03));
   /* The colour of the ink bevel's drops. */
   --grasp-bevel-ink-drop: light-dark(
     oklch(0.2 0.04 162 / 0.2),
@@ -444,7 +444,7 @@
   /* The edge of the second action: drawn as a field is (an inset hairline and the field's lift), so a quiet button and a field in one row are the same drawn height. Every bevel has the same 1px inset outline and the same lift, so buttons of one size read as one height side by side. */
   --grasp-bevel-quiet:
     inset 0 0 0 1px var(--grasp-bevel-quiet-edge), var(--grasp-field-lift);
-  /* The quiet bevel's outline: firm enough that a white button on a white card shows its top edge as a filled one does, so Cancel beside Connect does not read shorter. */
+  /* The quiet bevel's outline, and every field's (field-edge): firm enough that a white button on a white card shows its top edge as a filled one does, so Cancel beside Connect does not read shorter, and a search beside it reads as the same kind of edge. */
   --grasp-bevel-quiet-edge: light-dark(
     oklch(0.173 0.028 169.36 / 0.11),
     oklch(0.96 0.02 150 / 0.16)
@@ -654,12 +654,12 @@
     oklch(0.9 0.06 165),
     oklch(0.42 0.07 165)
   );
-  /* The hairline round a field, drawn inside it: the system's edge, so a field reads by its white fill and its lift. */
-  --grasp-field-edge: var(--grasp-edge-tone);
+  /* The hairline round a field, drawn inside it: the quiet Button's own outline, so a field and the Button beside it share one edge, and a field reads by its white fill and its lift. */
+  --grasp-field-edge: var(--grasp-bevel-quiet-edge);
   /* field-edge under a pointer: one small step stronger. */
   --grasp-field-edge-hover: light-dark(
-    oklch(0.173 0.028 169.36 / 0.12),
-    oklch(0.96 0.02 150 / 0.18)
+    oklch(0.173 0.028 169.36 / 0.16),
+    oklch(0.96 0.02 150 / 0.22)
   );
   /* The hairline of a field whose value is wrong: the danger tone itself, 3:1 or more on every ground, drawn inside so the field is no bigger. Its message says what is wrong, never the colour alone. */
   --grasp-field-edge-invalid: var(--grasp-danger);
@@ -693,7 +693,7 @@
   --grasp-field-focus-invalid:
     inset 0 0 0 1px var(--grasp-field-edge-invalid), var(--grasp-field-lift),
     0 0 0 3px var(--grasp-field-focus-halo-invalid);
-  /* The size of the typed words in a field on a phone or a touch screen (media.typing): under 16px, Safari zooms the page in on focus. */
+  /* The size of the words in every field on a phone or a touch screen (media.typing), a Select's trigger too, so fields side by side stay one size: under 16px, Safari zooms the page in on focus. */
   --grasp-field-text-touch: 16px;
   /* The breath of lift under a field, beneath its hairline: lift-low's shadow without its edge. */
   --grasp-field-lift:
