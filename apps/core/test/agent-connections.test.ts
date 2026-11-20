@@ -855,6 +855,55 @@ describe("a person's own connections in their own chat", setUpTime, () => {
     });
   });
 
+  it("are listed and named for reading beside a grant for a write alone, which still holds the write", async () => {
+    const [person, admin] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const mail = await mailConnection([], mailWithSearch, {
+      owner: person.userId,
+    });
+    const chat = await chatOf(
+      person.userId,
+      codeStep(
+        "export default async (self, env) => await env.connections.list();"
+      ),
+      codeStep(
+        `export default async (self, env) => (await env.connections.call("MAIL", "mail.send", ${JSON.stringify(invoiceMail)})).pending !== null;`
+      ),
+      says("It waits for you.")
+    );
+    await requestGranted(idp, admin, {
+      subject: chat.agent,
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send"],
+      binding: "MAIL",
+    });
+    await chat.ask("What can you reach, then send the invoice.");
+
+    const [listed, sent] = await codeResults(chat.stub, chat.chat.id);
+    const did = await mail.did();
+    expect({
+      // Named before any code ran: by the recall's where else to look.
+      named: JSON.stringify(chat.provider.requests[0]?.body).includes(mail.id),
+      listed: listed?.text.includes(
+        JSON.stringify({
+          name: mail.id,
+          connectionId: mail.id,
+          resource: null,
+          actions: ["mail.search"],
+        })
+      ),
+      held: sent?.text,
+      sent: did.sent,
+    }).toStrictEqual({
+      named: true,
+      listed: true,
+      held: "Returned:\ntrue",
+      sent: [],
+    });
+  });
+
   it("send nothing with no grant, whatever the code calls", async () => {
     const person = await signedInApi(idp, "user");
     const mail = await mailConnection([], mailWithSearch, {

@@ -239,13 +239,17 @@ export const usableConnections = async (
         ];
   });
   // Beside its grants, in its person's own chat, their own connections it
-  // reads with none, each once: one granted already is listed by its grant.
-  const grantedIds = new Set<string>(
-    granted.map(({ connection }) => connection.connectionId)
-  );
+  // reads with none: each but one a grant for the whole connection already
+  // lists with all its reads (a grant for a write alone hides none).
   const readable = await ownReadable(env, scope);
   const own = readable.filter(
-    ({ connectionId }) => !grantedIds.has(connectionId)
+    ({ connectionId, actions }) =>
+      !granted.some(
+        ({ connection }) =>
+          connection.connectionId === connectionId &&
+          connection.resource === null &&
+          actions.every((action) => connection.actions.includes(action))
+      )
   );
   return [
     ...granted,
