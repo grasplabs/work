@@ -12,7 +12,10 @@ import {
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowCandidateRun,
+  WorkflowResourceRun,
+} from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -61,9 +64,14 @@ import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import {
+  candidateRunFor,
+  startCandidateRun,
+} from "../src/workflows/candidate-runs.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
@@ -461,11 +469,16 @@ const holdStep = { id: "hold", type: "wait", for: "3 seconds" };
 const recallingWorkflow = async (
   by: Member,
   admin: Member,
-  { hold }: { hold?: "before" | "after" } = {}
+  {
+    hold,
+    byDefault = false,
+    alias = byDefault ? "brain" : "docs",
+  }: { hold?: "before" | "after"; byDefault?: boolean; alias?: string } = {}
 ) => {
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
   const workflow = await createWorkflowResource(env, by, `recall-${unique()}`);
+  // Declaring no permission, it reads by the Brain's own alias (GRA-2228).
   await publishDefinition(
     env,
     by,
@@ -478,7 +491,9 @@ const recallingWorkflow = async (
       },
       returns: packDescriptor,
       result: { $expr: "recalled" },
-      permissions: { brain: { docs: { contract: key } } },
+      ...(byDefault
+        ? {}
+        : { permissions: { brain: { [alias]: { contract: key } } } }),
       steps: [
         // A pause before the recall or the run's output, for a test to act
         // in.
@@ -486,7 +501,7 @@ const recallingWorkflow = async (
         {
           id: "recalled",
           type: "call",
-          brain: "docs",
+          brain: alias,
           action: "recall",
           args: {
             question: { $expr: "args.question" },
@@ -497,13 +512,16 @@ const recallingWorkflow = async (
       ],
     })
   );
+  if (byDefault) {
+    return { workflow, permissionId: null };
+  }
   const permissionId = await granted(
     by,
     admin,
     brainGrant({ type: "workflow", workflowId: workflow.id })
   );
   await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "docs",
+    alias,
     target: { kind: "brain", permissionId },
     reviewed: { version: 1 },
   });
@@ -1484,6 +1502,142 @@ describe(
         texts: [`For everyone: ${word} is in the handbook.`],
         audited: { type: "app", id: app.app },
       });
+    });
+  }
+);
+
+describe(
+  "a workflow that declares no permission to read the Brain",
+  setUpTime,
+  () => {
+    it("recalls what everyone in the company may read by the Brain's alias with no grant, marked first, its result withheld once that is erased", async () => {
+      const { word, admin, ada } = await company();
+      const erasedWord = `band${unique().replaceAll(/\W/gu, "")}`;
+      const erased = await forEveryone(`Salary band: ${erasedWord} is 70k.`);
+      const { workflow } = await recallingWorkflow(ada, admin, {
+        byDefault: true,
+      });
+      /** Whether the workflow is marked as having read the Brain by default. */
+      const marked = async () =>
+        (await env.DB.prepare(
+          "SELECT 1 FROM brain_default_reads WHERE subject_type = 'workflow' AND subject_id = ?"
+        )
+          .bind(workflow.id)
+          .first()) !== null;
+      const before = await marked();
+      const pack = await ranOf(ada, workflow.id, {
+        question: word,
+        tokens: 800,
+      });
+      const later = await startedRun(ada, workflow.id, {
+        question: erasedWord,
+        tokens: 800,
+      });
+      const recalledLater = await endOf(ada, workflow.id, later);
+      await eraseSourceNoLongerEveryones(env, {
+        source: erased,
+        readers: { kind: "none" },
+        reason: "deleted",
+      });
+      const record = await resourceRunFor(env, ada, workflow.id, later);
+
+      expect({
+        before,
+        marked: await marked(),
+        texts: textsOf(pack).filter((text) => text.includes(word)),
+        recalledLater: textsOf(recalledLater).filter((text) =>
+          text.includes(erasedWord)
+        ),
+        withheld: { result: record.result ?? null, error: record.error?.code },
+      }).toStrictEqual({
+        before: false,
+        marked: true,
+        texts: [`For everyone: ${word} is in the handbook.`],
+        recalledLater: [`Salary band: ${erasedWord} is 70k.`],
+        withheld: { result: null, error: "brain.revoked" },
+      });
+    });
+
+    it("reads through a permission declared under the Brain's alias, never by default: unmarked, its reads pinned under its grant", async () => {
+      const { word, admin, ada } = await company();
+      const { workflow, permissionId } = await recallingWorkflow(ada, admin, {
+        alias: "brain",
+      });
+      const runId = await startedRun(ada, workflow.id, {
+        question: word,
+        tokens: 800,
+      });
+      const pack = await endOf(ada, workflow.id, runId);
+      const pins = await env.DB.prepare(
+        "SELECT DISTINCT permission_id AS permission FROM run_brain_versions WHERE run_id = ?"
+      )
+        .bind(runId)
+        .all<{ permission: string }>();
+      const marked = await env.DB.prepare(
+        "SELECT 1 FROM brain_default_reads WHERE subject_type = 'workflow' AND subject_id = ?"
+      )
+        .bind(workflow.id)
+        .first();
+
+      expect({
+        texts: textsOf(pack).filter((text) => text.includes(word)),
+        pinnedUnder: pins.results.map(({ permission }) => permission),
+        marked,
+      }).toStrictEqual({
+        texts: [`For everyone: ${word} is in the handbook.`],
+        pinnedUnder: [permissionId],
+        marked: null,
+      });
+    });
+
+    it("answers a draft's test run of the Brain's alias from its fixtures, as a real run's call", async () => {
+      const ada = await person("builder");
+      const workflow = await createWorkflowResource(
+        env,
+        ada,
+        `test-${unique()}`
+      );
+      const { revision } = await workflowDraft(env, ada, workflow.id);
+      const saved = await editWorkflowDraft(env, ada, workflow.id, {
+        revision,
+        source: JSON.stringify({
+          $schema: workflowSchemaUrl,
+          args: { kind: "object", fields: {} },
+          returns: packDescriptor,
+          result: { $expr: "recalled" },
+          steps: [
+            {
+              id: "recalled",
+              type: "call",
+              brain: "brain",
+              action: "recall",
+              args: { question: "leave", budget: { tokens: 100 } },
+            },
+          ],
+        }),
+      });
+      const answer = { items: [], notFound: ["leave"], truncated: false };
+      const { runId } = await startCandidateRun(env, ada, workflow.id, {
+        revision: saved.revision,
+        args: {},
+        fixtures: { brain: { result: answer } },
+      });
+      const run: WorkflowCandidateRun = await vi.waitFor(
+        async () => {
+          const read = await candidateRunFor(env, ada, workflow.id, runId);
+          if (read.status === "starting" || read.status === "running") {
+            throw new Error(`Test run ${runId} is ${read.status}`);
+          }
+          return read;
+        },
+        { timeout: 20_000, interval: 100 }
+      );
+
+      expect({
+        problems: saved.problems,
+        status: run.status,
+        result: run.result,
+      }).toStrictEqual({ problems: [], status: "completed", result: answer });
     });
   }
 );
