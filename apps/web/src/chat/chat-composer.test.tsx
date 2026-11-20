@@ -547,6 +547,27 @@ describe(ChatComposer, () => {
     });
   });
 
+  it("stays cancelled when Mute is pressed while a cancelled dictation fades", async () => {
+    window.SpeechRecognition = Recognition;
+    localStorage.setItem("grasp-dictation-told:grace", "1");
+    await shown({}, member);
+    type("Book the room");
+    await press(button("Dictate"));
+    await press(button("Cancel"));
+    // Still drawn while its words dissolve.
+    await press(button("Mute"));
+    await vi.waitFor(() => {
+      if (document.querySelector("[data-slot=composer-voice-foot]")) {
+        throw new Error("Still dictating");
+      }
+    });
+
+    expect({ dictate: offersDictation(), text: field().value }).toStrictEqual({
+      dictate: true,
+      text: "Book the room",
+    });
+  });
+
   it("stops listening when the box goes away mid-dictation", async () => {
     window.SpeechRecognition = Recognition;
     localStorage.setItem("grasp-dictation-told:grace", "1");

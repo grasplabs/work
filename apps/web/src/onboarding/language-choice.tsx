@@ -38,7 +38,7 @@ export const LanguageChoice = ({
           void chooseLocale(chosen);
         }
       }}
-      size="sm"
+      size="xs"
       value={picked ? [i18n.locale] : []}
     >
       {languages.map((language) => (

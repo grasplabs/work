@@ -1,17 +1,3 @@
-// An agent's figure: Damsko's Stephen (`site/study/stephen/`, Ruben's pick of 16 November),
-// taken over from the product on 19 November, lit and dithered the way Stephen is, in a shape of its own. A shape is a small scene
-// of lit bodies, not one ball pressed flat: a single orb with silk (Stephen's own), three orbs
-// circling one another, a pair in orbit, a swarm on three tilted rings, a bevelled triangle that
-// turns, a cut crystal, a planet with its ring, and, drawn in figures.ts, a torus, a cratered orb, a comet, an orbit of two rings, and the eight
-// Ruben chose (19 November): crescent, eclipse, sun, jellyfish, mushroom, cloud, lantern, bell. The
-// main agent's orb alone has one eye in its middle. Every body is a height over the cell grid, so each
-// has a true normal: a key light with wrap, a rim from behind, a gloss where the light glances off,
-// and a glow round the whole that fades into the night it stands on. Each cell's light is set
-// through Bayer's ordered dither (`grasp/dither`) into five steps, so the edges move a cell at a
-// time. A state is a pose of the lighting and the motion: asleep the whole figure at low light, still, idle,
-// listening turned to you and quicker, thinking with the light wandering and the bodies hurrying,
-// done bright. Pure numbers: no DOM here.
-//
 import { BAYER } from "../dither/dither";
 import { breathOf, eyeLifeOf, shutOf, stepEye, twitchOf } from "./eye";
 import type { EyeLife } from "./eye";

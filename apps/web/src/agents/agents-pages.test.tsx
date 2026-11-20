@@ -261,15 +261,6 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** Waits `ms` of real time: a hover card opens only after the pointer rests. */
-const waited = async (ms: number): Promise<void> => {
-  const { promise, resolve } = Promise.withResolvers<boolean>();
-  setTimeout(() => {
-    resolve(true);
-  }, ms);
-  await promise;
-};
-
 const press = async (element: Element | null | undefined) => {
   if (!(element instanceof HTMLElement)) {
     throw new TypeError("Nothing to press");
@@ -440,7 +431,7 @@ describe("the company's agents, on pages of their own", () => {
         groups: ["Yours", "Only you see and ask these.", "Your company's"].map(
           (words) => text.includes(words)
         ),
-        alone: scribesCard?.text.includes("Only you"),
+        alone: scribesCard?.text.includes("Just for me"),
         paused: idlesCard?.text.includes("Paused"),
         newAgent: document.querySelector("a[href='/agents/new']") !== null,
       }).toStrictEqual({
@@ -675,7 +666,7 @@ describe("the company's agents, on pages of their own", () => {
       }).toStrictEqual({ listed: true, takeOn: null });
     });
 
-    it("shows an admin every agent under the tab for whom it answers, each card opening its page with one fact at its foot", async () => {
+    it("shows an admin every agent of the company under Organization, each card opening its page with whom it answers at its foot", async () => {
       await mounted(
         <Overview
           makes
@@ -687,27 +678,21 @@ describe("the company's agents, on pages of their own", () => {
           usable={[chatAgent(stephen)]}
         />
       );
-      // With no tab in the address, the first with agents in it: Milan
-      // answers nobody else yet.
-      const mine = { tabs: tabs(), cards: cards() };
-      await press(tabNamed("Organization"));
+      // With no tab in the address and none of their own, the company's:
+      // Milan too, though he answers nobody yet.
+      const organization = { tabs: tabs(), cards: cards() };
+      await press(tabNamed("My agents"));
       expect({
-        mine: {
-          tabs: mine.tabs,
-          cards: mine.cards.map(({ name, to, chat }) => ({ name, to, chat })),
-        },
         organization: {
-          tabs: tabs(),
-          cards: cards().map(({ name, to, chat }) => ({ name, to, chat })),
+          tabs: organization.tabs,
+          cards: organization.cards.map(({ name, to, chat }) => ({
+            name,
+            to,
+            chat,
+          })),
         },
+        mine: cards(),
       }).toStrictEqual({
-        mine: {
-          tabs: [
-            { name: "My agents", chosen: true },
-            { name: "Organization", chosen: false },
-          ],
-          cards: [{ name: "Milan", to: "/agents/agent-milan", chat: [] }],
-        },
         organization: {
           tabs: [
             { name: "My agents", chosen: false },
@@ -716,25 +701,26 @@ describe("the company's agents, on pages of their own", () => {
           cards: [
             { name: "Stephen", to: "/agents/organization", chat: [] },
             { name: "Claire", to: "/agents/agent-claire", chat: [] },
+            { name: "Milan", to: "/agents/agent-milan", chat: [] },
           ],
         },
+        mine: [],
       });
-      const [milansCard] = mine.cards;
-      const [stephensCard, clairesCard] = cards();
+      const [stephensCard, clairesCard, milansCard] = organization.cards;
       expect({
-        // Its next run at its foot, and whom it answers for a touch screen.
-        claire: ["Next", "Finance"].map((words) =>
-          clairesCard?.text.includes(words)
-        ),
-        stephen: ["Everyone with Grasp", "Last run failed"].map((words) =>
+        // Whom each answers, and how it stands.
+        claire: clairesCard?.text.includes("Finance"),
+        stephen: ["Everyone", "Last run failed"].map((words) =>
           stephensCard?.text.includes(words)
         ),
-        milanPaused: milansCard?.text.includes("Paused"),
+        milan: ["Nobody yet", "Paused"].map((words) =>
+          milansCard?.text.includes(words)
+        ),
         newAgent: document.querySelector("a[href='/agents/new']") !== null,
       }).toStrictEqual({
-        claire: [true, true],
+        claire: true,
         stephen: [true, true],
-        milanPaused: true,
+        milan: [true, true],
         newAgent: true,
       });
     });
@@ -780,7 +766,7 @@ describe("the company's agents, on pages of their own", () => {
       });
     });
 
-    it("puts an admin's own agents under My agents, before the company's that answer nobody else", async () => {
+    it("puts an admin's own agents under My agents, and none of the company's", async () => {
       const scribe = agentOf("agent-scribe", "Scribe", { ownerId: "user-me" });
       await mounted(
         <Overview
@@ -794,21 +780,18 @@ describe("the company's agents, on pages of their own", () => {
       expect({
         tabs: tabs(),
         cards: cards().map(({ name, to, chat }) => ({ name, to, chat })),
-        alone: scribesCard?.text.includes("Only you"),
+        alone: scribesCard?.text.includes("Just for me"),
       }).toStrictEqual({
         tabs: [
           { name: "My agents", chosen: true },
           { name: "Organization", chosen: false },
         ],
-        cards: [
-          { name: "Scribe", to: "/agents/agent-scribe", chat: [] },
-          { name: "Milan", to: "/agents/agent-milan", chat: [] },
-        ],
+        cards: [{ name: "Scribe", to: "/agents/agent-scribe", chat: [] }],
         alone: true,
       });
     });
 
-    it("tells an admin resting on a card what is worth knowing before opening it", async () => {
+    it("says with an admin's card what is worth knowing before opening it", async () => {
       await mounted(
         <Overview
           at="organization"
@@ -819,30 +802,18 @@ describe("the company's agents, on pages of their own", () => {
           usable={[chatAgent(stephen)]}
         />
       );
+      // What the card's link is described by: read out with its name, and
+      // what grows inside the card for who rests on it.
       const card = document.querySelector("a[href='/agents/agent-claire']");
-      await act(async () => {
-        card?.dispatchEvent(
-          new PointerEvent("pointerenter", {
-            bubbles: true,
-            pointerType: "mouse",
-          })
-        );
-        card?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-        card?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
-        await waited(800);
-      });
-      const said = document.body.textContent ?? "";
+      const said = (card?.getAttribute("aria-describedby") ?? "")
+        .split(" ")
+        .map((id) => document.querySelector(`#${id}`)?.textContent ?? "")
+        .join(" ");
       expect(
-        [
-          "Answers",
-          "Finance",
-          "3 of 6 kinds of work",
-          "$12.50 · 40 requests · 4 people",
-          "Last asked",
-        ].map((words) => said.includes(words))
+        ["Finance", "On its own", "Model", "This month", "$12.50"].map(
+          (words) => said.includes(words)
+        )
       ).toStrictEqual([true, true, true, true, true]);
-      // Milan was never asked this month: nothing about what it cost.
-      expect(said).not.toContain("$0.00");
     });
   });
 
@@ -967,7 +938,7 @@ describe("the company's agents, on pages of their own", () => {
       ).toStrictEqual([true, true, true, true, true]);
     });
 
-    it("says an agent's access isn't shown where core didn't say it, never that it answers everyone", async () => {
+    it("says nothing of whom an agent answers where core didn't say it, never that it answers everyone", async () => {
       // As for an admin among Grasp's staff, whom core refuses the read.
       const unread: ManagedAgents = { ...managed, settings: {} };
       await mounted(
@@ -981,9 +952,10 @@ describe("the company's agents, on pages of their own", () => {
       );
       const [firstCard, clairesCard] = cards();
       const onCards = {
-        first: firstCard?.text.includes("Everyone with Grasp"),
-        claire: clairesCard?.text.includes("Access not shown"),
+        first: firstCard?.text.includes("Everyone"),
+        // No pill: neither everyone nor nobody.
         claireEveryone: clairesCard?.text.includes("Everyone"),
+        claireNobody: clairesCard?.text.includes("Nobody yet"),
       };
       act(() => {
         root?.unmount();
@@ -1013,8 +985,8 @@ describe("the company's agents, on pages of their own", () => {
         everyone: document.body.textContent?.includes("Everyone"),
       }).toStrictEqual({
         first: true,
-        claire: true,
         claireEveryone: false,
+        claireNobody: false,
         access: true,
         everyone: false,
       });

@@ -235,7 +235,6 @@ export const InspectorPanel = (props: InspectorPanelProps) => {
         tint={props.tint}
         loading={props.loading === true}
       />
-      {/* Without sections or a foot, no empty view under the header. */}
       {views === undefined &&
       ((sections?.length ?? 0) > 0 || props.foot !== undefined) ? (
         <PanelView>

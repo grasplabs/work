@@ -19,6 +19,7 @@
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import { NoActions } from "./no-actions";
 import { styles } from "./styles";
 
 /** Every prop a RowList takes. */
@@ -30,6 +31,12 @@ export interface RowListProps {
   /** The id of the words that name it, such as a Panel section's label. */
   "aria-labelledby"?: string;
   /**
+   * No row of it ever has actions (a read-only summary): no room is kept for them, and each detail
+   * ends at the row's own inset.
+   * @default false
+   */
+  noActions?: boolean;
+  /**
    * Below 30rem of the list's own width, each row's detail goes on a second line under its name,
    * so a long name keeps the whole row on a phone.
    * @default false
@@ -39,20 +46,23 @@ export interface RowListProps {
 
 /**
  * A list of 44px rows, a hairline between them. The rows draw the lines themselves (every row
- * after the first), and a row without actions keeps their room when the list holds any, by CSS.
+ * after the first), and a row without actions keeps their room, unless `noActions` says none will come.
  */
 export const RowList = ({
   children,
   "aria-label": label,
   "aria-labelledby": labelledBy,
+  noActions = false,
   stack = false,
 }: RowListProps) => (
-  <ul
-    aria-label={label}
-    aria-labelledby={labelledBy}
-    data-slot="row-list"
-    {...stylex.props(styles.list, stack && styles.stack)}
-  >
-    {children}
-  </ul>
+  <NoActions value={noActions}>
+    <ul
+      aria-label={label}
+      aria-labelledby={labelledBy}
+      data-slot="row-list"
+      {...stylex.props(styles.list, stack && styles.stack)}
+    >
+      {children}
+    </ul>
+  </NoActions>
 );

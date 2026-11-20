@@ -54,7 +54,6 @@ msgstr "{0, plural, one {L’équipe que vous avez laissée de côté} other {Le
 #. placeholder {0}: classes.on
 #. placeholder {1}: classes.of
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 msgid "{0} of {1} kinds of work"
 msgstr "{0} types de travail sur {1}"
 
@@ -1228,7 +1227,6 @@ msgstr "{people, plural, one {{sector}, # personne.} other {{sector}, # personne
 msgid "{people, plural, one {{team}: # person} other {{team}: # people}}"
 msgstr "{people, plural, one {{team} : # personne} other {{team} : # personnes}}"
 
-#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 msgid "{people, plural, one {# person} other {# people}}"
 msgstr "{people, plural, one {# personne} other {# personnes}}"
@@ -1321,10 +1319,6 @@ msgstr "{refused, plural, one {# refusée au cours des dernières 24 heures} oth
 #: src/agents/agent-page.tsx
 msgid "{requests, plural, one {# request to a model} other {# requests to a model}}"
 msgstr "{requests, plural, one {# requête à un modèle} other {# requêtes à un modèle}}"
-
-#: src/agents/agents-overview.tsx
-msgid "{requests, plural, one {# request} other {# requests}}"
-msgstr "{requests, plural, one {# requête} other {# requêtes}}"
 
 #: src/frame/part-words.tsx
 msgid "{rest, plural, one {# other} other {# others}}"
@@ -1421,10 +1415,6 @@ msgstr "{sources, plural, one {Un travail chronophage qui pourrait être automat
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source, by no team yet.} other {Time-consuming work that could be automated, raised in # sources, by no team yet.}}"
 msgstr "{sources, plural, one {Un travail chronophage qui pourrait être automatisé, soulevé dans # source, encore par aucune équipe.} other {Un travail chronophage qui pourrait être automatisé, soulevé dans # sources, encore par aucune équipe.}}"
-
-#: src/agents/agents-overview.tsx
-msgid "{spent} · {count} · {reach}"
-msgstr "{spent} · {count} · {reach}"
 
 #: src/agents/own-agents-admin.tsx
 msgid "{spent} this month"
@@ -2112,10 +2102,6 @@ msgstr "Accès pour les personnes que vous ajoutez"
 #: src/agents/agent-page.tsx
 msgid "Access isn't shown"
 msgstr "L'accès n'est pas affiché"
-
-#: src/agents/agents-overview.tsx
-msgid "Access not shown"
-msgstr "Accès non affiché"
 
 #: src/apps/access-view.tsx
 msgid "Access to {name}"
@@ -3073,7 +3059,6 @@ msgid "Answering"
 msgstr "Répond"
 
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 msgid "Answers"
 msgstr "Répond à"
 
@@ -3692,6 +3677,10 @@ msgstr "Demande en cours"
 msgctxt "a question going out"
 msgid "Asking"
 msgstr "Envoi de la question"
+
+#: src/brain/activity-page.tsx
+msgid "Asking failed: {reason}"
+msgstr "Impossible de poser la question : {reason}"
 
 #: src/frame/part-words.tsx
 msgid "Asking for the microphone"
@@ -7116,6 +7105,7 @@ msgid "Every weekday at 9:00"
 msgstr "Chaque jour ouvré à 9:00"
 
 #: src/agents/agent-facts.tsx
+#: src/agents/agents-overview.tsx
 #: src/agents/setup/words.ts
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
@@ -7157,6 +7147,10 @@ msgstr "Tous ses membres · {shownRole}"
 #: src/connections/brain-audience.tsx
 msgid "Everyone in the company"
 msgstr "Tout le monde dans l'entreprise"
+
+#: src/agents/new-agent.tsx
+msgid "Everyone in the company can ask it."
+msgstr "Tout le monde dans l’entreprise peut lui poser des questions."
 
 #: src/inbox/items.ts
 msgid "Everyone in the company reads your answer, with your name."
@@ -7201,7 +7195,6 @@ msgid "Everyone who uses the App"
 msgstr "Tous ceux qui utilisent l’App"
 
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 msgid "Everyone with Grasp"
 msgstr "Toutes les personnes ayant Grasp"
 
@@ -9323,10 +9316,6 @@ msgstr "Ce n'est pas arrivé"
 msgid "It didn't happen: {who}"
 msgstr "Ce n'est pas arrivé : {who}"
 
-#: src/agents/new-agent.tsx
-msgid "It does nothing yet until you allow it"
-msgstr "Il ne fait rien tant que tu ne l'autorises pas"
-
 #: src/drafts/publish-errors.ts
 msgid "It doesn't pass its checks. Fix the problems, then share."
 msgstr "Il ne passe pas ses vérifications. Corrigez les problèmes, puis partagez-le."
@@ -9748,6 +9737,7 @@ msgstr "Jugement"
 msgid "Jump to latest"
 msgstr "Aller au plus récent"
 
+#: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
 msgid "Just for me"
 msgstr "Rien que pour moi"
@@ -9946,10 +9936,6 @@ msgstr "30 derniers jours"
 msgid "Last 7 days"
 msgstr "7 derniers jours"
 
-#: src/agents/agents-overview.tsx
-msgid "Last asked"
-msgstr "Dernière question"
-
 #: src/agents/agent-page.tsx
 msgid "Last asked in a chat"
 msgstr "Dernière question dans un chat"
@@ -9977,10 +9963,6 @@ msgstr "Dernière exécution : {when}"
 #: src/brain/sources-page.tsx
 msgid "Last read {lastRead}"
 msgstr "Lu pour la dernière fois {lastRead}"
-
-#: src/agents/agents-overview.tsx
-msgid "Last run"
-msgstr "Dernière exécution"
 
 #: src/agents/agents-overview.tsx
 msgid "Last run failed"
@@ -10651,7 +10633,6 @@ msgid "Max"
 msgstr "Maximal"
 
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 msgid "May do"
 msgstr "Peut faire"
 
@@ -10767,6 +10748,7 @@ msgstr "Mode"
 
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 #: src/agents/setup/thinking-step.tsx
 #: src/apps/resource-bindings.tsx
 #: src/frame/part-words.tsx
@@ -11288,10 +11270,6 @@ msgstr "Plus récents d'abord"
 #: src/settings/event-sources.tsx
 msgid "Next"
 msgstr "Suivante"
-
-#: src/agents/agents-overview.tsx
-msgid "Next {nextMoment}"
-msgstr "Prochaine {nextMoment}"
 
 #: src/frame/part-words.tsx
 msgid "Next match"
@@ -12343,7 +12321,6 @@ msgid "Nothing was added. Fix these rows and try again."
 msgstr "Rien n'a été ajouté. Corrigez ces lignes et réessayez."
 
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 #: src/frame/part-words.tsx
 msgid "Nothing yet"
@@ -12739,7 +12716,6 @@ msgid "Only when someone asks"
 msgstr "Seulement sur demande"
 
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
 msgid "Only you"
 msgstr "Vous seul"
@@ -16182,7 +16158,6 @@ msgid "Sign out this device?"
 msgstr "Déconnecter cet appareil ?"
 
 #: src/brain/brain-atlas.ts
-#: src/routes/_shell.settings.security.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in"
 msgstr "Connexion"
@@ -16230,10 +16205,6 @@ msgstr "S’est reconnecté à une connexion"
 #: src/activity/audit-words.ts
 msgid "Signed in to an App as a visitor"
 msgstr "S’est connecté à une application en tant que visiteur"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Signed in with"
-msgstr "Connexion via"
 
 #: src/frame/part-words.tsx
 msgctxt "state of one app"
@@ -17540,6 +17511,7 @@ msgid "The Apps this chat builds didn't load."
 msgstr "Les applications que ce chat crée n’ont pas été chargées."
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 msgid "The asker's"
 msgstr "Celui de la personne qui demande"
 
@@ -20486,17 +20458,15 @@ msgid "Who can talk to him"
 msgstr "Qui peut lui parler"
 
 #: src/agents/setup/audience-step.tsx
-msgid "Who can use {name}"
-msgstr "Qui peut utiliser {name}"
-
-#: src/agents/setup/audience-step.tsx
-msgid "Who can use {name}?"
-msgstr "Qui peut utiliser {name} ?"
-
 #: src/agents/setup/review-step.tsx
 #: src/frame/part-words.tsx
 msgid "Who can use it"
 msgstr "Qui peut l’utiliser"
+
+#: src/agents/setup/audience-step.tsx
+#: src/routes/_shell.agents.new.tsx
+msgid "Who can use it?"
+msgstr "Qui peut l’utiliser ?"
 
 #: src/interview/words.ts
 msgid "Who does it"
@@ -21318,18 +21288,10 @@ msgstr "Vos instructions"
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Votre organisation n’autorise pas ce modèle. Choisissez-en un autre."
 
-#: src/routes/_shell.settings.security.tsx
-msgid "Your organization manages your password"
-msgstr "Votre organisation gère votre mot de passe"
-
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Votre organisation l’utilise via les autorisations que vous accordez."
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Your organization’s account"
-msgstr "Le compte de votre organisation"
 
 #: src/settings/sign-in-settings.tsx
 msgid "your organization’s work accounts"

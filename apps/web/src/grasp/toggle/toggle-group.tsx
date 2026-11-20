@@ -42,8 +42,9 @@ interface ToggleGroupOwnProps {
    */
   multiple?: boolean;
   /**
-   * `md` beside other controls, `sm` in a dense toolbar. Every toggle in it takes this size.
-   * @default "md"
+   * Button's ladder: `xs` 28 alone or in a toolbar; `sm` 32, `md` 36 and `lg` 44, the track level with
+   * a field of that size in the same row (a Select beside it). Every toggle in it takes this size.
+   * @default "xs"
    */
   size?: ToggleSize;
   /**
@@ -88,7 +89,7 @@ const styles = stylex.create({
 
 export const ToggleGroup = ({
   children,
-  size = "md",
+  size = "xs",
   style: styleProp,
   layout,
   ...rest

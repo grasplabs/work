@@ -203,6 +203,8 @@ export const ScheduleStep = ({ setup, change, name }: StepProps) => {
                 <ToggleGroup
                   aria-label={t`Days`}
                   multiple
+                  // Level with the 32px selects in the same sentence.
+                  size="sm"
                   onValueChange={(values) => {
                     set({ days: new Set(values.map(Number)) });
                   }}

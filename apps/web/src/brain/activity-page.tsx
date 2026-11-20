@@ -279,6 +279,10 @@ export const ActivityPage = () => {
   );
 
   const inHand = open === undefined ? undefined : opened.get(open);
+  const reason =
+    failed !== undefined && failed.gap === inHand?.ask?.id
+      ? failed.reason
+      : undefined;
   const go = (goes: Goes): void => {
     void navigate({ to: "/brain/$noteId", params: { noteId: goes.id } });
   };
@@ -290,8 +294,8 @@ export const ActivityPage = () => {
         await session.brain.askAboutGap(gap.id);
         await router.invalidate();
       },
-      (reason) => {
-        setFailed({ gap: gap.id, reason });
+      (why) => {
+        setFailed({ gap: gap.id, reason: why });
       }
     );
   };
@@ -325,6 +329,7 @@ export const ActivityPage = () => {
               readAt.current = pane.current?.scrollTop ?? 0;
               setOpen(id);
             }}
+            open={open}
             waiting={waitingListed.map(({ line }) => line)}
             words={words}
           />
@@ -373,11 +378,10 @@ export const ActivityPage = () => {
               changed={inHand.changed}
               icon={inHand.icon}
               kept={inHand.kept}
-              meta={
-                failed !== undefined && failed.gap === inHand.ask?.id
-                  ? [...inHand.meta, failed.reason]
-                  : inHand.meta
+              error={
+                reason === undefined ? undefined : t`Asking failed: ${reason}`
               }
+              meta={inHand.meta}
               onClose={() => {
                 // Only a phone hid the log; beside it, the reader may have scrolled on.
                 const hidden = page.current?.checkVisibility() === false;

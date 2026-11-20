@@ -76,6 +76,7 @@ const NewAgentPage = () => {
 const NewAgentLoading = () => {
   const { t } = useLingui();
   const { way } = Route.useSearch();
+  const { identity } = Route.useRouteContext();
   if (way === "chat") {
     // In a chat: the library's question skeleton, as its first question stands.
     return (
@@ -103,11 +104,18 @@ const NewAgentLoading = () => {
     />
   );
   if (way === "manual") {
-    // Set up by hand: the library's setup skeleton, its first question.
+    // Set up by hand: the library's setup skeleton, its first question,
+    // who can use it for the company's admins, who have the choice.
     return (
       <>
         {crumbs}
-        <PageSkeletonSetup question={t`What should we call your agent?`} />
+        <PageSkeletonSetup
+          question={
+            isMemberAdmin(identity)
+              ? t`Who can use it?`
+              : t`What should we call your agent?`
+          }
+        />
       </>
     );
   }

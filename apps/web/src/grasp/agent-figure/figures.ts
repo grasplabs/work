@@ -1,13 +1,3 @@
-// The later figures (body.ts's first seven are its own): four from the first round (torus,
-// crater, comet, orbit) and the eight Ruben chose from the study of twenty-four (19 November: "Yes,
-// those eight"): crescent, eclipse, little sun, jellyfish, mushroom, rain cloud, lantern, bell.
-// Little objects with a silhouette you can name at 48 pixels, in the figures' own light and dither:
-// no outlines, no faces (the main agent's eye is body.ts's, on its orb alone).
-//
-// Each of the eight is a 2D silhouette (a signed distance, below 0 inside) inflated into a rounded
-// solid with a true normal, so it takes the key, wrap, gloss and rim as the orb does. They are
-// drawn in a unit square and scaled by the pose's size, so asleep is a little smaller and done a
-// little larger, as with every figure. Pure numbers: no DOM here.
 import type { Drawn, Hit, Sphere } from "./solid";
 import {
   TAU,
@@ -311,8 +301,6 @@ const orbitRing = (
     noise(ring.d * 30, 2.1)
   );
 };
-
-// ---- Ruben's eight, each drawn in the unit square at size 1.
 
 const crescent = (turn: number): FigurePart[] => [
   soft(

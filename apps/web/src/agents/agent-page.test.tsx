@@ -41,6 +41,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AgentPage, agentTabOf } from "./agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
+import { ManualAgent } from "./manual-agent.tsx";
 import { NewAgent } from "./new-agent.tsx";
 import { agentInstructionsFor } from "./unsaved-instructions.ts";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
@@ -402,9 +403,13 @@ interface Shown {
 
 /**
  * What is shown: one agent's page, by its name, or the new agent's, with
- * the company's agents of people's own on, or off.
+ * the company's agents of people's own on, or off, or set up by hand.
  */
-type Open = { agent: string; tab?: AgentTab } | "new" | "new-own-off";
+type Open =
+  | { agent: string; tab?: AgentTab }
+  | "new"
+  | "new-own-off"
+  | "new-guided";
 
 /** The page for `open` on the agents its route read, its tab kept as its route would. */
 const Page = ({
@@ -418,6 +423,19 @@ const Page = ({
 }) => {
   const tab: AgentTab =
     typeof open === "string" ? "overview" : (open.tab ?? "overview");
+  if (open === "new-guided") {
+    return (
+      <ManualAgent
+        apps={[]}
+        company={editable}
+        models={models}
+        own
+        personId={anna.userId}
+        taken={data.agents.map(({ name }) => name)}
+        teams={teams}
+      />
+    );
+  }
   if (typeof open === "string") {
     return (
       <NewAgent
@@ -881,13 +899,49 @@ const makeInChat = async ({
     await press(button("Next"));
   }
   if (whose === "offered") {
-    // Nobody yet, and only when asked: as offered.
+    // Everyone in the company, and only when asked: as offered.
     await press(button("Next"));
     await press(button("Next"));
   }
   await set(answerBox(), instructions, "input");
   await press(button("Review"));
   await press(button("Make agent"));
+};
+
+/** The radio whose row says `words`, in whatever is asked now. */
+const radio = (words: string): HTMLElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLElement>("[role='radio']"),
+  ].find((each) => saysOnItsRow(each, words));
+  if (found === undefined) {
+    throw new TypeError(`No radio ${words}`);
+  }
+  return found;
+};
+
+/**
+ * Goes through the guided setup as a person does, naming it `name` and
+ * saying what it is for, every other answer as offered, up to Make agent;
+ * says each question asked, in order, after the ones `before`.
+ */
+const setUpByHand = async (
+  name: string,
+  before: readonly string[] = []
+): Promise<string[]> => {
+  const question = document.querySelector("h1")?.textContent ?? "";
+  const questions = [...before, question];
+  // A dozen at most: more is a setup that never ends.
+  if (question.startsWith("Ready to make") || questions.length > 12) {
+    return questions;
+  }
+  if (question === "What should we call your agent?") {
+    await set(field("Name"), name, "input");
+  }
+  if (question === `What should ${name} do?`) {
+    await set(field("What it is for"), "Chases unpaid invoices.", "input");
+  }
+  await press(button("Next"));
+  return await setUpByHand(name, questions);
 };
 
 describe("an agent's page", () => {
@@ -920,8 +974,9 @@ describe("an agent's page", () => {
     await press(button("Next"));
     await press(answer("Ember"));
     await press(button("Next"));
-    // Nobody yet, and only when asked: as offered.
+    await press(answer("Nobody yet"));
     await press(button("Next"));
+    // Only when asked: as offered.
     await press(button("Next"));
     await set(answerBox(), "Answer only about invoices.", "input");
     await press(button("Review"));
@@ -1371,6 +1426,8 @@ describe("an agent's page", () => {
       asked: [
         ["make", expect.objectContaining({ name: "Claire" })],
         ["told", "agent-1", claireTold],
+        // For everyone, as offered.
+        ["reach", "agent-1", true, { who: "everyone" }],
         ["told", "agent-1", claireTold],
         ["work out", "agent-1"],
       ],
@@ -1416,6 +1473,72 @@ describe("an agent's page", () => {
     // Whom it is for: the company's people, never just the admin.
     expect(answer("Everyone in the company")).toBeInstanceOf(HTMLElement);
     expect(() => answer("Just for me")).toThrow("No answer Just for me");
+  });
+
+  it("asks an admin first who can use a new agent set up by hand, everyone as offered, and makes it for everyone", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, "new-guided");
+    const offered = radio("Everyone").getAttribute("aria-checked");
+    const questions = await setUpByHand("Claire");
+    await press(button("Make agent"));
+    expect({ offered, questions }).toStrictEqual({
+      offered: "true",
+      questions: [
+        "Who can use it?",
+        "What should we call your agent?",
+        "What should Claire do?",
+        "How should Claire work?",
+        "Which apps can Claire use?",
+        "What can Claire do?",
+        "How hard should Claire think?",
+        "When should Claire work?",
+        "Ready to make Claire?",
+      ],
+    });
+    expect(asked[0]).toStrictEqual([
+      "make",
+      expect.objectContaining({ name: "Claire" }),
+    ]);
+    expect(asked).toContainEqual([
+      "reach",
+      "agent-1",
+      true,
+      { who: "everyone" },
+    ]);
+  });
+
+  it("asks no more of an agent just for its maker, set up by hand, than it keeps, and makes it theirs", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, "new-guided");
+    await press(radio("Just me"));
+    const questions = await setUpByHand("Claire");
+    await press(button("Make agent"));
+    expect({ questions, made: asked[0] }).toStrictEqual({
+      // Never what it may do or when it works: one of their own has neither.
+      questions: [
+        "Who can use it?",
+        "What should we call your agent?",
+        "What should Claire do?",
+        "How should Claire work?",
+        "Which apps can Claire use?",
+        "How hard should Claire think?",
+        "Ready to make Claire?",
+      ],
+      made: ["make own", expect.objectContaining({ name: "Claire" })],
+    });
+    expect(
+      asked.some(([what]) => what === "reach" || what === "wake")
+    ).toBeFalsy();
+  });
+
+  it("never asks someone who isn't an admin who can use an agent they set up by hand", async () => {
+    const fake = fakeConnections();
+    await shown(fake, "new-guided", false);
+    expect(document.querySelector("h1")?.textContent).toBe(
+      "What should we call your agent?"
+    );
   });
 
   it("lets an admin make an agent just for themselves instead of one for the company", async () => {

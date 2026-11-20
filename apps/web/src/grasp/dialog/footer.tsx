@@ -13,13 +13,17 @@ export interface DialogFooterProps {
   children: ReactNode;
 }
 
-/** The actions, at the end of the line. On a phone they share its width. */
+/** The actions, at the end of the line. On a phone every Button in it takes an equal part of its width. */
 export const DialogFooter = ({ children }: DialogFooterProps) => {
   const still = useStill();
   return (
     <div
       data-slot="dialog-footer"
-      {...stylex.props(styles.footer, still?.look.footer)}
+      {...stylex.props(
+        stylex.defaultMarker(),
+        styles.footer,
+        still?.look.footer
+      )}
     >
       {children}
     </div>

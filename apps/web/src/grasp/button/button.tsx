@@ -246,6 +246,32 @@ const FIRST = `:nth-child(1 of ${ITEM})`;
 const LAST = `:nth-last-child(1 of ${ITEM})`;
 
 const styles = stylex.create({
+  // In a dialog's footer on a phone, every Button takes an equal part of the line (a DialogAction or
+  // a form's own submit), each at least as wide as its words, so two long labels take a line each.
+  // After the size's styles, so its width wins over the size's least width.
+  inDialogFooter: {
+    flexGrow: {
+      default: null,
+      [stylex.when.ancestor('[data-slot="dialog-footer"]')]: {
+        default: null,
+        [media.belowPhone]: 1,
+      },
+    },
+    flexBasis: {
+      default: null,
+      [stylex.when.ancestor('[data-slot="dialog-footer"]')]: {
+        default: null,
+        [media.belowPhone]: 0,
+      },
+    },
+    minWidth: {
+      default: null,
+      [stylex.when.ancestor('[data-slot="dialog-footer"]')]: {
+        default: null,
+        [media.belowPhone]: "fit-content",
+      },
+    },
+  },
   base: {
     // The icon inside follows these (the icons entry (`@/components/grasp/icons`)/icon.stylex.ts).
     [iconVars.size]: grasp.iconSm,
@@ -1002,6 +1028,7 @@ const lookOf = ({
     styles.base,
     wrap.words,
     styles[size],
+    styles.inDialogFooter,
     styles.inGroup,
     iconOnly && styles.square,
     iconOnly && squares[size],
