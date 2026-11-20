@@ -45,7 +45,7 @@ import { RowNote, SectionNotLoaded } from "./section.tsx";
 // Settings › Security: the person's accounts on chat platforms that are
 // linked to them, so Grasp knows it is them writing there, as quiet rows in
 // the Chat apps card (none when none are); and a link a chat sent them,
-// waiting for them to confirm it, at the top of that card. Confirming is a
+// waiting for them to confirm it, in a card of its own above it. Confirming is a
 // press here, never opening the link (chat apps open links to preview
 // them), and the card says whose account it is, by the platform's own
 // name for it, so a link someone forwarded doesn't pass for theirs. And
@@ -299,7 +299,7 @@ const ForgetConversations = () => {
       label={t`Your conversations in chat apps`}
     >
       <AlertDialog>
-        <AlertDialogTrigger disabled={busy} size="sm" variant="ghost">
+        <AlertDialogTrigger disabled={busy} size="sm" variant="danger">
           {t`Delete`}
         </AlertDialogTrigger>
         <AlertDialogContent>
@@ -369,9 +369,10 @@ const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
 };
 
 /**
- * Chat apps: the link a chat app sent, while one waits in this tab, the
- * accounts linked to the person, and deleting their conversations with
- * Stephen there.
+ * Chat apps: the link a chat app sent, while one waits in this tab, in its
+ * own card above; then the rows, run edge to edge as every settings card's
+ * (the accounts linked to the person, deleting their conversations with
+ * Stephen there), so each name keeps the width it needs.
  */
 export const ChatAppsSection = ({
   chat,
@@ -382,14 +383,21 @@ export const ChatAppsSection = ({
 }) => {
   const { t } = useLingui();
   return (
-    <SectionCard variant="grouped" density="compact" title={t`Chat apps`}>
+    <>
       {waiting ? <PendingChatLink chat={chat} /> : null}
-      {chat.state === "ready" ? (
-        <LinkedChatAccounts accounts={chat.data.accounts} />
-      ) : null}
-      <SettingsRows>
-        <ForgetConversations />
-      </SettingsRows>
-    </SectionCard>
+      <SectionCard
+        variant="grouped"
+        density="compact"
+        flush
+        title={t`Chat apps`}
+      >
+        {chat.state === "ready" ? (
+          <LinkedChatAccounts accounts={chat.data.accounts} />
+        ) : null}
+        <SettingsRows>
+          <ForgetConversations />
+        </SettingsRows>
+      </SectionCard>
+    </>
   );
 };
