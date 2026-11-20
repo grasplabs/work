@@ -11723,10 +11723,6 @@ msgstr "Niemand hat diesen Namen"
 msgid "No one yet: open it to add people"
 msgstr "Noch niemand: Öffnen Sie es, um Personen hinzuzufügen"
 
-#: src/brain/opportunities-page.tsx
-msgid "No opportunities yet"
-msgstr "Noch keine Chancen"
-
 #: src/people/person-picker.tsx
 msgid "No owner yet"
 msgstr "Noch niemand verantwortlich"
@@ -12452,6 +12448,10 @@ msgstr "Derzeit dient nichts, was der Workflow nutzen darf: Geben Sie dem Workfl
 #: src/apps/app-access-requests.tsx
 msgid "Nothing this App asked for is waiting."
 msgstr "Nichts, was diese App angefragt hat, wartet noch."
+
+#: src/brain/opportunities-page.tsx
+msgid "Nothing to automate yet"
+msgstr "Noch nichts zu automatisieren"
 
 #: src/settings/audit-chain.tsx
 msgid "Nothing to check yet"
@@ -18450,10 +18450,6 @@ msgstr "Diese Notizen stützen sich auf nichts anderes und gehen mit: {named} un
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named}."
 msgstr "Diese Notizen stützen sich auf nichts anderes und gehen mit: {named}."
-
-#: src/brain/opportunities-page.tsx
-msgid "They appear once your teams' interviews describe how their work runs."
-msgstr "Sie erscheinen, sobald die Interviews Ihrer Teams beschreiben, wie ihre Arbeit läuft."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
