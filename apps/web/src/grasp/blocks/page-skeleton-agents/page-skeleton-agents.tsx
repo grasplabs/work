@@ -25,7 +25,7 @@ export const agentCardStyles = stylex.create({
   page: {
     display: "flex",
     flexDirection: "column",
-    gap: grasp.space6,
+    gap: grasp.pageGap,
     width: "100%",
   },
   // Columns of at least 16rem (the whole width when narrower), sharing what is left.

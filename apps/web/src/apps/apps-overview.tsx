@@ -75,8 +75,9 @@ const styles = stylex.create({
     justifyContent: "space-between",
     gap: grasp.space4,
   },
-  // The room between the bar and the cards, where the bar stands over them.
-  barRoom: { marginBlockEnd: grasp.space6 },
+  // The room between the bar and the cards: with the tab panel's own 16px,
+  // the page gap (24px), as the Apps page's skeleton lays it.
+  barRoom: { marginBlockEnd: grasp.space2 },
   search: { maxWidth: "18rem" },
   // The search's placeholder in the search's box: as wide as the row lets
   // it be, up to the search's width.

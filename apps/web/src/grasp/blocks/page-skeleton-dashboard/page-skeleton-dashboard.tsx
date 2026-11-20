@@ -25,7 +25,7 @@ import { grasp } from "../../tokens/tokens.stylex";
 
 const styles = stylex.create({
   // The header, the chart, the figures and the table, a section's gap apart: as the loaded page lays them.
-  page: { display: "grid", gap: grasp.space6, minWidth: 0 },
+  page: { display: "grid", gap: grasp.pageGap, minWidth: 0 },
   // The chart's box: as tall as the chart will draw, across its card.
   // The chart's frame while it waits: as tall as the chart, its level lines where the chart draws
   // them (inside its inset, after the y axis's room, above the x axis's), dotted 2 on 2 in the line
@@ -81,11 +81,11 @@ export interface PageSkeletonDashboardProps<Row extends RowData> {
   descriptionLines?: number;
 }
 
-/** The chart's level lines at their places, at the chart's height, with no marks. */
-const ChartFrame = ({ height }: { height: number }) => {
+/** The chart's level lines at their places, at the chart's height, with no marks: a chart's own frame while it waits, wherever it stands (a settings card's too). */
+export const PageSkeletonChartFrame = ({ height }: { height: number }) => {
   const plot = height - chartInset.top - chartAxisRoom.x;
   return (
-    <div {...stylex.props(styles.frame(height))}>
+    <div data-slot="chart-frame" {...stylex.props(styles.frame(height))}>
       {Array.from({ length: LINES }, (_, index) => (
         <span
           key={index}
@@ -130,7 +130,7 @@ export const PageSkeletonDashboard = <Row extends RowData>({
     {chart === undefined ? null : (
       <SectionCard title={chart.title}>
         <div aria-hidden="true">
-          <ChartFrame height={chart.height ?? 240} />
+          <PageSkeletonChartFrame height={chart.height ?? 240} />
         </div>
       </SectionCard>
     )}
