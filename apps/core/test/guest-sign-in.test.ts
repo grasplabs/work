@@ -24,12 +24,12 @@ import type { CapturedMail } from "./mail-capture.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
+  openRpc,
   outcome,
   routed,
   sessionCookieName,
   signedInApi,
   unique,
-  whoami,
 } from "./sign-in.ts";
 
 // Guests (GRA-2235, pull request 2): an admin or a builder invites an
@@ -334,6 +334,17 @@ describe("inviting a guest", () => {
   });
 });
 
+/** The Apps the person behind `cookie` lists, as a member's page does. */
+const appsOf = async (cookie: string) => {
+  const { core } = await openRpc(cookie);
+  try {
+    using session = core.authenticate();
+    return await session.apps.list();
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
 describe("a guest signing in with a code", () => {
   it("is mailed a short-lived code that signs them in to a session reaching nothing, audited", async () => {
     const mail = await mailbox();
@@ -349,7 +360,9 @@ describe("a guest signing in with a code", () => {
 
     expect({
       signedIn: cookie !== "",
-      rpc: await outcome(whoami(cookie)),
+      // A member's call: a guest reaches only what guest-access.ts lets
+      // through (guest-apps.test.ts).
+      rpc: await outcome(appsOf(cookie)),
       session: sessionSchema.parse(await sessionOf(cookie)),
       events: events
         .filter(({ action }) => action.startsWith("member.guest"))
