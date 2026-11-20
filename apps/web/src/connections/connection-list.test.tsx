@@ -1,5 +1,9 @@
 // @vitest-environment happy-dom
-import { connectionErrors } from "@grasp-os/shared/connect";
+import {
+  composioConsentText,
+  composioKeyConsentText,
+  connectionErrors,
+} from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { syncErrors } from "@grasp-os/shared/sync";
 import { i18n } from "@lingui/core";
@@ -66,8 +70,8 @@ const integrationOf = (connections: CatalogConnection[]): Integration => ({
 
 let root: Root | undefined;
 
-/** The text of the disconnect dialog of the one connection `shown`. */
-const disconnectDialog = async (shown: CatalogConnection): Promise<string> => {
+/** The page showing the one connection `shown`. */
+const showing = async (shown: CatalogConnection): Promise<void> => {
   const core = {
     withSession: async <T,>(action: (session: unknown) => Promise<T>) =>
       await action({}),
@@ -97,6 +101,11 @@ const disconnectDialog = async (shown: CatalogConnection): Promise<string> => {
     );
     await router.load();
   });
+};
+
+/** The text of the disconnect dialog of the one connection `shown`. */
+const disconnectDialog = async (shown: CatalogConnection): Promise<string> => {
+  await showing(shown);
   const trigger = [...document.querySelectorAll("button")].find(
     (button) => button.textContent === "Disconnect"
   );
@@ -131,6 +140,43 @@ describe("disconnecting a connection", () => {
       never: never.includes(erased),
       opened: never.includes("Disconnect Notes?"),
     }).toStrictEqual({ mayHold: true, never: false, opened: true });
+  });
+});
+
+describe("a Composio connection's consent", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+  });
+
+  it("quotes the consent for how it was made, and none where that wasn't recorded", async () => {
+    const quoted = async (
+      composioAuth?: CatalogConnection["composioAuth"]
+    ): Promise<string[]> => {
+      await showing(
+        connection(composioAuth === undefined ? {} : { composioAuth })
+      );
+      const quotes = [...document.querySelectorAll("blockquote")].map(
+        (quote) => quote.textContent ?? ""
+      );
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      return quotes;
+    };
+    expect({
+      key: await quoted("key"),
+      managed: await quoted("managed"),
+      unrecorded: await quoted(),
+    }).toStrictEqual({
+      key: [composioKeyConsentText],
+      managed: [composioConsentText],
+      unrecorded: [],
+    });
   });
 });
 

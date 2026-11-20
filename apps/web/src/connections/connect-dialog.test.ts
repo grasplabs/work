@@ -64,6 +64,13 @@ describe("connecting from the Integrations page", () => {
     ]).toStrictEqual([false, false]);
   });
 
+  it("is offered to admins alone for a toolkit that takes a key", () => {
+    expect([
+      canConnect(integration("composio", "pipedesk", "key"), someone("admin")),
+      canConnect(integration("composio", "pipedesk", "key"), someone("user")),
+    ]).toStrictEqual([true, false]);
+  });
+
   it("is offered as before while connect doesn't say whose app it takes", () => {
     expect(
       canConnect(integration("composio", "hubspot"), someone("admin"))

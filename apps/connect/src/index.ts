@@ -49,6 +49,9 @@ import type {
   StartConnection,
   ConnectWithKey,
   StartToolkitConnection,
+  ToolkitKeyField,
+  ToolkitKeyFieldsRequest,
+  ConnectToolkitWithKey,
   ChangeToolkitTools,
   UnknownOutcome,
   UnknownOutcomeListing,
@@ -111,7 +114,9 @@ import { clock } from "./clock.ts";
 import {
   finishToolkitFlow,
   changeToolkitTools,
+  connectToolkitWithKey,
   startToolkitConnection,
+  toolkitKeyFields,
 } from "./composio-connections.ts";
 import { connectionOwners, personalAccounts } from "./connections.ts";
 import {
@@ -482,6 +487,21 @@ export default class Connect
     request: StartToolkitConnection
   ): Promise<{ url: string }> {
     return await startToolkitConnection(this.env, request);
+  }
+
+  // Connecting one that takes a key, with what the admin typed: no flow,
+  // nothing kept of the key (src/composio-connections.ts).
+
+  async toolkitKeyFields(
+    request: ToolkitKeyFieldsRequest
+  ): Promise<ToolkitKeyField[]> {
+    return await toolkitKeyFields(this.env, request);
+  }
+
+  async connectToolkitWithKey(
+    request: ConnectToolkitWithKey
+  ): Promise<{ connectionId: string }> {
+    return await connectToolkitWithKey(this.env, request);
   }
 
   async changeToolkitTools(

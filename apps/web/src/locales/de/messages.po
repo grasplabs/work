@@ -687,6 +687,10 @@ msgstr "{kind} ({what})"
 msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
 
+#: src/connections/connect-dialog.tsx
+msgid "{label} (optional)"
+msgstr "{label} (optional)"
+
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
@@ -4539,6 +4543,10 @@ msgstr "Verwendete Verbindungen"
 msgid "Connections to sign in to again"
 msgstr "Erneut anzumeldende Verbindungen"
 
+#: src/connections/integration-row.tsx
+msgid "Connects with a key"
+msgstr "Verbindet mit einem Schlüssel"
+
 #: src/connections/connection-list.tsx
 msgid "Consent"
 msgstr "Zustimmung"
@@ -4546,6 +4554,10 @@ msgstr "Zustimmung"
 #: src/connections/connect-dialog.tsx
 msgid "Consent and connect"
 msgstr "Zustimmen und verbinden"
+
+#: src/connections/connect-dialog.tsx
+msgid "Consent and enter the key"
+msgstr "Zustimmen und Schlüssel eingeben"
 
 #: src/connections/connect-dialog.tsx
 msgid "Consent and sign in"
@@ -9095,6 +9107,10 @@ msgctxt "workflow stage"
 msgid "Needs a check"
 msgstr "Zu prüfen"
 
+#: src/connections/integration-row.tsx
+msgid "Needs an app Grasp hasn't registered"
+msgstr "Braucht eine App, die Grasp nicht registriert hat"
+
 #: src/dashboard/widget-board.tsx
 msgid "Needs attention"
 msgstr "Braucht Aufmerksamkeit"
@@ -9119,10 +9135,6 @@ msgstr "Braucht Sie"
 msgctxt "tab listing the workflows that need a person"
 msgid "Needs you"
 msgstr "Braucht Sie"
-
-#: src/connections/integration-row.tsx
-msgid "Needs your own sign-in app"
-msgstr "Braucht eigene Anmelde-App"
 
 #: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx

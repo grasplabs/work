@@ -1438,6 +1438,7 @@ export const listConnections = async (
     accountName: row.accountName,
     createdAt: row.createdAt.toISOString(),
     ...(row.serverKind === "composio" && {
+      ...(row.composioAuth !== null && { composioAuth: row.composioAuth }),
       tools: allowedToolNames(row),
       offeredTools: offeredToolNames(row),
       readTools: readToolNames(row),

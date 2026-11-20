@@ -128,7 +128,7 @@ const insert = (
   const server = composio
     ? `https://backend.composio.dev/v3/mcp/${connection.id}?user_id=e2e`
     : "microsoft-365";
-  return `INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, account_id, account_name, connected_by, tools, created_at, updated_at) VALUES (${[
+  return `INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, account_id, account_name, connected_by, composio_auth, tools, created_at, updated_at) VALUES (${[
     quoted(connection.id),
     quoted(provider),
     quoted(scope),
@@ -139,6 +139,8 @@ const insert = (
     quoted(`account-${connection.id}`),
     quoted(connection.account),
     quoted(connectedBy),
+    // Signed in with Composio's app: its consent is the sign-in's.
+    value(composio ? "managed" : null),
     value(composio ? JSON.stringify(seededTools) : null),
     String(now),
     String(now),

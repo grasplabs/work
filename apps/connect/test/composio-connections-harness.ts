@@ -1,5 +1,9 @@
-import { composioConsentText } from "@grasp-os/shared/connect";
+import {
+  composioConsentText,
+  composioKeyConsentText,
+} from "@grasp-os/shared/connect";
 import type {
+  ConnectToolkitWithKey,
   ConnectionPerson,
   StartToolkitConnection,
 } from "@grasp-os/shared/connect";
@@ -19,6 +23,9 @@ import { auditEvents, clientOrigin, someone } from "./connect.ts";
 
 export const contacts = ["contact-1", "contact-2"];
 
+/** The key Pipedesk's provider accepts, with its subdomain. */
+export const pipedeskKey = `pd_${crypto.randomUUID()}`;
+
 export const composio = fakeComposioApi(
   [
     {
@@ -29,6 +36,59 @@ export const composio = fakeComposioApi(
         { slug: "HUBSPOT_CREATE_CONTACT" },
         { slug: "HUBSPOT_UPDATE_CONTACT" },
       ],
+    },
+    // Composio holds no app for it, and it takes a key an admin types in.
+    {
+      slug: "pipedesk",
+      name: "Pipedesk",
+      managed: false,
+      keyAuth: {
+        scheme: "API_KEY",
+        fields: [
+          { name: "generic_api_key", displayName: "API key", secret: true },
+          // Composio says it isn't secret.
+          { name: "subdomain", displayName: "Subdomain", secret: false },
+          // Composio says nothing of it: taken for a secret.
+          { name: "region", displayName: "Region", required: false },
+          // Never shown: Composio's default applies.
+          { name: "base_url", visible: false, required: false },
+        ],
+        accepts: { generic_api_key: pipedeskKey, subdomain: "acme" },
+      },
+      tools: [{ slug: "PIPEDESK_LIST_DEALS" }, { slug: "PIPEDESK_ADD_NOTE" }],
+    },
+    // Takes a key, described at length, with an optional field connect
+    // can't read.
+    {
+      slug: "wordydesk",
+      name: "Wordydesk",
+      managed: false,
+      keyAuth: {
+        scheme: "BEARER_TOKEN",
+        fields: [
+          {
+            name: "token",
+            displayName: `Token ${"t".repeat(300)}`,
+            description: "d".repeat(5000),
+          },
+        ],
+        accepts: {},
+        unreadable: "optional",
+      },
+      tools: [{ slug: "WORDYDESK_LIST" }],
+    },
+    // Takes a key, but describes a required field connect can't read.
+    {
+      slug: "brokendesk",
+      name: "Brokendesk",
+      managed: false,
+      keyAuth: {
+        scheme: "BASIC",
+        fields: [{ name: "username", displayName: "Username" }],
+        accepts: {},
+        unreadable: "required",
+      },
+      tools: [{ slug: "BROKENDESK_LIST" }],
     },
     // Composio holds no app for it: it would take the organization's own.
     {
@@ -52,6 +112,10 @@ export const composio = fakeComposioApi(
       {
         name: "HUBSPOT_UPDATE_CONTACT",
         run: () => ({ output: { deleted: true } }),
+      },
+      {
+        name: "PIPEDESK_LIST_DEALS",
+        run: () => ({ output: { deals: ["deal-1"] } }),
       },
     ],
   }
@@ -106,6 +170,23 @@ export const start = async (
     ...options,
   });
   return url;
+};
+
+/** Connects Pipedesk with `values` for `person`, as core does. */
+export const connectWithKey = async (
+  person: ConnectionPerson,
+  options: Partial<Omit<ConnectToolkitWithKey, "person">> = {}
+): Promise<string> => {
+  const { connectionId } = await exports.default.connectToolkitWithKey({
+    person,
+    toolkit: "pipedesk",
+    tools: ["PIPEDESK_LIST_DEALS"],
+    consent: composioKeyConsentText,
+    values: { generic_api_key: pipedeskKey, subdomain: "acme" },
+    origin: clientOrigin,
+    ...options,
+  });
+  return connectionId;
 };
 
 /** Composio sending `person`'s browser back to core with the flow's state. */

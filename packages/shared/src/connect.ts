@@ -423,6 +423,13 @@ export interface ConnectionSummary {
   /** ISO 8601. */
   createdAt: string;
   /**
+   * How a Composio connection was made, and so which consent was given:
+   * signing in (`managed`, {@link composioConsentText}) or with a key
+   * (`key`, {@link composioKeyConsentText}). Absent for a native
+   * connection, and for one where it wasn't recorded.
+   */
+  composioAuth?: "managed" | "key";
+  /**
    * A Composio connection's allowed tools, by name, as the admin who
    * connected it consented to them. Absent for a native connection, and
    * from a connect that predates it.
@@ -707,6 +714,27 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
     returnTo?: string;
   }) => Promise<{ url: string }>;
   /**
+   * What an admin types to connect a toolkit whose `auth` is `key`, as
+   * Composio describes it now: admins only, never Grasp staff.
+   */
+  keyFields: (toolkit: string) => Promise<ToolkitKeyField[]>;
+  /**
+   * Connects a toolkit whose `auth` is `key` with what the admin typed
+   * (`values`, by field name), for an admin who consented to
+   * {@link composioKeyConsentText}: connect passes the values to Composio
+   * once and keeps none of them. No browser leaves Grasp: the answer is
+   * where to send it next, the integration's page by default. A key the
+   * provider rejects is `connection.key_rejected`.
+   */
+  connectToolkitWithKey: (request: {
+    toolkit: string;
+    tools: (string | ComposioToolRule)[];
+    /** Exactly {@link composioKeyConsentText}, as the admin was shown it. */
+    consent: string;
+    values: Record<string, string>;
+    returnTo?: string;
+  }) => Promise<{ url: string }>;
+  /**
    * Changes which tools a shared Composio connection allows, and which of
    * them only read, for an admin, audited (GRA-993): only tools the
    * toolkit has. A held action of a tool taken away is dropped. Someone
@@ -911,14 +939,31 @@ export interface CatalogEntry {
 }
 
 /**
- * Whose sign-in app connecting an entry takes. `managed`: one Grasp or
- * Composio holds, so connecting needs nothing but consent; every native
- * provider is. `own`: a Composio toolkit Composio holds no app for, which
- * the organization connects only with a sign-in app of its own (its own
- * OAuth client or API key). Grasp can't take one yet, so connecting such a
- * toolkit is refused (`connection.own_auth_required`).
+ * What connecting an entry takes. `managed`: signing in, with an app Grasp
+ * or Composio holds, so connecting needs nothing but consent; every native
+ * provider is. `key`: a Composio toolkit Composio connects with a key, a
+ * token or a username and password, which an admin types into Grasp's own
+ * form (`ConnectionsApi.keyFields`). `own`: a Composio toolkit that only
+ * signs in with an OAuth app nobody registered for this deployment, which
+ * Grasp can't take yet, so connecting it is refused
+ * (`connection.own_auth_required`).
  */
-export type CatalogAuth = "managed" | "own";
+export type CatalogAuth = "managed" | "key" | "own";
+
+/**
+ * One thing an admin types to connect a toolkit with a key, as Composio
+ * describes it: its `name` is what Composio takes it as, its `label` and
+ * `description` are Composio's text, rendered as text. A `secret` one is
+ * never shown as it is typed; one Composio doesn't say of counts as
+ * secret.
+ */
+export interface ToolkitKeyField {
+  name: string;
+  label: string;
+  description: string | null;
+  required: boolean;
+  secret: boolean;
+}
 
 /**
  * Which group a category is in, by its words in lower case. The first
@@ -1319,6 +1364,15 @@ export interface ToolClassSetting {
 export const composioConsentText =
   "Composio, a third party, will hold this connection's tokens in its own cloud, outside this deployment, and Grasp won't see them. Grasp calls only the tools you allow, through Composio, which acts for your organization with those tokens. Disconnecting deletes the account at Composio.";
 
+/**
+ * What an admin consents to before connecting a Composio toolkit with a
+ * key they type in: as {@link composioConsentText}, shown word for word,
+ * sent back and recorded as its SHA-256. Deleting a key at Composio doesn't
+ * revoke it at its provider, so it says so.
+ */
+export const composioKeyConsentText =
+  "Composio, a third party, will hold the key you enter in its own cloud, outside this deployment. Grasp passes it on once and keeps no copy. Grasp calls only the tools you allow, through Composio, which acts for your organization with that key. Disconnecting deletes the key at Composio, but doesn't revoke it: revoke it at its provider too. Use a key made for Grasp alone, with no more access than it needs.";
+
 /** Most tools an admin may allow on one Composio connection. */
 export const composioToolsMax = 1000;
 
@@ -1383,6 +1437,31 @@ export const startToolkitConnectionSchema = z.strictObject({
 export type StartToolkitConnection = z.input<
   typeof startToolkitConnectionSchema
 >;
+
+/** Asks for what an admin types to connect a toolkit with a key. */
+export const toolkitKeyFieldsSchema = z.strictObject({
+  person: connectionPersonSchema,
+  toolkit: composioToolkitSchema,
+});
+export type ToolkitKeyFieldsRequest = z.input<typeof toolkitKeyFieldsSchema>;
+
+/**
+ * Connects a toolkit with a key, for an admin who consented to Composio
+ * holding it. `values` are what they typed, by field name: connect takes
+ * only the names Composio lists for the toolkit, and passes the values on
+ * to Composio without keeping, logging or answering any of them.
+ */
+export const connectToolkitWithKeySchema = z.strictObject({
+  person: connectionPersonSchema,
+  toolkit: composioToolkitSchema,
+  tools: composioToolsSchema,
+  /** Exactly {@link composioKeyConsentText}, as the admin was shown it. */
+  consent: z.string().refine((text) => text === composioKeyConsentText),
+  values: z.record(z.string(), z.string()),
+  /** The deployment's origin, from its config: its Composio user. */
+  origin: z.url(),
+});
+export type ConnectToolkitWithKey = z.input<typeof connectToolkitWithKeySchema>;
 
 /** Changes the tools a shared Composio connection allows (GRA-993). */
 export const changeToolkitToolsSchema = z.strictObject({
@@ -2159,6 +2238,24 @@ export interface ConnectApi
     request: StartToolkitConnection
   ) => Promise<{ url: string }>;
   /**
+   * What an admin types to connect a toolkit whose `auth` is `key`, as
+   * Composio describes it now. Admins only, never Grasp staff.
+   */
+  toolkitKeyFields: (
+    request: ToolkitKeyFieldsRequest
+  ) => Promise<ToolkitKeyField[]>;
+  /**
+   * Connects a toolkit whose `auth` is `key` with what the admin typed,
+   * passed to Composio once and kept by connect nowhere: not stored, not
+   * logged, not in an audit event or an error. Admins only, never Grasp
+   * staff; their consent and the connection are recorded, the names of
+   * the fields given but none of their values. A key the provider rejects
+   * is `connection.key_rejected`, and nothing is left at Composio.
+   */
+  connectToolkitWithKey: (
+    request: ConnectToolkitWithKey
+  ) => Promise<{ connectionId: string }>;
+  /**
    * Changes the tools a shared Composio connection allows, for an admin:
    * Composio's server first, then connect's own list, which every call
    * goes by, only if it is still the one read (`connection.tools_changed`
@@ -2400,7 +2497,9 @@ export const connectionErrors = defineErrorFamily({
   "connection.scopes_refused":
     "The access granted wasn't exactly what this connection asks for, so it wasn't kept. An administrator of your organization's Microsoft or Google account has to grant everything it asks for, and nothing more; then connect it again.",
   "connection.own_auth_required":
-    "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
+    "This app signs in only with an app of its own, which nobody registered for Grasp yet.",
+  "connection.key_rejected":
+    "The app didn't accept that key. Check it and what you typed with it, then try again.",
   "connection.erase_pending":
     "Their connections aren't all revoked at their providers yet. Erasing them goes on once they are.",
   "connection.http_origin_refused":

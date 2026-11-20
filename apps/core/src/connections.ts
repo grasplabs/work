@@ -42,6 +42,7 @@ import type {
   SharedSyncPlaces,
   ConnectionBrainAudienceSetting,
   ToolClassSetting,
+  ToolkitKeyField,
 } from "@grasp-os/shared/connect";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
@@ -152,6 +153,9 @@ const connectToolkitRequestSchema = z.object({
   returnTo: z.string().default("/"),
 });
 type ConnectToolkitRequest = Parameters<ConnectionsApi["connectToolkit"]>[0];
+type ConnectToolkitWithKeyRequest = Parameters<
+  ConnectionsApi["connectToolkitWithKey"]
+>[0];
 
 /** What the frontend sends to start: checked here, as it came over the wire. */
 const startRequestSchema = z.strictObject({
@@ -550,6 +554,58 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       origin: config.origin,
       returnTo: `${back.pathname}${back.search}`,
     });
+  }
+
+  /**
+   * What an admin types to connect a toolkit with a key, as Composio
+   * describes it: connect checks the role and the toolkit.
+   */
+  async keyFields(toolkit: string): Promise<ToolkitKeyField[]> {
+    const person = await this.#person();
+    return await this.#env.CONNECT.toolkitKeyFields({ person, toolkit });
+  }
+
+  /**
+   * Connecting a toolkit with a key the admin typed: core passes it on to
+   * connect and keeps nothing of it, as connect does on to Composio; connect
+   * checks the rest (the role, the toolkit, the fields, the tools, the
+   * consent). The answer is the page to send the browser to, as a sign-in's
+   * is the provider's.
+   */
+  async connectToolkitWithKey(
+    request: ConnectToolkitWithKeyRequest
+  ): Promise<{ url: string }> {
+    const person = await this.#person();
+    const parsed = connectToolkitRequestSchema.safeParse(request);
+    const config = signInConfig(this.#env);
+    if (config === undefined) {
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
+    const back = parsed.success
+      ? onOrigin(config.origin, parsed.data.returnTo)
+      : undefined;
+    if (back === undefined) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    const { toolkit, tools, consent, values } = request;
+    const slug = composioToolkitSchema.safeParse(toolkit);
+    if (slug.success) {
+      await requireOffered(this.#env, person, {
+        source: "composio",
+        id: slug.data,
+        scope: "shared",
+      });
+    }
+    const { connectionId } = await this.#env.CONNECT.connectToolkitWithKey({
+      person,
+      toolkit,
+      tools,
+      consent,
+      values,
+      origin: config.origin,
+    });
+    back.searchParams.set("connection", connectionId);
+    return { url: back.href };
   }
 
   /**

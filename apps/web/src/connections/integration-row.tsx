@@ -236,9 +236,14 @@ export const IntegrationRow = ({
             <Trans>Not offered</Trans>
           </Badge>
         ) : null}
+        {integration.auth === "key" ? (
+          <Badge variant="outline">
+            <Trans>Connects with a key</Trans>
+          </Badge>
+        ) : null}
         {integration.auth === "own" ? (
           <Badge variant="outline">
-            <Trans>Needs your own sign-in app</Trans>
+            <Trans>Needs an app Grasp hasn&apos;t registered</Trans>
           </Badge>
         ) : null}
       </span>
