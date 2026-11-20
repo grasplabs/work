@@ -1,7 +1,7 @@
 // SectionCard: one part of a page on a card, its header at the top: a title, a sentence and the
 // part's own buttons, then what it holds, and a foot when it has one. The product's own part, made
-// of the finished ones: Card (src/components/card), SectionHeader (src/components/section-header)
-// and Separator. Palermo has no section card; it takes Palermo's Card and Section Header as they are.
+// of the finished ones: Card and its CardHeader and CardFooter (src/components/card), SectionHeader
+// (src/components/section-header) and Separator. Palermo has no section card; it takes Palermo's Card and Section Header as they are.
 //
 //   <SectionCard title="Usage" description="Seats and storage this month." actions={<Button>Export</Button>}>
 //     …
@@ -26,6 +26,7 @@ import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 
 import { Card } from "../card";
 import type { CardLayoutStyle } from "../card";
+import { CardFooterBox, CardHeaderBox } from "../card/card";
 import { focus } from "../focus/focus";
 import { Info } from "../icons";
 import { SectionHeader } from "../section-header";
@@ -234,6 +235,8 @@ const styles = stylex.create({
   flush: { minWidth: 0, [tableVars.corner]: 0 },
   // Flush, the title and the foot line up with the words in a table's first column.
   edgeFlush: { paddingInline: grasp.tableCellInline },
+  // The foot's words take the whole row, as a block's would: a Pagination there runs its width.
+  footWords: { flexGrow: 1, minWidth: 0 },
   foot: {
     paddingInline: grasp.space5,
     paddingBlock: grasp.space3,
@@ -303,15 +306,15 @@ const Foot = ({
       {...stylex.props(fill && styles.footFill)}
     >
       <Separator decorative />
-      <div
-        {...stylex.props(
+      <CardFooterBox
+        look={[
           styles.foot,
           compact && styles.footCompact,
-          flush && styles.edgeFlush
-        )}
+          flush && styles.edgeFlush,
+        ]}
       >
-        {footer}
-      </div>
+        <div {...stylex.props(styles.footWords)}>{footer}</div>
+      </CardFooterBox>
     </div>
   );
 
@@ -343,14 +346,14 @@ const Head = ({
   fill,
   handle,
 }: HeadProps) => (
-  <div
-    {...stylex.props(
+  <CardHeaderBox
+    look={[
       styles.head,
       compact && styles.headCompact,
       flush && styles.edgeFlush,
       fill && styles.headFill,
-      handle && styles.handled
-    )}
+      handle && styles.handled,
+    ]}
   >
     {handle && <Handle handle={handle} />}
     <SectionHeader
@@ -363,7 +366,7 @@ const Head = ({
       size={compact ? "sm" : "md"}
       loading={loading}
     />
-  </div>
+  </CardHeaderBox>
 );
 
 /** The info mark beside the title, and whatever else stands beside it. */

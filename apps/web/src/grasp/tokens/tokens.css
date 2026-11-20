@@ -1815,6 +1815,8 @@
   --grasp-picker-tile: 8rem;
   /* The width of a page column at the page's start: a settings page's groups of rows (Page column). */
   --grasp-page-column-measure: 45rem;
+  /* The width of a settings page's centred column: its title and its groups of rows (Page column measure="settings"). */
+  --grasp-page-settings-measure: 40rem;
   /* The width of a wide page's centred column, such as a table or a board. */
   --grasp-page-measure-wide: 80rem;
   /* Between the parts of a page, top to bottom: its header, its toolbar and its content, as a page lays them and its skeleton waits in them. */

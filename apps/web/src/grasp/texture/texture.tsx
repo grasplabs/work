@@ -46,9 +46,10 @@ const styles = stylex.create({
     display: { default: "block", [media.forced]: "none" },
   },
   // In the object's own colour: from the top, down, the same in either direction. In the dark the
-  // colour is lifted toward white, so a deep brand (Slack's aubergine) still shows on a dark ground.
+  // dark theme has its own mix: the colour's own hue and strength at a lightness that shows on a dark
+  // ground (as the lavender callout's), so HubSpot reads orange there too, and Slack's aubergine purple.
   tinted: (tint: string) => ({
-    backgroundImage: `linear-gradient(to bottom, light-dark(${tint}, color-mix(in oklab, ${tint} 40%, white)), transparent 85%)`,
+    backgroundImage: `linear-gradient(to bottom, light-dark(${tint}, oklch(from ${tint} 0.72 c h)), transparent 85%)`,
   }),
 });
 

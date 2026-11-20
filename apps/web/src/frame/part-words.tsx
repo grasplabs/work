@@ -1321,6 +1321,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       signedOut: t({ message: "Signed out", context: "state of one app" }),
       stopped: t({ message: "Stopped working", context: "state of one app" }),
       notConnected: t`Not connected`,
+      adminConnects: t`An admin connects this`,
       canDo: t`What Grasp can do`,
       mayDo: t`What Grasp may do`,
       counts: (reads, writes) =>

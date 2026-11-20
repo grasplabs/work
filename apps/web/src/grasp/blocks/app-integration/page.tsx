@@ -37,6 +37,7 @@ import type { App, AppConnection, AppTool, AppToolChoice } from "./model";
 import {
   AppMark,
   asksConnect,
+  canConnect,
   ChoiceWord,
   ConnectAction,
   groupChoice,
@@ -160,7 +161,7 @@ export interface AppPageProps extends AppActions {
   onToolsChange?: (
     changes: readonly { id: string; choice: AppToolChoice }[]
   ) => void;
-  /** A change of who may use it: the host keeps it. */
+  /** A change of who may use it: the host keeps it. Without it, who may use it is shown as words. */
   onForWhomChange?: (forWhom: AppConnection["forWhom"]) => void;
   /** This instance's own words, over the catalogue's, key by key. */
   words?: Partial<AppIntegrationWords>;
@@ -564,6 +565,26 @@ const UsedBy = ({ app, words }: { app: App; words: AppIntegrationWords }) => {
   );
 };
 
+/** The head's action: Connect (or, for a member, why not), or Manage. */
+const HeadAction = ({
+  app,
+  actions,
+  words,
+}: {
+  app: App;
+  actions: AppActions;
+  words: AppIntegrationWords;
+}) => {
+  if (!asksConnect(app)) {
+    return <ManageMenu app={app} actions={actions} words={words} size="sm" />;
+  }
+  return canConnect(actions) ? (
+    <ConnectAction app={app} actions={actions} words={words} size="sm" />
+  ) : (
+    <span {...stylex.props(styles.help)}>{words.adminConnects}</span>
+  );
+};
+
 /** An app's own page: its tinted head, what Grasp may do, and its connection beside it. */
 export const AppPage = ({
   app,
@@ -585,18 +606,7 @@ export const AppPage = ({
         description={
           <span {...stylex.props(styles.description)}>{app.description}</span>
         }
-        actions={
-          asksConnect(app) ? (
-            <ConnectAction
-              app={app}
-              actions={actions}
-              words={words}
-              size="sm"
-            />
-          ) : (
-            <ManageMenu app={app} actions={actions} words={words} size="sm" />
-          )
-        }
+        actions={<HeadAction app={app} actions={actions} words={words} />}
       />
       <div {...stylex.props(styles.body)}>
         <div {...stylex.props(styles.grid)}>

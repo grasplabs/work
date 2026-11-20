@@ -46,6 +46,7 @@ import { useWords } from "../words/words";
 import { PanelPlaceContext } from "./float-window";
 import type { PanelPlacement } from "./float-window";
 import { appShellPanelWords } from "./words";
+import type { AppShellPanelWords } from "./words";
 
 // Below this the shell is a phone's: the panels lie over the page, so there is no placement to switch.
 const NARROW_REM = 40;
@@ -177,6 +178,11 @@ export interface AppShellPanelHeadProps {
   onClose?: () => void;
   /** Buttons of your own before close, where an item in `menu` will not do. Each is one more icon in the head: prefer `menu`. */
   actions?: ReactNode;
+  /**
+   * This head's own words, over the catalogue's (GraspWords) `app-shell-panel` group, key by key
+   * (`{ close: "Close the chat" }`). Any left out are the catalogue's, else English.
+   */
+  words?: Partial<AppShellPanelWords>;
   /** The panel's own page: a link to it, "Open as a page", where you give one. */
   pageHref?: string;
   /**
@@ -256,6 +262,7 @@ const HeadControls = ({
   narrow,
   onRename,
   menu,
+  words,
 }: {
   setPlacement?: (placement: PanelPlacement) => void;
   next: PanelPlacement;
@@ -266,8 +273,8 @@ const HeadControls = ({
   narrow: boolean;
   onRename: (() => void) | undefined;
   menu: readonly DropdownMenuAction[];
+  words: AppShellPanelWords;
 }) => {
-  const words = useWords("app-shell-panel", appShellPanelWords);
   const said = useWords("rename", renameWords);
   const page = pageHref !== undefined || pageRender !== undefined;
   const items = menuOf({
@@ -329,12 +336,13 @@ export const AppShellPanelHead = ({
   pageRender,
   expanded = false,
   onExpandedChange,
+  words: own,
 }: AppShellPanelHeadProps) => {
   const place = use(PanelPlaceContext);
   const [head, setHead] = useState<HTMLDivElement | null>(null);
   const narrow = useNarrow(head);
   const [renameAsked, setRenameAsked] = useState(0);
-  const words = useWords("app-shell-panel", appShellPanelWords);
+  const words = useWords("app-shell-panel", appShellPanelWords, own);
   const { setPlacement, handleMovePress, handleMoveKey } = place;
   const hint = useId();
   const next = place.placement === "floating" ? "docked" : "floating";
@@ -400,6 +408,7 @@ export const AppShellPanelHead = ({
               : undefined
           }
           menu={menu}
+          words={words}
         />
         {actions}
         {onClose === undefined ? null : (

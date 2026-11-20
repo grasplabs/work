@@ -2737,6 +2737,10 @@ msgstr "Ein Admin hat die Datenänderung verworfen, die diese Version braucht, d
 msgid "An admin approves its access again before it works for your team."
 msgstr "Ein Admin genehmigt seinen Zugriff erneut, bevor es für Ihr Team funktioniert."
 
+#: src/frame/part-words.tsx
+msgid "An admin connects this"
+msgstr "Das verbindet ein Admin"
+
 #: src/connections/integration-facts.ts
 msgid "An admin connects this for everyone."
 msgstr "Ein Admin verbindet dies für alle."

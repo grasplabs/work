@@ -2737,6 +2737,10 @@ msgstr "An admin abandoned the data change this version needs, so it can't be sh
 msgid "An admin approves its access again before it works for your team."
 msgstr "An admin approves its access again before it works for your team."
 
+#: src/frame/part-words.tsx
+msgid "An admin connects this"
+msgstr "An admin connects this"
+
 #: src/connections/integration-facts.ts
 msgid "An admin connects this for everyone."
 msgstr "An admin connects this for everyone."

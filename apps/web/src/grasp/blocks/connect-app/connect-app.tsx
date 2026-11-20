@@ -155,9 +155,9 @@ const styles = stylex.create({
   },
   groups: { maxHeight: "16rem" },
   who: { paddingBlock: grasp.space1, paddingInline: grasp.space1 },
+  consentScroll: { maxHeight: "7rem" },
   // Who uses it, fixed by the host: its word on the section's inset.
   fixed: { paddingBlock: grasp.space2, paddingInline: grasp.inspectorInset },
-  consentScroll: { maxHeight: "7rem" },
   consent: {
     margin: 0,
     paddingBlock: grasp.space3,

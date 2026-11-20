@@ -457,6 +457,10 @@ export const ConnectAction = ({
   );
 };
 
+/** Whether the person may connect it: the host gave a Connect (an admin), else it is said why not. */
+export const canConnect = (actions: AppActions) =>
+  actions.connect !== undefined || actions.onConnect !== undefined;
+
 /** Whether the app asks to be connected (again) before anything else: none yet, or it stopped. */
 export const asksConnect = (app: App) =>
   app.connection === undefined || app.connection.state === "reconnect";

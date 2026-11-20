@@ -2737,6 +2737,10 @@ msgstr "Un administrateur a abandonné la modification de données dont cette ve
 msgid "An admin approves its access again before it works for your team."
 msgstr "Un administrateur approuve à nouveau son accès avant qu’il fonctionne pour votre équipe."
 
+#: src/frame/part-words.tsx
+msgid "An admin connects this"
+msgstr "Un administrateur le connecte"
+
 #: src/connections/integration-facts.ts
 msgid "An admin connects this for everyone."
 msgstr "Un admin le connecte pour tout le monde."

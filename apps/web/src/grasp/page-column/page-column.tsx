@@ -1,9 +1,12 @@
 // Page column: a page's content in one column of a reading width, at the page's start or in its
-// middle (`align="center"`), as a settings page has it (the product's Settings: one screen per section, a column about 720px wide
-// beside the nav). A child that needs the page's whole width, a table, stands in PageColumnWide.
+// middle (`align="center"`), as a settings page has it. A child that needs the page's whole width, a
+// table, stands in PageColumnWide.
 //
-//   <PageColumn>
-//     <SectionCard flush density="compact" title="Workspace"><SettingsRows>…</SettingsRows></SectionCard>
+//   <PageColumn measure="settings" align="center">
+//     <PageHeader size="md" title="General" />
+//     <SectionCard variant="grouped" flush density="compact" title="Interface">
+//       <SettingsRows controls="fit">…</SettingsRows>
+//     </SectionCard>
 //     <PageColumnWide><DataTable … /></PageColumnWide>
 //   </PageColumn>
 //
@@ -14,6 +17,7 @@ import type { ReactNode } from "react";
 
 import type { LayoutStyle } from "../layout/layout";
 import { grasp } from "../tokens/tokens.stylex";
+import { pageColumnVars } from "./page-column.stylex";
 
 /** What a caller may style: where the column sits and how much room it takes. */
 export type PageColumnLayoutStyle = LayoutStyle;
@@ -23,14 +27,15 @@ export interface PageColumnProps {
   /** The page's content, top to bottom: groups of rows, and PageColumnWide for a table. */
   children: ReactNode;
   /**
-   * How wide the column runs: `column` (page-column-measure, 45rem) for settings and forms,
-   * `page` (page-measure, 64rem) for a page of wider things.
+   * How wide the column runs: `column` (page-column-measure, 45rem) for forms, `settings`
+   * (page-settings-measure, 40rem) for a settings page, `page` (page-measure, 64rem) for a page of
+   * wider things.
    * @default "column"
    */
-  measure?: "column" | "page";
+  measure?: "column" | "settings" | "page";
   /**
-   * Where the column stands: at the page's start, or in its middle, the room past the measure shared
-   * on both sides (a settings page).
+   * Where the column stands: at the page's start, or in its middle with the room past the measure
+   * shared on both sides (a settings page).
    * @default "start"
    */
   align?: "start" | "center";
@@ -55,22 +60,31 @@ const styles = stylex.create({
     boxSizing: "border-box",
     minWidth: 0,
   },
-  column_column: {
-    paddingInlineEnd: `max(0px, calc(100% - ${grasp.pageColumnMeasure}))`,
+  start: {
+    paddingInlineEnd: `max(0px, calc(100cqi - ${pageColumnVars.measure}))`,
   },
-  column_page: {
-    paddingInlineEnd: `max(0px, calc(100% - ${grasp.pageMeasure}))`,
+  // In the middle: what is past the measure, half on each side; a wide child steps back by one side.
+  center: {
+    paddingInline: `max(0px, calc((100cqi - ${pageColumnVars.measure}) / 2))`,
+    [pageColumnVars.wideStart]: `min(0px, calc((${pageColumnVars.measure} - 100cqi) / 2))`,
   },
-  center_column: {
-    paddingInline: `max(0px, calc((100% - ${grasp.pageColumnMeasure}) / 2))`,
+  measure_column: { [pageColumnVars.measure]: grasp.pageColumnMeasure },
+  measure_settings: { [pageColumnVars.measure]: grasp.pageSettingsMeasure },
+  measure_page: { [pageColumnVars.measure]: grasp.pageMeasure },
+  wide: {
+    width: "100cqi",
+    minWidth: 0,
+    marginInlineStart: pageColumnVars.wideStart,
   },
-  center_page: {
-    paddingInline: `max(0px, calc((100% - ${grasp.pageMeasure}) / 2))`,
-  },
-  wide: { width: "100cqi", minWidth: 0 },
 });
 
-/** A page's content in one column of a reading width, at the page's start. */
+const measures = {
+  column: styles.measure_column,
+  settings: styles.measure_settings,
+  page: styles.measure_page,
+} as const;
+
+/** A page's content in one column of a reading width, at the page's start or in its middle. */
 export const PageColumn = ({
   children,
   measure = "column",
@@ -80,15 +94,14 @@ export const PageColumn = ({
   <div
     data-slot="page-column"
     data-measure={measure}
+    data-align={align}
     {...stylex.props(styles.frame, layout)}
   >
     <div
       {...stylex.props(
         styles.column,
-        align === "start" &&
-          (measure === "page" ? styles.column_page : styles.column_column),
-        align === "center" &&
-          (measure === "page" ? styles.center_page : styles.center_column)
+        measures[measure],
+        align === "center" ? styles.center : styles.start
       )}
     >
       {children}
