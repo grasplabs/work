@@ -1796,7 +1796,6 @@ msgstr "Aan een pagina zijn de gegevens van de app geweigerd"
 msgid "A page your team opens"
 msgstr "Een pagina die je team opent"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "A part couldn't be made out. What came before is kept."
 msgstr "Een deel was niet te verstaan. Wat ervoor kwam blijft staan."
@@ -2563,6 +2562,10 @@ msgstr "Sta minstens één tool toe om {app} te koppelen."
 #: src/apps/field-editor.tsx
 msgid "Allow decimals"
 msgstr "Decimalen toestaan"
+
+#: src/frame/part-words.tsx
+msgid "Allow the microphone in the browser's settings."
+msgstr "Sta de microfoon toe in de instellingen van de browser."
 
 #: src/interview/sound-check.tsx
 msgid "Allow the microphone when your browser asks."
@@ -3418,7 +3421,6 @@ msgctxt "a question going out"
 msgid "Asking"
 msgstr "Bezig met vragen"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Asking for the microphone"
 msgstr "Vraagt om de microfoon"
@@ -3897,7 +3899,6 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/chat/use-dictation.ts
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
@@ -5338,6 +5339,10 @@ msgid "Couldn't take that answer"
 msgstr "Dat antwoord kon niet worden overgenomen"
 
 #: src/frame/part-words.tsx
+msgid "Couldn't write that down. What you typed is kept."
+msgstr "Dat kon niet worden uitgeschreven. Wat je typte blijft staan."
+
+#: src/frame/part-words.tsx
 msgid "Counted in the page's words. Code view marks them in its source."
 msgstr "Geteld in de woorden van de pagina. De codeweergave markeert ze in de bron."
 
@@ -6033,7 +6038,6 @@ msgstr "klaar"
 
 #: src/apps/blueprints.tsx
 #: src/apps/publish.tsx
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.runs.tsx
@@ -9420,7 +9424,6 @@ msgstr "Laten we beginnen"
 msgid "Lets {field} in {table} hold more. Every record already fits."
 msgstr "Laat {field} in {table} meer bevatten. Elk record past al."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Level"
 msgstr "Niveau"
@@ -9574,7 +9577,6 @@ msgstr "Zet op een rij waarover een beslissing nodig is, en van wie."
 msgid "List what was finished, and who did it."
 msgstr "Zet op een rij wat is afgerond, en wie het deed."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 #: src/interview/voice-bar.tsx
 msgid "Listening"
@@ -10262,7 +10264,6 @@ msgstr "Oude vermeldingen uit het auditlogboek verplaatst"
 msgid "Mutations and actions of {app}"
 msgstr "Mutaties en acties van {app}"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Mute"
 msgstr "Dempen"
@@ -10272,7 +10273,6 @@ msgctxt "turn your microphone off for a moment"
 msgid "Mute"
 msgstr "Dempen"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Muted"
 msgstr "Gedempt"
@@ -10773,7 +10773,6 @@ msgstr "Geen treffers"
 msgid "No memory files are written yet."
 msgstr "Er zijn nog geen geheugenbestanden geschreven."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "No microphone was found."
 msgstr "Er is geen microfoon gevonden."
@@ -12461,7 +12460,6 @@ msgid "Pause Stephen outside Grasp?"
 msgstr "Stephen buiten Grasp pauzeren?"
 
 #: src/agents/agents-overview.tsx
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 #: src/settings/stephen-card.tsx
 #: src/workflows/runs.tsx
@@ -16312,7 +16310,6 @@ msgstr "Dat medewerkersaccount heeft hier geen toegang gekregen."
 msgid "That way of signing in isn't set up here."
 msgstr "Die manier van inloggen is hier niet ingesteld."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "That's as long as one dictation can be."
 msgstr "Langer kan één dictaat niet zijn."
@@ -16739,11 +16736,6 @@ msgstr "De geheugenbestanden, skills en uploads die je agents lezen, staan in [K
 msgid "The message"
 msgstr "Het bericht"
 
-#: src/chat/use-dictation.ts
-#: src/frame/part-words.tsx
-msgid "The microphone is blocked for this site."
-msgstr "De microfoon is geblokkeerd voor deze site."
-
 #: src/interview/words.ts
 msgid "The microphone is not available here. Type your answer."
 msgstr "De microfoon werkt hier niet. Typ je antwoord."
@@ -17012,11 +17004,6 @@ msgstr "Het hele bedrijf"
 msgid "the whole connection"
 msgstr "de hele koppeling"
 
-#: src/chat/use-dictation.ts
-#: src/frame/part-words.tsx
-msgid "The words couldn't be written down. What you typed is kept."
-msgstr "De woorden konden niet worden uitgeschreven. Wat je typte blijft staan."
-
 #: src/workflows/delete-workflow.tsx
 msgid "The workflow is deleted, but its name wasn't released: {reason}"
 msgstr "De workflow is verwijderd, maar de naam is niet vrijgegeven: {reason}"
@@ -17212,7 +17199,6 @@ msgstr "Deze App is gearchiveerd. Herstel hem om hem te delen."
 msgid "This App offers no options."
 msgstr "Deze App biedt geen opties."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "This browser can't dictate."
 msgstr "Deze browser kan niet dicteren."
@@ -17729,7 +17715,6 @@ msgstr "Proberen"
 #: src/chat/chat-body.tsx
 #: src/chat/chat-files.tsx
 #: src/chat/thread.tsx
-#: src/chat/use-dictation.ts
 #: src/connections/connect-dialog.tsx
 #: src/frame/page-failed.tsx
 #: src/frame/part-words.tsx
@@ -17962,7 +17947,6 @@ msgstr "Ontkoppelen"
 msgid "Unlink {app} account {shown}"
 msgstr "{app}-account {shown} ontkoppelen"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Unmute"
 msgstr "Dempen opheffen"
@@ -19633,7 +19617,6 @@ msgstr "{file} schrijven"
 msgid "Writing a code step"
 msgstr "Codestap schrijven"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Writing it down"
 msgstr "Schrijft het uit"

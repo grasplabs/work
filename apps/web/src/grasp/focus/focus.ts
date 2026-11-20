@@ -30,7 +30,9 @@ const watchPointerFocus = (root: Document) => {
     return;
   }
   root.documentElement.dataset[flag] = "";
-  let pointer = false;
+  // Until a key is pressed, focus moved by code (a page's first stop after a navigation, focus
+  // given back) counts as a press: the ring is the keyboard's, and nothing has come from it yet.
+  let pointer = true;
   // A press on what already has focus moves no focus, so focusin never hears it: the element is
   // marked here, so a ring the keyboard drew earlier goes with the press (a press never shows the
   // ring). A key on it brings the ring back.

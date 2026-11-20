@@ -10,6 +10,7 @@ import type {
   ComposerVoiceProblem,
   ComposerVoiceWords,
 } from "../grasp/composer/index.ts";
+import { useComposerWords } from "../grasp/composer/words.ts";
 import { isLocale } from "../i18n.ts";
 import { sourceFor, useCanDictate } from "./dictation.ts";
 import type { DictationSource } from "./dictation.ts";
@@ -58,36 +59,29 @@ const keepTold = (userId: string): void => {
   }
 };
 
-/** What the dictation says, in the page's language. */
+/**
+ * What this dictation says beyond the parts' catalogue (frame/part-words.tsx),
+ * which has the rest: who writes it down, the first time, and that this
+ * deployment has no transcription, in place of a failure.
+ */
 const useWords = (
   telling: boolean,
   unavailable: boolean
 ): Partial<ComposerVoiceWords> => {
   const { t } = useLingui();
+  const { problems } = useComposerWords("voice");
   return {
-    asking: telling
-      ? t`Your browser's maker writes down what you say.`
-      : t`Asking for the microphone`,
-    listening: t`Listening`,
-    thinking: t`Writing it down`,
-    silent: t`Paused`,
-    muted: t`Muted`,
-    done: t`Done`,
-    cancel: t`Cancel`,
-    mute: t`Mute`,
-    unmute: t`Unmute`,
-    retry: t`Try again`,
-    level: t`Level`,
-    problems: {
-      blocked: t`The microphone is blocked for this site.`,
-      missing: t`No microphone was found.`,
-      unsupported: t`This browser can't dictate.`,
-      unheard: t`A part couldn't be made out. What came before is kept.`,
-      failed: unavailable
-        ? t`Dictation isn't set up here yet. What you typed is kept.`
-        : t`The words couldn't be written down. What you typed is kept.`,
-      limited: t`That's as long as one dictation can be.`,
-    },
+    ...(telling
+      ? { asking: t`Your browser's maker writes down what you say.` }
+      : {}),
+    ...(unavailable
+      ? {
+          problems: {
+            ...problems,
+            failed: t`Dictation isn't set up here yet. What you typed is kept.`,
+          },
+        }
+      : {}),
   };
 };
 

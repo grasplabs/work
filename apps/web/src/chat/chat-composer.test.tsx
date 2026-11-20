@@ -499,7 +499,7 @@ describe(ChatComposer, () => {
     });
   });
 
-  it("says a dictation failed when the browser's recognition never starts, keeping what was typed", async () => {
+  it("says over the box that a dictation failed when the browser's recognition never starts, keeping what was typed, until it is dismissed", async () => {
     // A browser that can't reach its maker's service: it neither starts nor says why.
     Recognition.silent = true;
     window.SpeechRecognition = Recognition;
@@ -513,13 +513,27 @@ describe(ChatComposer, () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
 
+      const failed = "Couldn't write that down. What you typed is kept.";
+      const said = document.body.textContent.includes(failed);
+      const offersRetry = [...document.querySelectorAll("button")].some(
+        (each) => each.textContent === "Try again"
+      );
+      const kept = field().value;
+      await press(button("Dismiss"));
+
       expect({
-        said: document.body.textContent.includes(
-          "The words couldn't be written down. What you typed is kept."
-        ),
-        // The dictation's card shows what was typed in the field's place.
-        kept: document.body.textContent.includes("Book the room"),
-      }).toStrictEqual({ said: true, kept: true });
+        said,
+        offersRetry,
+        kept,
+        gone: !document.body.textContent.includes(failed),
+        after: field().value,
+      }).toStrictEqual({
+        said: true,
+        offersRetry: true,
+        kept: "Book the room",
+        gone: true,
+        after: "Book the room",
+      });
     } finally {
       vi.useRealTimers();
       Recognition.silent = false;
@@ -615,7 +629,7 @@ describe(ChatComposer, () => {
       const said = document.body.textContent.includes(
         "Dictation isn't set up here yet. What you typed is kept."
       );
-      await press(button("Cancel"));
+      await press(button("Dismiss"));
       const after = offersDictation();
       act(() => {
         root?.unmount();

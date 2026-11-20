@@ -198,8 +198,8 @@
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)),
     inset 0 0 0 1px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
-    inset 0 -6px 12px
-      light-dark(oklch(0.12 0.03 162 / 0.45), oklch(0.29 0.05 162 / 0.08));
+    inset 0 -2px 4px
+      light-dark(oklch(0.12 0.03 162 / 0.12), oklch(0.29 0.05 162 / 0.03));
   --grasp-bevel-ink-drop: light-dark(
     oklch(0.2 0.04 162 / 0.2),
     oklch(0 0 0 / 0.24)
@@ -303,10 +303,10 @@
     oklch(0.9 0.06 165),
     oklch(0.42 0.07 165)
   );
-  --grasp-field-edge: var(--grasp-edge-tone);
+  --grasp-field-edge: var(--grasp-bevel-quiet-edge);
   --grasp-field-edge-hover: light-dark(
-    oklch(0.173 0.028 169.36 / 0.12),
-    oklch(0.96 0.02 150 / 0.18)
+    oklch(0.173 0.028 169.36 / 0.16),
+    oklch(0.96 0.02 150 / 0.22)
   );
   --grasp-field-edge-invalid: var(--grasp-danger);
   --grasp-field-edge-focus: light-dark(
@@ -1208,8 +1208,8 @@
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)),
     inset 0 0 0 1px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
-    inset 0 -6px 12px
-      light-dark(oklch(0.12 0.06 178 / 0.45), oklch(0.29 0.1 178 / 0.08));
+    inset 0 -2px 4px
+      light-dark(oklch(0.12 0.06 178 / 0.12), oklch(0.29 0.1 178 / 0.03));
   --grasp-bevel-ink-drop: light-dark(
     oklch(0.2 0.08 178 / 0.2),
     oklch(0 0 0 / 0.24)
@@ -1313,10 +1313,10 @@
     oklch(0.9 0.12 178),
     oklch(0.42 0.07 165)
   );
-  --grasp-field-edge: var(--grasp-edge-tone);
+  --grasp-field-edge: var(--grasp-bevel-quiet-edge);
   --grasp-field-edge-hover: light-dark(
-    oklch(0.173 0.056 178 / 0.12),
-    oklch(0.96 0.04 178 / 0.18)
+    oklch(0.173 0.056 178 / 0.16),
+    oklch(0.96 0.04 178 / 0.22)
   );
   --grasp-field-edge-invalid: var(--grasp-danger);
   --grasp-field-edge-focus: light-dark(
@@ -2207,8 +2207,8 @@
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)),
     inset 0 0 0 1px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
-    inset 0 -6px 12px
-      light-dark(oklch(0.12 0.007 75 / 0.45), oklch(0.29 0.011 75 / 0.08));
+    inset 0 -2px 4px
+      light-dark(oklch(0.12 0.007 75 / 0.12), oklch(0.29 0.011 75 / 0.03));
   --grasp-bevel-ink-drop: light-dark(
     oklch(0.2 0.009 75 / 0.2),
     oklch(0 0 0 / 0.24)
@@ -2312,10 +2312,10 @@
     oklch(0.9 0.013 75),
     oklch(0.42 0.07 165)
   );
-  --grasp-field-edge: var(--grasp-edge-tone);
+  --grasp-field-edge: var(--grasp-bevel-quiet-edge);
   --grasp-field-edge-hover: light-dark(
-    oklch(0.173 0.006 75 / 0.12),
-    oklch(0.96 0.004 75 / 0.18)
+    oklch(0.173 0.006 75 / 0.16),
+    oklch(0.96 0.004 75 / 0.22)
   );
   --grasp-field-edge-invalid: var(--grasp-danger);
   --grasp-field-edge-focus: light-dark(
