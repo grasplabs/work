@@ -194,7 +194,7 @@ describe("the Integrations overview", () => {
       connection("acme-crm", { source: "composio", status: "needs_reauth" }),
     ]);
     expect(host.textContent).toContain(
-      "Acme CRM stopped working. Disconnect it and connect it again"
+      "Acme CRM stopped working. Connect it again"
     );
     const open = [...host.querySelectorAll("a")].find(
       (link) => link.textContent === "Open Acme CRM"

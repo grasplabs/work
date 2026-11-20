@@ -197,6 +197,14 @@ const buttons = (text: string): HTMLElement[] =>
     (each) => each.textContent.trim() === text
   );
 
+/** The connect dialog's own Connect, which carries its working and failed words too. */
+const dialogConnect = (): HTMLElement | undefined =>
+  [
+    ...document.querySelectorAll<HTMLElement>(
+      '[role="dialog"] [data-slot="button"]'
+    ),
+  ].find((each) => each.textContent.startsWith("Connect"));
+
 describe("an app's panel", () => {
   afterEach(() => {
     act(() => {
@@ -219,7 +227,7 @@ describe("an app's panel", () => {
       // Who uses a toolkit isn't asked: it is always everyone.
       choices: dialog?.querySelectorAll('[role="combobox"]').length ?? -1,
     };
-    await press(buttons("Connect").at(-1));
+    await press(dialogConnect());
 
     expect({ shown, sent }).toStrictEqual({
       shown: { consent: true, forEveryone: true, choices: 0 },
@@ -255,7 +263,7 @@ describe("an app's panel", () => {
     };
     const sent = await opened("hubspot", [stopped]);
     await press(buttons("Connect again")[0]);
-    await press(buttons("Connect").at(-1));
+    await press(dialogConnect());
 
     expect(
       sent.map((each) => ("toolkit" in each ? "connect" : each))

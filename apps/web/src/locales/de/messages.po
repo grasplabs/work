@@ -123,8 +123,8 @@ msgid "{app} needs someone to sign in again. Until then, what uses it waits."
 msgstr "Bei {app} muss sich jemand erneut anmelden. Bis dahin wartet, was es nutzt."
 
 #: src/connections/integrations-header.tsx
-msgid "{app} stopped working. Disconnect it and connect it again; until then, what uses it waits."
-msgstr "{app} funktioniert nicht mehr. Trenne es und verbinde es erneut; bis dahin wartet, was es nutzt."
+msgid "{app} stopped working. Connect it again; until then, what uses it waits."
+msgstr "{app} funktioniert nicht mehr. Verbinde es erneut; bis dahin wartet, was es nutzt."
 
 #: src/connections/revocations-by-hand.tsx
 msgid "{app}, {whose}'s own"
@@ -2067,6 +2067,7 @@ msgstr "Akzeptiert"
 
 #: src/agents/agent-section.tsx
 #: src/apps/publish.tsx
+#: src/connections/connection-list.tsx
 msgid "Access"
 msgstr "Zugriff"
 

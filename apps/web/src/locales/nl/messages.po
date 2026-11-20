@@ -123,8 +123,8 @@ msgid "{app} needs someone to sign in again. Until then, what uses it waits."
 msgstr "Iemand moet opnieuw inloggen bij {app}. Tot die tijd wacht wat het gebruikt."
 
 #: src/connections/integrations-header.tsx
-msgid "{app} stopped working. Disconnect it and connect it again; until then, what uses it waits."
-msgstr "{app} werkt niet meer. Ontkoppel het en koppel het opnieuw; tot die tijd wacht wat het gebruikt."
+msgid "{app} stopped working. Connect it again; until then, what uses it waits."
+msgstr "{app} werkt niet meer. Koppel het opnieuw; tot dan wacht wat het gebruikt."
 
 #: src/connections/revocations-by-hand.tsx
 msgid "{app}, {whose}'s own"
@@ -2067,6 +2067,7 @@ msgstr "Geaccepteerd"
 
 #: src/agents/agent-section.tsx
 #: src/apps/publish.tsx
+#: src/connections/connection-list.tsx
 msgid "Access"
 msgstr "Toegang"
 

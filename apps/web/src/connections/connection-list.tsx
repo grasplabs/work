@@ -481,3 +481,44 @@ export const ConnectionList = ({
       key={connection.id}
     />
   ));
+
+/**
+ * What an app's one connection holds beyond what the app's page says of it
+ * (its account, who connected it, signing in again and disconnecting): the
+ * consent a Composio one was connected with, and, for admins and builders,
+ * which Apps and agents hold a permission for it. Nothing for someone who
+ * would see neither.
+ */
+export const ConnectionAccess = ({
+  connection,
+  held,
+  identity,
+}: {
+  connection: ListedConnection;
+  /** Undefined for someone who can't list permissions. */
+  held: Loaded<HeldPermissions> | undefined;
+  identity: Identity;
+}) => {
+  const { t } = useLingui();
+  const consented = connection.source === "composio";
+  const holders = held?.state === "ready" ? held.data : undefined;
+  if (!consented && holders === undefined) {
+    return null;
+  }
+  return (
+    <SectionCard density="compact" flush title={t`Access`}>
+      {consented ? (
+        <SettingsRows>
+          <ConsentRecord connection={connection} />
+        </SettingsRows>
+      ) : null}
+      {holders === undefined ? null : (
+        <Holders
+          held={holders}
+          id={connection.id}
+          mayRevoke={isMemberAdmin(identity)}
+        />
+      )}
+    </SectionCard>
+  );
+};

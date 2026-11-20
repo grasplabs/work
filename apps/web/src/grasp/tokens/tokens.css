@@ -420,7 +420,7 @@
   --grasp-bevel-ink-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)),
-    inset 0 0 0 0.75px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
+    inset 0 0 0 1px light-dark(var(--grasp-light-night), oklch(0 0 0 / 0.5)),
     inset 0 -6px 12px
       light-dark(oklch(0.12 0.03 162 / 0.45), oklch(0.29 0.05 162 / 0.08));
   /* The colour of the ink bevel's drops. */
@@ -441,9 +441,14 @@
   /* bevel-ink while pressed: the drop tightens, as if the button went down. */
   --grasp-bevel-ink-press:
     var(--grasp-bevel-ink-face), var(--grasp-button-lift-press);
-  /* The edge of the second action: drawn as a field is (an inset hairline and the field's lift), so a quiet button and a field in one row are the same drawn height. */
+  /* The edge of the second action: drawn as a field is (an inset hairline and the field's lift), so a quiet button and a field in one row are the same drawn height. Every bevel has the same 1px inset outline and the same lift, so buttons of one size read as one height side by side. */
   --grasp-bevel-quiet:
-    inset 0 0 0 1px var(--grasp-edge-tone), var(--grasp-field-lift);
+    inset 0 0 0 1px var(--grasp-bevel-quiet-edge), var(--grasp-field-lift);
+  /* The quiet bevel's outline: firm enough that a white button on a white card shows its top edge as a filled one does, so Cancel beside Connect does not read shorter. */
+  --grasp-bevel-quiet-edge: light-dark(
+    oklch(0.173 0.028 169.36 / 0.11),
+    oklch(0.96 0.02 150 / 0.16)
+  );
   /* A filled button under a pointer: the field's lift, one small step deeper. Nothing dark is drawn far outside its box. */
   --grasp-button-lift-hover:
     0 1px 2px var(--grasp-shade-faint), 0 3px 6px var(--grasp-shade-faint);
@@ -453,7 +458,7 @@
   --grasp-bevel-danger-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.2), oklch(1 0 0 / 0.24)),
     inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.06), oklch(1 0 0 / 0.08)),
-    inset 0 0 0 0.75px light-dark(oklch(0.36 0.13 28), oklch(0 0 0 / 0.5)),
+    inset 0 0 0 1px light-dark(oklch(0.36 0.13 28), oklch(0 0 0 / 0.5)),
     inset 0 -6px 12px oklch(0.3 0.12 28 / 0.4);
   /* The colour of the danger bevel's drops. */
   --grasp-bevel-danger-drop: light-dark(
@@ -477,7 +482,7 @@
   --grasp-bevel-approve-face:
     inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.18), oklch(1 0 0 / 0.22)),
     inset 0 -0.75px 0 oklch(1 0 0 / 0.06),
-    inset 0 0 0 0.75px oklch(0.36 0.07 173 / 0.7),
+    inset 0 0 0 1px oklch(0.36 0.07 173 / 0.7),
     inset 0 -6px 12px oklch(0.3 0.06 173 / 0.3);
   /* The colour of the approve bevel's drops: mint-deep on a light ground. */
   --grasp-bevel-approve-drop: light-dark(
@@ -489,9 +494,9 @@
     0 1px 1px var(--grasp-bevel-approve-drop),
     0 0.5px 0.5px var(--grasp-bevel-approve-drop),
     0 0.25px 0.25px var(--grasp-bevel-approve-drop);
-  /* The bevelled edge of an approving action at rest, with its glow: held in close under it, so beside another button it draws no taller (the wider 0 3px 10px -7px reached 3px further down than its neighbour's lift). */
+  /* The bevelled edge of an approving action at rest, with its glow: held inside the field's lift under it, so beside another button it draws no taller (scripts/check-button-heights.ts). */
   --grasp-bevel-approve:
-    var(--grasp-bevel-approve-face), 0 2px 6px -5px var(--grasp-approve-glow),
+    var(--grasp-bevel-approve-face), 0 1px 3px -3px var(--grasp-approve-glow),
     var(--grasp-field-lift);
   /* bevel-approve under a pointer: the drop grows and the glow comes up. */
   --grasp-bevel-approve-hover:

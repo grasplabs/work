@@ -348,9 +348,10 @@ export const ConnectApp = ({
         </DialogBody>
         <DialogFooter>
           <DialogAction>{words.cancel}</DialogAction>
-          <Button
+          {/* A dialog action like Cancel, so the two stand at one size side by side. */}
+          <DialogAction
             variant="ink"
-            onClick={() => {
+            action={() => {
               onConnect({
                 tools: tools.map((tool) => ({
                   id: tool.id,
@@ -358,11 +359,10 @@ export const ConnectApp = ({
                 })),
                 forWhom,
               });
-              setOpen(false);
             }}
           >
             {words.connect}
-          </Button>
+          </DialogAction>
         </DialogFooter>
       </DialogContent>
     </Dialog>

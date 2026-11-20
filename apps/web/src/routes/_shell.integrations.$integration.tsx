@@ -5,7 +5,10 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSettled } from "../connections/app-of.tsx";
 import { IntegrationAppPage } from "../connections/app-page.tsx";
 import { ConnectedDialog } from "../connections/connected-dialog.tsx";
-import { ConnectionList } from "../connections/connection-list.tsx";
+import {
+  ConnectionAccess,
+  ConnectionList,
+} from "../connections/connection-list.tsx";
 import type { HeldPermissions } from "../connections/connection-list.tsx";
 import { useWhyNoConnect } from "../connections/integration-facts.ts";
 import { loadIntegrations } from "../connections/integrations-data.ts";
@@ -118,6 +121,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
   const navigate = useNavigate({ from: Route.fullPath });
   const { t } = useLingui();
   const read = useSettled(integration.listed ? tools : undefined);
+  const [only, ...more] = integration.connections;
   const used = useSettled(uses);
   // Only a connection the page lists: anyone can put an ID in a link.
   const connected =
@@ -158,13 +162,18 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
         {isAdmin(identity.role) && integration.listed ? (
           <OfferSwitch integration={integration} staff={identity.staff} />
         ) : null}
-        {/* Its connections, each a card of its own. */}
         <HeldNotLoaded held={held} />
-        <ConnectionList
-          held={held}
-          identity={identity}
-          integration={integration}
-        />
+        {/* One connection: the app page says it, and this what it holds
+            besides. More: each a card of its own. */}
+        {only === undefined || more.length > 0 ? (
+          <ConnectionList
+            held={held}
+            identity={identity}
+            integration={integration}
+          />
+        ) : (
+          <ConnectionAccess connection={only} held={held} identity={identity} />
+        )}
       </Page>
     </>
   );

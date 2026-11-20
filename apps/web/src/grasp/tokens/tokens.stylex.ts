@@ -175,6 +175,7 @@ export const grasp = stylex.defineConsts({
   bevelInkHover: "var(--grasp-bevel-ink-hover)",
   bevelInkPress: "var(--grasp-bevel-ink-press)",
   bevelQuiet: "var(--grasp-bevel-quiet)",
+  bevelQuietEdge: "var(--grasp-bevel-quiet-edge)",
   buttonLiftHover: "var(--grasp-button-lift-hover)",
   buttonLiftPress: "var(--grasp-button-lift-press)",
   bevelDangerFace: "var(--grasp-bevel-danger-face)",
