@@ -274,10 +274,7 @@ const WorkspacePending = () => {
   return (
     <>
       <OrgCardLoading canChange={isMemberAdmin(identity)} />
-      <PageSkeletonSettings
-        header={false}
-        sections={[{ rows: 2, title: false }, 1]}
-      />
+      <PageSkeletonSettings header={false} sections={[2, 1]} />
     </>
   );
 };
