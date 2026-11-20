@@ -50,7 +50,7 @@ export const rowsOf = <T extends ThreadItemBase>(
       if (day.getTime() !== lastDay) {
         const ago = daysAgo(day, now);
         // A thread that starts today needs no "Today" over it: its first line stands only for an
-        // earlier day, and a line comes where the day changes after that.
+        // earlier day, and a line comes wherever the day changes after that.
         if (lastDay !== null || ago !== 0) {
           rows.push({
             kind: "date",
