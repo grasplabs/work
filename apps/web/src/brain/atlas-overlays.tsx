@@ -1,4 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { ButtonGroup, ButtonGroupButton } from "../grasp/button-group/index.ts";
@@ -10,17 +11,38 @@ import {
   SelectValue,
 } from "../grasp/select/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
-import { ToolbarBand } from "../grasp/toolbar-band/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { RegionGroup } from "./atlas-map.ts";
 import { Mark } from "./region-marks.tsx";
 
 /**
  * What stands round the atlas, out of the brain's way, as in the prototype (grasplabs/prototype,
  * packages/grasp: components/knowledge/atlas-overlays.tsx), on the library's parts: above it a
- * Toolbar band, with what a dot says at its start (pointing lights those dots, a press keeps them
+ * row, with what a dot says at its start (pointing lights those dots, a press keeps them
  * lit) and at its end a region's groups to narrow it to and the zoom. The way back is the
  * sidebar's and the bar's crumbs. The chat has the bottom centre (chat/global-chat.tsx).
  */
+
+const styles = stylex.create({
+  // One row at every width: the legend at the start, the zoom pinned at the end. The library's
+  // Toolbar band stacks its halves below 40rem, which put the three zoom buttons on a row of their
+  // own beside a docked chat; a map's legend and zoom belong on one line.
+  row: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space3,
+    minWidth: 0,
+  },
+  // Where even the legend's words don't fit (a phone), it scrolls sideways rather than wrap.
+  legend: { minWidth: 0, overflowX: "auto", scrollbarWidth: "none" },
+  end: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+});
 
 /** Which dots a mark of the legend stands for. */
 export type Spot = "known" | "waiting" | "open";
@@ -46,7 +68,7 @@ export interface LegendGroups {
 }
 
 /**
- * Above the atlas, the library's Toolbar band: at its start what a dot says, drawn as the brain
+ * Above the atlas, one row: at its start what a dot says, drawn as the brain
  * draws it (filled where something is known, hollow where it is still waiting, in the attention
  * colour where a question is open), each a toggle. Pointing at one lights up the dots that have
  * it, in the brain or the region on screen; a press keeps them lit. At its end, in a region with
@@ -79,56 +101,12 @@ export const AtlasToolbar = ({
   const all = "all";
   const total = groups?.total ?? 0;
   return (
-    <ToolbarBand
+    <div
       aria-label={t`The brain's view`}
-      end={
-        <>
-          {groups === undefined ? null : (
-            <Select
-              items={[
-                { value: all, label: t`All (${total})` },
-                ...groups.items.map((group) => ({
-                  value: group.key,
-                  label: `${group.label} (${group.count})`,
-                })),
-              ]}
-              onValueChange={(value) => {
-                groups.onSelect(
-                  typeof value === "string" && value !== all ? value : undefined
-                );
-              }}
-              value={groups.selected ?? all}
-            >
-              <SelectTrigger aria-label={t`Show`} size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent />
-            </Select>
-          )}
-          <ButtonGroup aria-label={t`Zoom`} size="sm">
-            <ButtonGroupButton
-              aria-label={t`Zoom out`}
-              icon={Minus}
-              onClick={() => {
-                onZoom(1 / 1.25);
-              }}
-            />
-            <ButtonGroupButton
-              aria-label={t`Zoom in`}
-              icon={Plus}
-              onClick={() => {
-                onZoom(1.25);
-              }}
-            />
-            <ButtonGroupButton
-              aria-label={t`Fit and center`}
-              icon={Fit}
-              onClick={onReset}
-            />
-          </ButtonGroup>
-        </>
-      }
-      start={
+      role="toolbar"
+      {...stylex.props(styles.row)}
+    >
+      <div {...stylex.props(styles.legend)}>
         <ToggleGroup
           aria-label={t`Light up the dots`}
           onValueChange={(chosen: unknown[]) => {
@@ -163,7 +141,52 @@ export const AtlasToolbar = ({
             </Toggle>
           ))}
         </ToggleGroup>
-      }
-    />
+      </div>
+      <div {...stylex.props(styles.end)}>
+        {groups === undefined ? null : (
+          <Select
+            items={[
+              { value: all, label: t`All (${total})` },
+              ...groups.items.map((group) => ({
+                value: group.key,
+                label: `${group.label} (${group.count})`,
+              })),
+            ]}
+            onValueChange={(value) => {
+              groups.onSelect(
+                typeof value === "string" && value !== all ? value : undefined
+              );
+            }}
+            value={groups.selected ?? all}
+          >
+            <SelectTrigger aria-label={t`Show`} size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent />
+          </Select>
+        )}
+        <ButtonGroup aria-label={t`Zoom`} size="sm">
+          <ButtonGroupButton
+            aria-label={t`Zoom out`}
+            icon={Minus}
+            onClick={() => {
+              onZoom(1 / 1.25);
+            }}
+          />
+          <ButtonGroupButton
+            aria-label={t`Zoom in`}
+            icon={Plus}
+            onClick={() => {
+              onZoom(1.25);
+            }}
+          />
+          <ButtonGroupButton
+            aria-label={t`Fit and center`}
+            icon={Fit}
+            onClick={onReset}
+          />
+        </ButtonGroup>
+      </div>
+    </div>
   );
 };
