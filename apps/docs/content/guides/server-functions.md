@@ -152,7 +152,7 @@ A chat's code can also ask who may know about something, with `env.brain.whoKnow
 
 ## Skills from the Brain
 
-Skills say how things are done here: Grasp's own, which each release ships, and the company's. An action selects the skills for a task with `ctx.brain.skills.select` and reads one with `ctx.brain.skills.read`, the same skills a chat selects and reads for the same person. Each is an operation of the Brain's permission, `"skills.select"` and `"skills.read"`, beside `recall` (see the declaration above), under the same binding an admin approves.
+Skills say how things are done here: Grasp's own, which each release ships, and the company's. An action selects the skills for a task with `ctx.brain.skills.select` and reads one with `ctx.brain.skills.read`, the same skills a chat selects and reads for the same person. Like `recall`, every App has both without declaring anything. An App that declares the Brain lists them as its operations, `"skills.select"` and `"skills.read"` (see the declaration above), under the binding an admin approves.
 
 ```ts server/skills.ts
 import { v } from "@grasp-os/sdk";
@@ -173,11 +173,11 @@ export const howTo = action({
 
 `select` takes a `task` (at most 2,000 characters) and answers `skills`: the few that apply, best first, each with its `scope` (`grasp` or `company`), `name`, `version` and `description`; none when no skill shares the task's telling words, and then go without rather than with one that only seems close. `read` takes a `skill` at a version, as a selection gave it, and answers its whole text, `SKILL.md`, at exactly that version: a newer version never changes what a task already selected, but a skill a release drops, or one that is erased, can no longer be read. A skill the company adapted takes the place of Grasp's of the same name. Anything else is refused as `permission.invalid_args`, and a skill there isn't at that version as `permission.item_not_found`.
 
-Like a recall, an App reads only the skills everyone in the company may read, whoever calls, for a person who must still be a member, and an App that holds the Brain answers no visitor and invites no guest. It never reads a person's own skills: those steer only that person's own chat, where they build too, because what an App or a workflow does is seen by others. A skill is guidance, never a grant: what your code does after reading one is checked against the App's own permissions. A workflow's step reaches the same skills as `ctx.brain.<alias>.skills.select` and `.read`.
+Like a recall, an App reads only the skills everyone in the company may read, whoever calls, for a person who must still be a member, and an App that reads the Brain answers no visitor and invites no guest. It never reads a person's own skills: those steer only that person's own chat, where they build too, because what an App or a workflow does is seen by others. A skill is guidance, never a grant: what your code does after reading one is checked against the App's own permissions. A workflow's step reaches the same skills as `ctx.brain.<alias>.skills.select` and `.read`.
 
 ## Entities
 
-The Brain keeps memories: small facts about entities (people, teams, customers, suppliers, projects, products, tools and the company's own terms). An action finds entities with `ctx.brain.entities.find`, and reads an entity's card with `ctx.brain.entities.get`. Each is an operation of the Brain's permission, declared like `recall` (see the declaration above): `"entities.find"` and `"entities.get"`.
+The Brain keeps memories: small facts about entities (people, teams, customers, suppliers, projects, products, tools and the company's own terms). An action finds entities with `ctx.brain.entities.find`, and reads an entity's card with `ctx.brain.entities.get`. Like `recall`, every App has both without declaring anything. An App that declares the Brain lists them as its operations (see the declaration above): `"entities.find"` and `"entities.get"`.
 
 ```ts server/renewals.ts
 import { v } from "@grasp-os/sdk";
