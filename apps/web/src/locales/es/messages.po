@@ -54,7 +54,6 @@ msgstr "{0, plural, one {El equipo que has dejado fuera} other {Los # equipos qu
 #. placeholder {0}: classes.on
 #. placeholder {1}: classes.of
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 msgid "{0} of {1} kinds of work"
 msgstr "{0} de {1} tipos de trabajo"
 
@@ -1228,7 +1227,6 @@ msgstr "{people, plural, one {{sector}, # persona.} other {{sector}, # personas.
 msgid "{people, plural, one {{team}: # person} other {{team}: # people}}"
 msgstr "{people, plural, one {{team}: # persona} other {{team}: # personas}}"
 
-#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 msgid "{people, plural, one {# person} other {# people}}"
 msgstr "{people, plural, one {# persona} other {# personas}}"
@@ -1321,10 +1319,6 @@ msgstr "{refused, plural, one {# rechazada en las últimas 24 horas} other {# re
 #: src/agents/agent-page.tsx
 msgid "{requests, plural, one {# request to a model} other {# requests to a model}}"
 msgstr "{requests, plural, one {# solicitud a un modelo} other {# solicitudes a un modelo}}"
-
-#: src/agents/agents-overview.tsx
-msgid "{requests, plural, one {# request} other {# requests}}"
-msgstr "{requests, plural, one {# solicitud} other {# solicitudes}}"
 
 #: src/frame/part-words.tsx
 msgid "{rest, plural, one {# other} other {# others}}"
@@ -1421,10 +1415,6 @@ msgstr "{sources, plural, one {Trabajo que lleva mucho tiempo y podría automati
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source, by no team yet.} other {Time-consuming work that could be automated, raised in # sources, by no team yet.}}"
 msgstr "{sources, plural, one {Trabajo que lleva mucho tiempo y podría automatizarse, mencionado en # fuente, aún por ningún equipo.} other {Trabajo que lleva mucho tiempo y podría automatizarse, mencionado en # fuentes, aún por ningún equipo.}}"
-
-#: src/agents/agents-overview.tsx
-msgid "{spent} · {count} · {reach}"
-msgstr "{spent} · {count} · {reach}"
 
 #: src/agents/own-agents-admin.tsx
 msgid "{spent} this month"
@@ -3073,7 +3063,6 @@ msgid "Answering"
 msgstr "Respondiendo"
 
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 msgid "Answers"
 msgstr "Responde a"
 
@@ -7113,6 +7102,7 @@ msgid "Every weekday at 9:00"
 msgstr "Cada día laborable a las 9:00"
 
 #: src/agents/agent-facts.tsx
+#: src/agents/agents-overview.tsx
 #: src/agents/setup/words.ts
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
@@ -7198,7 +7188,6 @@ msgid "Everyone who uses the App"
 msgstr "Todos los que usan la App"
 
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 msgid "Everyone with Grasp"
 msgstr "Todas las personas con Grasp"
 
@@ -9745,6 +9734,7 @@ msgstr "Criterio propio"
 msgid "Jump to latest"
 msgstr "Ir a lo más reciente"
 
+#: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
 msgid "Just for me"
 msgstr "Solo para mí"
@@ -9943,10 +9933,6 @@ msgstr "Últimos 30 días"
 msgid "Last 7 days"
 msgstr "Últimos 7 días"
 
-#: src/agents/agents-overview.tsx
-msgid "Last asked"
-msgstr "Última consulta"
-
 #: src/agents/agent-page.tsx
 msgid "Last asked in a chat"
 msgstr "Última pregunta en un chat"
@@ -9974,10 +9960,6 @@ msgstr "Última ejecución: {when}"
 #: src/brain/sources-page.tsx
 msgid "Last read {lastRead}"
 msgstr "Leído por última vez {lastRead}"
-
-#: src/agents/agents-overview.tsx
-msgid "Last run"
-msgstr "Última ejecución"
 
 #: src/agents/agents-overview.tsx
 msgid "Last run failed"
@@ -10648,7 +10630,6 @@ msgid "Max"
 msgstr "Máximo"
 
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 msgid "May do"
 msgstr "Puede hacer"
 
@@ -10764,6 +10745,7 @@ msgstr "Modo"
 
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 #: src/agents/setup/thinking-step.tsx
 #: src/apps/resource-bindings.tsx
 #: src/frame/part-words.tsx
@@ -11285,10 +11267,6 @@ msgstr "Más recientes primero"
 #: src/settings/event-sources.tsx
 msgid "Next"
 msgstr "Siguiente"
-
-#: src/agents/agents-overview.tsx
-msgid "Next {nextMoment}"
-msgstr "Próxima {nextMoment}"
 
 #: src/frame/part-words.tsx
 msgid "Next match"
@@ -12340,7 +12318,6 @@ msgid "Nothing was added. Fix these rows and try again."
 msgstr "No se ha añadido nada. Corrige estas filas e inténtalo de nuevo."
 
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 #: src/frame/part-words.tsx
 msgid "Nothing yet"
@@ -12736,7 +12713,6 @@ msgid "Only when someone asks"
 msgstr "Solo cuando alguien lo pide"
 
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
 msgid "Only you"
 msgstr "Solo tú"
@@ -17537,6 +17513,7 @@ msgid "The Apps this chat builds didn't load."
 msgstr "Las aplicaciones que crea este chat no se cargaron."
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 msgid "The asker's"
 msgstr "El de quien pregunta"
 

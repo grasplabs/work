@@ -1,9 +1,3 @@
-// The figures, live: one frame loop for every figure and aura on the page, as Damsko's Stephen
-// study runs them (`site/study/stephen/live.ts`). Each steps only while it is in
-// view and the tab is shown, and repaints only when a cell changed. Cells are painted one pixel
-// each into a small image, scaled up to the canvas without smoothing, so every cell lands on whole
-// device pixels. A palette's colours are read from the tokens through a probe in the figure's own
-// place, once per theme. No React render per frame; with reduced motion, one still.
 import type { Body, FigureShape, FigureState, Lean } from "./body";
 import {
   CODES,
