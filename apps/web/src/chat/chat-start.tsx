@@ -1,10 +1,12 @@
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ChatMake } from "@grasp-os/shared/chat";
+import type { Opportunity } from "@grasp-os/shared/opportunities";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Await, useRouteContext } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 
+import { briefOf, useStartFrom } from "../brain/opportunity-drafts.ts";
 import type { Session } from "../core.ts";
 import { ChatStart as StartScreen } from "../grasp/chat-start/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -13,7 +15,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
 import type { MakeExample } from "../make/examples.ts";
 import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
-import { agentModelOf, agentOptions, startingAgent } from "./agent-choice.tsx";
+import { agentModelOf } from "./agent-choice.tsx";
 import { useLook } from "./backdrop-look.ts";
 import { ChatComposer } from "./chat-composer.tsx";
 import { useGoToChat } from "./chat-link.ts";
@@ -28,8 +30,11 @@ import { useAsk } from "./use-ask.ts";
 // and `&project=`): what to get done, and ideas to start from under the box
 // (make/make-ideas.tsx), the blueprints for an App, a few starting
 // sentences for a workflow; the first question starts the chat with what
-// to make (`ChatMake`), which the chat keeps. Asking makes the chat and
-// goes to its own page (chat/chat-link.ts), the question already in it.
+// to make (`ChatMake`), which the chat keeps. From an opportunity an admin
+// drafts (`opportunity`, GRA-1751), the box starts with its brief
+// (brain/opportunity-drafts.ts) for them to change and send: nothing is
+// asked until they do. Asking makes the chat and goes to its own page
+// (chat/chat-link.ts), the question already in it.
 
 const styles = stylex.create({
   // App shell's page area: the screen fills it.
@@ -112,27 +117,28 @@ const Below = ({
 /**
  * Asks in a new chat, which opens on its own page; from Make
  * something (`make`), with `ideas` to start from, the chat made with what
- * to make. The chat is with the agent `agent` names (the Agents page's
- * "Chat"), else the company's first, until the person picks another.
+ * to make. The agent `agent` names (the Agents page's "Chat") is mentioned
+ * in the box as it opens, so the question goes to it (`@`, mentions.tsx);
+ * taken out, the question goes to the company's first agent.
  */
 export const ChatStart = ({
   make,
   ideas,
   agent,
+  opportunity,
 }: {
   make: ChatMake | undefined;
   ideas: Promise<Loaded<MakeIdeas>> | undefined;
   agent?: string | undefined;
+  /** The opportunity whose brief the box starts with, once read. */
+  opportunity?: Promise<Loaded<Opportunity | undefined>> | undefined;
 }) => {
   const { offered } = useGlobalChat();
   const { identity } = useRouteContext({ from: "/_shell" });
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const look = useLook(identity.userId);
   const agents = offered?.agents ?? [];
-  // The agent chosen in the box's plus menu, else the one the address
-  // names (the Agents page's "Chat"), else the company's first.
-  const [picked, setPicked] = useState(agent);
-  const agentId = startingAgent(agents, picked)?.id;
+  const named = agents.find(({ id }) => id === agent);
   const goToChat = useGoToChat();
   const { composer } = useAsk(
     undefined,
@@ -145,13 +151,35 @@ export const ChatStart = ({
         goToChat(chatId);
       },
       ...(make === undefined ? {} : { make }),
-      ...(agentId === undefined ? {} : { agentId }),
     }
   );
   const question =
     make === undefined
       ? t`What should we look at today?`
       : t`What do you want to get done?`;
+  // The agent the address names, mentioned in the box once the person's
+  // agents are read: only one they may ask, and only into an empty box.
+  const mentioned = useRef(false);
+  const { text: typed, onText, onMentions, mentions } = composer;
+  // Whose model the box shows: the first agent it mentions, else the
+  // company's first, who answers a question that mentions none.
+  const answering =
+    mentions.find(({ kind }) => kind === "agent")?.id ?? agents.at(0)?.id;
+  useEffect(() => {
+    if (named === undefined || mentioned.current || typed !== "") {
+      return;
+    }
+    mentioned.current = true;
+    onText(`@${named.name} `);
+    onMentions([{ kind: "agent", id: named.id, label: named.name }]);
+  }, [named, typed, onText, onMentions]);
+  // The opportunity's brief, once read, fills the box.
+  const kind = make?.kind;
+  useStartFrom(opportunity, (read) => {
+    if (kind !== undefined) {
+      onText(briefOf(read, kind, i18n));
+    }
+  });
   return (
     <StartScreen
       below={
@@ -169,11 +197,8 @@ export const ChatStart = ({
     >
       <ChatComposer
         {...composer}
-        agent={agentId}
-        agentModel={agentModelOf(agents, agentId)}
-        agents={agentOptions(agents)}
+        agentModel={agentModelOf(agents, answering)}
         models={offered?.models}
-        onAgent={setPicked}
         running={false}
         surface="glass"
       />

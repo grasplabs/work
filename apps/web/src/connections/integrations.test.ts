@@ -325,6 +325,7 @@ describe("beyond and nearestApps", () => {
 const independent = (name: string): ConnectionWorkflow => ({
   id: `workflow-${name}`,
   name,
+  title: null,
 });
 
 /** Each section's apps, by ID. */

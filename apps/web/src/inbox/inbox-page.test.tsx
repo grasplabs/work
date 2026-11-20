@@ -189,7 +189,6 @@ const shown = async (
       reconnect: { state: "ready", data: [] },
       requests: undefined,
       decisions: { state: "ready", data: [] },
-      workflowGoLives: { state: "ready", data: [] },
       heldStarts: { state: "ready", data: [] },
       bindings: { state: "ready", data: [] },
       gaps: { state: "ready", data: waits },

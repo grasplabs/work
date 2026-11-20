@@ -1,4 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
+import type { PreviewBundle, PreviewRefresh } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { pageLeaseHeader } from "@grasp-os/shared/pages";
 import type { AppVersionPush, PageBundle } from "@grasp-os/shared/pages";
@@ -12,9 +13,15 @@ import {
   callFunction,
   failureOf,
   fileRefusal,
+  previewPage,
   previewTarget,
 } from "./page-host.ts";
-import type { FrameLocation, PageOpening, PageState } from "./page-host.ts";
+import type {
+  DraftRevisions,
+  FrameLocation,
+  PageOpening,
+  PageState,
+} from "./page-host.ts";
 import type { FrameLink } from "./tab-link.ts";
 
 // The page relaying a page's function call to core: whatever comes back
@@ -279,6 +286,7 @@ describe("a page core refuses to open", () => {
     ["version.manifest_corrupt", "corrupt"],
     ["version.not_sealed", "not-sealed"],
     ["version.revoked", "version-revoked"],
+    ["version.format_unsupported", "outdated"],
     ["version.nothing_like_this", "unknown"],
   ])("on %s, says it failed as %s", (code, reason) => {
     expect(
@@ -668,8 +676,8 @@ const previewOver = (answer: unknown, lease: string | null = "lease") => {
   };
   const session = {
     apps: {
-      drafts: {
-        previewReport: async (
+      preview: {
+        report: async (
           _app: string,
           revision: number,
           _page: string,
@@ -691,7 +699,7 @@ const previewOver = (answer: unknown, lease: string | null = "lease") => {
   // The revision the frame's reports are of, as its updates say.
   const reporting = { at: 1 };
   // SAFETY: a preview's calls, reports and live queries reach only these
-  // of `apps.drafts` and `pages`, which the stand-in has.
+  // of `apps.preview` and `pages`, which the stand-in has.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
   const asLink = link as unknown as FrameLink;
   const { lease: _bundleLease, ...unleased } = bundle;
@@ -871,5 +879,131 @@ describe("a preview's frame as its draft changes", () => {
     expect(pushes).toStrictEqual([
       { revision: 4, result: { ok: true, value: [] } },
     ]);
+  });
+});
+
+// A preview's own connection to core dropping while the page asks core
+// for the draft's last write: Grasp's turn may end then, so nothing names
+// a newer revision afterwards, and the frame must still take that write
+// once the connection is back. Core stands in as connections signed in as
+// Ada, each answering `apps.preview.update`, the first breaking as it is
+// asked for revision 2, as a socket that drops does.
+
+/** The draft's pages at `revision`, as core answers them. */
+const pagesAt = (revision: number): PreviewRefresh => ({
+  revision,
+  entry: `desk-${revision}`,
+  modules: { [`desk-${revision}`]: 10 },
+  css: "",
+  kit: [],
+});
+
+/** Connections to core as Ada, the first dropping on its first update. */
+const droppingOnce = () => {
+  const breaks: (() => void)[] = [];
+  const asked: string[] = [];
+  let opened = 0;
+  const open = () => {
+    opened += 1;
+    const connection = opened;
+    const session = {
+      whoami: async () => await Promise.resolve({ userId: "ada" }),
+      apps: {
+        preview: {
+          update: async (app: string, revision: number) => {
+            asked.push(`${revision} on ${connection}`);
+            await Promise.resolve();
+            if (connection === 1) {
+              // The socket drops: what was on its way fails without a code.
+              breaks[0]?.();
+              throw new Error("Peer closed WebSocket: 1006");
+            }
+            return { app, refresh: pagesAt(revision) };
+          },
+        },
+      },
+      pages: {
+        watchVersion: async () =>
+          await Promise.resolve({
+            release: async () => {
+              await Promise.resolve();
+            },
+          }),
+      },
+    };
+    const core = {
+      authenticate: () => session,
+      onRpcBroken: (onBroken: () => void) => {
+        breaks.push(onBroken);
+      },
+      [Symbol.dispose]: () => {
+        // Nothing to let go of.
+      },
+    };
+    // SAFETY: the preview reaches only `authenticate`, `whoami`,
+    // `apps.preview.update`, `pages.watchVersion`, `onRpcBroken` and
+    // disposal, which this stand-in has.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
+    return core as unknown as ReturnType<
+      NonNullable<ConstructorParameters<typeof CoreLink>[1]>
+    >;
+  };
+  return { open, asked };
+};
+
+describe("a preview whose connection drops as the draft's last write comes", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("takes that write once the connection is back, though nothing names a newer one", async () => {
+    vi.useFakeTimers();
+    const core = droppingOnce();
+    const link = new CoreLink(() => {
+      // Never ends here.
+    }, core.open);
+    const revisions: DraftRevisions = { latest: 1, listener: undefined };
+    const opened: PreviewBundle = {
+      app: bundle.app,
+      name: "Notes",
+      artifact: "artifact",
+      frameToken: "token",
+      lease: "lease",
+      revision: 1,
+      refresh: pagesAt(1),
+    };
+    const { source } = previewPage(
+      { app: bundle.app },
+      atRoot,
+      () => {
+        // The frame's state isn't asked about here.
+      },
+      revisions
+    );
+    const cleanups: (() => void)[] = [];
+    const { target } = source.connect(
+      link,
+      opened,
+      () => {
+        // Core never refuses the build here.
+      },
+      cleanups
+    );
+    const handed: string[] = [];
+    target.followUpdates?.(async ({ entry }) => {
+      handed.push(entry);
+      return await Promise.resolve("applied");
+    });
+    // Grasp's last write, named once.
+    revisions.listener?.(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    for (const cleanup of cleanups) {
+      cleanup();
+    }
+    link.close();
+    expect({ asked: core.asked, handed }).toStrictEqual({
+      asked: ["2 on 1", "2 on 2"],
+      handed: ["desk-2"],
+    });
   });
 });

@@ -4,10 +4,10 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { createApp } from "../src/apps.ts";
+import { appKind, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { rollback } from "../src/publish.ts";
 import { appOf } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
@@ -109,7 +109,7 @@ export interface Built {
 export const appWith = async (files: TestSource): Promise<Built> => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitDefined(env, owner, id, files, "First version");
+  await commitDefined(env, owner, id, files);
   return { owner, app: id };
 };
 
@@ -128,7 +128,7 @@ export const failuresOf = async (
   on: Env = env
 ): Promise<unknown> => {
   try {
-    await publishVersion(on, owner, app, 1);
+    await rollback(on, appKind, owner, app, 1);
   } catch (error) {
     if (isExpectedError(error) && error.code === "version.tests_failed") {
       return error.details?.failures;

@@ -24,7 +24,6 @@ import {
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // A chat's agent, through the Workspace object: the loop, the code it runs
@@ -134,9 +133,8 @@ describe("chat agent code run leases", () => {
 
   it("closes a run's lease when a permission of its agent is revoked while it runs, and admits nothing after", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { collectionId } = await collectionWithNote(admin.api, {
+    const { id: app } = await admin.api.apps.create({
       name: `Handbook ${crypto.randomUUID()}`,
-      access: "everyone",
     });
     // Long enough that the revoke always comes first, however slow the
     // runner: the revoke closes the run, not the wait.
@@ -146,11 +144,12 @@ describe("chat agent code run leases", () => {
       ),
       says("Done.")
     );
-    const permission = await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, collectionId, "HANDBOOK")
-    );
+    const permission = await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "app", appId: app },
+      actions: ["read"],
+      binding: "HANDBOOK",
+    });
 
     const reply = ask("Look twice.");
     await vi.waitFor(
@@ -194,9 +193,8 @@ describe("chat agent code run leases", () => {
 
   it("notices a revocation the code never called after: it ends revoked, and hands on neither its result nor its logs", async () => {
     const admin = await signedInApi(idp, "admin");
-    const { collectionId } = await collectionWithNote(admin.api, {
+    const { id: app } = await admin.api.apps.create({
       name: `Handbook ${crypto.randomUUID()}`,
-      access: "everyone",
     });
     const { stub, chat, agent, ask } = await newChat(
       codeStep(
@@ -204,11 +202,12 @@ describe("chat agent code run leases", () => {
       ),
       says("Done.")
     );
-    const permission = await requestGranted(
-      idp,
-      admin,
-      readCollection(agent, collectionId, "HANDBOOK")
-    );
+    const permission = await requestGranted(idp, admin, {
+      subject: agent,
+      object: { type: "app", appId: app },
+      actions: ["read"],
+      binding: "HANDBOOK",
+    });
 
     const reply = ask("Look once.");
     // Revoked once the code's one call was answered, so it calls nothing

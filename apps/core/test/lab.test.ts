@@ -1,5 +1,4 @@
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
@@ -28,7 +27,11 @@ import {
   approveAgreed,
   countedFor,
   modelOf,
+  onLink,
+  openLinkAs,
   quick,
+  signedInAs,
+  participate,
 } from "./interview-link.ts";
 import { keyChanger } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -121,18 +124,23 @@ const agreedFact = (
   id: string,
   tag: InterviewFact["tag"],
   record: string
-): InterviewFact => ({ id, tag, text: record, record, agreed: true });
+): InterviewFact => ({
+  id,
+  tag,
+  text: record,
+  record,
+  agreed: true,
+  ...(tag === "who" ? {} : { share: "team" as const }),
+});
 
-/** Opens someone's link on a device and saves their interview as agreed to, with `facts`, approved. */
+/** Opens someone's link signed in as them and saves their interview as agreed to, with `facts`, approved. */
 const agree = async (person: string, facts: InterviewFact[]): Promise<void> => {
   const link = await onboardingStore(env).linkOf(person);
   const secret = link?.split("#")[1] ?? "";
-  const opened = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const { key } = z.object({ key: z.string() }).parse(await opened.json());
+  const { link: device } = await openLinkAs(
+    secret,
+    await signedInAs(`${person}@acme.test`)
+  );
   const progress: InterviewProgress = {
     person: "completed",
     told: true,
@@ -146,12 +154,10 @@ const agree = async (person: string, facts: InterviewFact[]): Promise<void> => {
     adding: false,
     addedAt: 0,
   };
-  await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", secret, key, version: 0, progress }),
-  });
-  await approveAgreed({ secret, key }, facts);
+  // They take part before anything they say is kept, as their page has them.
+  await participate(device);
+  await onLink({ action: "save", ...device, version: 0, progress });
+  await approveAgreed(device, facts);
 };
 
 /** What the model answers for the team's map: entering orders, Karin's. */
@@ -308,7 +314,7 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
           id: person,
           name: "Sanne de Vries",
           team: "lab",
-          email: "",
+          email: `${person}@acme.test`,
           title: "Finance administrator",
           away: false,
         },
@@ -330,13 +336,12 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
       await answerTo({ action: "links" }, { session })
     );
     const secret = links.find((each) => each.person === person)?.link;
-    const opened = await routed(interviewApiPath, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        action: "session",
-        secret: secret?.split("#")[1] ?? "",
-      }),
+    // Opened as the page opens it, signed in as Sanne, whose address it
+    // was sent to.
+    const opened = await onLink({
+      action: "session",
+      secret: secret?.split("#")[1] ?? "",
+      cookie: await signedInAs(`${person}@acme.test`),
     });
     expect(
       z
@@ -460,7 +465,7 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
             id: `wim-${id}`,
             name: "Wim Wouters",
             team: `desk-${id}`,
-            email: "",
+            email: `wim-${id}@acme.test`,
             title: "Team lead",
             away: false,
           },
@@ -468,7 +473,7 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
             id: `karin-${id}`,
             name: "Karin Kok",
             team: `desk-${id}`,
-            email: "",
+            email: `karin-${id}@acme.test`,
             title: "Order clerk",
             away: false,
           },
@@ -518,7 +523,7 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
             id: ids.wim,
             name: "Wim Wouters",
             team: ids.team,
-            email: "",
+            email: `${ids.wim}@acme.test`,
             title: "Team lead",
             away: false,
           },
@@ -526,7 +531,7 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
             id: ids.karin,
             name: "Karin Kok",
             team: ids.team,
-            email: "",
+            email: `${ids.karin}@acme.test`,
             title: "Order clerk",
             away: false,
           },

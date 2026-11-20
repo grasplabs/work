@@ -367,7 +367,10 @@ describe("a Composio tool the admin marked as a read", () => {
     };
     const withKey = await outcome(callAs(run, call, signed));
     const ranBefore = [...composio.state.mcp.ran];
-    const [held, ...others] = await exports.default.listPendingActions(anna);
+    const [held, ...others] = await exports.default.listPendingActions(
+      anna,
+      "grasp"
+    );
     if (held === undefined || others.length > 0) {
       throw new Error("Expected one held action");
     }
@@ -418,7 +421,10 @@ describe("a Composio tool the admin marked as a read", () => {
       idempotencyKey: "run-1:list-broken",
     };
     const withKey = await outcome(callAs(run, call, signed));
-    const [held, ...others] = await exports.default.listPendingActions(anna);
+    const [held, ...others] = await exports.default.listPendingActions(
+      anna,
+      "grasp"
+    );
     if (held === undefined || others.length > 0) {
       throw new Error("Expected one held action");
     }
@@ -515,7 +521,7 @@ describe("a Composio tool the admin didn't mark as a read", () => {
       idempotencyKey: crypto.randomUUID(),
     };
     const answer = await callAs(inChat, call, { origin: chatOrigin });
-    const [pending] = await exports.default.listPendingActions(anna);
+    const [pending] = await exports.default.listPendingActions(anna, "grasp");
     expect(answer.pending?.id).toBe(pending?.id);
     expect(pending?.action).toBe("HUBSPOT_GET_CONTACT");
     const [held] = await events();
@@ -552,7 +558,7 @@ describe("a Composio tool the admin didn't mark as a read", () => {
 });
 
 describe("a call core signs for work that may only read", () => {
-  it("reads, and refuses every side effect before it is held, run or replayed", async () => {
+  it("reads, refuses every tool that isn't a read before it is held, run or replayed, and holds a read from a restricted context for its person", async () => {
     const anna = someone();
     const connectionId = await hubspot();
     const inChat = agentFor(anna.userId, "agent-chat", "interactive");
@@ -581,7 +587,8 @@ describe("a call core signs for work that may only read", () => {
       replayed: await outcome(
         callAs(run, create, { readOnly: true, origin: runOrigin })
       ),
-      // A read from a restricted context is a side effect too.
+      // A read from a restricted context is a side effect too: still a
+      // read, so it waits for its person rather than being refused.
       restricted: await outcome(
         callAs(
           run,
@@ -594,10 +601,14 @@ describe("a call core signs for work that may only read", () => {
       ),
     };
     const recorded = await events();
+    const pending = await exports.default.listPendingActions(anna, "grasp");
     expect({
       ranOnce,
       outcomes,
-      pending: await exports.default.listPendingActions(anna),
+      pending: pending.map(({ action, restricted }) => ({
+        action,
+        restricted,
+      })),
       ran: composio.state.mcp.ran.map(({ tool }) => tool),
       audited: recorded
         .filter(({ action }) => action === "connection.call")
@@ -608,11 +619,11 @@ describe("a call core signs for work that may only read", () => {
         list: "ok",
         held: "connect.read_only",
         replayed: "connect.read_only",
-        restricted: "connect.read_only",
+        restricted: "connect.held",
       },
-      pending: [],
+      pending: [{ action: "HUBSPOT_LIST_CONTACTS", restricted: true }],
       ran: ["HUBSPOT_CREATE_CONTACT", "HUBSPOT_LIST_CONTACTS"],
-      audited: ["ok", "ok", "refused", "refused", "refused"],
+      audited: ["ok", "ok", "refused", "refused", "held"],
     });
   });
 });

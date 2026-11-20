@@ -64,7 +64,8 @@ export const ResetAppData = ({ app }: { app: App }) => {
       <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`Reset ${name}’s data?`}</DialogTitle>
         <DialogDescription>
-          {t`Every record it holds and every file in them is gone for good, and its current version runs again with no records. Its pages, versions, members and history stay.`}
+          {t`Every record it holds and every file in them is gone for good, and its current version runs again with no records. Its pages, versions, members and history stay.`}{" "}
+          {t`What its code remembered in the Brain until now goes too; a call already running may still remember what it read before.`}
         </DialogDescription>
         <DialogBody>
           <Form

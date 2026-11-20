@@ -3,7 +3,7 @@ import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   linkMail,
@@ -13,7 +13,7 @@ import {
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
-import { onLink, participate } from "./interview-link.ts";
+import { holdAlarm, onLink, participate } from "./interview-link.ts";
 import { captureMail } from "./mail-capture.ts";
 import { onboardingLog } from "./onboarding-log.ts";
 import { openLink } from "./onboarding-team.ts";
@@ -112,6 +112,15 @@ const whichTo = ({ to, subject }: EmailMessageBuilder) => [
 ];
 
 describe("the interview link emails", () => {
+  // Each test releases, reminds and delivers by hand, on the day it
+  // means, as the store's alarm would on that day. The tests from "say
+  // whose failed" on share the deployment's one store, and the alarm a
+  // staff list's save sets half a second on ran amid a test on a slow
+  // runner: it released the links of the people just saved under the plan
+  // the test before left (started today), at the real time, and sent them
+  // through that test's stand-in, so no mail failed that was meant to.
+  beforeEach(holdAlarm);
+
   it("send a lead's link on the start day, the team's once the lead's turn is over, one reminder on the third working day, and no second", async () => {
     const start = startMonday();
     const store = await plannedStore(start);

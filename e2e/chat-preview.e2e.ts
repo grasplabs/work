@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 import type { FrameLocator, Locator, Page } from "@playwright/test";
 
-import { commitApp } from "../apps/core/test/app-definitions.ts";
+import { publishApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { writeDraft } from "./draft-writes.ts";
 import { modelScripts } from "./model-scripts.ts";
@@ -64,15 +64,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
   const name = `Tally ${tag}`;
   try {
     const app = await api.apps.create({ name });
-    const { version } = await commitApp(
-      api.apps.files,
-      app.id,
-      tallyFiles("in the App"),
-      "A tally"
-    );
-    // Live, for the people it is shared with (until then, its
-    // builders' alone).
-    await api.apps.versions.publish(app.id, version);
+    const { version } = await publishApp(api, app.id, tallyFiles("in the App"));
     const chat = await api.chats.create(`Build ${tag}`);
     const page = await pageOf(builder);
 
@@ -188,13 +180,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
 
     // A version published elsewhere, from another tab: the App shows, as
     // the team sees it while nothing is changed over it.
-    const { version } = await commitApp(
-      api.apps.files,
-      app.id,
-      tallyFiles("in the App"),
-      "A tally"
-    );
-    await api.apps.versions.publish(app.id, version);
+    await publishApp(api, app.id, tallyFiles("in the App"));
     const published = page
       .getByRole("region", { name: `${name}, as your team sees it` })
       .frameLocator("iframe");
@@ -277,7 +263,9 @@ test("an App's own chat writes its page and server code, and its workspace previ
     // Server code that doesn't build, with a write of the page: the page
     // still takes the write, built against the references the draft last
     // generated, and its calls show the server code's error, while the
-    // problem is being fixed.
+    // problem is being fixed, said over the preview's corner: nothing
+    // comes in above it, which would move the page under the person.
+    const shownAt = await preview.locator("iframe").boundingBox();
     await askOnceIdle(chat, "Take more.");
     await expect(chat.getByText("It takes more.")).toBeVisible({
       timeout: 30_000,
@@ -287,6 +275,9 @@ test("an App's own chat writes its page and server code, and its workspace previ
       { timeout: 10_000 }
     );
     await expect(preview.getByText("Fixing a problem…")).toBeVisible();
+    expect(await preview.locator("iframe").boundingBox()).toStrictEqual(
+      shownAt
+    );
 
     // Once it builds, the frame takes it: started afresh, as the error the
     // page showed can't be taken back in place, its data kept.
@@ -339,13 +330,7 @@ test("an App's workspace previews the App before its chat changes anything, then
   const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
   try {
     const app = await api.apps.create({ name });
-    const { version } = await commitApp(
-      api.apps.files,
-      app.id,
-      tallyFiles("in the App"),
-      "A tally"
-    );
-    await api.apps.versions.publish(app.id, version);
+    await publishApp(api, app.id, tallyFiles("in the App"));
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}`);
 
@@ -363,13 +348,7 @@ test("an App's workspace previews the App before its chat changes anything, then
     ).toBeEnabled();
 
     // A version published elsewhere comes into the open preview.
-    const second = await commitApp(
-      api.apps.files,
-      app.id,
-      tallyFiles("in version 2"),
-      "Elsewhere"
-    );
-    await api.apps.versions.publish(app.id, second.version);
+    await publishApp(api, app.id, tallyFiles("in version 2"));
     await expect(live.getByRole("status")).toHaveText("0 in version 2", {
       timeout: 30_000,
     });
@@ -406,13 +385,7 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
   const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
   try {
     const app = await api.apps.create({ name });
-    const { version } = await commitApp(
-      api.apps.files,
-      app.id,
-      tallyFiles("in the App"),
-      "A tally"
-    );
-    await api.apps.versions.publish(app.id, version);
+    await publishApp(api, app.id, tallyFiles("in the App"));
     const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}`);
     await expect(

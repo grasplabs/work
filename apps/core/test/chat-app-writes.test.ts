@@ -3,10 +3,7 @@ import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  heldWriteRefusal,
-  withoutLinks,
-} from "../src/channels/stephen-rules.ts";
+import { heldWriteRefusal } from "../src/channels/stephen-rules.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
   codeResults,
@@ -16,6 +13,7 @@ import {
   transcript,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
@@ -144,7 +142,7 @@ const outcomeOf = async (
 ) => {
   const answer = await stub.ask(chat.id, { text: question, model });
   const results = await codeResults(stub, chat.id);
-  const held = await person.api.pendingActions.list();
+  const held = await heldFor(person, chat.via === "web" ? "grasp" : "chat_app");
   return {
     answer,
     returned: results.map(({ text }) => text),
@@ -276,13 +274,12 @@ describe("a chat app's writes", setUpTime, () => {
 });
 
 describe("a chat app's answers", setUpTime, () => {
-  it("keep no link of the model's own, only its citations, and the mark of the text it answered by", async () => {
-    const set = await setUp(
-      "teams",
-      says(
-        "The figures are in [the Q3 report](https://evil.test/q3) and [Q3](grasp:note/doc-1), see https://evil.test/more."
-      )
-    );
+  it("keep the model's words as written, and the mark of the text it answered by", async () => {
+    // Made inert where they are posted (channels/inert.ts), never
+    // rewritten where they are kept.
+    const written =
+      "The figures are in [the Q3 report](https://evil.test/q3) and [Q3](grasp:note/doc-1), see https://evil.test/more.";
+    const set = await setUp("teams", says(written));
     const answer = await set.ask("Where are the Q3 figures?");
     const messages = await transcript(set.stub, set.chat.id);
     const kept = messages.flatMap((message) =>
@@ -294,8 +291,6 @@ describe("a chat app's answers", setUpTime, () => {
     );
     // The model was told the mark with the channel's rules.
     const [request] = set.provider.requests;
-    const shown =
-      "The figures are in the Q3 report and [Q3](grasp:note/doc-1), see.";
     expect({
       answer: answer.answer,
       kept,
@@ -303,31 +298,12 @@ describe("a chat app's answers", setUpTime, () => {
         `<channel mark=\\"${answer.channelText}\\">`
       ),
       mark: answer.channelText?.length,
-    }).toStrictEqual({ answer: shown, kept: [shown], marked: true, mark: 64 });
-  });
-});
-
-describe("Stephen's own words", () => {
-  it("lose every link but a citation", () => {
-    expect(
-      [
-        "Open [it](https://evil.test) now.",
-        "Mail <mailto:ben@acme.test> or www.evil.test today.",
-        "![a picture](grasp:note/doc-1) of [Q3](grasp:note/doc-2)",
-      ].map(withoutLinks)
-    ).toStrictEqual([
-      "Open it now.",
-      "Mail or today.",
-      "a picture of [Q3](grasp:note/doc-2)",
-    ]);
-  });
-
-  it("are left as they are where there was no link", () => {
-    const words = [
-      "Merci ! Le rapport est prêt : voyez-le.",
-      "Steps:\n  1. Open the report\n      2. Check Q3",
-    ];
-    expect(words.map(withoutLinks)).toStrictEqual(words);
+    }).toStrictEqual({
+      answer: written,
+      kept: [written],
+      marked: true,
+      mark: 64,
+    });
   });
 });
 

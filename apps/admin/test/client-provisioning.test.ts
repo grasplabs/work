@@ -130,8 +130,8 @@ describe("provisioning a client's resources", () => {
       d1: wanted.d1.toSorted((a, b) => a.name.localeCompare(b.name)),
       buckets: wanted.buckets.toSorted((a, b) => a.name.localeCompare(b.name)),
     });
-    // Three databases and two buckets each, none shared.
-    expect([account.d1.length, account.buckets.length]).toStrictEqual([6, 4]);
+    // Two databases and two buckets each, none shared.
+    expect([account.d1.length, account.buckets.length]).toStrictEqual([4, 4]);
     // Each client's Workers now render onto its own resources.
     for (const [index, run] of runs.entries()) {
       for (const worker of Object.values(manifest.workers)) {

@@ -15,6 +15,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { buildPages } from "../src/pages.ts";
+import { sandbox } from "../src/sandbox.ts";
 import { callStub } from "../src/sandboxed.ts";
 import { probeModule } from "./isolate-probe.ts";
 
@@ -477,3 +478,46 @@ describe(
     });
   }
 );
+
+describe("a call into an isolate", () => {
+  // Short: a callee never released only shows as a call that never ends.
+  it(
+    "releases the callee as soon as the call settles, when what it answered has a disposer of its own",
+    { timeout: 10_000 },
+    async () => {
+      const released = Promise.withResolvers<null>();
+      // The callee keeps its answer's call open until the caller releases it,
+      // and says when that happens: its answer's disposer runs.
+      const callee = env.LOADER.load({
+        ...sandbox,
+        mainModule: "callee.js",
+        modules: {
+          "callee.js": `import { WorkerEntrypoint } from "cloudflare:workers";
+export class Callee extends WorkerEntrypoint {
+  answer(onReleased) {
+    const told = onReleased.dup();
+    return {
+      text: "answered",
+      [Symbol.dispose]() {
+        told();
+        told[Symbol.dispose]();
+      },
+    };
+  }
+}
+`,
+        },
+      }).getEntrypoint("Callee");
+
+      const answer = await callStub(callee, "answer", [
+        () => {
+          released.resolve(null);
+        },
+      ]);
+
+      // The answer is data, read after the call let go of the callee.
+      expect(answer).toMatchObject({ text: "answered" });
+      await expect(released.promise).resolves.toBeNull();
+    }
+  );
+});

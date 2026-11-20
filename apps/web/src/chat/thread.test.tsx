@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import type { ThinkingGround } from "@grasp-os/shared/brain";
 import type {
+  ChatAgent,
   ChatMessage,
   ChatPartial,
   ChatToolEvent,
@@ -18,7 +19,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { ChatThread } from "./thread.tsx";
+import { answerAgentsOf, ChatThread } from "./thread.tsx";
 import "./test-thread-room.ts";
 
 // An answer's steps as one trace in the thread. What the model thought:
@@ -51,7 +52,6 @@ const answer = (id: number, text: string): ChatMessage => ({
   id,
   role: "assistant",
   text,
-  citations: [],
   code: [],
   tools: [],
   end: "done",
@@ -75,7 +75,9 @@ const thread = async (
   /** What core says a picture of thinking is drawn from; it can't be read without. */
   ground?: ThinkingGround,
   /** Whether the turn runs on past its answer, checking its drafts. */
-  checking?: boolean
+  checking?: boolean,
+  /** The agents the person may ask, which name the answers. */
+  agents?: readonly ChatAgent[]
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -108,6 +110,7 @@ const thread = async (
   const page = createRootRoute({
     component: () => (
       <ChatThread
+        agents={agents}
         chatId="chat"
         loaded
         messages={messages}
@@ -252,7 +255,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [],
         tools: [
           {
@@ -298,7 +300,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [],
         tools: [
           {
@@ -332,6 +333,47 @@ describe(ChatThread, () => {
     );
   });
 
+  it("says under a call of remember what the memory replaced", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "",
+        code: [],
+        tools: [
+          {
+            callId: "remember",
+            tool: "remember",
+            codeBefore: 0,
+            input: { statement: "Loves sushi" },
+          },
+        ],
+        end: "done",
+        at,
+      },
+      {
+        id: 3,
+        role: "result",
+        callId: "remember",
+        text: "Saved.",
+        failed: false,
+        at,
+        saved: {
+          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
+          type: "preference",
+          statement: "Loves sushi",
+          replaced: ["Loves pizza", "Loves pasta"],
+        },
+      },
+    ]);
+
+    expect(document.body.textContent).toContain(
+      "In place of: Loves pizza and Loves pasta"
+    );
+  });
+
   it("says when an undo found nothing to undo, never that it was forgotten", async () => {
     forgetAnswer = "nothing";
     const at = "2026-10-27T09:00:05.000Z";
@@ -341,7 +383,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [],
         tools: [
           {
@@ -396,7 +437,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [],
         tools: [
           {
@@ -476,7 +516,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "The desk is written.",
-        citations: [],
         code: [],
         tools: [],
         end: "done",
@@ -506,7 +545,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "Four.",
-        citations: [],
         code: [],
         tools: [],
         reasoning: { text: "Add two to two.", ms: 3400 },
@@ -533,7 +571,6 @@ describe(ChatThread, () => {
           id: 2,
           role: "assistant",
           text: "",
-          citations: [],
           code: [],
           tools: [
             {
@@ -573,7 +610,6 @@ describe(ChatThread, () => {
           id: 2,
           role: "assistant",
           text: "",
-          citations: [],
           code: [{ callId: "step", code: "await env.dashboard.makeWidget()" }],
           tools: [],
           end: "done",
@@ -624,7 +660,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [],
         tools: [
           {
@@ -687,7 +722,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "Four, as the [policy](https://exam",
-        citations: [],
         code: [],
         tools: [],
         end: "cancelled",
@@ -740,7 +774,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: "",
-        citations: [],
         code: [
           {
             callId: "call",
@@ -800,7 +833,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text,
-        citations: [],
         code: [],
         tools: [],
         end: "done",
@@ -836,7 +868,6 @@ describe(ChatThread, () => {
         id: 3,
         role: "assistant",
         text: "The weekly report takes most.",
-        citations: [],
         code: [],
         tools: [],
         end: "done",
@@ -898,7 +929,6 @@ describe(ChatThread, () => {
         id: 2,
         role: "assistant",
         text: links.map((href, at) => `[Link ${at + 1}](${href})`).join(" "),
-        citations: [],
         code: [],
         tools: [],
         end: "done",
@@ -950,5 +980,108 @@ describe(ChatThread, () => {
       before: [],
       after: [links[1]],
     });
+  });
+});
+
+/** An answer, by the agent `agentId`. */
+const answerBy = (id: number, text: string, agentId?: string): ChatMessage => ({
+  id,
+  role: "assistant",
+  ...(agentId === undefined ? {} : { agentId }),
+  text,
+  code: [],
+  tools: [],
+  end: "done",
+  at: "2026-10-27T09:00:01.000Z",
+});
+/** A question. */
+const questionOf = (id: number, text: string): ChatMessage => ({
+  id,
+  role: "user",
+  text,
+  at: "2026-10-27T09:00:00.000Z",
+});
+/** An agent the person may ask. */
+const agentOf = (id: string, name: string): ChatAgent => ({
+  id,
+  name,
+  face: "pen",
+  job: "",
+  model: null,
+  own: false,
+});
+
+describe("answers given by the agents a question addressed", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+  });
+
+  it("names an answer only where another agent gave it than the one before it, and none in a chat one agent answers", () => {
+    const one = [
+      questionOf(1, "Hi"),
+      answerBy(2, "Hello", "a"),
+      answerBy(3, "More", "a"),
+    ];
+    const several = [
+      questionOf(1, "@Claire @Pat hi"),
+      answerBy(2, "Claire here", "claire"),
+      answerBy(3, "Still Claire", "claire"),
+      answerBy(4, "Pat here", "pat"),
+      questionOf(5, "And?"),
+      answerBy(6, "Pat again", "pat"),
+      // Kept before answers named their agent: named by none.
+      answerBy(7, "Older"),
+    ];
+    expect({
+      one: [...answerAgentsOf(one)],
+      several: [...answerAgentsOf(several)],
+    }).toStrictEqual({
+      one: [],
+      several: [
+        [2, "claire"],
+        [4, "pat"],
+      ],
+    });
+  });
+
+  it("names the next agent over the answer it is writing, before it is kept", async () => {
+    await thread(
+      [questionOf(1, "@Claire @Pat hi"), answerBy(2, "Claire here", "claire")],
+      { agentId: "pat", text: "Pat wri", code: [], tools: [], reasoning: "" },
+      [],
+      undefined,
+      undefined,
+      [agentOf("claire", "Claire"), agentOf("pat", "Pat")]
+    );
+    // The names over answers: Claire's kept answer names none until
+    // another is kept, and Pat's being written is named.
+    const named = [...document.querySelectorAll("h3")]
+      .map((each) => each.textContent?.trim())
+      .filter((each) => each === "Claire" || each === "Pat");
+    expect(named).toStrictEqual(["Pat"]);
+  });
+
+  it("shows the agent's name over its first answer, and says so of one the person can no longer ask", async () => {
+    await thread(
+      [
+        questionOf(1, "@Claire @Gone hi"),
+        answerBy(2, "Claire here", "claire"),
+        answerBy(3, "Gone here", "gone"),
+      ],
+      null,
+      [],
+      undefined,
+      undefined,
+      [agentOf("claire", "Claire")]
+    );
+    const text = document.body.textContent ?? "";
+    expect({
+      claire: text.indexOf("Claire") < text.indexOf("Claire here"),
+      gone: text.includes("An agent you can no longer ask"),
+    }).toStrictEqual({ claire: true, gone: true });
   });
 });

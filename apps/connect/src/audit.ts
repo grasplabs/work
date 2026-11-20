@@ -158,6 +158,11 @@ export interface CallRecord {
   recovery?: RecoveryMode;
   /** The IDs of the resources it read. */
   provenance?: readonly string[];
+  /**
+   * Its connection's connector, as the catalog names it: the system it
+   * was in, never which connection (a person's own names that person).
+   */
+  provider?: string;
   /** The held action it made, or the one its person confirmed. */
   pendingActionId?: string;
   /**
@@ -283,6 +288,7 @@ export const auditCall = async (
     }
   };
   add("action", call?.action);
+  add("provider", record.provider);
   add("resource", call?.resource);
   // App code chooses keys, so the log gets a hash, never the key itself.
   add(
@@ -349,21 +355,32 @@ const ackSchema = z
     { message: `At most ${auditOutboxTakeMax} events` }
   );
 
+/** The events a take passes over, by their IDs: none by default. */
+const heldSchema = z.array(z.uuid()).default([]);
+
 /**
- * The oldest events in the outbox, in the order they were stored (SQLite's
- * rowid, which an insert sets past every row in the table, also for events
- * stored in one batch, which share their `created_at`), at most
- * {@link auditOutboxTakeMax}: core takes them, appends them to the audit
- * log, and only then acknowledges them (`ackAuditEvents`). Taking removes
- * nothing, so events core took but didn't acknowledge are taken again.
+ * The oldest events in the outbox but those `held` names, in the order
+ * they were stored (SQLite's rowid, which an insert sets past every row
+ * in the table, also for events stored in one batch, which share their
+ * `created_at`), at most {@link auditOutboxTakeMax}: core takes them,
+ * appends them to the audit log, and only then acknowledges them
+ * (`ackAuditEvents`). Taking removes nothing, so events core took but
+ * didn't acknowledge are taken again. Within one drain core names the
+ * ones it holds (an erasure it could not finish yet), so those are passed
+ * over and keep no newer one from the log.
  */
 export const takeAuditEvents = async (
-  env: Env
+  env: Env,
+  held: unknown = []
 ): Promise<OutboxedAuditEvent[]> => {
+  const parsed = heldSchema.safeParse(held);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
   const { results } = await env.DB.prepare(
-    "SELECT id, event, created_at AS createdAt FROM audit_outbox ORDER BY rowid LIMIT ?"
+    "SELECT id, event, created_at AS createdAt FROM audit_outbox WHERE id NOT IN (SELECT value FROM json_each(?)) ORDER BY rowid LIMIT ?"
   )
-    .bind(auditOutboxTakeMax)
+    .bind(JSON.stringify(parsed.data), auditOutboxTakeMax)
     .all<OutboxedAuditEvent>();
   return results;
 };

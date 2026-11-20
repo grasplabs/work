@@ -2,11 +2,11 @@ import { appErrors } from "@grasp-os/shared/apps";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { turnRecallMethod } from "../src/brain-search.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { readCollection } from "./knowledge.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { notesFiles } from "./notes-client-app.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -41,13 +41,8 @@ const setUp = async (
   const person =
     personRole === undefined ? builder : await signedInApi(idp, personRole);
   const chat = await chatOf(person.userId, ...script(app));
-  /** Grants the agent reading the Apps collection, and the App. */
+  /** Grants the agent reading the App. */
   const grant = async () => {
-    await requestGranted(
-      idp,
-      admin,
-      readCollection(chat.agent, "apps", "APP_LIBRARY")
-    );
     await requestGranted(idp, admin, {
       subject: chat.agent,
       object: { type: "app", appId: app },
@@ -66,8 +61,10 @@ const callsOf = async (agentId: string, count: number): Promise<AuditEvent[]> =>
       const calls = events.filter(
         ({ actor, action, detail }) =>
           action === "agent.call" &&
-          // Not the catalog each turn reads for its skills.
+          // Not the catalog each turn reads for its skills, nor the recall
+          // before its question.
           detail.turn !== true &&
+          detail.method !== turnRecallMethod &&
           actor.type === "agent" &&
           actor.agentId === agentId
       );

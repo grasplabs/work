@@ -105,8 +105,6 @@ const practicePersonSchema = z.object({
   /** Their id in the key. */
   employee: z.string(),
   name: z.string(),
-  /** The key of the device the lab opened their link on. */
-  key: z.string().optional(),
   /** When a model played them: how it went. */
   played: playedSchema.optional(),
 });
@@ -131,7 +129,7 @@ export class PracticeError extends Error {
   override name = "PracticeError";
 }
 
-/** Every team id of a practice company starts so: the roster is the lab's to replace. */
+/** The id the lab gives a practice company's team: core gives it the members' team's (GRA-2055). */
 const teamPrefix = "practice-";
 
 const fileOf = (practice: Pick<Practice, "id" | "key">): string =>
@@ -188,6 +186,13 @@ const teamNameOf = (key: AnswerKey): string => {
   return [...count].toSorted((a, b) => b[1] - a[1])[0]?.[0] ?? "Team";
 };
 
+/**
+ * The address a practice person signs in with on the local stack, at the
+ * stack's company domain: their link went to it, and only its account opens
+ * it (GRA-1790).
+ */
+export const practiceEmail = (id: string): string => `${id}@acme.test`;
+
 /** The roster of a practice company: the lead the lab adds, and everyone in the key. */
 const rosterOf = (
   key: AnswerKey,
@@ -210,7 +215,7 @@ const rosterOf = (
         {
           id: leadId,
           name: lead,
-          email: "",
+          email: practiceEmail(leadId),
           team,
           title: "Team lead",
           away: false,
@@ -218,7 +223,7 @@ const rosterOf = (
         ...key.employees.map((employee, at) => ({
           id: people[at]?.id ?? employee.id,
           name: employee.name,
-          email: "",
+          email: practiceEmail(people[at]?.id ?? employee.id),
           team,
           title: roleName(key, employee.role),
           away: false,
@@ -233,8 +238,10 @@ const rosterOf = (
 /** Refuses to replace an onboarding on the local core that isn't the lab's. */
 const ownsOnboarding = async (core: Core): Promise<void> => {
   const { roster } = await core.session.api.onboarding.view();
-  const theirs = (roster?.teams ?? []).filter(
-    (team) => !team.id.startsWith(teamPrefix)
+  // Every practice person signs in at the address the lab makes of their
+  // id: anyone else is someone else's.
+  const theirs = (roster?.people ?? []).filter(
+    (person) => person.email !== practiceEmail(person.id)
   );
   if (theirs.length > 0) {
     throw new PracticeError(
@@ -357,7 +364,7 @@ export const makePractice = async (
     throw new PracticeError("The lead has no link.");
   }
   await playInterview(
-    linkOn(leadLink),
+    linkOn(leadLink, practiceEmail(leadId)),
     modelPlayer(askerOf(core), lead, leadSystem(key, lead, locale)),
     { locale }
   );

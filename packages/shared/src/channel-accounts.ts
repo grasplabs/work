@@ -139,4 +139,12 @@ export interface ChannelAccountsApi {
   unlink: (id: string) => Promise<ChannelUnlinked>;
   /** Where they reach Stephen: each chat app set up that he answers them in. */
   reach: () => Promise<ChannelReach[]>;
+  /**
+   * Deletes every conversation they had with an agent in a chat app, as
+   * Grasp keeps it: what the agent replays of it, what their Brain kept
+   * of it, and the writes still held in it; never what the chat app keeps.
+   * How many it deleted. Audited once per call, as `chat.apps_deleted`
+   * with how many went and how many didn't.
+   */
+  forgetConversations: () => Promise<number>;
 }

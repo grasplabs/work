@@ -20,7 +20,7 @@ import { askedFor, awayLine, pasteOf, splitOf } from "./events.ts";
 import type { Answer, Player } from "./person.ts";
 import { agrees, playInterview } from "./play.ts";
 
-type Asked = Omit<InterviewTurnRequest, "secret" | "key">;
+type Asked = Omit<InterviewTurnRequest, "secret">;
 
 const stephen = (more: Partial<StephenTurn>): StephenTurn => ({
   say: "",
@@ -45,29 +45,28 @@ const step = (text: string) => ({
 const scriptedLink = (turns: StephenTurn[]) => {
   const saved: InterviewProgress[] = [];
   const asked: Asked[] = [];
-  /** What the link was asked, in order: `participate:<key>`, `save` and `turn`. */
+  /** What the link was asked, in order: `participate`, `save`, `turn` and `approve`. */
   const calls: string[] = [];
   const approved: ApprovedFact[] = [];
   const link: Link = {
     open: async () =>
       await Promise.resolve({
         state: "open",
-        key: "device-key",
         name: "Sanne",
         kind: "own",
         progress: null,
         version: 0,
       }),
-    participate: async (key) => {
-      calls.push(`participate:${key}`);
+    participate: async () => {
+      calls.push("participate");
       await Promise.resolve();
     },
-    approve: async (key, facts) => {
-      calls.push(`approve:${key}:${facts.map(({ id }) => id).join(",")}`);
+    approve: async (facts) => {
+      calls.push(`approve:${facts.map(({ id }) => id).join(",")}`);
       approved.push(...facts);
       await Promise.resolve();
     },
-    save: async (_key, version, progress) => {
+    save: async (version, progress) => {
       calls.push("save");
       saved.push(progress);
       return await Promise.resolve(version + 1);
@@ -138,13 +137,13 @@ describe("an interview played on a link", () => {
     });
   });
 
-  it("agrees to take part with the key the link gave, before anything is said or kept", async () => {
+  it("agrees to take part before anything is said or kept", async () => {
     const { link, calls } = scriptedLink([
       stephen({ say: "I'll read back what I wrote down.", wants: "readback" }),
     ]);
     await playInterview(link, scriptedPlayer([], ["Yes."]), { locale: "en" });
 
-    expect(calls[0]).toBe("participate:device-key");
+    expect(calls[0]).toBe("participate");
   });
 
   it("approves every fact still standing at the end, each at the revision it was read back at", async () => {
@@ -165,7 +164,7 @@ describe("an interview played on a link", () => {
     );
     const facts = saved.at(-1)?.facts.filter(({ out }) => out !== true) ?? [];
 
-    expect(calls.at(-1)).toMatch(/^approve:device-key:/u);
+    expect(calls.at(-1)).toMatch(/^approve:/u);
     expect(approved).toStrictEqual(
       await Promise.all(
         facts.map(async (fact) => ({
@@ -310,9 +309,9 @@ describe("what happens to them on the way", () => {
     let opens = 0;
     const counted: Link = {
       ...link,
-      open: async (key) => {
+      open: async () => {
         opens += 1;
-        return await link.open(key);
+        return await link.open();
       },
     };
     const { player } = askedPlayer([{ say: "By mail.", said: ["S1"] }]);

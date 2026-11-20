@@ -18,6 +18,8 @@ const toolkits: FakeToolkit[] = [
     slug: "hubspot",
     name: "HubSpot",
     categories: ["CRM", "Marketing"],
+    // It takes a key too, but Composio holds an app for it: signed in to.
+    keyAuth: { scheme: "API_KEY", fields: [], accepts: {} },
     description:
       "HubSpot is a  CRM platform\nfor marketing, sales and service. It brings teams together.",
     tools: [
@@ -39,6 +41,9 @@ const toolkits: FakeToolkit[] = [
   {
     slug: "linear",
     name: "Linear",
+    // Composio holds no app for it, but it takes a username and password.
+    managed: false,
+    keyAuth: { scheme: "BASIC", fields: [], accepts: {} },
     // Its main category fits no group; the next one does.
     categories: ["News & lifestyle", "Project management"],
     description: null,
@@ -51,6 +56,7 @@ const toolkits: FakeToolkit[] = [
     managed: false,
     tools: [{ slug: "ACME_LIST" }],
   },
+
   // No tools: connecting it couldn't do anything.
   { slug: "empty_kit", name: "Empty", tools: [] },
   {
@@ -164,13 +170,13 @@ describe("the catalog", () => {
     ).toBeTruthy();
   });
 
-  it("lists toolkits Composio holds no app for as needing the organization's own, and leaves out those without tools or an account, and items it can't read", async () => {
+  it("lists toolkits Composio holds no app for as taking a key where they take one, else as needing the organization's own, and leaves out those without tools or an account, and items it can't read", async () => {
     const { entries } = await exports.default.catalog();
     expect(entries.map(({ id, auth }) => [id, auth])).toStrictEqual([
       ["microsoft", "managed"],
       ["google", "managed"],
       ["hubspot", "managed"],
-      ["linear", "managed"],
+      ["linear", "key"],
       ["acme_erp", "own"],
       ["notion", "managed"],
     ]);

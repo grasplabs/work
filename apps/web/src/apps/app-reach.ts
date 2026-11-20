@@ -1,4 +1,5 @@
-import type { App, AppMember } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
+import type { SubjectMember } from "@grasp-os/shared/subject-members";
 
 // How the person reaches an App, for the Apps page's three tabs: their own
 // (they made it or answer for it), shared with them by name, or the
@@ -15,7 +16,7 @@ export const isMine = (
 
 /** Whether `members` share the App with `person` by name. */
 export const sharedWith = (
-  members: readonly AppMember[],
+  members: readonly SubjectMember[],
   person: string
 ): boolean =>
   members.some((member) => member.type === "person" && member.id === person);

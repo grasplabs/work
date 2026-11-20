@@ -73,6 +73,7 @@ export const PURPOSES = [
   "drawing",
   "chat",
   "runs",
+  "opinions",
 ] as const;
 export type Purpose = (typeof PURPOSES)[number];
 
@@ -160,6 +161,7 @@ const forPurposes = <T>(make: (purpose: Purpose) => T): Record<Purpose, T> => ({
   drawing: make("drawing"),
   chat: make("chat"),
   runs: make("runs"),
+  opinions: make("opinions"),
 });
 /** Uses added up, in order. */
 const added = (uses: Iterable<Use>): Use => {
@@ -175,6 +177,7 @@ const cells = (): Record<Purpose, Record<Model, Use>> => ({
   drawing: byModel(),
   chat: byModel(),
   runs: byModel(),
+  opinions: byModel(),
 });
 
 /** The day everything about an organization is counted up to: the day its interviews are on while they run, and today otherwise. */
@@ -265,7 +268,7 @@ export const usageOf = (view: OrgView, day: string): Usage => {
     months.set(monthOf(on), month);
     const that = days.get(on) ?? {
       models: forModels(() => 0),
-      purposes: { reading: 0, interviews: 0, drawing: 0, chat: 0, runs: 0 },
+      purposes: forPurposes(() => 0),
     };
     that.models[model] += used.spend;
     that.purposes[purpose] += used.spend;

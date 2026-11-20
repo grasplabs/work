@@ -1,4 +1,3 @@
-import { brainErrors } from "@grasp-os/brain/contract";
 import { schemaFromDescriptor } from "@grasp-os/runtime/host";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -81,7 +80,10 @@ import type { AiCalls, RunStep } from "./host.ts";
 import { admitAttempt, triggeredAccountOf } from "./quotas.ts";
 import { callingRunOf } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
+import {
+  endedRunResultWithheld,
+  requireResourceRunEvidenceReadable,
+} from "./resource-reads.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import { compensationFailedError } from "./runs.ts";
@@ -265,6 +267,7 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
           "account"
         ),
         failedTask: sql<null>`NULL`.as("failed_task"),
+        capturedAt: sql<null>`NULL`.as("captured"),
       })
       .from(sql`(SELECT 1)`)
       .where(
@@ -981,7 +984,7 @@ const evidenceRefusal = async (
     await requireResourceRunEvidenceReadable(env, run);
     return undefined;
   } catch (error) {
-    if (brainErrors.codeOf(error) !== "brain.revoked") {
+    if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
       throw error;
     }
     return forIsolate(error);
@@ -1143,8 +1146,8 @@ export const sealedActivation = async (
 
 /**
  * `activation` as the run host runs it (`sealedActivation`), whatever
- * started it: an independent workflow's run, a test run of a draft's
- * checkpoint (its calls answered from its start's fixtures, its waits held
+ * started it: an independent workflow's run, a test run of a draft at
+ * one revision (its calls answered from its start's fixtures, its waits held
  * short: `calling.candidate`, `maxSleepMs`), or a run an App's test started
  * (its calls served by its test: `calling.fixture`).
  */
@@ -1162,8 +1165,8 @@ export const sealedActivationOf = ({
 
 /**
  * Runs one activation of `activation.run` (an independent workflow's run,
- * a run an App's test started, fixture-runs.ts, or a test run of its draft's
- * checkpoint, candidate-runs.ts): the build's generated module in an
+ * a run an App's test started, fixture-runs.ts, or a test run of its draft at
+ * one revision, candidate-runs.ts): the build's generated module in an
  * isolate of its own on the run host (`sealedActivation`).
  * Answers the run's output, once it matches its version's output schema.
  */
@@ -1271,7 +1274,10 @@ export const resultOf = async (
   // The sweep's mark on its receipt too: details removed once stay removed,
   // whatever the retention says after.
   const receipt = await drizzle(env.DB)
-    .select({ detailsRemovedAt: workflowStartReceipts.detailsRemovedAt })
+    .select({
+      detailsRemovedAt: workflowStartReceipts.detailsRemovedAt,
+      stateHash: workflowStartReceipts.stateHash,
+    })
     .from(workflowStartReceipts)
     .where(eq(workflowStartReceipts.id, row.id))
     .get();
@@ -1295,6 +1301,28 @@ export const resultOf = async (
   // asked.
   if (removed) {
     return { error: { code: row.failureCode, message: removedText } };
+  }
+  // What it returned or why it failed may hold what it recalled, or what
+  // the kept state it started from copied: withheld once the company may
+  // no longer read that, as before it ended, or once the runs that set
+  // that state weren't recorded (`endedRunResultWithheld`, GRA-1996).
+  if (
+    await endedRunResultWithheld(
+      env,
+      {
+        runId: row.id,
+        workflowId: row.workflowResourceId,
+        principal: row.principalId,
+      },
+      receipt?.stateHash ?? null
+    )
+  ) {
+    return {
+      error: {
+        code: "brain.revoked",
+        message: workflowResourceErrors.create("brain.revoked").message,
+      },
+    };
   }
   let engine: Pick<WorkflowResourceRun, "result" | "error">;
   try {
@@ -1515,6 +1543,13 @@ export const resourceRunFor = async (
     row.status === "running" ? [row.id] : []
   );
   const aiProvider = waits.get(row.id);
+  // How many kept keys it started without, as its receipt froze it.
+  const receipt = await drizzle(env.DB)
+    .select({ stateWithheld: workflowStartReceipts.stateWithheld })
+    .from(workflowStartReceipts)
+    .where(eq(workflowStartReceipts.id, row.id))
+    .get();
+  const stateWithheld = receipt?.stateWithheld ?? null;
   const run: WorkflowResourceRun = {
     id: row.id,
     workflowId: row.workflowResourceId,
@@ -1524,6 +1559,7 @@ export const resourceRunFor = async (
     principal: row.principalId,
     status: row.status,
     ...(aiProvider === undefined ? {} : { aiProvider }),
+    ...(stateWithheld === null ? {} : { stateWithheld }),
     createdAt: row.createdAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,
   };

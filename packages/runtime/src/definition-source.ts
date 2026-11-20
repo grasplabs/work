@@ -285,10 +285,7 @@ const permissionOf = (
     }
     case "brain": {
       return call(permission, "brain", [
-        objectOf([
-          ["operations", literal(declared.operations)],
-          ["collections", literal(declared.collections)],
-        ]),
+        objectOf([["operations", literal(declared.operations)]]),
       ]);
     }
     case "workflows": {

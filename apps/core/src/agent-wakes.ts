@@ -10,8 +10,9 @@ import { nextScheduledRun } from "@grasp-os/shared/workflows";
 import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import type { MadeFrom } from "./agent-builder.ts";
 import { requireAgentReaches } from "./agent-reach.ts";
-import { readAgent, turnAgent } from "./agents.ts";
+import { companyAgent, turnAgent } from "./agents.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { memberOf } from "./auth/identity.ts";
 import { agentWakes } from "./db/core/schema.ts";
@@ -112,6 +113,29 @@ const firesRarely = (
   return true;
 };
 
+/**
+ * The schedule `said` names, in the company's time zone when it names
+ * none, and when it next fires; `agent.wake_invalid` for one that names
+ * no time to come or fires more often than hourly. What a wake-up is
+ * checked for before anything is made of it.
+ */
+export const wakeScheduleOf = async (
+  env: Env,
+  said: { cron: string; timeZone?: string | undefined },
+  now = new Date()
+): Promise<{ schedule: { cron: string; timeZone: string }; nextAt: Date }> => {
+  const organization = await readOrganization(env);
+  const schedule = {
+    cron: said.cron,
+    timeZone: said.timeZone ?? organization.timeZone,
+  };
+  const nextAt = nextOf(schedule, now);
+  if (nextAt === undefined || !firesRarely(schedule, now)) {
+    throw agentErrors.create("agent.wake_invalid");
+  }
+  return { schedule, nextAt };
+};
+
 /** The wake-up `wakeId`, or `agent.wake_unknown`. */
 const requireWake = async (env: Env, wakeId: unknown): Promise<WakeRow> => {
   const row =
@@ -158,33 +182,22 @@ export const makeAgentWake = async (
   identity: Identity,
   agentId: unknown,
   input: unknown,
-  now = new Date()
+  now = new Date(),
+  { from }: MadeFrom = {}
 ): Promise<AgentWake> => {
   requireCompanyAdmin(identity);
-  const agent =
-    typeof agentId === "string" ? await readAgent(env, agentId) : undefined;
-  if (agent === undefined) {
-    throw agentErrors.create("agent.unknown");
-  }
+  // Never a person's own agent: it works only when its owner asks.
+  const agent = await companyAgent(env, agentId);
   const parsed = agentWakeInputSchema.safeParse(input);
   if (!parsed.success) {
     throw agentErrors.create("agent.wake_invalid");
   }
   const db = drizzle(env.DB);
-  const [organization, person] = await Promise.all([
-    readOrganization(env),
+  const [{ schedule, nextAt }, person] = await Promise.all([
+    wakeScheduleOf(env, parsed.data, now),
     memberOf(env.DB, parsed.data.personId),
   ]);
-  const schedule = {
-    cron: parsed.data.cron,
-    timeZone: parsed.data.timeZone ?? organization.timeZone,
-  };
-  const nextAt = nextOf(schedule, now);
-  if (
-    person === undefined ||
-    nextAt === undefined ||
-    !firesRarely(schedule, now)
-  ) {
+  if (person === undefined) {
     throw agentErrors.create("agent.wake_invalid");
   }
   const row: WakeRow = {
@@ -243,6 +256,7 @@ export const makeAgentWake = async (
         timeZone: row.timeZone,
         person: row.personId,
         openingLength: String(row.opening.length),
+        ...(from === undefined ? {} : { from }),
       },
     }),
   ]);

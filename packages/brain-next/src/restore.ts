@@ -3,11 +3,14 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
+import { placeChunks } from "./chunk-blocks.ts";
 import { chunksOf } from "./chunks.ts";
 import {
   attributeRuleOf,
   changeKeySchema,
+  erasedConfirmer,
   isWholeKey,
+  newInstructionsSchema,
   newMemoriesSchema,
   newSourceSchema,
   principalSchema,
@@ -16,12 +19,18 @@ import {
   sourceIdSchema,
   storeBytesMax,
 } from "./contract.ts";
-import type { RestoreStatus } from "./contract.ts";
+import type { Access, RestoreStatus } from "./contract.ts";
 import { enqueueEmbedding } from "./embedding.ts";
 import { keepNames } from "./entities.ts";
-import { keepSubject, subjectOf } from "./erasure.ts";
+import {
+  isErased,
+  keepSubject,
+  subjectOf,
+  writerSubjectOf,
+} from "./erasure.ts";
 import {
   changeLineSchema,
+  removalLineSchema,
   confirmationLineSchema,
   dropPartsBeyond,
   exportKeyOf,
@@ -48,7 +57,9 @@ import type {
   Manifest,
   MemoriesLine,
   MemoryLine,
+  RemovalLine,
 } from "./exports.ts";
+import { extractorRowOf } from "./extractors.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -57,9 +68,23 @@ import {
   isInDoubt,
   noteWrite,
 } from "./files.ts";
-import { lineageOfSource, lineageOfWriter } from "./memories.ts";
+import {
+  lineageOfSource,
+  lineageOfWriter,
+  writerErasedAfterSql,
+} from "./memories.ts";
+import {
+  closeCards,
+  closedOf,
+  entityClosureOf,
+  isErasedPerson,
+  namingOf,
+  personSubjectOf,
+  strippedOf,
+} from "./people.ts";
+import type { Naming } from "./people.ts";
 import { readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
-import { planOf, valueKeyFor } from "./remember.ts";
+import { planOf, restatementOf, valueKeyFor } from "./remember.ts";
 import { memoriesWrittenSinceSql, restoreFailedSql } from "./restoring.ts";
 import { indexMemoryWords, indexWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
@@ -72,8 +97,9 @@ import type { WorkContext } from "./work.ts";
 //
 // 1. Checking, before anything is written: each part's size, SHA-256 and
 //    count against the manifest, and each line by the contract's own rules
-//    for a source, its text and its readers, and by what a company export
-//    holds: readers a group names (never one person, never no one), no
+//    for a source, its text and its readers (the rule of the add its key
+//    goes to: an instruction file's text may be emptied, a document's
+//    never), and by what a company export holds: readers a group names (never one person, never no one), no
 //    skill Grasp ships, and what is kept whole (an instruction file or a
 //    skill, never indexed) only as itself, as the store takes them
 //    (contract.ts `wholeKeyPrefixes`), so a file can't make a document into
@@ -81,7 +107,7 @@ import type { WorkContext } from "./work.ts";
 //    restore, and nothing of the export is written. The sources each part
 //    holds are recorded for the export as it is checked (exports.ts).
 //    A memory's line is checked by the add's own rules (contract.ts
-//    `newMemoriesSchema` and its plan in remember.ts), as one group's.
+//    `newMemoriesSchema` and its plan in remember.ts), as groups'.
 // 2. Writing: every version as it was (its number, when it was added, its
 //    readers, its change keys, whether it was current, indexed as it was);
 //    then, in the order they were written, every memory (its id, the
@@ -95,12 +121,14 @@ import type { WorkContext } from "./work.ts";
 //
 // The erasure ledger is applied as each version is written: it is left out
 // when the store's record of erasures names it (its source erased, so its
-// key is closed; or this version, named by a person's erasure), asked again
-// in the transaction that writes it; and so as each memory and mark resting
+// key is closed), asked again in the transaction that writes it; and so as each memory and mark resting
 // on one is. That record is the whole ledger: the
 // store answers nothing until it has read the ledger through (store.ts),
-// and an erasure that lands during the restore covers what was restored
-// before it as it covers any content.
+// and an erasure of a source or a writer that lands during the restore
+// covers what was restored before it as it covers any content. A person's
+// erasure doesn't land during one: it is refused until the restore is
+// through or given up (store.ts `erasePersonShared`), then runs on the
+// whole of what came back.
 //
 // While it runs, nothing is added to the store (restoring.ts): no add can
 // meet a version it brings back. It never moves a current pointer that is
@@ -108,10 +136,16 @@ import type { WorkContext } from "./work.ts";
 // (written by a run the store stopped part-way) is passed over, so a run
 // repeated finds what the last one wrote and ends the same, and a failed
 // restore can be started again from the same export while the store holds
-// nothing but what it wrote: once anything is added (a version, or any
-// write of memories, which moves the write stamp), or the ledger names a
-// version the export holds, the restore is given up (`abandoned`), and its
-// export's files are no longer held (exports.ts `exportsStep`). It fails rather than
+// nothing but what it wrote, also once a source's or a person's erasure
+// names what the export holds (started again, it leaves that out, and its
+// export is served to no one meanwhile); a writer's erasure, as an App's
+// data reset, likewise: it takes what the restore wrote of the writer, and
+// moves the record of the write stamp the restore failed at along with the
+// stamp (restoring.ts `erasureKeepsFailedSql`). Once something is added (a
+// version, or a write of memories: an add, a confirmation, a retire, an
+// extraction mark, which moves the write stamp), or its check found a part
+// damaged, and by nothing else, the restore is given up (`abandoned`), and
+// its export's files are no longer held (exports.ts `exportsStep`). It fails rather than
 // fill the store past its quota (contract.ts `storeBytesMax`). Its export
 // is recorded as one the store has (exports.ts `recordRestoredExport`), so
 // an erasure of what it holds deletes its files once the restore is done.
@@ -121,23 +155,25 @@ import type { WorkContext } from "./work.ts";
 // store shows less, never more. A restored source whose current version the
 // ledger left out keeps its history, which no one can read without a
 // current version (sources.ts `readVersion`); the overview counts such
-// sources (`sourcesWithoutCurrent`).
+// sources (`sourcesWithoutCurrent`). A source the export holds removed
+// comes back removed, as it was (removal.ts).
 
 /** What a restore refuses to start, and why: each a refusal (contract.ts `refusalPrefix`). */
 const refusals = {
   notEmpty: `${refusalPrefix} a restore goes only into a store that holds nothing`,
   running: `${refusalPrefix} a restore is under way`,
   notFound: `${refusalPrefix} no whole company export of this deployment has that id`,
-  // An export an older release made holds no memories: restored, it would
-  // read as whole without them (exports.ts `exportFormat`).
-  olderFormat: `${refusalPrefix} that export was made by an older release and holds no memories, so it can't be restored: make a new export`,
+  // An export an older release made lacks what this one keeps (memories,
+  // removals): restored, it would read as whole without them (exports.ts
+  // `exportFormat`).
+  olderFormat: `${refusalPrefix} that export was made by an older release, which this one can't restore: make a new export`,
   // One a newer release made may hold what this one doesn't know.
   newerFormat: `${refusalPrefix} that export was made by a newer release, which this one can't restore`,
   // An abandoned restore's export id is refused for good: the store it
-  // half-filled has been used since, or its export holds what the ledger
-  // erased (its files are then deleted), so restoring it again would mix
-  // what it wrote with what came after, or bring back nothing whole.
-  givenUp: `${refusalPrefix} that restore was given up: the store took something since, or the ledger names what the export holds`,
+  // half-filled has been used since, or its export is damaged, so restoring
+  // it again would mix what it wrote with what came after, or bring back
+  // nothing whole.
+  givenUp: `${refusalPrefix} that restore was given up: the store took something since, or its export is damaged`,
 } as const;
 
 /** A restore's row, as the store keeps it. */
@@ -287,21 +323,34 @@ const manifestOf = async (
 };
 
 /**
- * A version's line: by the contract's own rules for what an add takes, and
- * by what a company export holds (above).
+ * Whether `access` is read by groups alone, one or several: all a company
+ * export holds, never what one person alone may read or nobody may.
+ */
+const readByGroups = ({ kind }: Access): boolean =>
+  kind === "audience" || kind === "readers";
+
+/**
+ * A version's line: by the contract's own rules for what an add takes, the
+ * rule of the add that takes its key (`addInstructions` for what is kept
+ * whole, whose text may be emptied; `addSource` otherwise), and by what a
+ * company export holds (above).
  */
 const versionLineSchema = exportLineSchema.superRefine((line, context) => {
-  const asAdd = newSourceSchema.safeParse({
+  const addSchema = isWholeKey(line.source)
+    ? newInstructionsSchema
+    : newSourceSchema;
+  const asAdd = addSchema.safeParse({
     source: line.source,
     change: "restore",
     text: line.text,
     access: line.access,
+    ...(line.thread === undefined ? {} : { thread: line.thread }),
   });
   if (
     !asAdd.success ||
     !sourceIdSchema.safeParse(line.source).success ||
     !z.array(changeKeySchema).safeParse(line.changes).success ||
-    line.access.kind !== "audience" ||
+    !readByGroups(line.access) ||
     line.source.startsWith(shippedSkillsPrefix) ||
     isWholeKey(line.source) === line.indexed
   ) {
@@ -353,15 +402,17 @@ const addOf = (line: MemoryLine): unknown => ({
 });
 
 /**
- * Whether `line` is a memory an add would take as one group's (the add's
+ * Whether `line` is a memory an add would take as groups' (the add's
  * own rules: contract.ts `newMemoriesSchema` and its plan), resting on a
- * version or a writer, never both.
+ * version or a writer, never both; drawn by extraction from a version
+ * alone.
  */
 const isMemoryToRestore = (line: MemoryLine): boolean => {
   if (
-    line.access.kind !== "audience" ||
+    !readByGroups(line.access) ||
     (line.writer === null) === (line.source === null) ||
-    (line.source === null) !== (line.version === null)
+    (line.source === null) !== (line.version === null) ||
+    (line.source === null && (line.extractor ?? null) !== null)
   ) {
     return false;
   }
@@ -384,15 +435,22 @@ const partLineSchema = z.union([
     message: "Not a memory to restore",
   }),
   confirmationLineSchema.refine(
-    ({ person }) => principalSchema.safeParse(person).success,
+    // A person's erasure leaves their confirmations standing, its
+    // confirmer replaced (people.ts).
+    ({ person }) =>
+      person === erasedConfirmer || principalSchema.safeParse(person).success,
     { message: "Not a confirmation to restore" }
   ),
   extractionLineSchema.refine(
     ({ source, access }) =>
-      sourceIdSchema.safeParse(source).success && access.kind === "audience",
+      sourceIdSchema.safeParse(source).success && readByGroups(access),
     { message: "Not an extraction mark to restore" }
   ),
   changeLineSchema,
+  removalLineSchema.refine(
+    ({ source }) => sourceIdSchema.safeParse(source).success,
+    { message: "Not a removal to restore" }
+  ),
 ]);
 type PartLine = z.infer<typeof partLineSchema>;
 
@@ -536,11 +594,14 @@ const restoreVersion = async (
       )
       .one();
     const memo: WordMemo = new Map();
+    // In its set of readers' own block, as an add places them.
+    const first = placeChunks(sql, readerSet, chunks.length);
     for (const [position, chunk] of chunks.entries()) {
       const written = sql
         .exec<{ row: number }>(
-          `INSERT INTO chunks (version_row, position, text, hash)
-          VALUES (?, ?, ?, ?) RETURNING row`,
+          `INSERT INTO chunks (row, version_row, position, text, hash)
+          VALUES (?, ?, ?, ?, ?) RETURNING row`,
+          first + position,
           row,
           position,
           chunk.text,
@@ -551,14 +612,17 @@ const restoreVersion = async (
     }
     for (const change of line.changes) {
       sql.exec(
-        `INSERT OR IGNORE INTO source_changes (source, change, version_row)
-        VALUES (?, ?, ?)`,
+        `INSERT OR IGNORE INTO source_changes (source, change, version_row, read_at)
+        VALUES (?, ?, ?, ?)`,
         line.source,
         change,
-        row
+        row,
+        // When the version's text was last read, on each of its changes:
+        // the latest is what an add of an earlier read is held against.
+        line.readAt ?? null
       );
     }
-    keepSubject(sql, line.source, subject);
+    keepSubject(sql, line.source, subject, null, line.thread === true);
     // Never moves a pointer that is there.
     const pointed =
       line.current &&
@@ -572,6 +636,17 @@ const restoreVersion = async (
         .toArray().length > 0;
     if (pointed && chunks.length > 0) {
       enqueueEmbedding(storage, line.source, line.version);
+    }
+    // The version that was current when its source was removed: the
+    // source comes back removed, its key closed (removal.ts).
+    if (line.removed) {
+      sql.exec(
+        `INSERT INTO removed_sources (source, subject, version_row) VALUES (?, ?, ?)
+        ON CONFLICT (source) DO NOTHING`,
+        line.source,
+        subject,
+        row
+      );
     }
     return true;
   });
@@ -645,20 +720,46 @@ const entityRowsOf = (
 
 /**
  * Whether the memory `line` is passed over: the store holds it already (a
- * run of this restore before), or it rests on a version the store doesn't
- * hold. In the caller's transaction.
+ * run of this restore before), it rests on a version the store doesn't
+ * hold, or it is a writer's (`writerSubject`, its lineage's SHA-256) that
+ * an erasure of that writer recorded since covers (memories.ts
+ * `writerErasedAfterSql`): an erasure that came while the restore ran,
+ * whose deletion may already have passed where this memory would go (its
+ * sweep, erasure.ts `eraseWriterBatch`), so it would stay for good. In the
+ * caller's transaction, so no erasure lands between the check and the
+ * write.
  */
 const passesOverMemory = (
   sql: SqlStorage,
   line: MemoryLine,
-  subject: string | null
+  subject: string | null,
+  writerSubject: string | null,
+  naming: Naming
 ): boolean =>
   sql.exec("SELECT 1 FROM memories WHERE id = ?", line.id).toArray().length >
     0 ||
+  // In the word of a person an erasure took, or about or relating to an
+  // entity that was theirs alone (people.ts).
+  isErasedPerson(sql, naming.speakers[0]) ||
+  closedOf(
+    sql,
+    [line.about, ...(line.object === null ? [] : [line.object])].map((id) =>
+      entityClosureOf(id)
+    )
+  ).size > 0 ||
   (line.source !== null &&
     (subject === null ||
       line.version === null ||
-      !holdsVersion(sql, line.source, subject, line.version)));
+      !holdsVersion(sql, line.source, subject, line.version))) ||
+  (writerSubject !== null &&
+    sql
+      .exec(
+        `SELECT 1 FROM erasures
+        WHERE ${writerErasedAfterSql("erasures", "?1", "?2")} LIMIT 1`,
+        writerSubject,
+        line.learnedAt
+      )
+      .toArray().length > 0);
 
 /** The lineage of the memory `line`: its writer's, or its source's. */
 const lineageOf = (line: MemoryLine): string =>
@@ -678,9 +779,13 @@ const restoreMemory = async (
   line: MemoryLine
 ): Promise<void> => {
   const subject = line.source === null ? null : await subjectOf(line.source);
+  const writerSubject =
+    line.writer === null ? null : await writerSubjectOf(line.writer);
+  const restatement = await restatementOf(line);
+  const naming = await namingOf(line.entities, [line.speaker]);
   storage.transactionSync(() => {
     const { sql } = storage;
-    if (passesOverMemory(sql, line, subject)) {
+    if (passesOverMemory(sql, line, subject, writerSubject, naming)) {
       return;
     }
     const rows = entityRowsOf(sql, line);
@@ -700,16 +805,17 @@ const restoreMemory = async (
       .exec<{ row: number }>(
         `INSERT INTO memories (id, entity, attribute, object, value, value_key,
           one_value, type, statement, quote, source, version, subject, writer,
-          lineage, lineage_order, speaker, valid_from, valid_until, learned_at,
-          retired_at, readers)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          writer_subject, lineage, lineage_order, speaker, valid_from,
+          valid_until, learned_at, retired_at, retired_change, readers,
+          extractor)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING row`,
         line.id,
         about,
         line.attribute,
         line.object === null ? null : (rows.get(line.object) ?? null),
         line.value,
-        valueKeyFor(rule, line.value, line.object),
+        valueKeyFor(rule, { ...line, restatement }),
         rule?.values === "one" ? 1 : 0,
         line.type,
         line.statement,
@@ -718,6 +824,7 @@ const restoreMemory = async (
         line.version,
         subject,
         line.writer,
+        writerSubject,
         lineageOf(line),
         line.version ?? 0,
         JSON.stringify(line.speaker),
@@ -725,11 +832,34 @@ const restoreMemory = async (
         line.validUntil,
         line.learnedAt,
         line.retiredAt,
-        readerSetKeyOf(line.access)
+        line.retiredChange ?? null,
+        readerSetKeyOf(line.access),
+        line.extractor === undefined || line.extractor === null
+          ? null
+          : extractorRowOf(sql, line.extractor)
       )
       .one();
+    // What it replaces, of what this store holds, as its add checked it,
+    // with when an undo ended that: each restored before it, as lines come
+    // in the store's order.
+    if (line.replaces !== undefined) {
+      sql.exec(
+        `INSERT INTO memory_replacements (memory, replaced, undone_at)
+        SELECT ?1, held.row, asked.value ->> 'undoneAt'
+        FROM json_each(?2) AS asked
+        JOIN memories AS held ON held.id = asked.value ->> 'memory'`,
+        row,
+        JSON.stringify(line.replaces)
+      );
+    }
     indexMemoryWords(sql, row, line.statement, new Map());
-    for (const { id, names, identifiers } of line.entities) {
+    // Without an identifier a person's erasure closed, as an add keeps it.
+    const kept = strippedOf(
+      sql,
+      line.entities.map((entity) => ({ ...entity, key: entity.id })),
+      naming.identifiers
+    ).entities;
+    for (const { id, names, identifiers } of kept) {
       const entity = rows.get(id);
       if (entity !== undefined) {
         keepNames(sql, entity, row, names, identifiers);
@@ -742,14 +872,20 @@ const restoreMemory = async (
  * Writes the confirmation `line` back, over the memories it names, unless
  * the store lacks any of them (passed over, as erasing one deletes the
  * confirmation) or holds it already (the same memory, person and moment:
- * a run of this restore before). In one transaction.
+ * a run of this restore before). Its confirmer is `erasedConfirmer` once a
+ * person's erasure took them (people.ts), as the erasure leaves one it
+ * finds. In one transaction.
  */
-const restoreConfirmation = (
+const restoreConfirmation = async (
   storage: DurableObjectStorage,
   line: ConfirmationLine
-): void => {
+): Promise<void> => {
+  const confirmer = await personSubjectOf(line.person);
   storage.transactionSync(() => {
     const { sql } = storage;
+    const person = isErasedPerson(sql, confirmer)
+      ? erasedConfirmer
+      : line.person;
     const named = [line.memory, ...line.over];
     const rows = sql
       .exec<{ id: string; row: number }>(
@@ -767,7 +903,7 @@ const restoreConfirmation = (
         `SELECT 1 FROM memory_confirmations
         WHERE memory = ? AND person = ? AND at = ?`,
         memory,
-        line.person,
+        person,
         line.at
       )
       .toArray();
@@ -778,7 +914,7 @@ const restoreConfirmation = (
       .exec<{ row: number }>(
         "INSERT INTO memory_confirmations (memory, person, at) VALUES (?, ?, ?) RETURNING row",
         memory,
-        line.person,
+        person,
         line.at
       )
       .one();
@@ -857,6 +993,31 @@ const restoreChange = (
 };
 
 /**
+ * Closes again a key removed before any version was added under it
+ * (removal.ts): its mark, with no version, unless the ledger erased the
+ * key since (the erasure closes it, and no plain key outlives it) or it is
+ * marked already.
+ */
+const restoreRemoval = async (
+  storage: DurableObjectStorage,
+  line: RemovalLine
+): Promise<void> => {
+  const subject = await subjectOf(line.source);
+  storage.transactionSync(() => {
+    const { sql } = storage;
+    if (isErased(sql, subject)) {
+      return;
+    }
+    sql.exec(
+      `INSERT INTO removed_sources (source, subject, version_row) VALUES (?, ?, NULL)
+      ON CONFLICT (source) DO NOTHING`,
+      line.source,
+      subject
+    );
+  });
+};
+
+/**
  * Writes `line`, one of the memories' steps (exports.ts), back as it was,
  * unless it is passed over (above). A change key goes in as kept, once.
  */
@@ -868,9 +1029,11 @@ const restoreMemoriesLine = async (
   if (line.kind === "memory") {
     await restoreMemory(storage, db, line);
   } else if (line.kind === "confirmation") {
-    restoreConfirmation(storage, line);
+    await restoreConfirmation(storage, line);
   } else if (line.kind === "extraction") {
     await restoreExtraction(storage, db, line);
+  } else if (line.kind === "removal") {
+    await restoreRemoval(storage, line);
   } else {
     restoreChange(storage, line);
   }
@@ -899,6 +1062,8 @@ const settle = (
   // hold (an erasure before or during the restore).
   if (settled.length > 0 && state === "done") {
     retireIfStale(storage, id);
+    // The store holds the cards as their lines gave them now.
+    sql.exec("DELETE FROM restore_cards");
   }
 };
 
@@ -913,17 +1078,29 @@ const settleNow = (
   });
 };
 
-/** The version `line` holds or rests on, if any. */
-const restsOn = (
-  line: PartLine
-): { source: string; version: number } | undefined => {
+/**
+ * What `line` holds or rests on, as the export records it (exports.ts
+ * `Held`), if anything: the version, by its source's key's SHA-256 and
+ * number; or, for a writer's memory, the writer, by its lineage's SHA-256
+ * and when the memory was learned.
+ */
+const heldBy = async (line: PartLine): Promise<Held | undefined> => {
   if (isVersionLine(line) || line.kind === "extraction") {
-    return { source: line.source, version: line.version };
+    return [await subjectOf(line.source), line.version];
   }
-  if (line.kind === "memory" && line.source !== null && line.version !== null) {
-    return { source: line.source, version: line.version };
+  // A key held with no version: version 0, as the export recorded it.
+  if (line.kind === "removal") {
+    return [await subjectOf(line.source), 0];
   }
-  return undefined;
+  if (line.kind !== "memory") {
+    return undefined;
+  }
+  if (line.source !== null && line.version !== null) {
+    return [await subjectOf(line.source), line.version];
+  }
+  return line.writer === null
+    ? undefined
+    : [await writerSubjectOf(line.writer), line.learnedAt];
 };
 
 /**
@@ -944,20 +1121,43 @@ const checkPart = async (
     partLinesOf(bucket, id, part),
     partHoldingsOf(bucket, id, index),
   ]);
-  const fromLines: Held[] = await Promise.all(
-    (lines ?? []).flatMap((line) => {
-      const rests = restsOn(line);
-      return rests === undefined
-        ? []
-        : [
-            (async () =>
-              [await subjectOf(rests.source), rests.version] as const)(),
-          ];
+  const heldByLines = await Promise.all(
+    (lines ?? []).map(async (line) => await heldBy(line))
+  );
+  const fromLines = heldByLines.filter((held) => held !== undefined);
+  const memoryLines = (lines ?? []).filter(
+    (line): line is MemoryLine => !isVersionLine(line) && line.kind === "memory"
+  );
+  const namings = await Promise.all(
+    memoryLines.map(async ({ entities }) => {
+      const { identifiers } = await namingOf(entities, []);
+      return identifiers;
     })
   );
   storage.transactionSync(() => {
     const { sql } = storage;
     recordExportSources(sql, id, [...(holdings ?? []), ...fromLines]);
+    // Each card of a person an erasure took, as the export gives it, closed
+    // before any line is written (every part is checked first, on every
+    // start): so every line about it is passed over, whichever comes first
+    // in the export, and nothing rests on what an earlier start recorded.
+    for (const [at, { entities }] of memoryLines.entries()) {
+      const subjects = namings[at] ?? [];
+      // Every card of kind `person` it gives, by its identifiers' subjects:
+      // so an erasure before the restore is through takes it by its id.
+      for (const [place, entity] of entities.entries()) {
+        for (const subject of entity.kind === "person"
+          ? (subjects[place] ?? [])
+          : []) {
+          sql.exec(
+            "INSERT OR IGNORE INTO restore_cards (subject, entity) VALUES (?, ?)",
+            subject,
+            entity.id
+          );
+        }
+      }
+      closeCards(sql, id, entities, subjects);
+    }
     // A part whose lines don't check, or whose holdings are missing or
     // unreadable (what it holds may not all be on record), is damaged.
     sql.exec(

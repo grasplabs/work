@@ -2,12 +2,12 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { answerDecision } from "../src/decisions/decisions.ts";
+import { newTeam } from "./admin-teams.ts";
 import { allEvents } from "./audit-events.ts";
 import { asking, confirmedAnswer, outputOf, week } from "./decisions.ts";
 import type { Asking, Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
-import { newTeam } from "./knowledge.ts";
 import { racingDb } from "./racing-db.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 

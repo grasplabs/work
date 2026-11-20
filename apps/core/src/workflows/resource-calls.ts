@@ -28,10 +28,17 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { requireStepKey, runStubCall } from "../bindings.ts";
+import { captureRunRead } from "../connection-capture.ts";
 import { permissions } from "../db/core/schema.ts";
 import { models } from "../models.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { writeJson } from "./bounded-json.ts";
+import {
+  callBrain,
+  requireBrainAnswer,
+  requireBrainRequest,
+} from "./brain-calls.ts";
+import type { BrainCall } from "./brain-calls.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
 import { runFileTypeShown } from "./office-files.ts";
 import {
@@ -44,12 +51,7 @@ import type {
   CandidateBinding,
   FrozenCatalogBinding,
 } from "./resource-authority.ts";
-import {
-  callKnowledge,
-  requireKnowledgeRequest,
-  requireResourceRunEvidenceReadable,
-} from "./resource-reads.ts";
-import type { KnowledgeCall } from "./resource-reads.ts";
+import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import {
   attachRunFiles,
   callFiles,
@@ -179,10 +181,10 @@ export type BuiltCall =
       readonly outputSchema: Json;
     }
   | {
-      /** A Knowledge collection's search, read or recall (GRA-700). */
-      readonly name: "grasp.knowledge";
+      /** A recall of the Brain, or of its skills (brain-calls.ts). */
+      readonly name: "grasp.brain";
       readonly binding: string;
-      readonly operation: KnowledgeCall["operation"];
+      readonly operation: BrainCall["operation"];
       readonly arguments: Json;
     }
   | {
@@ -206,7 +208,7 @@ type BoundBuiltCall = Exclude<BuiltCall, AppCall>;
 const kindOf = {
   "grasp.connector": "connector",
   "grasp.model": "model",
-  "grasp.knowledge": "knowledge",
+  "grasp.brain": "brain",
   "grasp.files": "files",
 } as const;
 
@@ -659,6 +661,7 @@ const callConnector = async (
   const attached = await attachedTo(env, run, shape, call, read);
   onFiles(attached.detail);
   const { input } = attached;
+  const connectionId = connectionIdSchema.parse(row.objectId);
   const result = await runStubCall(
     env,
     // Refused at once, before any check, for a key other than the step's.
@@ -693,13 +696,16 @@ const callConnector = async (
       permissionId: permissionIdSchema.parse(target.permissionId),
       connection: {
         type: "connection",
-        connectionId: connectionIdSchema.parse(row.objectId),
+        connectionId,
         ...(row.resource === null ? {} : { resource: row.resource }),
       },
     },
     [call.operation, input, { idempotencyKey: effect.key }],
     attached.files
   );
+  // When the tool answered, before anything else is awaited: the Brain
+  // keeps the read made last (connection-capture.ts `Read`).
+  const readAt = new Date();
   if (result.pending !== undefined) {
     // Connect answers a workflow's held side effect (a restricted run's)
     // with `connect.held`, whose decision the run waits for
@@ -726,6 +732,23 @@ const callConnector = async (
   if (echoes(answer, call.sensitive)) {
     throw callInvalid("output: It echoes a sensitive argument.");
   }
+  // An answer the run took, kept for the one person the run acts for
+  // (GRA-1828), by the chat's rules and code, before the step goes on,
+  // within half of what the step's attempt has left (`captureRunRead`).
+  // Never throws; a retry reads again under the same key, and the same
+  // text again adds no version.
+  await captureRunRead(
+    env,
+    {
+      run,
+      sensitive: call.sensitive.length > 0,
+      deadline: effect.deadline,
+    },
+    connectionId,
+    call.operation,
+    input,
+    { result, readAt }
+  );
   if (content === undefined) {
     return { output: answer, detail: {} };
   }
@@ -863,7 +886,7 @@ const filesCallDetail = (
 /**
  * What `call` of a test run answers: the answer its start gave the call's
  * binding, checked as a real call checks what it sends and what comes back
- * (against the catalog contract the checkpoint was checked against, still
+ * (against the catalog contract the draft was checked against, still
  * as it was, or the task's own output schema), so a test run passes only
  * what a run of the published version would. Nothing of it leaves core.
  */
@@ -917,8 +940,9 @@ const candidateAnswer = async (
       requireModelRequest(call);
       return requireShape(JSON.stringify(call.outputSchema), answer, "output");
     }
-    case "grasp.knowledge": {
-      requireKnowledgeRequest(call);
+    case "grasp.brain": {
+      requireBrainRequest(call);
+      requireBrainAnswer(call, answer);
       return boundedAnswer(answer, "output");
     }
     // A test run keeps no file: its files calls answer what its start
@@ -1094,7 +1118,7 @@ export const makeCall = async (
   if (call.name === "grasp.connector") {
     requireNoSensitiveKept(call);
   }
-  // A test run of a draft's checkpoint calls nothing: whatever the call,
+  // A test run of a draft at one revision calls nothing: whatever the call,
   // its answer is the one the run's start gave its binding, before any
   // binding, authority or receipt is looked at, so nothing of it can
   // reach connect, a model, an App, a store or Knowledge.
@@ -1162,8 +1186,8 @@ export const makeCall = async (
         output = await callModel(env, run, task, binding, call, effect);
         break;
       }
-      case "grasp.knowledge": {
-        output = await callKnowledge(env, run, binding, call);
+      case "grasp.brain": {
+        output = await callBrain(env, run, binding, call);
         break;
       }
       case "grasp.files": {

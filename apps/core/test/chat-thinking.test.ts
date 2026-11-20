@@ -11,17 +11,16 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { resolverOf, showThinking } from "../src/agent-thinking.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { personalChatsOf, says, transcript } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, holdAlarm, onLink } from "./interview-link.ts";
+import { aloneInTheStore, answering, onLink } from "./interview-link.ts";
 import type { Answer } from "./model-provider.ts";
 import {
   intake,
   mapped,
   openLink,
-  team,
+  sevenTeam,
+  sevenTold,
   ticketsReply,
-  told as peopleTold,
 } from "./onboarding-team.ts";
 import type { Ids } from "./onboarding-team.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -60,11 +59,11 @@ const thinks = (input: Record<string, unknown>): Answer => ({
   outputTokens: 30,
 });
 
-/** A team through the onboarding, its claims and its tickets in the brain. */
+/** A team through the onboarding, its claims and its tickets in the brain: seven tell, as a team needs to have claims. */
 const teamInTheBrain = async (): Promise<Ids> => {
-  const ids = await team();
+  const ids = await sevenTeam();
   await mapped(ids);
-  await peopleTold(ids);
+  await sevenTold(ids);
   await answering(
     [ticketsReply(ids)],
     async () => await onboardingStore(env).drawNext()
@@ -78,17 +77,10 @@ const teamInTheBrain = async (): Promise<Ids> => {
  * answered by `replies`; with what the brain shows them of the team.
  */
 const askedWithBrain = async (ids: Ids, ...replies: Answer[]) => {
-  const admin = await signedInApi(idp, "admin");
   const member = await signedInApi(idp, "user");
   const chats = await personalChatsOf(member.userId, ...replies);
-  await requestGranted(idp, admin, {
-    subject: chats.agent,
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
   const brain = await member.api.brain.read();
-  const teamId = `team-${ids.team}`;
+  const teamId = ids.team;
   const said = brain.statements.find(({ teamIds }) => teamIds.includes(teamId));
   const work = brain.workflows.find((workflow) => workflow.teamId === teamId);
   return { member, chats, teamId, said: said?.id ?? "", work };
@@ -155,7 +147,7 @@ const drawn = (of: "me" | "team", per: "week" | "month") => ({
 
 describe("a step of thinking, checked", () => {
   const brain = {
-    teams: [{ id: "team-1", name: "Mortgage advice" }],
+    teams: [{ id: "1", name: "Mortgage advice" }],
     statements: [{ id: "st-1" }],
     workflows: [{ id: "wf-1", name: "Weekly report" }],
   };
@@ -168,7 +160,7 @@ describe("a step of thinking, checked", () => {
         step: "Reading the teams.",
         shape: "same-pain",
         move: "teams",
-        notes: ["Mortgage advice", "mortgage-advice", "team-1", "st-1"],
+        notes: ["Mortgage advice", "mortgage-advice", "1", "st-1"],
       }),
       workflowInSamePain: check({
         step: "Reading the work.",
@@ -181,7 +173,7 @@ describe("a step of thinking, checked", () => {
       byName: {
         step: {
           text: "Reading the teams.",
-          notes: ["team-1", "st-1"],
+          notes: ["1", "st-1"],
           shape: "same-pain",
           move: "teams",
         },
@@ -209,7 +201,7 @@ describe("a step of thinking, checked", () => {
           step: "Reading the teams.",
           shape: "same-pain",
           move: "teams",
-          notes: ["team-1"],
+          notes: ["1"],
         });
         return details;
       } catch (error) {
@@ -223,13 +215,13 @@ describe("a step of thinking, checked", () => {
         "The brain could not be read.",
         {
           text: "Reading the teams.",
-          notes: ["team-1"],
+          notes: ["1"],
           shape: "same-pain",
           move: "teams",
         },
         {
           text: "Reading the teams.",
-          notes: ["team-1"],
+          notes: ["1"],
           shape: "same-pain",
           move: "teams",
         },
@@ -240,7 +232,7 @@ describe("a step of thinking, checked", () => {
 
   it("refuses a shape or a move there isn't, and a step that names nothing or says nothing", () => {
     expect([
-      check({ step: "x", shape: "mood", move: "teams", notes: ["team-1"] }),
+      check({ step: "x", shape: "mood", move: "teams", notes: ["1"] }),
       check({ step: "x", shape: "hours", move: "teams", notes: ["wf-1"] }),
       check({ step: "x", shape: "hours", move: "work", notes: [] }),
       check({ step: " ", shape: "hours", move: "work", notes: ["wf-1"] }),
@@ -271,7 +263,50 @@ describe("a step of thinking, checked", () => {
 });
 
 describe("show_thinking in a chat", slow, () => {
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
+
+  it("is never offered in a chat others share: a shared thread's turn names no claim of the brain", async () => {
+    const ids = await teamInTheBrain();
+    const first = await askedWithBrain(ids);
+    const { member, chats } = await askedWithBrain(
+      ids,
+      thinks({
+        step: "Looking at what they said.",
+        shape: "same-pain",
+        move: "said",
+        notes: [first.said],
+      }),
+      says("Ops says tickets come in through Zendesk.")
+    );
+    const colleague = await signedInApi(idp, "user");
+    const shared = await chats.stub.askThrough(
+      member.userId,
+      chats.agent.agentId,
+      "slack",
+      "Does the same pain hurt more than one team?",
+      undefined,
+      {
+        thread: `C${crypto.randomUUID()}`,
+        kind: "group",
+        audience: {
+          members: [member.userId, colleague.userId],
+          outsiders: false,
+        },
+      }
+    );
+    const kept = await transcript(chats.stub, shared.chatId);
+    const told = toldOf(kept);
+
+    expect({
+      told: told.map(({ shown }) => shown),
+      // What the tool answered holds nothing the team said.
+      claim: told.some(({ told: text }) => text.includes("Zendesk")),
+    }).toStrictEqual({
+      // Not a tool of this turn: the call answers as one it doesn't have.
+      told: [false],
+      claim: false,
+    });
+  });
 
   it("shows only what is in the brain, keeps the steps with the answer, and asks once for words", async () => {
     const ids = await teamInTheBrain();
@@ -379,7 +414,6 @@ describe("show_thinking in a chat", slow, () => {
     const ids = await teamInTheBrain();
     const before = await askedWithBrain(ids);
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
-    await onboardingStore(env).purgeBrain();
     const { chats } = await askedWithBrain(
       ids,
       thinks({

@@ -8,6 +8,7 @@ import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
+import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -149,7 +150,7 @@ describe("reaching others from a Teams chat", setUpTime, () => {
     });
     expect({
       card: turn.card,
-      held: await turn.person.api.pendingActions.list(),
+      held: await heldFor(turn.person, "chat_app"),
       connectCalls: turn.connectCalls,
       sent: await sentWith(turn.subject),
       asksToSend: new URL(url).searchParams
@@ -172,7 +173,7 @@ describe("reaching others from a Teams chat", setUpTime, () => {
       asked: "Mail ben@acme.test the invoice and copy cleo@acme.test.",
     });
     const card = JSON.stringify(turn.card?.activity ?? {});
-    const held = await turn.person.api.pendingActions.list();
+    const held = await heldFor(turn.person, "chat_app");
     expect({
       held: held.length,
       shows: [
@@ -194,7 +195,7 @@ describe("reaching others from a Teams chat", setUpTime, () => {
     });
     expect({
       card: turn.card,
-      held: await turn.person.api.pendingActions.list(),
+      held: await heldFor(turn.person, "chat_app"),
       sent: await sentWith(turn.subject),
     }).toStrictEqual({ card: undefined, held: [], sent: [] });
   });
@@ -205,7 +206,7 @@ describe("reaching others from a Teams chat", setUpTime, () => {
       cc: [],
       asked: "Mail ben@acme.test the invoice.",
     });
-    const writes = await turn.person.api.pendingActions.list();
+    const writes = await heldFor(turn.person, "chat_app");
     const press = {
       ...messageFrom(turn.teams, { text: undefined }),
       replyToId: turn.card?.id,

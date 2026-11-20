@@ -12,8 +12,9 @@ import { modelErrors } from "@grasp-os/shared/models";
 import { errorResponse } from "../errors.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
+import { interviewCaller } from "./interview-caller.ts";
 import { tellingText } from "./interviewer-text.ts";
-import { linkHeaders, linkRefusal } from "./links.ts";
+import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
 
 // The read-back as Stephen tells it, `POST /api/interview/story`, on
@@ -24,8 +25,8 @@ import { onboardingStore } from "./store.ts";
 // here. Ported from the prototype (grasplabs/prototype, packages/grasp:
 // worker/story.ts).
 //
-// Like a turn (interview.ts): the link's secret and the device's key are
-// checked by the store, which also limits calls per link; the gateway call
+// Like a turn (interview.ts): the link's secret and the session of the
+// account it belongs to are checked (interview-caller.ts, the store), which also limits calls per link; the gateway call
 // is made by the system for `onboarding.interview`, never in anyone's
 // name, and counts as carrying sensitive data; and what it took is counted
 // in the onboarding's AI use.
@@ -54,6 +55,11 @@ export const interviewStoryResponse = async (
       requestId
     );
   }
+  // Who asks, before anything they sent is read (interview-caller.ts).
+  const caller = await interviewCaller(env, request.headers);
+  if (typeof caller === "string") {
+    return noCallerRefusal(caller, requestId);
+  }
   const length = Number(request.headers.get("content-length") ?? 0);
   const raw =
     length > interviewStoryMaxBytes
@@ -69,7 +75,7 @@ export const interviewStoryResponse = async (
   const store = onboardingStore(env);
   const found = await store.turnContext(
     await sha256Hex(asked.secret),
-    await sha256Hex(asked.key)
+    caller.account
   );
   if (!found.ok) {
     if (found.code === "interview.link_invalid") {

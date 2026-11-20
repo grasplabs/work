@@ -50,8 +50,6 @@ const chat = (
   createdAt: lastAt,
   lastAt,
   running: false,
-  appId: null,
-  via: "web",
   make: null,
   archived: false,
 });

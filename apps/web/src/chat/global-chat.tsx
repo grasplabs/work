@@ -1,5 +1,6 @@
-import type { ChatAgent, ChatSubject } from "@grasp-os/shared/chat";
+import type { ChatAgent } from "@grasp-os/shared/chat";
 import type { ModelEfforts } from "@grasp-os/shared/models";
+import type { Subject } from "@grasp-os/shared/subject";
 import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -20,12 +21,14 @@ import type { Loaded } from "../load-from-core.tsx";
 import { isShortcut } from "../shortcuts.ts";
 import {
   setActiveChat,
+  showSlot,
   useActiveChat,
   useShownName,
   useShownSlot,
 } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import { pendingAsk } from "./asked-questions.tsx";
+import { answeredAfterBuild } from "./build-answered.ts";
 import { useChatBuilds } from "./builds.tsx";
 import { readChatNames, useChatSummary } from "./chat-details.ts";
 import { closeChat, useChatLayout } from "./chat-layout.ts";
@@ -38,7 +41,12 @@ import {
 } from "./chat-presence.ts";
 import type { ChatPresence } from "./chat-presence.ts";
 import { stageOf } from "./chat-stage.ts";
-import { subjectOf, subjectWords, useSubjectChat } from "./chat-subject.ts";
+import {
+  slotOf,
+  subjectOf,
+  subjectWords,
+  useSubjectChat,
+} from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
 import { tellChatsChanged } from "./chats-changed.ts";
 import type { SourceName } from "./sources.tsx";
@@ -188,7 +196,7 @@ const useChatWords = (): ChatWords => {
   const { t, i18n } = useLingui();
   const subject = subjectOf(useShownSlot());
   if (subject !== undefined) {
-    const { title, placeholder } = subjectWords(subject.kind);
+    const { title, placeholder } = subjectWords;
     return {
       title: i18n._(title),
       placeholder: i18n._(placeholder),
@@ -207,7 +215,7 @@ const useChatWords = (): ChatWords => {
  */
 const useQuestionSubject = (
   slot: ChatSlot
-): { about: ChatSubject | undefined; name: string | undefined } => {
+): { about: Subject | undefined; name: string | undefined } => {
   const name = useShownName();
   const about = subjectOf(slot);
   return { about, name: about === undefined ? undefined : name };
@@ -224,7 +232,7 @@ export const useChatSession = (
   chatId: string | undefined,
   offered: Offered | undefined,
   slot: ChatSlot = "chat",
-  about?: ChatSubject
+  about?: Subject
 ) => {
   const { view, failure, gone } = useFollowedChat(chatId);
   const { composer, ask } = useAsk(
@@ -369,6 +377,46 @@ export const useGlobalChat = (): GlobalChat => {
     throw new Error("useGlobalChat must be used within a GlobalChatProvider.");
   }
   return chat;
+};
+
+/**
+ * Has Grasp's chat be about `subject`, called `name`, while the calling
+ * page is open: that subject's chat, in its slot (chat-subject.ts); the
+ * person's own again after. None for a page about something the person
+ * doesn't build (no subject). Answers that chat, once its slot holds it,
+ * and nothing of the chat it showed before: its ID,
+ * whether its agent works on it (`running`), or checks it too (`busy`),
+ * whether Grasp answered after the Build it that made it (`built`), how
+ * often its agent wrote drafts (`worked`), which reads the page again,
+ * and what the person calls it, its chat's title, which the plan named.
+ */
+export const useChatAbout = (subject: Subject | undefined, name: string) => {
+  const chat = useGlobalChat();
+  const slot = subject === undefined ? undefined : slotOf(subject);
+  useEffect(() => {
+    if (slot === undefined) {
+      return () => {
+        // Not about the page's subject: the person's own chat stays.
+      };
+    }
+    showSlot(slot, name);
+    return () => {
+      showSlot("chat");
+    };
+  }, [slot, name]);
+  const ours = slot !== undefined && chat.slot === slot;
+  const running = ours && chat.view.running;
+  return {
+    chatId: ours ? chat.chatId : undefined,
+    running,
+    busy: running || (ours && chat.view.checking),
+    built:
+      ours &&
+      subject !== undefined &&
+      answeredAfterBuild(chat.view.messages, subject),
+    worked: chat.view.worked,
+    title: ours ? chat.summary?.title : undefined,
+  };
 };
 
 /** The key that opens the chat, or closes it: ⌘J, or Ctrl J off a Mac. */

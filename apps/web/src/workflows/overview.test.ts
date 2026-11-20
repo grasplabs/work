@@ -1,7 +1,6 @@
 import type { ListedConnection } from "@grasp-os/shared/connect";
 import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { roleErrors } from "@grasp-os/shared/roles";
-import type { WorkflowStage } from "@grasp-os/shared/workflow-lifecycle";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -9,17 +8,18 @@ import type { CoreConnection } from "../core-connection.ts";
 import { phaseOf, readOverview, readTools } from "./overview.ts";
 
 // What the Workflows page reads, against core's API as the page reaches it
-// over RPC, faked: each workflow stands in the phase its stage, its runs
-// and its go-live say, what needs the reader first; and the tools a
-// workflow reaches are the apps its connections belong to.
+// over RPC, faked: each workflow stands in the phase its live version and
+// its runs say, what needs the reader first; and the tools a workflow
+// reaches are the apps its connections belong to.
 
-/** A workflow that ran this week and needs nobody, changed by `change`. */
+/** A workflow that runs, ran this week and needs nobody, changed by `change`. */
 const workflow = (
   name: string,
   change: Partial<WorkflowSummary> = {}
 ): WorkflowSummary => ({
   workflowId: workflowResourceIdSchema.parse(`id-${name}`),
   name,
+  title: null,
   version: 1,
   owner: { userId: "owner", name: "Ada Lovelace" },
   lastRun: {
@@ -36,11 +36,9 @@ const workflow = (
 /** Core's API, as far as the page reads it. */
 interface Core {
   overview: () => Promise<WorkflowSummary[]>;
-  stages: Readonly<Record<string, WorkflowStage>>;
-  paused?: readonly string[];
-  goLives?: { workflowId: string; name: string }[];
-  resources?: () => Promise<{ id: string; process: string | null }[]>;
-  lifecycleFails?: boolean;
+  resources?: () => Promise<
+    { id: string; process: string | null; paused: boolean }[]
+  >;
 }
 
 /** The tab's connection to a core that answers as `core` says. */
@@ -59,22 +57,6 @@ const overviewOf = async (core: Core) =>
       workflows: { overview: core.overview },
       workflowResources: {
         list: core.resources ?? (async () => await Promise.resolve([])),
-        lifecycle: {
-          waiting: async () => await Promise.resolve(core.goLives ?? []),
-          get: async (id: string) => {
-            await Promise.resolve();
-            if (core.lifecycleFails === true) {
-              throw roleErrors.create("role.forbidden");
-            }
-            return {
-              stage: core.stages[id],
-              paused:
-                core.paused?.includes(id) === true
-                  ? { by: "owner", at: "2026-10-08T09:00:00.000Z" }
-                  : null,
-            };
-          },
-        },
       },
     })
   );
@@ -88,22 +70,20 @@ const phasesOf = async (core: Core): Promise<string[]> => {
 };
 
 describe(phaseOf, () => {
-  const quiet = { waitsToGoLive: false, waiting: 0, failed: 0 };
+  const quiet = { waiting: 0, failed: 0 };
 
-  it("follows the stage: to build while only named, building until a version went live, then running", () => {
-    expect(
-      (["mapped", "designed", "testing", "live", "scaling"] as const).map(
-        (stage) => phaseOf({ stage, ...quiet })
-      )
-    ).toStrictEqual(["toBuild", "building", "building", "running", "running"]);
+  it("is building until a version is live, then running", () => {
+    expect([
+      phaseOf({ live: false, ...quiet }),
+      phaseOf({ live: true, ...quiet }),
+    ]).toStrictEqual(["building", "running"]);
   });
 
-  it("needs the reader while runs wait or failed, or a version waits for them to go live, whatever its stage", () => {
+  it("needs the reader while runs wait or failed, live or not", () => {
     expect([
-      phaseOf({ stage: "live", ...quiet, waiting: 1 }),
-      phaseOf({ stage: "scaling", ...quiet, failed: 2 }),
-      phaseOf({ stage: "testing", ...quiet, waitsToGoLive: true }),
-    ]).toStrictEqual(["needsYou", "needsYou", "needsYou"]);
+      phaseOf({ live: true, ...quiet, waiting: 1 }),
+      phaseOf({ live: false, ...quiet, failed: 2 }),
+    ]).toStrictEqual(["needsYou", "needsYou"]);
   });
 });
 
@@ -113,71 +93,41 @@ describe("the Workflows page's rows", () => {
       overview: async () =>
         await Promise.resolve([
           workflow("Archive"),
-          workflow("Billing", { lastRun: null }),
+          workflow("Billing", { lastRun: null, version: null }),
           workflow("Complaints", { waiting: 1 }),
-          workflow("Drafted", { lastRun: null }),
           workflow("Expenses"),
         ]),
-      stages: {
-        "id-Archive": "live",
-        "id-Billing": "mapped",
-        "id-Complaints": "live",
-        "id-Drafted": "designed",
-        "id-Expenses": "scaling",
-      },
     });
 
     expect(rows).toStrictEqual([
       "Complaints: needsYou",
       "Archive: running",
       "Expenses: running",
-      "Drafted: building",
-      "Billing: toBuild",
+      "Billing: building",
     ]);
   });
 
-  it("keeps a workflow that runs without a version gone live under building", async () => {
-    const rows = await phasesOf({
-      overview: async () => await Promise.resolve([workflow("Intake")]),
-      stages: { "id-Intake": "testing" },
-    });
-
-    expect(rows).toStrictEqual(["Intake: building"]);
-  });
-
-  it("lists a version waiting for the reader to go live under what needs them, also of a workflow core doesn't list for them", async () => {
-    const rows = await phasesOf({
-      overview: async () => await Promise.resolve([workflow("Intake")]),
-      stages: { "id-Intake": "testing" },
-      goLives: [
-        { workflowId: "id-Intake", name: "Intake" },
-        { workflowId: "id-Payroll", name: "Payroll" },
-      ],
-    });
-
-    expect(rows).toStrictEqual(["Intake: needsYou", "Payroll: needsYou"]);
-  });
-
-  it("carries what core says of each: its owner, its process, whether it is paused, and its runs this week once it ran", async () => {
+  it("carries what core says of each: the name people see, its owner, its process, whether it is paused, and its runs this week once it ran", async () => {
     const read = await overviewOf({
       overview: async () =>
         await Promise.resolve([
-          workflow("Intake"),
+          workflow("intake", { title: "Intake" }),
           workflow("Planned", {
             lastRun: null,
             handled: 0,
+            version: null,
             owner: { userId: "owner", name: null },
           }),
         ]),
-      stages: { "id-Intake": "live", "id-Planned": "mapped" },
-      paused: ["id-Intake"],
       resources: async () =>
-        await Promise.resolve([{ id: "id-Intake", process: "o2c" }]),
+        await Promise.resolve([
+          { id: "id-intake", process: "o2c", paused: true },
+        ]),
     });
 
     expect(read.state === "ready" ? read.data : read.state).toStrictEqual([
       {
-        id: "id-Intake",
+        id: "id-intake",
         name: "Intake",
         phase: "running",
         paused: true,
@@ -188,7 +138,7 @@ describe("the Workflows page's rows", () => {
       {
         id: "id-Planned",
         name: "Planned",
-        phase: "toBuild",
+        phase: "building",
         paused: false,
         process: null,
         owner: null,
@@ -203,16 +153,14 @@ describe("the Workflows page's rows", () => {
         await Promise.resolve();
         throw roleErrors.create("role.forbidden");
       },
-      stages: {},
     });
 
     expect(rows).toStrictEqual([]);
   });
 
-  it("still show when the process each serves can't be read", async () => {
+  it("still show when the workflows' records can't be read", async () => {
     const rows = await phasesOf({
       overview: async () => await Promise.resolve([workflow("Intake")]),
-      stages: { "id-Intake": "live" },
       resources: async () => {
         await Promise.resolve();
         throw new Error("The workflows' records can't be read.");
@@ -220,16 +168,6 @@ describe("the Workflows page's rows", () => {
     });
 
     expect(rows).toStrictEqual(["Intake: running"]);
-  });
-
-  it("aren't shown in a phase core didn't say: a stage that can't be read fails the read", async () => {
-    const rows = await phasesOf({
-      overview: async () => await Promise.resolve([workflow("Intake")]),
-      stages: {},
-      lifecycleFails: true,
-    });
-
-    expect(rows).toStrictEqual(["refused"]);
   });
 });
 

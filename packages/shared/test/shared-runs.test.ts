@@ -6,25 +6,20 @@ import { inTurn, sharedRun } from "../src/shared-runs.ts";
 import type { SharedRun, Turns } from "../src/shared-runs.ts";
 
 // Work shared across the requests of an isolate (src/shared-runs.ts):
-// pure scheduling, so tested on its own. Work whose request was cancelled
-// never settles (workerd drops it), which a promise that never settles
-// stands in for here.
+// pure scheduling, so tested on its own. Another request's work is an
+// entry it notes its end on; a cancelled request's never notes one
+// (workerd drops the rest of it), which an entry left as it is stands in
+// for here.
 
 /** How long the work here may take before it is taken for abandoned. */
 const abandonAfterMs = 50;
 
-/** A promise that settles only when told, as a cancelled request's never does. */
-const held = <T>() => Promise.withResolvers<T>();
-
 describe("work shared across requests", () => {
   it("starts one replacement for an abandoned run, however many wait on it", async () => {
-    const runs = new Map<string, SharedRun<string>>();
-    const abandoned = held<string>();
-    runs.set("build", {
-      promise: abandoned.promise,
-      started: Date.now(),
-      abandonAfterMs,
-    });
+    // Another request's build, abandoned: it never notes an end.
+    const runs = new Map<string, SharedRun<string>>([
+      ["build", { started: Date.now(), abandonAfterMs }],
+    ]);
     let starts = 0;
     const start = async (): Promise<string> => {
       starts += 1;
@@ -47,13 +42,10 @@ describe("work shared across requests", () => {
   });
 
   it("starts one replacement however quickly it finishes, though each waiter's time runs out on its own", async () => {
-    const runs = new Map<string, SharedRun<string>>();
-    const abandoned = held<string>();
-    runs.set("build", {
-      promise: abandoned.promise,
-      started: Date.now(),
-      abandonAfterMs,
-    });
+    // Another request's build, abandoned: it never notes an end.
+    const runs = new Map<string, SharedRun<string>>([
+      ["build", { started: Date.now(), abandonAfterMs }],
+    ]);
     let starts = 0;
     // Each waiter asks a moment after the one before, so their times run
     // out one after the other, after the first one's replacement finished.
@@ -76,12 +68,8 @@ describe("work shared across requests", () => {
 
   it("shares a run that settles in time, and hands its failure to every waiter", async () => {
     const runs = new Map<string, SharedRun<string>>();
-    const running = held<string>();
-    runs.set("build", {
-      promise: running.promise,
-      started: Date.now(),
-      abandonAfterMs,
-    });
+    const running: SharedRun<string> = { started: Date.now(), abandonAfterMs };
+    runs.set("build", running);
     let starts = 0;
     const waiting = Array.from(
       { length: 3 },
@@ -94,7 +82,7 @@ describe("work shared across requests", () => {
           error instanceof Error ? error.message : "?"
         )
     );
-    running.reject(new Error("The build failed."));
+    running.outcome = { error: new Error("The build failed.") };
 
     await expect(Promise.all(waiting)).resolves.toStrictEqual([
       "The build failed.",
@@ -105,13 +93,10 @@ describe("work shared across requests", () => {
   });
 
   it("starts no replacement for a waiter given up on while it waited, and leaves it to another", async () => {
-    const runs = new Map<string, SharedRun<string>>();
-    const abandoned = held<string>();
-    runs.set("build", {
-      promise: abandoned.promise,
-      started: Date.now(),
-      abandonAfterMs,
-    });
+    // Another request's build, abandoned: it never notes an end.
+    const runs = new Map<string, SharedRun<string>>([
+      ["build", { started: Date.now(), abandonAfterMs }],
+    ]);
     let starts = 0;
     const start = async (): Promise<string> => {
       starts += 1;
@@ -150,20 +135,16 @@ describe("work shared across requests", () => {
     const now = Date.now();
     // Abandoned, and no longer waited on: started twice its own time ago.
     runs.set("gone", {
-      promise: held<string>().promise,
       started: now - 2 * abandonAfterMs - 1,
       abandonAfterMs,
     });
     // Abandoned, but a waiter may still be about to follow its link.
     runs.set("just abandoned", {
-      promise: held<string>().promise,
       started: now - abandonAfterMs - 1,
       abandonAfterMs,
     });
     // Within its own time, however short the caller's.
-    const running = held<string>();
     runs.set("running", {
-      promise: running.promise,
       started: now - 2 * abandonAfterMs - 1,
       abandonAfterMs: 60_000,
     });
@@ -177,7 +158,6 @@ describe("work shared across requests", () => {
       answer: "own",
       left: ["just abandoned", "running"],
     });
-    running.resolve("done");
   });
 });
 
@@ -224,7 +204,6 @@ describe("work run in turn", () => {
   it("takes a turn that never ends, as a cancelled request's, for abandoned once its time is up", async () => {
     const turns: Turns = {
       last: {
-        done: held<undefined>().promise,
         endsBy: Date.now() + abandonAfterMs,
       },
     };

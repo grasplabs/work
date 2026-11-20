@@ -14,16 +14,20 @@ import { env } from "cloudflare:workers";
 
 import { inJurisdiction } from "../src/durable-objects.ts";
 
-/** The Brain's one store, as core reaches it. */
-const store = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+/**
+ * A store of the Brain, as core reaches it: the shared one (`brain`)
+ * unless another is named (`person:<id>`, a person's own).
+ */
+const store = (storeName = "brain") =>
+  inJurisdiction(env, env.BRAIN_STORE).getByName(storeName);
 
 /**
  * Kills the store, as a crash or a restart would: its next call starts it
  * afresh. The kill's own error is the test's: observed here and dropped.
  */
-export const killStore = async (): Promise<void> => {
+export const killStore = async (storeName?: string): Promise<void> => {
   try {
-    await runInDurableObject(store(), (_instance, state) => {
+    await runInDurableObject(store(storeName), (_instance, state) => {
       state.abort("Killed by the test");
     });
   } catch {
@@ -48,8 +52,8 @@ export interface StoreCopy {
 const indexPages = /^(?:chunk|memory)_(?:words|stems)_/u;
 
 /** A copy of the whole store, as a backup taken now would hold it. */
-export const copyOfStore = async (): Promise<StoreCopy> =>
-  await runInDurableObject(store(), (_instance, state) => {
+export const copyOfStore = async (storeName?: string): Promise<StoreCopy> =>
+  await runInDurableObject(store(storeName), (_instance, state) => {
     const { sql } = state.storage;
     const tables = sql
       .exec<{ name: string; sql: string }>(
@@ -84,8 +88,11 @@ export const copyOfStore = async (): Promise<StoreCopy> =>
  * since is gone from it, erasures and the store's record of them
  * included. The bucket is untouched.
  */
-export const restoreStore = async (copy: StoreCopy): Promise<void> => {
-  await runInDurableObject(store(), (_instance, state) => {
+export const restoreStore = async (
+  copy: StoreCopy,
+  storeName?: string
+): Promise<void> => {
+  await runInDurableObject(store(storeName), (_instance, state) => {
     const { sql } = state.storage;
     state.storage.transactionSync(() => {
       sql.exec("PRAGMA defer_foreign_keys = ON");
@@ -117,5 +124,5 @@ export const restoreStore = async (copy: StoreCopy): Promise<void> => {
       }
     });
   });
-  await killStore();
+  await killStore(storeName);
 };

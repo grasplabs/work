@@ -144,7 +144,7 @@ import { api, permissions } from "@server/_generated/api";
 import type { Note } from "./note-editor.tsx";
 
 /** One attached file: its preview, name and size, to download or remove. */
-function Attachment({
+const Attachment = ({
   note,
   file,
   onOutcome,
@@ -152,7 +152,7 @@ function Attachment({
   note: Note;
   file: FileRef;
   onOutcome: (outcome: string) => void;
-}) {
+}) => {
   const shown = useFile(permissions.files, file);
   const client = useClient();
   const detach = useMutation(api.notes.detachFile);
@@ -202,13 +202,13 @@ function Attachment({
       </Button>
     </li>
   );
-}
+};
 
 /**
  * A note's files: one uploaded at a time, then attached, each shown with
  * its preview.
  */
-export function Attachments({ note }: { note: Note }) {
+export const Attachments = ({ note }: { note: Note }) => {
   const upload = useUpload(permissions.files);
   const attach = useMutation(api.notes.attachFile);
   const [outcome, setOutcome] = useState("");
@@ -248,7 +248,7 @@ export function Attachments({ note }: { note: Note }) {
       </ul>
     </section>
   );
-}
+};
 `;
 
 const createNote = `import { useForm } from "@grasp-os/sdk/react";
@@ -256,7 +256,7 @@ import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-
 import { api } from "@server/_generated/api";
 
 /** A new note: the function's input is the form, its contract the check. */
-export function CreateNote() {
+export const CreateNote = () => {
   const form = useForm(api.notes.create, {
     defaultValues: { title: "", body: "" },
     resetOnSuccess: true,
@@ -269,7 +269,7 @@ export function CreateNote() {
       <SubmitButton form={form}>Create note</SubmitButton>
     </Form>
   );
-}
+};
 `;
 
 const noteEditor = `import type { FunctionReturn } from "@grasp-os/sdk";
@@ -284,13 +284,13 @@ export type Note = NonNullable<FunctionReturn<typeof api.notes.get>>;
  * person changed, so someone else's save of the note's other field stays.
  * Saved, it opens again on the note it saved.
  */
-export function NoteEditor({
+export const NoteEditor = ({
   note,
   onSaved,
 }: {
   note: Note;
   onSaved: (saved: Note) => void;
-}) {
+}) => {
   const form = useForm(api.notes.update, {
     defaultValues: { id: note._id, title: note.title, body: note.body },
     onSuccess: onSaved,
@@ -303,7 +303,7 @@ export function NoteEditor({
       <SubmitButton form={form}>Save changes</SubmitButton>
     </Form>
   );
-}
+};
 `;
 
 const appPage = `import { createFileRoute } from "@tanstack/react-router";
@@ -319,7 +319,7 @@ import { NoteEditor } from "../components/note-editor.tsx";
 import type { Note } from "../components/note-editor.tsx";
 
 /** The note chosen, loaded live; null is a note that is gone. */
-function SelectedNote({ id }: { id: Id<"notes"> }) {
+const SelectedNote = ({ id }: { id: Id<"notes"> }) => {
   const note = useQuery(api.notes.get, { id });
   // Saving opens the editor afresh: from the note it saved, or the note as
   // it is now, whichever is newer, as the live note may not have caught up
@@ -347,9 +347,9 @@ function SelectedNote({ id }: { id: Id<"notes"> }) {
       <Attachments note={note} />
     </>
   );
-}
+};
 
-function Notes() {
+const Notes = () => {
   // A live list, five notes at a time: kept current as notes are saved,
   // edited and deleted anywhere, never with a note twice or missing.
   const { items, hasMore, isLoading, loadMore } = usePaginatedQuery(
@@ -397,7 +397,7 @@ function Notes() {
       {selected === null ? null : <SelectedNote id={selected} key={selected} />}
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Notes });
 `;
 
@@ -407,7 +407,7 @@ import { useState } from "react";
 import { api } from "@server/_generated/api";
 
 /** Imports a note through an action that fails after saving it. */
-export function ImportNote() {
+export const ImportNote = () => {
   const importHalfway = useAction(api.notes.importHalfway);
   const [outcome, setOutcome] = useState("");
   const run = async () => {
@@ -426,7 +426,7 @@ export function ImportNote() {
       <output aria-label="Import">{outcome}</output>
     </div>
   );
-}
+};
 `;
 
 /** The Notes App's files. */
@@ -461,7 +461,7 @@ const someFile = { id: "00000000-0000-4000-8000-000000000000" };
  * A page that downloads a file a while after it opens, without anyone
  * asking, and again on a click.
  */
-function Notes() {
+const Notes = () => {
   const client = useClient();
   const [unasked, setUnasked] = useState("waiting");
   const [asked, setAsked] = useState("waiting");
@@ -487,7 +487,7 @@ function Notes() {
       <output aria-label="Asked download">{asked}</output>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Notes });
 `;
 
@@ -501,7 +501,7 @@ import { useState } from "react";
 import { permissions } from "@server/_generated/api";
 
 /** One file, or none while hidden. */
-function Shown({
+const Shown = ({
   file,
   hidden,
   renders,
@@ -509,7 +509,7 @@ function Shown({
   file: FileRef;
   hidden: boolean;
   renders: number;
-}) {
+}) => {
   const shown = useFile(permissions.files, hidden ? "skip" : file);
   if (hidden) {
     return <p>The file is hidden</p>;
@@ -525,10 +525,10 @@ function Shown({
       Showing {shown.name}, rendered {renders} times
     </p>
   );
-}
+};
 
 /** A file uploaded, then shown. */
-function Notes() {
+const Notes = () => {
   const upload = useUpload(permissions.files);
   const client = useClient();
   const [file, setFile] = useState<FileRef | null>(null);
@@ -590,7 +590,7 @@ function Notes() {
       )}
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Notes });
 `;
 
@@ -622,7 +622,7 @@ import { permissions } from "@server/_generated/api";
  * A page that opens its help site on a click, opens it a while after
  * the click (its activation spent), and tries a site it didn't declare.
  */
-function Notes() {
+const Notes = () => {
   const client = useClient();
   const [outcome, setOutcome] = useState("waiting");
   const open = async (url: string) => {
@@ -652,7 +652,7 @@ function Notes() {
       <output aria-label="Link">{outcome}</output>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Notes });
 `;
 
@@ -684,14 +684,14 @@ export const navigationFiles = (): TestApp =>
   withFiles(notesAppFiles(), {
     "src/routes/start.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
 
-function Start() {
+const Start = () => {
   return (
     <main className="flex flex-col gap-3 p-6">
       <h1>Start</h1>
       <Link params={{ id: "n42" }} to="/notes/$id">Open note n42</Link>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/start")({ component: Start });
 `,
     "src/routes/notes.$id.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
@@ -699,7 +699,7 @@ import { useForm } from "@grasp-os/sdk/react";
 import { Form, TextField } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
 
-function Note() {
+const Note = () => {
   const { id } = Route.useParams();
   const form = useForm(api.notes.create, { defaultValues: { title: "", body: "" } });
   return (
@@ -711,7 +711,7 @@ function Note() {
       <Link to="/start">Back to start</Link>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/notes/$id")({ component: Note });
 `,
   });
@@ -728,13 +728,13 @@ export const surface = { kind: "sidebar", title: "All notes" };
 `,
     "src/routes/prefs.tsx": `import { createFileRoute } from "@tanstack/react-router";
 
-function Prefs() {
+const Prefs = () => {
   return (
     <main className="p-6">
       <h1>Preferences</h1>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/prefs")({ component: Prefs });
 export const surface = { kind: "settings", title: "Options" };
 `,
@@ -756,13 +756,13 @@ export const hoppingFiles = (): TestApp =>
     "src/routes/takeoff.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-function Takeoff() {
+const Takeoff = () => {
   const navigate = useNavigate();
   useEffect(() => {
     void navigate({ to: "/hops/$n", params: { n: "1" } });
   }, [navigate]);
   return <main className="p-6"><h1>Takeoff</h1></main>;
-}
+};
 export const Route = createFileRoute("/takeoff")({ component: Takeoff });
 `,
     // A page that moves on a press and again on its release, and on a key's
@@ -771,7 +771,7 @@ export const Route = createFileRoute("/takeoff")({ component: Takeoff });
     "src/routes/keys.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button } from "@grasp-os/ui/components/button";
 
-function Keys() {
+const Keys = () => {
   const navigate = useNavigate();
   return (
     <main className="flex flex-col gap-3 p-6">
@@ -790,12 +790,12 @@ function Keys() {
       />
     </main>
   );
-}
+};
 export const Route = createFileRoute("/keys")({ component: Keys });
 `,
     "src/routes/launch.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
 
-function Launch() {
+const Launch = () => {
   return (
     <main className="flex flex-col gap-3 p-6">
       <h1>Launch</h1>
@@ -804,13 +804,13 @@ function Launch() {
       <Link params={{ n: "1" }} to="/forges/$n">Start forging</Link>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/launch")({ component: Launch });
 `,
     "src/routes/hops.$n.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-function Hop() {
+const Hop = () => {
   const { n } = Route.useParams();
   const navigate = useNavigate();
   useEffect(() => {
@@ -819,7 +819,7 @@ function Hop() {
     }
   }, [navigate, n]);
   return <main className="p-6"><h1>Hop {n}</h1></main>;
-}
+};
 export const Route = createFileRoute("/hops/$n")({ component: Hop });
 `,
     // A hop that focuses its own field as it mounts, while the click that
@@ -828,7 +828,7 @@ export const Route = createFileRoute("/hops/$n")({ component: Hop });
     "src/routes/focus-hops.$n.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
-function FocusHop() {
+const FocusHop = () => {
   const { n } = Route.useParams();
   const navigate = useNavigate();
   const field = useRef<HTMLInputElement>(null);
@@ -844,7 +844,7 @@ function FocusHop() {
       <input aria-label="Where" ref={field} />
     </main>
   );
-}
+};
 export const Route = createFileRoute("/focus-hops/$n")({ component: FocusHop });
 `,
     // A hop that tries every way its code has to pass for the person
@@ -874,7 +874,7 @@ const forge = () => {
   parent.postMessage({ type: "act" }, "*");
 };
 
-function Forge() {
+const Forge = () => {
   const { n } = Route.useParams();
   const navigate = useNavigate();
   const field = useRef<HTMLInputElement>(null);
@@ -892,7 +892,7 @@ function Forge() {
       <Link to="/launch">Go back</Link>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/forges/$n")({ component: Forge });
 `,
   });

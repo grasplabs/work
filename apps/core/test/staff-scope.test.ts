@@ -113,7 +113,7 @@ const reportWorkflow = async () => {
 
 /** A start of version 1, under a key of its own, as a session starts one. */
 const startOf = () => ({
-  version: 1,
+  expected: 1,
   args: { who: "Ada" },
   key: unique(),
 });
@@ -137,7 +137,7 @@ describe("a Grasp staff session, whatever its scope", () => {
         apps: await outcome(api.apps.list()),
         chats: await outcome(api.chats.list()),
         members: await outcome(api.members.list()),
-        knowledge: await outcome(api.knowledge.listCollections()),
+        brainSources: await outcome(api.brainSources.list()),
         auditLog: await outcome(api.audit.search()),
         waiting: await outcome(api.waiting.list()),
         audit: audit.status,
@@ -150,7 +150,7 @@ describe("a Grasp staff session, whatever its scope", () => {
       apps: "role.forbidden",
       chats: "role.forbidden",
       members: "role.forbidden",
-      knowledge: "role.forbidden",
+      brainSources: "role.forbidden",
       auditLog: "role.forbidden",
       waiting: "role.forbidden",
       audit: 401,
@@ -161,7 +161,7 @@ describe("a Grasp staff session, whatever its scope", () => {
     }).toStrictEqual({ full: reached, onboarding: reached });
   });
 
-  it("starts no run, asks no chat, calls no App function, creates no App and writes no Knowledge or Brain", async () => {
+  it("starts no run, asks no chat, calls no App function, creates no App and writes no Brain", async () => {
     const { builder, app, workflow } = await reportWorkflow();
     const { session, api } = await staffOn(env);
     const { userId } = await api.whoami();
@@ -174,9 +174,6 @@ describe("a Grasp staff session, whatever its scope", () => {
         api.chats.send(crypto.randomUUID(), { text: "Hi", model: "any" })
       ),
       createApp: await outcome(api.apps.create({ name: "Staff's" })),
-      collection: await outcome(
-        api.knowledge.createCollection({ name: "Staff's", access: "everyone" })
-      ),
       brain: await outcome(api.brain.addRecords([])),
       page: await outcome(api.pages.open(app)),
       functions: await postedAs(`${appFunctionPath}/${app}`, session, asPage),
@@ -191,7 +188,6 @@ describe("a Grasp staff session, whatever its scope", () => {
       chat: "role.forbidden",
       send: "role.forbidden",
       createApp: "role.forbidden",
-      collection: "role.forbidden",
       brain: "role.forbidden",
       page: "role.forbidden",
       functions: 401,
@@ -214,7 +210,7 @@ describe("a Grasp staff member added as a member", () => {
     const { core } = await openRpc(session);
     const member = core.authenticate();
     const who = await whoami(session);
-    await builder.api.workflowResources.share(workflow, {
+    await builder.api.workflowResources.members.add(workflow, {
       type: "person",
       id: who.userId,
       role: "user",

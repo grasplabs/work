@@ -59,6 +59,9 @@ const typeRules: readonly {
   { action: "connection.connect", type: "config" },
   // An admin changing which tools a connected app allows (GRA-993).
   { action: "connection.tools", type: "config" },
+  // An admin picking which places of a shared connection sync into the
+  // Brain (shared drives, document libraries).
+  { action: "connection.sync_places", type: "config" },
   // Connect sending, editing or deleting a message as the client's own bot
   // on a chat platform, or refusing a request core's chat adapters sent.
   { action: "channel.call", type: "action" },
@@ -85,6 +88,15 @@ const typeRules: readonly {
   { action: "agent.changed", type: "config" },
   { action: "agent.paused", type: "config" },
   { action: "agent.deleted", type: "config" },
+  // A person offering one of their own agents to the company, and its
+  // admins taking it on or declining it (core's src/agent-builder.ts).
+  { action: "agent.offered", type: "config" },
+  { action: "agent.adopted", type: "config" },
+  { action: "agent.declined", type: "config" },
+  // An agent's apps: one added or taken off by hand, and those worked out
+  // from its instructions (core's src/agent-apps.ts).
+  { action: "agent.app.changed", type: "config" },
+  { action: "agent.apps.worked_out", type: "config" },
   { action: "agent.reach.changed", type: "config" },
   { action: "agent.class.changed", type: "config" },
   // An admin giving an agent a document to answer from, or taking one
@@ -102,6 +114,9 @@ const typeRules: readonly {
   { action: "connection.app.pointed", type: "config" },
   // A connection's tokens stopped working: it needs signing in again.
   { action: "connection.needs_reauth", type: "config" },
+  // A renewal of a connection's tokens found its account's address changed,
+  // or no longer confirmed (connect's tokens.ts, GRA-1761).
+  { action: "connection.account_changed", type: "config" },
   // Connect reading what changed at a connection for workflows' event
   // triggers, dropping an event it couldn't deliver, and starting or
   // stopping listening there, being refused it, or failing to read it.
@@ -110,8 +125,12 @@ const typeRules: readonly {
   // didn't start.
   { action: "connection.events.dropped", type: "action" },
   { action: "connection.events", type: "config" },
-  // Event sources (core's src/event-sources.ts): an admin creating one,
-  // rotating or revoking its secret, and deleting it.
+  // Event sources (core's src/event-sources.ts): an admin reading the
+  // payload of a delivery one kept and sending one a test event (core's
+  // src/workflows/source-deliveries.ts), then creating one, rotating or
+  // revoking its secret, and deleting it.
+  { action: "event_source.delivery.read", type: "read" },
+  { action: "event_source.test_sent", type: "action" },
   { action: "event_source", type: "config" },
   // An event source's event a workflow's trigger refused for good (core's
   // src/workflows/source-events.ts), or a waiting run refused; its events
@@ -128,14 +147,59 @@ const typeRules: readonly {
   // An admin adding records the brain is built from, and a purge
   // rewriting a record's words.
   { action: "brain.records", type: "action" },
+  // A chat's agent's read through a connection kept as a source in the
+  // new Brain, skipped, or failed (core's connection-capture.ts): IDs and
+  // counts, never what was read; and every such source of a connection
+  // erased once it was disconnected (`brain.capture.erased`, core's
+  // capture-erasures.ts).
+  { action: "brain.capture", type: "action" },
+  // An admin choosing who may read in the Brain what agents read through
+  // a shared connection (core's connection-audiences.ts, GRA-1831): the
+  // connection and the audience, by IDs alone.
+  { action: "brain.connection_audience", type: "config" },
+  // An admin asking to erase what the Brain kept from a shared connection,
+  // and that erasure, or a disconnect's, ended (core's shared-reads.ts,
+  // GRA-1831): the connection and how many records, by IDs and a count.
+  { action: "brain.shared_reads", type: "action" },
+  // Native sync making a page of a connected system's changes into Brain
+  // sources, and erasing what it copied once its connection was
+  // disconnected (core's brain-sync.ts, GRA-1758): the connection, its
+  // sync and counts, never an item.
+  { action: "brain.sync", type: "action" },
+  // An App, a workflow's run or a chat's code recalling from the Brain
+  // for a person (core's src/brain-recall.ts): for whom, how many
+  // passages and whether the budget cut it short, or why it was refused;
+  // never the question or what was found.
+  { action: "brain.recall", type: "read" },
+  // A chat's code asking the Brain who knows about a topic for a person
+  // (core's src/brain-recall.ts `whoKnowsFor`): for whom, how many people it named
+  // and whether the budget cut it short, or why it was refused; never the
+  // question, a name or who was named.
+  { action: "brain.who_knows", type: "read" },
+  // An App or a workflow's run selecting or reading the Brain's skills for
+  // a person (core's src/brain-recall.ts): for whom, how many skills or
+  // which version, or why it was refused; never the task, a name or a
+  // text. Each named exactly: a release installing skills
+  // (`brain.skills.installed`) is no read.
+  { action: "brain.skills.select", type: "read" },
+  { action: "brain.skills.read", type: "read" },
+  // An App or a workflow's run reading the Brain's entities for a person
+  // (core's src/brain-recall.ts): an entity's card, or a page of entities,
+  // by ids and counts, or why it was refused; never a name, a statement
+  // or a cursor. Each named exactly.
+  { action: "brain.entities.get", type: "read" },
+  { action: "brain.entities.find", type: "read" },
   // A Grasp staff member reaching a namespace, method or route of the
   // client's deployment (core's staff-audit.ts): what they looked at or
   // did there, by its surface and identifiers, never its content.
   { action: "staff.accessed", type: "read" },
+  // A Grasp staff member asking whether a source or a person was erased
+  // from the client's Brain (core's brain-report.ts): a read of its
+  // erasure ledger, whatever it answered.
+  { action: "admin.brain.erasure.looked_up", type: "read" },
   // A gap's owner asked (Grasp's), and a person answering or closing it.
   { action: "brain.gap.asked", type: "action" },
-  // A purge rewriting answers, or forgetting who gave them.
-  { action: "brain.gap.answers_purged", type: "action" },
+  // An erased person forgotten as who answered gaps.
   { action: "brain.gap.answerer_erased", type: "action" },
   { action: "brain.gap", type: "decision" },
   // Two entities of different collections decided to be one, or not
@@ -146,8 +210,19 @@ const typeRules: readonly {
   // Ids and codes only, never what a memory says.
   { action: "brain.memory", type: "action" },
   // Core handing a source over to the new Brain (GRA-1727): started, handed
-  // over or refused, by ids alone.
+  // over, refused, or skipped with why (a chat's noted question it may no
+  // longer keep: restricted, deleted, not a member, no text), by ids alone.
   { action: "brain.source", type: "action" },
+  // A file uploaded straight into the Brain (core's brain-uploads.ts):
+  // added, refused with why, failed, deleted or a delete failed, by IDs and
+  // counts, never its name or text; and an admin listing the shared
+  // uploads to erase one, with how many.
+  { action: "brain.upload.listed", type: "read" },
+  { action: "brain.upload", type: "action" },
+  // A person's run results taken out of use in the Brain once they lost
+  // the workflow (core's brain-run-sources.ts): one event a loss, with the
+  // person and how many runs it covered, by IDs and a count alone.
+  { action: "brain.run_sources", type: "action" },
   // A Grasp staff member reading the client's Brain report, and asking for
   // an action on it and its outcome (core's brain-report.ts).
   { action: "admin.brain.read", type: "read" },
@@ -159,6 +234,20 @@ const typeRules: readonly {
   { action: "admin.snapshot.read", type: "read" },
   { action: "admin.kickoff.read", type: "read" },
   { action: "knowledge.search", type: "read" },
+  // Sharing a skill with the company (GRA-1754), by the share's ID or the
+  // skill's name, never its text. A person asking; an admin's decision
+  // (approving or declining a share, retiring a company skill); and each
+  // decision's one outcome, as core's reconciler recorded it from the
+  // Brain: added or retired (with the version), or superseded by a later
+  // decision before it could be. A decision without an outcome yet is on
+  // its way: the clock reconciles it.
+  { action: "skill.share.requested", type: "action" },
+  { action: "skill.share.added", type: "action" },
+  { action: "skill.share.superseded", type: "action" },
+  { action: "skill.share", type: "decision" },
+  { action: "skill.retired", type: "config" },
+  { action: "skill.retire_done", type: "config" },
+  { action: "skill.retire_superseded", type: "action" },
   // A skill selected for a task, or none (GRA-310): which, never its text.
   { action: "knowledge.skill", type: "read" },
   { action: "knowledge.read", type: "read" },
@@ -169,12 +258,27 @@ const typeRules: readonly {
   { action: "knowledge.signal.dismissed", type: "decision" },
   { action: "knowledge.collection", type: "config" },
   { action: "knowledge", type: "action" },
-  // A person making, renaming or deleting one of their chats.
+  // A person making, renaming or deleting one of their chats; and a
+  // question of their own chat noted to keep in their own Brain
+  // (`chat.turn_noted`, GRA-1805), whose hand-over records how it ended
+  // (`brain.source.*`).
+  // A chat that handed its model or code something only its person may
+  // read, so what it writes for others waits for them (core's
+  // private-reads.ts); and a write to an App held for them since (held
+  // by the agent's own `agent.call`, which names the hold), confirmed or
+  // declined by them, how a confirmed one ended, or that it waited past
+  // its day unconfirmed (core's held-app-calls.ts).
+  { action: "chat.private_read", type: "permission" },
+  { action: "chat.app_call.ended", type: "action" },
+  { action: "chat.app_call.lapsed", type: "action" },
+  { action: "chat.app_call", type: "decision" },
   { action: "chat", type: "action" },
   // A call of the chat agent's code that nothing else records: a listing,
   // a catalog or a run's status, or a call refused before it did anything.
   // Its calls that can change something (a connector call, an App's
-  // export) record themselves under their own actions.
+  // export) record themselves under their own actions. The recall before a
+  // chat's question (method `brain.recall`, core's turn-recall.ts) says
+  // what it read as (`reads`, `TurnRecallReads` in audit.ts).
   { action: "agent.call", type: "read" },
   { action: "model", type: "model_call" },
   { action: "permission", type: "permission" },
@@ -324,6 +428,11 @@ const typeRules: readonly {
   { action: "workflow.state", type: "action" },
   // A schedule stopped after its run kept failing to start.
   { action: "workflow.schedule", type: "action" },
+  // The draft of an App or a workflow saved, restored or discarded, and a
+  // version of one published or rolled back to (core's drafts.ts and
+  // publish.ts), each naming its App or workflow as the target.
+  { action: "draft", type: "config" },
+  { action: "version", type: "config" },
   { action: "platform", type: "platform_update" },
   // Improvement signals: the daily computation, and reading them.
   { action: "improvement.signals.computed", type: "action" },

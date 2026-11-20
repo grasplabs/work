@@ -1,26 +1,17 @@
 import type { ViewedApp } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { appWorkflowBindingSchema } from "@grasp-os/shared/workflow-resources";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type {
   AppWorkflowBinding,
   WorkflowResource,
-  WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useState } from "react";
 
+import { useDraft } from "../drafts/use-draft.ts";
 import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -32,15 +23,8 @@ import {
   DialogFooter,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "../grasp/field/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
-import { Workflow } from "../grasp/icons/index.ts";
-import { Input } from "../grasp/input/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Select,
@@ -64,29 +48,25 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { buildsApp } from "./app-role.ts";
 
-// The workflows an App's App starts, on the App's Resources tab, for
-// its builders (`workflowResources.appBindings`, which core lets them read
+// The workflows an App starts, on the App's Resources tab, for its
+// builders (`workflowResources.appBindings`, which core lets them read
 // and nobody else, never Grasp staff): each alias the App's code starts a
-// workflow by, and the exact version it binds. Its builders bind an alias
-// to a version of a workflow they have a role in (`bindToApp`), which
-// replaces what the alias bound before, and remove a binding
-// (`unbindFromApp`), once confirmed. A binding grants nothing: starting
-// through it still takes the App's own permission on the workflow, which
-// an admin grants. An archived App's bindings are kept and shown, but not
-// changed.
-
-/** What a binding binds, as the dialog was given it or chose it. */
-interface Binding {
-  alias: string;
-  workflow: string | null;
-  version: number | null;
-}
+// workflow by, whose live version it starts. A binding is part of the
+// App's version: a builder changes what an alias binds in the App's
+// draft (`apps.define` with `bindWorkflow`, to a workflow they have a
+// role in), which declares what the App relies on of its live version
+// and binds it once they publish the draft; the chat does the same, and
+// ends a binding by publishing a version that no longer binds it. A
+// binding grants nothing: starting through it still takes the App's own
+// permission on the workflow, which an admin grants. An archived App's
+// bindings are kept and shown, but not changed.
 
 /** The workflows the person has a role in, with a published version. */
 const bindable = (workflows: readonly WorkflowResource[]): WorkflowResource[] =>
   workflows.filter((workflow) => workflow.currentVersion !== null);
 
 const styles = stylex.create({
+  section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
   actions: {
     display: "flex",
     justifyContent: "flex-end",
@@ -94,83 +74,66 @@ const styles = stylex.create({
   },
 });
 
-/** Binding an alias to a workflow version, or changing what it binds. */
+/**
+ * Changing which workflow an alias binds, in the App's draft, over
+ * `revision`, the draft's as the page read it last (core refuses one the
+ * draft moved past); undefined until it is read.
+ */
 const BindDialog = ({
   app,
-  start,
+  revision,
+  binding,
   workflows,
   onClose,
-  onBound,
+  onDrafted,
 }: {
   app: string;
-  /** What it starts from: an alias already bound, or a new one. */
-  start: Binding;
+  revision: number | undefined;
+  /** The binding it changes. */
+  binding: AppWorkflowBinding;
   workflows: readonly WorkflowResource[];
   onClose: () => void;
-  onBound: () => void;
+  onDrafted: () => void;
 }) => {
   const { t } = useLingui();
-  const core = useCore();
   const formId = useId();
   const { busy, failure, run } = useCoreAction();
-  const [alias, setAlias] = useState(start.alias);
-  const [workflow, setWorkflow] = useState(start.workflow);
-  const [chosen, setChosen] = useState(start.version);
-  const [versions, setVersions] = useState<Loaded<WorkflowResourceVersion[]>>();
-  const naming = start.alias === "";
-  const aliasValid =
-    appWorkflowBindingSchema.shape.alias.safeParse(alias).success;
-  useEffect(() => {
-    const left = new AbortController();
-    const read = async (): Promise<void> => {
-      if (workflow === null) {
-        return;
-      }
-      const loaded = await loadFromCore(
-        core,
-        async (session) => await session.workflowResources.versions(workflow),
-        left.signal
-      );
-      if (!left.signal.aborted) {
-        setVersions(loaded);
-      }
-    };
-    void read();
-    return () => {
-      left.abort();
-    };
-  }, [core, workflow]);
-  const published =
-    versions?.state === "ready"
-      ? versions.data.map((each) => each.version).toSorted((a, b) => b - a)
-      : [];
+  const [problem, setProblem] = useState<string>();
+  const [workflow, setWorkflow] = useState<string | null>(
+    workflows.some((each) => each.id === binding.workflowId)
+      ? binding.workflowId
+      : null
+  );
+  const { alias } = binding;
   const bind = async (): Promise<void> => {
-    if (workflow === null || chosen === null) {
+    if (workflow === null || revision === undefined) {
       return;
     }
-    const bound = await run(
+    setProblem(undefined);
+    const changed = await run(
       async (session) =>
-        await session.workflowResources.bindToApp(workflow, {
-          app,
+        await session.apps.define(app, revision, {
+          op: "bindWorkflow",
           alias,
-          version: chosen,
+          workflow,
         })
     );
-    if (bound === undefined) {
+    if (changed === undefined) {
       // The dialog stays open, with core's reason in it.
-      throw new Error("Not bound");
+      throw new Error("Not changed");
     }
-    onBound();
+    if (!changed.ok) {
+      setProblem(changed.problem);
+      throw new Error("Not changed");
+    }
+    onDrafted();
     onClose();
   };
   const workflowItems = workflows.map((each) => ({
     value: each.id,
-    label: each.name,
+    label: workflowLabel(each),
   }));
-  const versionItems = published.map((version) => ({
-    value: String(version),
-    label: t`Version ${version}`,
-  }));
+  const shown = failure ?? problem;
   return (
     <Dialog
       onOpenChange={(open) => {
@@ -181,11 +144,9 @@ const BindDialog = ({
       open
     >
       <DialogContent closeLabel={t`Close`}>
-        <DialogTitle>
-          {naming ? t`Bind a workflow` : t`Change what ${alias} starts`}
-        </DialogTitle>
+        <DialogTitle>{t`Change what ${alias} starts`}</DialogTitle>
         <DialogDescription>
-          {t`The App starts this exact version by its name, until a builder binds another. Starting it still takes the App's own permission on the workflow, which an admin grants.`}
+          {t`The change goes into the App's draft, which declares what the workflow's live version has. Once you publish the draft, the App starts that workflow's live version by this name. Starting it still takes the App's own permission on the workflow, which an admin grants.`}
         </DialogDescription>
         <DialogBody>
           <Form
@@ -194,21 +155,6 @@ const BindDialog = ({
               event.preventDefault();
             }}
           >
-            {naming ? (
-              <Field invalid={alias !== "" && !aliasValid}>
-                <FieldLabel>{t`Name in the App's code`}</FieldLabel>
-                <Input maxLength={64} onValueChange={setAlias} value={alias} />
-                {alias === "" || aliasValid ? (
-                  <FieldDescription>
-                    {t`A letter, then letters, digits or underscores, such as summary.`}
-                  </FieldDescription>
-                ) : (
-                  <FieldError match>
-                    {t`Start with a letter, then use only letters, digits or underscores.`}
-                  </FieldError>
-                )}
-              </Field>
-            ) : null}
             <Field>
               <FieldLabel>{t`Workflow`}</FieldLabel>
               <Select
@@ -216,8 +162,6 @@ const BindDialog = ({
                 onValueChange={(value) => {
                   if (value !== null) {
                     setWorkflow(value);
-                    setChosen(null);
-                    setVersions(undefined);
                   }
                 }}
                 value={workflow}
@@ -228,42 +172,19 @@ const BindDialog = ({
                 <SelectContent />
               </Select>
             </Field>
-            <Field>
-              <FieldLabel>{t`Version`}</FieldLabel>
-              <Select
-                disabled={workflow === null || versions?.state !== "ready"}
-                items={versionItems}
-                onValueChange={(value) => {
-                  if (value !== null) {
-                    setChosen(Number(value));
-                  }
-                }}
-                value={chosen === null ? null : String(chosen)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={t`Choose a version`} />
-                </SelectTrigger>
-                <SelectContent />
-              </Select>
-              {versions === undefined || versions.state === "ready" ? null : (
-                <NotLoaded page={versions} />
-              )}
-            </Field>
-            {failure === undefined ? null : (
-              <Alert tone="danger">{failure}</Alert>
-            )}
+            {shown === undefined ? null : <Alert tone="danger">{shown}</Alert>}
           </Form>
         </DialogBody>
         <DialogFooter>
           <DialogAction>{t`Cancel`}</DialogAction>
           <DialogAction
             action={bind}
-            disabled={busy || !aliasValid || chosen === null}
-            failedLabel={t`Could not bind`}
+            disabled={busy || workflow === null || revision === undefined}
+            failedLabel={t`Could not change`}
             variant="ink"
-            workingLabel={t`Binding`}
+            workingLabel={t`Changing`}
           >
-            {t`Bind`}
+            {t`Change in the draft`}
           </DialogAction>
         </DialogFooter>
       </DialogContent>
@@ -271,157 +192,95 @@ const BindDialog = ({
   );
 };
 
-/** Removing a binding, once confirmed. */
-const Unbind = ({
-  binding,
-  onUnbound,
-}: {
-  binding: AppWorkflowBinding;
-  onUnbound: () => void;
-}) => {
-  const { t } = useLingui();
-  const { busy, failure, run } = useCoreAction();
-  const { alias } = binding;
-  const unbind = async (): Promise<void> => {
-    const done = await run(async (session) => {
-      await session.workflowResources.unbindFromApp(binding.id);
-      return true;
-    });
-    if (done !== true) {
-      // It stays open, with core's reason in it.
-      throw new Error("Not unbound");
-    }
-    onUnbound();
-  };
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger
-        aria-label={t`Unbind ${alias}`}
-        disabled={busy}
-        size="sm"
-        variant="ghost"
-      >
-        {t`Unbind`}
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogTitle>{t`Unbind ${alias}?`}</AlertDialogTitle>
-        <AlertDialogDescription>
-          {t`The App can no longer start a workflow by this name, until a builder binds it again. Runs already started go on.`}
-        </AlertDialogDescription>
-        {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
-        <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-          <AlertDialogAction
-            action={unbind}
-            failedLabel={t`Could not unbind`}
-            variant="danger"
-            workingLabel={t`Unbinding`}
-          >
-            {t`Unbind`}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-};
-
-/** The bindings as read, with binding and unbinding for who may. */
+/** The bindings as read, with changing one in the draft for who may. */
 const BindingsView = ({
   app,
+  revision,
   bindings,
   workflows,
   changes,
-  onChanged,
 }: {
   app: string;
+  /** The draft's revision as read last; undefined until it is. */
+  revision: number | undefined;
   bindings: readonly AppWorkflowBinding[];
   workflows: readonly WorkflowResource[];
-  /** Whether the person may bind and unbind: not on an archived App. */
+  /** Whether the person may change them: not on an archived App. */
   changes: boolean;
-  onChanged: () => void;
 }) => {
   const { t } = useLingui();
-  const [binding, setBinding] = useState<Binding | null>(null);
-  const names = new Map(workflows.map((each) => [each.id, each.name]));
+  const [binding, setBinding] = useState<AppWorkflowBinding | null>(null);
+  const [drafted, setDrafted] = useState(false);
+  const names = new Map(
+    workflows.map((each) => [each.id, workflowLabel(each)])
+  );
   return (
     <SectionCard
-      actions={
-        changes ? (
-          <Button
-            icon={Workflow}
-            onClick={() => {
-              setBinding({ alias: "", workflow: null, version: null });
-            }}
-            size="sm"
-          >
-            {t`Bind a workflow`}
-          </Button>
-        ) : undefined
-      }
       density="compact"
-      flush={bindings.length > 0}
+      flush={bindings.length > 0 && !drafted}
       headingLevel={3}
       title={t`Workflows the App starts`}
     >
-      {bindings.length === 0 ? (
-        <Text size="sm" tone="muted">
-          {t`The App starts no workflow of its own.`}
-        </Text>
-      ) : (
-        <Table aria-label={t`Workflows the App starts`} density="compact">
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t`Name in the App's code`}</TableHead>
-              <TableHead>{t`Workflow`}</TableHead>
-              <TableHead>{t`Version`}</TableHead>
-              <TableHead>{t`Bound`}</TableHead>
-              {changes ? <TableHead aria-label={t`Actions`} /> : null}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {bindings.map((each) => (
-              <TableRow key={each.id}>
-                <TableCell lead>{each.alias}</TableCell>
-                <TableCell>
-                  {names.get(each.workflowId) ?? each.workflowId}
-                </TableCell>
-                <TableCell>{each.version}</TableCell>
-                <TableCell>{formatDateTime(each.boundAt)}</TableCell>
-                {changes ? (
-                  <TableCell align="end">
-                    <div {...stylex.props(styles.actions)}>
-                      <Button
-                        onClick={() => {
-                          setBinding({
-                            alias: each.alias,
-                            workflow: names.has(each.workflowId)
-                              ? each.workflowId
-                              : null,
-                            version: null,
-                          });
-                        }}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        {t`Change version`}
-                      </Button>
-                      <Unbind binding={each} onUnbound={onChanged} />
-                    </div>
-                  </TableCell>
-                ) : null}
+      <div {...stylex.props(styles.section)}>
+        {drafted ? (
+          <Text size="sm" tone="muted">
+            {t`Changed in the draft: publish the App for it to start the new workflow.`}
+          </Text>
+        ) : null}
+        {bindings.length === 0 ? (
+          <Text size="sm" tone="muted">
+            {t`The App starts no workflow of its own.`}
+          </Text>
+        ) : (
+          <Table aria-label={t`Workflows the App starts`} density="compact">
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t`Name in the App's code`}</TableHead>
+                <TableHead>{t`Workflow`}</TableHead>
+                <TableHead>{t`Bound`}</TableHead>
+                {changes ? <TableHead aria-label={t`Actions`} /> : null}
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+            </TableHeader>
+            <TableBody>
+              {bindings.map((each) => (
+                <TableRow key={each.id}>
+                  <TableCell lead>{each.alias}</TableCell>
+                  <TableCell>
+                    {names.get(each.workflowId) ?? each.workflowId}
+                  </TableCell>
+                  <TableCell>{formatDateTime(each.boundAt)}</TableCell>
+                  {changes ? (
+                    <TableCell align="end">
+                      <div {...stylex.props(styles.actions)}>
+                        <Button
+                          onClick={() => {
+                            setBinding(each);
+                          }}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {t`Change`}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  ) : null}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
       {binding === null ? null : (
         <BindDialog
           app={app}
-          onBound={onChanged}
+          binding={binding}
           onClose={() => {
             setBinding(null);
           }}
-          start={binding}
+          onDrafted={() => {
+            setDrafted(true);
+          }}
+          revision={revision}
           workflows={bindable(workflows)}
         />
       )}
@@ -436,8 +295,8 @@ interface Read {
 }
 
 /**
- * The workflows an App's App binds, for its builders, read when the
- * Resources tab opens and again after each change.
+ * The workflows an App binds, for its builders, read when the Resources
+ * tab opens.
  */
 export const AppWorkflows = ({
   app,
@@ -448,9 +307,12 @@ export const AppWorkflows = ({
 }) => {
   const core = useCore();
   const builds = buildsApp(app, identity);
+  // The draft a change goes into, followed as builders write it.
+  const { draft } = useDraft(
+    builds ? { kind: "app", id: app.id } : undefined,
+    0
+  );
   const [read, setRead] = useState<Loaded<Read>>();
-  // Counts the changes made here, so each reads the bindings again.
-  const [changed, setChanged] = useState(0);
   useEffect(() => {
     const left = new AbortController();
     const load = async (): Promise<void> => {
@@ -476,8 +338,7 @@ export const AppWorkflows = ({
     return () => {
       left.abort();
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `changed` says when to read again
-  }, [app.id, builds, changed, core]);
+  }, [app.id, builds, core]);
   if (!builds) {
     return null;
   }
@@ -492,9 +353,7 @@ export const AppWorkflows = ({
       app={app.id}
       bindings={read.data.bindings}
       changes={!app.archived}
-      onChanged={() => {
-        setChanged((count) => count + 1);
-      }}
+      revision={draft?.revision}
       workflows={read.data.workflows}
     />
   );

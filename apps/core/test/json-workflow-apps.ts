@@ -17,13 +17,14 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { signedInSession } from "../src/auth/identity.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { grantReviewed, release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
 import { liveStatus, runObject } from "./runs.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // Independent JSON workflows as run tests drive them, through the public
 // paths people and Apps take, each over a real session's RPC: a workflow
@@ -113,6 +114,20 @@ export const greetingOf = (hold?: string, label?: string): string =>
   definitionOf(greetingTasks(hold, label));
 
 /**
+ * A definition whose args are a record of strings, keyed by any name up
+ * to a record key's length: what it starts with is named by whoever
+ * starts it, or offers it.
+ */
+export const anyNamesOf = (): string =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    args: { kind: "record", value: { kind: "string" } },
+    returns: objectSchema({ status: { kind: "string" } }),
+    result: { status: "Done" },
+    steps: greetingTasks(),
+  });
+
+/**
  * A workflow of `by`'s, created and published as version 1 through their
  * session: running `tasks`, or the definition `definition` makes of its
  * name.
@@ -122,11 +137,11 @@ export const publishedWorkflow = async (
   tasks: unknown[] | ((name: string) => string)
 ): Promise<{ id: string; name: string }> => {
   const workflow = await by.api.workflowResources.create(`flow-${unique()}`);
-  await by.api.workflowResources.publish(workflow.id, {
-    definition:
-      typeof tasks === "function" ? tasks(workflow.name) : definitionOf(tasks),
-    basedOn: null,
-  });
+  await publishOverRpc(
+    by.api,
+    workflow.id,
+    typeof tasks === "function" ? tasks(workflow.name) : definitionOf(tasks)
+  );
   return { id: workflow.id, name: workflow.name };
 };
 
@@ -140,7 +155,7 @@ export const startedBy = async (
   input?: unknown
 ): Promise<string> => {
   const { runId } = await by.api.workflowResources.start(id, {
-    version: 1,
+    expected: 1,
     args: input ?? { who: "Ada" },
     key: unique(),
   });
@@ -422,14 +437,12 @@ export const endLiveResourceRuns = async (): Promise<void> => {
 /**
  * The App every bound workflow here is bound to: one page, one alias,
  * declaring `declares` of the workflow besides its args and returns (its
- * events, listen tasks and decisions, as the version bound has them), and
- * recording `bound` as the version it binds, as a draft's `bindWorkflow`
- * does.
+ * events, listen tasks and decisions, as its live version has them). What
+ * it binds is `boundIn`'s (app-definitions.ts).
  */
 export const requestsApp = (
   alias: string,
-  declares?: WorkflowEventContract,
-  bound?: { readonly workflowId: string; readonly version: number }
+  declares?: WorkflowEventContract
 ): TestApp =>
   testApp(
     {
@@ -444,7 +457,6 @@ export const requestsApp = (
         `permission.workflow(${JSON.stringify(alias)}, { args: v.object({ who: v.string().trim().min(1) }), returns: v.object({ status: v.string() }) })`,
       ],
       ...(declares === undefined ? {} : { contracts: { [alias]: declares } }),
-      ...(bound === undefined ? {} : { bound: { [alias]: bound } }),
     },
     {
       "server/requests.ts": `import { permissions } from "../grasp.config.ts";
@@ -599,7 +611,7 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
 
   /**
    * An App sealed and current, its page approved, with `alias` bound to
-   * version 1 of a workflow and the App's `start` grant on it: a greeting
+   * a workflow and the App's `start` grant on it: a greeting
    * that waits `hold` first, or the definition `definition` makes of its
    * name; or, `sharing` another fixture's people and workflow, that one.
    * The App declares `declares` of it besides its args and returns: the
@@ -631,13 +643,12 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
         definition ?? (() => greetingOf(hold))
       ));
     const { id: app } = await builder.api.apps.create({ name: "Requests" });
-    await builder.api.workflowResources.bindToApp(workflow.id, {
+    // Published, binding the workflow as its version goes live.
+    await release(
+      builder,
       app,
-      alias,
-      version: 1,
-    });
-    // Committed, sealed as it is made current, and published.
-    await release(builder, app, requestsApp(alias, declares));
+      boundIn(requestsApp(alias, declares), { [alias]: workflow.id })
+    );
     const { id: grant } = await builder.api.permissions.request({
       subject: { type: "app", appId: app },
       object: { type: "workflow", workflowId: workflow.id },
@@ -654,6 +665,14 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
       sharing: { admin, builder, workflow },
       grant,
       reference: await workflowReference(app, alias),
+      /** Publishes the App again, binding `workflowId` under the alias. */
+      rebind: async (workflowId: string): Promise<void> => {
+        await release(
+          builder,
+          app,
+          boundIn(requestsApp(alias, declares), { [alias]: workflowId })
+        );
+      },
     };
   };
 

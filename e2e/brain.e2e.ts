@@ -109,9 +109,9 @@ test("a person folds the brain's navigation to a rail, which marks the page they
   await expect(here("Activity")).toHaveAttribute("aria-current", "page");
   await expect(here("Brain")).not.toHaveAttribute("aria-current", "page");
 
-  // And on the memory records, they are.
-  await here("Memory").click();
-  await expect(page).toHaveURL(/\/brain\/memory$/u);
-  await expect(here("Memory")).toHaveAttribute("aria-current", "page");
+  // And on its sources, they are.
+  await here("Sources").click();
+  await expect(page).toHaveURL(/\/brain\/sources$/u);
+  await expect(here("Sources")).toHaveAttribute("aria-current", "page");
   await expect(here("Activity")).not.toHaveAttribute("aria-current", "page");
 });

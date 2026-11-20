@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `interview` integer DEFAULT false NOT NULL;

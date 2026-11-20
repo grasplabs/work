@@ -1,4 +1,3 @@
-import type { Transcript } from "@grasp-os/shared/brain";
 import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
 
@@ -12,15 +11,12 @@ import {
   teamClaimBasis,
 } from "./brain.ts";
 import type { Note, NoteEvent, NoteRef } from "./brain.ts";
-import { chapterOfTurns, placeLabel } from "./transcript.ts";
 
 interface ExportOptions {
   /** Where Grasp runs, so links in the file open the note or workflow there. */
   baseUrl: string;
   /** ISO date of the export. */
   exportedOn: string;
-  /** A source's conversation, exported word for word after its article. */
-  transcript?: Transcript;
 }
 
 const notWord = /[^a-z0-9]+/gu;
@@ -87,36 +83,15 @@ const labelled = (label: string): string =>
       'A label before its value, as in "Owner: Finance". Keep the colon where your language puts it.',
   });
 
-/** A transcript, chapter by chapter, every turn with its place and speaker. */
-const transcriptLines = (transcript: Transcript): string[] => {
-  const lines = ["", `## ${t`Transcript`}`];
-  const chapterOf = chapterOfTurns(transcript);
-  for (const [index, turn] of transcript.turns.entries()) {
-    const number = chapterOf[index] ?? 0;
-    const chapter = transcript.chapters[number];
-    if (chapter && (index === 0 || number !== chapterOf[index - 1])) {
-      lines.push(
-        "",
-        `### ${inline(chapter.title)} · ${inline(placeLabel(transcript, chapter.at))}`
-      );
-    }
-    lines.push(
-      "",
-      `**${inline(placeLabel(transcript, turn.at))} · ${inline(turn.speaker)}:** ${escapeMarkdown(turn.text)}`
-    );
-  }
-  return lines;
-};
-
 /**
- * A note as Markdown with its full history: every point, the article and transcript, every timeline event with
+ * A note as Markdown with its full history: every point, the article, every timeline event with
  * its quotes, what is still open and everything it links to. Nothing is folded, as it is on screen.
  * Headings and labels are in the reader's language; the frontmatter keys stay English, so other
  * tools can read them.
  */
 export const noteMarkdown = (
   note: Note,
-  { baseUrl, exportedOn, transcript }: ExportOptions
+  { baseUrl, exportedOn }: ExportOptions
 ): string => {
   const link = (ref: NoteRef) => {
     const label = inline(ref.label);
@@ -133,7 +108,7 @@ export const noteMarkdown = (
   };
   /** A link to where something was said in a source. */
   const quoteLink = (text: string, sourceId: string, statementId: string) =>
-    `[${inline(statementWords(statementId, text))}](${baseUrl}/brain/${pathPart(sourceId)}#${pathPart(statementId)})${isTeamClaim(statementId) ? ` (${inline(teamClaimBasis())})` : ""}`;
+    `[${inline(statementWords(statementId, text))}](${baseUrl}/brain/${pathPart(sourceId)}#${pathPart(statementId)})${isTeamClaim(statementId) ? ` (${inline(teamClaimBasis(statementId))})` : ""}`;
   const eventLine = (entry: NoteEvent) => [
     `- **${formatDay(entry.date)}** · ${link({ label: entry.title, to: entry.to, workflowId: entry.workflowId })}${given(entry.detail) ? ` · ${inline(entry.detail)}` : ""}`,
     ...entry.quotes.map(
@@ -154,7 +129,7 @@ export const noteMarkdown = (
     "",
     // A team's claim says what it rests on, as the page does.
     ...(note.kind === "statement" && isTeamClaim(note.id)
-      ? [`*${inline(teamClaimBasis())}*`, ""]
+      ? [`*${inline(teamClaimBasis(note.id))}*`, ""]
       : []),
     escapeMarkdown(note.summary),
     "",
@@ -171,9 +146,6 @@ export const noteMarkdown = (
       "",
       note.article.map(escapeMarkdown).join("\n\n")
     );
-  }
-  if (transcript) {
-    lines.push(...transcriptLines(transcript));
   }
 
   lines.push("", `## ${t`Timeline`}`, "", ...note.timeline.flatMap(eventLine));

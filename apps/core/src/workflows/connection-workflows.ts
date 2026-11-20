@@ -77,13 +77,7 @@ export const connectorBindingsOf = async (
       .from(workflowBindingApprovals)
       .innerJoin(
         workflowResources,
-        and(
-          eq(workflowBindingApprovals.workflowResourceId, workflowResources.id),
-          eq(
-            workflowBindingApprovals.reviewedVersion,
-            workflowResources.currentVersion
-          )
-        )
+        eq(workflowBindingApprovals.workflowResourceId, workflowResources.id)
       )
       .where(
         and(
@@ -186,7 +180,7 @@ export const connectionWorkflows = async (
   return [...uses].flatMap(([connectionId, using]) => {
     const workflows: ConnectionWorkflow[] = resources
       .filter(({ id }) => using.has(id))
-      .map(({ id, name }) => ({ id, name }));
+      .map(({ id, name, title }) => ({ id, name, title }));
     return workflows.length === 0 ? [] : [{ connectionId, workflows }];
   });
 };

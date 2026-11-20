@@ -37,9 +37,11 @@ const settled = async (): Promise<void> => {
 
 /** A published version, as `versions` lists it, with only what the tab reads. */
 const published = (version: number): WorkflowResourceVersion => ({
+  kind: "workflow",
   resourceId: "workflow-1",
   version,
-  definitionVersion: `1.${version}.0`,
+  contractVersion: `1.${version}.0`,
+  label: `26.11.${version}`,
   profile: "grasp-workflow/2",
   definitionHash: "definition",
   contractHash: "contract",
@@ -54,12 +56,14 @@ const published = (version: number): WorkflowResourceVersion => ({
 /** The section for a builder when `builder`: what core was asked. */
 const shown = async (builder: boolean): Promise<unknown[]> => {
   const asked: unknown[] = [];
-  const workflowResources = {
-    definition: async (id: string, version: number) => {
+  const versions = {
+    files: async ({ id }: { id: string }, version: number) => {
       await Promise.resolve();
-      asked.push({ definition: id, version });
-      return `{"document":{"version":"1.${version}.0"}}`;
+      asked.push({ files: id, version });
+      return { "workflow.json": `{"document":{"version":"1.${version}.0"}}` };
     },
+  };
+  const workflowResources = {
     source: async (id: string, version: number) => {
       await Promise.resolve();
       asked.push({ source: id, version });
@@ -74,9 +78,10 @@ const shown = async (builder: boolean): Promise<unknown[]> => {
   const core = {
     withSession: async <T,>(
       action: (session: {
+        versions: typeof versions;
         workflowResources: typeof workflowResources;
       }) => Promise<T>
-    ): Promise<T> => await action({ workflowResources }),
+    ): Promise<T> => await action({ versions, workflowResources }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
@@ -129,7 +134,7 @@ describe("a version's definition and source", () => {
     document.body.replaceChildren();
   });
 
-  it("shows the definition of exactly the version picked, and lists its source files to download", async () => {
+  it("names each version by its label, shows the definition of exactly the version picked, and lists its source files to download", async () => {
     const asked = await shown(true);
     const choice = document.querySelector<HTMLElement>(
       '[role="combobox"][aria-label="Version"]'
@@ -139,10 +144,13 @@ describe("a version's definition and source", () => {
       choice?.click();
       await settled();
     });
+    const offered = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ];
+    // Each version by its label.
+    const options = offered.map((each) => each.textContent.trim());
     await act(async () => {
-      [...document.querySelectorAll<HTMLElement>('[role="option"]')]
-        .find((each) => each.textContent.trim() === "Version 1")
-        ?.click();
+      offered.find((each) => each.textContent.trim() === "26.11.1")?.click();
       await settled();
     });
     await press("Show its definition");
@@ -150,6 +158,7 @@ describe("a version's definition and source", () => {
 
     expect({
       latest,
+      options,
       asked,
       definition: document.querySelector("code[data-language]")?.textContent,
       downloads: [...document.querySelectorAll("button")]
@@ -157,9 +166,10 @@ describe("a version's definition and source", () => {
         .filter((label) => label?.startsWith("Download") === true),
     }).toStrictEqual({
       // The latest, until another is picked.
-      latest: "Version 2",
+      latest: "26.11.2",
+      options: ["26.11.1", "26.11.2"],
       asked: [
-        { definition: "workflow-1", version: 1 },
+        { files: "workflow-1", version: 1 },
         { source: "workflow-1", version: 1 },
       ],
       definition: '{"document":{"version":"1.1.0"}}',

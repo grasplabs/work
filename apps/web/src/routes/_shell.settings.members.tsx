@@ -68,12 +68,14 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { DirectoryReads } from "../settings/directory-reads.tsx";
 import { RemovedActions, useRemovedPeople } from "../settings/erasures.tsx";
 import {
   copyEmail,
   InvitationActions,
   InviteButton,
 } from "../settings/invitations.tsx";
+import { MemberSuspension } from "../settings/member-suspension.tsx";
 import { roleItems, roleLines } from "../settings/roles.ts";
 import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 import { TeamsPanel } from "../settings/teams.tsx";
@@ -83,10 +85,12 @@ import { useNarrow } from "../use-narrow.ts";
 
 // Settings → Members and roles, on one page as the library's Settings
 // pattern has it: one compact card of people, each with their face, their
-// email, their role on one edge and a menu to end their sessions or remove
-// them for good; the invitations nobody has taken up yet; and at its foot
+// email, whether the directory suspended them and why
+// (settings/member-suspension.tsx), their role on one edge and a menu to
+// end their sessions or remove them for good; the invitations nobody has taken up yet; and at its foot
 // the people removed, quiet, and a way to erase them
-// (settings/erasures.tsx). Then the teams, for the organization's own
+// (settings/erasures.tsx). Then where the directory's daily read stands,
+// once one was tried (settings/directory-reads.tsx), the teams, for the organization's own
 // admins (settings/teams.tsx), and, last, what each role may do. Core checks the role on every call; anyone else
 // sees why they can't. The admin's own row has no actions: core refuses
 // removing yourself or ending your own sessions, and demoting yourself
@@ -108,6 +112,8 @@ const styles = stylex.create({
     paddingInline: grasp.tableCellInline,
   },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
+  // A suspended member: their face and name, and why under them.
+  person: { display: "flex", flexDirection: "column", gap: grasp.space1 },
   // Your own row has no menu: its room is kept, so every role stands on one edge.
   menuRoom: { width: grasp.controlXs, flexShrink: 0 },
   // The roles compared: each name over what it may do.
@@ -473,13 +479,22 @@ const peopleColumns = ({
             <DataTablePerson detail={words.removedOn(date)} name={row.name} />
           );
         }
-        return (
+        const person = (
           <DataTablePerson
             name={row.name}
             {...(row.kind === "invited" || row.email === ""
               ? {}
               : { detail: row.email })}
           />
+        );
+        // Suspended by the directory: why, and where the way out is, under them.
+        return row.member !== undefined && row.member.suspension !== null ? (
+          <span {...stylex.props(styles.person)}>
+            {person}
+            <MemberSuspension member={row.member} />
+          </span>
+        ) : (
+          person
         );
       },
     },
@@ -730,6 +745,8 @@ const MembersPage = () => {
           <SectionNotLoaded page={page} />
         </SectionCard>
       )}
+      {/* Nothing before a read was tried, or for anyone core refuses it. */}
+      <DirectoryReads />
       {/* Core refuses the teams to anyone else. */}
       {/* Read again whenever the people change, so a removed person leaves the teams' faces too. */}
       {isMemberAdmin(identity) ? (

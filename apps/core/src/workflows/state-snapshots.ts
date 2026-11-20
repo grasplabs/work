@@ -13,7 +13,7 @@ import {
 } from "../db/core/schema.ts";
 
 // The snapshot of what a workflow kept between its runs, frozen as a run
-// starts (workflow-state.ts, `workflowStateOf`), which every activation of
+// starts (workflow-state.ts, `readableStateOf`), which every activation of
 // the run reads (sealed-run.ts). Each is stored once, by the SHA-256 of
 // its canonical JSON (`workflow_state_snapshots`), and a start's receipt or
 // a test run's row names it by that hash: runs of a workflow whose state
@@ -39,7 +39,7 @@ const snapshotsPerSweep = 500;
 
 /**
  * `state`, what a workflow keeps now (workflow-state.ts,
- * `workflowStateOf`), as a snapshot to freeze.
+ * `readableStateOf`), as a snapshot to freeze.
  */
 export const snapshotFrom = async (
   state: Readonly<Record<string, Json>>

@@ -3,7 +3,8 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appKind } from "../src/apps.ts";
+import { readDraft, saveDraft } from "../src/drafts.ts";
 import {
   createdApp,
   fixed,
@@ -35,7 +36,7 @@ mockIdpWith(idp);
 
 describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("publishes nothing that fails its checks", async () => {
-    const { person, chat, grant } = await setUp(
+    const { person, chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -47,21 +48,23 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       "builder",
       true
     );
-    await grant();
 
     await chat.ask("Build an invoice desk");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     const app = await createdApp(person.api);
-    const { revision } = await person.api.apps.drafts.get(app.id);
+    const { revision } = await person.api.drafts.get({
+      kind: "app",
+      id: app.id,
+    });
     expect({
       checked: returned(result?.text),
-      published: await person.api.apps.drafts
-        .publish(app.id, revision)
+      published: await person.api.drafts
+        .publish({ kind: "app", id: app.id }, revision)
         .then(() => "published")
         .catch((error: unknown) => appErrors.codeOf(error)),
       app: await person.api.apps.get(app.id),
-      versions: await person.api.apps.versions.list(app.id),
+      versions: await person.api.versions.list({ kind: "app", id: app.id }),
     }).toMatchObject({
       checked: { passed: false },
       published: "app.draft_failed",
@@ -102,7 +105,7 @@ export const titles = action({
       'import { noteFields } from "../values.ts";',
       'import { noteFields } from "../values.ts";\n\nexport const total: number = "seven";'
     );
-    const { person, chat, grant } = await setUp(
+    const { person, chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -122,7 +125,6 @@ export const titles = action({
       "builder",
       true
     );
-    await grant();
 
     await chat.ask("Build a notes App");
 
@@ -139,9 +141,9 @@ export const titles = action({
       checked: { passed: false, server: "failed" },
     });
     const app = await createdApp(person.api);
-    await expect(person.api.apps.versions.list(app.id)).resolves.toStrictEqual(
-      []
-    );
+    await expect(
+      person.api.versions.list({ kind: "app", id: app.id })
+    ).resolves.toStrictEqual([]);
   });
 
   it("builds and previews a draft with an unused import, and passes it once the lint's finding is fixed", async () => {
@@ -155,7 +157,7 @@ export const titles = action({
       ),
       "src/routes/index.tsx": `import { Badge } from "@grasp-os/ui/components/badge";\n${notesCode["src/routes/index.tsx"] ?? ""}`,
     };
-    const { chat, grant } = await setUp(
+    const { chat } = await setUp(
       [
         codeStep(`export default async (self, env) => {
         ${findApp}
@@ -180,7 +182,6 @@ export const titles = action({
       "builder",
       true
     );
-    await grant();
 
     await chat.ask("Build a notes App");
 
@@ -234,7 +235,7 @@ export const titles = action({
         "workflows/intake.json": "{}\n",
       }),
     };
-    const { chat, grant } = await setUp([
+    const { chat } = await setUp([
       codeStep(`export default async (self, env) => {
         ${ledger}
         const refusal = async (call) => {
@@ -257,7 +258,6 @@ export const titles = action({
       };`),
       says("Done."),
     ]);
-    await grant();
 
     await chat.ask("Add an intake workflow to the ledger");
 
@@ -276,9 +276,11 @@ export const titles = action({
     // The same attack through a draft saved before this release refused
     // the write: publishing commits the saved draft, not a write.
     const { builder, existing } = await setUp([]);
-    const draft = await readDraft(env, existing);
+    const draft = await readDraft(env, { kind: "app", id: existing });
     await saveDraft(
       env,
+      appKind,
+
       existing,
       { ...draft, base: 1 },
       {
@@ -299,15 +301,21 @@ export const titles = action({
         detail: {},
       }
     );
-    const { revision } = await builder.api.apps.drafts.get(existing);
+    const { revision } = await builder.api.drafts.get({
+      kind: "app",
+      id: existing,
+    });
 
-    const refused = await builder.api.apps.drafts
-      .publish(existing, revision)
+    const refused = await builder.api.drafts
+      .publish({ kind: "app", id: existing }, revision)
       .then(() => "published")
       .catch((error: unknown) => appErrors.codeOf(error));
 
     expect(refused).toBe("app.no_workflows");
-    const versions = await builder.api.apps.versions.list(existing);
+    const versions = await builder.api.versions.list({
+      kind: "app",
+      id: existing,
+    });
     expect(versions.map(({ version }) => version)).toStrictEqual([1]);
   });
 });

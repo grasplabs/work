@@ -79,8 +79,11 @@ interface ProviderState {
   holders: Map<string, Account>;
   /** Answers the account's profile lookup instead, when set. */
   profile: Answer | undefined;
-  /** The scopes a refresh says it granted, instead of the account's. */
-  refreshGranted: string | undefined;
+  /**
+   * The scopes a refresh says it granted, instead of the account's; null
+   * for an answer that says nothing of them.
+   */
+  refreshGranted: string | null | undefined;
 }
 
 const sameGrant = (a: Account, b: Account): boolean =>
@@ -218,12 +221,14 @@ export const fakeProviders = () => {
           return answer;
         }
       }
-      return tokens(
-        state.refreshGranted === undefined
-          ? account
-          : { ...account, granted: state.refreshGranted },
-        state.rotate ?? account.provider === "microsoft"
-      );
+      const { granted: _granted, ...unsaid } = account;
+      let renewed: Account = account;
+      if (state.refreshGranted === null) {
+        renewed = unsaid;
+      } else if (state.refreshGranted !== undefined) {
+        renewed = { ...account, granted: state.refreshGranted };
+      }
+      return tokens(renewed, state.rotate ?? account.provider === "microsoft");
     }
     return oauthError("unsupported_grant_type");
   };
@@ -262,6 +267,8 @@ export const fakeProviders = () => {
     const aliases = account.aliases ?? [];
     return account.provider === "microsoft"
       ? Response.json({
+          // The account's Entra object ID, as Graph's /me answers it.
+          id: account.subject,
           mail: account.email,
           proxyAddresses: [
             `SMTP:${account.email}`,

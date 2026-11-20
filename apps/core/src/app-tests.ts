@@ -34,6 +34,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { isolateArgumentDepth } from "@grasp-os/shared/stores";
+import { waitUntil } from "cloudflare:workers";
 import { eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -637,7 +638,9 @@ const testCallback = (
           held = false;
           holds -= 1;
           if (holds === 0) {
-            void lost();
+            // Past the release, which may end the request that made it:
+            // left to it, the test's stubs would never be let go of.
+            waitUntil(lost());
           }
         },
       }

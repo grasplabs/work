@@ -24,14 +24,16 @@ import {
   unique,
 } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
+import { publishOverRpc } from "./workflow-publishing.ts";
 
 // An independent workflow's triggers over the session's `/rpc`
 // (`workflowResources.triggers`), from trigger-resources.ts's threat model:
 // a trigger starts runs on its own, acting for its creator, so only a
 // builder of the workflow creates one; nobody but who manages it sees,
-// disables or deletes it; and only its owner, still a builder, moves it
-// to another version or enables it again. Each test makes its own people
-// and workflows.
+// disables or deletes it; only its owner, still a builder, enables it
+// again; and it starts the workflow's live version, so another builder
+// making one live is audited on it and its owner told. Each test makes
+// its own people and workflows.
 
 const idp = mockIdp();
 
@@ -67,14 +69,8 @@ const reporting = async (builder: Person): Promise<string> => {
   const { id } = await builder.api.workflowResources.create(
     `report-${unique()}`
   );
-  await builder.api.workflowResources.publish(id, {
-    definition: definitionOf("1"),
-    basedOn: null,
-  });
-  await builder.api.workflowResources.publish(id, {
-    definition: definitionOf("1.1"),
-    basedOn: 1,
-  });
+  await publishOverRpc(builder.api, id, definitionOf("1"));
+  await publishOverRpc(builder.api, id, definitionOf("1.1"));
   return id;
 };
 
@@ -84,12 +80,11 @@ const nightly = {
   missedOccurrences: "coalesce",
 };
 
-/** A nightly schedule trigger of `owner`'s on version 1 of `workflowId`. */
+/** A nightly schedule trigger of `owner`'s on `workflowId`. */
 const nightlyTrigger = async (owner: Person, workflowId: string) =>
   await owner.api.workflowResources.triggers.create({
     kind: "schedule",
     workflowId,
-    version: 1,
     config: nightly,
   });
 
@@ -112,6 +107,16 @@ const loggedAbout = async (id: string) => {
     }));
 };
 
+/** What `person` is told of workflows changed under their triggers. */
+const changedFor = async (person: Person) => {
+  const { notifications } = await person.api.notifications.list();
+  return notifications.flatMap((notification) =>
+    notification.type === "trigger_workflow_changed"
+      ? [{ trigger: notification.trigger, workflow: notification.workflow }]
+      : []
+  );
+};
+
 /** The trigger holding a permission, if a trigger does. */
 const triggerOf = ({ subject }: Pick<Permission, "subject">): string =>
   subject.type === "trigger" ? subject.triggerId : "";
@@ -132,9 +137,7 @@ describe("an independent workflow's triggers over /rpc", () => {
         id: trigger.id,
         kind: "schedule",
         owner: owner.userId,
-        version: 1,
         workflowId: workflow,
-        workflowVersion: 1,
         principal: owner.userId,
         enabled: true,
         createdAt: "",
@@ -162,12 +165,12 @@ describe("an independent workflow's triggers over /rpc", () => {
       personApi("builder"),
       personApi("user"),
     ]);
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: member.userId,
       role: "user",
     });
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: user.userId,
       role: "user",
@@ -192,13 +195,13 @@ describe("an independent workflow's triggers over /rpc", () => {
     });
   });
 
-  it("are hidden from, and can't be disabled, moved or deleted by, anyone who doesn't manage them", async () => {
+  it("are hidden from, and can't be disabled or deleted by, anyone who doesn't manage them", async () => {
     const { owner, workflow, trigger } = await ownerWithTrigger();
     const [member, outsider] = await Promise.all([
       personApi("user"),
       personApi("builder"),
     ]);
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: member.userId,
       role: "user",
@@ -210,9 +213,6 @@ describe("an independent workflow's triggers over /rpc", () => {
         disable: await outcome(
           api.workflowResources.triggers.setEnabled(trigger.id, false)
         ),
-        move: await outcome(
-          api.workflowResources.triggers.setVersion(trigger.id, 2)
-        ),
         delete: await outcome(
           api.workflowResources.triggers.delete(trigger.id)
         ),
@@ -222,7 +222,6 @@ describe("an independent workflow's triggers over /rpc", () => {
     const refused = {
       listed: [],
       disable: "workflow.trigger_unavailable",
-      move: "workflow.trigger_unavailable",
       delete: "workflow.trigger_unavailable",
     };
     expect({
@@ -237,7 +236,7 @@ describe("an independent workflow's triggers over /rpc", () => {
       personApi("builder"),
       personApi("admin"),
     ]);
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: coBuilder.userId,
       role: "builder",
@@ -247,7 +246,6 @@ describe("an independent workflow's triggers over /rpc", () => {
     const seen = await triggers.list(workflow);
     const disabled = await triggers.setEnabled(trigger.id, false);
     const reEnable = await outcome(triggers.setEnabled(trigger.id, true));
-    const move = await outcome(triggers.setVersion(trigger.id, 2));
     const enabled = await owner.api.workflowResources.triggers.setEnabled(
       trigger.id,
       true
@@ -272,7 +270,6 @@ describe("an independent workflow's triggers over /rpc", () => {
       seen,
       disabled: disabled.enabled,
       reEnable,
-      move,
       enabled: enabled.enabled,
       seenByAdmin,
       afterDelete: await owner.api.workflowResources.triggers.list(workflow),
@@ -285,7 +282,6 @@ describe("an independent workflow's triggers over /rpc", () => {
       seen: [trigger],
       disabled: false,
       reEnable: "workflow.trigger_unavailable",
-      move: "workflow.trigger_unavailable",
       enabled: true,
       seenByAdmin: [{ ...trigger, nextAt: enabled.nextAt }],
       afterDelete: [],
@@ -300,21 +296,59 @@ describe("an independent workflow's triggers over /rpc", () => {
     });
   });
 
-  it("move to another published version of their workflow for their owner, keeping their configuration", async () => {
+  it("follow the live version: each publish and roll back is audited on them, and their owner told when someone else made it", async () => {
     const { owner, workflow, trigger } = await ownerWithTrigger();
-    const { triggers } = owner.api.workflowResources;
+    const coBuilder = await personApi("builder");
+    await owner.api.workflowResources.members.add(workflow, {
+      type: "person",
+      id: coBuilder.userId,
+      role: "builder",
+    });
+    const subject = { kind: "workflow", id: workflow } as const;
 
-    const moved = await triggers.setVersion(trigger.id, 2);
-    const unpublished = await outcome(triggers.setVersion(trigger.id, 3));
+    await publishOverRpc(owner.api, workflow, definitionOf("2"));
+    const toldOfOwn = await changedFor(owner);
+    await publishOverRpc(coBuilder.api, workflow, definitionOf("3"));
+    await coBuilder.api.versions.rollback(subject, 2, undefined, 4);
+    const events = await allEvents();
+    const updates = events.flatMap(({ action, actor, target, detail }) =>
+      action === "trigger.updated" && target?.id === trigger.id
+        ? [
+            {
+              actor: actor.type === "person" ? actor.userId : actor.type,
+              detail,
+            },
+          ]
+        : []
+    );
 
     expect({
-      moved: { ...moved, nextAt: "" },
-      unpublished,
-      listed: await triggers.list(workflow),
+      toldOfOwn,
+      told: await changedFor(owner),
+      coBuilderTold: await changedFor(coBuilder),
+      updates,
+      listed: await owner.api.workflowResources.triggers.list(workflow),
     }).toStrictEqual({
-      moved: { ...trigger, version: 2, workflowVersion: 2, nextAt: "" },
-      unpublished: "workflow.version_not_found",
-      listed: [moved],
+      toldOfOwn: [],
+      // Once, however often it changed while unread.
+      told: [{ trigger: trigger.id, workflow }],
+      coBuilderTold: [],
+      updates: [
+        {
+          actor: owner.userId,
+          detail: { workflowVersion: 3, previous: 2 },
+        },
+        {
+          actor: coBuilder.userId,
+          detail: { workflowVersion: 4, previous: 3 },
+        },
+        {
+          actor: coBuilder.userId,
+          detail: { workflowVersion: 2, previous: 4 },
+        },
+      ],
+      // Its configuration as it was.
+      listed: [trigger],
     });
   });
 
@@ -324,13 +358,12 @@ describe("an independent workflow's triggers over /rpc", () => {
 
     const refused = {
       unknownKind: await outcome(
-        triggers.create({ kind: "email", workflowId: workflow, version: 1 })
+        triggers.create({ kind: "email", workflowId: workflow })
       ),
       noSchedule: await outcome(
         triggers.create({
           kind: "schedule",
           workflowId: workflow,
-          version: 1,
           config: { ...nightly, schedule: { cron: "never", timeZone: "UTC" } },
         })
       ),
@@ -338,7 +371,6 @@ describe("an independent workflow's triggers over /rpc", () => {
         triggers.create({
           kind: "schedule",
           workflowId: workflow,
-          version: 1,
           config: { ...nightly, input: { job: "nightly" } },
         })
       ),
@@ -360,25 +392,24 @@ describe("an independent workflow's triggers over /rpc", () => {
     });
   });
 
-  it("stay listed, and can be disabled and deleted, but not enabled or moved, by an owner who no longer builds the workflow", async () => {
+  it("stay listed, and can be disabled and deleted, but not enabled, by an owner who no longer builds the workflow", async () => {
     const owner = await personApi("builder");
     const workflow = await reporting(owner);
     const coBuilder = await personApi("builder");
-    await owner.api.workflowResources.share(workflow, {
+    await owner.api.workflowResources.members.add(workflow, {
       type: "person",
       id: coBuilder.userId,
       role: "builder",
     });
     const ownersTrigger = await nightlyTrigger(owner, workflow);
     const theirs = await nightlyTrigger(coBuilder, workflow);
-    await owner.api.workflowResources.unshare(workflow, {
+    await owner.api.workflowResources.members.remove(workflow, {
       type: "person",
       id: coBuilder.userId,
     });
     const { triggers } = coBuilder.api.workflowResources;
 
     const listed = await triggers.list(workflow);
-    const move = await outcome(triggers.setVersion(theirs.id, 2));
     const disabled = await triggers.setEnabled(theirs.id, false);
     const enable = await outcome(triggers.setEnabled(theirs.id, true));
     const othersDelete = await outcome(triggers.delete(ownersTrigger.id));
@@ -386,14 +417,12 @@ describe("an independent workflow's triggers over /rpc", () => {
 
     expect({
       listed,
-      move,
       disabled: disabled.enabled,
       enable,
       othersDelete,
       left: await owner.api.workflowResources.triggers.list(workflow),
     }).toStrictEqual({
       listed: [theirs],
-      move: "workflow.resource_unavailable",
       disabled: false,
       enable: "workflow.resource_unavailable",
       othersDelete: "workflow.trigger_unavailable",
@@ -413,7 +442,6 @@ describe("an independent workflow's triggers over /rpc", () => {
         triggers.create({
           kind: "schedule",
           workflowId: workflow,
-          version: 1,
           config: nightly,
         })
       ),
@@ -447,7 +475,6 @@ describe("an independent workflow's triggers over /rpc", () => {
     const trigger = await owner.api.workflowResources.triggers.create({
       kind: "connector",
       workflowId: workflow,
-      version: 1,
       config,
     });
 
@@ -475,7 +502,6 @@ describe("an independent workflow's triggers over /rpc", () => {
     const trigger = await triggers.create({
       kind: "connector",
       workflowId: workflow,
-      version: 1,
       config: {
         connection: { connectionId, resource: mailbox },
         event: "m365.mail.received",

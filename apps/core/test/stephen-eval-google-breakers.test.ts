@@ -158,8 +158,8 @@ const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
   {
     rule: "nothingUnreadableRead",
     caseId: "Q-N1",
-    // Last: the grant and the team stay for the rest of the run.
-    mistake: { collection: "hr", team: "hr" },
+    // Last: the team stays for the rest of the run.
+    mistake: { team: "hr" },
     plan: {
       search: "Mark Jansen salary scale",
       answer: () => "I can't share what a colleague earns.",

@@ -17,7 +17,7 @@ import {
 } from "./sign-in.ts";
 
 // An admin's controls over an App's sealed releases over the session's
-// `/rpc` (`apps.versions`), from release-controls.ts's threat model:
+// `/rpc` (`apps.releases`), from release-controls.ts's threat model:
 // revoking a release stops it running, and a legal hold keeps it, so only
 // the organization's own admins see or change either, never its builders
 // or Grasp staff; and an admin demoted since signing in changes nothing.
@@ -34,8 +34,7 @@ const sealedTwice = async () => {
     fixture.app,
     withFiles(notesFiles, {
       "server/notes.ts": `${notesFiles.files["server/notes.ts"] ?? ""}// Again.\n`,
-    }),
-    "Again"
+    })
   );
   const second = await seal(fixture, 2);
   return { ...fixture, first, second };
@@ -65,11 +64,11 @@ describe("an App's releases over /rpc", () => {
   it("are revoked by an admin, with why: the release runs no more, is shown revoked and is audited once", async () => {
     const { app, first, second } = await sealedTwice();
     const admin = await signedInApi(idp, "admin");
-    const { versions } = admin.api.apps;
+    const { releases } = admin.api.apps;
 
-    const revoked = await versions.revoke(app, 2, { reason: "Leaks data" });
-    const again = await versions.revoke(app, 2, { reason: "Again" });
-    const listed = await versions.releases(app);
+    const revoked = await releases.revoke(app, 2, { reason: "Leaks data" });
+    const again = await releases.revoke(app, 2, { reason: "Again" });
+    const listed = await releases.list(app);
 
     expect({
       revoked: { ...revoked, revokedAt: "" },
@@ -118,17 +117,17 @@ describe("an App's releases over /rpc", () => {
   it("are held by an admin until the hold is lifted, each audited", async () => {
     const { app, first } = await sealedTwice();
     const admin = await signedInApi(idp, "admin");
-    const { versions } = admin.api.apps;
+    const { releases } = admin.api.apps;
 
-    const held = await versions.placeHold(app, 1, {
+    const held = await releases.placeHold(app, 1, {
       hold: "case-2026-17",
       reason: "Litigation",
     });
-    const heldAgain = await versions.placeHold(app, 1, {
+    const heldAgain = await releases.placeHold(app, 1, {
       hold: "case-2026-17",
       reason: "Again",
     });
-    const lifted = await versions.releaseHold(app, 1, "case-2026-17");
+    const lifted = await releases.releaseHold(app, 1, "case-2026-17");
 
     expect({
       holds: held.holds.map(({ hold }) => hold),
@@ -159,11 +158,45 @@ describe("an App's releases over /rpc", () => {
     });
   });
 
+  it("are listed a full page at a time, each with its holds", async () => {
+    const { app } = await sealedTwice();
+    const admin = await signedInApi(idp, "admin");
+    // Releases 3 to 100 as copies of the first: a page of 100 names more
+    // versions than one statement of D1's 100 bound parameters takes.
+    await env.DB.prepare(
+      `WITH RECURSIVE later(version) AS (SELECT 3 UNION ALL SELECT version + 1 FROM later WHERE version < 100)
+       INSERT INTO sdk_release_manifests (app_id, version, manifest_hash, manifest, sealed_at, seal_id, package_graphs)
+       SELECT app_id, later.version, manifest_hash, manifest, sealed_at, seal_id, package_graphs
+       FROM sdk_release_manifests, later WHERE app_id = ? AND sdk_release_manifests.version = 1`
+    )
+      .bind(app)
+      .run();
+    await admin.api.apps.releases.placeHold(app, 1, {
+      hold: "case-1",
+      reason: "Litigation",
+    });
+
+    const listed = await admin.api.apps.releases.list(app);
+
+    expect({
+      versions: listed.map(({ version }) => version),
+      held: listed
+        .filter(({ holds }) => holds.length > 0)
+        .map(({ version, holds }) => ({
+          version,
+          holds: holds.map(({ hold }) => hold),
+        })),
+    }).toStrictEqual({
+      versions: Array.from({ length: 100 }, (_, at) => 100 - at),
+      held: [{ version: 1, holds: ["case-1"] }],
+    });
+  });
+
   it("are neither seen, revoked nor held by anyone but the organization's own admins", async () => {
     const fixture = await sealedTwice();
     const { app } = fixture;
     const admin = await signedInApi(idp, "admin");
-    await admin.api.apps.versions.placeHold(app, 1, {
+    await admin.api.apps.releases.placeHold(app, 1, {
       hold: "case-1",
       reason: "Litigation",
     });
@@ -180,19 +213,19 @@ describe("an App's releases over /rpc", () => {
     const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
     const { core } = await openRpc(staffSession);
     const staff = core.authenticate();
-    const before = await admin.api.apps.versions.releases(app);
+    const before = await admin.api.apps.releases.list(app);
 
     const tries = await Promise.all(
       [builder.api, user.api, demoted.api, staff].map(
-        async ({ apps: { versions } }) => ({
-          releases: await outcome(versions.releases(app)),
+        async ({ apps: { releases } }) => ({
+          releases: await outcome(releases.list(app)),
           revoke: await outcome(
-            versions.revoke(app, 2, { reason: "Not mine" })
+            releases.revoke(app, 2, { reason: "Not mine" })
           ),
           hold: await outcome(
-            versions.placeHold(app, 2, { hold: "mine", reason: "Mine" })
+            releases.placeHold(app, 2, { hold: "mine", reason: "Mine" })
           ),
-          lift: await outcome(versions.releaseHold(app, 1, "case-1")),
+          lift: await outcome(releases.releaseHold(app, 1, "case-1")),
         })
       )
     );
@@ -206,7 +239,7 @@ describe("an App's releases over /rpc", () => {
     const logged = await loggedAbout(app);
     expect({
       tries,
-      after: await admin.api.apps.versions.releases(app),
+      after: await admin.api.apps.releases.list(app),
       logged: logged.map(({ action }) => action),
     }).toStrictEqual({
       tries: [refused, refused, refused, refused],
@@ -218,22 +251,22 @@ describe("an App's releases over /rpc", () => {
   it("refuse a version never sealed, an App that isn't there, and a revocation or hold without why", async () => {
     const { app } = await sealedTwice();
     const admin = await signedInApi(idp, "admin");
-    const { versions } = admin.api.apps;
+    const { releases } = admin.api.apps;
     const refusals = {
-      unsealed: await outcome(versions.revoke(app, 3, { reason: "Gone" })),
+      unsealed: await outcome(releases.revoke(app, 3, { reason: "Gone" })),
       unsealedHold: await outcome(
-        versions.placeHold(app, 3, { hold: "case-1", reason: "Litigation" })
+        releases.placeHold(app, 3, { hold: "case-1", reason: "Litigation" })
       ),
       noApp: await outcome(
-        versions.revoke(crypto.randomUUID(), 1, { reason: "Gone" })
+        releases.revoke(crypto.randomUUID(), 1, { reason: "Gone" })
       ),
-      noReason: await outcome(versions.revoke(app, 1, { reason: "  " })),
+      noReason: await outcome(releases.revoke(app, 1, { reason: "  " })),
       noHoldName: await outcome(
-        versions.placeHold(app, 1, { hold: "", reason: "Litigation" })
+        releases.placeHold(app, 1, { hold: "", reason: "Litigation" })
       ),
-      badVersion: await outcome(versions.revoke(app, 0, { reason: "Gone" })),
+      badVersion: await outcome(releases.revoke(app, 0, { reason: "Gone" })),
     };
-    const listed = await versions.releases(app);
+    const listed = await releases.list(app);
 
     expect({
       ...refusals,

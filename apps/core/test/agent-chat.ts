@@ -94,6 +94,21 @@ export const chatOf = async (personId: string, ...replies: ProviderReply[]) => {
 };
 
 /**
+ * Asks `text` in a new chat of `chat`'s workspace, whose agent's grants
+ * hold there too. A read of the person's own connection marks the chat it
+ * answers in, which then holds every later toolkit read for them
+ * (GRA-1928): a test of something else gives each such read a chat of its
+ * own.
+ */
+export const askAfresh = async (
+  chat: Awaited<ReturnType<typeof chatOf>>,
+  text: string
+): Promise<void> => {
+  const fresh = await chat.stub.createChat("Questions", chat.personId, chat.id);
+  await chat.stub.ask(fresh.id, { text, model });
+};
+
+/**
  * `personId`'s own Workspace object, the one their session's chats are in
  * (`personalWorkspaceId`), answered by `replies` in all its chats, with an
  * agent of its own: `newChat` makes each chat.
@@ -121,6 +136,38 @@ export const transcript = async (
   chatId: string
 ): Promise<Message[]> =>
   await runInDurableObject(stub, (instance) => instance.messages(chatId));
+
+/**
+ * The agent's words each of `personId`'s chats in their own Workspace
+ * keeps, chat by chat, oldest first.
+ */
+export const keptAnswersOf = async (personId: string): Promise<string[][]> => {
+  const stub = workspace(env, personalWorkspaceId(personId));
+  const chatIds = await runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec<{ id: string }>(
+        "SELECT id FROM chats WHERE person_id = ? ORDER BY created_at",
+        personId
+      )
+      .toArray()
+      .map(({ id }) => id)
+  );
+  const kept: string[][] = [];
+  for (const chatId of chatIds) {
+    // oxlint-disable-next-line no-await-in-loop -- chat by chat
+    const messages = await transcript(stub, chatId);
+    kept.push(
+      messages.flatMap((message) =>
+        message.role === "assistant"
+          ? message.content.flatMap((block) =>
+              block.type === "text" ? [block.text] : []
+            )
+          : []
+      )
+    );
+  }
+  return kept;
+};
 
 /** How the notice of a turn's check begins (agent-builds.ts, `turnCheck`). */
 const turnCheckStart = "Grasp checked the drafts you wrote this turn";
@@ -165,11 +212,26 @@ export const codeResults = async (stub: WorkspaceStub, chatId: string) => {
   );
 };
 
-/** What each call of the chat's tools came to, by tool, as the model read it. */
-export const toolResults = async (stub: WorkspaceStub, chatId: string) => {
+/**
+ * Whether a tool call is the recall before a question, which every turn
+ * runs as a step of its own (turn-recall.ts names its calls `recall_…`).
+ */
+const isRecall = (toolCallId: string): boolean =>
+  toolCallId.startsWith("recall_");
+
+/**
+ * What each call of the chat's tools came to, by tool, as the model read
+ * it: the model's own calls (`recalls: false`, the default), or the
+ * recalls before its questions alone (`recalls: true`).
+ */
+export const toolResults = async (
+  stub: WorkspaceStub,
+  chatId: string,
+  { recalls = false }: { recalls?: boolean } = {}
+) => {
   const messages = await transcript(stub, chatId);
   return messages.flatMap((message) =>
-    message.role === "toolResult"
+    message.role === "toolResult" && isRecall(message.toolCallId) === recalls
       ? [
           {
             tool: message.toolName,
@@ -183,11 +245,14 @@ export const toolResults = async (stub: WorkspaceStub, chatId: string) => {
   );
 };
 
-/** How each code step of the chat ended, as the host recorded it. */
+/**
+ * How each code step of the chat ended, as the host recorded it: its
+ * `executeCode` runs, never the recall before a question every turn runs.
+ */
 export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
   const messages = await transcript(stub, chatId);
   return messages.flatMap((message) => {
-    if (message.role !== "toolResult") {
+    if (message.role !== "toolResult" || message.toolName !== "executeCode") {
       return [];
     }
     const details: unknown = message.details;
@@ -205,14 +270,14 @@ export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
  * back what was there with the restore this returns (in a `finally`), or
  * the tests after it run under its values.
  */
-export const setObjectEnv = async (
-  stub: WorkspaceStub,
+export const setObjectEnv = async <O extends Rpc.DurableObjectBranded>(
+  stub: DurableObjectStub<O>,
   vars: Record<string, unknown>
 ): Promise<() => Promise<void>> => {
   const before = await runInDurableObject(stub, (instance) => {
     const objectEnv: unknown = Reflect.get(instance, "env");
     if (typeof objectEnv !== "object" || objectEnv === null) {
-      throw new TypeError("The Workspace object has no env");
+      throw new TypeError("The object has no env");
     }
     const kept: Record<string, { value: unknown } | undefined> = {};
     for (const key of Object.keys(vars)) {
@@ -226,7 +291,7 @@ export const setObjectEnv = async (
     await runInDurableObject(stub, (instance) => {
       const objectEnv: unknown = Reflect.get(instance, "env");
       if (typeof objectEnv !== "object" || objectEnv === null) {
-        throw new TypeError("The Workspace object has no env");
+        throw new TypeError("The object has no env");
       }
       for (const [key, was] of Object.entries(before)) {
         if (was === undefined) {

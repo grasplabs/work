@@ -107,3 +107,24 @@ test("the admin drops three documents, answers Stephen's question, and sees thei
     /^In your documents I saw (?=.*HubSpot)(?=.*DocuSign)(?=.*Exact Online)(?=.*Microsoft Teams)/u
   );
 });
+
+test("the admin removes a document that was read, once they confirm it", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("setupDocuments");
+  const page = await pageOf(admin);
+  await answerSpeech(page);
+  const name = "expenses.pdf";
+  await readDocumentsAs(page, { [name]: readings[name] });
+  await page.goto("/setup?step=documents");
+  await page.locator('input[type="file"]').setInputFiles([pdf(name)]);
+  const row = page.getByRole("listitem").filter({ hasText: name });
+  await expect(row.getByText(readings[name].about)).toBeVisible();
+
+  await row.getByRole("button", { name: `Remove ${name}` }).click();
+  await page
+    .getByRole("alertdialog", { name: `Remove ${name}?` })
+    .getByRole("button", { name: "Remove" })
+    .click();
+  await expect(row).toHaveCount(0);
+});

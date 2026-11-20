@@ -1,6 +1,7 @@
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useRef, useState } from "react";
+import { z } from "zod";
 
 import { forgetActiveChats } from "../chat/active-chat.ts";
 import { loadCoreStatus } from "../core-connection.ts";
@@ -92,6 +93,28 @@ const Language = () => {
   );
 };
 
+/** A session core made for someone's interview alone (GRA-1790), as Better Auth tells it. */
+const interviewSessionSchema = z.object({
+  session: z.object({ interview: z.literal(true) }),
+});
+
+/**
+ * Whether this browser is signed in for an interview alone: while the
+ * gate is closed, someone a link went to who signed in here gets such a
+ * session, which opens nothing but their interview. They are told Grasp
+ * isn't open yet, as anyone the gate turns away is, and where their link
+ * is, rather than asked to sign in again and again.
+ */
+const isInterviewOnly = async (): Promise<boolean> => {
+  try {
+    const response = await fetch("/api/auth/get-session");
+    const body: unknown = response.ok ? await response.json() : null;
+    return interviewSessionSchema.safeParse(body).success;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * The library's sign-in page, the website's log-in: a button for each way
  * this deployment offers, Grasp staff's own way after them, why the last
@@ -100,7 +123,7 @@ const Language = () => {
  * once the door has opened, coming back to `returnTo`.
  */
 const SignIn = () => {
-  const { connected, signInOptions } = Route.useLoaderData();
+  const { connected, signInOptions, interviewOnly } = Route.useLoaderData();
   const { error, returnTo } = Route.useSearch();
   // The way being left for, so the others are out of use meanwhile.
   const [leaving, setLeaving] = useState<string>();
@@ -109,7 +132,10 @@ const SignIn = () => {
   const ask = async (id: string): Promise<string> =>
     await signInAddress(id === "staff" ? staffProvider : id, returnTo);
   const ways = connected ? signInOptions : [];
-  const notice = noticeOf(connected, error);
+  const notice = noticeOf(
+    connected,
+    error ?? (interviewOnly ? "not_open_yet" : undefined)
+  );
   return (
     <SignInDoor
       language={<Language />}
@@ -158,7 +184,7 @@ export const Route = createFileRoute("/sign-in")({
     if (status.connected) {
       forgetActiveChats();
     }
-    return status;
+    return { ...status, interviewOnly: await isInterviewOnly() };
   },
   component: SignIn,
 });

@@ -22,8 +22,10 @@ import type {
   ExportStatus,
 } from "./contract.ts";
 import { subjectOf } from "./erasure.ts";
+import { extractorOfColumns, extractorSchema } from "./extractors.ts";
 import { fileKeyOf, hashOf } from "./files.ts";
-import { readerSetKeyOf } from "./reader-sets.ts";
+import { unerasedSql, writerErasedAfterSql } from "./memories.ts";
+import { accessOfKey, readerSetKeyOf } from "./reader-sets.ts";
 import { answerSchema } from "./remember.ts";
 import {
   isRestoring,
@@ -34,7 +36,8 @@ import { defineWork, enqueueWork, workParksMax } from "./work.ts";
 import type { WorkContext } from "./work.ts";
 
 // Exports: the company's Brain, written as files in the shared store's
-// part of the bucket, under `exports/<id>/`: parts of JSON Lines, a version
+// part of the bucket, or what one person alone may read, written in their
+// own store's part (`ExportScope`), under `exports/<id>/`: parts of JSON Lines, a version
 // a line, each beside the versions it holds (`partHoldsFileOf`), and a
 // manifest written last, naming the deployment and each part with its
 // SHA-256, size and how many versions and lines of memories it holds. So an
@@ -59,10 +62,16 @@ import type { WorkContext } from "./work.ts";
 // nothing else) and those no one is known to read (a set with no one in it:
 // an admin is not a reader of it), and every version of a source whose
 // current version is such or that has none (no one else may read its
-// history), left out in the statement that selects them; and the skills
+// history), left out in the statement that selects them. In the company's
+// export, a removed source (removal.ts) is held by the version that was
+// current when it was removed, as if that were current, and that version is
+// marked `removed`, so a restore brings it back removed; a key removed
+// before any version was added under it is a line of its own (`removals`,
+// the last step), so a restore closes it again; a person's own export
+// leaves both out, as no one reads them; and the skills
 // Grasp ships (contract.ts `shippedSkillsPrefix`), which each release adds
 // again. It holds the company's instruction files and its own skills. Of
-// memories and extraction marks, those one group reads (the shared store
+// memories and extraction marks, those groups read (the shared store
 // keeps none only one person may read) and that rest on no version, or on
 // one the export holds, in the statement that selects them
 // (`exportedMemorySql`): so it never holds a memory drawn from what it
@@ -70,8 +79,15 @@ import type { WorkContext } from "./work.ts";
 // memory it names is held. An
 // admin's export holds every group's content, those they are not in among
 // them: that is what a company's backup is for. A person's own store never
-// takes part in one; a person's own export is for later, with the store per
-// person.
+// takes part in one.
+//
+// A person's own export is written in their own store, by the same rules,
+// and holds only what a set of readers that is that person and no one else
+// may read (their store keeps nothing else: this is the second lock), in
+// the statements that select it. Only they start and read it (store.ts);
+// erasing them deletes its files with their store's part of the bucket,
+// listed, so also after a storage loss. No restore takes one (restore.ts
+// restores only the company's).
 //
 // What it takes is what the store held as it started (`up_to`, the last
 // version's row), written by the work queue a part a run (`exportWork`),
@@ -83,13 +99,19 @@ import type { WorkContext } from "./work.ts";
 // is the company's to read as any version the export selects.)
 //
 // Erasure, one rule: an export is stale exactly when the erasure ledger
-// names a version it holds. Each part records the versions it holds, and
-// those its memories and extraction marks rest on, by their source's key as
-// the ledger names it and their number (`export_sources`); a source's erasure names every version of its source,
-// a person's names each version it hid (`erased_versions`), whoever's export
-// it is. So retention's erasures of what an export doesn't hold leave it be,
-// and a person's erasure that hid a team source's history makes the
-// company export holding that history stale. A stale export is never served
+// names a version it holds. A version of a source added in a group (a
+// person's chat) is held under its group's key too, so erasing the group,
+// which the ledger names by that key alone, makes it stale the same way.
+// Each part records the versions it holds, and those its memories and
+// extraction marks rest on, by their source's key as the ledger names it
+// and their number (`export_sources`); a source's erasure names every
+// version of its source, whoever's export it is. So retention's erasures
+// of what an export doesn't hold leave it be. A writer's memories are held
+// by the writer's lineage as the ledger names it and the earliest moment
+// one of them a part holds was learned: a writer's erasure names every
+// memory of it learned before the erasure, so it makes stale every export
+// holding one, and none that holds only what the writer added after it.
+// A stale export is never served
 // (`exportFile` asks before and after it reads), a restore refuses it, and
 // its files are deleted by the queue (`dropFiles`). The same rule is asked
 // of a part's holdings before its files are put, and of a part as it is
@@ -124,6 +146,24 @@ import type { WorkContext } from "./work.ts";
 
 /** Where exports are kept in the store's part of the bucket. */
 export const exportsPrefix = "exports/";
+
+/**
+ * Whose export a store writes: the company's, in the shared store, or one
+ * person's own, in their store, holding only what they alone may read.
+ */
+export type ExportScope =
+  | { kind: "company" }
+  | { kind: "person"; person: string };
+
+/** The scope of the store whose own person is `owner`, if any (work.ts `WorkContext.owner`). */
+export const exportScopeOf = (owner: string | undefined): ExportScope =>
+  owner === undefined ? { kind: "company" } : { kind: "person", person: owner };
+
+/** The key of the set of readers that is `scope`'s person alone, bound in its statements. */
+const ownKeyOf = (scope: ExportScope): SqlStorageValue[] =>
+  scope.kind === "person"
+    ? [readerSetKeyOf({ kind: "owner", person: scope.person })]
+    : [];
 
 /** Most versions one part holds. */
 const exportPartVersions = 50;
@@ -173,7 +213,9 @@ const partHoldsFileOf = (index: number): string =>
   exportPartNameOf(index, "holds.json");
 
 const holdsSchema = z.array(
-  z.tuple([z.string().regex(/^[0-9a-f]{64}$/u), z.int().positive()])
+  // Version 0 is a key held with no version (a removal line, `removals`):
+  // only an erasure of the key itself names it.
+  z.tuple([z.string().regex(/^[0-9a-f]{64}$/u), z.int().nonnegative()])
 );
 
 /**
@@ -204,11 +246,25 @@ export const exportLineSchema = z.strictObject({
   version: z.int().positive(),
   /** When it was added, in milliseconds. */
   addedAt: z.int().nonnegative(),
+  /**
+   * When its text was last read, in milliseconds, if its producer said
+   * (the latest `read_at` of its changes, `NewSource.readAt`): restored on
+   * each of its changes, so no add of an earlier read replaces it after a
+   * restore either. Optional: a bundle made before it restores with none.
+   */
+  readAt: z.int().nonnegative().optional(),
   access: accessSchema,
   /** Whether it was its source's current version. */
   current: z.boolean(),
+  /**
+   * Whether it was its source's current version when the source was
+   * removed (removal.ts): restored, the source comes back removed.
+   */
+  removed: z.boolean(),
   /** Whether its text is cut into chunks and indexed: an instruction file's isn't. */
   indexed: z.boolean(),
+  /** Its source is a thread (`NewSource.thread`): left out for one that isn't. */
+  thread: z.literal(true).optional(),
   /** The change keys its producer added it with. */
   changes: z.array(z.string()),
   text: z.string(),
@@ -256,7 +312,35 @@ export const memoryLineSchema = z.strictObject({
   /** When the store learned it, and retired it if it did by then, in milliseconds. */
   learnedAt: z.int().nonnegative(),
   retiredAt: z.int().nonnegative().nullable(),
+  /**
+   * The change that retired it (`RetiredMemory.change`): null when it
+   * isn't retired, or was retired before changes were kept. Absent from
+   * an export an older release wrote, which kept none.
+   */
+  retiredChange: z.string().nullable().optional(),
   access: accessSchema,
+  /**
+   * The calls that drew it from its source (extractors.ts): null for a
+   * memory extraction didn't draw. In the company's export alone, never in
+   * a person's own (nothing of it is shown to a member); absent from an
+   * export an older release wrote, which kept none.
+   */
+  extractor: extractorSchema.nullable().optional(),
+  /**
+   * The memories it replaces (contract.ts `NewMemory.replaces`), each one
+   * the export holds, by id, with when an undo of it ended that (in
+   * milliseconds), if one did by the export's moment: absent for none, and
+   * from an export an older release wrote, which kept none.
+   */
+  replaces: z
+    .array(
+      z.strictObject({
+        memory: memoryIdSchema,
+        undoneAt: z.int().nonnegative().nullable(),
+      })
+    )
+    .min(1)
+    .optional(),
 });
 export type MemoryLine = z.infer<typeof memoryLineSchema>;
 
@@ -295,20 +379,35 @@ export const changeLineSchema = z.strictObject({
 });
 export type ChangeLine = z.infer<typeof changeLineSchema>;
 
-/** A line of a part past the versions: one of the memories' steps (`memoryPhases`). */
+/**
+ * A line of a key removed with no version to mark (removal.ts): one removed
+ * before anything was added under it. Its key alone, which a restore
+ * closes again, so an add that began before the removal never lands after
+ * a restore either. A removed key with a version is marked on that
+ * version's line instead (`ExportLine.removed`).
+ */
+export const removalLineSchema = z.strictObject({
+  kind: z.literal("removal"),
+  source: z.string(),
+});
+export type RemovalLine = z.infer<typeof removalLineSchema>;
+
+/** A line of a part past the versions: one of the memories' steps (`memoryPhases`), or a removal. */
 export type MemoriesLine =
   | MemoryLine
   | ConfirmationLine
   | ExtractionLine
-  | ChangeLine;
+  | ChangeLine
+  | RemovalLine;
 
 /**
  * The format of the exports this release writes, and the only one it
- * restores: format 2 holds memories, and an export of format 1 (versions
- * only) would come back as a Brain without them while reading as whole,
+ * restores: format 3 holds removed sources as removed (`removed`), and an
+ * export of an earlier format would come back without what it lacks
+ * (memories before format 2, removals before 3) while reading as whole,
  * so a restore refuses it (restore.ts) and the admin makes a new export.
  */
-export const exportFormat = 2;
+export const exportFormat = 3;
 
 /** An export's manifest, as written last. */
 export const manifestSchema = z.strictObject({
@@ -319,7 +418,8 @@ export const manifestSchema = z.strictObject({
    * is named `local` (core's brain-next.ts), so there it tells little.
    */
   deployment: z.string().min(1),
-  scope: z.literal("company"),
+  /** Whose: a restore takes only the company's (restore.ts). */
+  scope: z.enum(["company", "person"]),
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
   versions: z.int().nonnegative(),
@@ -378,18 +478,21 @@ const rowOf = (sql: SqlStorage, id: string): ExportRow | undefined =>
 /**
  * Whether the erasure ledger, as the store holds it, names the version
  * `version` of the source whose key's subject is `subject` (SQL
- * expressions): a source's erasure names every version, a person's those it
- * hid. The one rule of staleness (above).
+ * expressions): a source's erasure names every version. A writer's memory
+ * is held by its writer's subject and when it was learned
+ * (`memoriesLineOf`): a writer's erasure names every one learned before
+ * it. A person's erasure in the shared store names every export started
+ * before it, by a row naming its subject it adds to each (people.ts
+ * `applyPerson`). The one rule of staleness (above).
  */
 const namedSql = (subject: string, version: string): string => `(
   EXISTS (
     SELECT 1 FROM erasures
-    WHERE erasures.kind = 'source' AND erasures.subject = ${subject}
+    WHERE erasures.kind IN ('source', 'person') AND erasures.subject = ${subject}
   )
   OR EXISTS (
-    SELECT 1 FROM erased_versions
-    WHERE erased_versions.subject = ${subject}
-      AND erased_versions.version = ${version}
+    SELECT 1 FROM erasures
+    WHERE ${writerErasedAfterSql("erasures", subject, version)}
   )
 )`;
 
@@ -405,6 +508,10 @@ export const namesAnySql = `SELECT 1 FROM json_each(?1) AS pair
 WHERE ${namedSql("pair.value ->> 0", "pair.value ->> 1")}
 LIMIT 1`;
 
+/** `?1` an export's id: a restore of it runs, or failed and may start again. */
+const restoreHoldsSql = `SELECT 1 FROM restores
+WHERE restores.export = ?1 AND restores.state IN ('running', 'failed')`;
+
 /** Of a row of `exports`: whether a restore of it runs, or failed and may start again. */
 const heldSql = `exports.id IN (
   SELECT export FROM restores WHERE state IN ('running', 'failed')
@@ -416,6 +523,25 @@ export const isStale = (sql: SqlStorage, id: string): boolean =>
     .exec(`SELECT 1 FROM exports WHERE exports.id = ? AND ${staleSql}`, id)
     .toArray().length > 0;
 
+/**
+ * Whether export `id` is still being written and holds nothing erased:
+ * asked right before each of its puts, with no await between, so a run
+ * stops writing once the ledger names what it holds, or once its store was
+ * erased whole (its rows gone with it, so asking throws, which says no).
+ * It doesn't keep an erased store's files from outliving its erasure: the
+ * store's bucket refuses every put once it forgot itself, and its erasure
+ * isn't done while a put it sent is still on its way (bucket.ts
+ * `countingWrites`, store.ts `#eraseWhole`). This stops a run early, and
+ * an export's part from being written over what the ledger erased.
+ */
+const stillWriting = (sql: SqlStorage, id: string): boolean => {
+  try {
+    return rowOf(sql, id)?.state === "writing" && !isStale(sql, id);
+  } catch {
+    return false;
+  }
+};
+
 /** `id`'s items of the queue are under this key. */
 const keyOf = (id: string): string => `export:${id}`;
 
@@ -423,15 +549,28 @@ const keyOf = (id: string): string => `export:${id}`;
  * The versions an export selects. `unreadable` is every set one person
  * alone, or no one known, may read.
  */
-const selectedSql = `source_versions.reader_set NOT IN (SELECT id FROM unreadable)
+const selectedSqlOf = (
+  scope: ExportScope["kind"]
+): string => `source_versions.reader_set NOT IN (SELECT id FROM unreadable)
   AND substr(source_versions.source, 1, ${shippedSkillsPrefix.length})
     != '${shippedSkillsPrefix}'
-  AND EXISTS (
+  AND (EXISTS (
     SELECT 1 FROM current_versions AS now
     JOIN source_versions AS current ON current.row = now.version_row
     WHERE now.source = source_versions.source
       AND current.reader_set NOT IN (SELECT id FROM unreadable)
-  )`;
+  )${
+    // A person's own export hands them what they may read: a source
+    // removed from their store is read by no one, them included.
+    scope === "company"
+      ? ` OR EXISTS (
+    SELECT 1 FROM removed_sources AS gone
+    JOIN source_versions AS was ON was.row = gone.version_row
+    WHERE gone.source = source_versions.source
+      AND was.reader_set NOT IN (SELECT id FROM unreadable)
+  )`
+      : ""
+  })`;
 
 /** A version, as a run selects it for a part. */
 interface Selected extends Record<string, SqlStorageValue> {
@@ -440,10 +579,16 @@ interface Selected extends Record<string, SqlStorageValue> {
   version: number;
   file: string;
   added_at: number;
+  read_at: number | null;
   readers: string;
   current: number;
+  removed: number;
   indexed: number;
   changes: string;
+  /** Its source's group's key as the ledger names it, if it was added in one. */
+  group_subject: string | null;
+  /** 1 when its source is a thread. */
+  thread: number;
 }
 
 /**
@@ -452,19 +597,29 @@ interface Selected extends Record<string, SqlStorageValue> {
  * Current: the version its source's current pointer names, or, where that
  * is a version added after the export started, the last one before it.
  */
-const unreadableSql = `unreadable AS (
+const unreadableSql: Record<ExportScope["kind"], string> = {
+  company: `unreadable AS (
   SELECT reader_set AS id FROM reader_set_members
   GROUP BY reader_set HAVING count(*) = 1 AND max(kind) = 'person'
   UNION
   SELECT id FROM reader_sets
   WHERE id NOT IN (SELECT reader_set FROM reader_set_members)
-)`;
+)`,
+  // `?4` the key of the set that is the person alone: every other set.
+  person: `unreadable AS (
+  SELECT id FROM reader_sets WHERE key IS NOT ?4
+)`,
+};
 
-const selectSql = `
-WITH ${unreadableSql}
+/** `selectSql` of each scope: `?4` the person's own key, in theirs. */
+const selectSqlOf = (scope: ExportScope["kind"]): string => `
+WITH ${unreadableSql[scope]}
 SELECT source_versions.row AS row, source_versions.source AS source,
   source_versions.version AS version, source_versions.file AS file,
-  source_versions.added_at AS added_at, reader_sets.key AS readers,
+  source_versions.added_at AS added_at,
+  (SELECT max(read_at) FROM source_changes
+    WHERE source_changes.version_row = source_versions.row) AS read_at,
+  reader_sets.key AS readers,
   coalesce(
     current_versions.version_row = source_versions.row
     OR (current_versions.version_row > ?2 AND source_versions.row = (
@@ -473,33 +628,34 @@ SELECT source_versions.row AS row, source_versions.source AS source,
     )),
     0
   ) AS current,
+  coalesce(
+    removed_sources.version_row = source_versions.row
+    OR (removed_sources.version_row > ?2 AND source_versions.row = (
+      SELECT max(before.row) FROM source_versions AS before
+      WHERE before.source = source_versions.source AND before.row <= ?2
+    )),
+    0
+  ) AS removed,
   EXISTS (SELECT 1 FROM chunks WHERE chunks.version_row = source_versions.row) AS indexed,
   (SELECT json_group_array(change) FROM source_changes
-    WHERE source_changes.version_row = source_versions.row) AS changes
+    WHERE source_changes.version_row = source_versions.row) AS changes,
+  (SELECT group_subject FROM source_subjects
+    WHERE source_subjects.source = source_versions.source) AS group_subject,
+  coalesce((SELECT thread FROM source_subjects
+    WHERE source_subjects.source = source_versions.source), 0) AS thread
 FROM source_versions
 JOIN reader_sets ON reader_sets.id = source_versions.reader_set
 LEFT JOIN current_versions ON current_versions.source = source_versions.source
+LEFT JOIN removed_sources ON removed_sources.source = source_versions.source
 WHERE source_versions.row > ?1 AND source_versions.row <= ?2
   AND source_versions.row NOT IN (SELECT version_row FROM erasing_versions)
-  AND ${selectedSql}
+  AND ${selectedSqlOf(scope)}
 ORDER BY source_versions.row
 LIMIT ?3`;
 
-/** A set of readers' key (reader-sets.ts) as the access it names, if the contract can name it. */
-const accessOfKey = (key: string): Access | undefined => {
-  const principals = z
-    .array(z.tuple([z.enum(["person", "group"]), z.string()]))
-    .parse(JSON.parse(key));
-  const [first, ...rest] = principals;
-  let access: Access = { kind: "none" };
-  if (first?.[0] === "person") {
-    access = { kind: "owner", person: first[1] };
-  } else if (first?.[0] === "group") {
-    access = { kind: "audience", group: first[1] };
-  }
-  return rest.length === 0 && readerSetKeyOf(access) === key
-    ? access
-    : undefined;
+const selectSql: Record<ExportScope["kind"], string> = {
+  company: selectSqlOf("company"),
+  person: selectSqlOf("person"),
 };
 
 /**
@@ -512,18 +668,43 @@ export const memoryPhases = [
   "confirmations",
   "extractions",
   "changes",
+  "removals",
 ] as const;
+
+/**
+ * How many bindings each step's statement names in the company's export
+ * (`memoryPhaseSqlOf`); a person's names all six.
+ */
+const companyBindings: Record<(typeof memoryPhases)[number], number> = {
+  memories: 4,
+  confirmations: 4,
+  extractions: 4,
+  changes: 5,
+  removals: 3,
+};
 
 /** Most rows one part of a step of memories reads; its bytes bound it first. */
 const memoryPartRows = 500;
 
 /**
- * Whether the set of readers whose key is `key` (an expression) is one
- * group: what a company export holds of memories and extraction marks
- * (the contract's `audience`), never one person alone or no one.
+ * Whether the set of readers whose key is `key` (an expression) is groups
+ * alone, one or several: what a company export holds of memories and
+ * extraction marks (the contract's `audience` and `readers`), never one
+ * person alone or no one.
  */
-const oneGroupSql = (key: string): string =>
-  `(json_array_length(${key}) = 1 AND ${key} ->> '$[0][0]' = 'group')`;
+const groupsSql = (key: string): string =>
+  `(json_array_length(${key}) >= 1 AND NOT EXISTS (
+    SELECT 1 FROM json_each(${key}) AS principal
+    WHERE principal.value ->> '$[0]' IS NOT 'group'
+  ))`;
+
+/**
+ * Whether the set of readers whose key is `key` is one a `scope` export
+ * holds of memories and extraction marks: groups' in the company's,
+ * the person's alone in theirs (`?6` its key).
+ */
+const exportedReadersSql = (scope: ExportScope["kind"], key: string): string =>
+  scope === "company" ? groupsSql(key) : `(${key} = ?6)`;
 
 /**
  * `?2` the export: whether a part it wrote holds the version `version` of
@@ -544,40 +725,59 @@ const writtenVersionSql = (
 
 /**
  * `?2` the export, `?4` the stamp it started at: whether the memory
- * `alias` is one the export holds: learned by then, read by one group, and
- * resting on no version or one a part of it wrote.
+ * `alias` is one the export holds: learned by then, read by groups, no
+ * erasure of its writer since (memories.ts `unerasedSql`), and resting on
+ * no version or one a part of it wrote.
  */
-const exportedMemorySql = (alias: string): string => `(
+const exportedMemorySql = (
+  scope: ExportScope["kind"],
+  alias: string
+): string => `(
   ${alias}.learned_at <= ?4
-  AND ${oneGroupSql(`${alias}.readers`)}
+  AND ${exportedReadersSql(scope, `${alias}.readers`)}
+  AND ${unerasedSql(alias)}
   AND (${alias}.source IS NULL
     OR ${writtenVersionSql(`${alias}.subject`, `${alias}.version`)})
 )`;
 
 /**
- * Each step's statement (`memoryPhases`): `?1` the last row written, `?2`
- * the export, `?3` how many, `?4` the stamp
- * it started at, `?5` the last change's row it takes. Each row with its
- * `row`, in order.
+ * Each step's statement (`memoryPhases`) in a `scope` export: `?1` the
+ * last row written, `?2` the export, `?3` how many, `?4` the stamp it
+ * started at, `?5` the last change's row it takes, `?6` in a person's the
+ * key of their set alone. Each row with its `row`, in order.
  */
-const memoryPhaseSql: Record<(typeof memoryPhases)[number], string> = {
+const memoryPhaseSqlOf = (
+  scope: ExportScope["kind"]
+): Record<(typeof memoryPhases)[number], string> => ({
   memories: `SELECT m.row AS row, m.id AS id, about.id AS about, object.id AS object,
   m.attribute AS attribute, m.value AS value, m.type AS type,
   m.statement AS statement, m.quote AS quote, m.source AS source,
   m.version AS version, m.subject AS subject, m.writer AS writer,
-  m.speaker AS speaker, m.valid_from AS valid_from,
+  m.writer_subject AS writer_subject, m.speaker AS speaker, m.valid_from AS valid_from,
   m.valid_until AS valid_until, m.learned_at AS learned_at,
   CASE WHEN m.retired_at <= ?4 THEN m.retired_at END AS retired_at,
+  CASE WHEN m.retired_at <= ?4 THEN m.retired_change END AS retired_change,
   m.readers AS readers,
+  drawn.read_prompt AS read_prompt, drawn.read_model AS read_model,
+  drawn.check_prompt AS check_prompt, drawn.check_model AS check_model,
   (SELECT json_group_array(json_array(named.id, named.kind))
     FROM entities AS named WHERE named.row IN (m.entity, m.object)) AS entities,
   (SELECT json_group_array(json_array(named.id, entity_names.type, entity_names.value))
     FROM entity_names JOIN entities AS named ON named.row = entity_names.entity
-    WHERE entity_names.memory = m.row) AS names
+    WHERE entity_names.memory = m.row) AS names,
+  (SELECT json_group_array(json_object('memory', id, 'undoneAt', undone_at)) FROM (
+    SELECT replaced.id AS id,
+      CASE WHEN named.undone_at <= ?4 THEN named.undone_at END AS undone_at
+    FROM memory_replacements AS named
+    JOIN memories AS replaced ON replaced.row = named.replaced
+    WHERE named.memory = m.row AND ${exportedMemorySql(scope, "replaced")}
+    ORDER BY replaced.row
+  )) AS replaces
 FROM memories AS m
 JOIN entities AS about ON about.row = m.entity
 LEFT JOIN entities AS object ON object.row = m.object
-WHERE m.row > ?1 AND ${exportedMemorySql("m")}
+LEFT JOIN extractors AS drawn ON drawn.row = m.extractor
+WHERE m.row > ?1 AND ${exportedMemorySql(scope, "m")}
 ORDER BY m.row
 LIMIT ?3`,
   confirmations: `SELECT confirmed.row AS row, m.id AS memory, confirmed.person AS person,
@@ -587,12 +787,12 @@ LIMIT ?3`,
     WHERE over.confirmation = confirmed.row) AS over
 FROM memory_confirmations AS confirmed
 JOIN memories AS m ON m.row = confirmed.memory
-WHERE confirmed.row > ?1 AND confirmed.at <= ?4 AND ${exportedMemorySql("m")}
+WHERE confirmed.row > ?1 AND confirmed.at <= ?4 AND ${exportedMemorySql(scope, "m")}
   AND NOT EXISTS (
     SELECT 1 FROM memory_confirmed_over AS over
     LEFT JOIN memories AS other ON other.row = over.memory
     WHERE over.confirmation = confirmed.row
-      AND (other.row IS NULL OR NOT ${exportedMemorySql("other")})
+      AND (other.row IS NULL OR NOT ${exportedMemorySql(scope, "other")})
   )
 ORDER BY confirmed.row
 LIMIT ?3`,
@@ -600,7 +800,7 @@ LIMIT ?3`,
   marked.subject AS subject, marked.at AS at, marked.readers AS readers
 FROM memory_extractions AS marked
 WHERE marked.rowid > ?1 AND marked.at <= ?4
-  AND ${oneGroupSql("marked.readers")}
+  AND ${exportedReadersSql(scope, "marked.readers")}
   AND ${writtenVersionSql("marked.subject", "marked.version")}
 ORDER BY marked.rowid
 LIMIT ?3`,
@@ -615,10 +815,31 @@ WHERE changed.rowid > ?1 AND changed.rowid <= ?5
   AND NOT EXISTS (
     SELECT 1 FROM json_each(changed.answer, '$.memories') AS answered
     LEFT JOIN memories AS m ON m.id = answered.value
-    WHERE m.row IS NULL OR NOT ${exportedMemorySql("m")}
+    WHERE m.row IS NULL OR NOT ${exportedMemorySql(scope, "m")}
   )
 ORDER BY changed.rowid
 LIMIT ?3`,
+  // Keys removed with no version to mark. The company's export alone: a
+  // mark names no readers, only a key, and only a company export is ever
+  // restored (restore.ts), so a person's own export carries none (`?6`, the
+  // person's own key, is never null).
+  removals:
+    scope === "company"
+      ? `SELECT gone.rowid AS row, gone.source AS source, gone.subject AS subject
+FROM removed_sources AS gone
+WHERE gone.rowid > ?1 AND gone.version_row IS NULL
+ORDER BY gone.rowid
+LIMIT ?3`
+      : `SELECT gone.rowid AS row, gone.source AS source, gone.subject AS subject
+FROM removed_sources AS gone
+WHERE gone.rowid > ?1 AND ?6 IS NULL
+ORDER BY gone.rowid
+LIMIT ?3`,
+});
+
+const memoryPhaseSql = {
+  company: memoryPhaseSqlOf("company"),
+  person: memoryPhaseSqlOf("person"),
 };
 
 /** A row of a step's statement, as it comes. */
@@ -634,10 +855,21 @@ const intOrNull = (value: SqlStorageValue | undefined): number | null =>
 const jsonOf = (value: SqlStorageValue | undefined): unknown =>
   JSON.parse(textOf(value));
 
-/** The access a set of readers' key names, which a step selects only as one group's. */
-const groupAccessOf = (key: SqlStorageValue | undefined): Access => {
+/**
+ * The access a set of readers' key names, which a step selects only as
+ * groups' (one or several) in the company's export, and as the person's
+ * alone in theirs.
+ */
+const exportedAccessOf = (
+  scope: ExportScope,
+  key: SqlStorageValue | undefined
+): Access => {
   const access = accessOfKey(textOf(key));
-  if (access?.kind !== "audience") {
+  const exported =
+    scope.kind === "company"
+      ? access?.kind === "audience" || access?.kind === "readers"
+      : access?.kind === "owner" && access.person === scope.person;
+  if (access === undefined || !exported) {
     throw new Error("The Brain selected readers it doesn't export");
   }
   return access;
@@ -648,9 +880,10 @@ const groupAccessOf = (key: SqlStorageValue | undefined): Access => {
  * source's key as the ledger names it), if it rests on one.
  */
 const memoriesLineOf = (
+  scope: ExportScope,
   phase: (typeof memoryPhases)[number],
   row: PhaseRow
-): { line: MemoriesLine; held: Held | undefined } => {
+): { line: MemoriesLine; held: Held | undefined; byWriter?: true } => {
   if (phase === "memories") {
     const names = z
       .array(z.tuple([z.string(), z.string(), z.string()]))
@@ -660,6 +893,11 @@ const memoriesLineOf = (
       .parse(jsonOf(row.entities));
     const source = textOrNull(row.source);
     const version = intOrNull(row.version);
+    const replaces = z
+      .array(
+        z.strictObject({ memory: z.string(), undoneAt: z.int().nullable() })
+      )
+      .parse(jsonOf(row.replaces));
     const line = memoryLineSchema.parse({
       kind: "memory",
       id: row.id,
@@ -688,14 +926,30 @@ const memoriesLineOf = (
       validUntil: row.valid_until,
       learnedAt: row.learned_at,
       retiredAt: row.retired_at,
-      access: groupAccessOf(row.readers),
+      retiredChange: row.retired_change,
+      access: exportedAccessOf(scope, row.readers),
+      ...(replaces.length === 0 ? {} : { replaces }),
+      ...(scope.kind === "company"
+        ? {
+            extractor: extractorOfColumns({
+              read_prompt: row.read_prompt ?? null,
+              read_model: row.read_model ?? null,
+              check_prompt: row.check_prompt ?? null,
+              check_model: row.check_model ?? null,
+            }),
+          }
+        : {}),
     });
     const subject = textOrNull(row.subject);
-    return {
-      line,
-      held:
-        subject === null || version === null ? undefined : [subject, version],
-    };
+    const writerSubject = textOrNull(row.writer_subject);
+    if (subject !== null && version !== null) {
+      return { line, held: [subject, version] };
+    }
+    // A writer's memory is held by its writer and when it was learned: an
+    // erasure of the writer after that makes the export stale (`namedSql`).
+    return writerSubject === null
+      ? { line, held: undefined }
+      : { line, held: [writerSubject, line.learnedAt], byWriter: true };
   }
   if (phase === "confirmations") {
     return {
@@ -709,13 +963,22 @@ const memoriesLineOf = (
       held: undefined,
     };
   }
+  if (phase === "removals") {
+    // Held as version 0 of its key, which only an erasure of the key
+    // itself names (`namedSql`): so erasing it makes the export stale, and
+    // no plain key outlives what it named in an export's files either.
+    return {
+      line: removalLineSchema.parse({ kind: "removal", source: row.source }),
+      held: [textOf(row.subject), 0],
+    };
+  }
   if (phase === "extractions") {
     const line = extractionLineSchema.parse({
       kind: "extraction",
       source: row.source,
       version: row.version,
       at: row.at,
-      access: groupAccessOf(row.readers),
+      access: exportedAccessOf(scope, row.readers),
     });
     return { line, held: [textOf(row.subject), line.version] };
   }
@@ -764,6 +1027,22 @@ export const exportStatus = (
 };
 
 /**
+ * The export a person's own store shows its person: their most recent one
+ * by its start, whatever came of it, so a latest attempt that failed is
+ * said, never hidden behind an older one that finished; null when none was
+ * ever started. A stale one says it was erased (`stateOf`).
+ */
+export const latestExportStatus = (sql: SqlStorage): ExportStatus | null => {
+  const latest = sql
+    .exec<{ id: string }>(
+      "SELECT id FROM exports ORDER BY started_at DESC, rowid DESC LIMIT 1"
+    )
+    .toArray()
+    .at(0);
+  return latest === undefined ? null : exportStatus(sql, latest);
+};
+
+/**
  * A file of a done export, as written: null for an export not done or
  * stale, one that doesn't exist, and a file it doesn't have, alike.
  * Asked again once the file is read: an erasure may have landed while it
@@ -793,14 +1072,17 @@ export const exportFile = async (
 /**
  * Whether export `id`'s files may be deleted now, as a deletion of them
  * runs: never while it is written or done (a drop queued before a restore
- * recorded it, say), nor while a restore of it runs or failed.
+ * recorded it, say), nor while a restore of it runs or failed, asked of
+ * the restore itself: one whose stopped check handed the export back keeps
+ * no row of it (`handBackStopped`), and a drop queued before it began may
+ * run after.
  */
 const droppable = (sql: SqlStorage, id: string): boolean =>
   sql
     .exec(
       `SELECT 1 FROM exports
-      WHERE exports.id = ?
-        AND (exports.state IN ('writing', 'done') OR ${heldSql})`,
+      WHERE exports.id = ?1 AND exports.state IN ('writing', 'done')
+      UNION ALL ${restoreHoldsSql}`,
       id
     )
     .toArray().length === 0;
@@ -953,8 +1235,8 @@ const sweepDue = (sql: SqlStorage): boolean =>
  * Whether the export files `key` names, of an export the store has no row
  * of, may be dropped, by what that one file says (a run reads only it, and
  * for a part's holdings whether the manifest is there): a manifest that is
- * missing, isn't JSON, or, read loosely, isn't a company export of that id
- * (nothing can serve or restore it); never for its format, so a build
+ * missing, isn't JSON, or, read loosely, isn't an export of that id and
+ * of the store's own scope (nothing can serve or restore it); never for its format, so a build
  * rolled back to an older release keeps what a newer one wrote, and the
  * other way round, each judged by its holdings as below; a
  * part's holdings without a manifest beside them (an export never
@@ -966,6 +1248,7 @@ const sweepDue = (sql: SqlStorage): boolean =>
 const orphanFileDrops = async (
   sql: SqlStorage,
   bucket: BrainBucket,
+  scope: ExportScope,
   id: string,
   file: string
 ): Promise<{ drop: boolean; reads: number }> => {
@@ -976,7 +1259,7 @@ const orphanFileDrops = async (
     }
     try {
       const manifest = z
-        .looseObject({ id: z.literal(id), scope: z.literal("company") })
+        .looseObject({ id: z.literal(id), scope: z.literal(scope.kind) })
         .safeParse(JSON.parse(await object.text()));
       return { drop: !manifest.success, reads: 1 };
     } catch {
@@ -1015,9 +1298,18 @@ const orphanFileDrops = async (
 };
 
 /**
+ * Whether the store has no record of export `id`: no row of it, and no
+ * restore of it that runs or failed and may start again, which an export
+ * its stopped check handed back is kept for (`handBackStopped`).
+ */
+const unrecorded = (sql: SqlStorage, id: string): boolean =>
+  rowOf(sql, id) === undefined &&
+  sql.exec(restoreHoldsSql, id).toArray().length === 0;
+
+/**
  * The sweep's place saved at `key`, in one transaction with the deletion
  * of export `id`'s files put on the queue when `drop` says so and the store
- * still has no row of it (a restore may have recorded it meanwhile).
+ * still has no record of it (a restore may have recorded it meanwhile).
  */
 const sweptKey = (
   storage: DurableObjectStorage,
@@ -1026,7 +1318,7 @@ const sweptKey = (
   drop: boolean
 ): void => {
   storage.transactionSync(() => {
-    if (drop && rowOf(storage.sql, id) === undefined) {
+    if (drop && unrecorded(storage.sql, id)) {
       enqueueExport(storage, id);
     }
     storage.sql.exec("UPDATE export_sweep SET cursor = ? WHERE id = 1", key);
@@ -1047,8 +1339,9 @@ const sweptKey = (
 const sweepWork = defineWork({
   kind: "brain.export_sweep",
   payload: z.strictObject({}),
-  run: async (_payload, { storage, bucket, again }) => {
+  run: async (_payload, { storage, bucket, again, owner }) => {
     const { sql } = storage;
+    const scope = exportScopeOf(owner);
     const cursor =
       sql
         .exec<{ cursor: string | null }>(
@@ -1068,11 +1361,11 @@ const sweepWork = defineWork({
         return;
       }
       const [id = "", file = ""] = key.slice(exportsPrefix.length).split("/");
-      const unknown = id !== "" && file !== "" && rowOf(sql, id) === undefined;
+      const unknown = id !== "" && file !== "" && unrecorded(sql, id);
       let judged = { drop: false, reads: 0 };
       if (unknown) {
         // oxlint-disable-next-line no-await-in-loop -- a file at a time, a run's few reads
-        judged = await orphanFileDrops(sql, bucket, id, file);
+        judged = await orphanFileDrops(sql, bucket, scope, id, file);
       }
       reads += judged.reads;
       sweptKey(storage, id, key, judged.drop);
@@ -1110,8 +1403,13 @@ const settleStuck = (storage: DurableObjectStorage): void => {
  * be on record, so they go), or one that failed with its export no longer
  * adopted (`handedBackSql`) or checked whole, once the store took
  * something since it failed (a version past `held_to`, but Grasp's own
- * skills, or a write of memories past `held_stamp`) or the ledger names a
- * version its export holds: to give up.
+ * skills, or a write of memories past `held_stamp`): to give up. Not for
+ * an erasure, whatever it names in its export (a writer's moves
+ * `held_stamp` along with the stamp, restoring.ts
+ * `erasureKeepsFailedSql`): a failed restore's export is served to no one,
+ * and started again it leaves out what the ledger erased (restore.ts), so
+ * the company keeps its backup; it is retired as erased once the restore
+ * is done (restore.ts `settle`).
  */
 const givenUpSql = `restores.state = 'failed' AND (
   (
@@ -1128,9 +1426,6 @@ const givenUpSql = `restores.state = 'failed' AND (
         != '${shippedSkillsPrefix}'
   )
   OR ${memoriesWrittenSinceSql}
-  OR EXISTS (
-    SELECT 1 FROM exports WHERE exports.id = restores.export AND ${staleSql}
-  )
 )`;
 
 /**
@@ -1147,10 +1442,11 @@ const handedBackSql = `restores.state = 'failed' AND restores.damaged = 0
 
 /**
  * Every adopted export whose check stopped (`handedBackSql`) handed back
- * to the sweep, as one the store has no record of: its rows deleted, its
- * files kept, and the sweep's pass marked as covering no erasure, so the
- * next pass judges them by the ledger (`orphanFileDrops`), as soon as one
- * is recorded. Its restore stays failed, to start again. In the caller's
+ * to the sweep: its rows deleted, its files kept. Its restore stays
+ * failed, to start again, and the sweep leaves its files be meanwhile
+ * (`unrecorded`), whatever the ledger names: started again, the restore
+ * leaves that out. Once that restore is given up (`giveUpRestores`), the
+ * sweep judges them by the ledger (`orphanFileDrops`). In the caller's
  * transaction.
  */
 const handBackStopped = (storage: DurableObjectStorage): void => {
@@ -1165,15 +1461,14 @@ const handBackStopped = (storage: DurableObjectStorage): void => {
     sql.exec("DELETE FROM export_parts WHERE export = ?", id);
     sql.exec("DELETE FROM exports WHERE id = ?", id);
   }
-  if (handed.length > 0) {
-    sql.exec("UPDATE export_sweep SET through = 0 WHERE id = 1");
-  }
 };
 
 /**
  * Every failed restore to give up (`givenUpSql`) settled as abandoned, its
  * export no longer held: retired at once when the ledger names a version
- * it holds. In the caller's transaction.
+ * it holds; or, handed back (`handBackStopped`), judged by the next pass of
+ * the sweep, its pass marked as covering no erasure, as the passes since
+ * left its files be. In the caller's transaction.
  */
 const giveUpRestores = (storage: DurableObjectStorage): void => {
   const given = storage.sql
@@ -1181,6 +1476,14 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
       `UPDATE restores SET state = 'abandoned' WHERE ${givenUpSql} RETURNING export`
     )
     .toArray();
+  // Never started again: the cards its export gives go, but those it
+  // wrote something of, which the store holds by their name alone; their
+  // rows go with them (forget.ts) or with an erasure that takes them.
+  if (given.length > 0) {
+    storage.sql.exec(
+      "DELETE FROM restore_cards WHERE entity NOT IN (SELECT id FROM entities)"
+    );
+  }
   for (const restore of given) {
     // Adopted, and its check found a damaged part: what its files hold is
     // not all on record, so they go.
@@ -1191,6 +1494,11 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
       restore.export
     );
     retireIfStale(storage, restore.export);
+  }
+  if (
+    given.some((restore) => rowOf(storage.sql, restore.export) === undefined)
+  ) {
+    storage.sql.exec("UPDATE export_sweep SET through = 0 WHERE id = 1");
   }
 };
 
@@ -1203,8 +1511,8 @@ const giveUpRestores = (storage: DurableObjectStorage): void => {
  * started: from the first key when an erasure was recorded past the one
  * the last pass started for (`through`), or from its saved place when a
  * pass's item went before it ended. A pass is never restarted, but from
- * the first key once an export is handed back, which its saved place may
- * be past. Its rule is
+ * the first key once the restore of an export handed back is given up,
+ * whose files its saved place may be past. Its rule is
  * `exportsDue`. Between erasures nothing can make an export stale: a part
  * and a restore done are asked as they land (`writePart`, `retireIfStale`).
  */
@@ -1320,9 +1628,12 @@ const linesOf = async (
         source: version.source,
         version: version.version,
         addedAt: version.added_at,
+        ...(version.read_at === null ? {} : { readAt: version.read_at }),
         access,
         current: version.current === 1,
+        removed: version.removed === 1,
         indexed: version.indexed === 1,
+        ...(version.thread === 1 ? { thread: true as const } : {}),
         changes: z.array(z.string()).parse(JSON.parse(version.changes)),
         text,
       };
@@ -1466,6 +1777,7 @@ export const manifestPartsOf = (
 const finish = async (
   storage: DurableObjectStorage,
   bucket: BrainBucket,
+  scope: ExportScope,
   row: WritingRow
 ): Promise<void> => {
   const parts = manifestPartsOf(storage.sql, row.id);
@@ -1477,7 +1789,7 @@ const finish = async (
     format: exportFormat,
     id: row.id,
     deployment: row.deployment,
-    scope: "company",
+    scope: scope.kind,
     startedAt: new Date(row.started_at).toISOString(),
     finishedAt: new Date().toISOString(),
     versions: row.versions,
@@ -1486,6 +1798,9 @@ const finish = async (
     parts,
   };
   await dropPartsBeyond(bucket, row.id, parts.length);
+  if (!stillWriting(storage.sql, row.id)) {
+    return;
+  }
   await bucket.put(
     exportKeyOf(row.id, manifestFile),
     JSON.stringify(manifest),
@@ -1569,17 +1884,34 @@ interface NextPart {
 const versionsPart = async (
   sql: SqlStorage,
   bucket: BrainBucket,
+  scope: ExportScope,
   row: ExportRow
 ): Promise<NextPart | "failed" | undefined> => {
   const selected = sql
-    .exec<Selected>(selectSql, row.cursor, row.up_to, exportPartVersions)
+    .exec<Selected>(
+      selectSql[scope.kind],
+      row.cursor,
+      row.up_to,
+      exportPartVersions,
+      ...ownKeyOf(scope)
+    )
     .toArray();
   if (selected.length === 0) {
     return undefined;
   }
   const read = await linesOf(bucket, selected);
   const lines: Uint8Array[] = [];
-  const versions: { source: string; version: number }[] = [];
+  const groupOf = new Map(
+    selected.map(({ row: versionRow, group_subject }) => [
+      versionRow,
+      group_subject,
+    ])
+  );
+  const versions: {
+    source: string;
+    version: number;
+    group: string | null;
+  }[] = [];
   let last = row.cursor;
   for (const { row: versionRow, source, version, line } of read) {
     if (line === null) {
@@ -1594,14 +1926,21 @@ const versionsPart = async (
       return "failed";
     }
     lines.push(line);
-    versions.push({ source, version });
+    versions.push({ source, version, group: groupOf.get(versionRow) ?? null });
     last = versionRow;
   }
-  const held: Held[] = await Promise.all(
-    versions.map(
-      async ({ source, version }) => [await subjectOf(source), version] as const
-    )
+  // Each version by its source's key, and, for one added in a group (a
+  // person's chat, say), by its group's key too: erasing the group names
+  // that key alone in the ledger, so the one rule (`namedSql`) finds it the
+  // same way. Held here, as the part is written: the store forgets which
+  // group a source was in once its versions are gone.
+  const heldEach = await Promise.all(
+    versions.map(async ({ source, version, group }): Promise<Held[]> => [
+      [await subjectOf(source), version],
+      ...(group === null ? [] : [[group, version] as const]),
+    ])
   );
+  const held: Held[] = heldEach.flat();
   return {
     lines,
     phase: null,
@@ -1620,6 +1959,7 @@ const versionsPart = async (
  */
 const memoriesPart = (
   sql: SqlStorage,
+  scope: ExportScope,
   row: WritingRow
 ): NextPart | undefined => {
   for (let phase = row.phase ?? 1; phase <= memoryPhases.length; phase += 1) {
@@ -1634,30 +1974,46 @@ const memoriesPart = (
       row.stamp,
       row.changes_up_to,
     ];
-    // Each statement takes as many bindings as the last it names.
+    // Each statement takes as many bindings as the last it names: in a
+    // person's export, each names their own key, the sixth.
+    const named =
+      scope.kind === "person"
+        ? [...bindings, ...ownKeyOf(scope)]
+        : bindings.slice(0, companyBindings[name]);
     const rows = sql
-      .exec<PhaseRow>(
-        memoryPhaseSql[name],
-        ...bindings.slice(0, name === "changes" ? 5 : 4)
-      )
+      .exec<PhaseRow>(memoryPhaseSql[scope.kind][name], ...named)
       .toArray();
     const lines: Uint8Array[] = [];
     const held: Held[] = [];
+    // A writer's memories by its subject, held once a part by the earliest
+    // learned: an erasure of it after that one is after none of them.
+    const writers = new Map<string, number>();
     let cursor = 0;
     let bytes = 0;
     for (const found of rows) {
-      const { line, held: rests } = memoriesLineOf(name, found);
+      const {
+        line,
+        held: rests,
+        byWriter,
+      } = memoriesLineOf(scope, name, found);
       const encoded = encoder.encode(`${JSON.stringify(line)}\n`);
       if (lines.length > 0 && bytes + encoded.byteLength > exportPartBytes) {
         break;
       }
       lines.push(encoded);
       bytes += encoded.byteLength;
-      if (rests !== undefined) {
+      if (rests !== undefined && byWriter === true) {
+        const [subject, learnedAt] = rests;
+        writers.set(
+          subject,
+          Math.min(learnedAt, writers.get(subject) ?? learnedAt)
+        );
+      } else if (rests !== undefined) {
         held.push(rests);
       }
       cursor = found.row;
     }
+    held.push(...writers);
     if (lines.length > 0) {
       return {
         lines,
@@ -1682,9 +2038,10 @@ const memoriesPart = (
  */
 const writePart = async (
   id: string,
-  { storage, bucket, again }: WorkContext
+  { storage, bucket, again, owner }: WorkContext
 ): Promise<void> => {
   const { sql } = storage;
+  const scope = exportScopeOf(owner);
   const found = rowOf(sql, id);
   if (found?.state !== "writing" || isStale(sql, id)) {
     return;
@@ -1698,14 +2055,16 @@ const writePart = async (
   }
   const row: WritingRow = { ...found, stamp, changes_up_to: changesUpTo };
   const versions =
-    row.phase === null ? await versionsPart(sql, bucket, row) : undefined;
+    row.phase === null
+      ? await versionsPart(sql, bucket, scope, row)
+      : undefined;
   if (versions === "failed") {
     fail(storage, id);
     return;
   }
-  const next = versions ?? memoriesPart(sql, row);
+  const next = versions ?? memoriesPart(sql, scope, row);
   if (next === undefined) {
-    await finish(storage, bucket, row);
+    await finish(storage, bucket, scope, row);
     return;
   }
   const { lines, held } = next;
@@ -1734,11 +2093,17 @@ const writePart = async (
   }
   const body = joined(lines);
   const hash = await hashOf(body);
+  if (!stillWriting(sql, id)) {
+    return;
+  }
   await bucket.put(
     exportKeyOf(id, partHoldsFileOf(row.parts)),
     JSON.stringify(held),
     { httpMetadata: { contentType: "application/json" } }
   );
+  if (!stillWriting(sql, id)) {
+    return;
+  }
   await bucket.put(exportKeyOf(id, partFileOf(row.parts)), body, {
     sha256: hash,
     httpMetadata: { contentType: "application/x-ndjson" },

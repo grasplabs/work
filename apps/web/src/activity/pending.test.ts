@@ -1,7 +1,7 @@
 import {
   agentIdSchema,
   appIdSchema,
-  collectionIdSchema,
+  connectionIdSchema,
   permissionIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
@@ -12,7 +12,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   objectOf,
   requestAsker,
-  requestRow,
   requestNextRun,
   requestWords,
   subjectOf,
@@ -38,7 +37,7 @@ const onApp = (actions: string[]): Permission => ({
   chat: null,
 });
 
-const directory = { people: new Map(), apps: new Map() };
+const directory = { people: new Map(), teams: new Map(), apps: new Map() };
 
 describe("a pending request on an App", () => {
   it("says which of the App's functions each action calls, and no more", () => {
@@ -76,8 +75,8 @@ describe("a pending request on an App", () => {
   });
 });
 
-/** A workflow's request to read a collection. */
-const onCollection = (): Permission => ({
+/** A workflow's request to read a connection. */
+const onConnection = (): Permission => ({
   ...onApp([]),
   subject: {
     type: "workflow",
@@ -86,8 +85,8 @@ const onCollection = (): Permission => ({
     ),
   },
   object: {
-    type: "collection",
-    collectionId: collectionIdSchema.parse(
+    type: "connection",
+    connectionId: connectionIdSchema.parse(
       "22222222-2222-4222-8222-222222222222"
     ),
   },
@@ -124,7 +123,7 @@ describe("a pending request that names a workflow", () => {
   });
 
   it("names the workflow that asks", () => {
-    const asking = onCollection();
+    const asking = onConnection();
     const { subject } = asking;
     const id = subject.type === "workflow" ? subject.workflowId : "";
 
@@ -187,31 +186,6 @@ describe("a schedule trigger asking to start its workflow", () => {
       other: true,
       asker: "Schedule for invoice-approval",
       otherAsker: true,
-    });
-  });
-});
-
-describe("a pending request in a list's row", () => {
-  it("says what a collection request asks, by the collection's name where the page knows it, and any other by who asks", () => {
-    const reads = onCollection();
-    const both: Permission = { ...reads, actions: ["read", "write"] };
-    const { object } = reads;
-    const id = object.type === "collection" ? object.collectionId : "";
-    const named = { ...directory, collections: new Map([[id, "Finance"]]) };
-    const asker = subjectOf(reads, directory);
-
-    expect({
-      named: requestRow(reads, named),
-      both: requestRow(both, named),
-      unnamed: requestRow(reads, directory),
-      unnamedWords: requestWords(reads, directory).includes(id),
-      other: requestRow(onApp(["read"]), directory),
-    }).toStrictEqual({
-      named: `${asker} may read Finance`,
-      both: `${asker} may read and change Finance`,
-      unnamed: `${asker} may read a collection`,
-      unnamedWords: false,
-      other: subjectOf(onApp(["read"]), directory),
     });
   });
 });

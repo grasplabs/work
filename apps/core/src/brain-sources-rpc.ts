@@ -1,5 +1,9 @@
+import type { BrainStoreCursor } from "@grasp-os/shared/brain-memories";
 import { brainSearchBudget } from "@grasp-os/shared/brain-sources";
 import type {
+  BrainConnectedSource,
+  BrainLearned,
+  BrainSearchMemory,
   BrainSearchPack,
   BrainSourceListed,
   BrainSourcePage,
@@ -8,29 +12,59 @@ import type {
   BrainSourcesApi,
   BrainSourceText,
   BrainSourceVersionPage,
+  BrainSharedUploadPage,
+  BrainSharedUploadsAfter,
+  BrainUpload,
+  BrainUploadFile,
+  BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
 
+import {
+  cursorIn,
+  cursorOut,
+  entityOut,
+  memoryOut,
+} from "./brain-memories-rpc.ts";
 import {
   listSourcesAs,
   listVersionsAs,
   readSourceVersionAs,
+  readableConnectionsOf,
   recallAs,
+  versionChangeAs,
 } from "./brain-next.ts";
-import type { ListedSource, SourceRef } from "./brain-next.ts";
+import type {
+  ListedSource,
+  RecalledMemory,
+  SourceRef,
+  StoredMemory,
+} from "./brain-next.ts";
+import {
+  brainUploadOf,
+  deleteBrainUpload,
+  sharedUploadsFor,
+  uploadToBrain,
+  uploadVersionToBrain,
+} from "./brain-uploads.ts";
+import { connectionOwnersOf } from "./connections.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { keptOf } from "./shared-reads.ts";
 
 // The Brain's sources over `/rpc` (`session.brainSources`), for anyone
 // signed in who is a member: each call is the Brain's own as that person
 // (brain-next.ts), which reads them with the teams core counts them in
 // now and answers only from what they may read. Search is `recallAs`
-// with a fixed budget, its pack handed on as it is: the page ranks
-// nothing of its own. Like the rest of the workspace it refuses a Grasp
-// staff session (session-check.ts `fullAccess`). Nothing here is audited
-// per read, as `recallAs` isn't: what a source is and who may read it
-// are the Brain's, and brain-next.ts checks every source and version it
-// is given with its own rules.
+// with a fixed budget, its pack of passages and memories handed on as it
+// is, and shown whole (sources-page.tsx): the page ranks nothing of its
+// own, and nothing the budget was spent on is left out. Like the rest of
+// the workspace it refuses a Grasp staff session (session-check.ts
+// `fullAccess`). Nothing here is audited per read, as `recallAs` isn't:
+// what a source is and who may read it are the Brain's, and brain-next.ts
+// checks every source and version it is given with its own rules. Uploads
+// are brain-uploads.ts's, which checks the file, who may act on an upload
+// and its readers, and audits each.
 
 /**
  * `source` as core's Brain takes it: its own rules check the producer and
@@ -50,6 +84,7 @@ const listedOf = ({
   firstLine,
   personal,
   versions,
+  readAt,
 }: ListedSource): BrainSourceListed => ({
   source,
   version,
@@ -57,6 +92,32 @@ const listedOf = ({
   firstLine,
   personal,
   versions,
+  ...(readAt === undefined ? {} : { readAt: readAt.toISOString() }),
+});
+
+/** `memory` of a pack as the page shows it. */
+const shownOf = ({
+  store,
+  memory,
+  statement,
+  quote,
+  context,
+  source,
+  said,
+  confirmed,
+  contested,
+  found,
+}: RecalledMemory): BrainSearchMemory => ({
+  store,
+  id: memory,
+  statement,
+  quote,
+  context,
+  source,
+  said,
+  confirmed,
+  contested,
+  found,
 });
 
 export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
@@ -135,16 +196,144 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
     });
   }
 
+  async learned(
+    source: BrainSourceRef,
+    version: number,
+    next?: BrainStoreCursor | null
+  ): Promise<BrainLearned | null> {
+    return await withPerson(this.#check, async (person) => {
+      // Shown as the Memories page shows memories (brain-memories-rpc.ts):
+      // whether it is their own word, never whose.
+      const page = await versionChangeAs(this.#env, person.userId, {
+        source: refOf(source),
+        version,
+        ...(next === undefined || next === null
+          ? {}
+          : { after: cursorIn(next) }),
+      });
+      if (page === null) {
+        return null;
+      }
+      const shown = (memory: StoredMemory) => memoryOut(person.userId, memory);
+      return {
+        memories: page.memories.map(({ part, memory, rivals, moreRivals }) => ({
+          part,
+          memory: shown(memory),
+          rivals: rivals.map(shown),
+          moreRivals,
+        })),
+        entities: page.entities.map((entity) => ({
+          ...entityOut(entity),
+          firstSeen: entity.firstSeen,
+        })),
+        next: page.next === null ? null : cursorOut(page.next),
+      };
+    });
+  }
+
   async search(question: string): Promise<BrainSearchPack> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await recallAs(this.#env, person.userId, {
+    return await withPerson(this.#check, async (person) => {
+      const { items, memories, notFound, truncated } = await recallAs(
+        this.#env,
+        person.userId,
+        {
           question,
           budget: { tokens: brainSearchBudget },
           // Their own Brain page: what is theirs alone is theirs to find.
           personal: true,
-        })
+        }
+      );
+      return {
+        items,
+        memories: memories.map((memory) => shownOf(memory)),
+        notFound,
+        truncated,
+      };
+    });
+  }
+
+  async connections(): Promise<BrainConnectedSource[]> {
+    return await withPerson(this.#check, async (person) => {
+      // Only those the person's own reader holds now, as every read of
+      // theirs: one outside its audience is as one that keeps nothing.
+      const ids = await readableConnectionsOf(this.#env, person.userId);
+      const kept = await keptOf(this.#env, ids);
+      if (kept.length === 0) {
+        return [];
+      }
+      const [owners, catalog] = await Promise.all([
+        connectionOwnersOf(
+          this.#env,
+          kept.map(({ connectionId }) => connectionId)
+        ),
+        this.#env.CONNECT.catalog(),
+      ]);
+      const ownerOf = new Map(owners.map((owner) => [owner.id, owner]));
+      const names = new Map(
+        catalog.entries.map(({ source, id, name }) => [`${source}:${id}`, name])
+      );
+      return kept.flatMap(({ connectionId, records, lastReadAt }) => {
+        const owner = ownerOf.get(connectionId);
+        return owner === undefined
+          ? []
+          : [
+              {
+                connectionId,
+                name:
+                  names.get(`${owner.source}:${owner.provider}`) ??
+                  owner.provider,
+                account: owner.accountName,
+                records,
+                lastReadAt: lastReadAt.toISOString(),
+              },
+            ];
+      });
+    });
+  }
+
+  async upload(
+    file: BrainUploadFile,
+    readers: BrainUploadReaders,
+    uploadId: string
+  ): Promise<{ source: BrainSourceRef; version: number }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await uploadToBrain(this.#env, person, file, readers, uploadId)
+    );
+  }
+
+  async uploadVersion(
+    uploadId: string,
+    file: BrainUploadFile,
+    versionId: string
+  ): Promise<{ source: BrainSourceRef; version: number }> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await uploadVersionToBrain(this.#env, person, uploadId, file, versionId)
+    );
+  }
+
+  async uploadOf(uploadId: string): Promise<BrainUpload | null> {
+    return await withPerson(
+      this.#check,
+      async (person) => await brainUploadOf(this.#env, person, uploadId)
+    );
+  }
+
+  async deleteUpload(uploadId: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await deleteBrainUpload(this.#env, person, uploadId);
+    });
+  }
+
+  async sharedUploads(
+    after?: BrainSharedUploadsAfter | null
+  ): Promise<BrainSharedUploadPage> {
+    return await withPerson(
+      this.#check,
+      async (person) => await sharedUploadsFor(this.#env, person, after)
     );
   }
 }

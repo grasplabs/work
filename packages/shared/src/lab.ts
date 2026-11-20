@@ -69,7 +69,7 @@ export const labRequestSchema = z.discriminatedUnion("action", [
   z.strictObject({
     action: z.literal("turn"),
     who: labWhoSchema,
-    turn: interviewTurnRequestSchema.omit({ secret: true, key: true }),
+    turn: interviewTurnRequestSchema.omit({ secret: true }),
   }),
   /** Who someone on the roster is, as a turn of theirs would know it. */
   z.strictObject({

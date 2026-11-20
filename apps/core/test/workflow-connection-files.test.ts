@@ -14,10 +14,7 @@ import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
@@ -30,6 +27,7 @@ import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A workflow's connection calls that keep a file (`into`) or attach run
 // files (`from`), as steps of its own, from their threat model
@@ -350,10 +348,12 @@ const filingWorkflow = async () => {
     builder,
     `files-${unique()}`
   );
-  await publishWorkflowVersion(env, builder, workflow.id, {
-    definition: definitionOf(mailKey, filesKey),
-    basedOn: null,
-  });
+  await publishDefinition(
+    env,
+    builder,
+    workflow.id,
+    definitionOf(mailKey, filesKey)
+  );
   const permissionId = await granted(builder, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
     object: { type: "connection", connectionId },
@@ -393,7 +393,7 @@ const ran = async (
     { type: "person", person: by },
     id,
     {
-      version: 1,
+      expected: 1,
       args: { attach: "", ...input },
       key: unique(),
     }
@@ -559,10 +559,12 @@ describe("a workflow's connection calls keeping and attaching run files", () => 
       builder,
       `plain-${unique()}`
     );
-    const refused = await publishWorkflowVersion(env, builder, workflow.id, {
-      definition: definitionOf(plain, filesKey),
-      basedOn: null,
-    }).then(
+    const refused = await publishDefinition(
+      env,
+      builder,
+      workflow.id,
+      definitionOf(plain, filesKey)
+    ).then(
       () => [],
       (error: unknown) =>
         z

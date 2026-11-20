@@ -8,16 +8,28 @@ import { brainSearchBudget } from "@grasp-os/shared/brain-sources";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
-import { addSource, eraseSource, recallAs } from "../src/brain-next.ts";
+import {
+  addSource,
+  eraseSource,
+  recallAs,
+  rememberAs,
+} from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
-import { openRpc, signedIn, signedInApi, staffPerson } from "./sign-in.ts";
+import { eventsOf } from "./model-rules.ts";
+import {
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+} from "./sign-in.ts";
 
 type Api = Awaited<ReturnType<typeof signedInApi>>["api"];
 
@@ -227,11 +239,12 @@ describe("the Brain's sources, as a person reads them", () => {
     });
   });
 
-  it("searches with recall itself: the same pack recall gives that person, cut short or not", async () => {
+  it("searches with recall itself: the same pack it gives that person, cut short or not, its memories each with where it came from", async () => {
     const [reader, other] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "user"),
     ]);
+    const teamId = await teamOf(reader.userId);
     const asked = word();
     const missing = word();
     // More of what the reader may read than the budget holds (dates and
@@ -243,6 +256,48 @@ describe("the Brain's sources, as a person reads them", () => {
       await add(newSource(), long, owner(reader.userId));
     }
     await add(newSource(), `${asked} hidden`, owner(other.userId));
+    // A memory of theirs, one of their team's resting on a source, and
+    // another person's own, each holding the question's word.
+    const theirs = `${asked} remembered note`;
+    const { memory: theirMemory } = await rememberAs(env, reader.userId, {
+      change: crypto.randomUUID(),
+      about: { kind: "customer", names: [`Depot ${word()}`] },
+      type: "fact",
+      statement: theirs,
+      quote: theirs,
+    });
+    const teamStatement = `${asked} ships on Fridays`;
+    const teamSource = newSource();
+    await add(teamSource, teamStatement, { kind: "team", teamId });
+    const {
+      memories: [teamMemory = ""],
+    } = await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group: `team:${teamId}` },
+      entities: [{ key: "c", kind: "customer", names: [`Depot ${word()}`] }],
+      memories: [
+        {
+          about: "c",
+          type: "fact",
+          statement: teamStatement,
+          speaker: { kind: "system" },
+          basis: {
+            kind: "source",
+            source: `upload:${teamSource.id}`,
+            version: 1,
+            quote: teamStatement,
+          },
+        },
+      ],
+    });
+    const hidden = `${asked} another person's own ${word()}`;
+    await rememberAs(env, other.userId, {
+      change: crypto.randomUUID(),
+      about: { kind: "customer", names: [`Depot ${word()}`] },
+      type: "fact",
+      statement: hidden,
+      quote: hidden,
+    });
 
     const questions = [asked, `${asked} ${missing}`, `"${missing}"`];
     const searched = await Promise.all(
@@ -261,7 +316,48 @@ describe("the Brain's sources, as a person reads them", () => {
       )
     );
 
-    expect(searched).toStrictEqual(recalled);
+    // The same pack, whole: every passage and memory recall packed, in
+    // its order, nothing the budget was spent on left out.
+    expect(
+      searched.map(({ items, memories, notFound, truncated }) => ({
+        items,
+        memories: memories.map(({ store, id }) => [store, id]),
+        notFound,
+        truncated,
+      }))
+    ).toStrictEqual(
+      recalled.map(({ items, memories, notFound, truncated }) => ({
+        items,
+        memories: memories.map(({ store, memory }) => [store, memory]),
+        notFound,
+        truncated,
+      }))
+    );
+    const shown = (id: string) => {
+      const memory = searched[0]?.memories.find((each) => each.id === id);
+      return memory === undefined
+        ? undefined
+        : {
+            store: memory.store,
+            statement: memory.statement,
+            source: memory.source,
+            said: memory.said,
+          };
+    };
+    expect({
+      theirs: shown(theirMemory),
+      team: shown(teamMemory),
+      hidden: JSON.stringify(searched).includes(hidden),
+    }).toStrictEqual({
+      theirs: { store: "own", statement: theirs, source: null, said: "you" },
+      team: {
+        store: "shared",
+        statement: teamStatement,
+        source: { source: teamSource, version: 1 },
+        said: "system",
+      },
+      hidden: false,
+    });
     expect(
       searched.map(({ items, notFound, truncated }) => ({
         found: items.length > 0,
@@ -275,21 +371,55 @@ describe("the Brain's sources, as a person reads them", () => {
     ]);
   });
 
+  // GRA-1805: a chat's turns are seen in their chat, not as a row each.
+  it("lists no turn of a person's chat, and still finds one when they search", async () => {
+    const reader = await signedInApi(idp, "user");
+    const asked = word();
+    const upload = newSource();
+    await add(upload, `${asked} in a file`, owner(reader.userId));
+    const chat = {
+      producer: "chat" as const,
+      id: `${reader.userId}/${crypto.randomUUID()}`,
+    };
+    const turn = { producer: "chat" as const, id: `${chat.id}/1` };
+    await addSource(env, {
+      source: turn,
+      change: "answer",
+      text: `${asked} in a chat?`,
+      readers: owner(reader.userId),
+      group: chat,
+    });
+
+    const { sources } = await reader.api.brainSources.list();
+    const { items } = await reader.api.brainSources.search(asked);
+
+    expect({
+      listed: idsOf(sources).filter((id) => id === upload.id || id === turn.id),
+      found: items.map(({ source }) => source.id).toSorted(byCodeUnits),
+    }).toStrictEqual({
+      listed: [upload.id],
+      found: [upload.id, turn.id].toSorted(byCodeUnits),
+    });
+  });
+
   it("refuses a question longer than the Brain takes, as recall does for every caller", async () => {
     const { api, userId } = await signedInApi(idp, "user");
     const tooLong = "a".repeat(questionMaxLength + 1);
-    await expect(api.brainSources.search(tooLong)).rejects.toThrow(
-      "Something went wrong."
-    );
     // Core's own refusal, not the store's ("The Brain refused it"): the
     // question is checked before anything of it reaches the embedder.
-    await expect(
-      recallAs(env, userId, {
-        question: tooLong,
-        budget: { tokens: brainSearchBudget },
-        personal: true,
-      })
-    ).rejects.toThrow(/^Refused: /u);
+    expect({
+      searched: await outcome(api.brainSources.search(tooLong)),
+      recalled: await outcome(
+        recallAs(env, userId, {
+          question: tooLong,
+          budget: { tokens: brainSearchBudget },
+          personal: true,
+        })
+      ),
+    }).toStrictEqual({
+      searched: "brain.request_invalid",
+      recalled: "brain.request_invalid",
+    });
   });
 
   it("reads a null page start as none, and refuses one that names no page", async () => {
@@ -301,11 +431,13 @@ describe("the Brain's sources, as a person reads them", () => {
       first
     );
     await expect(
-      reader.api.brainSources.list({
-        addedAt: "not a time",
-        source: { producer: "upload", id: crypto.randomUUID() },
-      })
-    ).rejects.toThrow("Something went wrong.");
+      outcome(
+        reader.api.brainSources.list({
+          addedAt: "not a time",
+          source: { producer: "upload", id: crypto.randomUUID() },
+        })
+      )
+    ).resolves.toBe("brain.request_invalid");
   });
 
   it("refuses a Grasp staff session", async () => {
@@ -393,7 +525,7 @@ describe("the Brain's sources, as a person reads them", () => {
         source: `${prefix}hidden-${index}`,
         change: crypto.randomUUID(),
         text: `Hidden ${index}`,
-        access: { kind: "owner", person: `someone-${tag}` },
+        access: { kind: "audience", group: `team:someone-${tag}` },
       });
     }
     const pages = [];
@@ -431,5 +563,96 @@ describe("the Brain's sources, as a person reads them", () => {
         .flatMap(({ sources }) => sources.map(({ source }) => source))
         .toSorted(byCodeUnits)
     ).toStrictEqual(keys);
+  });
+});
+
+/** `value` as any argument: a call from outside TypeScript can send any shape. */
+const anything = (value: unknown): never =>
+  // SAFETY: what the test sends is what a page could, whatever its type.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  value as never;
+
+describe("the Brain's methods over RPC, given arguments of the wrong kind", () => {
+  it("refuses each as an invalid request, audits an audited one as refused for it, and logs nothing of it", async () => {
+    const { api, userId } = await signedInApi(idp, "user");
+    const marker = `Marker${word()}`;
+    const long = `${marker}${"a".repeat(1024 * 1024)}`;
+    const logged = (["log", "info", "warn", "error", "debug"] as const).map(
+      (method) => vi.spyOn(console, method)
+    );
+    const answers = {
+      forgetNumber: await outcome(api.brainMemories.forget(anything(42))),
+      forgetLong: await outcome(api.brainMemories.forget(long)),
+      listExtraField: await outcome(
+        api.brainSources.list({
+          addedAt: new Date().toISOString(),
+          source: anything({
+            producer: "upload",
+            id: crypto.randomUUID(),
+            [marker]: marker,
+          }),
+        })
+      ),
+      versionsWrongType: await outcome(
+        api.brainSources.versions(anything(marker))
+      ),
+      searchLong: await outcome(api.brainSources.search(long)),
+    };
+    const lines = logged.flatMap((spy) =>
+      spy.mock.calls
+        .flat()
+        .map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg)))
+    );
+    for (const spy of logged) {
+      spy.mockRestore();
+    }
+    // The refusals come through core's outbox, after their attempts.
+    const events = await vi.waitFor(
+      async () => {
+        const kept = await eventsOf({ type: "person", userId });
+        expect(kept).toHaveLength(4);
+        return kept;
+      },
+      { timeout: 10_000 }
+    );
+    expect({
+      answers,
+      events: events
+        .map(({ action, detail }) => ({ action, detail }))
+        .toSorted(
+          (a, b) =>
+            Number(a.detail?.outcome === "refused") -
+            Number(b.detail?.outcome === "refused")
+        ),
+      failuresLogged: lines.filter((line) => line.includes("rpc.failed")),
+      markerAnywhere: [JSON.stringify(events), ...lines].some((text) =>
+        text.includes(marker)
+      ),
+    }).toStrictEqual({
+      answers: {
+        forgetNumber: "brain.request_invalid",
+        forgetLong: "brain.request_invalid",
+        listExtraField: "brain.request_invalid",
+        versionsWrongType: "brain.request_invalid",
+        searchLong: "brain.request_invalid",
+      },
+      events: [
+        ...Array.from({ length: 2 }, () => ({
+          action: "brain.memory.forgotten",
+          detail: { onBehalfOf: userId, memory: null, outcome: "attempted" },
+        })),
+        ...Array.from({ length: 2 }, () => ({
+          action: "brain.memory.forgotten",
+          detail: {
+            onBehalfOf: userId,
+            memory: null,
+            outcome: "refused",
+            reason: "brain.request_invalid",
+          },
+        })),
+      ],
+      failuresLogged: [],
+      markerAnywhere: false,
+    });
   });
 });

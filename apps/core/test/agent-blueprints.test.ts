@@ -2,9 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
-import { release, requestGranted } from "./apps.ts";
+import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { collectionWithNote, readCollection } from "./knowledge.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -38,7 +37,7 @@ const tryEach = (calls: Record<string, string>): string =>
 /**
  * A chat of `role`'s person answered by `replies`, whose agent may build
  * Apps; the Ledger, a builder's App marked as a blueprint and shared with
- * the person, which reads a collection; and the Vault, a blueprint of
+ * the person; and the Vault, a blueprint of
  * another builder's that the person has no role in: by their blueprints'
  * IDs.
  */
@@ -46,7 +45,6 @@ const setUp = async (
   replies: (apps: { ledger: string; vault: string }) => ProviderReply[],
   role: "builder" | "user" = "builder"
 ) => {
-  const admin = await signedInApi(idp, "admin");
   const [owner, stranger] = await Promise.all([
     signedInApi(idp, "builder"),
     signedInApi(idp, "builder"),
@@ -57,15 +55,6 @@ const setUp = async (
     "src/routes/index.tsx":
       'import { createFileRoute } from "@tanstack/react-router"; export const Route = createFileRoute("/")({ component: () => null });\n',
   });
-  const { collectionId } = await collectionWithNote(admin.api, {
-    name: "Handbook",
-    access: "everyone",
-  });
-  await requestGranted(
-    idp,
-    admin,
-    readCollection({ type: "app", appId: ledger }, collectionId)
-  );
   const { id: ledgerBlueprint } = await owner.api.apps.blueprints.mark(
     ledger,
     version
@@ -84,12 +73,6 @@ const setUp = async (
     person.userId,
     ...replies({ ledger: ledgerBlueprint, vault: vaultBlueprint })
   );
-  await requestGranted(idp, admin, {
-    subject: chat.agent,
-    object: { type: "collection", collectionId: "apps" },
-    actions: ["read"],
-    binding: "APP_LIBRARY",
-  });
   return { chat };
 };
 

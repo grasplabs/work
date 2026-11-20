@@ -122,9 +122,8 @@ import type {
 //   and only its arguments are the isolate's: a file is named by its ID,
 //   which an expression may compute, but the host looks each file up by
 //   that ID *and* the run's own, so no ID of another run's file, made up
-//   or carried in data, reaches one; a Brain collection is the
-//   permission's one, read as the run's person may (core's
-//   resource-reads.ts). A connection's `into` and `from`, the files
+//   or carried in data, reaches one; the Brain is read under the
+//   permission, as the run's person may (core's resource-reads.ts). A connection's `into` and `from`, the files
 //   permissions a read keeps its file in and a write attaches files from,
 //   are sealed too: the code names the same ones, and the host refuses a
 //   call that names others, or names any where the action's contract
@@ -611,8 +610,8 @@ class Generator {
   }
 
   /**
-   * A call on the run's files or a Brain collection,
-   * `ctx.files.<alias>.<action>` or `ctx.brain.<alias>.<action>`: an action
+   * A call on the run's files or the Brain, `ctx.files.<alias>.<action>`
+   * or `ctx.brain.<alias>.<action>` (`.skills.select`): an action
    * of the format's own fixed list, sealed as its call, and declared.
    */
   #resourceCall(
@@ -644,7 +643,11 @@ class Generator {
               operation: step.action,
               arguments: args,
             },
-      member: `ctx.${kind}${memberOf(alias)}${memberOf(step.action)}`,
+      // A Brain action's path, `skills.select`, is a member of a member.
+      member: `ctx.${kind}${memberOf(alias)}${step.action
+        .split(".")
+        .map(memberOf)
+        .join("")}`,
     };
   }
 

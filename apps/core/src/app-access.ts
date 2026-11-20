@@ -1,19 +1,24 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import type { App, AppRole } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { MemberRole } from "@grasp-os/shared/subject-members";
 import { and, eq, exists, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
+  brainTeamsOfApps,
+  mayReadBrainTeamsOf,
   readerOf,
   sourcesOf,
   sourcesOfApps,
   unreadableBy,
+  unreadableTeamsBy,
 } from "./app-provenance.ts";
+import type { AppSources } from "./app-provenance.ts";
 import { teamsOf } from "./auth/identity.ts";
 import { apps, appMembers, teamMembers } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -42,7 +47,13 @@ import type { SharedRole } from "./sharing.ts";
 // exist for them (`app.not_found`), just as an App that isn't there.
 // Someone an App is shared with is refused too, with `app.unreadable`,
 // while it has read data they can't read where it comes from
-// (app-provenance.ts).
+// (app-provenance.ts). Its owner and the admins aren't held to that,
+// they manage it whatever it read, but for a team's content in the Brain
+// (GRA-1842): an App that may hold what a Brain grant recalled of a team
+// is refused, `app.unreadable`, to anyone not in that team now, its owner
+// and admins too. Managing it without reading its data (archiving,
+// restoring, removing it, resetting its data) stays theirs
+// (`{ managing: true }`); an admin revokes its grants as for any App.
 //
 // Whether it is live narrows that (app-status.ts): until its first publish
 // and while archived, it is open to its builders and the admins alone.
@@ -128,8 +139,8 @@ export const decidedAppRole = (
     shares: readonly SharedRole[];
     open: boolean;
   }
-): { role: AppRole; shared: boolean } | undefined => {
-  let found: { role: AppRole; shared: boolean } | undefined;
+): { role: MemberRole; shared: boolean } | undefined => {
+  let found: { role: MemberRole; shared: boolean } | undefined;
   if (isAdmin(by.role)) {
     found = { role: "builder", shared: false };
   } else if (owns) {
@@ -154,7 +165,7 @@ const appRole = async (
   env: Env,
   by: Person,
   app: Pick<App, "id" | "owner"> & AppOpening
-): Promise<{ role: AppRole; shared: boolean } | undefined> => {
+): Promise<{ role: MemberRole; shared: boolean } | undefined> => {
   const owns = app.owner === by.userId;
   // Whom it is shared with matters only to someone neither admin nor owner.
   const rows =
@@ -182,8 +193,24 @@ export const requireAppRole = async (
   env: Env,
   by: Person,
   app: Pick<App, "id" | "owner"> & AppOpening,
-  needed: AppRole
-): Promise<AppRole> => {
+  needed: MemberRole,
+  {
+    managing = false,
+    sources,
+  }: {
+    /**
+     * For what manages the App without reading its data (archive, restore,
+     * removal, a reset): its owner and admins outside a team its Brain
+     * grants name aren't refused it.
+     */
+    managing?: boolean;
+    /**
+     * What the App may have read, when the caller read it already for
+     * this same check (app-provenance.ts `holdingsOf`): not read again.
+     */
+    sources?: AppSources;
+  } = {}
+): Promise<MemberRole> => {
   const found = await appRole(env, by, app);
   if (found === undefined) {
     throw appErrors.create("app.not_found");
@@ -194,7 +221,7 @@ export const requireAppRole = async (
   }
   if (shared) {
     const unreadable = unreadableBy(
-      await sourcesOf(env, app.id),
+      sources ?? (await sourcesOf(env, app.id)),
       readerOf(
         by.userId,
         by.teams.map(({ id }) => id),
@@ -204,6 +231,15 @@ export const requireAppRole = async (
     if (unreadable.length > 0) {
       throw appErrors.create("app.unreadable");
     }
+  } else if (
+    !managing &&
+    !(await mayReadBrainTeamsOf(
+      env,
+      app.id,
+      by.teams.map(({ id }) => id)
+    ))
+  ) {
+    throw appErrors.create("app.unreadable");
   }
   return role;
 };
@@ -257,8 +293,9 @@ export const requireStillOpen = async (
 
 /**
  * Of the Apps `ids`, those `by` may open now as far as what each App read
- * goes (app-provenance.ts): every one for an admin, their own, and any
- * other only while they can read everything it read. That they have a
+ * goes (app-provenance.ts): for an admin, and of their own, every one but
+ * those holding a Brain team's content they aren't in; any other only
+ * while they can read everything it read. That they have a
  * role in each is for the caller to have checked (`appsFoundBy`). For
  * listing what belongs to many Apps at once, as `requireAppRole` decides
  * for one: a few queries and connect calls, whatever the number of Apps.
@@ -266,10 +303,15 @@ export const requireStillOpen = async (
 export const appsReadableBy = async (
   env: Env,
   by: Person,
-  ids: readonly string[]
+  ids: readonly string[],
+  /**
+   * For what manages them without reading their data (their permissions):
+   * an admin's and one's own aren't held to the Brain's teams.
+   */
+  { managing = false }: { managing?: boolean } = {}
 ): Promise<Set<string>> => {
-  if (isAdmin(by.role) || ids.length === 0) {
-    return new Set(ids);
+  if (ids.length === 0) {
+    return new Set();
   }
   const rows = await drizzle(env.DB)
     .select({ id: apps.id, owner: apps.ownerId })
@@ -280,14 +322,24 @@ export const appsReadableBy = async (
     by.teams.map(({ id }) => id),
     by.role
   );
-  const own = rows.filter(({ owner }) => owner === by.userId);
-  const shared = rows
-    .filter(({ owner }) => owner !== by.userId)
+  // An admin's every App, and anyone's own, are held to the Brain's teams
+  // alone; any other to everything it read.
+  const managed = rows
+    .filter(({ owner }) => isAdmin(by.role) || owner === by.userId)
     .map(({ id }) => appIdSchema.parse(id));
-  // All the shared Apps' sources at once, each decided in memory.
-  const sources = await sourcesOfApps(env, shared);
+  const managedIds = new Set<string>(managed);
+  const shared = rows
+    .filter(({ id }) => !managedIds.has(id))
+    .map(({ id }) => appIdSchema.parse(id));
+  // All the Apps' sources at once, each decided in memory.
+  const [teams, sources] = await Promise.all([
+    managing ? new Map<AppId, string[]>() : brainTeamsOfApps(env, managed),
+    sourcesOfApps(env, shared),
+  ]);
   return new Set([
-    ...own.map(({ id }) => id),
+    ...managed.filter(
+      (id) => unreadableTeamsBy(teams.get(id) ?? [], reader).length === 0
+    ),
     ...shared.filter((id) => {
       const of = sources.get(id);
       return of !== undefined && unreadableBy(of, reader).length === 0;

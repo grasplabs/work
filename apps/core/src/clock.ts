@@ -1,7 +1,3 @@
-import { sweepLinking } from "@grasp-os/brain/entities";
-import { sweepIndexing } from "@grasp-os/brain/indexing";
-import { sweepBrainReceipts } from "@grasp-os/brain/memories";
-import { sweepPayloads } from "@grasp-os/brain/payloads";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   ClockObject,
@@ -16,31 +12,38 @@ import { sweepTestFixtures } from "./app-tests.ts";
 import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
-import { reconcileConsolidation } from "./brain-consolidation.ts";
-import { workBrain } from "./brain-next.ts";
+import { expireEvents, workBrain } from "./brain-next.ts";
+import { removeLostRunSources } from "./brain-run-sources.ts";
 import { producersOf, relayHandOvers } from "./brain-sources.ts";
+import { runSync } from "./brain-sync.ts";
+import { completeOwedRemovals } from "./brain-uploads.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
+import { readDirectories } from "./directory-people.ts";
+import { readReaderGroups } from "./directory-reader-groups.ts";
+import { suspendedUserIds } from "./directory-suspensions.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
-import { indexApps } from "./knowledge/apps-collection.ts";
-import { advanceExports } from "./knowledge/brain-export.ts";
-import { brainOf } from "./knowledge/ports.ts";
-import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
-import { checkReadings } from "./onboarding/documents.ts";
+import { settleOnboardingBrain } from "./onboarding/new-brain.ts";
 import { rescanPackages } from "./packages/rescan.ts";
 import { sweepPageFrames } from "./page-frame.ts";
 import { sweepBuilds } from "./pages.ts";
 import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
+import { completeOwedErasures } from "./shared-reads.ts";
+import { reconcileSkills } from "./skill-shares.ts";
+import {
+  readerGroupQueriesPerTick,
+  readerGroupRequestsPerTick,
+} from "./source-readers.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
@@ -55,6 +58,7 @@ import {
 import { sweepRunDetails } from "./workflows/retention.ts";
 import { sweepRunFiles } from "./workflows/run-files.ts";
 import { startDueScheduleTriggers } from "./workflows/schedule-triggers.ts";
+import { sweepSourceDeliveries } from "./workflows/source-deliveries.ts";
 import { repairWakes } from "./workflows/wakes.ts";
 
 // The client's clock for core (spec 43.5, @grasp-os/workerflow/clock):
@@ -70,14 +74,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // Connect's events also tell people of the mailboxes and drives it
   // stopped hearing (src/connector-source-notices.ts).
   { name: "audit.drain", period: "minute", run: drainAuditOutboxesNoticing },
-  // Settled runs' outcomes the Brain doesn't have yet (src/brain-capture.ts).
-  // Scopes whose few new episodes waited long enough to be consolidated
-  // into lesson candidates (src/brain-consolidation.ts).
-  {
-    name: "brain.consolidation",
-    period: "minute",
-    run: reconcileConsolidation,
-  },
   // The new Brain's work queue: what is due, a few at a time
   // (src/brain-next.ts, @grasp-os/brain-next's work.ts), its hand-overs
   // read from core's producers (src/brain-sources.ts).
@@ -88,53 +84,73 @@ export const clockTasks: readonly ClockTask<Env>[] = [
       await workBrain(env, at, producersOf(env));
     },
   },
+  // Events past their time, deleted from the new Brain (GRA-1763,
+  // src/brain-next.ts `expireEvents`).
+  {
+    name: "brain.events",
+    period: "minute",
+    run: async (env) => {
+      await expireEvents(env);
+    },
+  },
   // What core noted to hand over to the new Brain, put on its work queue
   // (src/brain-hand-overs.ts, src/brain-sources.ts).
   { name: "brain.hand_overs", period: "minute", run: relayHandOvers },
+  // What the onboarding still owes the new Brain: interviews and team
+  // claims that no longer stand, each erased until it is, then each
+  // interview to add, added until it is (src/onboarding/new-brain.ts).
+  // A team claim is added by the hand-over.
+  {
+    name: "onboarding.brain_erasures",
+    period: "minute",
+    run: async (env) => {
+      await settleOnboardingBrain(env);
+    },
+  },
+  // Run results of people who lost their workflow, taken out of use in the
+  // new Brain (src/brain-run-sources.ts).
+  {
+    name: "brain.run_sources",
+    period: "minute",
+    run: async (env) => {
+      await removeLostRunSources(env);
+    },
+  },
   { name: "members.disconnects", period: "minute", run: retryDisconnects },
   { name: "members.erasures", period: "minute", run: retryErasures },
+  // Shared uploads their uploaders removed, whose removal from the Brain,
+  // or its record, is still owed (src/brain-uploads.ts).
+  {
+    name: "brain.upload_removals",
+    period: "minute",
+    run: completeOwedRemovals,
+  },
+  // Erasures of what the Brain kept from a shared connection, each a step
+  // on until it ends (src/shared-reads.ts, GRA-1831).
+  {
+    name: "brain.shared_read_erasures",
+    period: "minute",
+    run: async (env) => {
+      await completeOwedErasures(env);
+    },
+  },
+  // Native sync (src/brain-sync.ts, GRA-1758): what disconnects owe the
+  // shared store erased, then pages of each connected system's changes
+  // made into Brain sources, out of a stated share of the run's calls.
+  {
+    name: "brain.sync",
+    period: "minute",
+    run: async (env) => {
+      await runSync(env);
+    },
+  },
+  // Decisions on the company's skills whose outcome the Brain hasn't given
+  // yet (src/skill-shares.ts `reconcileSkills`).
+  { name: "skills.reconcile", period: "minute", run: reconcileSkills },
   {
     name: "access.revocations",
     period: "minute",
     run: retryAccessRevocations,
-  },
-  { name: "knowledge.uploads", period: "minute", run: sweepUploads },
-  // Exports of the company's Brain being written, and those past their
-  // window (src/knowledge/brain-export.ts).
-  { name: "brain.exports", period: "minute", run: advanceExports },
-  // Shared documents' readings their writer never checked against the
-  // purges since (src/onboarding/documents.ts `checkReading`).
-  {
-    name: "onboarding.readings",
-    period: "minute",
-    run: checkReadings,
-  },
-  // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
-  {
-    name: "knowledge.payloads",
-    period: "minute",
-    run: async (env, at) => {
-      await sweepPayloads(brainOf(env), at);
-    },
-  },
-  // Documents whose indexing never started or ended unfinished, and failed
-  // ones due another run (src/knowledge/indexing.ts).
-  {
-    name: "knowledge.indexing",
-    period: "minute",
-    run: async (env, at) => {
-      await sweepIndexing(brainOf(env), at);
-    },
-  },
-  // Brain sources settled since their change, linking runs that ended
-  // unfinished, and failed ones due another run (packages/brain's
-  // entities.ts).
-  {
-    name: "knowledge.linking",
-    period: "minute",
-    run: async (env, at) => {
-      await sweepLinking(brainOf(env), at);
-    },
   },
   // Deploys apply migrations first (CI's db:migrate, and the admin's
   // deploy), so `platform_versions` exists. A version running before it
@@ -198,6 +214,21 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // model's files copied from the release directory first
   // (src/embedder.ts).
   { name: "embed.warm", period: "minute", run: warmQuestionEmbedder },
+  // The groups each person's own suite account is in, read again once its
+  // token was minted since, which copied reader lists' groups count them
+  // in (connect's src/reader-groups.ts, source-readers.ts).
+  {
+    name: "brain.reader_groups",
+    period: "minute",
+    run: async (env) => {
+      await env.CONNECT.readReaderGroups({
+        requests: readerGroupRequestsPerTick,
+        queries: readerGroupQueriesPerTick,
+        // Whose own connections connect reads nothing of now (GRA-2143).
+        paused: await suspendedUserIds(env),
+      });
+    },
+  },
   // Connect's own clock armed, if nothing has (connect's src/clock.ts).
   {
     name: "connect.clock",
@@ -210,21 +241,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "signals.daily",
     period: "quarterHour",
     run: refreshDailySignals,
-  },
-  {
-    name: "knowledge.apps",
-    period: "quarterHour",
-    run: async (env) => {
-      await indexApps(env);
-    },
-  },
-  // Brain command receipts past their retention (src/knowledge/memories.ts).
-  {
-    name: "knowledge.brain_receipts",
-    period: "quarterHour",
-    run: async (env, at) => {
-      await sweepBrainReceipts(brainOf(env), at);
-    },
   },
   {
     name: "email.kept",
@@ -247,6 +263,14 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepEventWaits,
   },
+  // What event sources kept of their deliveries: payloads past their day,
+  // deliveries and counts past their seven
+  // (src/workflows/source-deliveries.ts).
+  {
+    name: "workflows.source_deliveries",
+    period: "quarterHour",
+    run: sweepSourceDeliveries,
+  },
   { name: "channels.links", period: "quarterHour", run: sweepChannelLinks },
   // Stephen's counts past their week (src/channels/signals.ts).
   {
@@ -254,8 +278,8 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepChannelSignals,
   },
-  // Stephen's requests past their thirteen months, and the questions
-  // nothing points at (src/channels/stephen-requests.ts).
+  // Stephen's requests past their thirteen months, and the questions,
+  // topics and proposals nothing points at (src/channels/stephen-requests.ts).
   {
     name: "channels.requests",
     period: "quarterHour",
@@ -307,6 +331,18 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // since, a few a run (src/packages/rescan.ts).
   { name: "packages.rescan", period: "quarterHour", run: rescanPackages },
   { name: "apps.releases", period: "quarterHour", run: sweepReleases },
+  // The organization's directory, read once a day and kept by the
+  // provider's IDs of its people, tied to the members who signed in
+  // (src/directory-people.ts, GRA-2056).
+  { name: "directory.people", period: "quarterHour", run: readDirectories },
+  // The members of the Entra groups reader lists name, through the same
+  // directory, each read again every half day (src/directory-reader-groups.ts,
+  // GRA-2146).
+  {
+    name: "directory.reader_groups",
+    period: "quarterHour",
+    run: readReaderGroups,
+  },
   // Model usage past its retention (src/model-usage.ts).
   { name: "models.usage", period: "quarterHour", run: sweepModelUsage },
   {

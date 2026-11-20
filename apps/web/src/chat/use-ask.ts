@@ -4,9 +4,10 @@ import {
   chatFilesPerQuestionMax,
   chatFileTypeOf,
 } from "@grasp-os/shared/chat";
-import type { ChatMake, ChatSubject } from "@grasp-os/shared/chat";
+import type { ChatMake } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
+import type { Subject } from "@grasp-os/shared/subject";
 import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { useRef, useState, useSyncExternalStore } from "react";
@@ -69,7 +70,7 @@ export interface AskOptions {
   /**
    * What each question is about: the page it is asked on (chat-subject.ts).
    */
-  subject?: ChatSubject;
+  subject?: Subject;
   /**
    * What "Make something" started the new chat to make (`ChatMake`),
    * which the chat keeps: the first question makes the chat with it.
@@ -259,14 +260,17 @@ export const useAsk = (
     setLate(false);
     setUnsentWhy(undefined);
     const named = chatMentionsOf(mentioned);
+    // A new chat starts with the agent picked, else the first one the
+    // question mentions: the first agent, paused, never stops it.
+    const startWith = agentId ?? named.find(({ kind }) => kind === "agent")?.id;
     let created: string | undefined;
     const call = run(
       async (session) => {
-        let id = chatId ?? unsentChatFor(unsent.current, question, agentId);
+        let id = chatId ?? unsentChatFor(unsent.current, question, startWith);
         if (id === undefined) {
           ({ id } = await session.chats.create(
             titleOf(question),
-            agentId,
+            startWith,
             make
           ));
           created = id;
@@ -316,7 +320,7 @@ export const useAsk = (
         // The box keeps the question and says why it wasn't sent; a new chat
         // made for it waits to be asked in again.
         if (created !== undefined) {
-          unsent.current = { id: created, question, agentId };
+          unsent.current = { id: created, question, agentId: startWith };
         }
         return false;
       }

@@ -55,7 +55,7 @@ const sharedWorkflows = async () => {
   ]);
   await Promise.all(
     [approve, remind].map(async ({ id }) => {
-      await owner.api.workflowResources.share(id, {
+      await owner.api.workflowResources.members.add(id, {
         type: "person",
         id: user.userId,
         role: "builder",
@@ -188,7 +188,7 @@ describe("widgets Grasp makes from what a person asks", () => {
     // The other builder no longer has a role in either workflow.
     await Promise.all(
       [app.approve, app.remind].map(async ({ id }) => {
-        await owner.api.workflowResources.unshare(id, {
+        await owner.api.workflowResources.members.remove(id, {
           type: "person",
           id: user.userId,
         });

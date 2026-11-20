@@ -4,12 +4,13 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { permissions } from "./db/core/schema.ts";
 
-// The App's `{ type: "platform" }` permissions, as a `grasp` or guests
-// binding names one (resource-grasp.ts, resource-guests.ts): one
+// The App's `{ type: "platform" }` permissions, as a `grasp`, guests or
+// brain binding names one (resource-grasp.ts, resource-guests.ts,
+// resource-brain.ts): one
 // action each, which an admin granted the App itself, never a chat's.
 
 /** What the platform offers an App that a binding may name. */
-export type PlatformAction = "statistics" | "guests";
+export type PlatformAction = "statistics" | "guests" | "brain";
 
 /** App `app`'s own active permissions of `action`, as one condition. */
 const ownActive = (app: AppId, action: PlatformAction) =>

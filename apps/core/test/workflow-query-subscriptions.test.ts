@@ -10,27 +10,24 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor } from "../src/apps.ts";
+import { appKind, appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { decisionOutcome, openDecision } from "../src/decisions/decisions.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { terminateResourceRun } from "../src/workflows/resource-runs.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
 import { approvalDeclared } from "./json-workflow-apps.ts";
 import { appWith, queryReference, seal } from "./sealed-apps.ts";
 import { signedInApi, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // A page's live workflow queries (`workflows.<alias>.queries.runs`,
 // workflow-reference-queries.ts), followed through a frame's `watchQuery` as
@@ -202,18 +199,14 @@ const followingRuns = async (
     builder.acting,
     `greet-${unique()}`
   );
-  await publishWorkflowVersion(env, builder.acting, workflow.id, {
-    definition: definitionOf(),
-    basedOn: null,
-  });
-  const fixture = await appWith(files(), "Requests", builder.acting);
+  await publishDefinition(env, builder.acting, workflow.id, definitionOf());
+  const fixture = await appWith(
+    boundIn(files(), { followUp: workflow.id }),
+    "Requests",
+    builder.acting
+  );
   await seal(fixture);
-  await publishVersion(env, builder.acting, fixture.app, 1);
-  await bindWorkflowToApp(env, builder.acting, workflow.id, {
-    app: fixture.app,
-    alias: "followUp",
-    version: 1,
-  });
+  await rollback(env, appKind, builder.acting, fixture.app, 1);
   const asked = await requestPermission(
     env,
     builder.acting,
@@ -432,22 +425,19 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       builder.acting,
       `decide-${unique()}`
     );
-    await publishWorkflowVersion(env, builder.acting, workflow.id, {
-      definition: decidingDefinitionOf(key),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      builder.acting,
+      workflow.id,
+      decidingDefinitionOf(key)
+    );
     const fixture = await appWith(
-      files(approvalDeclared),
+      boundIn(files(approvalDeclared), { followUp: workflow.id }),
       "Requests",
       builder.acting
     );
-    await bindWorkflowToApp(env, builder.acting, workflow.id, {
-      app: fixture.app,
-      alias: "followUp",
-      version: 1,
-    });
     await seal(fixture);
-    await publishVersion(env, builder.acting, fixture.app, 1);
+    await rollback(env, appKind, builder.acting, fixture.app, 1);
     await env.DB.prepare(
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
     )
@@ -542,22 +532,19 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       builder.acting,
       `decide-${unique()}`
     );
-    await publishWorkflowVersion(env, builder.acting, workflow.id, {
-      definition: decidingDefinitionOf(key),
-      basedOn: null,
-    });
+    await publishDefinition(
+      env,
+      builder.acting,
+      workflow.id,
+      decidingDefinitionOf(key)
+    );
     const fixture = await appWith(
-      files(approvalDeclared),
+      boundIn(files(approvalDeclared), { followUp: workflow.id }),
       "Requests",
       builder.acting
     );
-    await bindWorkflowToApp(env, builder.acting, workflow.id, {
-      app: fixture.app,
-      alias: "followUp",
-      version: 1,
-    });
     await seal(fixture);
-    await publishVersion(env, builder.acting, fixture.app, 1);
+    await rollback(env, appKind, builder.acting, fixture.app, 1);
     await env.DB.prepare(
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
     )

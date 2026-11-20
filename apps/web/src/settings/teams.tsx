@@ -1,4 +1,8 @@
-import type { Member, OrganizationTeam } from "@grasp-os/shared/members";
+import type {
+  DirectoryPlacement,
+  Member,
+  OrganizationTeam,
+} from "@grasp-os/shared/members";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -50,6 +54,7 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+import { DirectoryPlacementSections } from "./directory-placement.tsx";
 import { LoadingLines, RowNote, SectionNotLoaded } from "./section.tsx";
 import { createTeam, deleteTeam } from "./team-changes.ts";
 import { isTaken, TeamDialog } from "./team-members-dialog.tsx";
@@ -57,9 +62,9 @@ import { useTeamChange } from "./use-team-change.ts";
 
 // Teams, for admins (GRA-1296): the organization's teams, each with how
 // many are in it; making one, renaming it, deleting it, and who is in it.
-// Everything that is shared with a team ("Chosen teams") picks from these.
-// They aren't the onboarding's roster teams, which are a list of their
-// own. Better Auth checks the role on every
+// Everything that is shared with a team ("Chosen teams") picks from these,
+// and so does the onboarding's staff list, which names these same teams
+// (GRA-2055). Better Auth checks the role on every
 // change and core on every read; only admins see this tab at all.
 
 const styles = stylex.create({
@@ -85,6 +90,8 @@ const styles = stylex.create({
 interface TeamsData {
   teams: OrganizationTeam[];
   members: Member[];
+  /** Whom the directory leaves for an admin to place (directory-placement.tsx). */
+  placement: DirectoryPlacement;
 }
 
 const readTeams = async (
@@ -94,11 +101,12 @@ const readTeams = async (
   await loadFromCore(
     core,
     async (session) => {
-      const [teams, members] = await Promise.all([
+      const [teams, members, placement] = await Promise.all([
         session.members.teams(),
         session.members.list(),
+        session.members.directoryPlacement(),
       ]);
-      return { teams, members };
+      return { teams, members, placement };
     },
     left
   );
@@ -381,42 +389,50 @@ const TeamsList = ({
   const [opened, setOpened] = useState<string>();
   const open = teams.find(({ id }) => id === opened);
   return (
-    <SectionCard
-      variant="grouped"
-      actions={<NewTeamButton onChanged={onChanged} teams={teams} />}
-      density="compact"
-      flush={teams.length > 0}
-      title={t`Teams`}
-    >
-      {teams.length === 0 ? (
-        <Text tone="muted">{t`No teams yet.`}</Text>
-      ) : (
-        <ItemGroup aria-label={t`Teams`} separated>
-          {teams.map((team) => (
-            <TeamRow
-              key={team.id}
-              members={members}
-              onChanged={onChanged}
-              onOpen={() => {
-                setOpened(team.id);
-              }}
-              team={team}
-            />
-          ))}
-        </ItemGroup>
-      )}
-      {/* A new dialog for each team opened, so it starts from that team's name and people. */}
-      <TeamDialog
-        key={open?.id ?? "closed"}
-        members={members}
+    <>
+      <SectionCard
+        variant="grouped"
+        actions={<NewTeamButton onChanged={onChanged} teams={teams} />}
+        density="compact"
+        flush={teams.length > 0}
+        title={t`Teams`}
+      >
+        {teams.length === 0 ? (
+          <Text tone="muted">{t`No teams yet.`}</Text>
+        ) : (
+          <ItemGroup aria-label={t`Teams`} separated>
+            {teams.map((team) => (
+              <TeamRow
+                key={team.id}
+                members={members}
+                onChanged={onChanged}
+                onOpen={() => {
+                  setOpened(team.id);
+                }}
+                team={team}
+              />
+            ))}
+          </ItemGroup>
+        )}
+        {/* A new dialog for each team opened, so it starts from that team's name and people. */}
+        <TeamDialog
+          key={open?.id ?? "closed"}
+          members={members}
+          onChanged={onChanged}
+          onClose={() => {
+            setOpened(undefined);
+          }}
+          team={open}
+          teams={teams}
+        />
+      </SectionCard>
+      {/* Whom the directory leaves to place, and the hand pins: each only while it lists someone. */}
+      <DirectoryPlacementSections
         onChanged={onChanged}
-        onClose={() => {
-          setOpened(undefined);
-        }}
-        team={open}
+        placement={data.placement}
         teams={teams}
       />
-    </SectionCard>
+    </>
   );
 };
 

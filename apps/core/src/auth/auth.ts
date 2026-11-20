@@ -1,11 +1,15 @@
 import type { sso } from "@better-auth/sso";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { relayRedirectUri } from "@grasp-os/shared/oauth-relay";
+import {
+  staffListTeamRefusals,
+  teamNameKey,
+} from "@grasp-os/shared/onboarding";
 import { roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import type { SignInRefusal } from "@grasp-os/shared/sign-in";
@@ -20,14 +24,23 @@ import { organization } from "better-auth/plugins/organization";
 import { defaultAc } from "better-auth/plugins/organization/access";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { teamAccessMayHaveDropped, teamGone } from "../access-revocations.ts";
+import {
+  teamAccessMayHaveDropped,
+  teamGone,
+  tellKept,
+} from "../access-revocations.ts";
 import {
   auditedBatch,
   keepAuditEvent,
+  outboxedEventWhere,
   outboxedIfChanged,
+  outboxedWhere,
+  storedEvent,
 } from "../audit-outbox.ts";
 import {
   accounts,
@@ -41,25 +54,42 @@ import {
   users,
   verifications,
 } from "../db/core/schema.ts";
+import { pinTeamMember, placeMember } from "../directory-teams.ts";
+import { directoryKinds, tieSignedIn } from "../directory-ties.ts";
 import {
   isErasedEmail,
   isErasedSubject,
   subjectsOf,
 } from "../erased-people.ts";
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
+import { onboardingStore } from "../onboarding/store.ts";
+import { keepSignInAddress } from "../source-readers.ts";
+import { namedOnListUnmade } from "../staff-list-teams.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
   directoryProviderId,
   oidcProviders,
   providerIds,
+  signInConfig,
 } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
-import { activeMember, notRemoved, organizationId } from "./membership-sql.ts";
+import {
+  activeMember,
+  mayAct,
+  notRemoved,
+  organizationId,
+} from "./membership-sql.ts";
 
 // Kept apart (membership-sql.ts), with nothing but the schema imported, so
 // access checks read by the revocations this file reaches can use them.
-export { activeMember, notRemoved, organizationId } from "./membership-sql.ts";
+export {
+  activeMember,
+  mayAct,
+  memberNotRemoved,
+  notRemoved,
+  organizationId,
+} from "./membership-sql.ts";
 
 /** Better Auth's routes, under core's API. */
 export const authBasePath = "/api/auth";
@@ -117,19 +147,27 @@ const authLogger = {
 
 /**
  * `userId`'s current membership of the organization, as a SQL condition on
- * `members`: none once an admin removed them.
+ * `members`: none once they may no longer act (`mayAct`).
  */
 export const currentMembership = (userId: string): SQL | undefined =>
   and(
     eq(members.organizationId, organizationId),
     eq(members.userId, userId),
-    notRemoved(userId)
+    mayAct(userId)
   );
 
 /** Whether an admin removed `userId` from the organization. */
 export const isRemoved = async (env: Env, userId: string): Promise<boolean> => {
   const row = await drizzle(env.DB).get<{ member: number }>(
     sql`SELECT ${notRemoved(userId)} AS member`
+  );
+  return row.member === 0;
+};
+
+/** Whether `userId` may no longer act or be read as (`mayAct`). */
+export const mayNotAct = async (env: Env, userId: string): Promise<boolean> => {
+  const row = await drizzle(env.DB).get<{ member: number }>(
+    sql`SELECT ${mayAct(userId)} AS member`
   );
   return row.member === 0;
 };
@@ -142,7 +180,7 @@ export const activeAdminExists = (except?: string): SQL => sql`EXISTS (
   SELECT 1 FROM ${members}
   WHERE ${members.organizationId} = ${organizationId}
     AND ${members.role} = 'admin'
-    AND ${notRemoved(members.userId)}
+    AND ${mayAct(members.userId)}
     ${except === undefined ? sql`` : sql`AND ${members.userId} <> ${except}`}
 )`;
 
@@ -177,7 +215,7 @@ const restoreAdmin = async (env: Env, userId: string): Promise<void> => {
       .where(
         and(
           eq(members.id, membership.id),
-          notRemoved(userId),
+          mayAct(userId),
           sql`NOT ${activeAdminExists()}`
         )
       ),
@@ -228,6 +266,83 @@ const openInvitation = async (
   return invitation && role.success
     ? { id: invitation.id, role: role.data }
     : undefined;
+};
+
+/**
+ * What joining gives someone signing in with `email` at `now`: admin for
+ * a configured admin; otherwise the role of their open invitation, only
+ * while it is still open as the statement that gives it runs (`role`, as
+ * SQL), or `user`. `taken` is the role the invitation is taken up with;
+ * `configuredAdmin` whether they are one.
+ * The one rule for a new member (`ensureMember`) and for a member the
+ * directory made before they signed in (`adoptDirectoryMember`).
+ */
+const joiningOf = async (
+  env: Env,
+  admins: readonly string[],
+  email: string | undefined,
+  now: number
+): Promise<{
+  role: SQL;
+  invitation: { id: string; taken: string } | undefined;
+  configuredAdmin: boolean;
+}> => {
+  const configuredAdmin = email !== undefined && admins.includes(email);
+  const invitation =
+    email === undefined ? undefined : await openInvitation(env, email, now);
+  if (configuredAdmin) {
+    return {
+      configuredAdmin,
+      role: sql`'admin'`,
+      invitation:
+        invitation === undefined
+          ? undefined
+          : { id: invitation.id, taken: "admin" },
+    };
+  }
+  return invitation === undefined
+    ? { configuredAdmin, role: sql`'user'`, invitation: undefined }
+    : {
+        configuredAdmin,
+        role: sql`CASE WHEN ${isOpenInvitation(invitation.id, now)} THEN ${invitation.role} ELSE 'user' END`,
+        invitation: { id: invitation.id, taken: invitation.role },
+      };
+};
+
+/**
+ * The statements that take up `invitation` for `userId`, as they join, and
+ * record it, only where `joined` holds as they run and the invitation is
+ * still open then: taken up once, by the join that gave its role. `taken`
+ * is whether they did, as SQL for the batch's later statements.
+ */
+const takingUp = (
+  db: DrizzleD1Database,
+  invitation: { id: string; taken: string },
+  userId: string,
+  now: number,
+  joined: SQL
+): { statements: [BatchItem<"sqlite">, BatchItem<"sqlite">]; taken: SQL } => {
+  const accepted = createAuditEvent(
+    {
+      actor: actorOf({ userId, staff: false }),
+      action: "member.invitation.accepted",
+      target: { type: "invitation", id: invitation.id },
+      detail: { userId, role: invitation.taken },
+    },
+    "core"
+  );
+  return {
+    statements: [
+      db
+        .update(invitations)
+        .set({ status: "accepted" })
+        .where(
+          and(eq(invitations.id, invitation.id), openInvitationAt(now), joined)
+        ),
+      outboxedEventWhere(db, accepted, sql`changes() > 0`),
+    ],
+    taken: storedEvent(accepted.id),
+  };
 };
 
 /**
@@ -286,19 +401,13 @@ const ensureMember = async (
   ) {
     return false;
   }
-  const configuredAdmin = email !== undefined && config.admins.includes(email);
   const now = new Date();
-  const invitation =
-    email === undefined
-      ? undefined
-      : await openInvitation(env, email, now.getTime());
-  const invited =
-    invitation === undefined
-      ? sql`0`
-      : isOpenInvitation(invitation.id, now.getTime());
-  const role = configuredAdmin
-    ? sql`'admin'`
-    : sql`CASE WHEN ${invited} THEN ${invitation?.role ?? "user"} ELSE 'user' END`;
+  const { role, invitation, configuredAdmin } = await joiningOf(
+    env,
+    config.admins,
+    email,
+    now.getTime()
+  );
   await db
     .insert(organizations)
     .values({
@@ -312,7 +421,7 @@ const ensureMember = async (
   const join = db
     .insert(members)
     .select(
-      sql`SELECT ${memberId}, ${organizationId}, ${userId}, ${role}, ${now.getTime()}
+      sql`SELECT ${memberId}, ${organizationId}, ${userId}, ${role}, ${now.getTime()}, NULL, NULL, NULL
         WHERE ${notRemoved(userId)}`
     )
     .onConflictDoNothing();
@@ -320,27 +429,30 @@ const ensureMember = async (
     ? join
     : auditedBatch(env, db, [
         join,
-        db
-          .update(invitations)
-          .set({ status: "accepted" })
-          .where(
-            and(
-              eq(invitations.id, invitation.id),
-              openInvitationAt(now.getTime()),
-              sql`EXISTS (SELECT 1 FROM ${members} WHERE ${members.id} = ${memberId})`
-            )
-          ),
-        outboxedIfChanged(db, {
-          actor: actorOf({ userId, staff: false }),
-          action: "member.invitation.accepted",
-          target: { type: "invitation", id: invitation.id },
-          detail: { userId, role: configuredAdmin ? "admin" : invitation.role },
-        }),
+        ...takingUp(
+          db,
+          invitation,
+          userId,
+          now.getTime(),
+          sql`EXISTS (SELECT 1 FROM ${members} WHERE ${members.id} = ${memberId})`
+        ).statements,
       ]));
   if (configuredAdmin) {
     await restoreAdmin(env, userId);
   }
-  return !(await isRemoved(env, userId));
+  return !(await mayNotAct(env, userId));
+};
+
+/** `userId`'s address, as their sign-in gave it. */
+const emailOf = async (
+  env: Env,
+  userId: string
+): Promise<string | undefined> => {
+  const [user] = await drizzle(env.DB)
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, userId));
+  return user?.email;
 };
 
 /**
@@ -351,12 +463,102 @@ const gateLetsIn = async (
   env: Env,
   config: SignInConfig,
   userId: string
+): Promise<boolean> => await mayComeIn(env, config, await emailOf(env, userId));
+
+/**
+ * Whether `email`, verified by the company's sign-in, opens someone's
+ * interview link while the gate is closed (GRA-1790, the store's
+ * `interviewInvites`). Fails closed: an onboarding that can't be asked
+ * lets nobody in for an interview.
+ */
+const interviewInvites = async (
+  env: Env,
+  email: string | undefined
 ): Promise<boolean> => {
-  const [user] = await drizzle(env.DB)
-    .select({ email: users.email })
-    .from(users)
-    .where(eq(users.id, userId));
-  return await mayComeIn(env, config, user?.email);
+  if (email === undefined) {
+    return false;
+  }
+  try {
+    return await onboardingStore(env).interviewInvites(email);
+  } catch (error) {
+    log.error("auth.interview_check_failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return false;
+  }
+};
+
+/**
+ * The statements that make a member the directory made before they signed
+ * in join, at their first sign-in (`adoptDirectoryMember`), in its batch
+ * after `moved` (the account moved to them there).
+ */
+const joinedAs = (
+  db: DrizzleD1Database,
+  joining: Awaited<ReturnType<typeof joiningOf>>,
+  memberId: string,
+  membershipId: string | undefined,
+  moved: SQL,
+  now: number
+): BatchItem<"sqlite">[] => {
+  // Their first sign-in is their join, decided in the batch once the
+  // account moved, and only while they may act (someone suspended, whose
+  // sign-in `ensureMember` refuses after this, hasn't joined). Their
+  // invitation first: taken up while they have the role the directory
+  // made them with or the one it gives, never over one an admin gave them
+  // since. Then the role, raised only from that one, so nothing is ever
+  // lowered: the invitation's where it was taken up, a configured admin's,
+  // or none. A configured admin's raise is recorded by the take-up's event
+  // where there was one, else by its own: whichever the batch did.
+  const joins = sql`${moved} AND ${mayAct(memberId)}`;
+  const memberWith = (held: SQL) => sql`EXISTS (
+    SELECT 1 FROM ${members}
+    WHERE ${members.organizationId} = ${organizationId}
+      AND ${members.userId} = ${memberId}
+      AND ${members.role} IN ${held}
+  )`;
+  const invited =
+    joining.invitation === undefined
+      ? undefined
+      : takingUp(
+          db,
+          joining.invitation,
+          memberId,
+          now,
+          sql`${joins} AND ${memberWith(sql`(${joining.invitation.taken}, 'user')`)}`
+        );
+  const taken = invited?.taken ?? sql`0`;
+  const raisedTo = joining.configuredAdmin
+    ? sql`'admin'`
+    : sql`CASE WHEN ${taken} THEN ${joining.invitation?.taken ?? "user"} ELSE 'user' END`;
+  return [
+    ...(invited?.statements ?? []),
+    ...(joining.configuredAdmin && membershipId !== undefined
+      ? [
+          outboxedWhere(
+            db,
+            {
+              actor: { type: "system" },
+              action: "member.role.updated",
+              target: { type: "member", id: membershipId },
+              detail: { userId: memberId, role: "admin", reason: "joined" },
+            },
+            sql`${joins} AND ${memberWith(sql`('user')`)} AND NOT ${taken}`
+          ),
+        ]
+      : []),
+    db
+      .update(members)
+      .set({ role: raisedTo })
+      .where(
+        and(
+          eq(members.organizationId, organizationId),
+          eq(members.userId, memberId),
+          eq(members.role, "user"),
+          joins
+        )
+      ),
+  ];
 };
 
 /**
@@ -366,10 +568,18 @@ const gateLetsIn = async (
  * member, who takes their name and address, and the new user goes.
  * Answers the user id the session is for: the directory's member, or
  * `userId` when there is none, or `userId` isn't new.
+ *
+ * What else belongs to the new user (`moving`, from one user to another:
+ * an interview of theirs) moves first, before the new user goes, so a
+ * failure to move leaves it and the user as they were, adopted at the next
+ * sign-in; moving again is harmless. Moved back whenever the member wasn't
+ * adopted after all, the batch's failure among it: the batch is one
+ * transaction, so whose the account is says whether it landed.
  */
 export const adoptDirectoryMember = async (
   env: Env,
   userId: string,
+  moving: (from: string, to: string) => Promise<void>,
   now = new Date()
 ): Promise<string> => {
   const db = drizzle(env.DB);
@@ -392,13 +602,16 @@ export const adoptDirectoryMember = async (
   ) {
     return userId;
   }
+  // The object ID compared lower case, as the directory's daily read
+  // keeps it (directory-people.ts), by `accounts_provider_oid_lower_idx`:
+  // however Entra cases it in the token, it is the same person.
   const [held] = await db
     .select({ userId: accounts.userId })
     .from(accounts)
     .where(
       and(
         eq(accounts.providerId, directoryProviderId),
-        eq(accounts.accountId, signedIn.oid),
+        sql`lower(${accounts.oid}) = lower(${signedIn.oid})`,
         ne(accounts.userId, userId)
       )
     );
@@ -414,6 +627,25 @@ export const adoptDirectoryMember = async (
     return userId;
   }
   const memberId = held.userId;
+  // Their first sign-in is when they join: it gives them what a join gives
+  // a new member (`joiningOf`), by the address it brings, as `ensureMember`
+  // would have, had the directory not made them a member first.
+  const joining = await joiningOf(
+    env,
+    signInConfig(env)?.admins ?? [],
+    fresh.email.toLowerCase(),
+    now.getTime()
+  );
+  const [membership] = await db
+    .select({ id: members.id })
+    .from(members)
+    .where(
+      and(
+        eq(members.organizationId, organizationId),
+        eq(members.userId, memberId)
+      )
+    );
+  await moving(userId, memberId);
   const notYetMember = sql`NOT EXISTS (
     SELECT 1 FROM ${members} WHERE ${members.userId} = ${userId}
   )`;
@@ -421,10 +653,32 @@ export const adoptDirectoryMember = async (
     SELECT 1 FROM ${accounts}
     WHERE ${accounts.id} = ${signedIn.id} AND ${accounts.userId} = ${memberId}
   )`;
+  /** Whose the account is now: the member's once the batch landed. */
+  const adoptedNow = async (): Promise<string> => {
+    const [account] = await db
+      .select({ userId: accounts.userId })
+      .from(accounts)
+      .where(eq(accounts.id, signedIn.id));
+    return account?.userId ?? userId;
+  };
+  /** Moves back what moved, unless the member was adopted. */
+  const unlessAdopted = async (adopted: string): Promise<void> => {
+    if (adopted !== memberId) {
+      await moving(memberId, adopted);
+    }
+  };
+  const joiningStatements = joinedAs(
+    db,
+    joining,
+    memberId,
+    membership?.id,
+    moved,
+    now.getTime()
+  );
   // One batch, in order: the account moves, the user made for it goes
   // (freeing their address), the member takes their name and address, and
   // the directory's account goes, as their sign-in names them from now on.
-  await auditedBatch(env, db, [
+  const adopting = auditedBatch(env, db, [
     db
       .update(accounts)
       .set({ userId: memberId, updatedAt: now })
@@ -466,12 +720,17 @@ export const adoptDirectoryMember = async (
       action: "member.signed_in_from_directory",
       target: { type: "user", id: memberId },
     }),
+    ...joiningStatements,
   ]);
-  const [account] = await db
-    .select({ userId: accounts.userId })
-    .from(accounts)
-    .where(eq(accounts.id, signedIn.id));
-  return account?.userId ?? userId;
+  try {
+    await adopting;
+  } catch (error) {
+    await unlessAdopted(await adoptedNow());
+    throw error;
+  }
+  const adopted = await adoptedNow();
+  await unlessAdopted(adopted);
+  return adopted;
 };
 
 /** A claim of an IdP's verified profile, if it is a string. */
@@ -513,6 +772,25 @@ const isErasedSignIn = async (
 };
 
 /**
+ * Ties the directory's people their sign-in accounts name to the member
+ * signing in (directory-people.ts, GRA-2056), by the daily read's own
+ * rule. Their sign-in goes on whatever comes of it: the next read ties
+ * them all the same.
+ */
+const tieAtSignIn = async (env: Env, userId: string): Promise<void> => {
+  try {
+    await tieSignedIn(env, userId);
+    // And placed in the teams their departments fill, by the same rule.
+    for (const kind of directoryKinds) {
+      // oxlint-disable-next-line no-await-in-loop -- one provider at a time
+      await tellKept(env, await placeMember(env, kind, userId));
+    }
+  } catch (error) {
+    log.error("directory.tie_failed", errorFields(error));
+  }
+};
+
+/**
  * The session a sign-in through `providerId` gets, or `false` for none.
  * Staff sessions are marked and cut short; everyone else's opens in the
  * deployment's organization, as a member.
@@ -545,58 +823,120 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
   }
   const fromClient =
     providerId === providerIds.entra || providerId === providerIds.google;
-  // Someone the directory made a member before they ever signed in is
-  // that member from their first Microsoft sign-in on, by the object id
-  // their verified ID token names.
-  const userId =
-    providerId === providerIds.entra
-      ? await adoptDirectoryMember(env, session.userId)
-      : session.userId;
-  if (
-    !(
-      fromClient &&
-      (await gateLetsIn(env, config, userId)) &&
-      (await ensureMember(env, config, userId))
-    )
-  ) {
-    // Sessions come only from an SSO callback, for members.
+  if (!fromClient) {
+    // Sessions come only from an SSO callback.
     return false;
   }
-  return {
-    data: {
-      ...session,
-      userId,
-      staff: false,
-      activeOrganizationId: organizationId,
-    },
-  };
+  if (await gateLetsIn(env, config, session.userId)) {
+    // Someone the directory made a member before they ever signed in is
+    // that member from their first Microsoft sign-in on, by the object id
+    // their verified ID token names; an interview of theirs goes with them
+    // (the store's `accountMoved`).
+    const userId =
+      providerId === providerIds.entra
+        ? await adoptDirectoryMember(env, session.userId, async (from, to) => {
+            await onboardingStore(env).accountMoved(from, to);
+          })
+        : session.userId;
+    // For members.
+    if (!(await ensureMember(env, config, userId))) {
+      return false;
+    }
+    await tieAtSignIn(env, userId);
+    return {
+      data: {
+        ...session,
+        userId,
+        staff: false,
+        interview: false,
+        activeOrganizationId: organizationId,
+      },
+    };
+  }
+  // The gate is closed to them: a session for their own interview alone,
+  // if a link of one went to their address (GRA-1790). They join nothing:
+  // no membership is made, a member the directory made is not adopted (and
+  // nothing of it reaches the company's audit log), and the session reaches
+  // no route but the interview's (identity.ts `sessionIdentity`, the
+  // `/organization/` hook). Nobody an admin removed comes in for one either.
+  const { userId } = session;
+  return (await interviewInvites(env, await emailOf(env, userId))) &&
+    !(await mayNotAct(env, userId))
+    ? { data: { ...session, userId, staff: false, interview: true } }
+    : false;
 };
 
-const idTokenClaimsSchema = z.looseObject({ oid: z.string().optional() });
+const idTokenClaimsSchema = z.looseObject({
+  oid: z.string().optional(),
+  email: z.string().optional(),
+  email_verified: z.boolean().optional(),
+  tid: z.string().optional(),
+  hd: z.string().optional(),
+});
 
-/** The `oid` claim of an ID token the SSO plugin verified in this request. */
-const oidOf = (idToken: unknown): string | null => {
+/** The claims of an ID token the SSO plugin verified in this request, as far as core keeps them. */
+const claimsOf = (idToken: unknown): z.infer<typeof idTokenClaimsSchema> => {
   const payload = typeof idToken === "string" ? idToken.split(".")[1] : "";
   if (payload === undefined || payload === "") {
-    return null;
+    return {};
   }
   try {
     const json = new TextDecoder().decode(fromBase64Url(payload));
-    return idTokenClaimsSchema.parse(JSON.parse(json)).oid ?? null;
+    return idTokenClaimsSchema.parse(JSON.parse(json));
   } catch {
-    return null;
+    return {};
+  }
+};
+
+/**
+ * What a sign-in keeps of its verified ID token: the Entra object ID
+ * (`oid`); the address only where the provider marks it verified
+ * (`email_verified`, as Google's tokens do; a Google sign-in is refused
+ * without it, claims.ts), which an item's reader list may name its
+ * account by (source-readers.ts); and the tenant the token was checked
+ * against (claims.ts), Entra's `tid` or Google's `hd`, which that account
+ * counts in only while the sign-in config names it. Entra's `email` is
+ * never verified, so none of Entra's is kept.
+ */
+const keptClaimsOf = (
+  idToken: unknown
+): {
+  oid: string | null;
+  verifiedEmail: string | null;
+  verifiedEmailAt: Date | null;
+  verifiedTenant: string | null;
+} => {
+  const claims = claimsOf(idToken);
+  const verifiedEmail =
+    claims.email_verified === true ? (claims.email ?? null) : null;
+  return {
+    oid: claims.oid ?? null,
+    verifiedEmail,
+    verifiedEmailAt: verifiedEmail === null ? null : new Date(),
+    verifiedTenant: claims.tid ?? claims.hd ?? null,
+  };
+};
+
+/** Keeps the address a sign-in proved, if any (source-readers.ts). */
+const keepSignInAddressOf = async (
+  env: Env,
+  account: Record<string, unknown>
+): Promise<void> => {
+  const { userId, verifiedEmail } = account;
+  if (typeof userId === "string" && typeof verifiedEmail === "string") {
+    await keepSignInAddress(env, userId, verifiedEmail);
   }
 };
 
 /**
  * What is kept of an account from a sign-in: no IdP tokens (core never
- * holds provider tokens, R1), only the Entra object id taken from the ID
- * token before it is dropped.
+ * holds provider tokens, R1), only the Entra object id and a verified
+ * address taken from the ID token before it is dropped (`keptClaimsOf`).
  */
 const withoutTokens = <T extends Record<string, unknown>>(account: T) => ({
   data: {
     ...account,
-    ...(account.idToken === undefined ? {} : { oid: oidOf(account.idToken) }),
+    ...(account.idToken === undefined ? {} : keptClaimsOf(account.idToken)),
     accessToken: null,
     refreshToken: null,
     idToken: null,
@@ -636,15 +976,17 @@ const auditedChanges: Record<
     action: "team.deleted",
     target: { type: "team", id: change.teamId ?? "unknown" },
   }),
+  // A hand add or removal pins the pair (`pinTeamMember`): the directory's
+  // read leaves it as the admin set it until an admin lets it.
   "/organization/add-team-member": (change) => ({
     action: "team.member.added",
     target: { type: "team", id: change.teamId ?? "unknown" },
-    detail: { userId: change.userId ?? null },
+    detail: { userId: change.userId ?? null, pinned: "in" },
   }),
   "/organization/remove-team-member": (change) => ({
     action: "team.member.removed",
     target: { type: "team", id: change.teamId ?? "unknown" },
-    detail: { userId: change.userId ?? null },
+    detail: { userId: change.userId ?? null, pinned: "out" },
   }),
 };
 
@@ -657,6 +999,21 @@ const auditedChanges: Record<
 const loadSso = async (): Promise<typeof sso> => {
   const { sso: plugin } = await import("@better-auth/sso");
   return plugin;
+};
+
+/**
+ * Refuses a team made or renamed in Settings › Members under a name the
+ * staff list gives a team it hasn't made yet (GRA-2055): the confirm keeps
+ * the list's team by its id, so it would be a second of the name.
+ */
+const refuseNameOnListUnmade = async (env: Env, name: string) => {
+  if (await namedOnListUnmade(env, name)) {
+    throw new APIError("CONFLICT", {
+      code: staffListTeamRefusals.notMadeYet,
+      message:
+        "A team on the staff list has this name. It appears here once the staff list is confirmed.",
+    });
+  }
 };
 
 const createAuth = (
@@ -695,6 +1052,7 @@ const createAuth = (
       disableSessionRefresh: true,
       additionalFields: {
         staff: { type: "boolean", defaultValue: false, input: false },
+        interview: { type: "boolean", defaultValue: false, input: false },
       },
     },
     // Never link an IdP account to an existing user by email.
@@ -702,6 +1060,9 @@ const createAuth = (
       accountLinking: { enabled: false },
       additionalFields: {
         oid: { type: "string", required: false, input: false },
+        verifiedEmail: { type: "string", required: false, input: false },
+        verifiedEmailAt: { type: "date", required: false, input: false },
+        verifiedTenant: { type: "string", required: false, input: false },
       },
     },
     advanced: {
@@ -739,11 +1100,13 @@ const createAuth = (
               )
             : "method_not_allowed";
         // While the company is onboarding, only its admins come in through
-        // its IdP, before any user or membership is made (onboarding/gate.ts).
+        // its IdP, and those an interview link went to, for their interview
+        // alone, before any user or membership is made (onboarding/gate.ts).
         if (
           refusal === undefined &&
           provider !== providerIds.staff &&
-          !(await mayComeIn(env, config, user.email))
+          !(await mayComeIn(env, config, user.email)) &&
+          !(await interviewInvites(env, user.email))
         ) {
           refusal = "not_open_yet";
         }
@@ -775,10 +1138,16 @@ const createAuth = (
         create: {
           // oxlint-disable-next-line require-await
           before: async (account) => withoutTokens(account),
+          after: async (account) => {
+            await keepSignInAddressOf(env, account);
+          },
         },
         update: {
           // oxlint-disable-next-line require-await
           before: async (account) => withoutTokens(account),
+          after: async (account) => {
+            await keepSignInAddressOf(env, account);
+          },
         },
       },
       session: {
@@ -802,8 +1171,12 @@ const createAuth = (
             }
             // The gate again, now the session is stored: one the gate
             // closed on after `startSession` looked is gone either way, by
-            // this or by the close, which ends every stored session.
-            if (!(await gateLetsIn(env, config, session.userId))) {
+            // this or by the close, which ends every stored session; and an
+            // interview's that the gate opened on is gone, by this or by the
+            // opening, which ends every interview's session, so they sign
+            // in again as a member.
+            const open = await gateLetsIn(env, config, session.userId);
+            if (session.interview === true ? open : !open) {
               await drizzle(env.DB)
                 .delete(sessions)
                 .where(eq(sessions.id, session.id));
@@ -819,8 +1192,14 @@ const createAuth = (
         }
         // A removed person's membership row may outlive the removal if
         // deleting it failed; the organization plugin would still trust it.
+        // An interview's session reaches nothing of the organization, though
+        // the directory may have made them a member already (GRA-1790).
         const caller = await getSessionFromCtx(context);
-        if (caller && (await isRemoved(env, caller.user.id))) {
+        if (
+          caller &&
+          (caller.session.interview === true ||
+            (await mayNotAct(env, caller.user.id)))
+        ) {
           throw new APIError("FORBIDDEN", { message: "Not a member." });
         }
       }),
@@ -850,6 +1229,17 @@ const createAuth = (
       organization({
         roles,
         creatorRole: "admin",
+        // A member's suspension (directory-suspensions.ts): kept on their
+        // membership, never written through Better Auth (`input: false`),
+        // and none of its member routes is on (routes.ts).
+        schema: {
+          member: {
+            additionalFields: {
+              suspendedAt: { type: "date", required: false, input: false },
+              suspendedBy: { type: "string", required: false, input: false },
+            },
+          },
+        },
         allowUserToCreateOrganization: false,
         disableOrganizationDeletion: true,
         // An organization may have no teams at all: an admin deletes
@@ -859,6 +1249,26 @@ const createAuth = (
         // App shared with it away: their hosts tell the open pages to
         // look again (access-revocations.ts).
         organizationHooks: {
+          // An admin's hand change of a membership, pinned ahead of Better
+          // Auth's own write (directory-teams.ts): the directory's read
+          // never undoes it. These two routes alone change a membership
+          // by hand (routes.ts keeps the others off).
+          beforeAddTeamMember: async ({ teamMember }) => {
+            await pinTeamMember(
+              env,
+              teamMember.teamId,
+              teamMember.userId,
+              true
+            );
+          },
+          beforeRemoveTeamMember: async ({ teamMember }) => {
+            await pinTeamMember(
+              env,
+              teamMember.teamId,
+              teamMember.userId,
+              false
+            );
+          },
           afterRemoveTeamMember: async ({ teamMember }) => {
             await teamAccessMayHaveDropped(env, teamMember.teamId, [
               teamMember.userId,
@@ -866,6 +1276,48 @@ const createAuth = (
           },
           afterDeleteTeam: async ({ team }) => {
             await teamGone(env, team.id);
+          },
+          // The onboarding's staff list names these same teams (GRA-2055,
+          // staff-list-teams.ts), whose names change here alone: a rename
+          // shows on the list at once. The rename is kept whatever comes of
+          // that, so a failure is logged, not answered: the list's next
+          // save takes the name from here again (`intoMembersTeams`). A
+          // team on the list, saved or confirmed, is taken off there
+          // first, so it never names one gone.
+          afterUpdateTeam: async ({ team }) => {
+            if (team === null) {
+              return;
+            }
+            try {
+              await onboardingStore(env).renameTeam(team.id, team.name);
+            } catch (error) {
+              log.error("onboarding.team_rename_unfollowed", {
+                teamId: team.id,
+                error: error instanceof Error ? error.name : "unknown",
+              });
+            }
+          },
+          beforeDeleteTeam: async ({ team }) => {
+            if (await onboardingStore(env).listsTeam(team.id)) {
+              throw new APIError("CONFLICT", {
+                code: staffListTeamRefusals.onList,
+                message: "The team is on the staff list.",
+              });
+            }
+          },
+          // A name the staff list gives a team it hasn't made yet stays its
+          // own (GRA-2055, `refuseNameOnListUnmade`).
+          beforeCreateTeam: async ({ team }) => {
+            await refuseNameOnListUnmade(env, team.name);
+          },
+          // Renamed to it too: the same second team at the confirm.
+          beforeUpdateTeam: async ({ team, updates }) => {
+            if (
+              updates.name !== undefined &&
+              teamNameKey(updates.name) !== teamNameKey(team.name)
+            ) {
+              await refuseNameOnListUnmade(env, updates.name);
+            }
           },
         },
       }),

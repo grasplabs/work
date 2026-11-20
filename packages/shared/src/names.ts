@@ -217,6 +217,8 @@ export const clientRoleNames: Readonly<Record<string, string>> = {
   "worker:grasp-os-core": "core",
   "worker:grasp-os-connect": "connect",
   "d1:grasp-os-core": "core-db",
+  // Knowledge's database, which releases since GRA-1941 no longer bind:
+  // named while a channel may still deploy a release from before then.
   "d1:grasp-os-knowledge": "core-knowledge",
   "r2:grasp-os-files": "core-files",
   "r2:grasp-os-audit-archive": "core-audit",

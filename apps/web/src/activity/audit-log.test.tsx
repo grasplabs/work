@@ -58,7 +58,7 @@ const records = (from: number, to: number): AuditRecord[] =>
 
 let root: Root | undefined;
 
-const directory = { people: new Map(), apps: new Map() };
+const directory = { people: new Map(), teams: new Map(), apps: new Map() };
 
 /** The events, and the details of the one opened, as the audit trail's page holds them. */
 const Events = ({ first }: { first: AuditPage }) => {

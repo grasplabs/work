@@ -35,10 +35,11 @@ export interface RulesInput {
         platform:
           | "brain_upkeep"
           | "dashboard_widgets"
-          | "brain_recall"
           | "stephen_requests"
           | "provider_test"
-          | "document_conversion";
+          | "agent_builder"
+          | "opportunities"
+          | "dictation";
       };
 }
 

@@ -9,8 +9,7 @@ import {
   fingerprintOf,
   loadBuiltinRelease,
 } from "../src/builtins.ts";
-import { commitApp } from "./app-definitions.ts";
-import { release } from "./apps.ts";
+import { commitApp, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { refusal, signedInApi } from "./sign-in.ts";
 
@@ -18,7 +17,7 @@ import { refusal, signedInApi } from "./sign-in.ts";
 // its version declares: each resource in its manifest, bound and approved
 // by an admin for that declaration, and each independent workflow it binds
 // under an alias, whose every call is a binding of its validated
-// definition, approved for that exact version. No code is read to say what
+// definition, approved for that declaration. No code is read to say what
 // a version calls, so nothing may run that the review doesn't list.
 //
 // The attacks, each refused:
@@ -55,17 +54,15 @@ describe("an App's own workflows", () => {
     await release(builder, app, { "AGENTS.md": "# Ledger\n" });
 
     const refused = await Promise.all([
-      refusal(commitApp(builder.api.apps.files, app, stealing, "Steal")),
+      refusal(commitApp(builder.api, app, stealing)),
       refusal(
-        commitApp(
-          builder.api.apps.files,
-          app,
-          { "notes.md": "# Notes\n", "workflows/lib/send.ts": "export {};\n" },
-          "Helper"
-        )
+        commitApp(builder.api, app, {
+          "notes.md": "# Notes\n",
+          "workflows/lib/send.ts": "export {};\n",
+        })
       ),
     ]);
-    const versions = await builder.api.apps.versions.list(app);
+    const versions = await builder.api.versions.list({ kind: "app", id: app });
 
     expect({
       refused: refused.map((error) => ({
@@ -115,7 +112,10 @@ describe("an App's own workflows", () => {
         })
       );
       const after = await builder.api.apps.list();
-      const versions = await builder.api.apps.versions.list(copy.id);
+      const versions = await builder.api.versions.list({
+        kind: "app",
+        id: copy.id,
+      });
       expect({
         refused: [created, updated].map((error) => ({
           code: appErrors.codeOf(error),

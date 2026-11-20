@@ -56,7 +56,12 @@ export type HeldBinding = z.infer<typeof heldBindingSchema>;
 
 /** Where a call a person is there for comes from (`origin`). */
 const originSchema = z.strictObject({
-  permissionId: permissionIdSchema,
+  /**
+   * The grant the call was allowed under; null for a read in its
+   * person's own chat that needs none (core's ungranted-reads.ts), which
+   * is always `readOnly`.
+   */
+  permissionId: permissionIdSchema.nullable(),
   context: workContextSchema,
   /**
    * For an App action's connector resource: the approved binding the call
@@ -105,8 +110,10 @@ export const capabilityClaimsSchema = z.strictObject({
   idempotencyKey: identifierSchema.nullable(),
   /**
    * The chat, App or run making the call has read restricted data (threat
-   * model R12, Q12): connect lets it read, as a tool declares, and holds
-   * every side effect for the person. Only the capability says it.
+   * model R12, Q12), or the chat handed over something only its person
+   * may read (core's private-reads.ts, GRA-1928): connect lets it read, as
+   * a tool declares, and holds every side effect for the person, a read
+   * whose input leaves for a third party too. Only the capability says it.
    */
   restricted: z.boolean().default(false),
   /**
@@ -152,6 +159,13 @@ export const capabilityClaimsSchema = z.strictObject({
    * waits until it is decided. Only the capability says it.
    */
   heldUntil: z.int().nonnegative().optional(),
+  /**
+   * The call comes from a conversation in a chat app (Teams, Slack), which
+   * Grasp never shows as a chat: a side effect held from it is decided on
+   * its card there, and Grasp's own list of what waits leaves it out
+   * (`listPendingActions`). Only the capability says it.
+   */
+  chatApp: z.boolean().default(false),
   /**
    * Only on the capability core signs once a person decided a call that
    * waits for them, from their own session, after checking its permission
@@ -205,6 +219,8 @@ export interface CapabilityScope extends CapabilityCall {
   context?: z.input<typeof workContextSchema> | undefined;
   /** When a side effect held from it ends unconfirmed: signed, not compared. */
   heldUntil?: number | undefined;
+  /** It comes from a chat app's conversation: signed, not compared. */
+  chatApp?: boolean | undefined;
   /** What a person decided of the call: signed, not compared. */
   decision?: CapabilityDecision | undefined;
   /** Only for a chat's agent: `CapabilityClaims.mailboxes`. */
@@ -274,6 +290,7 @@ export const signCapability = async (
     origin: scope.origin,
     ...(scope.context === undefined ? {} : { context: scope.context }),
     ...(scope.heldUntil === undefined ? {} : { heldUntil: scope.heldUntil }),
+    ...(scope.chatApp === true ? { chatApp: true } : {}),
     ...(scope.decision === undefined ? {} : { decision: scope.decision }),
     ...(scope.mailboxes === undefined
       ? {}
@@ -397,7 +414,10 @@ export const verifyCapability = async (
     claims.resource === (scope.resource ?? null) &&
     claims.action === scope.action &&
     claims.idempotencyKey === (scope.idempotencyKey ?? null);
-  if (!matches) {
+  // A call no grant allows may only read: whatever signed it, connect
+  // takes nothing else from it.
+  const grantless = claims.origin.permissionId === null;
+  if (!matches || (grantless && !claims.readOnly)) {
     throw invalid("scope");
   }
   return claims;

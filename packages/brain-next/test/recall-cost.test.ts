@@ -4,11 +4,13 @@ import type {
   Reader,
   VectorModel,
 } from "@grasp-os/brain-next/contract";
-import { reset, runInDurableObject } from "cloudflare:test";
+import { reset } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { recallBudgetMax, vectorsPerPutMax } from "../src/contract.ts";
+import { asMigrated } from "./blocks-migrated.ts";
+import { countRowsRead } from "./rows-read.ts";
 
 // What a recall costs the store, against what the reader may not read.
 // #2134's rule: chunks of sources the reader may not read are never
@@ -17,82 +19,67 @@ import { recallBudgetMax, vectorsPerPutMax } from "../src/contract.ts";
 // same), so this file holds it by cost: the rows the store's SQL reads,
 // as workerd counts them (each cursor's `rowsRead`).
 //
-// What it found, and so what it holds: a hidden chunk is not free. Each
-// one holding a word, a stop word or an ID the question asks is still
-// read: the word index's lookup lists it, and the joins drop it at the
-// reader's check, some 10 to 36 rows a hidden chunk on this corpus. That
-// is the store as designed today (the filter joins the index's matches;
-// it doesn't drive the index), not a break. The vector scan reads only
-// the reader's own groups' codes, and so reads nothing of a hidden one.
+// A hidden chunk costs a recall nothing (GRA-1803): each set of readers'
+// chunks are kept in blocks of rows of their own, and every way asks its
+// index only within the reader's blocks (chunk-blocks.ts), so a chunk the
+// reader may not read is never listed, joined or dropped. Before, each
+// one holding what the question asks was listed by the index and dropped
+// at the reader's check: 36 rows a hidden chunk for the words way, 10 for
+// the stop words, 30 for an ID, 20 for a date. The vector scan read only
+// the reader's own groups' codes already.
 //
-// So each way is held to a budget of rows per hidden chunk: what it reads
-// for each of 1,200 hidden chunks beside the reader's own 3, measured on
-// main, with 3 % of margin. The counts are exact: the same corpus reads
-// the same rows run after run (with the reader's own sources alone, they
-// differ by a few rows from one run to the next, as the sources' random
-// keys sort; with 1,200 hidden chunks, not at all). A way that groups,
-// counts, ranks or scans hidden chunks it may not read pays more for each
-// and fails: counting every chunk's stop words costs the words way 8 %
-// more a hidden chunk, ranking hidden chunks under the exact way's cap
-// 26 % more, dropping the reader's check 50 to 66 % more, and scanning other
-// groups' codes makes the vector scan read the hidden codes too (about
-// one row a hidden chunk, against none).
-
-/** Rows the store's SQL read, counted at the store itself. */
-interface Counter {
-  rows: () => number;
-  reset: () => void;
-}
-
-/** The counters of the stores of this file, by their object's id. */
-const counters = new Map<string, Counter>();
+// So each way reads the same rows beside 1,200 and 4,800 hidden chunks,
+// of 6 and 24 other groups, as beside none, every chunk holding the
+// question's words, stop words, ID and date: within `seekMargin` rows,
+// what an index seek touches more as the trees grow deeper (measured: 4
+// rows, 5 for a date, once, from none to 1,200, and none from 1,200 to
+// 4,800). A way that lists hidden chunks again (an index asked outside
+// the reader's blocks, a join that scans the chunks) reads a row or more
+// for each, thousands here, and fails.
+//
+// Two more hold where an add places chunks: a set's chunks share its block
+// (a word no chunk holds costs the same however many sources the reader's
+// own set holds; an add that took a block of its own each time would
+// cost the reader a lookup per version, the design GRA-1803 rejected), and
+// a store made before the blocks, whose chunks all share block 0, keeps
+// new chunks out of it (else every set's readers would list them there).
 
 /** The shared store, from empty storage, its SQL's reads counted. */
 const countedStore = async () => {
   await reset();
   const stub = env.BRAIN_STORE.getByName("brain");
-  // The store woken and its SQL wrapped once: every cursor its statements
-  // open is kept, and their rows read summed when asked. The test runs in
-  // the store's own isolate, so the counter is reached here.
-  await runInDurableObject(stub, (_instance, state) => {
-    const { sql } = state.storage;
-    const cursors: SqlStorageCursor<Record<string, SqlStorageValue>>[] = [];
-    const exec = sql.exec.bind(sql);
-    Object.defineProperty(sql, "exec", {
-      value: (...args: Parameters<typeof sql.exec>) => {
-        const cursor = exec(...args);
-        cursors.push(cursor);
-        return cursor;
-      },
-    });
-    counters.set(stub.id.toString(), {
-      rows: () => cursors.reduce((sum, cursor) => sum + cursor.rowsRead, 0),
-      reset: () => {
-        cursors.length = 0;
-      },
-    });
-  });
-  /** The rows `ask` has the store's SQL read. */
-  const rowsReadBy = async (ask: () => Promise<unknown>): Promise<number> => {
-    const counter = counters.get(stub.id.toString());
-    counter?.reset();
-    await ask();
-    return counter?.rows() ?? Number.NaN;
-  };
+  const rowsReadBy = await countRowsRead(stub);
   return { stub, rowsReadBy };
 };
 
-const reader: Reader = { person: "reader", groups: [] };
-const own: Access = { kind: "owner", person: "reader" };
-const someoneElse: Access = { kind: "owner", person: "someone-else" };
+// Groups only one person is in: the shared store keeps nothing one
+// person's alone.
+const reader: Reader = { person: "reader", groups: ["team:reader"] };
+const own: Access = { kind: "audience", group: "team:reader" };
 
-/** Hidden sources, and passages in each. */
-const hiddenSources = 6;
+/** The `index`th hidden source's readers: a group of its own. */
+const someoneElse = (index: number): Access => ({
+  kind: "audience",
+  group: `team:someone-${index}`,
+});
+
+/** Passages in each hidden source. */
 const hiddenPassages = 200;
-const hiddenChunks = hiddenSources * hiddenPassages;
 
-/** What every chunk holds: telling words, stop words and an ID. */
-const words = "The invoice of the warehouse INV-2024-0042 and the";
+/** How many hidden sources the store holds as each way is measured. */
+const hiddenSizes = [0, 6, 24];
+
+/** Rows an index seek may read more as the trees grow deeper. */
+const seekMargin = 8;
+
+/** Whether `rows` stay within `seekMargin` of the first, and never fewer. */
+const flat = (rows: readonly number[]): boolean => {
+  const [first = 0] = rows;
+  return rows.every((row) => row >= first && row - first <= seekMargin);
+};
+
+/** What every chunk holds: telling words, stop words, an ID and a date. */
+const words = "The invoice of the warehouse INV-2024-0042 and the, 14/03/2026";
 
 /** `count` passages, each a paragraph of its own, each holding `words`. */
 const passagesOf = (count: number): string =>
@@ -143,6 +130,8 @@ const waysOf = (stub: Store) => {
     stopWords: recall("zebra of the"),
     // An ID: the exact way, its cap.
     exact: recall("INV-2024-0042"),
+    // A date written otherwise: the exact way by its day, its cap.
+    date: recall("14 maart 2026"),
     vectors: async () =>
       await stub.searchVectors({
         model: model.name,
@@ -155,16 +144,8 @@ const waysOf = (stub: Store) => {
 
 type Way = keyof ReturnType<typeof waysOf>;
 
-/** Rows per hidden chunk each way may read: main's own, with 3 % margin. */
-const budgets: Record<Way, number> = {
-  words: 37.1,
-  stopWords: 10.3,
-  exact: 30.9,
-  vectors: 0.05,
-};
-
 describe("what a recall reads of what the reader may not read", () => {
-  it("reads, for each way, no more rows per hidden chunk than its budget", async () => {
+  it("reads, for each way, the same rows however many hidden chunks the store holds", async () => {
     const { stub, rowsReadBy } = await countedStore();
     const ownChunks: ChunkRef[] = [];
     for (let index = 0; index < 3; index += 1) {
@@ -180,54 +161,117 @@ describe("what a recall reads of what the reader may not read", () => {
     }
     await putVectorsOf(stub, ownChunks);
     const ways = waysOf(stub);
-    const names: readonly Way[] = ["words", "stopWords", "exact", "vectors"];
-    const alone = new Map<Way, number>();
-    for (const name of names) {
-      // oxlint-disable-next-line no-await-in-loop -- one way at a time
-      alone.set(name, await rowsReadBy(ways[name]));
-    }
-    const hidden: ChunkRef[] = [];
-    for (let index = 0; index < hiddenSources; index += 1) {
-      const source = `upload:hidden-${index}`;
-      // oxlint-disable-next-line no-await-in-loop -- one add at a time
-      const { version } = await stub.addSource({
-        source,
-        change: crypto.randomUUID(),
-        text: passagesOf(hiddenPassages),
-        access: someoneElse,
-      });
-      hidden.push(
-        ...Array.from({ length: hiddenPassages }, (_, position) => ({
+    const names: readonly Way[] = [
+      "words",
+      "stopWords",
+      "exact",
+      "date",
+      "vectors",
+    ];
+    const read = new Map<Way, number[]>(names.map((name) => [name, []]));
+    let held = 0;
+    for (const size of hiddenSizes) {
+      const hidden: ChunkRef[] = [];
+      for (; held < size; held += 1) {
+        const source = `upload:hidden-${held}`;
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        const { version } = await stub.addSource({
           source,
-          version,
-          position,
-        }))
-      );
-    }
-    await putVectorsOf(stub, hidden);
-    const read: Partial<Record<Way, number>> = {};
-    for (const name of names) {
-      // oxlint-disable-next-line no-await-in-loop -- one way at a time
-      const beside = await rowsReadBy(ways[name]);
-      read[name] =
-        Math.round(((beside - (alone.get(name) ?? 0)) / hiddenChunks) * 100) /
-        100;
+          change: crypto.randomUUID(),
+          text: passagesOf(hiddenPassages),
+          access: someoneElse(held),
+        });
+        hidden.push(
+          ...Array.from({ length: hiddenPassages }, (_, position) => ({
+            source,
+            version,
+            position,
+          }))
+        );
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      await putVectorsOf(stub, hidden);
+      for (const name of names) {
+        // oxlint-disable-next-line no-await-in-loop -- one way at a time
+        read.get(name)?.push(await rowsReadBy(ways[name]));
+      }
     }
 
-    expect(
+    // Each way's rows at each size, and whether they stay within
+    // `seekMargin` of its rows beside no hidden chunk.
+    const measured = Object.fromEntries(
+      names.map((name) => {
+        const rows = read.get(name) ?? [];
+        return [name, { rows, flat: flat(rows) }];
+      })
+    );
+    expect(measured).toStrictEqual(
       Object.fromEntries(
-        names.map((name) => [
-          name,
-          {
-            perHiddenChunk: read[name],
-            over: (read[name] ?? 0) > budgets[name],
-          },
-        ])
-      )
-    ).toStrictEqual(
-      Object.fromEntries(
-        names.map((name) => [name, { perHiddenChunk: read[name], over: false }])
+        names.map((name) => [name, { rows: measured[name]?.rows, flat: true }])
       )
     );
+  });
+
+  it("reads the same rows on a store made before the blocks, however many hidden chunks its sets add since", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    // Before the blocks: the reader's and another set's chunks in block 0.
+    for (const [source, access] of [
+      ["upload:own", own],
+      ["upload:hidden", someoneElse(0)],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await stub.addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: passagesOf(2),
+        access,
+      });
+    }
+    await asMigrated(stub);
+    const ask = waysOf(stub).words;
+    const rows = [await rowsReadBy(ask)];
+    // The other set adds more since: never into block 0, which the
+    // reader reads for its own chunks there.
+    for (let index = 0; index < 6; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one add at a time
+      await stub.addSource({
+        source: `upload:hidden-${index}`,
+        change: crypto.randomUUID(),
+        text: passagesOf(hiddenPassages),
+        access: someoneElse(0),
+      });
+    }
+    rows.push(await rowsReadBy(ask));
+
+    expect({ rows, flat: flat(rows) }).toStrictEqual({ rows, flat: true });
+  });
+});
+
+describe("what a recall reads of the reader's own sources", () => {
+  it("reads the same rows for a word no chunk holds, however many sources the reader's own set holds", async () => {
+    const { stub, rowsReadBy } = await countedStore();
+    const ask = async () =>
+      await stub.recall({
+        question: "zebra",
+        reader,
+        budget: { tokens: recallBudgetMax },
+      });
+    const rows: number[] = [];
+    let held = 0;
+    for (const size of [3, 30, 120]) {
+      for (; held < size; held += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one add at a time
+        await stub.addSource({
+          source: `upload:own-${held}`,
+          change: crypto.randomUUID(),
+          text: `${words} ${held}`,
+          access: own,
+        });
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one size at a time
+      rows.push(await rowsReadBy(ask));
+    }
+
+    expect({ rows, flat: flat(rows) }).toStrictEqual({ rows, flat: true });
   });
 });

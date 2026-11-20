@@ -218,6 +218,62 @@
       "when": 1794388696581,
       "tag": "0030_pending_actions_unattended",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1794777930640,
+      "tag": "0031_slim_the_santerians",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794995606324,
+      "tag": "0032_connection_verified_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1795006911862,
+      "tag": "0033_striped_wonder_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1795012177571,
+      "tag": "0034_connection_reader_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1795033402621,
+      "tag": "0035_sync_picks_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1795102670437,
+      "tag": "0036_connection_tenant_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1795162746243,
+      "tag": "0037_held_reads_without_grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1795168122910,
+      "tag": "0038_magical_salo",
+      "breakpoints": true
     }
   ]
 }

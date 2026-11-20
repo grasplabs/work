@@ -19,16 +19,13 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
-import type {
-  CollectionBinding,
-  CollectionGrant,
-} from "./knowledge/binding.ts";
-import type { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
+import { mustConfirmForOthers } from "./private-reads.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
 import { requireToolClassOn } from "./tool-classes.ts";
+import { ungrantedReadConnection } from "./ungranted-reads.ts";
 import { stampedMail } from "./workflows/mail-stamps.ts";
 import type { StampingRun } from "./workflows/mail-stamps.ts";
 
@@ -74,6 +71,8 @@ export interface CallGrant {
    * until its person decides it.
    */
   heldUntil?: number;
+  /** It comes from a chat app's conversation (`CapabilityClaims.chatApp`). */
+  chatApp?: boolean;
   /**
    * For an App action's connector resource: the approved binding the call
    * comes through, which a held call pins and its confirmation checks.
@@ -82,18 +81,11 @@ export interface CallGrant {
 }
 
 /**
- * Checks the permission of an App or agent working in `context` for one
- * call, then signs the capability connect needs for exactly this call,
- * saying whether `context` is in restricted mode (connect then holds its
- * side effects for the person), whether the call may only read, and the
- * permission and context to check again should connect hold it for them.
- * `decision` is what a person decided of a call waiting for them: a held
- * action confirmed, or a call of unknown outcome resolved, only ever
- * signed through `reauthorizedCapability` (decided-calls.ts).
- * Core makes capabilities here and nowhere else, and nothing outside core
- * reaches this function.
+ * The capability for one call already allowed (`signedCall`, or with no
+ * grant `signedUngrantedRead`): its context's restricted mode, its class on for
+ * the person, then signed.
  */
-export const signedCall = async (
+const capabilityFor = async (
   env: Env,
   {
     authority,
@@ -105,15 +97,22 @@ export const signedCall = async (
     sensitive,
     notAfter,
     heldUntil,
+    chatApp,
     binding,
-  }: CallGrant,
+  }: Omit<CallGrant, "permissionId"> & { permissionId: PermissionId | null },
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
   decision?: CapabilityDecision
 ) => {
-  await authorize(env, authority, connection, action, permissionId, context);
   // The context is checked first: a call from a chat or App that isn't
-  // there is refused as that, whatever its class.
-  const restricted = await isRestricted(env, authority, context);
+  // there is refused as that, whatever its class. A chat that handed over
+  // something only its person may read (private-reads.ts) is signed
+  // restricted too (GRA-1928): connect then holds for the person every
+  // call whose input leaves for a third party, reads too, as it does for
+  // restricted data, so an instruction in what was read can't carry it
+  // out through another read unconfirmed. Its native reads go on.
+  const restricted =
+    (await isRestricted(env, authority, context)) ||
+    (context.type === "chat" && (await mustConfirmForOthers(env, context)));
   // The chat's agent may call only the classes the company turned on for
   // its person: one that is off never reaches connect (tool-classes.ts).
   const classed = await requireToolClassOn(
@@ -140,6 +139,7 @@ export const signedCall = async (
       sensitive,
       notAfter,
       heldUntil,
+      chatApp,
       origin: {
         permissionId,
         context,
@@ -158,6 +158,66 @@ export const signedCall = async (
     }
   );
   return { capability, scope };
+};
+
+/**
+ * Checks the permission of an App or agent working in `context` for one
+ * call, then signs the capability connect needs for exactly this call,
+ * saying whether `context` is in restricted mode (connect then holds its
+ * side effects for the person), whether the call may only read, and the
+ * permission and context to check again should connect hold it for them.
+ * `decision` is what a person decided of a call waiting for them: a held
+ * action confirmed, or a call of unknown outcome resolved, only ever
+ * signed through `reauthorizedCapability` (decided-calls.ts).
+ * Core makes capabilities here and nowhere else, and nothing outside core
+ * reaches this function.
+ */
+export const signedCall = async (
+  env: Env,
+  grant: CallGrant,
+  call: Pick<ConnectCall, "action" | "idempotencyKey">,
+  decision?: CapabilityDecision
+) => {
+  const { authority, connection, permissionId, context } = grant;
+  await authorize(
+    env,
+    authority,
+    connection,
+    call.action,
+    permissionId,
+    context
+  );
+  return await capabilityFor(env, grant, call, decision);
+};
+
+/**
+ * Signs the capability for a read that needs no grant (ungranted-reads.ts):
+ * of a connection active and the chat's person's own, or shared with an
+ * audience that holds them, and only a tool whose class reads, checked
+ * here again whoever asks, and signed read-only, so connect refuses
+ * anything but a read. The caller holds it to a turn whose answer reaches
+ * its person alone. Such a read connect held for its person (a marked
+ * chat's, GRA-1928) is confirmed (`decision`) and its answer read under
+ * its `idempotencyKey`, each checked here again as the read would be now.
+ */
+export const signedUngrantedRead = async (
+  env: Env,
+  grant: Omit<CallGrant, "permissionId" | "readOnly" | "binding" | "sensitive">,
+  { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
+  decision?: CapabilityDecision
+) => {
+  await ungrantedReadConnection(
+    env,
+    grant.authority,
+    grant.connection.connectionId,
+    action
+  );
+  return await capabilityFor(
+    env,
+    { ...grant, permissionId: null, readOnly: true },
+    { action, idempotencyKey },
+    decision
+  );
 };
 
 /**
@@ -214,6 +274,16 @@ export interface ConnectionGrant {
 }
 
 /**
+ * A read with no grant (ungranted-reads.ts): signed by `signedUngrantedRead`, never authorized
+ * by a permission.
+ */
+export interface UngrantedRead {
+  context: WorkContext;
+  permissionId: null;
+  connection: ConnectionObject;
+}
+
+/**
  * Refuses a workflow's connection call with a key other than its step's
  * (`stepKey`; none outside a step): core, not workflow or App code, holds
  * the key to a workflow's side effects, so a retry, a replay or another
@@ -244,6 +314,8 @@ export interface StubCaller {
   notAfter?: number;
   /** When a side effect connect holds from it ends (`CallGrant.heldUntil`). */
   heldUntil?: number;
+  /** It comes from a chat app's conversation (`CallGrant.chatApp`). */
+  chatApp?: boolean;
   /**
    * The resolver's last word, asked just before the call goes to connect,
    * after the permission check and the signing awaited: whether the work
@@ -277,7 +349,7 @@ export type StubAuthority =
 const signedStub = async (
   env: Env,
   authority: StubAuthority,
-  { context, permissionId, connection }: ConnectionGrant,
+  { context, permissionId, connection }: ConnectionGrant | UngrantedRead,
   call: unknown[]
 ): Promise<{
   request: ConnectCall;
@@ -294,21 +366,28 @@ const signedStub = async (
       typeof authority === "function"
         ? await authority(options?.idempotencyKey)
         : { authority };
-    const { capability, scope } = await signedCall(
-      env,
-      {
-        authority: caller.authority,
-        readOnly: caller.readOnly,
-        unattended: caller.unattended,
-        sensitive: caller.sensitive,
-        notAfter: caller.notAfter,
-        heldUntil: caller.heldUntil,
-        context,
-        connection,
-        permissionId,
-      },
-      { action, idempotencyKey: options?.idempotencyKey }
-    );
+    const allowed = {
+      authority: caller.authority,
+      unattended: caller.unattended,
+      notAfter: caller.notAfter,
+      heldUntil: caller.heldUntil,
+      chatApp: caller.chatApp,
+      context,
+      connection,
+    };
+    const { capability, scope } =
+      permissionId === null
+        ? await signedUngrantedRead(env, allowed, { action })
+        : await signedCall(
+            env,
+            {
+              ...allowed,
+              readOnly: caller.readOnly,
+              sensitive: caller.sensitive,
+              permissionId,
+            },
+            { action, idempotencyKey: options?.idempotencyKey }
+          );
     return {
       request: { capability, ...scope, input },
       ...(caller.stillAllowed === undefined
@@ -325,7 +404,7 @@ const signedStub = async (
 export const signedStubCall = async (
   env: Env,
   authority: StubAuthority,
-  grant: ConnectionGrant,
+  grant: ConnectionGrant | UngrantedRead,
   call: unknown[]
 ): Promise<ConnectCall> => {
   const { request } = await signedStub(env, authority, grant, call);
@@ -440,103 +519,24 @@ export const connectionGrantOf =
       ? { context, permissionId: id, connection: object }
       : undefined;
 
-/** A collection permission as its grant in `context`; nothing for any other. */
-export const collectionGrantOf =
-  (context: WorkContext) =>
-  ({ id, object }: Permission): CollectionGrant | undefined =>
-    object.type === "collection"
-      ? { context, permissionId: id, collectionId: object.collectionId }
-      : undefined;
-
-/** A collection permission's stub; nothing for any other. */
-const collectionStubOf = (authority: Authority, context: WorkContext) => {
-  const grantOf = collectionGrantOf(context);
-  return (permission: Permission): Fetcher<CollectionBinding> | undefined => {
-    const grant = grantOf(permission);
-    return grant === undefined
-      ? undefined
-      : exports.CollectionBinding({ props: { ...grant, authority } });
-  };
-};
-
 /**
  * The env for one authority working in `context`, built from the
  * permission records as they are now, every stub acting for
- * `authority.onBehalfOf` and keeping its restricted mode in `context`.
+ * `authority.onBehalfOf` and keeping its restricted mode in `context`:
+ * a stub for each connection it was granted, and nothing else.
  * Throws `permission.person_inactive` when that person has left.
- *
- * With a permission to read a collection, it also has `KNOWLEDGE`, the
- * agent's Knowledge tools across all of them (`KnowledgeBinding`); a
- * permission can't take that name, which is core's own binding's. Without
- * one, it has nothing to read, so the env stays as empty as its
- * permissions.
- *
- * That fits an agent, which acts for one person. A workflow run gets
- * `runBindingsFor`, and an App, which serves many people at once,
- * `appBindings`.
  */
 export const bindingsFor = async (
   env: Env,
   authority: Authority,
   context: WorkContext
-): Promise<
-  Record<
-    string,
-    | Fetcher<ConnectionBinding>
-    | Fetcher<CollectionBinding>
-    | Fetcher<KnowledgeBinding>
-  >
-> => {
+): Promise<Record<string, Fetcher<ConnectionBinding>>> => {
   const grantOf = connectionGrantOf(context);
-  const collectionOf = collectionStubOf(authority, context);
   const permissions = await grantedPermissions(env, authority, context);
-  const stubs = stubsOf<
-    Fetcher<ConnectionBinding> | Fetcher<CollectionBinding>
-  >(permissions, (permission) => {
+  return stubsOf(permissions, (permission) => {
     const grant = grantOf(permission);
     return grant === undefined
-      ? collectionOf(permission)
+      ? undefined
       : exports.ConnectionBinding({ props: { ...grant, authority } });
   });
-  const readsKnowledge = permissions.some(
-    ({ object, actions }) =>
-      object.type === "collection" && actions.includes("read")
-  );
-  return readsKnowledge
-    ? {
-        ...stubs,
-        KNOWLEDGE: exports.KnowledgeBinding({
-          props: { authority, context },
-        }),
-      }
-    : stubs;
-};
-
-/**
- * A workflow run's permissions as they are now, as `bindingsFor` builds
- * them, but for its connections: those aren't stubs in its env but grants, by binding name, which the run's host calls
- * for it (workflows/host.ts), so each call is checked against the step
- * running then and its key. The workflow dispatcher builds them on every
- * start and resume, so a revoked permission is gone from the next one.
- * Its `brain` permission gives it the Brain's binding by its name, with
- * the permission it is (`brains`, GRA-1067): a recall the host makes for
- * it as the run, under that permission alone.
- */
-export const runBindingsFor = async (
-  env: Env,
-  authority: Authority,
-  context: WorkContext
-): Promise<{
-  bindings: Record<string, Fetcher<CollectionBinding>>;
-  connections: Record<string, ConnectionGrant>;
-  brains: Record<string, PermissionId>;
-}> => {
-  const permissions = await grantedPermissions(env, authority, context);
-  return {
-    bindings: stubsOf(permissions, collectionStubOf(authority, context)),
-    connections: stubsOf(permissions, connectionGrantOf(context)),
-    brains: stubsOf(permissions, ({ id, object, actions }) =>
-      object.type === "platform" && actions.includes("brain") ? id : undefined
-    ),
-  };
 };

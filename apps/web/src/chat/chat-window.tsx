@@ -1,9 +1,5 @@
 import type { ChatSearchHit, ChatSummary } from "@grasp-os/shared/chat";
-import {
-  chatPlatformName,
-  chatTitleMaxLength,
-  chatTitleSchema,
-} from "@grasp-os/shared/chat";
+import { chatTitleMaxLength, chatTitleSchema } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -353,8 +349,8 @@ const useChatActions = (archived: boolean): CommandRowAction[] => {
 };
 
 /**
- * One chat as a row: its title; under it the chat app it came through,
- * or where a search found it, the words marked; at its end its time, or
+ * One chat as a row: its title; under it where a search found it, the
+ * words marked; at its end its time, or
  * the Working mark while its agent answers; current while it is open.
  */
 const useChatRow = (archived: boolean) => {
@@ -363,27 +359,14 @@ const useChatRow = (archived: boolean) => {
   const activeId = useActiveChat();
   return (chat: ChatSummary, hit?: ChatSearchHit): CommandEntry => {
     const said = hit?.said ?? null;
-    const app = chat.via === "web" ? null : chatPlatformName(chat.via);
-    const where: ReactNode =
-      said === null ? null : (
+    const description: ReactNode =
+      said === null ? undefined : (
         <>
           {said.before}
           <CommandMatch>{said.found}</CommandMatch>
           {said.after}
         </>
       );
-    let description: ReactNode;
-    if (app !== null && where !== null) {
-      description = (
-        <>
-          {t`via ${app}`} · {where}
-        </>
-      );
-    } else if (app !== null) {
-      description = t`via ${app}`;
-    } else if (where !== null) {
-      description = where;
-    }
     const time = timeOfDay(chat.lastAt, i18n.locale);
     return {
       value: chatValue(chat.id),

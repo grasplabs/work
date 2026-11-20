@@ -20,6 +20,20 @@ import {
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /**
+ * A read of an account's groups under way (reader-groups.ts): when it
+ * started, the account and the address it reads for, the groups found so
+ * far, the members still to ask, and the next page of the first of them.
+ */
+export interface ReaderGroupsReading {
+  startedAt: number;
+  account: string;
+  address: string | null;
+  found: string[];
+  pending: string[];
+  page: string | null;
+}
+
+/**
  * One connection to an outside system, and the MCP server that carries out
  * its actions: a native connector of ours (`server` names it) or a Composio
  * server scoped to one toolkit (`server` is its HTTPS URL).
@@ -64,6 +78,56 @@ export const connections = sqliteTable(
      */
     accountEmail: text("account_email"),
     /**
+     * The account's address as its provider confirmed it, when connected
+     * and again at each renewal (providers.ts `confirmAddress`), for the
+     * providers whose reader lists name accounts by address (Google's);
+     * null when the last renewal confirmed none, and for every other
+     * provider. What core counts a person in a copied reader list by
+     * (`personalAccounts`).
+     */
+    verifiedEmail: text("verified_email"),
+    /**
+     * When the provider last confirmed `verified_email`: when connected,
+     * or at the last renewal that confirmed it. Core counts the address
+     * only while this is recent (`readerProofMaxAgeMs`), so an address an
+     * idle connection or one needing reconnecting holds stops counting.
+     */
+    verifiedEmailAt: timestamp("verified_email_at"),
+    /**
+     * The addresses `verified_email` held before a renewal or reconnect
+     * replaced or cleared it (`pastAddressesAfter`), kept until its
+     * person's erasure, which forgets the reader tokens of each (core's
+     * person-erasure.ts `identity`). Nothing reads them for access: a past
+     * address proves nothing.
+     */
+    pastVerifiedEmails: text("past_verified_emails", { mode: "json" }).$type<
+      string[]
+    >(),
+    /**
+     * The groups the account is in at the provider, nested ones included,
+     * as the last whole read with its own token said (reader-groups.ts),
+     * for the providers whose reader lists name groups: null until one
+     * was. What core counts a person in a list's group by
+     * (`personalAccounts`), only while `reader_groups_at` is recent.
+     */
+    readerGroups: text("reader_groups", { mode: "json" }).$type<string[]>(),
+    /** When a whole read last said `reader_groups`. */
+    readerGroupsAt: timestamp("reader_groups_at"),
+    /**
+     * When a turn of a read of the account's groups was last taken, whole
+     * or not: one is due again only once the connection's access token was
+     * minted after it, or while a read is under way (reader-groups.ts).
+     */
+    readerGroupsTriedAt: timestamp("reader_groups_tried_at"),
+    /**
+     * A read of the account's groups under way, as its last turn left it:
+     * the groups found so far, which count for nothing until it is whole,
+     * and the members still to ask. Null when none is.
+     */
+    readerGroupsReading: text("reader_groups_reading", {
+      mode: "json",
+    }).$type<ReaderGroupsReading>(),
+    /**
      * The other addresses the account's mailbox receives mail at (its
      * primary address and SMTP aliases), as its provider said when it was
      * connected (account-addresses.ts); null when never read.
@@ -77,6 +141,13 @@ export const connections = sqliteTable(
      * it was connected (account-addresses.ts); null when never read.
      */
     accountSenders: text("account_senders", { mode: "json" }).$type<string[]>(),
+    /**
+     * For a shared connection whose places an admin picks: one up with
+     * each save that changed them (sync.ts `pickSyncPlaces`), so core
+     * hides what a save un-picked only for a save newer than the last it
+     * hid for (brain-sync.ts `hideUnpickedPlaces`). Null before the first.
+     */
+    syncPicksVersion: integer("sync_picks_version"),
     connectedBy: text("connected_by"),
     /**
      * For a Composio connection: the MCP server and the auth config
@@ -88,6 +159,12 @@ export const connections = sqliteTable(
      */
     composioServerId: text("composio_server_id"),
     composioAuthConfigId: text("composio_auth_config_id"),
+    /**
+     * How a Composio connection was made, and so which consent the admin
+     * gave: signing in with Composio's app (`managed`), or with a key they
+     * typed in (`key`). Null where it wasn't recorded.
+     */
+    composioAuth: text("composio_auth", { enum: ["managed", "key"] }),
     tools: text(),
     /**
      * Sends of a tool list to Composio, counted: the count goes up before
@@ -122,6 +199,13 @@ export const connections = sqliteTable(
       .on(table.provider, table.accountId)
       .where(
         sql`${table.accountId} IS NOT NULL AND ${table.status} <> 'disconnected'`
+      ),
+    // One live key connection per toolkit (composio-connections.ts
+    // `serveAndStore`): of two connects at once, the second fails whole.
+    uniqueIndex("connections_key_toolkit_idx")
+      .on(table.provider)
+      .where(
+        sql`${table.composioAuth} = 'key' AND ${table.status} <> 'disconnected'`
       ),
     // Offboarding disconnects a removed person's personal connections.
     index("connections_owner_user_id_idx").on(table.ownerUserId),
@@ -296,7 +380,8 @@ export const pendingActions = sqliteTable(
     idempotencyKey: text("idempotency_key").notNull(),
     input: text().notNull(),
     inputHash: text("input_hash").notNull(),
-    permissionId: text("permission_id").notNull(),
+    /** Null for a read that needs no grant (core's ungranted-reads.ts). */
+    permissionId: text("permission_id"),
     context: text().notNull(),
     /** Asked for by a chat, App or run that had read restricted data. */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
@@ -326,6 +411,12 @@ export const pendingActions = sqliteTable(
      * (`CapabilityClaims.unattended`): its person is told so when shown it.
      */
     unattended: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * Held in a chat app's conversation (`CapabilityClaims.chatApp`), which
+     * Grasp never shows as a chat: decided on its card there, and left out
+     * of Grasp's own list (`listPendingActions`).
+     */
+    chatApp: integer("chat_app", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     uniqueIndex("pending_actions_call_idx").on(
@@ -489,6 +580,47 @@ export const connectionTokens = sqliteTable("connection_tokens", {
   grantedScopes: text("granted_scopes"),
   updatedAt: timestamp("updated_at").notNull(),
 });
+
+/**
+ * No longer read or written (GRA-2207): a shared connection's places are
+ * read by its Brain audience, not by the readers SharePoint names, so no
+ * token for a company's SharePoint host is asked for. The table stays
+ * until a later release drops it (expand, then contract), so a release
+ * before this one, after a rollback, finds it as it left it. A row still
+ * in it goes with its grant's `connection_tokens` row (ON DELETE CASCADE).
+ */
+export const connectionTenantTokens = sqliteTable("connection_tenant_tokens", {
+  connectionId: text("connection_id")
+    .primaryKey()
+    .references(() => connectionTokens.connectionId, { onDelete: "cascade" }),
+  host: text().notNull(),
+  sealed: text().notNull(),
+  accessExpiresAt: timestamp("access_expires_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
+ * A place of a shared connection an admin picked for one of its
+ * connector's syncs (`places: "picked"`: a shared drive, a document
+ * library): the only places that sync reads of it (sync.ts). Who picked
+ * is in the audit log, not here.
+ */
+export const syncPicks = sqliteTable(
+  "sync_picks",
+  {
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => connections.id),
+    /** The connector's sync, such as `shared-drives`. */
+    feed: text().notNull(),
+    /** The place's ID at the provider, as the sync listed it. */
+    place: text().notNull(),
+    pickedAt: timestamp("picked_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
+  ]
+);
 
 /**
  * A revoke at its provider still owed for a connection's grant (GRA-1191,

@@ -287,7 +287,8 @@ export interface Kept {
 const storedOriginSchema = z.strictObject({
   mode: z.enum(["interactive", "workflow"]),
   appVersion: z.int().positive().nullable(),
-  permissionId: z.string().min(1),
+  /** Null for a read that needs no grant, kept once its person confirmed it. */
+  permissionId: z.string().min(1).nullable(),
   context: workContextSchema,
   /**
    * Recovering it needs its person: its context had read restricted data,
@@ -479,15 +480,18 @@ export const effectKeyHashOfRow = async (row: EffectScope): Promise<string> =>
 
 /**
  * Where a side effect's result is kept under its idempotency key, for a
- * call that has one. Work that may only read (`readOnly`) has no side
- * effects, so it has no stored results of one either: none is replayed to
- * it, whatever key it names.
+ * call that has one. Work that may only read (`readOnly`) has no stored
+ * results of a side effect: none is replayed to it, whatever key it
+ * names. Except the read its person confirmed (`decision`, checked
+ * against the held action exactly): a read held because of where it was
+ * asked (policy.ts `hasSideEffect`), whose answer is kept under the key
+ * it was held with, for its caller to read (`heldOutcome`).
  */
 export const scopeOf = (
-  { authority, resource, idempotencyKey, readOnly }: CapabilityClaims,
+  { authority, resource, idempotencyKey, readOnly, decision }: CapabilityClaims,
   call: { connectionId: string; action: string }
 ): IdempotencyScope | undefined =>
-  idempotencyKey === null || readOnly
+  idempotencyKey === null || (readOnly && decision === undefined)
     ? undefined
     : {
         subject: authority.subject,

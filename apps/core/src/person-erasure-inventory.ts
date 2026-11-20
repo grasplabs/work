@@ -25,6 +25,7 @@
 /** The erasure areas (person-erasure.ts), and removal before them. */
 export const erasureAreas = [
   "removal",
+  "brain_shared",
   "identity",
   "channels",
   "connect",
@@ -33,7 +34,11 @@ export const erasureAreas = [
   "brain",
   "runs",
   "interview",
+  "brain_sources",
 ] as const;
+
+/** An area of a person's erasure (person-erasure.ts): one of `erasureAreas` but removal. */
+export type ErasureAreaName = Exclude<(typeof erasureAreas)[number], "removal">;
 
 /** What erasing a person does to a table that names one. */
 export type ErasureClass =
@@ -55,6 +60,29 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.users": { erased: "identity" },
   "core.sessions": { erased: "identity" },
   "core.accounts": { erased: "identity" },
+  // The token the Brain knows each account on a copied reader list by
+  // (source-readers.ts, GRA-1761), under a keyed hash of the account, so
+  // no row holds an address or an object ID: the rows a person claimed by
+  // reading as themselves, and those nobody claimed of the accounts core
+  // keeps of them, go with their accounts. An outsider's stay, the
+  // company's record of who its documents were shared with, naming nobody
+  // readable.
+  "core.source_reader_tokens": { erased: "identity" },
+  // The groups copied reader lists name (source-readers.ts, GRA-1761): a
+  // provider's group IDs, which name no person.
+  "core.source_reader_groups": noPerson,
+  // No longer written (GRA-2207), kept until a later release drops it:
+  // pairs of a picked shared place and a reader, an account by its random
+  // token (`core.source_reader_tokens`), never by an address or an object
+  // ID, as the Brain's sets do (`brainStore.reader_set_members`): an
+  // erased person's token goes with their accounts, and a pair names one
+  // nobody holds again.
+  "core.source_reader_pairs": {
+    company: "who a picked place's documents are shared with, by token",
+  },
+  // Every address a person's sign-ins proved, for their erasure alone
+  // (source-readers.ts): forgotten with their accounts.
+  "core.sign_in_addresses": { erased: "identity" },
   "core.members": { erased: "removal" },
   "core.member_removals": { kept: "keeps someone removed out" },
   "core.person_erasures": { kept: "the erasure's own record, by ID" },
@@ -72,6 +100,45 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.invitations": { erased: "channels" },
   "core.teams": { none: "member_count is a count" },
   "core.team_members": { erased: "removal" },
+  "core.staff_list_synced": { none: "a version number, no person" },
+  "core.retired_team_ids": {
+    none: "team ids never to be made again, no person",
+  },
+  // Everyone the directory listed at its last daily read, by the
+  // provider's ID of them (directory-people.ts, GRA-2056): a person's rows
+  // go with their accounts, and the keyed hash of each ID that stays
+  // keeps the read from writing them again.
+  "core.directory_people": { erased: "identity" },
+  // Which members' team each department of the directory fills
+  // (directory-teams.ts): a department and a team, no person.
+  "core.directory_departments": {
+    none: "a department's name and a team's id, no person",
+  },
+  // The memberships the directory's read made, by the membership's own
+  // key: each goes with its membership, which removal deletes.
+  "core.directory_memberships": {
+    erased: "removal",
+    via: "team_members",
+  },
+  // What an admin pinned of a member's teams: deleted with their removal,
+  // and again by the erasure's channels step.
+  "core.team_pins": { erased: "removal" },
+  // The directory's groups admins mapped to teams (directory-groups.ts):
+  // a group and a team, no person; who mapped it is in the audit log.
+  "core.directory_group_teams": {
+    none: "a directory group's id and name and a team's id, no person",
+  },
+  // The members of each mapped group, by the provider's ID of them: each
+  // row goes with the person's `directory_people` row, which erasure
+  // deletes.
+  "core.directory_group_members": {
+    erased: "identity",
+    via: "directory_people",
+  },
+  // Where the daily read stands: a connection, a tenant and counts.
+  "core.directory_reads": {
+    none: "a connection, its tenant and counts, no person",
+  },
   "core.sso_providers": { none: "stays empty: providers come from config" },
   "core.permissions": { company: "grants they asked for or gave" },
   "core.apps": { company: "Apps they own or changed" },
@@ -88,6 +155,15 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.app_draft_points": { company: "drafts of Apps they wrote" },
   "core.app_draft_point_files": { company: "drafts of Apps they wrote" },
   "core.app_draft_contents": { company: "drafts of Apps they wrote" },
+  "core.drafts": { company: "drafts of Apps and workflows they wrote" },
+  "core.draft_files": { company: "drafts of Apps and workflows they wrote" },
+  "core.draft_checkpoints": {
+    company: "drafts of Apps and workflows they wrote",
+  },
+  "core.draft_checkpoint_files": {
+    company: "drafts of Apps and workflows they wrote",
+  },
+  "core.draft_blobs": { company: "drafts of Apps and workflows they wrote" },
   "core.app_candidates": { company: "candidates they made" },
   "core.sdk_artifact_deletions": { none: "owner is a deleting process" },
   "core.action_invocations": { company: "actions run for them, as runs are" },
@@ -126,16 +202,55 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.tool_class_settings": { company: "settings an admin changed" },
   "core.app_pointers": { company: "settings an admin changed" },
   "core.shared_mailbox_pointers": { company: "settings an admin changed" },
+  "core.connection_brain_audiences": { company: "settings an admin changed" },
+  // What agents read through a shared connection, kept for its audience,
+  // names no one; who asked to erase it, an admin's act on the company's.
+  "core.connection_brain_reads": noPerson,
+  // What Grasp proposes for a team's routine, and which an admin
+  // dismissed, by routine and evidence (opportunities.ts): ids, a form,
+  // step numbers and systems, never who. Who dismissed is in the audit log.
+  "core.opportunity_proposals": noPerson,
+  "core.opportunity_dismissals": noPerson,
+  "core.connection_brain_erasures": { company: "erasures an admin asked for" },
+  // Native sync (brain-sync.ts): a source names its connection's person
+  // and their own account (`account`), deleted by the connect area (and by each
+  // disconnect's drain); its items name keys, the provider's IDs and the
+  // Brain's versions, never a reader; a disconnect's record names who
+  // disconnected only until the erasure it owed ends, its event written.
+  "core.brain_sync_sources": { erased: "connect" },
+  "core.brain_sync_items": noPerson,
+  "core.brain_sync_catch_ups": noPerson,
+  "core.brain_sync_disconnects": {
+    company: "disconnects and the erasures they owed, by IDs",
+  },
   "core.stephen_reach": { company: "settings an admin changed" },
   "core.stephen_places": { company: "settings an admin changed" },
   "core.app_tool_classes": { company: "settings an admin changed" },
-  "core.agents": { company: "agents an admin made or changed" },
-  "core.agent_documents": { company: "documents an admin gave an agent" },
+  // Their own agents (`owner_id`), with those agents' documents. The
+  // company's agents, and what an admin gave them, stay the company's.
+  "core.agents": { erased: "workspace" },
+  "core.agent_documents": { erased: "workspace" },
+  // Their own agents' apps; a company agent's, which a person set, stay.
+  "core.agent_apps": { erased: "workspace" },
   "core.agent_reach": { company: "settings an admin changed" },
   "core.agent_wakes": { erased: "workspace" },
   "core.agent_places": { company: "settings an admin changed" },
   "core.agent_tool_classes": { company: "settings an admin changed" },
   "core.app_requests": { company: "Apps they asked Grasp for" },
+  // Their asks to share a skill (a waiting one holds their text) are
+  // deleted; on asks they decided as an admin, `decided_by` is cleared,
+  // and the decision stays.
+  "core.skill_shares": { erased: "brain" },
+  // Admins' decisions on the company's and the teams' skills, with the
+  // text each decided: the company's, and what the Brain follows, so they
+  // stay. Who decided (`decided_by`) is cleared when that admin is erased.
+  // Their audience (`audience`) names the company or a team, never a person.
+  "core.skill_decisions": {
+    company:
+      "decisions on the company's and the teams' skills, unnamed once their decider is erased",
+  },
+  // The names of the skills they deleted for good: theirs alone.
+  "core.skill_deletions": { erased: "brain" },
   "core.improvement_signals": { kept: "IDs and counts only" },
   "core.notifications": { erased: "channels" },
   // What they asked Stephen, with where their weekly summary stood.
@@ -150,14 +265,31 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.preview_fixture_stores": {
     none: "nothing writes or reads it; dropped by the next contract migration",
   },
+  // A source is a pin (history-access.ts): a memory's pin names other
+  // people by ID, its writer and the person whose word it is. Their
+  // erasure removes neither; the IDs stay, as the company's records keep
+  // an erased person's ID (D3).
   "core.run_chat_sources": {
-    company: "what a run's chat had read, with the run (D3)",
+    company:
+      "what a run's chat had read, with the run; its pins keep other people's IDs after their erasure (D3). Their own pins go with their erasure, whatever the run's age, each run left an erased pin of no one that keeps it refused (GRA-1996)",
   },
   "core.org_settings": {
     none: "the organization's billing and Pulse settings",
   },
   "core.run_brain_evidence": {
-    company: "what a run recalled, as runs are (D3)",
+    none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
+  },
+  "core.run_brain_versions": {
+    company:
+      "which Brain versions a run recalled, identifiers only, as runs are (D3)",
+  },
+  "core.kept_run_evidence": noPerson,
+  "core.run_state_writers": {
+    none: "which runs a run started from the kept state of: its writer is a run, by id, never a person",
+  },
+  "core.run_brain_memories": {
+    company:
+      "which Brain memories a run's entity reads rested on, identifiers only, no person's, as runs are (D3)",
   },
   "core.guest_chats": { company: "guest chats they opened for an App" },
   // An App's visitor list (app-visitors.ts): the company's, as its builders
@@ -204,6 +336,18 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_resource_members": { company: "who has a role in a workflow" },
   "core.trigger_resources": { company: "triggers they own" },
   "core.event_sources": { company: "event sources an admin created" },
+  // What a source accepted, for its admins to see (workflows/source-
+  // deliveries.ts): company data from an outside system, which may name
+  // people under no key of ours, as a kept event may, so it isn't one
+  // person's to erase and goes on the clock: its payload within a day,
+  // its row (a time and a type by then) within seven.
+  "core.event_source_deliveries": {
+    expires:
+      "an outside system's events, which may name people; the payload deleted within 24 hours, its row within 7 days",
+  },
+  "core.event_source_counts": {
+    none: "counts of deliveries by source, outcome and hour",
+  },
   "core.event_waits": { none: "runs' waits, by run and hash" },
   // An outside system's events may name people anywhere in their data,
   // under no key of ours: erasing a person can't find them, so each is
@@ -234,10 +378,15 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.app_workflow_bindings": { company: "bindings they made" },
   "core.workflow_candidate_runs": { company: "candidate runs (D3)" },
   "core.brain_gap_states": { company: "who answered a gap, by ID" },
-  "core.uploads": { company: "Knowledge uploads; Personal ones the Brain's" },
-  "core.knowledge_signals": { erased: "apps" },
-  "core.knowledge_signal_dismissals": {
-    none: "subject is a search or document",
+  "core.brain_uploads": {
+    company:
+      "who uploaded which file into the Brain for a team or everyone, by ID and the file's name; their uploads for themselves alone, by ID with no name, go with brain_sources once the Brain erased them; a file's text is the Brain's",
+  },
+  "core.uploads": {
+    none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
+  },
+  "core.knowledge_signals": {
+    none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
   },
   "core.verifications": {
     kept: "a sign-in's state for its minutes, by a random identifier",
@@ -245,13 +394,23 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.audit_outbox": { kept: "audit events on their way to the log (D2)" },
   "core.audit_outbox_rejected": { kept: "audit events the log refused (D2)" },
   "core.brain_capture_intents": { company: "outcomes of runs (D3), by run" },
-  "core.brain_hand_overs": {
-    none: "a source's kind and ID until the new Brain's queue takes it",
+  // What core has still to hand over to the new Brain, by a source's kind
+  // and id, until its hand-over ends. A chat turn's id names its person
+  // (`<person>/<chat>/<answer>`); a run's names nobody. Their erasure ends
+  // their open ones as erased once the Brain erased what was theirs
+  // (person-erasure.ts, brain-sources.ts `endHandOversOf`), also one whose
+  // item the queue parked for good.
+  "core.brain_hand_overs": { erased: "brain_sources" },
+  // Whose run results the Brain holds by workflow, and when each was taken
+  // out of use as they lost it (brain-run-sources.ts): IDs and a count, as
+  // the runs themselves are the company's.
+  "core.brain_run_sources": {
+    company: "whose run results it took out of use, by workflow (D3)",
   },
   // A person's own Brain store's health, keyed by the SHA-256 of their ID:
   // removed once the Brain's erasure erased their store (brain-next.ts
   // `erasePerson`).
-  "core.brain_own_stores": { erased: "brain" },
+  "core.brain_own_stores": { erased: "brain_sources" },
   "core.brain_records": {
     company: "agreed facts naming roles; a gap's answer names who gave it",
   },
@@ -268,13 +427,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_run_file_chunks": { company: "files of runs (D3)" },
   "core.app_candidate_reports": noPerson,
   "core.app_default_stores": noPerson,
-  "core.app_entries": noPerson,
   "core.app_origins": noPerson,
   "core.app_test_fixtures": noPerson,
   "core.build_receipts": noPerson,
   "core.business_store_versions": noPerson,
   "core.channel_signals": noPerson,
-  "core.collection_teams": noPerson,
   "core.dependency_policy": noPerson,
   "core.improvement_signal_computations": noPerson,
   "core.jwks": noPerson,
@@ -311,12 +468,18 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.stephen_request_questions": {
     none: "Grasp's own wording, without names or details",
   },
-  "core.stephen_request_topics": noPerson,
+  "core.stephen_request_topics": {
+    none: "Grasp's own wording, without names or details",
+  },
   "core.workflow_ai_waits": noPerson,
   // Nothing writes it since GRA-1552; dropped in GRA-1613.
   "core.workflow_stores": noPerson,
+  // A key may hold what its run read of a person's card: read only while
+  // what that run read holds (workflow-state.ts, GRA-1996), so withheld
+  // for good once their erasure took it.
   "core.workflow_state": {
-    company: "what a workflow keeps between its runs, as their outputs (D3)",
+    company:
+      "what a workflow keeps between its runs, as their outputs (D3); the keys set by runs their chats started, and by runs that started from those, go with their erasure (GRA-1996)",
   },
   "core.workflow_state_writes": noPerson,
   "core.workflow_state_snapshots": {
@@ -354,15 +517,23 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.chat_drafts": { erased: "workspace" },
   "workspace.chat_files": { erased: "workspace" },
   "workspace.chat_messages": { erased: "workspace" },
+  "workspace.chat_request_keys": { erased: "workspace" },
+  // Its person's alone, erased with their workspace. A memory's pin also
+  // names other people by ID (its writer, the person whose word it is):
+  // their erasure removes neither, and the IDs stay in this person's chat,
+  // as the company's records keep an erased person's ID (D3).
   "workspace.chat_run_sources": { erased: "workspace" },
   "workspace.chat_search_text": { erased: "workspace" },
   "workspace.chat_sources": { erased: "workspace" },
   "workspace.chat_tool_events": { erased: "workspace" },
+  "workspace.held_app_calls": { erased: "workspace" },
+  "workspace.memory_uses": { erased: "workspace" },
   "workspace.preview_release_artifacts": { erased: "workspace" },
   "workspace.preview_releases": { erased: "workspace" },
   "workspace.preview_stores": { erased: "workspace" },
   // The onboarding: their interview, by its own deletion.
-  "onboarding.people": { company: "the company's roster (D5)" },
+  // The company's roster (D5): their entry stays, without their address.
+  "onboarding.people": { erased: "interview" },
   "onboarding.links": { erased: "interview" },
   "onboarding.link_codes": { erased: "interview" },
   "onboarding.interviews": { erased: "interview" },
@@ -373,13 +544,24 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.counted": { kept: "who was counted in the admin's numbers" },
   "onboarding.asked_about": { erased: "interview" },
   "onboarding.brain_sent": { erased: "interview" },
+  "onboarding.opinion_candidates": { erased: "interview" },
+  "onboarding.opinion_backers": { erased: "interview" },
+  // A hash over people's lines and ids, no person named: dropped whenever
+  // what it was taken over loses one (the store's `#forgetOpinionsOf`).
+  "onboarding.opinion_inputs": { erased: "interview" },
+  "onboarding.opinion_people": { erased: "interview" },
   "onboarding.interview_settings": { erased: "interview" },
+  // An interview's (`link:<person>`) go with it; an admin's
+  // (`admin:<user>`), hashes of what the voice said for them, go with
+  // the interview area too (person-erasure.ts).
+  "onboarding.spoken_keys": { erased: "interview" },
+  // What the new Brain holds of their interview, until its erasure there
+  // returned.
+  "onboarding.brain_interviews": { erased: "interview" },
   // The roster's and the onboarding's own: who did what, by ID (D5).
   "onboarding.teams": { company: "the company's roster: a team's lead (D5)" },
   "onboarding.works": { company: "the company's roster: who does what (D5)" },
-  "onboarding.mail_outbox": {
-    company: "mail to the roster (D5), which keeps the address anyway",
-  },
+  "onboarding.mail_outbox": { erased: "interview" },
   "onboarding.events": { kept: "the onboarding's log, IDs only" },
   "onboarding.counted_works": { company: "who counted a work (D5)" },
   "onboarding.documents": { company: "documents the admin shared" },
@@ -389,8 +571,17 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     kept: "audit events on their way to the log (D2)",
   },
   "onboarding.brain_teams": noPerson,
+  "onboarding.brain_claims": {
+    company: "how a team works, as its people shared it, names out",
+  },
+  "onboarding.brain_drawings": {
+    company: "a team's work as its people shared it, names out",
+  },
+  "onboarding.brain_opinions": {
+    company: "what five or more across the company say, no team, names out",
+  },
   "onboarding.checked_differences": {
-    company: "a team's difference five or more told each way, names out",
+    company: "a team's difference as its people told each way, names out",
   },
   "onboarding.draw_failures": noPerson,
   "onboarding.drawn_works": noPerson,
@@ -400,6 +591,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.team_counts": noPerson,
   "onboarding.usage": noPerson,
   "onboarding.referrals": { erased: "interview" },
+  // An entry's addresses kept under the account its link belonged to when
+  // it left the list: an erasure moves them into `erased_addresses`.
+  "onboarding.left_addresses": { erased: "interview" },
+  "onboarding.erased_addresses": {
+    kept: "keeps someone erased off the staff list, as keyed hashes of their addresses, by ID",
+  },
   "onboarding.more_voices": {
     none: "work to hear more about; who asked is the audit log's",
   },
@@ -453,63 +650,149 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "dataStore.sdk_file_events": { company: "the App's files they own" },
   "dataStore.sdk_file_writes": { company: "the App's files they own" },
-  // The Brain and Knowledge (the Brain's personal purge erases a person's
-  // own; what they wrote in the company's collections is the company's).
-  "brain.collections": {
-    company: "collections; their Personal one the Brain's",
-  },
-  "brain.documents": { company: "documents; their Personal ones the Brain's" },
-  "brain.versions": { company: "versions; their Personal ones the Brain's" },
-  "brain.brain_memories": { erased: "brain" },
-  "brain.brain_episodes": { erased: "brain" },
-  "brain.brain_episode_members": { erased: "brain" },
-  "brain.brain_lessons": { erased: "brain" },
-  "brain.brain_lesson_versions": { erased: "brain", via: "brain_lessons" },
-  "brain.brain_lesson_evidence": { erased: "brain", via: "brain_episodes" },
-  "brain.brain_memory_cites": { erased: "brain", via: "brain_memories" },
-  "brain.brain_receipts": { erased: "brain" },
-  "brain.brain_consolidation_marks": { erased: "brain" },
-  "brain.brain_consolidation_due": { erased: "brain" },
-  "brain.brain_entities": {
-    company: "what documents name; those only their records name go",
-  },
-  "brain.brain_entity_keys": { company: "keys of entities, with them" },
-  "brain.brain_mentions": { company: "names in documents, with them" },
-  "brain.brain_assertions": {
-    company: "relations documents state; their memories' go with them",
-  },
-  "brain.brain_link_jobs": { company: "links of documents, with them" },
-  "brain.sections": { company: "documents; their Personal ones the Brain's" },
-  "brain.transcripts": {
-    company: "documents; their Personal ones the Brain's",
-  },
-  "brain.brain_payloads": { company: "uploads; their Personal ones go" },
-  "brain.brain_erased_evidence": { kept: "IDs of evidence erased" },
-  "brain.brain_purges": {
-    kept: "each purge's own record: the admin who ran it, by ID",
-  },
-  "brain.brain_purge_steps": noPerson,
-  "brain.brain_exports": { company: "exports of the Brain an admin asked for" },
-  "brain.brain_export_files": noPerson,
-  "brain.brain_erased_documents": {
-    kept: "the purge's own record: document IDs and hashes of their places",
-  },
-  "brain.brain_entity_matches": {
-    company: "who decided two entities are one, gone with the entities",
-  },
-  "brain.audit_outbox": { kept: "audit events on their way to the log (D2)" },
-  "brain.audit_outbox_rejected": { kept: "audit events the log refused (D2)" },
-  "brain.brain_capture_cursors": noPerson,
-  "brain.brain_payload_releases": noPerson,
-  "brain.brain_sequences": noPerson,
-  "brain.links": noPerson,
-  "brain.search_rebuilds": noPerson,
-  "brain.brain_forgotten_people": {
-    kept: "keeps their memory from coming back",
-  },
   // The audit log: IDs only, never rewritten, archived for 7 years (D2).
   "auditLog.events": { kept: "the audit log (D2)" },
   "auditLog.archives": noPerson,
+  // The new Brain's shared store (@grasp-os/brain-next): what a team, the
+  // company, an App's users or a staff-list team may read, or nobody.
+  // Erasing a member removes what the Brain derived about them and what is
+  // in their own word, and keeps the company's documents, even where their
+  // text names them (decided 16 November, GRA-1747): `brain_shared`
+  // (brain-next.ts `erasePersonShared`; the Brain's people.ts). What one
+  // person alone may read is never here (the store refuses it,
+  // store.ts `#mayKeep`): it is in their own store, the same tables, which
+  // their erasure deletes whole (`brain_sources`, brain-next.ts
+  // `erasePerson`), its record in R2 read before the store answers
+  // anything, so a restore brings nothing back; so a person's own store
+  // needs no entry here. The word indexes (migrations, not in the schema)
+  // hold the words of these passages and memories, and go with them.
+  // A set copied from where a document lives names each reader's account
+  // by a random token core keeps in its place (source-readers.ts,
+  // `core.source_reader_tokens`, GRA-1761), never by an address or an
+  // object ID: an erased person's token goes with their accounts, and the
+  // sets name one nobody holds again.
+  "brainStore.reader_sets": {
+    company: "who a document is shared with, by token, where it lives",
+  },
+  "brainStore.reader_set_members": {
+    company: "who a document is shared with, by token, where it lives",
+  },
+  "brainStore.files": noPerson,
+  "brainStore.source_versions": {
+    company: "documents a team or more may read, even where they name them",
+  },
+  "brainStore.current_versions": { company: "the current version of each" },
+  "brainStore.removed_sources": {
+    company: "documents taken out of use, kept as history",
+  },
+  "brainStore.source_changes": {
+    company: "the change keys of each add, as its producer named them",
+  },
+  "brainStore.source_subjects": {
+    kept: "SHA-256 of each source's key, as the erasure ledger names it",
+  },
+  "brainStore.known_groups": {
+    kept: "SHA-256 of each key named a group, so an erased group stays closed",
+  },
+  "brainStore.chunks": { company: "passages of those documents" },
+  "brainStore.chunk_days": {
+    company: "the days passages of those documents mention",
+  },
+  "brainStore.chunk_blocks": noPerson,
+  "brainStore.vector_models": noPerson,
+  "brainStore.vector_blocks": { company: "vector codes of those passages" },
+  "brainStore.vector_codes": { company: "vector codes of those passages" },
+  "brainStore.vector_removed": noPerson,
+  "brainStore.vector_files": noPerson,
+  "brainStore.embedding_state": noPerson,
+  "brainStore.unembeddable": noPerson,
+  "brainStore.work_items": {
+    company:
+      "work on those documents; a drawing names whose word a version is, by ID, and leaves out what is in an erased person's",
+  },
+  "brainStore.work_model_bucket": noPerson,
+  "brainStore.word_index": noPerson,
+  "brainStore.erasures": {
+    kept: "the erasure ledger's record: SHA-256 of a source's key, a writer's lineage or an erased person's id (D2)",
+  },
+  "brainStore.erasing_versions": { kept: "erasures under way, by row" },
+  "brainStore.erased_versions": {
+    kept: "what an older release's erasure hid, by SHA-256 of a source's key",
+  },
+  "brainStore.person_erasure_subjects": {
+    kept: "what a person's erasure closed: their address by SHA-256, closed for good, and their card by its id",
+  },
+  // SHA-256 of the identifiers of the person cards a restore's export
+  // gives: a person's erasure deletes the rows of theirs, after taking the
+  // cards by them (people.ts `applyPerson`); the rest go once the restore
+  // is done, or, given up, with each card the store holds (forget.ts).
+  "brainStore.restore_cards": { erased: "brain_shared" },
+  "brainStore.person_erasure_memories": {
+    kept: "the memories a person's erasure hides until the tick deletes them, by row",
+  },
+  "brainStore.exports": {
+    company:
+      "exports an admin asked for; one started before a member's erasure is stale",
+  },
+  "brainStore.export_parts": noPerson,
+  "brainStore.export_sources": {
+    company: "the versions each export holds, by SHA-256 of a source's key",
+  },
+  "brainStore.export_sweep": noPerson,
+  "brainStore.restores": noPerson,
+  // The person entity that is them alone (by the address they signed in
+  // with), the memories about it or in their word, and the names those
+  // gave; on anyone else's entity (a team, a project, a shared desk) their
+  // address alone.
+  "brainStore.entities": { erased: "brain_shared" },
+  "brainStore.memories": { erased: "brain_shared" },
+  "brainStore.entity_names": { erased: "brain_shared" },
+  // Their confirmations stand, their id replaced (`erasedConfirmer`).
+  "brainStore.memory_confirmations": { erased: "brain_shared" },
+  "brainStore.memory_confirmed_over": noPerson,
+  // Which memory replaces which, by row: deleted with either memory.
+  "brainStore.memory_replacements": noPerson,
+  "brainStore.memory_extractions": {
+    company: "marks of the versions fully drawn from",
+  },
+  // Which prompt versions (hashes) and models drew memories: no content.
+  "brainStore.extractors": noPerson,
+  "brainStore.memory_changes": {
+    kept: "SHA-256 of change keys and ids, so an erased add is never made again",
+  },
+  "brainStore.memory_erase_failures": noPerson,
+  "brainStore.memory_erasure_replay": noPerson,
+  "brainStore.memory_stamps": noPerson,
+  "brainStore.memory_outs": noPerson,
+  "brainStore.memory_ins": noPerson,
+  "brainStore.memory_judging": noPerson,
+  "brainStore.memory_judging_places": noPerson,
+  // The steps people took, as their teams' events (GRA-1763): each with a
+  // keyed tag of who took it in that team, by which a person's erasure
+  // deletes theirs (brain-next.ts `erasePersonShared`); the rest go after 90
+  // days (`eventsKeptMs`).
+  "brainStore.events": { erased: "brain_shared" },
+  // The tags an erasure of events closed, so a late write under one is
+  // refused: MACs of a person and a team under core's key, opaque without
+  // it, each deleted once no event under it could still arrive (90 days).
+  "brainStore.closed_event_tags": {
+    kept: "an erasure's own record: tags opaque without core's key, kept 90 days so a late write can't bring erased events back",
+  },
+  "brainStore.person_erasure_events": {
+    kept: "an erasure's own working record: the tags of the events a person's erasure took, opaque without core's key, deleted once its ledger entry holds them",
+  },
+  "brainStore.event_key": {
+    none: "an id of core's key the events are made under, never a person",
+  },
+  "brainStore.proposal_sources": {
+    none: "the sources a person's skill proposals name (skill-proposals.ts): only in their own store, erased whole; the shared store holds none",
+  },
+  "brainStore.skill_proposals": {
+    none: "drafts of a person's own skills (skill-proposals.ts): only in their own store, erased whole; the shared store holds none",
+  },
+  "brainStore.own_entity": {
+    none: "a person's own store's entity for its person (own-entity.ts): the shared store holds none, and their own store is erased whole",
+  },
 };
 
 /**
@@ -522,23 +805,28 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
 export const reviewedPersonColumns: Readonly<
   Record<string, readonly string[]>
 > = {
-  "brain.brain_assertions": ["subject_entity_id", "subject_name"],
-  "brain.brain_entity_matches": ["decided_by"],
-  "brain.brain_episode_members": ["user_id"],
-  "brain.brain_episodes": ["owner_id"],
-  "brain.brain_forgotten_people": ["user_id"],
-  "brain.brain_lessons": ["retired_by"],
-  "brain.brain_memories": ["owner_id"],
-  "brain.brain_purges": ["superseded_by"],
-  "brain.collections": ["owner"],
-  "brain.documents": ["owner"],
-  "brain.versions": ["author"],
+  "brainStore.erased_versions": ["subject"],
+  "brainStore.erasures": ["subject"],
+  "brainStore.export_sources": ["subject"],
+  "brainStore.known_groups": ["subject"],
+  "brainStore.memories": ["speaker", "subject", "writer", "writer_subject"],
+  "brainStore.memory_confirmations": ["person"],
+  "brainStore.memory_extractions": ["subject"],
+  "brainStore.person_erasure_subjects": ["subject"],
+  "brainStore.restore_cards": ["subject"],
+  "brainStore.reader_set_members": ["principal"],
+  "brainStore.removed_sources": ["subject"],
+  "brainStore.source_subjects": ["group_subject", "subject"],
   "core.access_revocations": ["user_ids"],
-  "core.accounts": ["user_id"],
+  "core.accounts": ["user_id", "verified_email", "verified_email_at"],
+  "core.source_reader_tokens": ["person"],
+  "core.source_reader_pairs": ["principal"],
+  "core.sign_in_addresses": ["user_id"],
   "core.action_invocations": ["person_id"],
   "core.agent_held_starts": ["person_id"],
-  "core.agents": ["changed_by", "made_by"],
+  "core.agents": ["changed_by", "made_by", "owner_id"],
   "core.agent_documents": ["added_by"],
+  "core.agent_apps": ["changed_by"],
   "core.agent_places": ["changed_by"],
   "core.agent_reach": ["changed_by"],
   "core.agent_wakes": ["changed_by", "made_by", "person_id"],
@@ -550,6 +838,10 @@ export const reviewedPersonColumns: Readonly<
   "core.app_members": ["added_by", "member_id", "member_type"],
   "core.app_pointers": ["changed_by"],
   "core.app_requests": ["requested_by"],
+  "core.run_state_writers": ["writer_run_id"],
+  "core.skill_shares": ["decided_by", "requested_by"],
+  "core.skill_decisions": ["decided_by"],
+  "core.skill_deletions": ["person_id"],
   "core.app_resource_bindings": ["approved_by", "revoked_by"],
   "core.app_test_decisions": ["decided_by", "recipients"],
   "core.app_test_runs": ["deciders", "principal"],
@@ -564,12 +856,18 @@ export const reviewedPersonColumns: Readonly<
   "core.blueprints": ["marked_by"],
   "core.brain_gap_states": ["answered_by"],
   "core.business_store_members": ["added_by", "member_id", "member_type"],
+  "core.brain_run_sources": ["person_id"],
+  "core.brain_uploads": ["uploaded_by"],
   "core.business_stores": ["closing_owner", "owner_id"],
   "core.channel_accounts": ["platform_user_id", "user_id"],
   "core.channel_conversations": ["user_id"],
   "core.channel_links": ["platform_user_id", "used_by"],
   "core.chat_audiences": ["members"],
   "core.chat_workflow_offers": ["user_id"],
+  "core.connection_brain_audiences": ["changed_by"],
+  "core.connection_brain_erasures": ["actor"],
+  "core.brain_sync_sources": ["person_id"],
+  "core.brain_sync_disconnects": ["actor"],
   "core.dependency_admission_refusals": ["subject_id", "subject_type"],
   "core.dependency_approvers": [
     "granted_by",
@@ -586,16 +884,23 @@ export const reviewedPersonColumns: Readonly<
     "subject_id",
     "subject_type",
   ],
+  // A draft's subject is the App or workflow it drafts, never a person.
+  "core.draft_blobs": ["subject_id", "subject_kind"],
+  "core.draft_checkpoint_files": ["subject_id", "subject_kind"],
+  "core.draft_checkpoints": ["person_id", "subject_id", "subject_kind"],
+  "core.draft_files": ["subject_id", "subject_kind"],
+  "core.drafts": ["subject_id", "subject_kind", "updated_by"],
   "core.erased_subjects": ["subject_hash", "user_id"],
   "core.event_sources": ["created_by"],
   "core.guest_chats": ["invited_by"],
   "core.hidden_connectors": ["hidden_by"],
   "core.improvement_signals": ["subject"],
   "core.invitations": ["email", "inviter_id"],
-  "core.knowledge_signal_dismissals": ["subject"],
   "core.knowledge_signals": ["owner", "subject"],
   "core.member_removals": ["user_id"],
-  "core.members": ["user_id"],
+  // `suspended_by` names what suspended the member (the directory's read),
+  // never a person; the row goes with the removal erasure needs first.
+  "core.members": ["suspended_by", "user_id"],
   "core.notifications": ["person_id"],
   "core.permissions": [
     "granted_by",
@@ -631,10 +936,14 @@ export const reviewedPersonColumns: Readonly<
   "core.stephen_summaries": ["person_id"],
   "core.stephen_summary_readers": ["person_id"],
   "core.team_members": ["user_id"],
+  // The member a row is tied to; `account_id` names the person too, by
+  // the provider's ID, and goes with them as well (directory-ties.ts).
+  "core.directory_people": ["user_id"],
+  "core.team_pins": ["user_id"],
   "core.teams": ["member_count"],
   "core.tool_class_settings": ["changed_by"],
   "core.trigger_resource_versions": ["principal_binding"],
-  "core.trigger_resources": ["email_address", "owner_id"],
+  "core.trigger_resources": ["email_address", "owner_id", "principal_binding"],
   "core.uploads": ["actor", "uploaded_by"],
   "core.users": ["email", "email_verified"],
   "core.workflow_binding_approvals": ["approved_by", "revoked_by"],
@@ -678,14 +987,20 @@ export const reviewedPersonColumns: Readonly<
   "dataStore.sdk_store": ["deleted_by"],
   "onboarding.approvals": ["person"],
   "onboarding.asked_about": ["person"],
+  "onboarding.brain_interviews": ["person", "user_id"],
   "onboarding.brain_sent": ["person"],
+  "onboarding.opinion_candidates": ["person"],
+  "onboarding.opinion_backers": ["person"],
+  "onboarding.opinion_people": ["person"],
   "onboarding.counted": ["person"],
   "onboarding.interview_settings": ["person"],
   "onboarding.interview_states": ["person"],
   "onboarding.interviews": ["person"],
   "onboarding.link_codes": ["person"],
-  "onboarding.links": ["person"],
+  "onboarding.links": ["person", "sent_to_email", "user_id"],
   "onboarding.participations": ["person"],
+  "onboarding.erased_addresses": ["user_id"],
+  "onboarding.left_addresses": ["user_id"],
   "onboarding.people": ["email"],
   "onboarding.readbacks": ["person"],
   "onboarding.referrals": ["person"],
@@ -693,4 +1008,5 @@ export const reviewedPersonColumns: Readonly<
   "workspace.custom_widgets": ["person_id"],
   "workspace.dashboard_widgets": ["person_id"],
   "workspace.dashboards": ["person_id"],
+  "workspace.held_app_calls": ["person_id"],
 };

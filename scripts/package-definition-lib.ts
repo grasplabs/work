@@ -111,6 +111,7 @@ import type { TypeTarget } from "../packages/compiler/src/type-check.ts";
 import {
   leftOut,
   pageOverride,
+  sdkTestOverride,
   ultraciteFormat,
   ultracitePresets,
 } from "../packages/compiler/ultracite-config.ts";
@@ -121,7 +122,7 @@ import {
 import type { Importer, LockfileInput } from "./package-definition-lockfile.ts";
 
 /** The workspace packages a project vendors, each with what it depends on. */
-const vendored = ["brain", "shared", "runtime", "sdk", "ui"] as const;
+const vendored = ["shared", "runtime", "sdk", "ui"] as const;
 
 /** The catalog packages every project depends on itself. */
 const projectDependencies = [
@@ -834,13 +835,15 @@ const configData = (value: unknown): string =>
  * (ultracite-config.ts), as data:
  * - Ultracite's `core`, `react`, `tanstack` and `vitest` presets, less the
  *   rules Grasp leaves out (`leftOut`);
+ * - on tests, the SDK's test blocks as test blocks (`sdkTestOverride`);
  * - on pages and components, the pages' own rules (`pageOverride`).
  */
 const oxlintConfigText = (): string => {
   const presets = Object.entries(ultracitePresets);
   return `// Written by Grasp when it exported this App: App code held to what
 // Grasp holds it to. Ultracite's presets, less the rules Grasp leaves
-// out, and the pages' own rules on pages and components.
+// out, the SDK's test blocks counted as test blocks, and the pages' own
+// rules on pages and components.
 import { defineConfig } from "oxlint";
 ${presets
   .map(([name]) => `import ${name} from "ultracite/oxlint/${name}";`)
@@ -850,7 +853,7 @@ export default defineConfig({
   extends: [${presets.map(([name]) => name).join(", ")}],
   ignorePatterns: ${configData(ignoredGlobs)},
   rules: ${configData(Object.fromEntries(leftOut.map((rule) => [rule, "off"])))},
-  overrides: ${configData([pageOverride("app/")])},
+  overrides: ${configData([sdkTestOverride(), pageOverride("app/")])},
 });
 `;
 };

@@ -690,8 +690,13 @@ export interface OrgEvent {
   about?: string;
 }
 
-/** What the Worker counts AI use under: the company's own onboarding and what it shared, the interviews, and the work drawn from them. */
-export const METER_PURPOSES = ["reading", "interviews", "drawing"] as const;
+/** What the Worker counts AI use under: the company's own onboarding and what it shared, the interviews, the work drawn from them, and the company's opinions put together from them. */
+export const METER_PURPOSES = [
+  "reading",
+  "interviews",
+  "drawing",
+  "opinions",
+] as const;
 export type MeterPurpose = (typeof METER_PURPOSES)[number];
 
 /**

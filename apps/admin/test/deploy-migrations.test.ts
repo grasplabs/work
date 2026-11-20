@@ -38,10 +38,7 @@ describe("each database's migrations", () => {
       sharingCoreDatabase(manifest, core?.migrations ?? [])
     );
 
-    expect([...databases.keys()].toSorted()).toStrictEqual([
-      "grasp-os-core",
-      "grasp-os-knowledge",
-    ]);
+    expect([...databases.keys()].toSorted()).toStrictEqual(["grasp-os-core"]);
   });
 
   it("refuses two Workers that give one database different migrations", async () => {

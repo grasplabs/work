@@ -26,6 +26,11 @@ import { reauthorizedCapability } from "./decided-calls.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import {
+  callRunOf,
+  callRunsEvidence,
+  requireCallRunEvidenceReadable,
+} from "./workflows/resource-reads.ts";
 import { wakingHeld } from "./workflows/wakes.ts";
 
 // Calls of unknown outcome (spec 14.3), as core shows them to the person
@@ -42,11 +47,22 @@ import { wakingHeld } from "./workflows/wakes.ts";
 // was sent, to follow up with each call's person; they resolve only their
 // own, as anyone does.
 
+/** The run that made the call of unknown outcome `outcome`, if a run made it. */
+const runOfOutcome = ({ key, origin }: UnknownOutcome) =>
+  callRunOf({
+    subject: key.subject,
+    context: origin?.context,
+    idempotencyKey: key.idempotencyKey,
+  });
+
 /**
  * The capability resolving the call `found` names by `choice`, at the
  * claim the person was shown, signed only as the call itself would be
  * allowed now (`reauthorizedCapability`), and, for `not_happened`, only
- * while what it sent is still kept for its person to read.
+ * while what it sent is still kept for its person to read, and, for a
+ * run's call, while the run may still read what it read
+ * (`requireCallRunEvidenceReadable`, `brain.revoked`): it would go out
+ * again as it was sent (GRA-1999).
  */
 const resolutionCapability = async (
   env: Env,
@@ -69,6 +85,10 @@ const resolutionCapability = async (
   // it can't be resolved.
   if (origin === null) {
     throw permissionErrors.create("permission.denied", { action: key.action });
+  }
+  const run = runOfOutcome(found);
+  if (choice === "not_happened" && run !== undefined) {
+    await requireCallRunEvidenceReadable(env, run);
   }
   return await reauthorizedCapability(
     env,
@@ -171,6 +191,37 @@ const cursorOf = (before: unknown): UnknownOutcomeCursor | undefined => {
   return parsed.data;
 };
 
+/**
+ * `outcomes`, what a run's call sent shown only while its run may still
+ * read what it read (`callRunsEvidence`, checked together): otherwise
+ * `withheld`, with neither its description nor its input, and only "it
+ * happened" taken (`resolutionCapability`), as a held action's input is
+ * withheld (pending-actions.ts, GRA-1999).
+ */
+const withInputsChecked = async (
+  env: Env,
+  outcomes: UnknownOutcome[]
+): Promise<UnknownOutcome[]> => {
+  const states = await callRunsEvidence(
+    env,
+    outcomes.flatMap((outcome) => runOfOutcome(outcome) ?? [])
+  );
+  return outcomes.map((outcome) => {
+    const run = runOfOutcome(outcome);
+    const state =
+      run === undefined ? "holds" : (states.get(run.runId) ?? "refused");
+    if (state === "holds") {
+      return outcome;
+    }
+    const { description: _description, ...shown } = outcome;
+    return {
+      ...shown,
+      input: null,
+      withheld: state === "refused" ? "revoked" : state,
+    };
+  });
+};
+
 /** A signed-in person's calls of unknown outcome, over `/rpc`. */
 export class UnknownOutcomesRpc
   extends CoreRpcTarget
@@ -191,9 +242,12 @@ export class UnknownOutcomesRpc
       if (person.staff) {
         return [];
       }
-      return await this.#env.CONNECT.listUnknownOutcomes(
-        await personOf(this.#env, person),
-        page
+      return await withInputsChecked(
+        this.#env,
+        await this.#env.CONNECT.listUnknownOutcomes(
+          await personOf(this.#env, person),
+          page
+        )
       );
     });
   }

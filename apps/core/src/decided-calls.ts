@@ -10,16 +10,17 @@ import {
 import type { CodeSubject, WorkContext } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { signedCall } from "./bindings.ts";
+import { signedCall, signedUngrantedRead } from "./bindings.ts";
 import { requireHeldBinding } from "./resource-bindings.ts";
 
 // A person deciding a call that waits for them, from their own session:
 // confirming a held action (pending-actions.ts) or resolving a call of
 // unknown outcome (unknown-outcomes.ts). Either can send the call, so
 // each is signed only as the call itself would be allowed now: the same
-// App or agent, its approved App version, the resource binding it came
-// through still serving it, and its permission and context checked again
-// (`signedCall`). One path for both, so neither checks less.
+// App or agent, the App version whose code made it, the resource binding
+// it came through still serving it, and its permission and context
+// checked again (`signedCall`). One path for both, so neither checks
+// less.
 
 /** A call waiting for its person, as connect recorded where it came from. */
 export interface DecidedCall {
@@ -28,7 +29,8 @@ export interface DecidedCall {
   /** The App version whose code made it; null for an agent's. */
   appVersion: number | null;
   context: WorkContext;
-  permissionId: string;
+  /** Null for a read that needs no grant (ungranted-reads.ts). */
+  permissionId: string | null;
   /** The App's approved resource binding it came through, if any. */
   binding?: HeldBinding | undefined;
   connectionId: string;
@@ -50,8 +52,7 @@ export const refusedForBinding = (error: unknown): boolean =>
 
 /**
  * The capability carrying `decision` on `call`, for `identity`, the person
- * it acts for: refused (`permission.denied`) for an App's call that names
- * no approved version, or once its permission, context or resource
+ * it acts for: refused (`permission.denied`) once its permission, context or resource
  * binding no longer allows it, as `signedCall` and `requireHeldBinding`
  * would refuse the call itself now.
  */
@@ -62,8 +63,8 @@ export const reauthorizedCapability = async (
   decision: CapabilityDecision
 ): Promise<string> => {
   const { subject, binding } = call;
-  // An App's call names the version whose code made it, or no version was
-  // approved for it: refused, as `authorize` would.
+  // An App's call names the version whose code made it: one naming none
+  // is refused, as `authorize` would refuse it.
   if (subject.type === "app" && call.appVersion === null) {
     throw permissionErrors.create("permission.denied", {
       action: call.action,
@@ -87,21 +88,31 @@ export const reauthorizedCapability = async (
     mode: call.mode,
     ...(call.appVersion === null ? {} : { appVersion: call.appVersion }),
   });
-  const { capability } = await signedCall(
-    env,
-    {
-      authority,
-      context: call.context,
-      connection: {
-        type: "connection",
-        connectionId: connectionIdSchema.parse(call.connectionId),
-        resource: call.resource ?? undefined,
-      },
-      permissionId: permissionIdSchema.parse(call.permissionId),
-      ...(binding === undefined ? {} : { binding }),
+  const allowed = {
+    authority,
+    context: call.context,
+    connection: {
+      type: "connection" as const,
+      connectionId: connectionIdSchema.parse(call.connectionId),
+      resource: call.resource ?? undefined,
     },
-    { action: call.action, idempotencyKey: call.idempotencyKey },
-    decision
-  );
+  };
+  const scope = { action: call.action, idempotencyKey: call.idempotencyKey };
+  // A read with no grant, held in a chat that read something only its
+  // person may read (GRA-1928): decided only while the person still
+  // reads that connection so, by the same rule as the read itself.
+  const { capability } =
+    call.permissionId === null
+      ? await signedUngrantedRead(env, allowed, scope, decision)
+      : await signedCall(
+          env,
+          {
+            ...allowed,
+            permissionId: permissionIdSchema.parse(call.permissionId),
+            ...(binding === undefined ? {} : { binding }),
+          },
+          scope,
+          decision
+        );
   return capability;
 };

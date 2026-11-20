@@ -15,7 +15,7 @@
   "workers_dev": true,
   "preview_urls": false,
   // Durable Objects bundle their Drizzle migrations as text, and the Grasp
-  // skills (skills/, src/knowledge/grasp-skills.ts) ship as text too.
+  // skills (skills/) ship as text too.
   "rules": [
     {
       "type": "Text",
@@ -111,6 +111,9 @@
       // for everyone who builds it, on one store of test data
       // (src/app-preview.ts).
       { "name": "APP_PREVIEWS", "class_name": "AppPreview" },
+      // One object per App's or workflow's draft, named by its subject:
+      // the pages that follow it, told of each write (src/draft-watch.ts).
+      { "name": "DRAFT_WATCHES", "class_name": "DraftWatch" },
       { "name": "AUDIT_LOG", "class_name": "AuditLog" },
       // The one object that installs what ships with each release
       // (src/builtins.ts).
@@ -162,6 +165,7 @@
     { "tag": "v12", "new_sqlite_classes": ["BrainStore"] },
     { "tag": "v13", "new_sqlite_classes": ["Embedder"] },
     { "tag": "v14", "new_sqlite_classes": ["AppPreview"] },
+    { "tag": "v15", "new_sqlite_classes": ["DraftWatch"] },
   ],
   // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],
@@ -170,12 +174,6 @@
       "binding": "DB",
       "database_name": "grasp-os-core",
       "migrations_dir": "src/db/core/migrations",
-    },
-    {
-      "binding": "KNOWLEDGE",
-      "database_name": "grasp-os-knowledge",
-      // The Brain's own migrations: the package owns its whole database.
-      "migrations_dir": "../../packages/brain/src/db/migrations",
     },
   ],
   "r2_buckets": [
@@ -191,12 +189,10 @@
       "bucket_name": "grasp-os-audit-archive",
       "jurisdiction": "eu",
     },
-    // The Brain's files. The new Brain's original source files, one per
-    // content hash under `sources/` (@grasp-os/brain-next's files.ts), and
-    // today's Knowledge's version texts under `payloads/`
-    // (src/knowledge/payloads.ts). The bucket stays when today's Brain is
-    // removed. One bucket per deployment, private, in the EU; only core
-    // reads and writes it.
+    // The Brain's files: its original source files, one per content hash
+    // under `sources/` (@grasp-os/brain-next's files.ts), and what its
+    // stores keep beside them. One bucket per deployment, private, in the
+    // EU; only core reads and writes it.
     {
       "binding": "BRAIN_OBJECTS",
       "bucket_name": "grasp-os-brain-objects",

@@ -15,10 +15,13 @@ import {
   opened,
   openedFor,
   participate,
+  postedOnLink,
   quick,
+  signedInAs,
 } from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { routed } from "./sign-in.ts";
+import { unique } from "./sign-in.ts";
 
 // One turn of someone's interview (src/onboarding/interview.ts), over the
 // endpoint, as the page asks for it. The model provider is the outside
@@ -30,24 +33,14 @@ import { routed } from "./sign-in.ts";
 //   such field, and the brief holds what the store knows.
 // - A line out that breaks his rules, or a fact whose words weren't said.
 // - A turn given up halfway going uncounted, or still running.
-// - A link that isn't open, or a device that isn't the link's, getting a
-//   turn.
+// - A link that isn't open, nobody signed in, or someone else signed in,
+//   getting a turn.
 
-type Turn = Omit<
-  InterviewTurnRequest,
-  "secret" | "key" | "interviewer" | "adding"
-> &
+type Turn = Omit<InterviewTurnRequest, "secret" | "interviewer" | "adding"> &
   Partial<Pick<InterviewTurnRequest, "interviewer" | "adding">>;
 
-const ask = async (
-  link: { secret: string; key: string },
-  turn: Turn
-): Promise<Response> =>
-  await routed(interviewTurnPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...link, ...turn }),
-  });
+const ask = async (link: Device, turn: Turn): Promise<Response> =>
+  await postedOnLink(interviewTurnPath, { ...link, ...turn });
 
 /** Every event a turn's answer holds, once it is whole. */
 const eventsOf = async (response: Response): Promise<TurnEvent[]> =>
@@ -311,8 +304,9 @@ describe("an interview turn", { timeout: 60_000 }, () => {
     }).toStrictEqual({ cutOff: true, sent: 1, counted: true });
   });
 
-  it("gives no turn to a link that opens nothing, or to a device that isn't the link's", async () => {
+  it("gives no turn to a link that opens nothing, to nobody signed in, or to anyone else signed in", async () => {
     const link = await opened();
+    const someoneElse = await signedInAs(`someone-${unique()}@acme.test`);
     const turn: Turn = {
       event: "start",
       locale: "en",
@@ -323,23 +317,25 @@ describe("an interview turn", { timeout: 60_000 }, () => {
     };
     const { requests, result } = await answering([], async () => ({
       unknown: await codeOf(
-        await ask({ secret: "a".repeat(43), key: link.key }, turn)
+        await ask({ ...link, secret: "a".repeat(43) }, turn)
       ),
-      elsewhere: await codeOf(
-        await ask({ secret: link.secret, key: "b".repeat(43) }, turn)
+      signedOut: await codeOf(await ask({ ...link, cookie: "" }, turn)),
+      someoneElse: await codeOf(
+        await ask({ ...link, cookie: someoneElse }, turn)
       ),
       // The page can't say who it is with.
       named: await codeOf(
-        await routed(interviewTurnPath, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...link, ...turn, name: "Someone else" }),
+        await postedOnLink(interviewTurnPath, {
+          ...link,
+          ...turn,
+          name: "Someone else",
         })
       ),
     }));
     expect({ ...result, sent: requests.length }).toStrictEqual({
       unknown: [404, "interview.link_invalid"],
-      elsewhere: [403, "interview.elsewhere"],
+      signedOut: [401, "interview.sign_in"],
+      someoneElse: [404, "interview.link_invalid"],
       named: [400, "interview.invalid"],
       sent: 0,
     });

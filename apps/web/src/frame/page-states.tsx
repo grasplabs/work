@@ -1,7 +1,7 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter } from "@tanstack/react-router";
-import { use } from "react";
+import { use, useEffect, useEffectEvent } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -19,6 +19,7 @@ import { Skeleton } from "../grasp/skeleton/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
 import { InFrame } from "./in-frame.ts";
 import { PageFailed, useCoreReach } from "./page-failed.tsx";
 import type { FailedHeading } from "./page-failed.tsx";
@@ -135,7 +136,7 @@ const GoToChat = () => {
   );
 };
 
-/** Not found, in a page that keeps its own frame, such as Knowledge with its sidebar. */
+/** Not found, in a page that keeps its own frame, such as the Brain with its navigation. */
 export const NotFoundState = ({
   title,
   icon,
@@ -205,15 +206,17 @@ export const NotFound = ({
 };
 
 /**
- * The error, in a page that keeps its own frame, such as Knowledge with
- * its sidebar: Grasp UI's failed page, its Try again reading the page's
- * loaders from core once more (or, to `reload`, loading Grasp anew).
+ * The error, in a page that keeps its own frame, such as the Brain with
+ * its navigation: Grasp UI's failed page, its Try again reading the
+ * page's loaders from core once more, or what a section reads itself
+ * (`again`); or, to `reload`, loading Grasp anew.
  */
 export const ErrorState = ({
   reason,
   title,
   heading = "h1",
   reload = false,
+  again,
 }: {
   reason: string | undefined;
   /** What failed; "This page didn't load" without it. */
@@ -222,6 +225,11 @@ export const ErrorState = ({
   heading?: StateHeading;
   /** Whether trying again loads Grasp anew: the page's file is gone after a new release. */
   reload?: boolean;
+  /**
+   * Reads again what a section reads itself, rather than the page's
+   * loaders: what Try again does then.
+   */
+  again?: () => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -245,6 +253,10 @@ export const ErrorState = ({
         // connection's pause before its next attempt short, and gives up
         // in a few seconds.
         await reachCore(context?.core);
+        if (again !== undefined) {
+          again();
+          return;
+        }
         // The page's loaders read from core once more; still failing, the
         // button says so.
         await router.invalidate();
@@ -287,9 +299,47 @@ export const PageError = ({
 };
 
 /**
+ * Reads again once core can be reached, while `page` says its read found
+ * core out of reach: the page's loaders, or what a section reads itself
+ * (`again`). At once when a connection is open already (it answered since
+ * the read failed, or the read alone hung), otherwise as soon as the next
+ * one answers. So "can't be reached" stays only while core can't be; a
+ * read that fails again waits for the connection after. A refusal, or
+ * something core doesn't have, is core's answer: never read again.
+ */
+const useReadAgainWhenBack = (
+  page: Loaded<unknown>,
+  again?: () => void
+): void => {
+  const router = useRouter();
+  const core = useCore();
+  const offline = page.state === "offline";
+  // The latest `again`, which a section may make anew at each render.
+  const readAgain = useEffectEvent((): void => {
+    if (again === undefined) {
+      void router.invalidate();
+      return;
+    }
+    again();
+  });
+  useEffect(() => {
+    const stop = offline
+      ? core.onConnected(() => {
+          readAgain();
+        })
+      : undefined;
+    if (offline && core.connected) {
+      readAgain();
+    }
+    return stop;
+  }, [core, offline]);
+};
+
+/**
  * A page whose own read from core came back without its data: not found
  * when core has no such thing (`notFound` says what), otherwise the error.
- * `crumbs` lead to the page, ending in it.
+ * `crumbs` lead to the page, ending in it. Out of reach, it reads again by
+ * itself once core is back (`useReadAgainWhenBack`).
  */
 export const PageNotLoaded = ({
   page,
@@ -304,6 +354,7 @@ export const PageNotLoaded = ({
   icon?: StateIcon;
 }) => {
   const { i18n, t } = useLingui();
+  useReadAgainWhenBack(page);
   if (page.state === "missing") {
     return (
       <NotFound
@@ -316,23 +367,34 @@ export const PageNotLoaded = ({
   return <PageError crumbs={crumbs} reason={notLoadedText(page, i18n)} />;
 };
 
-/** `PageNotLoaded` in a page that keeps its own frame, such as Knowledge with its sidebar. */
+/** `PageNotLoaded` in a page that keeps its own frame, such as the Brain with its navigation. */
 export const NotLoadedState = ({
   page,
   notFound,
   icon,
   heading,
+  again,
 }: {
   page: Exclude<Loaded<unknown>, { state: "ready" }>;
   notFound?: string;
   icon?: StateIcon;
   heading?: StateHeading;
+  /**
+   * Reads it again, for a section that reads it itself rather than the
+   * page's loaders: on Try again, and once core is back.
+   */
+  again?: () => void;
 }) => {
   const { i18n } = useLingui();
+  useReadAgainWhenBack(page, again);
   return page.state === "missing" ? (
     <NotFoundState heading={heading} icon={icon} title={notFound} />
   ) : (
-    <ErrorState heading={heading} reason={notLoadedText(page, i18n)} />
+    <ErrorState
+      again={again}
+      heading={heading}
+      reason={notLoadedText(page, i18n)}
+    />
   );
 };
 
@@ -363,7 +425,7 @@ export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
  * address alone decides what it reads names it as its `pendingComponent`.
  * Not the shell itself, so while it asks who is in again after core was
  * out of reach, what it showed stays; and not a page that reads again as
- * its search changes (a document opened in Knowledge, a tab of Activity),
+ * its search changes (a tab of Activity),
  * which keeps what it shows rather than turning back into a skeleton.
  */
 export const PageLoading = () => (

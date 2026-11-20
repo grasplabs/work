@@ -41,7 +41,11 @@ describe("chat agent code output", () => {
       output = applyOutput(output, update.output);
       seen.push({
         output,
-        result: update.messages.some(({ role }) => role === "result"),
+        // A code step's result, never the recall's before the question.
+        result: update.messages.some(
+          (message) =>
+            message.role === "result" && !message.callId.startsWith("recall_")
+        ),
       });
       await Promise.resolve();
     });
@@ -297,7 +301,15 @@ describe("chat agent code output", () => {
       "authorization: Basic ",
       "-----BEGIN PRIVATE KEY-----",
     ];
+    // One link of many pairs, each holding a reference, ending in a
+    // signature: every pair is read, and only by its offset.
+    const pairs = Math.ceil((2 * codeLimits.outputBytes) / 8);
+    const link = `https://h.example/x?${"a=&#59;&".repeat(pairs)}sig=S`;
+    const linkStarted = performance.now();
+    redact(link);
+    const linkTook = performance.now() - linkStarted;
     const slowest = Math.max(
+      linkTook,
       ...units.flatMap((unit) =>
         ["", "x", "-", "."].map((tail) => {
           const flood = `${unit}${tail}`.repeat(

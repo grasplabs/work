@@ -182,7 +182,7 @@ const accessMayHaveDropped = async (
 
 /**
  * Tells `app`'s host that another of its versions was made current
- * (apps.ts, `makeCurrent`), once that committed, so the pages that follow
+ * (apps.ts, `activateVersion`), once that committed, so the pages that follow
  * its version read it again (pages-rpc.ts, `watchVersion`); tried again
  * after `retryDelaysMs` while the host can't be reached. A host that
  * restarted meanwhile let go of every connection, and each looks again

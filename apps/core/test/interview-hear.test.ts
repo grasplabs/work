@@ -8,7 +8,8 @@ import { heardBudgets } from "../src/onboarding/transcription.ts";
 import { writtenText } from "./ai-providers-fake.ts";
 import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
-import { codeOf, openedFor } from "./interview-link.ts";
+import { codeOf, openedFor, signedInAs } from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
 import { spentMicros } from "./model-usage.ts";
 import { carrying, keyPlaces, plan, sentCount } from "./platform-providers.ts";
 import { routed, unique } from "./sign-in.ts";
@@ -126,22 +127,31 @@ const gatewayEvents = async (head: number) => {
     }));
 };
 
+/** What the page sends: a body, with the browser's session cookie. */
+interface Sent {
+  body: FormData | string;
+  cookie: string;
+}
+
 /** A recording as the page sends it, with the link and what it measured. */
 const recording = (
-  link: { secret: string; key: string },
+  link: Device,
   { seconds = "2.4", audio = newAudio(), type = "audio/webm" } = {}
-): FormData => {
+): Sent & { body: FormData } => {
   const form = new FormData();
   form.set("secret", link.secret);
-  form.set("key", link.key);
   form.set("locale", "en");
   form.set("seconds", seconds);
   form.set("audio", new File([audio], "stretch", { type }));
-  return form;
+  return { body: form, cookie: link.cookie };
 };
 
-const hear = async (body: FormData | string): Promise<Response> =>
-  await routed(interviewHearPath, { method: "POST", body });
+const hear = async ({ body, cookie }: Sent): Promise<Response> =>
+  await routed(interviewHearPath, {
+    method: "POST",
+    headers: { cookie, "sec-fetch-site": "same-origin" },
+    body,
+  });
 
 /** Seconds the onboarding counted as heard for interviews. */
 const heardCounted = async (): Promise<number> => {
@@ -300,7 +310,7 @@ describe(
       const { link } = await openedFor();
       const audio = newAudio();
       const form = recording(link, { audio });
-      form.append("keyterms", "Injected");
+      form.body.append("keyterms", "Injected");
       const result = await hearing(async () => {
         const response = await hear(form);
         return response.status;
@@ -345,7 +355,12 @@ describe(
 
     it.each([
       ["an unknown link", "unknown", [404, "interview.link_invalid"]],
-      ["another device's key", "otherKey", [403, "interview.elsewhere"]],
+      ["nobody signed in", "signedOut", [401, "interview.sign_in"]],
+      [
+        "someone else signed in",
+        "someoneElse",
+        [404, "interview.link_invalid"],
+      ],
       ["no recording", "noAudio", [400, "hear.invalid"]],
       ["a recording too large", "tooLarge", [400, "hear.invalid"]],
       ["not a form", "notForm", [400, "hear.invalid"]],
@@ -353,20 +368,27 @@ describe(
       "refuses %s, with nothing sent to the gateway",
       async (_name, kind, refusal) => {
         const { link } = await openedFor();
+        const someoneElse = await signedInAs(`someone-${unique()}@acme.test`);
         const audio = newAudio();
-        const bodies = {
+        const bodies: Record<typeof kind, () => Sent> = {
           unknown: () =>
-            recording({ secret: "a".repeat(43), key: link.key }, { audio }),
-          otherKey: () =>
-            recording({ secret: link.secret, key: "b".repeat(43) }, { audio }),
+            recording({ ...link, secret: "a".repeat(43) }, { audio }),
+          signedOut: () => ({ ...recording(link, { audio }), cookie: "" }),
+          someoneElse: () => ({
+            ...recording(link, { audio }),
+            cookie: someoneElse,
+          }),
           noAudio: () => {
-            const form = recording(link, { audio });
-            form.delete("audio");
-            return form;
+            const sent = recording(link, { audio });
+            sent.body.delete("audio");
+            return sent;
           },
           tooLarge: () =>
             recording(link, { audio: `${audio}${"x".repeat(1024 * 1024)}` }),
-          notForm: () => JSON.stringify({ ...link, audio }),
+          notForm: () => ({
+            body: JSON.stringify({ secret: link.secret, audio }),
+            cookie: link.cookie,
+          }),
         };
         const result = await hearing(
           async () => await codeOf(await hear(bodies[kind]()))

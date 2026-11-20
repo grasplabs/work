@@ -288,7 +288,10 @@ const hold = async (
   );
 
 const waiting = async (person: ConnectionPerson): Promise<PendingAction> => {
-  const [held, ...others] = await exports.default.listPendingActions(person);
+  const [held, ...others] = await exports.default.listPendingActions(
+    person,
+    "grasp"
+  );
   if (held === undefined || others.length > 0) {
     throw new Error("Expected one held action");
   }

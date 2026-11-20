@@ -17,12 +17,19 @@ export const log = {
   },
 };
 
+/**
+ * The name of something that was thrown (`Error.name`), no more: for a log
+ * whose fields must not carry what it was about, as its message could.
+ */
+export const errorName = (error: unknown): string =>
+  error instanceof Error ? error.name : typeof error;
+
 /** What to log about something that was thrown. */
 export const errorFields = (error: unknown): LogFields =>
   error instanceof Error
     ? {
-        errorName: error.name,
+        errorName: errorName(error),
         errorMessage: error.message,
         errorStack: error.stack,
       }
-    : { errorName: typeof error };
+    : { errorName: errorName(error) };

@@ -53,7 +53,7 @@ const rows = [
   row("Complaints", { phase: "needsYou" }),
   row("Archive", {}),
   row("Expenses", { paused: true, owner: "Grace Hopper" }),
-  row("Billing", { phase: "toBuild", owner: null, runs: null }),
+  row("Billing", { phase: "building", owner: null, runs: null }),
 ];
 
 const tools: ToolsByWorkflow = new Map([
@@ -135,7 +135,7 @@ describe("the Workflows page's table", () => {
       "Running2",
       "- Archive",
       "- ExpensesPaused",
-      "To build1",
+      "Building1",
       "- Billing",
     ]);
   });

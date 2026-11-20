@@ -26,7 +26,6 @@ const answered = (
   id,
   role: "assistant",
   text,
-  citations: [],
   code: [],
   tools: [],
   end,
@@ -47,7 +46,6 @@ describe(chatMarkdown, () => {
             id: 2,
             role: "assistant",
             text: "",
-            citations: [],
             code: [{ callId: "c1", code: "count()" }],
             tools: [],
             end: "done",
@@ -63,10 +61,8 @@ describe(chatMarkdown, () => {
           },
           answered(4, "| Open |\n| --- |\n| 12 |"),
         ],
-        provenance: { sources: ["col-1", "conn-9"], restricted: false },
-        names: new Map([
-          ["col-1", { name: "Finance", kind: "collection" as const }],
-        ]),
+        provenance: { sources: ["conn-1", "conn-9"], restricted: false },
+        names: new Map([["conn-1", { name: "Microsoft 365" }]]),
         i18n,
       })
     ).toBe(
@@ -76,7 +72,7 @@ describe(chatMarkdown, () => {
         // An answer that opens with a table keeps it a table.
         "**Grasp:**\n\n| Open |\n| --- |\n| 12 |",
         "## Sources",
-        "- Finance\n- conn-9",
+        "- Microsoft 365\n- conn-9",
       ].join("\n\n")
     );
   });

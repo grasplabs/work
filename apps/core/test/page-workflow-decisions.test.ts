@@ -1,12 +1,9 @@
+import { brainOf } from "@grasp-os/brain-next/contract";
 import { v } from "@grasp-os/runtime/app";
-import {
-  declaredPermission,
-  declaredWorkflows,
-  generatedPaths,
-} from "@grasp-os/runtime/host";
+import { declaredWorkflows, generatedPaths } from "@grasp-os/runtime/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { FunctionResult } from "@grasp-os/shared/functions";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
@@ -14,30 +11,33 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
+import { appKind, appFor, versionFiles } from "../src/apps.ts";
+import type { SourceRef } from "../src/brain-next.ts";
 import {
-  bindWorkflowToApp,
-  unbindWorkflowFromApp,
-} from "../src/app-workflow-bindings.ts";
-import { appFor, versionFiles } from "../src/apps.ts";
-import { sealedWorkflowPins } from "../src/bound-workflows.ts";
-import { decisionOutcome } from "../src/decisions/decisions.ts";
+  answerDecision,
+  confirmDecision,
+  decisionFor,
+  decisionOutcome,
+  reviewDecision,
+  uncheckedAskText,
+  waitingDecisions,
+  withheldAskText,
+} from "../src/decisions/decisions.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
-import { appHost } from "../src/durable-objects.ts";
+import { appHost, inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { brainVersionRead } from "../src/history-access.ts";
 import { withPageReferences } from "../src/page-references.ts";
 import { buildPages } from "../src/pages.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { rollback } from "../src/publish.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import {
   publishCatalogContract,
   resolveCatalogKeys,
 } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import {
   confirmPageDecision,
   decidePageRun,
@@ -45,9 +45,11 @@ import {
 } from "../src/workflows/page-decisions.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { withRespond } from "../src/workflows/run-waits.ts";
+import { workflowsToday } from "../src/workflows/today.ts";
 import { repairWakes } from "../src/workflows/wakes.ts";
-import { testApp } from "./app-definitions.ts";
+import { boundIn, testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
+import { commitDefined } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   contractOf,
@@ -70,6 +72,7 @@ import {
 } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // The decisions of the workflows an App binds, in the references its
 // pages import: each decision the App declares for the workflow
@@ -196,11 +199,10 @@ const boundApp = async (
   looped = false
 ): Promise<{
   fixture: Fixture;
-  binding: string;
   workflowId: string;
 }> => {
   const admin = await person("admin");
-  const fixture = await appWith(files(), "Invoices");
+  const owner = await person("builder");
   const key = `approval-${unique()}`;
   await publishCatalogContract(env, admin, {
     key,
@@ -210,19 +212,16 @@ const boundApp = async (
   });
   const workflow = await createWorkflowResource(
     env,
-    fixture.owner,
+    owner,
     `approve-${unique()}`
   );
-  await publishWorkflowVersion(env, fixture.owner, workflow.id, {
-    definition: definitionOf(key, looped),
-    basedOn: null,
-  });
-  const { id } = await bindWorkflowToApp(env, fixture.owner, workflow.id, {
-    app: fixture.app,
-    alias: "review",
-    version: 1,
-  });
-  return { fixture, binding: id, workflowId: workflow.id };
+  await publishDefinition(env, owner, workflow.id, definitionOf(key, looped));
+  const fixture = await appWith(
+    boundIn(files(), { review: workflow.id }),
+    "Invoices",
+    owner
+  );
+  return { fixture, workflowId: workflow.id };
 };
 
 /** A page naming the `review` workflow's `jobEvents`, its name literal. */
@@ -270,31 +269,37 @@ const eventDefinitionOf = (contract: string): string =>
     ],
   });
 
+/**
+ * Publishes `fixture`'s App again without its binding: it binds nothing as
+ * `review` from then on, its new version declaring it all the same.
+ */
+const publishedUnbound = async (fixture: Fixture): Promise<void> => {
+  const { version } = await commitDefined(
+    env,
+    fixture.owner,
+    fixture.app,
+    files()
+  );
+  await rollback(env, appKind, fixture.owner, fixture.app, version);
+};
+
 /** An App bound, as `review`, to a workflow version waiting for a page's event. */
 const eventApp = async (): Promise<Fixture> => {
   const admin = await person("admin");
-  const fixture = await appWith(files(eventPage, declaresEvent), "Invoices");
+  const owner = await person("builder");
   const key = `job-events-${unique()}`;
   await publishCatalogContract(env, admin, {
     key,
     kind: "event",
     events: jobEvents,
   });
-  const workflow = await createWorkflowResource(
-    env,
-    fixture.owner,
-    `wait-${unique()}`
+  const workflow = await createWorkflowResource(env, owner, `wait-${unique()}`);
+  await publishDefinition(env, owner, workflow.id, eventDefinitionOf(key));
+  return await appWith(
+    boundIn(files(eventPage, declaresEvent), { review: workflow.id }),
+    "Invoices",
+    owner
   );
-  await publishWorkflowVersion(env, fixture.owner, workflow.id, {
-    definition: eventDefinitionOf(key),
-    basedOn: null,
-  });
-  await bindWorkflowToApp(env, fixture.owner, workflow.id, {
-    app: fixture.app,
-    alias: "review",
-    version: 1,
-  });
-  return fixture;
 };
 
 /** The text of `path` among `release`'s artifacts, as it was sealed. */
@@ -470,9 +475,9 @@ const answerOf = (result: FunctionResult): unknown =>
  * of its decision queries, as whoever calls.
  */
 const decisionInbox = async (looped = false) => {
-  const { fixture, workflowId, binding } = await boundApp(looped);
+  const { fixture, workflowId } = await boundApp(looped);
   const release = await seal(fixture);
-  await publishVersion(env, fixture.owner, fixture.app, 1);
+  await rollback(env, appKind, fixture.owner, fixture.app, 1);
   const [reviewer, starter, outsider] = await Promise.all([
     person("admin"),
     person("admin"),
@@ -501,11 +506,14 @@ const decisionInbox = async (looped = false) => {
       restricted = false,
       version = 1,
       input = { amount: 5 },
+      principal = starter.userId,
     }: {
       step?: string;
       restricted?: boolean;
       version?: number;
       input?: unknown;
+      /** Whom it acts for: the starter, unless the test says otherwise. */
+      principal?: string;
     } = {}
   ): Promise<{ runId: string; decisionId: string }> => {
     const runId = crypto.randomUUID();
@@ -520,7 +528,7 @@ const decisionInbox = async (looped = false) => {
         workflowId,
         version,
         manifestHash,
-        starter.userId,
+        principal,
         at
       ),
       env.DB.prepare(
@@ -530,7 +538,7 @@ const decisionInbox = async (looped = false) => {
         workflowId,
         version,
         manifestHash,
-        starter.userId,
+        principal,
         restricted ? 1 : 0,
         at
       ),
@@ -566,7 +574,6 @@ const decisionInbox = async (looped = false) => {
   return {
     fixture,
     release,
-    binding,
     workflowId,
     manifestHash,
     opened,
@@ -578,12 +585,144 @@ const decisionInbox = async (looped = false) => {
   };
 };
 
+/** The shared Brain's store, as core reaches it. */
+const brainStore = () => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+/**
+ * Source `source` of the shared Brain, saying `text`, for `group`: everyone
+ * in the company by default. A source added again is its next version,
+ * and who may read it is the newest version's.
+ */
+const sourceFor = async (
+  source: SourceRef,
+  text: string,
+  group = "company"
+): Promise<void> => {
+  await brainStore().addSource({
+    source: `${source.producer}:${source.id}`,
+    change: crypto.randomUUID(),
+    text,
+    access: { kind: "audience", group },
+  });
+};
+
+/** A new source everyone in the company may read, at version 1. */
+const companySource = async (): Promise<SourceRef> => {
+  const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+  await sourceFor(source, `Invoice ${unique()} is due.`);
+  return source;
+};
+
+/**
+ * Pins version 1 of `source` to run `runId`, as a chat of `personId`'s
+ * whose agent started the run had read it: a real chat with its agent,
+ * pinned as a start from a chat pins what it read (workflow-starts.ts).
+ */
+const startedFromChat = async (
+  runId: string,
+  personId: string,
+  source: SourceRef
+): Promise<void> => {
+  const agentId = `agent-${unique()}`;
+  const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+  const chat = await workspace(env, workspaceId).createChat(
+    "Questions",
+    personId,
+    agentId
+  );
+  await env.DB.prepare(
+    "INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (?, ?, ?, ?, ?, ?)"
+  )
+    .bind(
+      runId,
+      brainVersionRead({ source, version: 1 }),
+      workspaceId,
+      chat.id,
+      agentId,
+      personId
+    )
+    .run();
+};
+
+/**
+ * A grant of the Brain to workflow `workflowId`, asked by its owner in
+ * `fixture` and given by `admin`: its ID.
+ */
+const brainGrantOf = async (
+  fixture: Fixture,
+  workflowId: string,
+  admin: Awaited<ReturnType<typeof person>>
+): Promise<string> => {
+  const { owner } = fixture;
+  const asked = await requestPermission(
+    env,
+    owner,
+    {
+      subject: { type: "workflow", workflowId },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: `BRAIN_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
+    },
+    {
+      app: async (named, role) => await appFor(env, owner, named, role),
+      resource: async (ref, needed) => {
+        await requireResourceRole(env, owner, ref, needed);
+      },
+    }
+  );
+  await grantPermission(env, admin, asked.id, { version: null });
+  return asked.id;
+};
+
+/**
+ * Keeps that run `runId` recalled version 1 of `source` through grant
+ * `permissionId`, as a recall keeps it with the run (run-evidence.ts).
+ */
+const recalledBy = async (
+  runId: string,
+  source: SourceRef,
+  permissionId: string
+): Promise<void> => {
+  await env.DB.prepare(
+    "INSERT INTO run_brain_versions (run_id, producer, source_id, version, permission_id, recorded_at) VALUES (?, ?, ?, 1, ?, ?)"
+  )
+    .bind(runId, source.producer, source.id, permissionId, Date.now())
+    .run();
+};
+
+/** The statements of a run's evidence check: its tables and its grants. */
+const evidenceStatement =
+  /"(?:run_brain_versions|run_brain_memories|run_chat_sources|permissions)"/u;
+
+/**
+ * What `read` costs of the check of runs' evidence: its statements on
+ * D1, and its calls to the Brain's stores.
+ */
+const evidenceCostOf = async (
+  read: () => Promise<unknown>
+): Promise<{ statements: number; brainCalls: number }> => {
+  const prepared = vi.spyOn(env.DB, "prepare");
+  const stores = vi.spyOn(env.BRAIN_STORE, "getByName");
+  try {
+    await read();
+    return {
+      statements: prepared.mock.calls.filter(([query]) =>
+        evidenceStatement.test(query)
+      ).length,
+      brainCalls: stores.mock.calls.length,
+    };
+  } finally {
+    prepared.mockRestore();
+    stores.mockRestore();
+  }
+};
+
 describe(
   "the decisions of an App's bound workflows",
   { timeout: 180_000 },
   () => {
     it("are the release's declared ones in its references, typed for its pages, and stay so when the binding goes", async () => {
-      const { fixture, binding } = await boundApp();
+      const { fixture } = await boundApp();
       const release = await seal(fixture);
       const references = await sealedText(release, generatedPaths.api);
       const sealedFiles = await versionFiles(env, fixture.app, 1);
@@ -594,7 +733,7 @@ describe(
         );
       const typedBefore = await sealedBuild();
 
-      await unbindWorkflowFromApp(env, fixture.owner, binding);
+      await publishedUnbound(fixture);
 
       expect({
         sealed: declaredWorkflows(release.app, release.workflows).find(
@@ -819,6 +958,311 @@ describe(
       });
     });
 
+    it("give nothing of what a decision asks once the source the chat that started its run read is narrowed, as its own page withholds it", async () => {
+      const { fixture, opened, reviewer, starter, runAsking, ask } =
+        await decisionInbox();
+      const kept = await runAsking(fixture.app, opened);
+      const asking = await runAsking(fixture.app, opened + 1000);
+      const source = await companySource();
+      await startedFromChat(asking.runId, starter.userId, source);
+      const detail = async (of: typeof kept) => {
+        const shown = z
+          .object({ prompt: z.string(), context: z.unknown() })
+          .nullable()
+          .parse(
+            await ask(reviewer, "decision", {
+              runId: of.runId,
+              decisionId: of.decisionId,
+            })
+          );
+        return shown === null
+          ? null
+          : { prompt: shown.prompt, context: shown.context };
+      };
+      const before = await detail(asking);
+
+      // Narrowed to a team its person isn't in: what the chat read is no
+      // longer theirs to read.
+      await sourceFor(source, "For the team alone.", `team:${unique()}`);
+      const page = await decisionFor(env, reviewer, asking.decisionId);
+
+      expect({
+        before,
+        kept: await detail(kept),
+        after: await detail(asking),
+        page: {
+          description: page.description,
+          input: page.input,
+          withheld: page.withheld,
+        },
+      }).toStrictEqual({
+        before: { prompt: "Approve this invoice?", context: { amount: 5 } },
+        kept: { prompt: "Approve this invoice?", context: { amount: 5 } },
+        after: null,
+        page: {
+          description: withheldAskText,
+          input: undefined,
+          withheld: "revoked",
+        },
+      });
+    });
+
+    it("show nothing of only the decision whose run can't be checked: the inbox and the day list the rest as they ask", async () => {
+      const { fixture, opened, reviewer, starter, runAsking } =
+        await decisionInbox();
+      const kept = await runAsking(fixture.app, opened);
+      const unchecked = await runAsking(fixture.app, opened + 1000);
+      // A chat pin of its run the check can't read: it throws, refusing
+      // nothing, so the run is checked alone and withheld.
+      await env.DB.prepare(
+        "INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (?, 'brain-grant', '', '', '', ?)"
+      )
+        .bind(unchecked.runId, starter.userId)
+        .run();
+      const inbox = await waitingDecisions(env, reviewer);
+      const today = await workflowsToday(env, reviewer);
+      const shownOf = (of: typeof kept) => {
+        const view = inbox.find(({ id }) => id === of.decisionId);
+        const waits = today.lanes
+          .flatMap(({ runs }) => runs)
+          .find(({ id }) => id === of.runId)?.waits;
+        return {
+          description: view?.description,
+          input: view?.input,
+          withheld: view?.withheld,
+          asks: waits?.asks,
+          todayWithheld: waits?.withheld,
+        };
+      };
+
+      expect({
+        kept: shownOf(kept),
+        unchecked: shownOf(unchecked),
+      }).toStrictEqual({
+        kept: {
+          description: "Approve this invoice?",
+          input: { amount: 5 },
+          withheld: undefined,
+          asks: "Approve this invoice?",
+          todayWithheld: undefined,
+        },
+        // A row that can never be read: it stays so, and its decision
+        // waits for its deadline.
+        unchecked: {
+          description: uncheckedAskText,
+          input: undefined,
+          withheld: "unchecked",
+          asks: uncheckedAskText,
+          todayWithheld: "unchecked",
+        },
+      });
+    });
+
+    it("take no answer to a decision while its run's evidence can't be checked, the Brain away, and show it as it asks once it is back", async () => {
+      const { fixture, workflowId, opened, reviewer, runAsking, ask } =
+        await decisionInbox();
+      const permissionId = await brainGrantOf(fixture, workflowId, reviewer);
+      const source = await companySource();
+      const asking = await runAsking(fixture.app, opened);
+      await recalledBy(asking.runId, source, permissionId);
+      const { decisionId } = asking;
+      const approval = { approved: true };
+      const rejection = { approved: false };
+      /** What the reviewer is shown of it, everywhere they see it. */
+      const shown = async () => {
+        const page = await decisionFor(env, reviewer, decisionId);
+        const inbox = await waitingDecisions(env, reviewer);
+        const today = await workflowsToday(env, reviewer);
+        const waits = today.lanes
+          .flatMap(({ runs }) => runs)
+          .find(({ id }) => id === asking.runId)?.waits;
+        // As the App's page reads it: its code gets none of it then.
+        const detail = await ask(reviewer, "decision", {
+          runId: asking.runId,
+          decisionId,
+        });
+        return {
+          app:
+            detail === null
+              ? null
+              : z.object({ prompt: z.string() }).parse(detail).prompt,
+          page: {
+            description: page.description,
+            input: page.input,
+            withheld: page.withheld,
+          },
+          inbox: inbox.find(({ id }) => id === decisionId)?.withheld,
+          today: { asks: waits?.asks, withheld: waits?.withheld },
+        };
+      };
+      // The Brain away: every call to it fails.
+      const away = vi
+        .spyOn(env.BRAIN_STORE, "getByName")
+        .mockImplementation(() => {
+          throw new Error("The Brain can't be reached");
+        });
+      let during: unknown;
+      let answers: unknown;
+      try {
+        during = await shown();
+        const { revision } = await decisionFor(env, reviewer, decisionId);
+        answers = {
+          approve: await codeOf(
+            async () =>
+              await reviewDecision(env, reviewer, decisionId, approval)
+          ),
+          reject: await codeOf(
+            async () =>
+              await reviewDecision(env, reviewer, decisionId, rejection)
+          ),
+          confirm: await codeOf(
+            async () =>
+              await confirmDecision(
+                env,
+                reviewer,
+                decisionId,
+                revision,
+                rejection
+              )
+          ),
+          answer: await codeOf(
+            async () =>
+              await answerDecision(env, reviewer, decisionId, rejection, "")
+          ),
+        };
+      } finally {
+        away.mockRestore();
+      }
+      const events = await allEvents();
+      const afterReview = await reviewDecision(
+        env,
+        reviewer,
+        decisionId,
+        approval
+      );
+
+      expect({
+        during,
+        answers,
+        refusalsAudited: events.filter(
+          ({ action, target, detail }) =>
+            action === "workflow.decision.answer_refused" &&
+            target?.id === decisionId &&
+            detail?.errorCode === "decision.unavailable"
+        ).length,
+        after: await shown(),
+        approvable: afterReview.state,
+      }).toStrictEqual({
+        during: {
+          app: null,
+          page: {
+            description: uncheckedAskText,
+            input: undefined,
+            withheld: "unchecked",
+          },
+          inbox: "unchecked",
+          today: { asks: uncheckedAskText, withheld: "unchecked" },
+        },
+        // No answer at all: an outage is no reason to reject.
+        answers: {
+          approve: "decision.unavailable",
+          reject: "decision.unavailable",
+          confirm: "decision.unavailable",
+          answer: "decision.unavailable",
+        },
+        refusalsAudited: 2,
+        // Back by itself on the next read that can check it.
+        after: {
+          app: "Approve this invoice?",
+          page: {
+            description: "Approve this invoice?",
+            input: { amount: 5 },
+            withheld: undefined,
+          },
+          inbox: undefined,
+          today: { asks: "Approve this invoice?", withheld: undefined },
+        },
+        approvable: "review",
+      });
+    });
+
+    it("check each run of a batch as its own person: one who left withholds their own run's ask, never another's", async () => {
+      const { fixture, workflowId, opened, reviewer, runAsking } =
+        await decisionInbox();
+      const permissionId = await brainGrantOf(fixture, workflowId, reviewer);
+      const source = await companySource();
+      const leaving = await person("admin");
+      const stays = await runAsking(fixture.app, opened);
+      // The newer, so first in the inbox and in its check.
+      const left = await runAsking(fixture.app, opened + 1000, {
+        principal: leaving.userId,
+      });
+      for (const { runId } of [stays, left]) {
+        // oxlint-disable-next-line no-await-in-loop -- one run at a time
+        await recalledBy(runId, source, permissionId);
+      }
+      // No longer a member: they read nothing of the company's.
+      await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+        .bind(leaving.userId)
+        .run();
+      const inbox = await waitingDecisions(env, reviewer);
+      const withheldOf = ({ decisionId }: typeof stays) =>
+        inbox.find(({ id }) => id === decisionId)?.withheld ?? "shown";
+
+      expect({
+        order: inbox
+          .map(({ id }) => id)
+          .filter((id) => id === stays.decisionId || id === left.decisionId),
+        stays: withheldOf(stays),
+        left: withheldOf(left),
+      }).toStrictEqual({
+        order: [left.decisionId, stays.decisionId],
+        stays: "shown",
+        left: "revoked",
+      });
+    });
+
+    it("check the runs of an inbox together: what its check reads and asks of the Brain doesn't grow with how many decisions it lists", async () => {
+      const { fixture, workflowId, opened, reviewer, runAsking } =
+        await decisionInbox();
+      const permissionId = await brainGrantOf(fixture, workflowId, reviewer);
+      const source = await companySource();
+      /** `count` more runs that recalled `source`, each asking: their decisions. */
+      const recalling = async (count: number, from: number) => {
+        const decisions: string[] = [];
+        for (let at = from; at < from + count; at += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one run at a time
+          const asked = await runAsking(fixture.app, opened + at);
+          // oxlint-disable-next-line no-await-in-loop -- as it was asked
+          await recalledBy(asked.runId, source, permissionId);
+          decisions.push(asked.decisionId);
+        }
+        return decisions;
+      };
+      const few = await recalling(2, 0);
+      const fewCost = await evidenceCostOf(
+        async () => await waitingDecisions(env, reviewer)
+      );
+      const many = [...few, ...(await recalling(10, 100))];
+      const manyCost = await evidenceCostOf(
+        async () => await waitingDecisions(env, reviewer)
+      );
+      const inbox = await waitingDecisions(env, reviewer);
+
+      expect({
+        askedTheBrain: fewCost.brainCalls > 0,
+        manyCost,
+        // Each one checked, and still readable: none withheld.
+        shown: many.map(
+          (id) => inbox.find((view) => view.id === id)?.withheld ?? false
+        ),
+      }).toStrictEqual({
+        askedTheBrain: true,
+        manyCost: fewCost,
+        shown: many.map(() => false),
+      });
+    });
+
     it("leave out a restricted run's decisions unless the App is restricted, and ask removed members and staff nothing", async () => {
       const { fixture, opened, reviewer, runAsking, ask } =
         await decisionInbox();
@@ -883,7 +1327,7 @@ describe(
     });
 
     it("answer an independent run's decision from the App's page once, after the page's confirmation, and refuse every decision the App may not answer alike", async () => {
-      const { fixture, binding, opened, reviewer, outsider, runAsking, ask } =
+      const { fixture, opened, reviewer, outsider, runAsking, ask } =
         await decisionInbox();
       const { app } = fixture;
       // The page's App, at the release its frame runs.
@@ -1013,7 +1457,7 @@ describe(
         restricted: true,
       });
       const beforeUnbinding = await review(reviewer, matching);
-      await unbindWorkflowFromApp(env, fixture.owner, binding);
+      await publishedUnbound(fixture);
 
       expect({
         ...refusals,
@@ -1055,7 +1499,7 @@ describe(
     });
 
     it("keep one answer of a decision answered from pages at once, or against its deadline, and take none against a changed context or a binding gone", async () => {
-      const { fixture, binding, workflowId, opened, reviewer, runAsking } =
+      const { fixture, workflowId, opened, reviewer, runAsking } =
         await decisionInbox();
       const { app } = fixture;
       const page = { app, version: 1 };
@@ -1177,7 +1621,7 @@ describe(
         unbound,
         approve,
         async () => {
-          await unbindWorkflowFromApp(env, fixture.owner, binding);
+          await publishedUnbound(fixture);
         }
       );
 
@@ -1376,7 +1820,7 @@ describe(
         reviewed: { version: 1 },
       });
       const release = await seal(fixture);
-      await publishVersion(env, owner, app, 1);
+      await rollback(env, appKind, owner, app, 1);
       const asked = await requestPermission(
         env,
         owner,
@@ -1539,16 +1983,12 @@ describe(
       });
     });
 
-    it("answer from a page only a decision of the version the release pins, as its inbox lists them", async () => {
+    it("answer from a page a decision of whichever version of the bound workflow a run is of, as its inbox lists them", async () => {
       const { fixture, opened, reviewer, runAsking } = await decisionInbox();
       const { app } = fixture;
-      // The App's binding of `review` moved to version 2 without a new
-      // release: the release still pins version 1.
-      await env.DB.prepare(
-        "UPDATE app_workflow_bindings SET workflow_resource_version = 2 WHERE app_id = ? AND alias = 'review' AND status = 'active'"
-      )
-        .bind(app)
-        .run();
+      // A run of version 2, though the release was sealed with version 1:
+      // a binding follows its workflow's live version, and a run of any
+      // version of it is the App's.
       const unsealed = await runAsking(app, opened, { version: 2 });
 
       await expect(
@@ -1563,7 +2003,7 @@ describe(
               { approved: true, payload: { comment: "Fine" } }
             )
         )
-      ).resolves.toBe("decision.not_found");
+      ).resolves.toBe("answered");
     });
 
     it("say a run's decision wait is answerable only by whom it asks, never staff, and only where the run's restricted mode is the App's", async () => {
@@ -1643,7 +2083,7 @@ describe(
     });
 
     it("type a draft's pages from the App's own declaration, bound or not, and fail a page's type check on a decision it doesn't declare", async () => {
-      const { fixture, binding } = await boundApp();
+      const { fixture } = await boundApp();
       const draftErrors = async (key: string) => {
         const drafted = await withDraftReferences(
           env,
@@ -1654,7 +2094,7 @@ describe(
       };
       const bound = await draftErrors("approval");
       const missing = await draftErrors("missing");
-      await unbindWorkflowFromApp(env, fixture.owner, binding);
+      await publishedUnbound(fixture);
       const unbound = await draftErrors("approval");
 
       expect({
@@ -1662,58 +2102,6 @@ describe(
         missing: missing.some((message) => message.includes("missing")),
         unbound,
       }).toStrictEqual({ bound: [], missing: true, unbound: [] });
-    });
-
-    it("resolve every workflow an App declares and binds, more of them than one statement binds values", async () => {
-      const { fixture, workflowId } = await boundApp();
-      const release = await seal(fixture);
-      // 60 more aliases, each declared and bound to the same version: past
-      // the 100 values D1 binds to one statement, two per pinned version.
-      const declared = declaredPermission(release.app, "review", "workflows");
-      if (declared === undefined) {
-        throw new Error("The App declares no review");
-      }
-      const aliases = Array.from(
-        { length: 60 },
-        (_, index) => `review${index}`
-      );
-      await env.DB.batch(
-        aliases.map((alias) =>
-          env.DB.prepare(
-            "INSERT INTO app_workflow_bindings (id, app_id, alias, workflow_resource_id, workflow_resource_version, status, bound_by, bound_at) VALUES (?, ?, ?, ?, 1, 'active', ?, ?)"
-          ).bind(
-            crypto.randomUUID(),
-            fixture.app,
-            alias,
-            workflowId,
-            fixture.owner.userId,
-            Date.now()
-          )
-        )
-      );
-      const bound = await sealedWorkflowPins(
-        env,
-        fixture.app,
-        {
-          ...release.app,
-          permissions: {
-            ...release.app.permissions,
-            ...Object.fromEntries(
-              aliases.map((alias) => [alias, { ...declared, alias }])
-            ),
-          },
-        },
-        // Recording none of its own: each is bound as the App binds it.
-        { name: "Invoices", permissions: [], tables: [], answers: [] }
-      );
-
-      expect({
-        count: bound.length,
-        eachPinned: bound.every(
-          ({ pinned }) =>
-            pinned?.workflowId === workflowId && pinned.version === 1
-        ),
-      }).toStrictEqual({ count: 61, eachPinned: true });
     });
 
     it("seal the events a page sends, and the event waits on them as typed waits", async () => {

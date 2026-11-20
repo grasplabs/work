@@ -336,11 +336,12 @@ export const buildSummary = (build: SealedBuild): WorkflowVersionBuild => ({
 const manifestBuildSchema = z.object({ build: sealedBuildSchema });
 
 /**
- * The format of a version's manifest, and of a test run's: 2 since the
- * contract it seals names what a run takes and answers `args` and
- * `returns`.
+ * The format of a version's manifest, and of a test run's: 3 since a
+ * Brain call step recalls or reads skills, never searches or reads a
+ * source (`brainActions`); 2 when the contract it seals named what a run
+ * takes and answers `args` and `returns`.
  */
-export const workflowManifestFormat = 2;
+export const workflowManifestFormat = 3;
 
 /** What a manifest says of its format, before anything else. */
 const manifestFormatSchema = z.object({

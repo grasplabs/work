@@ -23,7 +23,7 @@ import { AppDataModel } from "./app-data-model.tsx";
 import type { ModelChange, ModelOperation } from "./data-model-changes.tsx";
 
 // An App's data model in its workspace's Data view (app-data-model.tsx),
-// against core's `apps.drafts.dataModel` and `apps.drafts.define` as the page
+// against core's `apps.dataModel` and `apps.define` as the page
 // reaches them: what a person does becomes the definition's own
 // operations, each previewed first, and what publishing does to the
 // records the App holds is said before a change that needs a value,
@@ -134,8 +134,8 @@ const shown = async (
       fields: { title: "Call the bank" },
     },
   ];
-  const drafts = {
-    testTables: async () => {
+  const testData = {
+    tables: async () => {
       await Promise.resolve();
       return [
         {
@@ -148,24 +148,40 @@ const shown = async (
         },
       ];
     },
-    testRecords: async () => {
+    records: async () => {
       await Promise.resolve();
       return { records: notes, cursor: null };
     },
-    resetTestData: async () => {
+    resetData: async () => {
       await Promise.resolve();
       notes = [];
     },
+  };
+  // The draft's revision, which each change moves on. The page is shown
+  // at revision 1 and never reads the draft again here, as a page whose
+  // read after a change hasn't landed yet: its next change still goes
+  // over the revision the last one left, or core refuses it.
+  let revisionNow = 1;
+  const definitions = {
     dataModel: async () => {
       await Promise.resolve();
       return { model: held, plan: nothingPlanned, uses };
     },
     define: async (
       _app: string,
+      revision: number,
       operation: ModelChange,
       preview = false
     ): Promise<DataModelChange> => {
       await Promise.resolve();
+      if (revision !== revisionNow) {
+        throw Object.assign(
+          new Error(
+            "Someone else changed the draft at the same time. Read it again and retry."
+          ),
+          { code: "draft.conflict" }
+        );
+      }
       sent.push({ operation, preview });
       // A few operations as one: each after the one before, all or none.
       let after: DataModel = held;
@@ -179,11 +195,18 @@ const shown = async (
       }
       if (!preview) {
         held = after;
+        revisionNow += 1;
       }
-      return { ok: true, model: after, plan, change: plan };
+      return {
+        ok: true,
+        model: after,
+        plan,
+        change: plan,
+        revision: revisionNow,
+      };
     },
   };
-  const apps = { drafts };
+  const apps = { ...definitions, preview: testData };
   const core = {
     withSession: async <T,>(
       action: (session: { apps: typeof apps }) => Promise<T>

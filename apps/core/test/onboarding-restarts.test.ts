@@ -1,4 +1,3 @@
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewLine,
@@ -9,18 +8,23 @@ import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
-import { onboardingStore } from "../src/onboarding/store.ts";
+import { Onboarding, onboardingStore } from "../src/onboarding/store.ts";
 import {
   answering,
   approveAgreed,
+  onLink,
   openedFor,
+  openLinkAs,
+  participate,
+  postedOnLink,
   quick,
+  signedInAs,
 } from "./interview-link.ts";
+import type { Device } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { routed, unique } from "./sign-in.ts";
+import { unique } from "./sign-in.ts";
 
 // The onboarding's durability (GRA-339): its Worker restarted in the middle
 // of an interview's turn, and in the middle of a team's drawing, as a
@@ -40,7 +44,6 @@ import { routed, unique } from "./sign-in.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const sessionKey = z.object({ key: z.string().optional() });
 
 /** Waits, from the test's own context, until `done` holds. */
 const until = async (done: () => boolean): Promise<void> => {
@@ -90,15 +93,13 @@ const noNotes: ProviderReply = {
 
 /** Saves the page's progress on the link, from the version it holds. */
 const save = async (
-  link: { secret: string; key: string },
+  link: Device,
   version: number,
   progress: InterviewProgress
 ): Promise<InterviewSaved> => {
-  const response = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", ...link, version, progress }),
-  });
+  // They take part before anything they say is kept, as their page has them.
+  await participate(link);
+  const response = await onLink({ action: "save", ...link, version, progress });
   return await response.json();
 };
 
@@ -123,21 +124,17 @@ const progressOf = (
 
 /** A turn asked for, as the page asks it after `lines`. */
 const askTurn = async (
-  link: { secret: string; key: string },
+  link: Device,
   lines: InterviewLine[]
 ): Promise<Response> =>
-  await routed(interviewTurnPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...link,
-      event: "answer",
-      locale: "en",
-      lines,
-      facts: [],
-      phase: "steps",
-      minutes: 4,
-    }),
+  await postedOnLink(interviewTurnPath, {
+    ...link,
+    event: "answer",
+    locale: "en",
+    lines,
+    facts: [],
+    phase: "steps",
+    minutes: 4,
   });
 
 /** Stephen's line in a whole turn's answer. */
@@ -233,6 +230,17 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
   });
 
   it("draws a team's map a restart cut off once it is back, once: its pieces of work and its links not doubled", async () => {
+    // The test draws and opens the links itself, as the store's alarm
+    // would. The alarm, which saving the staff list, agreeing and drawing
+    // set half a second on, got there first on a slow runner: it drew with
+    // no reply queued, so the drawing failed and waited a minute (`drew:
+    // null`), or it opened the links the test then found open (`opened:
+    // []`). Held on the class, not the object (`holdAlarm`): the restart
+    // makes a new one.
+    const alarm = vi.spyOn(Onboarding.prototype, "alarm").mockResolvedValue();
+    onTestFinished(() => {
+      alarm.mockRestore();
+    });
     const store = onboardingStore(env);
     const id = unique();
     const ids = {
@@ -245,7 +253,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       id: person,
       name,
       team: ids.team,
-      email: "",
+      email: `${person}@acme.test`,
       title: "",
       away: false,
     });
@@ -272,12 +280,10 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
     // Lea agrees to her interview.
     const leasLink = await store.linkOf(ids.lea);
     const secret = leasLink?.split("#")[1] ?? "";
-    const session = await routed(interviewApiPath, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "session", secret }),
-    });
-    const { key = "" } = sessionKey.parse(await session.json());
+    const { link: lea } = await openLinkAs(
+      secret,
+      await signedInAs(`${ids.lea}@acme.test`)
+    );
     const agreed = progressOf(
       [{ from: "stephen", text: "What does your team do?" }],
       [
@@ -287,12 +293,13 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
           text: "Max and Mia handle new tickets.",
           record: "Max and Mia handle new tickets.",
           agreed: true,
+          share: "team",
         },
       ],
       "completed"
     );
-    await save({ secret, key }, 0, agreed);
-    await approveAgreed({ secret, key }, agreed.facts);
+    await save(lea, 0, agreed);
+    await approveAgreed(lea, agreed.facts);
     const map: ProviderReply = {
       text: JSON.stringify({
         does: "Answers customers' questions",

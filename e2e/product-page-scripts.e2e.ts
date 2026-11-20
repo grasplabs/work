@@ -23,13 +23,13 @@ let app: string;
 
 const plainPage = `import { createFileRoute } from "@tanstack/react-router";
 
-function Plain() {
+const Plain = () => {
   return (
     <main className="p-4">
       <h1 className="text-lg font-medium">Plain</h1>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Plain });
 `;
 
@@ -40,7 +40,7 @@ test.beforeAll(async () => {
   const { core, api } = apiOf(builder);
   try {
     ({ id: app } = await api.apps.create({ name: "Plain page" }));
-    await release(api, app, { "src/routes/index.tsx": plainPage }, "Plain");
+    await release(api, app, { "src/routes/index.tsx": plainPage });
   } finally {
     core[Symbol.dispose]();
   }

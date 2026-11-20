@@ -36,10 +36,11 @@ import { t } from "@lingui/core/macro";
 import { z } from "zod";
 
 // The interview's page talks to core over its link's endpoints only
-// (`/api/interview`, `/turn`, `/story`), with the link's secret and the
-// device's key in each body: it has no session, never opens `/rpc`, and
-// sends no cookie. Nothing it is answered is taken on trust: each answer is
-// checked against the shape core promises.
+// (`/api/interview`, `/turn`, `/story`), with the link's secret in each
+// body and the session of the company's sign-in in its cookie, which core
+// reads on these endpoints alone (GRA-1790): the interview opens only for
+// the account it belongs to. Nothing it is answered is taken on trust:
+// each answer is checked against the shape core promises.
 
 /** What a call that didn't work tells: its HTTP status (0 when nothing came back), core's code, and words for people. */
 export interface Refused {
@@ -52,24 +53,20 @@ export interface Refused {
 export const isRefused = (value: unknown): value is Refused =>
   typeof value === "object" && value !== null && "refused" in value;
 
-const sessionSchema = z.discriminatedUnion("state", [
-  z.object({
-    state: z.literal("open"),
-    key: z.string().optional(),
-    name: z.string(),
-    team: z.string(),
-    lead: z.string().nullable(),
-    kind: interviewKindSchema,
-    closes: z.string(),
-    closed: z.boolean(),
-    progress: interviewProgressSchema.nullable(),
-    version: z.int().min(0),
-    withdrawn: z.boolean(),
-  }),
-  z.object({ state: z.literal("elsewhere") }),
-]);
-export type SessionAnswer = z.output<typeof sessionSchema>;
-export type OpenSession = Extract<SessionAnswer, { state: "open" }>;
+const sessionSchema = z.object({
+  state: z.literal("open"),
+  name: z.string(),
+  team: z.string(),
+  lead: z.string().nullable(),
+  kind: interviewKindSchema,
+  closes: z.string(),
+  closed: z.boolean(),
+  progress: interviewProgressSchema.nullable(),
+  version: z.int().min(0),
+  withdrawn: z.boolean(),
+  removing: z.boolean(),
+});
+export type OpenSession = z.output<typeof sessionSchema>;
 
 const savedSchema = z.union([
   z.object({ saved: z.literal(true), version: z.int().min(0) }),
@@ -81,7 +78,11 @@ const savedSchema = z.union([
 ]);
 export type SaveAnswer = z.output<typeof savedSchema>;
 
-const deletedSchema = z.object({ deleted: z.literal(true) });
+const deletedSchema = z.object({
+  deleted: z.literal(true),
+  // What the Brain kept of it is still being removed.
+  removing: z.literal(true).optional(),
+});
 
 const participationSchema = z.object({ notice: z.int(), at: z.string() });
 
@@ -102,6 +103,8 @@ export type ApprovalAnswer = z.output<typeof approvalSchema>;
 const withdrawnSchema = z.object({
   withdrawn: z.literal(true),
   at: z.string(),
+  // What the Brain kept of it is still being removed.
+  removing: z.literal(true).optional(),
 });
 
 /** How long a call to keep or open may take. */
@@ -150,8 +153,6 @@ const posted = async <T>(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      // No cookie of anyone's goes with it: the link is all it has.
-      credentials: "omit",
       keepalive,
       signal: AbortSignal.timeout(callTimeoutMs),
     });
@@ -185,18 +186,13 @@ const posted = async <T>(
   };
 };
 
-/** Opens the link on this device: the interview, or that it is open elsewhere. */
+/** Opens the link for whoever is signed in: their interview, or why not. */
 export const openSession = async (
-  secret: string,
-  key: string | undefined
-): Promise<SessionAnswer | Refused> =>
+  secret: string
+): Promise<OpenSession | Refused> =>
   await posted(
     interviewApiPath,
-    {
-      action: "session",
-      secret,
-      ...(key === undefined ? {} : { key }),
-    } satisfies InterviewRequest,
+    { action: "session", secret } satisfies InterviewRequest,
     sessionSchema
   );
 
@@ -209,26 +205,23 @@ export const saveProgress = async (
 
 /** Deletes everything said on the link. */
 export const deleteInterview = async (
-  secret: string,
-  key: string
-): Promise<{ deleted: true } | Refused> =>
+  secret: string
+): Promise<z.output<typeof deletedSchema> | Refused> =>
   await posted(
     interviewApiPath,
-    { action: "delete", secret, key } satisfies InterviewRequest,
+    { action: "delete", secret } satisfies InterviewRequest,
     deletedSchema
   );
 
 /** They read what this is for and agree to take part, to the notice as this page shows it. */
 export const participate = async (
-  secret: string,
-  key: string
+  secret: string
 ): Promise<z.output<typeof participationSchema> | Refused> =>
   await posted(
     interviewApiPath,
     {
       action: "participate",
       secret,
-      key,
       notice: participationNotice.version,
     } satisfies InterviewRequest,
     participationSchema
@@ -237,23 +230,21 @@ export const participate = async (
 /** They approve the facts read back to them, each at the revision they saw. */
 export const approveFacts = async (
   secret: string,
-  key: string,
   facts: ApprovedFact[]
 ): Promise<ApprovalAnswer | Refused> =>
   await posted(
     interviewApiPath,
-    { action: "approve", secret, key, facts } satisfies InterviewRequest,
+    { action: "approve", secret, facts } satisfies InterviewRequest,
     approvalSchema
   );
 
 /** They withdraw: nothing of their interview is used from now on. */
 export const withdrawInterview = async (
-  secret: string,
-  key: string
+  secret: string
 ): Promise<z.output<typeof withdrawnSchema> | Refused> =>
   await posted(
     interviewApiPath,
-    { action: "withdraw", secret, key } satisfies InterviewRequest,
+    { action: "withdraw", secret } satisfies InterviewRequest,
     withdrawnSchema
   );
 
@@ -287,7 +278,6 @@ export const askTurn = async (
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(request),
-    credentials: "omit",
     signal,
   });
   if (!response.ok || response.body === null) {
@@ -336,7 +326,6 @@ export const askStory = async (
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request),
-      credentials: "omit",
       signal: AbortSignal.timeout(storyTimeoutMs),
     });
     return response.ok ? storyOf(await response.json(), request.lines) : null;
@@ -345,11 +334,45 @@ export const askStory = async (
   }
 };
 
-/** The secret in the page's link: what follows its `#`. */
-export const linkSecret = (): string => window.location.hash.slice(1);
+/** Where this tab keeps a link's secret while it is away signing in. */
+const signingInSecret = "grasp.interview.signing-in";
 
-/** Where this browser keeps the device's key for a link: under a hash of its secret, never the secret itself. */
-const keyName = async (secret: string): Promise<string> => {
+/**
+ * The secret in the page's link: what follows its `#`; or, back from
+ * signing in, the one this tab kept while it was away (`keepWhileSigningIn`),
+ * put back in the address and forgotten here.
+ */
+export const linkSecret = (): string => {
+  const inLink = window.location.hash.slice(1);
+  let kept: string | null = null;
+  try {
+    kept = sessionStorage.getItem(signingInSecret);
+    sessionStorage.removeItem(signingInSecret);
+  } catch {
+    // Storage refused: the link's own address is all there is.
+  }
+  if (inLink !== "" || kept === null) {
+    return inLink;
+  }
+  window.history.replaceState(null, "", `${window.location.pathname}#${kept}`);
+  return kept;
+};
+
+/**
+ * Keeps the link's secret in this tab alone while it is away signing in:
+ * the company's sign-in sends it back without what follows the `#`. Never
+ * in the address the sign-in keeps, which core stores until it is back.
+ */
+export const keepWhileSigningIn = (secret: string): void => {
+  try {
+    sessionStorage.setItem(signingInSecret, secret);
+  } catch {
+    // Storage refused: they open their link again from their email.
+  }
+};
+
+/** Where this browser keeps what belongs to a link: under a hash of its secret, never the secret itself. */
+const linkName = async (secret: string): Promise<string> => {
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(secret)
@@ -360,30 +383,9 @@ const keyName = async (secret: string): Promise<string> => {
   return `grasp.interview.${hex}`;
 };
 
-/** The key this device was given for the link, if it was. */
-export const keptKey = async (secret: string): Promise<string | undefined> => {
-  try {
-    return localStorage.getItem(await keyName(secret)) ?? undefined;
-  } catch {
-    return undefined;
-  }
-};
-
-/**
- * Keeps the device's key, given once: without it, the link opens on no
- * device again until Grasp's staff give it a new start.
- */
-export const keepKey = async (secret: string, key: string): Promise<void> => {
-  try {
-    localStorage.setItem(await keyName(secret), key);
-  } catch {
-    // A private window can refuse storage: the interview then lasts as long as the page.
-  }
-};
-
 /** Where what they typed and did not send is kept, per link. */
 export const draftName = async (secret: string): Promise<string> =>
-  `${await keyName(secret)}.draft`;
+  `${await linkName(secret)}.draft`;
 
 /** How long a recording may take to be written down. */
 const hearTimeoutMs = 20_000;
@@ -402,7 +404,6 @@ export const hearRecording = async ({
 }): Promise<{ heard: string } | { reason: "failed" | "limited" }> => {
   const form = new FormData();
   form.set("secret", fields.secret);
-  form.set("key", fields.key);
   form.set("locale", fields.locale);
   form.set(
     "seconds",
@@ -413,7 +414,6 @@ export const hearRecording = async ({
     const response = await fetch(interviewHearPath, {
       method: "POST",
       body: form,
-      credentials: "omit",
       signal: AbortSignal.timeout(hearTimeoutMs),
     });
     if (!response.ok) {

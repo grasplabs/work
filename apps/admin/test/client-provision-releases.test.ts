@@ -1,4 +1,5 @@
 import { moduleKey } from "@grasp-os/shared/release";
+import type { WorkerEntry } from "@grasp-os/shared/release";
 import { routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { and, eq, sql } from "drizzle-orm";
@@ -21,6 +22,7 @@ import {
   runClientProvision,
   startClientRelease,
 } from "../src/hosting/operation.ts";
+import { mockAccess } from "./access.ts";
 import {
   token,
   cloudflare,
@@ -45,12 +47,87 @@ import {
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { clientScripts } from "./grasp-account.ts";
 import { db, staff } from "./hosting.ts";
+import { page } from "./pages.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 // Here: releasing a live client, rolling it back, and offboarding it; the
 // rest in the other client-provision-*.test.ts files.
 
 mockCloudflareApi(token, cloudflare);
+mockAccess();
+
+/** Core with no Knowledge database: a release that no longer names it. */
+const withoutKnowledge = (core: WorkerEntry): WorkerEntry => ({
+  ...core,
+  bindings: core.bindings.filter(({ name }) => name !== "KNOWLEDGE"),
+  d1Databases: core.d1Databases.filter(
+    ({ binding }) => binding !== "KNOWLEDGE"
+  ),
+});
+
+/** Core binding its Knowledge database, `grasp-os-knowledge`. */
+const withKnowledge = (core: WorkerEntry): WorkerEntry => {
+  const without = withoutKnowledge(core);
+  return {
+    ...without,
+    bindings: [
+      ...without.bindings,
+      { type: "d1", name: "KNOWLEDGE", id: "$D1_KNOWLEDGE_ID" },
+    ],
+    d1Databases: [
+      ...without.d1Databases,
+      {
+        binding: "KNOWLEDGE",
+        databaseName: "grasp-os-knowledge",
+        migrations: without.d1Databases[0]?.migrations ?? [],
+      },
+    ],
+  };
+};
+
+/** Deletes client `clientId`'s Knowledge database from its account, as a person would by hand. */
+const deleteKnowledge = async (
+  account: { d1: { uuid: string }[] },
+  clientId: string
+) => {
+  const row = await resourceOf(clientId, "d1:grasp-os-knowledge");
+  const at = account.d1.findIndex(({ uuid }) => uuid === row.providerId);
+  if (at === -1) {
+    throw new Error(`${clientId} has no Knowledge database to delete`);
+  }
+  account.d1.splice(at, 1);
+  return row;
+};
+
+/**
+ * Runs client `clientId`'s operation as a new attempt, which a database
+ * stops: the last step it finished, its code, what its message says of
+ * the database named `physicalName`, and what staff read on its Setup.
+ */
+const stoppedRun = async (clientId: string, physicalName: string) => {
+  const error = await failing(await attempt(clientId));
+  if (!(error instanceof Error && "code" in error)) {
+    throw new Error(`${clientId}'s run didn't stop`);
+  }
+  const operation = await operationOf(clientId);
+  // Its Hosting, under Settings, shows the operation and why it stopped.
+  const { html } = await page(`/organizations/${clientId}/setup?tab=settings`);
+  return {
+    finished: operation?.step,
+    code: error.code,
+    names: error.message.includes(physicalName),
+    missing: error.message.includes("is missing from its account"),
+    another: error.message.includes("is another database"),
+    setup: {
+      code: html.includes("foreign_resource"),
+      words: [
+        "A database or other resource the release needs is missing from the client",
+        "made again under its name, or another client",
+        "look in the account before releasing again",
+      ].every((words) => html.includes(words)),
+    },
+  };
+};
 
 describe("provisioning a placed client", () => {
   useStoreSecrets({ deployer: token });
@@ -702,6 +779,195 @@ describe("provisioning a placed client", () => {
       status: "active",
       notOurs: "hostname_not_ours",
       route: { clientId: other.clientId },
+    });
+  });
+
+  it("releases on after a database the releases no longer name is deleted from the account, keeping its inventory row", async () => {
+    const first = await importRelease(
+      { notes: "feat(core): with knowledge" },
+      withKnowledge
+    );
+    const { account, clientId } = await liveClient(first);
+    const second = await importRelease(
+      { notes: "feat(core): without knowledge" },
+      withoutKnowledge
+    );
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: second.releaseId,
+    });
+    await runClientProvision(context, await attempt(clientId));
+    const knowledge = await deleteKnowledge(account, clientId);
+    const third = await importRelease(
+      { notes: "feat(core): later still" },
+      withoutKnowledge
+    );
+
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: third.releaseId,
+    });
+    await runClientProvision(context, await attempt(clientId));
+
+    expect({
+      operation: await operationOf(clientId),
+      runs: await runs(clientId),
+      row: await resourceOf(clientId, "d1:grasp-os-knowledge"),
+    }).toMatchObject({
+      operation: { releaseId: third.releaseId, status: "done", error: null },
+      runs: { core: third.releaseId, connect: third.releaseId },
+      // Kept as it was: the admin drops no role a release stops naming.
+      row: { lifecycle: "allocated", providerId: knowledge.providerId },
+    });
+  });
+
+  it("refuses a release that names a database missing from the account, or recreated there under its name, before anything uploads", async () => {
+    const first = await importRelease(
+      { notes: "feat(core): with knowledge" },
+      withKnowledge
+    );
+    const { account, clientId } = await liveClient(first);
+    const knowledge = await deleteKnowledge(account, clientId);
+    const second = await importRelease(
+      { notes: "feat(core): still with knowledge" },
+      withKnowledge
+    );
+    const uploads = account.scriptUploads.length;
+
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: second.releaseId,
+    });
+    const missing = await stoppedRun(clientId, knowledge.physicalName);
+    // Someone makes another database under its name.
+    account.d1.push({
+      uuid: crypto.randomUUID(),
+      name: knowledge.physicalName,
+      jurisdiction: knowledge.jurisdiction,
+    });
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: second.releaseId,
+    });
+    const recreated = await stoppedRun(clientId, knowledge.physicalName);
+
+    expect({
+      missing,
+      recreated,
+      uploaded: account.scriptUploads.length - uploads,
+      runs: await runs(clientId),
+    }).toMatchObject({
+      // Each stopped at its migrations, the step after resources.
+      missing: {
+        finished: "resources",
+        code: "foreign_resource",
+        names: true,
+        missing: true,
+        another: false,
+        setup: { code: true, words: true },
+      },
+      recreated: {
+        finished: "resources",
+        code: "foreign_resource",
+        names: true,
+        missing: false,
+        another: true,
+        setup: { code: true, words: true },
+      },
+      uploaded: 0,
+      runs: { core: first.releaseId, connect: first.releaseId },
+    });
+  });
+
+  it("refuses a rollback to a release that names a deleted database at its migrations, saying which, and never makes a new one for a later release naming it again", async () => {
+    const first = await importRelease(
+      { notes: "feat(core): with knowledge" },
+      withKnowledge
+    );
+    const { account, clientId } = await liveClient(first);
+    const second = await importRelease(
+      { notes: "feat(core): without knowledge" },
+      withoutKnowledge
+    );
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: second.releaseId,
+    });
+    await runClientProvision(context, await attempt(clientId));
+    const knowledge = await deleteKnowledge(account, clientId);
+    const uploads = account.scriptUploads.length;
+
+    await startClientRelease(db, staff, await attempt(clientId), {
+      rollback: true,
+    });
+    const back = await stoppedRun(clientId, knowledge.physicalName);
+    const backRuns = await runs(clientId);
+    // A later release names it again: refused the same way, not recreated.
+    const again = await importRelease(
+      { notes: "feat(core): knowledge again" },
+      withKnowledge
+    );
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: again.releaseId,
+    });
+    const named = await stoppedRun(clientId, knowledge.physicalName);
+
+    // Stopped at its migrations, the step after resources.
+    const refused = {
+      finished: "resources",
+      code: "foreign_resource",
+      names: true,
+      missing: true,
+      another: false,
+      setup: { code: true, words: true },
+    };
+    expect({
+      back,
+      backRuns,
+      named,
+      uploaded: account.scriptUploads.length - uploads,
+      databases: account.d1.filter(
+        ({ name }) => name === knowledge.physicalName
+      ),
+      runs: await runs(clientId),
+      route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
+    }).toMatchObject({
+      back: refused,
+      // Core runs the newer release still.
+      backRuns: { core: second.releaseId, connect: second.releaseId },
+      named: refused,
+      uploaded: 0,
+      databases: [],
+      runs: { core: second.releaseId, connect: second.releaseId },
+      route: { clientId, generation: 1 },
+    });
+  });
+
+  it("makes a new deployment its own database on a release that names one another deployment deleted", async () => {
+    const first = await importRelease(
+      { notes: "feat(core): with knowledge" },
+      withKnowledge
+    );
+    const { account, clientId: earlier } = await liveClient(first);
+    const second = await importRelease(
+      { notes: "feat(core): without knowledge" },
+      withoutKnowledge
+    );
+    await startClientRelease(db, staff, await attempt(earlier), {
+      releaseId: second.releaseId,
+    });
+    await runClientProvision(context, await attempt(earlier));
+    await deleteKnowledge(account, earlier);
+
+    // Placed on the release its channel still holds, which names it.
+    const { clientId } = await liveClient(first);
+    const knowledge = await resourceOf(clientId, "d1:grasp-os-knowledge");
+
+    expect({
+      operation: await operationOf(clientId),
+      runs: await runs(clientId),
+      databases: account.d1
+        .filter(({ name }) => name === knowledge.physicalName)
+        .map(({ uuid }) => uuid),
+    }).toMatchObject({
+      operation: { releaseId: first.releaseId, status: "done", error: null },
+      runs: { core: first.releaseId, connect: first.releaseId },
+      databases: [knowledge.providerId],
     });
   });
 });

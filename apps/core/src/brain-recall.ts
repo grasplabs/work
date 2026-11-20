@@ -1,0 +1,795 @@
+import type {
+  BrainCard,
+  BrainEntity,
+  BrainMemory,
+  BrainPack,
+  BrainSkill,
+  BrainSkillText,
+} from "@grasp-os/runtime/app";
+import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
+import { isExpectedError } from "@grasp-os/shared/errors";
+import { functionErrors } from "@grasp-os/shared/functions";
+import type { AppId, PermissionId } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
+import { permissionErrors } from "@grasp-os/shared/permissions";
+import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
+import { skillErrors } from "@grasp-os/shared/skills";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import type { z } from "zod";
+
+import { appendAuditEvent, auditedIdOf } from "./audit-outbox.ts";
+import { inHostBrainWords, inHostWords } from "./brain-audited.ts";
+import { storedTeamsOf } from "./brain-grant-teams.ts";
+import {
+  codeCardAs,
+  codeEntitiesAs,
+  codeRecallOf,
+  isCodeEntitiesRequest,
+  recallPassagesAs,
+  skillVersionRefOf,
+} from "./brain-next.ts";
+import type {
+  CardMemory,
+  CodeCard,
+  CodeEntitiesOperation,
+  CodeEntity,
+  CodeRestsOn,
+  SkillAt,
+  SkillVersionRef,
+} from "./brain-next.ts";
+import {
+  brainCardSchema,
+  brainEntitiesSchema,
+  skillReadSchema,
+  skillsSelectSchema,
+} from "./brain-pack.ts";
+import { readSkillFor, selectSkillsFor } from "./brain-skills.ts";
+import type { HeldNow, SkillsReach } from "./brain-skills.ts";
+import { uploadersOf } from "./brain-uploads.ts";
+import { permissions } from "./db/core/schema.ts";
+import { authorize } from "./permissions.ts";
+import { heldNothing } from "./skill-needs.ts";
+
+// The Brain's recall for code: an App's action (resource-brain.ts), a
+// workflow's step (workflows/brain-calls.ts) and a chat's code
+// (agent-brain.ts) all come here, with the same request and the same pack
+// (`BrainRecall`, `BrainPack` in @grasp-os/runtime). The threat model is
+// on GRA-1731. In order:
+//
+// - The request is untrusted: checked first, strictly, with the Brain's
+//   own limits (`codeRecallOf`), so it can't name a reader, groups or a
+//   vector, and refused in the function host's fixed words
+//   (`permission.invalid_args`).
+// - The caller's grant: the App or run must hold the permission to read
+//   the Brain it names, active, now, as `authorize` checks every grant
+//   (the person still a member). A chat's agent needs none: each read
+//   checks its person (`requireBrainReader`). Filtering a pack afterwards would make `notFound` and
+//   `truncated` untrue, so nothing is: whom it reads as is the scope.
+// - Whom it reads as. An App's or a workflow's recall reads what everyone
+//   in the company may read (`company`), as no person. An App's grant may
+//   name teams too (GRA-1842, threat model on the issue): it then also
+//   reads, of those, the teams the person it acts for is in now, never
+//   wider than the grant nor than them. What the App keeps of that is
+//   held to the same teams for everyone it is shared with: each team any
+//   of its grants names is one of its sources (app-provenance.ts), so it
+//   is shared with, and answers, only someone in all of them. What a run
+//   is handed may end up anywhere a member reads (a run's state, a
+//   decision, an App a run writes to), so a workflow's grant names no
+//   team (permissions.ts), and its recall holds nothing any member
+//   couldn't read at the source, whoever called. A chat's code (and its
+//   `searchBrain` tool) reads as the person the chat is for, their teams
+//   alone (`personal: false`), only in their own chat, in Grasp or their
+//   direct message on a chat app, in a turn they started
+//   (`RecallCaller.reach`); anywhere else (a turn a schedule or an event
+//   woke) as the company alone, as the
+//   recall before the question reads there (GRA-1820, turn-recall.ts).
+//   The person is always the one the call acts for
+//   (`onBehalfOf`, set by core from the session or the run, never by the
+//   code), and must still be a member; the Brain filters inside its own
+//   search, so a pack never holds more than that reader may read, and
+//   never what only a person may read (GRA-1762).
+// - Nothing of the question or the pack is in a refusal, a log line or
+//   the audit event, which is kept, answered or refused, before the call
+//   returns. What is refused before a call gets here (an App's operation
+//   it didn't declare, a declaration or a workflow's alias with no
+//   binding an admin approved) is the function host's and the run's own
+//   refusal, recorded as theirs, not as a recall.
+
+/** Who recalls, as core resolved them, never as the code says. */
+export interface RecallCaller {
+  readonly authority: Authority;
+  /** Where it works: a chat's own permission holds only in that chat. */
+  readonly context: WorkContext;
+  /**
+   * An App's or a workflow's permission to read the Brain
+   * (`{ type: "platform" }`, `brain`): null when it holds none, and the
+   * recall is refused (and audited). A chat's agent needs none
+   * (`requireBrainReader`), and gives null.
+   */
+  readonly permissionId: PermissionId | null;
+  /**
+   * For a chat's code and its `searchBrain` alone: `teams` reads its
+   * person's teams and the company, only in their own chat, in Grasp or
+   * their direct message, in a turn they started (agent-brain.ts);
+   * absent, it reads the company
+   * alone, wherever else it is called. Set by core from where the call is
+   * made, never by the code. An App's and a workflow's reach is their
+   * grant's (`recallFor`), whatever this says.
+   */
+  readonly reach?: "teams";
+  /** How the audit log names it. */
+  readonly actor: AuditActor;
+  /** What the audit event is about: the App, the run or the chat. */
+  readonly target?: AuditEntry["target"];
+  /**
+   * What the caller keeps of the pack before it gets it: a run's pins, a
+   * chat's reads. Run before the recall is audited as answered, so a pack
+   * that couldn't be kept is audited as refused, and nobody gets it.
+   */
+  readonly keep?: (pack: BrainPack) => Promise<void>;
+}
+
+/**
+ * Refuses `caller` when it may not read the Brain now: an App or a
+ * workflow without its grant to read it, active, its person still a
+ * member (`authorize`). A chat's agent needs no grant: every agent reads
+ * the Brain, as far as where its turn reads lets it (`reach`; Nick's
+ * decision on GRA-2203). Its person is checked by each read itself, as
+ * every reader of the Brain is (brain-next.ts reads them through
+ * `currentMembership`): one suspended or removed reads nothing.
+ */
+const requireBrainReader = async (
+  env: Env,
+  caller: Pick<RecallCaller, "authority" | "context" | "permissionId">
+): Promise<void> => {
+  if (caller.authority.subject.type === "agent") {
+    return;
+  }
+  if (caller.permissionId === null) {
+    throw permissionErrors.create("permission.denied", { action: "brain" });
+  }
+  await authorize(
+    env,
+    caller.authority,
+    { type: "platform" },
+    "brain",
+    caller.permissionId,
+    caller.context
+  );
+};
+
+/** Whether `input` is a recall as code asks for one (`BrainRecall`). */
+export const isBrainRecall = (input: unknown): boolean =>
+  codeRecallOf(input) !== undefined;
+
+/**
+ * The teams App grant `permissionId` reaches (`teams` on its row), none
+ * when it names none. A stored value that isn't a list of team IDs is
+ * refused (`permission.denied`), never read as more nor as less (threat
+ * model on GRA-1842, item 7). Set as the grant is asked for and never
+ * changed, so reading it after `authorize` reads what was authorized.
+ */
+const grantTeamsOf = async (
+  env: Env,
+  permissionId: PermissionId
+): Promise<readonly string[]> => {
+  const row = await drizzle(env.DB)
+    .select({ teams: permissions.teams })
+    .from(permissions)
+    .where(eq(permissions.id, permissionId))
+    .get();
+  const teams = storedTeamsOf(row?.teams ?? null);
+  if (teams === undefined) {
+    throw permissionErrors.create("permission.denied", { action: "brain" });
+  }
+  return teams;
+};
+
+/**
+ * A pack of what `caller`'s person may read for `input`'s question, within
+ * its budget, as of its moment when given. Refused as
+ * `permission.invalid_args` when `input` isn't a request, as
+ * `permission.denied` without the grant, and as `permission.unavailable`
+ * once the person is no longer a member (a visitor never was). Audited,
+ * answered or refused, before it returns.
+ */
+export const recallFor = async (
+  env: Env,
+  caller: RecallCaller,
+  input: unknown
+): Promise<BrainPack> => {
+  const audit = async (detail: Record<string, string | number | boolean>) => {
+    // Straight to the log, as a read is (`appendAuditEvent`): a recall
+    // the log can't take is answered nothing.
+    await appendAuditEvent(env, {
+      actor: caller.actor,
+      action: "brain.recall",
+      ...(caller.target === undefined ? {} : { target: caller.target }),
+      detail: { onBehalfOf: caller.authority.onBehalfOf, ...detail },
+    });
+  };
+  try {
+    const recall = codeRecallOf(input);
+    if (recall === undefined) {
+      throw functionErrors.create("permission.invalid_args");
+    }
+    await requireBrainReader(env, caller);
+    // An App's as the company and, of its grant's teams, the person's; a
+    // workflow's as the company alone; a chat's code as its person's
+    // teams in their own chat (`reach`), and as the company alone
+    // anywhere else; never what only a person may read. Nothing code
+    // sends can change it.
+    // Passages alone (GRA-1742): the pack code gets is the SDK's
+    // `BrainPack`, which holds no memory, so none takes its budget or a
+    // word from `notFound`, and no entity reaches code.
+    const { subject } = caller.authority;
+    const recalled = await recallPassagesAs(env, caller.authority.onBehalfOf, {
+      ...recall,
+      personal: false,
+      company: subject.type !== "agent" || caller.reach !== "teams",
+      teams:
+        subject.type === "app" && caller.permissionId !== null
+          ? await grantTeamsOf(env, caller.permissionId)
+          : [],
+    });
+    // A capture and an interview are one person's own, kept only in their
+    // own store (core's addSource refuses them anywhere else), which this
+    // recall never reads; a team's claim or drawing, and the company's
+    // opinions, from the onboarding's interviews are read by members as
+    // themselves alone (brain-next.ts `membersGroup`), which code never
+    // reads as; and what native sync copied is its owner's own or read by
+    // the accounts its source names (brain-sync.ts), which only a person
+    // reading as themselves holds; so no statement of this recall ever
+    // ranks or counts one: none can be here. Narrowed for the SDK's type,
+    // never thrown over.
+    const pack: BrainPack = {
+      ...recalled,
+      // When a version was last read where it lives is a fact of what
+      // an agent read for its person, never code's.
+      items: recalled.items.flatMap(({ readAt: _read, ...item }) => {
+        const { producer, id } = item.source;
+        return producer === "capture" ||
+          producer === "interview" ||
+          producer === "claim" ||
+          producer === "drawing" ||
+          producer === "opinion" ||
+          producer === "sync"
+          ? []
+          : [{ ...item, source: { producer, id } }];
+      }),
+    };
+    await caller.keep?.(pack);
+    await audit({ items: pack.items.length, truncated: pack.truncated });
+    return pack;
+  } catch (error) {
+    const refused = inHostWords(error);
+    await audit({
+      refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
+    });
+    throw refused;
+  }
+};
+
+// Who knows about a topic (GRA-1744; the design note and threat model are
+// on the issue): the people who uploaded the documents that a recall for
+// it finds for the asker, each with the one passage of theirs that recall
+// found first, its text as recall packs it, pinned with it. For a chat's
+// code alone
+// (agent-brain.ts `whoKnows`), never an App's or a workflow's, whose data
+// can reach people the asker isn't. How it can fail, and how it fails
+// closed:
+//
+// - A person is named on the strength of a document the asker may not
+//   read. The passages are the Brain's, found as recall finds them for
+//   the chat's code (`recallFor`'s reach), filtered by the reader inside
+//   the Brain's own statements; each upload is checked again in the one
+//   statement that reads its uploader (`uploadersOf`), as the same
+//   reader. A document they may not read answers as one nobody holds.
+// - What only one person may read becomes evidence for anyone else: no
+//   person's own store is read (`personal: false`; the shared store holds
+//   nothing one person alone may read either, so this is a second layer),
+//   and an upload its uploader alone reads is never taken.
+// - An erased or removed person is named, or one named for a team's
+//   document they may no longer read themselves: only an uploader who is
+//   an active member now, in that team still.
+// - A person is taken to know about what their document doesn't answer.
+//   Nothing here judges relevance: each person comes with the passage
+//   that matched, as recall found it for this reader (`found` as recall
+//   labels it: only the first way it found the passage, never whether it
+//   answers), and the caller (the chat's
+//   model, which reads the text) judges, as with every other recall. No
+//   threshold of our own, and no passage the reader may not read: each is
+//   one of recall's own items for them.
+// - Monitoring of individuals: people one at a time, in the order of
+//   their names, never ranked, scored or counted (one passage each, never
+//   how many of their documents answer), and never two related to each
+//   other.
+// - What the answer rests on reaches the chat's history unpinned: every
+//   version cited, and every person named, is kept with the run (`keep`)
+//   before the code gets it, so a later turn withholds it once the reach
+//   may no longer read the version, or the person is no longer a member.
+// - Nothing of the question or the answer is in a refusal, a log line or
+//   the audit event, which is kept, answered or refused, before the call
+//   returns.
+
+/** A version of an upload, as code reads a citation. */
+export interface UploadVersion {
+  source: { producer: "upload"; id: string };
+  version: number;
+}
+
+/** A passage of an upload, as a recall's pack hands it over (`BrainPack`). */
+export type UploadPassage = BrainPack["items"][number] & UploadVersion;
+
+/**
+ * A person a recall for the topic found an upload of: who they are, and
+ * the one passage of theirs recall found first for the asker, exactly as
+ * its pack holds it (its text, and how it was `found`): what the caller
+ * judges by whether they know about it.
+ */
+export interface PersonWhoKnows {
+  id: string;
+  name: string;
+  passage: UploadPassage;
+}
+
+/**
+ * Who knows about a topic, as code reads it: the people, by name; the
+ * parts of the question nothing the asker may read holds; and whether the
+ * budget left a passage out, as recall's pack says: someone whose only
+ * passage didn't fit is not named.
+ */
+export interface WhoKnows {
+  people: PersonWhoKnows[];
+  notFound: string[];
+  truncated: boolean;
+}
+
+/** Who asks, as core resolved them: a chat's code, never an App or a run. */
+export interface WhoKnowsCaller extends Omit<RecallCaller, "keep"> {
+  /**
+   * Keeps every version the answer cites, and every person it names (their
+   * member id), with the run, before code gets it: what couldn't be kept
+   * fails the call, audited as refused.
+   */
+  readonly keep: (read: {
+    versions: readonly UploadVersion[];
+    people: readonly string[];
+  }) => Promise<void>;
+}
+
+/** Whether `one` sorts before `other`: by name, then by id, never by count. */
+const byName = (one: PersonWhoKnows, other: PersonWhoKnows): number =>
+  one.name.localeCompare(other.name) || one.id.localeCompare(other.id);
+
+/**
+ * Who uploaded the documents a recall for `input`'s question finds for
+ * `caller`'s person at its reach, each with that passage (`WhoKnows`), for
+ * the caller to judge by. Refused as
+ * `permission.invalid_args` when `input` isn't a request, and as
+ * `permission.unavailable` once the person is no longer a member.
+ * Audited, answered or refused, before it returns.
+ */
+export const whoKnowsFor = async (
+  env: Env,
+  caller: WhoKnowsCaller,
+  input: unknown
+): Promise<WhoKnows> => {
+  const audit = async (detail: Record<string, string | number | boolean>) => {
+    await appendAuditEvent(env, {
+      actor: caller.actor,
+      action: "brain.who_knows",
+      ...(caller.target === undefined ? {} : { target: caller.target }),
+      detail: { onBehalfOf: caller.authority.onBehalfOf, ...detail },
+    });
+  };
+  try {
+    // A recall's question and budget, never a moment: who uploaded what
+    // is read as it is now.
+    const asked = codeRecallOf(input);
+    if (asked === undefined || asked.asOf !== undefined) {
+      throw functionErrors.create("permission.invalid_args");
+    }
+    await requireBrainReader(env, caller);
+    // As the chat's code recalls: its person's teams and the company in
+    // their own chat (`reach`), the company alone anywhere else. Never
+    // their own store (`personal: false`): a second layer, as the shared
+    // store keeps nothing only one person may read.
+    const reachesTeams = caller.reach === "teams";
+    // Recall's own pack, within the budget the caller gave: the passages
+    // handed over are its items, so the answer never holds more text.
+    const passages = await recallPassagesAs(env, caller.authority.onBehalfOf, {
+      question: asked.question,
+      budget: asked.budget,
+      personal: false,
+      company: !reachesTeams,
+    });
+    const uploads = passages.items.flatMap(
+      ({ source, ...item }): UploadPassage[] =>
+        source.producer === "upload"
+          ? [{ ...item, source: { producer: "upload", id: source.id } }]
+          : []
+    );
+    // A team's upload as the person reads it now, in the same statement
+    // as its uploader (`uploadersOf`); none as the company alone.
+    const found = await uploadersOf(
+      env,
+      [...new Set(uploads.map(({ source }) => source.id))],
+      { person: reachesTeams ? caller.authority.onBehalfOf : null }
+    );
+    const uploaders = new Map(
+      found.map((uploader) => [uploader.uploadId, uploader])
+    );
+    // Each person once, with their first passage in the pack's order.
+    const people = new Map<string, PersonWhoKnows>();
+    for (const passage of uploads) {
+      const uploader = uploaders.get(passage.source.id);
+      if (uploader !== undefined && !people.has(uploader.userId)) {
+        people.set(uploader.userId, {
+          id: uploader.userId,
+          name: uploader.name,
+          passage,
+        });
+      }
+    }
+    const answer: WhoKnows = {
+      people: [...people.values()].toSorted(byName),
+      notFound: passages.notFound,
+      truncated: passages.truncated,
+    };
+    await caller.keep({
+      versions: answer.people.map(({ passage: { source, version } }) => ({
+        source,
+        version,
+      })),
+      people: answer.people.map(({ id }) => id),
+    });
+    await audit({ people: answer.people.length, truncated: answer.truncated });
+    return answer;
+  } catch (error) {
+    const refused = inHostBrainWords(error);
+    await audit({
+      refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
+    });
+    throw refused;
+  }
+};
+
+/** What code asks of the Brain's skills: `ctx.brain.skills.<operation>`. */
+export type SkillsOperation = "skills.select" | "skills.read";
+
+/** `error` in the function host's words, a skill's refusals among them. */
+const inHostSkillWords = (error: unknown): unknown => {
+  const code = skillErrors.codeOf(error);
+  if (code === "skills.invalid") {
+    return functionErrors.create("permission.invalid_args");
+  }
+  if (code === "skills.not_found") {
+    return functionErrors.create("permission.item_not_found");
+  }
+  return inHostWords(error);
+};
+
+/**
+ * How far code's skills go: Grasp's and the company's alone. Never a
+ * person's own, which only ever reach that person's own chat, and never a
+ * team's (GRA-1844: decided for now; whether an App whose Brain grant is
+ * scoped to teams gets their skills is GRA-1844's follow-up with #2234).
+ * Code's input is refused for naming any other scope before this is asked
+ * (`skillReadSchema`, `grasp` and `company` alone).
+ */
+const codeSkills: SkillsReach = "company";
+
+/**
+ * What code holds of what a skill may need (skill-needs.ts): nothing. No
+ * App or workflow has a truthful set of connections and tools to meet a
+ * skill's needs against yet, so a skill that declares any is never
+ * listed, selected or read from code: it is as if it weren't there.
+ */
+const codeHolds: HeldNow = async () => await Promise.resolve(heldNothing);
+
+/**
+ * `skill` as code may be handed it: Grasp's or the company's. A person's
+ * own or a team's is never asked for (`codeSkills`); one coming back
+ * anyway fails the call, never passed on.
+ */
+const forCode = <Skill extends { scope: SkillAt["scope"] }>(
+  skill: Skill
+): Skill & { scope: "grasp" | "company" } => {
+  const { scope } = skill;
+  if (scope !== "grasp" && scope !== "company") {
+    throw new Error("A person's own or a team's skill reached code");
+  }
+  return { ...skill, scope };
+};
+
+/** Who reads the Brain's skills: a recall's caller, with its own pins. */
+export interface SkillsCaller extends Omit<RecallCaller, "keep"> {
+  /**
+   * What the caller keeps of the skills it is handed, before it gets them:
+   * a run's pins, as a recall's (`recordRunVersions`). Run before the call
+   * is audited as answered, so skills that couldn't be kept are audited as
+   * refused, and nobody gets them.
+   */
+  readonly keep?: (versions: readonly SkillVersionRef[]) => Promise<void>;
+}
+
+/**
+ * The Brain's skills for an App's action or a workflow's step (GRA-1830):
+ * `skills.select` the skills for `input.task`, `skills.read` one at the
+ * version a selection gave, the same a chat's code selects and reads for
+ * the same person (brain-skills.ts), at the company's reach and holding no
+ * needs (`codeSkills`, `codeHolds`): never the person's own, never a
+ * team's, never one that declares what it needs. Checked, kept and audited as a recall
+ * is (`recallFor`, the threat model on GRA-1830): the input first, then
+ * the caller's grant to read the Brain, now, and the person it acts for
+ * still a member. Refused as `permission.invalid_args` for input that
+ * isn't a task or a skill, `permission.item_not_found` for a skill there
+ * isn't at that version, `permission.denied` without the grant and
+ * `permission.unavailable` once the person is no longer a member. Each
+ * skill handed over, a selection's or a read's, is kept by the caller
+ * first (`keep`), so a run checks it again before anything leaves it.
+ * Audited, answered or refused, before it returns: how many skills, or
+ * which version, never the task, a name or a text.
+ */
+export const skillsCallFor = async (
+  env: Env,
+  caller: SkillsCaller,
+  operation: SkillsOperation,
+  input: unknown
+): Promise<{ skills: readonly BrainSkill[] } | BrainSkillText> => {
+  const audit = async (detail: Record<string, string | number | boolean>) => {
+    await appendAuditEvent(env, {
+      actor: caller.actor,
+      action: `brain.${operation}`,
+      ...(caller.target === undefined ? {} : { target: caller.target }),
+      detail: { onBehalfOf: caller.authority.onBehalfOf, ...detail },
+    });
+  };
+  try {
+    // The input first, as a recall's: a caller with no grant and bad
+    // input is refused alike by both.
+    const request =
+      operation === "skills.select" ? skillsSelectSchema : skillReadSchema;
+    if (!request.safeParse(input).success) {
+      throw functionErrors.create("permission.invalid_args");
+    }
+    await requireBrainReader(env, caller);
+    if (operation === "skills.select") {
+      const skills = await selectSkillsFor(
+        env,
+        caller.authority,
+        codeSkills,
+        codeHolds,
+        input
+      );
+      const handed = skills.map((skill) => forCode(skill));
+      await caller.keep?.(handed.map((skill) => skillVersionRefOf(skill)));
+      await audit({ skills: handed.length });
+      return { skills: handed };
+    }
+    const read = await readSkillFor(
+      env,
+      caller.authority,
+      codeSkills,
+      codeHolds,
+      input
+    );
+    const handed = forCode(read);
+    await caller.keep?.([skillVersionRefOf(handed)]);
+    await audit({ scope: handed.scope, version: handed.version });
+    return handed;
+  } catch (error) {
+    const refused = inHostSkillWords(error);
+    await audit({
+      refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
+    });
+    throw refused;
+  }
+};
+
+// The Brain's entities for code (GRA-1837 and GRA-1894, threat models on
+// the issues): an App's action (resource-brain.ts), a workflow's step
+// (workflows/brain-calls.ts) and a chat's code (agent-brain.ts) read an
+// entity's card and find entities. In order, as a recall's:
+//
+// - The request first, strictly (`isCodeEntitiesRequest`): it can't name
+//   a reader.
+// - The caller's grant to read the Brain, now (`requireBrainReader`).
+// - Whom it reads as (brain-next.ts `CodeReach`), as a recall's: an App
+//   and a workflow as the company alone, whatever teams their grant names,
+//   and an App's code, in a person's call on its page while they use it
+//   now, what that App's code remembered too (brain-app-writes.ts);
+//   a chat's code as its person's teams too, only in their own chat in
+//   Grasp in a turn they started (`RecallCaller.reach`), and as the
+//   company alone anywhere else. Never what only a person may read: code
+//   can pass what it read on to an App, a workflow or a connection, where
+//   no pin of the chat's follows it (GRA-1762).
+// - Audited once, before it answers, with ids and counts alone: never a
+//   name, a statement or a cursor. An entity the reader may not see is
+//   answered as one nobody holds.
+// - What it hands over rests on memories: a card's, and those that make
+//   every entity it names seen, named and found. The caller keeps each
+//   version of a source they rest on, and each of those memories with
+//   what it rests on (`CodeRestsOn`), before it gets the answer (a run's
+//   pins, a chat's reads), and code never sees them.
+
+// What a workflow's test run checks a request with before it answers from
+// its fixtures (workflows/brain-calls.ts), which reaches brain-next.ts
+// only through this module.
+export { isCodeEntitiesRequest } from "./brain-next.ts";
+export type { CodeEntitiesOperation } from "./brain-next.ts";
+
+/**
+ * Who reads the Brain's entities: a recall's caller, at its reach
+ * (`RecallCaller.reach`, a chat's code alone), keeping what it is handed
+ * rests on.
+ */
+export interface EntitiesCaller extends Omit<RecallCaller, "keep"> {
+  /**
+   * What the caller keeps of what it is handed rests on (`CodeRestsOn`),
+   * before it gets it: a run's pins, a chat's reads, as a recall's.
+   */
+  readonly keep?: (restsOn: CodeRestsOn) => Promise<void>;
+  /**
+   * For an App's code alone (resource-brain.ts): the App whose own
+   * memories it reads too, decided as it reads (brain-app-writes.ts
+   * `appUsersReadBy`); none reads the company's alone.
+   */
+  readonly appUsers?: () => Promise<AppId | undefined>;
+}
+
+/** The entity `input` asks for, as the audit log may name it. */
+const askedEntityOf = (input: unknown): string | null =>
+  auditedIdOf(
+    typeof input === "object" && input !== null
+      ? Reflect.get(input, "entity")
+      : undefined
+  );
+
+/** A memory as code is handed it (`BrainMemory`): what it says, never who wrote or confirmed it. */
+const codeMemoryOf = (memory: CardMemory) =>
+  ({
+    id: memory.id,
+    attribute: memory.attribute,
+    value: memory.value,
+    statement: memory.statement,
+    learnedAt: memory.learnedAt.toISOString(),
+    confirmed: memory.confirmed !== null,
+    contested: memory.contested,
+  }) satisfies BrainMemory;
+
+/** An entity as code is handed it (`BrainEntity`): never what its name rests on. */
+const codeEntityOf = ({ id, kind, name }: CodeEntity) =>
+  ({ id, kind, name }) satisfies BrainEntity;
+
+/** A card as code is handed it (`BrainCard`), as JSON. */
+const codeCardOf = (card: CodeCard) =>
+  ({
+    entity: codeEntityOf(card.entity),
+    attributes: card.attributes.map(({ attribute, memories, contested }) => ({
+      attribute,
+      memories: memories.map((memory) => codeMemoryOf(memory)),
+      contested,
+    })),
+    relations: card.relations.map(({ attribute, side, other, memory }) => ({
+      attribute,
+      side,
+      other: codeEntityOf(other),
+      memory: codeMemoryOf(memory),
+    })),
+    notes: card.notes.map((memory) => codeMemoryOf(memory)),
+    next: card.next,
+  }) satisfies BrainCard;
+
+/** The memories on `card`, counted. */
+const memoriesOn = (card: CodeCard): number =>
+  card.attributes.reduce(
+    (count, { memories }) => count + memories.length,
+    card.relations.length + card.notes.length
+  );
+
+/**
+ * `answer` as code may be handed it: held to the strict shape every caller
+ * hands code (brain-pack.ts, as the function host holds an App's), before
+ * anything is kept or audited, so an answer core's own mapping got wrong
+ * fails the call and is audited as refused, never as handed over.
+ */
+const handedAs = <T>(schema: z.ZodType<T>, answer: Json): Json => {
+  if (!schema.safeParse(answer).success) {
+    throw new Error(
+      "An answer not as code is handed one reached the Brain's entities"
+    );
+  }
+  return answer;
+};
+
+/** Reads `operation` for `caller`, checked already: what it answers code, and what its audit says. */
+const readFor = async (
+  env: Env,
+  caller: EntitiesCaller,
+  operation: CodeEntitiesOperation,
+  input: unknown
+): Promise<{
+  answer: Json;
+  detail: Record<string, string | number | boolean | null>;
+}> => {
+  const person = caller.authority.onBehalfOf;
+  // Its person's teams only for a chat's agent that core asks it for, as
+  // a recall's; the company alone for anything else. Nothing code sends
+  // can change it.
+  const reach =
+    caller.authority.subject.type === "agent" && caller.reach === "teams"
+      ? "teams"
+      : "company";
+  // Decided now, as it reads: never the call's own roles.
+  const appUsers = await caller.appUsers?.();
+  if (operation === "entities.get") {
+    const card = await codeCardAs(env, person, reach, input, appUsers);
+    if (card === null) {
+      return { answer: null, detail: { found: false, memories: 0 } };
+    }
+    const answer = handedAs(brainCardSchema, codeCardOf(card));
+    // Kept by the caller before it gets them, as a recall's pack is:
+    // everything what the card says rests on (contract `restsOn`).
+    await caller.keep?.(card.restsOn);
+    return { answer, detail: { found: true, memories: memoriesOn(card) } };
+  }
+  const page = await codeEntitiesAs(env, person, reach, input, appUsers);
+  const answer = handedAs(brainEntitiesSchema, {
+    entities: page.entities.map((entity) => codeEntityOf(entity)),
+    next: page.next,
+  });
+  // What the page says rests on, kept as a card's is.
+  await caller.keep?.(page.restsOn);
+  return { answer, detail: { entities: page.entities.length } };
+};
+
+/**
+ * The Brain's entities for an App's action, a workflow's step or a chat's
+ * code (above): `entities.get` a page of an entity's card and
+ * `entities.find` a page of entities, as the caller's reach may read
+ * them. Refused as
+ * `permission.invalid_args` for input that isn't a request,
+ * `permission.denied` without the grant to read the Brain, and
+ * `permission.unavailable` once the person is no longer a member.
+ * Audited once, before it answers.
+ */
+export const entitiesCallFor = async (
+  env: Env,
+  caller: EntitiesCaller,
+  operation: CodeEntitiesOperation,
+  input: unknown
+): Promise<Json> => {
+  const asked: Record<string, string | null> =
+    operation === "entities.get" ? { entity: askedEntityOf(input) } : {};
+  const audit = async (
+    detail: Record<string, string | number | boolean | null>
+  ): Promise<void> => {
+    await appendAuditEvent(env, {
+      actor: caller.actor,
+      action: `brain.${operation}`,
+      ...(caller.target === undefined ? {} : { target: caller.target }),
+      detail: { onBehalfOf: caller.authority.onBehalfOf, ...asked, ...detail },
+    });
+  };
+  let read: Awaited<ReturnType<typeof readFor>>;
+  try {
+    // The input first, as a recall's: a caller with no grant and bad
+    // input is refused alike by both.
+    if (!isCodeEntitiesRequest(operation, input)) {
+      throw functionErrors.create("permission.invalid_args");
+    }
+    await requireBrainReader(env, caller);
+    read = await readFor(env, caller, operation, input);
+  } catch (error) {
+    const refused = inHostBrainWords(error);
+    await audit({
+      refused: isExpectedError(refused) ? refused.code : "internal.unexpected",
+    });
+    throw refused;
+  }
+  await audit(read.detail);
+  return read.answer;
+};

@@ -307,7 +307,7 @@ export const Traces = ({
   activity,
   names,
   admin,
-  checkpoint,
+  testable,
   part,
   onPartChange,
   openRun,
@@ -323,8 +323,8 @@ export const Traces = ({
   runs: Loaded<WorkflowResourceRun[]>;
   activity: Loaded<WorkflowActivity[]>;
   names: Names;
-  /** The draft's checkpoint revision, if it has one: what a test runs. */
-  checkpoint: number | null;
+  /** The draft's revision while it passes: what a test runs. */
+  testable: number | null;
   part: TracesPart;
   onPartChange: (part: TracesPart) => void;
 }) => {
@@ -370,8 +370,8 @@ export const Traces = ({
             the answers typed for it stay. */}
         <TabsContent keepMounted value="runs">
           <div {...stylex.props(styles.traces)}>
-            {checkpoint === null ? null : (
-              <ItemTest revision={checkpoint} workflow={workflow} />
+            {testable === null ? null : (
+              <ItemTest revision={testable} workflow={workflow} />
             )}
             <RunBeside
               admin={admin}

@@ -14,8 +14,6 @@ import type {
   WorkflowVersionRecord,
 } from "./brain-records.ts";
 import { defineErrorFamily } from "./errors.ts";
-import type { CollectionId, DocumentId } from "./ids.ts";
-import type { DocumentType } from "./knowledge.ts";
 import type { WorkKnowledge } from "./work-knowledge.ts";
 
 /** The standard business processes a workflow belongs to. */
@@ -103,6 +101,8 @@ export interface TeamCount extends Dated {
 export interface Team {
   id: string;
   name: string;
+  /** What it does, as the company's admin described it on the roster; none when they didn't. */
+  does?: string;
   /** Where the team was first found. */
   sourceId: string;
   /** Size and roles per import, oldest first; the newest counts. */
@@ -112,8 +112,8 @@ export interface Team {
 }
 
 /**
- * One of the company's groups of teams, as its admin confirmed it or Grasp
- * proposed it: a region of the brain.
+ * One of the company's groups of teams, as Grasp arranged it or an admin
+ * changed it: a region of the brain.
  */
 export interface TeamGroup {
   id: string;
@@ -121,14 +121,14 @@ export interface TeamGroup {
   name: string;
   /** Its teams, by the brain's team ids, in the company's order. */
   teamIds: string[];
-  /** An admin confirmed it; until then it is only Grasp's proposal. */
+  /** Always true as core keeps it: every group counts, none waits to be confirmed. */
   confirmed: boolean;
 }
 
 /** Most groups of teams a company keeps. */
 export const teamGroupsMax = 50;
 
-/** A group of teams as an admin confirms it (`brain.saveTeamGroups`). */
+/** A group of teams as an admin keeps it (`brain.saveTeamGroups`). */
 export const teamGroupInputSchema = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
   name: z.string().trim().min(1).max(80),
@@ -175,14 +175,7 @@ export interface Tool {
   ai?: AiKind;
 }
 
-/**
- * Most Knowledge documents with a transcript `brain.read` lists as
- * sources, the newest saved first: each by how many turns it has, never
- * the turns, which `brain.transcript` reads when the source is opened.
- */
-export const brainTranscriptSourcesMax = 50;
-
-/** A source's id, as `brain.transcript` takes one. */
+/** A source's id, as the brain takes one. */
 export const sourceIdSchema = z.string().min(1).max(200);
 
 /** One turn, answer or passage in a transcript. */
@@ -230,15 +223,11 @@ export interface Source {
   teamIds?: string[];
   /** An interview written up as an article, paragraph by paragraph. */
   article?: string[];
-  /**
-   * How many turns its transcript has, when it has one: `brain.read` says
-   * only this; `brain.transcript(id)` reads the turns and chapters.
-   */
+  /** How many turns its transcript has, when it has one. */
   transcriptTurns?: number;
   /**
    * The whole conversation, word for word; its statements are highlights
-   * in it. Never sent by `brain.read`: the page puts here what
-   * `brain.transcript` read.
+   * in it. Never sent by `brain.read`.
    */
   transcript?: Transcript;
   /**
@@ -366,6 +355,19 @@ export interface Connection {
   via: "direct" | "composio";
   /** Tool names in workflow steps that this connection covers. */
   matches: string[];
+  /**
+   * Whether the Brain keeps what an agent reads for this person through it
+   * (GRA-1730): a native provider with a tool that answers one item
+   * (core's `nativeItemReads`, the table capture keeps by), connected by
+   * the person themselves. Absent for every other.
+   */
+  keepsReads?: true;
+  /**
+   * Connected, but it can't tell Grasp what changed in it (GRA-1763):
+   * only what is done there through Grasp is seen. Absent for one that
+   * can (core's brain-rpc.ts), and for one not connected.
+   */
+  activityGap?: true;
 }
 
 /** Everything the brain is built from. */
@@ -376,8 +378,8 @@ export interface Workspace {
   teams: Team[];
   /**
    * The company's groups of teams, in its order: the brain's regions. A
-   * team in none has no group yet; Grasp proposes one when an admin asks
-   * (`brain.proposeTeamGroups`).
+   * team in none waits for Grasp to arrange it, after the staff list is
+   * saved, or for an admin to place it (`saveTeamGroups`).
    */
   teamGroups: TeamGroup[];
   /** The interviews the brain learned from, week by week, oldest first. */
@@ -417,8 +419,6 @@ export interface BrainForgetPreview {
   source: string | null;
   /** The statements that go. */
   statements: string[];
-  /** The workflows whose numbers rest on the source: they keep them, and say their source was removed. */
-  workflows: string[];
 }
 
 /**
@@ -455,17 +455,6 @@ export interface BrainApi {
    */
   goals: () => Promise<Goal[]>;
   /**
-   * One source's transcript (`brain.transcript`), as the person may read it
-   * now, or null: alike when it has none and when they may not read it.
-   * A team's interviews have none, for anyone.
-   */
-  transcript: (sourceId: string) => Promise<Transcript | null>;
-  /**
-   * What changed in the brain since a moment (`brain.changes`), newest
-   * first, a page at a time, as the person may read it.
-   */
-  changes: (options: BrainChangesOptions) => Promise<BrainChangePage>;
-  /**
    * Adds records to the brain (brain-records.ts), all or none: for
    * admins. A record core holds already, exactly so, is left as it is.
    */
@@ -498,16 +487,10 @@ export interface BrainApi {
    */
   forget: (target: BrainForgetTarget) => Promise<BrainForgetPreview>;
   /**
-   * Has Grasp propose, through the model gateway, a group for every team
-   * in none that an admin confirmed: kept as proposals until an admin
-   * confirms them (`saveTeamGroups`), replacing earlier proposals. For the
-   * company's admins. Returns the groups as they are now.
-   */
-  proposeTeamGroups: () => Promise<TeamGroup[]>;
-  /**
-   * Confirms the company's groups of teams as given, in its order, all of
-   * them: what isn't given is no longer a group. For the company's
-   * admins, audited. Returns them as kept.
+   * Keeps the company's groups of teams as given, in its order, all of
+   * them: what isn't given is no longer a group. Grasp never moves a team
+   * an admin placed. For the company's admins, audited. Returns them as
+   * kept.
    */
   saveTeamGroups: (groups: TeamGroupInput[]) => Promise<TeamGroup[]>;
   /** Closes an open gap without an answer: for the company's admins. */
@@ -538,63 +521,3 @@ export const brainErrors = defineErrorFamily({
     "Those aren't groups of the brain's teams: each needs a name and teams the brain has, each team in one group at most.",
   "brain.work_not_found": "Grasp knows of no such piece of work.",
 });
-
-/**
- * Most changes one page holds: its documents, and as many collections,
- * fit in the audit event that records the read (`auditProvenanceMaxItems`).
- */
-export const brainChangesMaxLimit = 50;
-
-/** How far back the changes go, whatever moment is asked about: 90 days. */
-export const brainChangesMaxAgeMs = 90 * 24 * 60 * 60 * 1000;
-
-/** What a call for the brain's changes asks for. */
-export const brainChangesOptionsSchema = z.strictObject({
-  /**
-   * Changes after this moment (ISO 8601): at most `brainChangesMaxAgeMs`
-   * ago, an earlier one taken as that.
-   */
-  since: z.iso.datetime({ offset: true }),
-  /** Where the page before ended (`BrainChangePage.next`); none for the first. */
-  cursor: z.string().min(1).max(512).optional(),
-  limit: z.int().min(1).max(brainChangesMaxLimit).default(50),
-});
-export type BrainChangesOptions = z.input<typeof brainChangesOptionsSchema>;
-
-/**
- * One change in the brain: what core records today. A union on `kind`, so
- * goals, questions and workflow suggestions join it once core keeps them.
- */
-export type BrainChange =
-  | {
-      /** A Knowledge document added or changed: what a listing shows of it, never its text. */
-      kind: "document";
-      /** ISO 8601: when it was last changed. */
-      at: string;
-      /** Added after the moment asked about, or only changed since. */
-      change: "added" | "changed";
-      document: {
-        id: DocumentId;
-        collectionId: CollectionId;
-        path: string;
-        title: string;
-        type: DocumentType;
-      };
-    }
-  | {
-      /**
-       * A source the onboarding gave the brain, as `brain.read`'s sources
-       * name it (the kickoff, the staff list): for admins, who read them.
-       */
-      kind: "source";
-      /** ISO 8601: when it came in, or was last saved. */
-      at: string;
-      source: { id: string; title: string };
-    };
-
-/** A page of the brain's changes, newest first. */
-export interface BrainChangePage {
-  changes: BrainChange[];
-  /** Where the next page starts; null when this is the last. */
-  next: string | null;
-}

@@ -158,15 +158,9 @@ describe("the board page's numbers", () => {
     ]);
     expect(
       signalRows(
-        [
-          { path: pay.path, kind: "waiting_for_person", value: 5 * 3_600_000 },
-          { path: pay.path, kind: "unanswered_question", value: 4 },
-        ],
+        [{ path: pay.path, kind: "waiting_for_person", value: 5 * 3_600_000 }],
         [pay]
       ).map(({ text }) => text)
-    ).toStrictEqual([
-      "Waits up to 5 hours for a person to decide",
-      "A question went unanswered 4 times",
-    ]);
+    ).toStrictEqual(["Waits up to 5 hours for a person to decide"]);
   });
 });

@@ -1,5 +1,6 @@
 // What erasure deletes of memories (erasure.ts): the memories resting on
-// a version it deletes, or those only an erased person may read, each
+// a version it deletes, or drawn from a source it erases, or those a
+// writer's erasure hid (`deleteMemories`, a batch at a time), each
 // with its names and its confirmations; every confirmation made over one
 // of them, whole, so none shows to readers the erased memory once hid it
 // from; then each entity no memory mentions any more, so no name or
@@ -20,7 +21,10 @@ const setsOf = (sql: SqlStorage, keys: readonly string[]): number[] =>
         .map(({ id }) => id);
 
 /** `rows` of memories deleted whole: answers the sets of readers they named. */
-const deleteMemories = (sql: SqlStorage, rows: readonly number[]): number[] => {
+export const deleteMemories = (
+  sql: SqlStorage,
+  rows: readonly number[]
+): number[] => {
   if (rows.length === 0) {
     return [];
   }
@@ -64,14 +68,25 @@ const deleteMemories = (sql: SqlStorage, rows: readonly number[]): number[] => {
     "DELETE FROM memories WHERE row IN (SELECT value FROM json_each(?))",
     listed
   );
-  sql.exec(
-    `DELETE FROM entities WHERE row IN (
-      SELECT touched.value FROM json_each(?1) AS touched
-      WHERE NOT EXISTS (SELECT 1 FROM memories WHERE memories.entity = touched.value)
-        AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = touched.value)
-    )`,
-    JSON.stringify(touched.flatMap(({ entity }) => entity ?? []))
-  );
+  const gone = sql
+    .exec<{ id: string }>(
+      `DELETE FROM entities WHERE row IN (
+        SELECT touched.value FROM json_each(?1) AS touched
+        WHERE NOT EXISTS (SELECT 1 FROM memories WHERE memories.entity = touched.value)
+          AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = touched.value)
+          -- The store's own entity stays with no memories (own-entity.ts).
+          AND NOT EXISTS (SELECT 1 FROM own_entity WHERE own_entity.entity = touched.value)
+      ) RETURNING id`,
+      JSON.stringify(touched.flatMap(({ entity }) => entity ?? []))
+    )
+    .toArray();
+  // A card a restore given up recorded goes with what it recorded of it.
+  if (gone.length > 0) {
+    sql.exec(
+      "DELETE FROM restore_cards WHERE entity IN (SELECT value FROM json_each(?))",
+      JSON.stringify(gone.map(({ id }) => id))
+    );
+  }
   return setsOf(
     sql,
     touched.map(({ readers }) => readers)
@@ -151,42 +166,6 @@ export const eraseMemoriesOfSource = (
     ...deleteMemories(
       sql,
       rowsOf(sql, "SELECT row FROM memories WHERE subject = ?", subject)
-    ),
-  ];
-};
-
-/**
- * Deletes the memories and extraction marks resting on the versions the
- * person's erasure `erasure` hid (`erased_versions`): what it covered of
- * sources others read too. Answers the sets of readers they named.
- */
-export const eraseMemoriesHiddenBy = (
-  sql: SqlStorage,
-  erasure: string
-): number[] => {
-  const marks = sql
-    .exec<{ readers: string }>(
-      `DELETE FROM memory_extractions
-      WHERE (subject, version) IN (
-        SELECT subject, version FROM erased_versions WHERE erasure = ?
-      )
-      RETURNING readers`,
-      erasure
-    )
-    .toArray()
-    .map(({ readers }) => readers);
-  return [
-    ...setsOf(sql, marks),
-    ...deleteMemories(
-      sql,
-      rowsOf(
-        sql,
-        `SELECT memories.row AS row FROM erased_versions
-        JOIN memories ON memories.subject = erased_versions.subject
-          AND memories.version = erased_versions.version
-        WHERE erased_versions.erasure = ?`,
-        erasure
-      )
     ),
   ];
 };

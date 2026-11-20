@@ -10,13 +10,10 @@
  * which never changes: renaming the folder makes another blueprint. In it:
  *
  * - `blueprint.json`: `{ "name": …, "description": … }`, as for any App,
- *   and optionally `"collections"`: the collections it keeps documents in,
- *   as `[{ "id": …, "name": …, "description": … }]`, which the install
- *   creates if they aren't there yet (`declaredCollectionSchema`); and
- *   `"permissions"`: what each App created from it asks for, as
- *   `[{ "object": { "type": "collection", "collectionId": … }, "actions":
- *   […], "binding": … }]`, each a request an admin grants on the copy,
- *   and each for one of its collections; `"contracts"`: the catalog
+ *   and optionally `"permissions"`: what each App created from it asks
+ *   for of what the platform offers, as `[{ "object": { "type":
+ *   "platform" }, "actions": […], "binding": … }]`, each a request an
+ *   admin grants on the copy; `"contracts"`: the catalog
  *   contracts its workflows bind, as an admin publishes them
  *   (`catalogContractSchema`), which the install publishes if their keys
  *   aren't taken; and `"workflows"`: the independent workflows each App
@@ -33,8 +30,7 @@
  *
  * Each is checked here as the install would check it, so a bad one fails
  * the build rather than the install: its ID, its manifest (its
- * collections, and its permissions as any request's are checked, each
- * for a collection it declares), its definition, and its
+ * permissions as any request's are checked), its definition, and its
  * files as any App's write checks them (paths, no hidden files, each
  * file's size and their number), their total size as any version's, and
  * their generated files as its definition generates them.
@@ -58,7 +54,6 @@ import {
 import { isUnderGeneratedServerFolder } from "@grasp-os/runtime/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { fileChangesSchema, fromBlueprintSchema } from "@grasp-os/shared/apps";
-import { declaredCollectionSchema } from "@grasp-os/shared/knowledge";
 import {
   blueprintWorkflowSchema,
   declaredPermissionSchema,
@@ -96,9 +91,6 @@ export const digestModuleOf = (out: string): string =>
 /** Most permissions one built-in declares: each is one install statement. */
 export const declaredMaxPermissions = 16;
 
-/** Most collections one built-in declares. */
-export const declaredMaxCollections = 4;
-
 /**
  * Most workflows one built-in ships: each is a workflow its creator
  * creates and publishes as the copy is made, under their own quota.
@@ -114,22 +106,12 @@ const declaredWorkflowSchema = blueprintWorkflowSchema.extend({
 });
 
 /**
- * A `blueprint.json`: the App's name and description, as for any App,
- * the collections it declares, and what each copy asks for, each binding
- * name once, as an App's permissions have them, and each for a
- * collection it declares.
+ * A `blueprint.json`: the App's name and description, as for any App, and
+ * what each copy asks for, each binding name once, as an App's
+ * permissions have them.
  */
 const manifestSchema = fromBlueprintSchema
   .extend({
-    collections: z
-      .array(declaredCollectionSchema)
-      .max(declaredMaxCollections)
-      .refine(
-        (collections) =>
-          new Set(collections.map(({ id }) => id)).size === collections.length,
-        { message: "Each collection once" }
-      )
-      .default([]),
     permissions: z
       .array(declaredPermissionSchema)
       .max(declaredMaxPermissions)
@@ -170,18 +152,6 @@ const manifestSchema = fromBlueprintSchema
       return new Set(names).size === names.length;
     },
     { path: ["workflows"], message: "Each binding name once" }
-  )
-  .refine(
-    ({ collections, permissions }) =>
-      permissions.every(
-        ({ object }) =>
-          object.type !== "collection" ||
-          collections.some(({ id }) => id === object.collectionId)
-      ),
-    {
-      path: ["permissions"],
-      message: "Each for a collection the blueprint declares",
-    }
   );
 
 /** A folder name that is safe in an ID, a URL and an audit event. */

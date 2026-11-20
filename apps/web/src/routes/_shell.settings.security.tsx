@@ -36,8 +36,8 @@ import { SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
+  ChatAppsSection,
   LinkedChatAccounts,
-  PendingChatLink,
 } from "../settings/chat-accounts.tsx";
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
@@ -59,9 +59,10 @@ import { useCore } from "../use-core.ts";
 // The chat accounts linked to the person stand as quiet rows in the
 // Sign-in card, only when there are any (settings/chat-accounts.tsx). A
 // link a chat app sent lands here (routes/chat-link.tsx), so while one
-// waits in this tab a card offers to confirm or turn it down; once linked,
-// the account stands among the rows. Never for Grasp staff, who aren't the
-// company's people. Devices show the newest ten, and all on a press.
+// waits in this tab the Chat apps card offers to confirm or turn it down;
+// once linked, the account stands among the rows. That card also deletes
+// the person's conversations with Stephen in chat apps. Never for Grasp
+// staff, who aren't the company's people. Devices show the newest ten, and all on a press.
 
 /** The staff's own way in (core's `providerIds.staff`): not the organization's. */
 const staffProvider = "grasp-staff";
@@ -269,7 +270,9 @@ const Security = () => {
           <LinkedChatAccounts accounts={chat.data.accounts} />
         ) : null}
       </SectionCard>
-      {chat === undefined || !waiting ? null : <PendingChatLink chat={chat} />}
+      {chat === undefined ? null : (
+        <ChatAppsSection chat={chat} waiting={waiting} />
+      )}
       <Devices sessions={sessions} />
     </>
   );

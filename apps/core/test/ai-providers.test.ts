@@ -49,12 +49,10 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { aiProvidersControlUrl, compatibleHost } from "./ai-providers-fake.ts";
 import type { PlannedReply, ProviderRequest } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
-import {
-  platformAnthropicKey,
-  platformOpenAiKey,
-} from "./connect-providers.ts";
+import { platformAnthropicKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
+import { teamsMade } from "./members-teams.ts";
 import type { Answer } from "./model-provider.ts";
 import { recordedUsage } from "./model-usage.ts";
 import { agree, fact, mapped, team } from "./onboarding-team.ts";
@@ -870,26 +868,30 @@ describe("AI providers", { timeout: 60_000 }, () => {
       }).toStrictEqual({ models: ["gpt-5.4"], ticketsByPim: true });
     });
 
-    it("proposes the company's groups of teams with the organization's default model", async () => {
+    it("arranges the company's teams into regions with the organization's default model", async () => {
       const key = await connected(openaiCase);
       const { admin: by } = await admin();
+      // Arranged here, as the store's alarm would, never by itself.
+      await holdAlarm();
       const tag = unique();
-      await by.api.onboarding.saveRoster({
-        teams: [
-          { id: `sales-${tag}`, name: "Sales", lead: null },
-          { id: `support-${tag}`, name: "Support", lead: null },
-        ],
-        people: [
-          {
-            id: `ann-${tag}`,
-            name: "Ann Example",
-            team: `sales-${tag}`,
-            title: "Account manager",
-          },
-        ],
-      });
-      const sales = `team-sales-${tag}`;
-      const support = `team-support-${tag}`;
+      await by.api.onboarding.saveRoster(
+        await teamsMade({
+          teams: [
+            { id: `sales-${tag}`, name: "Sales", lead: null },
+            { id: `support-${tag}`, name: "Support", lead: null },
+          ],
+          people: [
+            {
+              id: `ann-${tag}`,
+              name: "Ann Example",
+              team: `sales-${tag}`,
+              title: "Account manager",
+            },
+          ],
+        })
+      );
+      const sales = `sales-${tag}`;
+      const support = `support-${tag}`;
       await plan(key, [
         answered(
           openaiCase.api,
@@ -899,26 +901,27 @@ describe("AI providers", { timeout: 60_000 }, () => {
         ),
       ]);
 
-      const groups = await by.api.brain.proposeTeamGroups();
+      await onboardingStore(env).arrangeNext();
 
+      const { teamGroups } = await by.api.brain.read();
       const sent = await carrying(key);
       expect({
         models: sent.map(
           ({ body }) =>
             z.object({ model: z.string() }).parse(JSON.parse(body)).model
         ),
-        proposed: groups
-          .filter(({ confirmed }) => !confirmed)
+        arranged: teamGroups
+          .filter(({ name }) => name === "Customers")
           .map(({ teamIds }) => teamIds.toSorted()),
       }).toStrictEqual({
         models: ["gpt-5.4"],
-        proposed: [[sales, support].toSorted()],
+        arranged: [[sales, support].toSorted()],
       });
     });
   });
 
   describe("falling back", () => {
-    it("tries the next model when a provider refuses a call before anything was billed, and audits it", async () => {
+    it("tries the next model when a provider refuses a call before anything was billed, says which answered, and audits it", async () => {
       const keys = await fallingBack();
       // Refused for its credentials: OpenAI takes nothing on.
       await plan(keys.openai, [{ status: 401 }]);
@@ -929,7 +932,10 @@ describe("AI providers", { timeout: 60_000 }, () => {
         await callOf(openaiCase.model, { trigger })
       );
 
-      expect(answer.text).toBe("From Claude.");
+      expect({ text: answer.text, model: answer.model }).toStrictEqual({
+        text: "From Claude.",
+        model: anthropicCase.model,
+      });
       const events = await auditedFor(trigger.userId, 3);
       expect(
         events.map(({ action, model, detail }) => ({
@@ -1292,61 +1298,12 @@ describe("AI providers", { timeout: 60_000 }, () => {
       // Always at their providers' EU hosts: Grasp's to keep there.
       expect(
         listing.platform.map(
-          ({ feature, provider }) =>
-            `${feature}: ${provider === null ? "here" : provider.whereItRuns}`
+          ({ feature, provider }) => `${feature}: ${provider.whereItRuns}`
         )
       ).toStrictEqual([
-        "conversion: OpenAI, European Union",
         "transcription: OpenAI, European Union",
         "speech: ElevenLabs, European Union",
       ]);
-    });
-
-    it("calls a provider Grasp has a key for, with that key, audited as the platform's", async () => {
-      await plan(platformOpenAiKey, [
-        answered("openai-responses", "Converted."),
-      ]);
-      const trigger = newPerson();
-
-      const answer = await models(env).platformCall(
-        await callOf("openai/gpt-5-mini", {
-          trigger,
-          work: { platform: "brain_upkeep" },
-        })
-      );
-
-      expect(answer.text).toBe("Converted.");
-      // At OpenAI's EU host: Grasp's project keeps its data there.
-      await expect(placesOf(platformOpenAiKey)).resolves.toStrictEqual(
-        onlyAt({ ...openaiCase, host: "eu.api.openai.com" })
-      );
-      const [event] = await auditedFor(trigger.userId, 1);
-      expect(event?.detail).toMatchObject({
-        transport: "connect",
-        credential: "platform",
-        region: "eu",
-        platform: "brain_upkeep",
-      });
-    });
-
-    it("doesn't offer a provider Grasp has no key for, nor its key to anything but a platform feature", async () => {
-      const { platform } = await env.CONNECT.aiProviderRoutes();
-      const noKey = await outcome(
-        models(env).platformCall(
-          await callOf("mistral/mistral-small-latest", {
-            work: { platform: "brain_upkeep" },
-          })
-        )
-      );
-      const notPlatform = await outcome(
-        models(env).platformCall(await callOf("openai/gpt-5-mini"))
-      );
-
-      expect({ platform, noKey, notPlatform }).toStrictEqual({
-        platform: ["anthropic", "openai", "elevenlabs"],
-        noKey: "model.not_allowed",
-        notPlatform: "model.invalid_call",
-      });
     });
   });
 

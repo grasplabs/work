@@ -5,6 +5,7 @@ import type {
   AgentWake,
 } from "@grasp-os/shared/agents";
 import type { ChatAgent } from "@grasp-os/shared/chat";
+import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -37,6 +38,7 @@ import {
 import { AgentPerson, Plus } from "../grasp/icons/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import type { KeyValueItem } from "../grasp/key-value/key-value.tsx";
+import { SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { dollars } from "../settings/money.ts";
@@ -46,8 +48,11 @@ import {
   useAudienceLine,
   wakesOn,
 } from "./agent-facts.tsx";
+import { OfferedAgents } from "./agent-share.tsx";
 import { useLast } from "./agent-wakes.tsx";
 import { lookOf } from "./figure/look.ts";
+import { OwnAgentsCard } from "./own-agents-admin.tsx";
+import type { OwnAgentsAdmin } from "./own-agents-admin.tsx";
 
 // The Agents page: the company's agents as portraits, Ruben's pick of the card concepts (E). Each
 // card is the agent's own night (its aura, dithered in its palette), its name large in the serif at
@@ -56,12 +61,15 @@ import { lookOf } from "./figure/look.ts";
 // is one link. A figure draws only while on screen and is a still under reduced motion; a paused
 // agent sleeps.
 //
-// Everyone sees the agents they may talk to (`chats.agents`), and their card opens a chat with it.
-// The company's admins see every agent (`connections.agents`), and its card opens its page; resting
+// Everyone sees the agents they may talk to (`chats.agents`), and their card opens a chat with it,
+// the agent mentioned in its box. A person's own agents (`connections.ownAgents`), which nobody else
+// sees, stand first, each opening its page. The company's admins see every agent of the company
+// (`connections.agents`), and its card opens its page; resting
 // on one, or reaching it with the keys, opens the library's HoverCard with what is worth knowing
 // before opening it: whom it answers, what it may do, whether it works on its own and when next,
 // this month's use and its last run. A touch screen has no hover, and a tap follows the link: there
-// the facts that matter most stand on the card itself.
+// the facts that matter most stand on the card itself. Under the cards, for admins: the agents
+// people offered the company (agent-share.tsx) and people's own agents (own-agents-admin.tsx).
 
 /** What an admin's read adds to the agents: every agent, and what core keeps of each. */
 export interface ManagedAgents {
@@ -77,6 +85,9 @@ export interface ManagedAgents {
 }
 
 const styles = stylex.create({
+  // The person's own and the company's, a group each.
+  groups: { display: "grid", gap: grasp.space7 },
+  group: { display: "grid", gap: grasp.space4 },
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 16rem), 1fr))",
@@ -142,6 +153,8 @@ interface Shown {
   face: string;
   /** Whether the person may talk to it. */
   usable: boolean;
+  /** Whether it answers, for one of the person's own; undefined for any other. */
+  own?: Agent["state"];
   /** As an admin reads it; undefined for anyone else. */
   managed:
     | {
@@ -155,11 +168,35 @@ interface Shown {
 }
 type Managed = NonNullable<Shown["managed"]>;
 
-/** The cards: every agent for an admin, else the ones the person may talk to. */
+/**
+ * The cards of the person's own agents, each opening its page, with a way
+ * into a chat only for one core lists them as asking (`usable`): none
+ * while the company has them off.
+ */
+const ownShownOf = (
+  own: readonly Agent[],
+  usable: readonly ChatAgent[]
+): Shown[] =>
+  own.map(({ id, name, job, face, state }) => ({
+    id,
+    name,
+    job,
+    face,
+    usable: usable.some((each) => each.id === id),
+    own: state,
+    managed: undefined,
+  }));
+
+/**
+ * The cards of the company's agents: every one for an admin, else the
+ * ones the person may talk to. Never one of the person's own, which have
+ * their own cards.
+ */
 const shownOf = (
-  usable: readonly ChatAgent[],
+  all: readonly ChatAgent[],
   managed: ManagedAgents | undefined
 ): Shown[] => {
+  const usable = all.filter(({ own }) => !own);
   if (managed === undefined) {
     return usable.map(({ id, name, job, face }) => ({
       id,
@@ -362,7 +399,7 @@ const Portrait = ({
 }) => {
   const { t } = useLingui();
   const look = lookOf(shown);
-  const paused = shown.managed?.state === "paused";
+  const paused = (shown.managed?.state ?? shown.own) === "paused";
   const { state, near } = usePose(paused);
   return (
     <span {...near} {...stylex.props(styles.portrait)}>
@@ -417,7 +454,8 @@ const WithDetails = ({
 
 /**
  * One agent's card. For an admin the whole card opens the agent's page, with its details on hover;
- * for anyone else, an agent they may talk to opens a chat with it.
+ * one of the person's own opens its page too; for anyone else, an agent they may talk to opens a
+ * chat with it mentioned.
  */
 const AgentCard = ({
   shown,
@@ -440,6 +478,16 @@ const AgentCard = ({
       </WithDetails>
     );
   }
+  if (shown.own !== undefined) {
+    return (
+      <CardLink
+        padding="none"
+        render={<Link params={{ agent: shown.id }} to="/agents/$agent" />}
+      >
+        {inside}
+      </CardLink>
+    );
+  }
   if (shown.usable) {
     const { name } = shown;
     return (
@@ -455,38 +503,87 @@ const AgentCard = ({
   return <Card padding="none">{inside}</Card>;
 };
 
-/** The Agents page's body: the agents the person may `usable`, and what an admin `managed`. */
+/** A group of agents' cards. */
+const Cards = ({
+  agents,
+  facts,
+  label,
+}: {
+  agents: readonly Shown[];
+  facts: (shown: Shown) => Facts | undefined;
+  label: string;
+}) => (
+  <ul aria-label={label} {...stylex.props(styles.grid)}>
+    {agents.map((agent) => (
+      <li key={agent.id}>
+        <AgentCard facts={facts(agent)} shown={agent} />
+      </li>
+    ))}
+  </ul>
+);
+
+/**
+ * The Agents page's body: the person's `own` agents, the company's they
+ * may `usable`, and what an admin `managed`.
+ */
 export const AgentsOverview = ({
   usable,
   managed,
+  own,
   makes,
+  makesOwn,
+  offered,
+  ownAdmin,
 }: {
   usable: readonly ChatAgent[];
   managed: ManagedAgents | undefined;
-  /** Whether the person may make an agent: the company's own admins. */
+  /** The person's own agents, which nobody else sees. */
+  own: readonly Agent[];
+  /** Whether the person may make an agent for the company: its own admins. */
   makes: boolean;
+  /** Whether the person may make one of their own: anyone of the company, while the company lets them. */
+  makesOwn: boolean;
+  /** For admins: the agents people offered the company, and who they are. */
+  offered?: { agents: readonly Agent[]; people: readonly Member[] } | undefined;
+  /** What an admin reads of people's own agents; undefined for anyone else. */
+  ownAdmin?: OwnAgentsAdmin | undefined;
 }) => {
   const { t } = useLingui();
   const factsOf = useFacts(managed?.teams ?? []);
   const agents = shownOf(usable, managed);
-  const newAgent = makes ? (
-    <Button icon={Plus} render={<Link to="/agents/new" />} variant="ink">
-      {t`New agent`}
-    </Button>
-  ) : undefined;
+  const mine = ownShownOf(own, usable);
+  // One of the person's own says on its foot that it is theirs alone.
+  const facts = (shown: Shown): Facts | undefined => {
+    if (shown.managed !== undefined) {
+      return factsOf(shown.managed);
+    }
+    return shown.own === undefined
+      ? undefined
+      : { rows: [], foot: t`Only you`, touch: [], failed: false };
+  };
+  const newAgent =
+    makes || makesOwn ? (
+      <Button icon={Plus} render={<Link to="/agents/new" />} variant="ink">
+        {t`New agent`}
+      </Button>
+    ) : undefined;
+  let emptyLine: string | undefined;
+  if (managed !== undefined) {
+    emptyLine = t`Make one for a job, such as chasing unpaid invoices.`;
+  } else if (makesOwn) {
+    emptyLine = t`The agents your company sets up for you show here. You can also make one of your own.`;
+  }
   return (
     <Page>
       <PageHeading action={newAgent} title={t`Agents`} />
-      {agents.length === 0 ? (
+      {agents.length === 0 && mine.length === 0 ? (
         <Empty size="page">
           <EmptyHeader>
             <EmptyMedia icon={AgentPerson} />
             <EmptyTitle>{t`No agents yet`}</EmptyTitle>
             {/* Only who can make one is told what to do. */}
-            {managed === undefined ? null : (
-              <EmptyDescription>
-                {t`Make one for a job, such as chasing unpaid invoices.`}
-              </EmptyDescription>
+            {emptyLine === undefined ? null : (
+              <EmptyDescription>{emptyLine}</EmptyDescription>
             )}
           </EmptyHeader>
           {newAgent === undefined ? null : (
@@ -494,20 +591,38 @@ export const AgentsOverview = ({
           )}
         </Empty>
       ) : (
-        <ul aria-label={t`Agents`} {...stylex.props(styles.grid)}>
-          {agents.map((agent) => (
-            <li key={agent.id}>
-              <AgentCard
-                facts={
-                  agent.managed === undefined
-                    ? undefined
-                    : factsOf(agent.managed)
-                }
-                shown={agent}
+        <div {...stylex.props(styles.groups)}>
+          {/* The person's own first, told apart from the company's only
+              where they have some. */}
+          {mine.length === 0 ? null : (
+            <section {...stylex.props(styles.group)}>
+              <SectionHeader
+                description={t`Only you see and ask these.`}
+                size="sm"
+                title={t`Yours`}
               />
-            </li>
-          ))}
-        </ul>
+              <Cards agents={mine} facts={facts} label={t`Your agents`} />
+            </section>
+          )}
+          {agents.length === 0 ? null : (
+            <section {...stylex.props(styles.group)}>
+              {mine.length === 0 ? null : (
+                <SectionHeader size="sm" title={t`Your company's`} />
+              )}
+              <Cards agents={agents} facts={facts} label={t`Agents`} />
+            </section>
+          )}
+        </div>
+      )}
+      {offered === undefined ? null : (
+        <OfferedAgents
+          editable={makes}
+          offered={offered.agents}
+          people={offered.people}
+        />
+      )}
+      {ownAdmin === undefined ? null : (
+        <OwnAgentsCard admin={ownAdmin} editable={makes} />
       )}
     </Page>
   );

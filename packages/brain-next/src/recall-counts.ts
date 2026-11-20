@@ -34,7 +34,12 @@ const unused = (): WayCounts => ({ recalls: 0, failed: 0 });
  */
 export const newRecallCounts = (): RecallOverview => ({
   since: new Date(),
-  ways: { words: unused(), exact: unused(), meaning: unused() },
+  ways: {
+    words: unused(),
+    exact: unused(),
+    entities: unused(),
+    meaning: unused(),
+  },
   withoutMeaning: { timed_out: 0, failed: 0, refused: 0, unusable: 0 },
 });
 

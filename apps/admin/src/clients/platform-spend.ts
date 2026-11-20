@@ -1,9 +1,8 @@
 /**
- * What Grasp's own AI features (document conversion, transcription,
- * speech) cost on Grasp's keys, read from what each client's core reports
- * with its AI status (src/clients/ai-status.ts, core's
- * src/ai-status-report.ts): what each call used, recorded after it, at list prices, in
- * US dollars. For the platform: every active organization's summed, with
+ * What Grasp's own AI features (transcription, speech) cost on Grasp's
+ * keys, read from what each client's core reports with its AI status
+ * (src/clients/ai-status.ts, core's src/ai-status-report.ts): what each
+ * call used, recorded after it, at list prices, in US dollars. For the platform: every active organization's summed, with
  * the organizations that cost the most (src/admin/platform-spend-sums.ts).
  * Read only: there is no cap on these features; staff watch what they
  * cost here instead.

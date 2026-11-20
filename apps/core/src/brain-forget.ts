@@ -16,12 +16,11 @@ import { brainRecords } from "./db/core/schema.ts";
 
 // Taking a source, or some things that were said, out of the brain on an
 // admin's word (`brain.forgetPreview`, `brain.forget`): the prototype's
-// `lib/brain-forget.ts`. Built alongside the content purge (a Knowledge
-// purge rewrites terms wherever they are, brain-records.ts
-// `brainRecordErasure`) and the onboarding's own purge of what rested on
-// a withdrawn interview (`purgeOnboardingRecords`): this takes whole
-// records the admin names, which neither of them does. A person's own
-// removal of their interview (GRA-332) stays the onboarding's.
+// `lib/brain-forget.ts`. It takes whole records the admin names; since the
+// cutover removed the term purge (decision B), it is how an admin takes a
+// record's words out. What the onboarding learned is none of its records
+// (GRA-1748): a person's own removal of their interview (GRA-332) stays
+// the onboarding's.
 //
 // Threat model, and how each is closed:
 //
@@ -38,16 +37,13 @@ import { brainRecords } from "./db/core/schema.ts";
 //   statement whose source it is, found again as it is taken, so one
 //   added between the preview and the yes goes too.
 // - It coming back: the row stays, its id taken. The same record sent
-//   again (the onboarding giving a team's claims again, under ids drawn
-//   from their words) is left as removed, and nothing new may name it
-//   (brain-records.ts `freshOf`). The onboarding's own purge leaves it.
+//   again is left as removed, and nothing new may name it (brain-records.ts
+//   `freshOf`).
 // - The audit trail holding what was said: each record taken is audited
 //   by its key alone (type and id), in the batch that takes it, and only
 //   when the batch changed it, so a second call records nothing.
 // - A preview that says less than goes: preview and forget find what goes
 //   the same way (`planOf`); forget takes what is there when it runs.
-// - Numbers losing their footing: a workflow drawn from the source keeps
-//   its numbers, and names the source, which now reads as removed.
 
 /** Records one batch takes out: two statements each. */
 const recordsPerBatch = 40;
@@ -63,7 +59,6 @@ interface Going {
 interface Plan {
   source: Going | null;
   statements: Going[];
-  workflows: string[];
 }
 
 /** The source record `id`, if the brain holds it; with `forgottenAt` set when it was taken out. */
@@ -96,24 +91,6 @@ const statementsOf = async (env: Env, sourceId: string): Promise<Going[]> =>
       )
     );
 
-/** The live workflows drawn from `sourceId`: the workflow's record, or a drawing of it, names it. */
-const workflowsOf = async (env: Env, sourceId: string): Promise<string[]> => {
-  const rows = await drizzle(env.DB)
-    .select({
-      workflowId: sql<string>`case when ${brainRecords.type} = 'workflow' then ${brainRecords.id} else json_extract(${brainRecords.body}, '$.workflowId') end`,
-    })
-    .from(brainRecords)
-    .where(
-      and(
-        inArray(brainRecords.type, ["workflow", "workflowVersion"]),
-        isNull(brainRecords.retiredAt),
-        isNull(brainRecords.forgottenAt),
-        sql`json_extract(${brainRecords.body}, '$.sourceId') = ${sourceId}`
-      )
-    );
-  return [...new Set(rows.map(({ workflowId }) => workflowId))];
-};
-
 /**
  * What goes with `target`: refuses one the brain doesn't hold as its own
  * record. One taken out already is no longer there to go.
@@ -124,14 +101,9 @@ const planOf = async (env: Env, target: BrainForgetTarget): Promise<Plan> => {
     if (source === undefined) {
       throw brainErrors.create("brain.forget_missing");
     }
-    const [statements, workflows] = await Promise.all([
-      statementsOf(env, source.id),
-      workflowsOf(env, source.id),
-    ]);
     return {
       source: source.forgottenAt === null ? source : null,
-      statements,
-      workflows,
+      statements: await statementsOf(env, source.id),
     };
   }
   const wanted = [...new Set(target.statements)];
@@ -154,7 +126,6 @@ const planOf = async (env: Env, target: BrainForgetTarget): Promise<Plan> => {
     statements: rows.flatMap(({ forgottenAt, ...row }) =>
       forgottenAt === null ? [row] : []
     ),
-    workflows: [],
   };
 };
 
@@ -162,7 +133,6 @@ const planOf = async (env: Env, target: BrainForgetTarget): Promise<Plan> => {
 const previewOf = (plan: Plan): BrainForgetPreview => ({
   source: plan.source?.id ?? null,
   statements: plan.statements.map(({ id }) => id).toSorted(),
-  workflows: plan.workflows.toSorted(),
 });
 
 /**

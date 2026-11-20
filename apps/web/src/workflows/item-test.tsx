@@ -31,7 +31,7 @@ import { RunStatusBadge } from "./run-detail.tsx";
 import { runStatusLabels } from "./run-status.ts";
 
 // "Test on recent items" (GRA-513, prototype `builder-runs.tsx`): the
-// draft's checkpoint runs once on the input of each of the builder's most
+// draft runs once, at its revision, on the input of each of the builder's most
 // recent real runs, each a test run whose calls are answered from what the
 // builder gives here, never made. Each item's result is read again until
 // every item's test run ended, newest item first, as core keeps them; an
@@ -140,7 +140,7 @@ export const ItemTest = ({
   revision,
 }: {
   workflow: string;
-  /** The draft's checkpoint revision, which the test runs. */
+  /** The draft's revision, which the test runs. */
   revision: number;
 }) => {
   const core = useCore();

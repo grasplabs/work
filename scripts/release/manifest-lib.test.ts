@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { assetKey, moduleKey } from "@grasp-os/shared/release";
+import { assetKey, modelBlobKey, moduleKey } from "@grasp-os/shared/release";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { builds, fixtureBuild, info, rawConfig } from "./fixture-release.ts";
@@ -54,11 +54,7 @@ describe("the release manifest", () => {
     const tokens = Object.values(workers)
       .flatMap((worker) => stringsIn(worker.bindings))
       .filter((value) => value.includes("$"));
-    expect(tokens).toStrictEqual([
-      "$D1_DB_ID",
-      "$D1_DB_ID",
-      "$D1_KNOWLEDGE_ID",
-    ]);
+    expect(tokens).toStrictEqual(["$D1_DB_ID", "$D1_DB_ID"]);
   });
 
   it("fails the build on a wrangler.jsonc key it doesn't handle", () => {
@@ -91,10 +87,13 @@ describe("the release manifest", () => {
     ).toThrow(/jurisdiction/u);
   });
 
-  it("names no model files while none ships, though core binds their bucket", () => {
-    expect(
-      generateManifest({ ...info, modelFiles: [] }, fixture).modelFiles
-    ).toStrictEqual([]);
+  it("names each model file it is given at its content address, where the deploy copies it from", () => {
+    expect(generateManifest(info, fixture).modelFiles).toStrictEqual(
+      info.modelFiles.map((file) => ({
+        ...file,
+        r2Key: modelBlobKey(file.sha256),
+      }))
+    );
   });
 
   it("refuses model files no Worker binds a bucket for", async () => {
@@ -176,10 +175,7 @@ describe("the release manifest", () => {
       generateManifest(info, [connect, { ...core, d1Migrations: {} }])
     ).toThrow(/no migrations collected for DB/u);
     expect(() =>
-      generateManifest(info, [
-        connect,
-        { ...core, d1Migrations: { DB: [], KNOWLEDGE: [] } },
-      ])
+      generateManifest(info, [connect, { ...core, d1Migrations: { DB: [] } }])
     ).toThrow(/no migrations collected for DB/u);
     const { assets: _assets, ...coreWithoutAssets } = core;
     expect(() => generateManifest(info, [connect, coreWithoutAssets])).toThrow(

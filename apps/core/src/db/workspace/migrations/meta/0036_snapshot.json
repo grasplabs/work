@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "82956531-5a13-445d-bd4c-44e6b9e85c9b",
-  "prevId": "4c453ed9-5f02-45c5-b996-bc21513b678f",
+  "id": "5bce9408-8dfd-4b22-8966-8dc6fa43ceb3",
+  "prevId": "0ffa021e-2df8-4cdd-9989-c623882ed86a",
   "tables": {
     "audit_outbox": {
       "name": "audit_outbox",
@@ -1019,6 +1019,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1395,20 +1402,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -1425,14 +1418,6 @@
           "columns": [
             "person_id",
             "app_id"
-          ],
-          "isUnique": false
-        },
-        "chats_project": {
-          "name": "chats_project",
-          "columns": [
-            "person_id",
-            "project_id"
           ],
           "isUnique": false
         }
@@ -1576,6 +1561,45 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "memory_uses": {
+      "name": "memory_uses",
+      "columns": {
+        "store": {
+          "name": "store",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "memory": {
+          "name": "memory",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "used_at": {
+          "name": "used_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "memory_uses_store_memory_pk": {
+          "columns": [
+            "store",
+            "memory"
+          ],
+          "name": "memory_uses_store_memory_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

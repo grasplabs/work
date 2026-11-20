@@ -1,3 +1,8 @@
+import type {
+  AgentChangeDrafted,
+  AgentDraftMake,
+  AgentDrafted,
+} from "@grasp-os/shared/agents";
 // @vitest-environment happy-dom
 import type {
   ChatBuild,
@@ -69,7 +74,6 @@ const reply = (
   id,
   role: "assistant",
   text: "",
-  citations: [],
   code: [],
   tools: [],
   end: "done",
@@ -108,8 +112,25 @@ const appOnly: ChatPlanned = {
 /** Core's side of the thread: the person's connections, and Build it. */
 const fakeCore = (connected: { current: boolean }) => {
   const built: ChatBuild[] = [];
+  const made: AgentDraftMake[] = [];
+  const changed: AgentDraftMake[] = [];
   const session = {
     connections: {
+      agents: async () =>
+        await Promise.resolve([
+          {
+            id: "agent-7",
+            name: "Claire",
+            job: "Chases invoices.",
+            instructions: "Chase late invoices.",
+          },
+        ]),
+      catalog: async () =>
+        await Promise.resolve({
+          entries: [
+            { source: "native", id: "google", name: "Google Workspace" },
+          ],
+        }),
       list: async () =>
         await Promise.resolve(
           connected.current
@@ -124,10 +145,20 @@ const fakeCore = (connected: { current: boolean }) => {
           app: { id: "app-1", name: "Month-end close" },
         });
       },
+      changeDraftedAgent: async (_chat: string, make: AgentDraftMake) => {
+        changed.push(make);
+        return await Promise.resolve({ id: "agent-7", name: "Claire" });
+      },
+      makeDraftedAgent: async (_chat: string, make: AgentDraftMake) => {
+        made.push(make);
+        return await Promise.resolve({ id: "agent-9", name: "HR helper" });
+      },
     },
   };
   return {
     built,
+    made,
+    changed,
     core: {
       withSession: async <T,>(
         action: (given: typeof session) => Promise<T>
@@ -149,7 +180,7 @@ const thread = async (
     connected?: { current: boolean };
   } = {}
 ) => {
-  const { core, built } = fakeCore(connected);
+  const { core, built, made, changed } = fakeCore(connected);
   const page = createRootRoute({
     component: () => (
       <ChatThread
@@ -192,7 +223,7 @@ const thread = async (
   await act(async () => {
     await Promise.resolve();
   });
-  return { built, router };
+  return { built, made, changed, router };
 };
 
 const button = (name: string): HTMLButtonElement | undefined =>
@@ -356,5 +387,112 @@ describe("making something in a chat's thread", () => {
       },
       { question: "When should reminders go out?", answer: "Every Friday" },
     ]);
+  });
+
+  it("shows an agent the chat drafted as its card says it, and makes it only on Make it, landing on its page", async () => {
+    const draft: AgentDrafted = {
+      callId: "call-draft",
+      name: "HR helper",
+      job: "Checks HR's mail.",
+      instructions: "Every Monday, sum up HR's new mail.",
+      whose: "company",
+      audience: { who: "everyone" },
+      classes: ["read-own"],
+      schedule: { cron: "0 8 * * 1", opening: "Sum up HR's new mail." },
+      apps: [{ source: "native", provider: "google", name: "Gmail" }],
+    };
+    const own: AgentDrafted = { ...draft, callId: "call-own", whose: "own" };
+    delete own.audience;
+    delete own.classes;
+    delete own.schedule;
+    delete own.apps;
+    const { made, router } = await thread([
+      said(1, 0, "Make me an HR agent."),
+      reply(2, 1, { agentDraft: own }),
+      said(3, 2, "One for the company, please."),
+      reply(4, 3, { agentDraft: draft }),
+    ]);
+    await settle();
+    const cards = [
+      ...document.querySelectorAll('section[aria-label^="An agent to make"]'),
+    ];
+    const shown = cards.map((card) =>
+      [...card.querySelectorAll("dd")].map((each) => each.textContent)
+    );
+    const makes = [...document.querySelectorAll("button")].filter(
+      (each) => each.textContent?.trim() === "Make it"
+    ).length;
+    await act(async () => {
+      button("Make it")?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect({
+      shown,
+      makes,
+      made,
+      at: router.state.location.pathname,
+    }).toStrictEqual({
+      shown: [
+        [
+          "Checks HR's mail.",
+          "Yours alone: only you ask it",
+          "Any app its kinds of work allow",
+          "Every Monday, sum up HR's new mail.",
+        ],
+        [
+          "Checks HR's mail.",
+          "One of the company's agents",
+          "Everyone in the company",
+          "Google Workspace (Gmail)",
+          "Read their own",
+          "0 8 * * 1 · the company's time zone · Sum up HR's new mail.",
+          "Every Monday, sum up HR's new mail.",
+        ],
+      ],
+      // Only the latest draft waits for the person.
+      makes: 1,
+      made: [{ draft: "call-draft", text: "Make it", model: "openai/gpt-5" }],
+      at: "/agents/agent-9",
+    });
+  });
+
+  it("shows a change the chat drafted as what the agent is and what it becomes, and changes it only on Change it", async () => {
+    const change: AgentChangeDrafted = {
+      callId: "call-change",
+      agent: "Claire",
+      whose: "company",
+      addInstructions: "Keep the calendar too.",
+      addApps: [{ source: "native", provider: "google", name: "Google" }],
+    };
+    const { changed, router } = await thread([
+      said(1, 0, "Give Claire the calendar."),
+      reply(2, 1, { agentChange: change }),
+    ]);
+    await settle();
+    const card = document.querySelector(
+      'section[aria-label="A change to Claire"]'
+    );
+    const shown = [...(card?.querySelectorAll("dd") ?? [])].map(
+      (each) => each.textContent
+    );
+    await act(async () => {
+      button("Change it")?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect({
+      shown,
+      changed,
+      at: router.state.location.pathname,
+    }).toStrictEqual({
+      shown: ["Keep the calendar too.", "Google Workspace (Google)"],
+      changed: [
+        { draft: "call-change", text: "Change it", model: "openai/gpt-5" },
+      ],
+      at: "/agents/agent-7",
+    });
   });
 });

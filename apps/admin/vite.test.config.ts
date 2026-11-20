@@ -12,17 +12,16 @@ const migrations = await readD1Migrations(
 );
 
 /**
- * The Brain's migrations (core's Knowledge database) as their files hold them, for the test that
- * applies real migrations through the admin's client (FTS5 tables,
- * triggers, comments).
+ * Core's migrations as their files hold them, for the test that applies
+ * real migrations through the admin's client (triggers, comments).
  */
-const knowledgeMigrationsDir = `${import.meta.dirname}/../../packages/brain/src/db/migrations`;
-const knowledgeMigrationFiles = readdirSync(knowledgeMigrationsDir)
+const coreMigrationsDir = `${import.meta.dirname}/../core/src/db/core/migrations`;
+const coreMigrationFiles = readdirSync(coreMigrationsDir)
   .filter((name) => name.endsWith(".sql"))
   .toSorted()
   .map((name) => ({
     name,
-    sql: readFileSync(`${knowledgeMigrationsDir}/${name}`, "utf-8"),
+    sql: readFileSync(`${coreMigrationsDir}/${name}`, "utf-8"),
   }));
 
 /**
@@ -105,7 +104,7 @@ export default defineProject({
           ENTRA_CLIENT_ID: "test-entra-app",
           GOOGLE_CLIENT_ID: "test-google-app.apps.googleusercontent.com",
           ADMIN_MIGRATIONS: migrations,
-          KNOWLEDGE_MIGRATION_FILES: knowledgeMigrationFiles,
+          CORE_MIGRATION_FILES: coreMigrationFiles,
         },
         // Where the fake Cloudflare API runs client D1 queries, one for
         // each database it holds at once (test/cloudflare-api-workers.ts).

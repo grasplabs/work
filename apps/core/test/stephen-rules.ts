@@ -146,7 +146,7 @@ export const stephenRules = {
     held.length > 0 && doneAlready.test(answer)
       ? "says it is done before the press"
       : null,
-  /** No link in his words: sources go on the card, cited. */
+  /** No link in his words. */
   noLink: ({ answer }) =>
     /https?:\/\//iu.test(answer) ? "a link in his words" : null,
   /** Never an empty answer. */

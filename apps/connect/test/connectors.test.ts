@@ -223,7 +223,10 @@ describe("a native connector", () => {
       { ...stated, input: { mailbox: "invoices@acme.test", subject: "Paid" } },
       { origin: chatOrigin }
     );
-    const [held] = await exports.default.listPendingActions(connection.person);
+    const [held] = await exports.default.listPendingActions(
+      connection.person,
+      "grasp"
+    );
     if (held === undefined || held.id !== pending?.id) {
       throw new Error("Expected the held action");
     }

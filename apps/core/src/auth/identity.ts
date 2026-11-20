@@ -6,12 +6,43 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { accounts, members, teamMembers, teams } from "../db/core/schema.ts";
+import {
+  accounts,
+  members,
+  teamMembers,
+  teams,
+  users,
+} from "../db/core/schema.ts";
 import { staffMayStay } from "../onboarding/gate.ts";
 import { reachesWorkspace } from "../session-check.ts";
 import { authFor, currentMembership, organizationId } from "./auth.ts";
 import { providerIds, signInConfig } from "./config.ts";
+
+/**
+ * A member's reads as `memberOf` makes them, for one batch with others,
+ * so what else is read is of the same snapshot of the database (core's
+ * Brain module reads the shared connections' audiences so).
+ */
+export const memberReads = (db: DrizzleD1Database, userId: string) =>
+  [
+    db
+      .select({ role: members.role })
+      .from(members)
+      .where(currentMembership(userId)),
+    db
+      .select({ id: teams.id, name: teams.name })
+      .from(teamMembers)
+      .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+      .where(
+        and(
+          eq(teamMembers.userId, userId),
+          eq(teams.organizationId, organizationId)
+        )
+      )
+      .orderBy(teams.name),
+  ] as const;
 
 /**
  * A person's role in the organization, read now. `undefined` when they have
@@ -22,31 +53,33 @@ export const memberRole = async (
   database: D1Database,
   userId: string
 ): Promise<Role | undefined> => {
-  const db = drizzle(database);
-  const [membership] = await db
-    .select({ role: members.role })
-    .from(members)
-    .where(currentMembership(userId));
+  const [read] = memberReads(drizzle(database), userId);
+  const [membership] = await read;
   const role = roleSchema.safeParse(membership?.role);
   return role.success ? role.data : undefined;
+};
+
+/** A person's name as their account holds it, read now; `undefined` for none. */
+export const accountNameOf = async (
+  database: D1Database,
+  userId: string
+): Promise<string | undefined> => {
+  const [user] = await drizzle(database)
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, userId));
+  const name = user?.name.trim();
+  return name === undefined || name === "" ? undefined : name;
 };
 
 /** The teams of the organization a person is in, read now, by name. */
 export const teamsOf = async (
   database: D1Database,
   userId: string
-): Promise<Identity["teams"]> =>
-  await drizzle(database)
-    .select({ id: teams.id, name: teams.name })
-    .from(teamMembers)
-    .innerJoin(teams, eq(teams.id, teamMembers.teamId))
-    .where(
-      and(
-        eq(teamMembers.userId, userId),
-        eq(teams.organizationId, organizationId)
-      )
-    )
-    .orderBy(teams.name);
+): Promise<Identity["teams"]> => {
+  const [, read] = memberReads(drizzle(database), userId);
+  return await read;
+};
 
 /**
  * A member of the organization, as the checks on what they may do see
@@ -62,6 +95,18 @@ export type Acting = Member & {
   actor?: AuditActor;
   /** The chat's agent acting, as what it writes records it. */
   via?: AgentProposer;
+};
+
+/** The member `userId`, from what `memberReads` read; `undefined` with no current membership. */
+export const memberFrom = (
+  userId: string,
+  membership: readonly { role: string }[],
+  memberTeams: Identity["teams"]
+): Member | undefined => {
+  const role = roleSchema.safeParse(membership[0]?.role);
+  return role.success
+    ? { userId, role: role.data, teams: memberTeams, staff: false }
+    : undefined;
 };
 
 /**
@@ -121,6 +166,8 @@ export const staffRole = async (
  * from the sign-in config, anyone else's from their membership.
  * `undefined` once they have neither.
  *
+ * A session for someone's interview alone is nobody's here (GRA-1790).
+ *
  * A staff session reaches the onboarding alone, whatever the config's
  * staff scope: Grasp's staff identity is for managing a deployment, never
  * for acting inside the client's workspace. A staff member who needs to
@@ -134,8 +181,15 @@ export const sessionIdentity = async (
     name: string;
     expiresAt: Date;
     staff: boolean;
+    /** A session for the person's own interview alone (GRA-1790). */
+    interview: boolean;
   }
 ): Promise<Identity | undefined> => {
+  // Nobody, to every route that asks who it is: only the interview's own
+  // routes read such a session (onboarding/interview-caller.ts).
+  if (session.interview) {
+    return undefined;
+  }
   const person = {
     userId: session.userId,
     email: session.email,
@@ -195,6 +249,7 @@ export const signedInSession = async (
     name: user.name,
     expiresAt: session.expiresAt,
     staff: session.staff,
+    interview: session.interview,
   });
   return person === undefined
     ? undefined

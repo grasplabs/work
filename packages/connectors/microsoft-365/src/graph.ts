@@ -118,6 +118,9 @@ export const graphFetch = graph.fetch;
 /** Graph's JSON answer, checked against what the tool expects of it. */
 export const graphJson = graph.json;
 
+/** The ToolError Graph's answer to a GET that isn't a success stands for. */
+export const graphFailure = graph.failure;
+
 /** A page of a Graph collection. */
 export const pageOf = <Item extends z.ZodType>(item: Item) =>
   z.object({

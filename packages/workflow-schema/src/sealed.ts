@@ -110,7 +110,7 @@ const sealedCallSchema = z.discriminatedUnion("name", [
     arguments: templateSchema,
   }),
   z.strictObject({
-    /** One read of a Brain collection, through a brain permission. */
+    /** One recall of the Brain, through a brain permission. */
     name: z.literal("grasp.brain"),
     binding: aliasSchema,
     operation: z.enum(brainActions),

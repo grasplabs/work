@@ -18,6 +18,7 @@ import {
   declineChatActionsSchema,
   endedRunsSchema,
   heldCallRequestSchema,
+  heldInSchema,
   heldRequestSchema,
   pendingKeySchema,
   refuseConfirmationSchema,
@@ -600,6 +601,9 @@ export const hold = async (
   }
 ): Promise<PendingReference> => {
   const { authority, origin } = claims;
+  // Null for a read with no grant, held because of where it was asked
+  // (`restricted`): core decides it by the same rule as the read.
+  const { permissionId } = origin;
   const db = drizzle(env.DB);
   const { subject } = authority;
   const subjectType = subject.type;
@@ -656,7 +660,7 @@ export const hold = async (
           ),
           input: value(JSON.stringify(input), "input"),
           inputHash: value(inputHash, "input_hash"),
-          permissionId: value(origin.permissionId, "permission_id"),
+          permissionId: value(permissionId, "permission_id"),
           context: value(context, "context"),
           restricted: value(claims.restricted ? 1 : 0, "restricted"),
           createdAt: value(heldAt, "created_at"),
@@ -669,6 +673,7 @@ export const hold = async (
           stamp: value(stamp, "stamp"),
           endsAt: value(claims.heldUntil ?? null, "ends_at"),
           unattended: value(claims.unattended ? 1 : 0, "unattended"),
+          chatApp: value(claims.chatApp ? 1 : 0, "chat_app"),
         })
         .from(connections)
         .where(
@@ -920,14 +925,18 @@ const listLimit = 200;
 /**
  * The held actions waiting for `person`, newest first, at most
  * {@link listLimit}: older ones wait on, and show once newer ones are
- * decided.
+ * decided. Only those held where `heldIn` says, in the same statement
+ * as the limit: Grasp's own list never loses one to a chat app's
+ * (`pending_actions.chat_app`), nor a chat app's card to Grasp's.
  */
 export const listPendingActions = async (
   env: Env,
-  request: unknown
+  request: unknown,
+  heldIn: unknown
 ): Promise<PendingAction[]> => {
   const parsed = connectionPersonSchema.safeParse(request);
-  if (!parsed.success) {
+  const where = heldInSchema.safeParse(heldIn);
+  if (!parsed.success || !where.success) {
     throw connectErrors.create("connect.invalid");
   }
   // Staff act for nobody here: nothing waits for them.
@@ -942,7 +951,11 @@ export const listPendingActions = async (
       and(
         eq(pendingActions.onBehalfOf, parsed.data.userId),
         // One whose day ended can only be declined as expired: never shown.
-        or(isNull(pendingActions.endsAt), gt(pendingActions.endsAt, new Date()))
+        or(
+          isNull(pendingActions.endsAt),
+          gt(pendingActions.endsAt, new Date())
+        ),
+        eq(pendingActions.chatApp, where.data === "chat_app")
       )
     )
     .orderBy(desc(pendingActions.createdAt), desc(pendingActions.id))

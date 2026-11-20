@@ -1,6 +1,7 @@
 import {
   egressHeader,
   egressKind,
+  egressTooLargeMessage,
   httpMethods,
   pathMatches,
   redirectHostMatches,
@@ -286,7 +287,7 @@ const capped = (response: Response): Response => {
       bytes += value.byteLength;
       if (bytes > maxEgressResponseBytes) {
         await reader.cancel();
-        controller.error(new Error("The provider's response is too large"));
+        controller.error(new Error(egressTooLargeMessage));
         return;
       }
       controller.enqueue(value);

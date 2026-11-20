@@ -2,12 +2,15 @@ import { readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
+import type { EmbedModel } from "@grasp-os/embed/model-files";
 import { defaultExclude, defineProject } from "vite-plus";
 import type { UserWorkspaceConfig } from "vite-plus";
 
+import { int8Model } from "../../packages/embed/test/test-model-files.ts";
 import { oxcParseTestConfig } from "../../packages/runtime/oxc-parse-test-config.ts";
 import { testComposioKey } from "../connect/test/provider-config.ts";
 import { digestModuleOf, testBlueprintsModule } from "./build-blueprints.ts";
+import { buildSteps, lastBuildStep } from "./build-steps.ts";
 import { connectBundle } from "./test/build-connect.ts";
 import { testVersionModule } from "./test/compiler-version.ts";
 import {
@@ -19,10 +22,12 @@ import {
   directoryClient,
   documentsClient,
   googleConnectClient,
+  googleDirectoryClient,
   platformOpenAiKey,
   slackApp,
   teamsBot,
 } from "./test/connect-providers.ts";
+import { shippedModelPlugin } from "./test/shipped-model-plugin.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 import { testAssets } from "./test/test-run.ts";
 import { withNoBackgroundCompile } from "./workerd-v8-flags.ts";
@@ -34,9 +39,6 @@ process.env.MINIFLARE_WORKERD_V8_FLAGS = withNoBackgroundCompile(
 
 const coreMigrations = await readD1Migrations(
   `${import.meta.dirname}/src/db/core/migrations`
-);
-const knowledgeMigrations = await readD1Migrations(
-  `${import.meta.dirname}/../../packages/brain/src/db/migrations`
 );
 const connectMigrations = await readD1Migrations(
   `${import.meta.dirname}/../connect/src/db/migrations`
@@ -74,7 +76,10 @@ export const pageTests = [
   "test/draft-runs.test.ts",
   "test/app-files-*.test.ts",
   "test/resource-bindings*.test.ts",
-  "test/brain-app-recall.test.ts",
+  "test/brain-recall-code.test.ts",
+  "test/brain-skills-code.test.ts",
+  "test/brain-entities-code.test.ts",
+  "test/brain-writes-code.test.ts",
   "test/resource-connectors*.test.ts",
   "test/http-connections.test.ts",
   "test/sealed-workflow-starts*.test.ts",
@@ -115,7 +120,7 @@ export const coreProject = (
     sandboxSocket,
     bindings = {},
     services = {},
-    plugins = [],
+    model = int8Model,
     main,
     durableObjects,
   }: {
@@ -132,8 +137,14 @@ export const coreProject = (
      * evaluation's local model files (vite.brain-eval.config.ts).
      */
     services?: Record<string, (request: Request) => Response>;
-    /** Vite plugins a project adds before the test pool's. */
-    plugins?: UserWorkspaceConfig["plugins"];
+    /**
+     * The embedding model core runs as the one it ships
+     * (test/shipped-model-plugin.ts): the embed package's int8 test model
+     * unless a project names another, its files put in `MODEL_FILES` as
+     * each file starts (start-each-file.ts), so core embeds as a
+     * deployment does.
+     */
+    model?: EmbedModel;
     /**
      * The Worker a project runs instead of core's own: core's, with test
      * classes beside it (test/meaning-worker.ts).
@@ -259,7 +270,7 @@ export const coreProject = (
       ],
     },
     plugins: [
-      ...plugins,
+      shippedModelPlugin(model),
       // Read when the pool starts, after the global setup wrote the bundle.
       cloudflareTest(() => ({
         wrangler: { configPath: "./wrangler.jsonc" },
@@ -316,7 +327,6 @@ export const coreProject = (
             // So a run waiting on a held side effect checks again at once.
             WORKFLOW_OFF_WAIT_MS: "250",
             CORE_MIGRATIONS: coreMigrations,
-            KNOWLEDGE_MIGRATIONS: knowledgeMigrations,
             CONNECT_MIGRATIONS: connectMigrations,
             ...bindings,
           },
@@ -368,6 +378,9 @@ export const coreProject = (
                 // Stephen's eval on Google connects through it.
                 GOOGLE_CLIENT_ID: googleConnectClient.id,
                 GOOGLE_CLIENT_SECRET: googleConnectClient.secret,
+                // The directory's own Google client (connect's providers.ts).
+                GOOGLE_DIRECTORY_CLIENT_ID: googleDirectoryClient.id,
+                GOOGLE_DIRECTORY_CLIENT_SECRET: googleDirectoryClient.secret,
                 COMPOSIO_API_KEY: testComposioKey,
                 // The client's Teams bot, which Entra and the Bot Connector
                 // in test/connect-providers.ts know.
@@ -412,45 +425,56 @@ export const coreProject = (
     ],
   });
 
-export default coreProject({
-  // The build step's own test, and the test that bundles core's host module
-  // with Wrangler, run in Node, in the root config's "scripts" project.
-  exclude: [
-    ...defaultExclude,
-    ...pageTests,
-    // With the sandbox supervisor bound: vite.on-prem.config.ts.
-    "test/on-prem/**",
-    // The Brain baseline's larger scale sizes, on request only:
-    // vite.brain-scale.config.ts.
-    "test/brain-scale-sizes.test.ts",
-    // How fast the Brain's store scans vector codes, on request only:
-    // vite.brain-vectors.config.ts.
-    "test/brain-next-vector-timings.test.ts",
-    // The Brain baseline against a real model, which costs money, on
-    // request only: vite.brain-model.config.ts.
-    "test/brain-real-model.test.ts",
-    // Experiment E02 against a real reranking model, likewise:
-    // vite.brain-recall-model.config.ts.
-    "test/brain-recall-real-model.test.ts",
-    // The Brain baseline, its CI scale size and experiment E02, in a group
-    // of their own: vite.brain.config.ts.
-    "test/brain-baseline*.test.ts",
-    "test/brain-recall-e02.test.ts",
-    "test/brain-scale-*-of-*.test.ts",
-    // The Brain evaluation, on request only: vite.brain-eval.config.ts.
-    "test/brain-eval.test.ts",
-    // The Brain evaluation against a real model, which costs money, on
-    // request only: vite.brain-eval-model.config.ts.
-    "test/brain-eval-model.test.ts",
-    // Recall by meaning through core, with a test model as if it shipped:
-    // vite.brain-meaning.config.ts.
-    "test/brain-next-meaning.test.ts",
-    // Stephen's eval, in a group of its own: vite.stephen.config.ts.
-    "test/stephen-eval*.test.ts",
-    // Stephen's eval against a real model, which costs money, on request
-    // only: vite.stephen-model.config.ts.
-    "test/stephen-real-model.test.ts",
-    "build-blueprints.test.ts",
-    "host-json.bundle.test.ts",
-  ],
-});
+/**
+ * Core's build (build-steps.ts): Vite+ runs the steps at once, and
+ * `build` last. Not cached: the frontend's build empties what three of
+ * them write.
+ */
+const build = {
+  ...Object.fromEntries(
+    Object.entries(buildSteps).map(([name, command]) => [
+      `build:${name}`,
+      { command, cache: false },
+    ])
+  ),
+  build: {
+    command: lastBuildStep,
+    dependsOn: Object.keys(buildSteps).map((name) => `build:${name}`),
+    cache: false,
+  },
+};
+
+export default {
+  ...coreProject({
+    // The build step's own test, and the test that bundles core's host module
+    // with Wrangler, run in Node, in the root config's "scripts" project.
+    exclude: [
+      ...defaultExclude,
+      ...pageTests,
+      // With the sandbox supervisor bound: vite.on-prem.config.ts.
+      "test/on-prem/**",
+      // How fast the Brain's store scans vector codes, on request only:
+      // vite.brain-vectors.config.ts.
+      "test/brain-next-vector-timings.test.ts",
+      // The Brain evaluation, on request only: vite.brain-eval.config.ts.
+      "test/brain-eval.test.ts",
+      // The Brain evaluation against a real model, which costs money, on
+      // request only: vite.brain-eval-model.config.ts.
+      "test/brain-eval-model.test.ts",
+      // The evaluation of extraction against a real model, which costs
+      // money, on request only: vite.brain-eval-extraction.config.ts.
+      "test/brain-eval-extraction.test.ts",
+      // Recall by meaning through core, with a test model as if it shipped:
+      // vite.brain-meaning.config.ts.
+      "test/brain-next-meaning.test.ts",
+      // Stephen's eval, in a group of its own: vite.stephen.config.ts.
+      "test/stephen-eval*.test.ts",
+      // Stephen's eval against a real model, which costs money, on request
+      // only: vite.stephen-model.config.ts.
+      "test/stephen-real-model.test.ts",
+      "build-blueprints.test.ts",
+      "host-json.bundle.test.ts",
+    ],
+  }),
+  run: { tasks: build },
+};

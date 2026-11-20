@@ -317,6 +317,15 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    */
   readonly #aiCalls: AiCalls = newAiCalls();
 
+  /**
+   * The run's status as the object reads it for itself, from its own
+   * journal. `status` is the RPC entry point core's lookups call
+   * (engine.ts), and the object never goes through it.
+   */
+  #live(): ReturnType<WorkflowRun<Env>["status"]> {
+    return super.status();
+  }
+
   // The engine's abstract hook, which a subclass can only override as it
   // is declared. Only core holds this namespace, and a definition built
   // for a caller runs nothing: the engine runs a run's definition itself.
@@ -426,7 +435,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     actor: AuditActor,
     at: number
   ): Promise<"marked" | "rolling_back" | "ended" | "missing"> {
-    const live = this.status();
+    const live = this.#live();
     if (live === undefined) {
       return "missing";
     }
@@ -612,7 +621,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     const { type } = pin;
     // Why it failed, from its own journal: kept on its row, so the code
     // outlives the engine's record of the run.
-    const live = this.status();
+    const live = this.#live();
     // A run marked stopped (`markStopped`) that fails before its
     // termination lands, its attempts refused from the stop on, ended
     // by the stop: cancelled, not failed. Unless
@@ -682,7 +691,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   #compensationOf(
     notified: RunNotification["status"]
   ): Pick<EngineStatus, "rollback" | "compensation"> {
-    const live = this.status();
+    const live = this.#live();
     if (live?.status !== notified) {
       return {};
     }

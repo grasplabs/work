@@ -1,3 +1,4 @@
+import { skillBodyOf } from "@grasp-os/brain-next/skills";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex, randomToken } from "@grasp-os/shared/encoding";
@@ -20,7 +21,6 @@ import type {
 } from "@grasp-os/shared/guests";
 import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
-import { splitFrontmatterBlock } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { bindingTargetSchema } from "@grasp-os/shared/resource-bindings";
@@ -57,10 +57,10 @@ import {
   guestMessages,
 } from "./db/core/schema.ts";
 import { errorResponse } from "./errors.ts";
-import { graspSkills } from "./knowledge/grasp-skills.ts";
 import { modelSettings, models } from "./models.ts";
 import { authorize } from "./permissions.ts";
 import { boundedText, jsonOf } from "./request-body.ts";
+import { shippedSkills } from "./shipped-skills.ts";
 
 // Guest chats (`@grasp-os/shared/guests`): an App, under a permission an
 // admin grants it (`{ type: "platform" }`, `guests`), invites someone who
@@ -163,10 +163,8 @@ const target = (id: string) => ({ type: "guest_chat", id });
 
 /** The Grasp skill `name`'s guidance, without its frontmatter. */
 const skillGuidance = (name: string): string | undefined => {
-  const skill = graspSkills.find(({ path }) => path === `${name}/SKILL.md`);
-  return skill === undefined
-    ? undefined
-    : splitFrontmatterBlock(skill.text)?.body.trim();
+  const skill = shippedSkills.find((shipped) => shipped.name === name);
+  return skill === undefined ? undefined : skillBodyOf(skill.text).trim();
 };
 
 /** What the model is told before the chat: the bounds, then the skill. */

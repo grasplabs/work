@@ -46,7 +46,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 import { api } from "@server/_generated/api";
 
-function Writer() {
+const Writer = () => {
   const [outlining, setOutlining] = useState(false);
   const draft = useStream(outlining ? api.writer.outline : api.writer.draft);
   const [finished, setFinished] = useState(0);
@@ -92,7 +92,7 @@ function Writer() {
       </p>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Writer });
 `;
 

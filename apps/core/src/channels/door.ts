@@ -52,7 +52,7 @@
  * in it, read from the platform's roster then (`audienceIn`). It is
  * answered in the person's own chat for the platform, or their one chat
  * for that group or channel thread, whose agent reads only what everyone
- * in it may (answer.ts, knowledge/access.ts).
+ * in it may (answer.ts, chat-audiences.ts).
  *
  * Slack (slack.ts) comes in the same way, by its own signature and ids:
  * its people are known only by the Slack account they linked to Grasp, and
@@ -74,11 +74,11 @@ import { z } from "zod";
 import { activeMember } from "../auth/auth.ts";
 import { signInConfig } from "../auth/config.ts";
 import { memberFromDirectory } from "../auth/directory-members.ts";
+import { audienceMaxMembers } from "../chat-audiences.ts";
+import type { Audience } from "../chat-audiences.ts";
 import { channelConversations } from "../db/core/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
 import { errorResponse } from "../errors.ts";
-import { audienceMaxMembers } from "../knowledge/access.ts";
-import type { Audience } from "../knowledge/access.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { stephenFor } from "../stephen-reach.ts";
 import { offerChannelLink } from "./accounts.ts";
@@ -87,11 +87,15 @@ import {
   cancelAction,
   confirmAction,
   helpfulAction,
+  lineCard,
   notHelpfulAction,
   signInCard,
   startAction,
+  undoAction,
 } from "./cards.tsx";
+import { inertInMessage } from "./inert.ts";
 import { pressCard } from "./press.ts";
+import { withoutQuotedReply } from "./quoted-reply.ts";
 import { isSetUp } from "./set-up.ts";
 import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
@@ -99,6 +103,7 @@ import { rateRequest } from "./stephen-requests.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
+import { pressUndo } from "./undo.ts";
 import { inDirectory, teamsMembers, writerOf } from "./who.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -205,6 +210,8 @@ const activitySchema = z.object({
     id: z.string().min(1).max(1024),
     conversationType: z.enum(["personal", "groupChat", "channel"]),
   }),
+  // Only whether it names a meeting (`isMeeting`): any value counts.
+  channelData: z.looseObject({ meeting: z.unknown().optional() }).optional(),
   entities: z
     .array(
       z.looseObject({
@@ -215,6 +222,9 @@ const activitySchema = z.object({
     .optional(),
 });
 type Activity = z.infer<typeof activitySchema>;
+
+/** Every field of an activity the door took, to send on as Teams sent it. */
+const activityFieldsSchema = z.looseObject({});
 
 /** The language `locale` (`nl-NL`, `de`) names, or English. */
 const localeOf = (locale: string | undefined): ChannelLocale => {
@@ -282,12 +292,6 @@ export interface ChannelMessage {
   kept?: string;
   /** Where they asked: their direct message, or a chat others share. */
   place: ChannelPlace;
-  /**
-   * Sends `send` once the platform has the reply as it stands: on Teams,
-   * after a streamed answer's last words, which Microsoft's SDK sends only
-   * once the message's handler has returned.
-   */
-  afterward: (send: () => Promise<unknown>) => void;
 }
 
 /** What takes a member's message on from the door. */
@@ -431,12 +435,25 @@ const mentionsBot = (env: Env, activity: Activity): boolean =>
   );
 
 /**
+ * Whether `activity` came from a Teams meeting's chat: its channel data
+ * names the meeting, or its conversation id is a meeting's. Anonymous
+ * attendees, and those who dial in, can be in a meeting's chat without
+ * being on the roster Teams gives a bot, so a meeting's roster is never
+ * shown complete: read as having someone Grasp can't name (GRA-1820).
+ */
+const isMeeting = (activity: Activity): boolean =>
+  activity.channelData?.meeting !== undefined ||
+  // A meeting's chat's conversation id, as Teams names one.
+  activity.conversation.id.startsWith("19:meeting_");
+
+/**
  * Who is in the group chat or channel `activity` came from, read from the
  * conversation's roster (a channel's: its team's, or a private channel's
  * own): its members Grasp knows as the organization's active people, and
  * whether anyone else is in it, a guest, another tenant's, someone Grasp
  * hasn't seen, or anyone at all when the roster can't be read or is too
- * large. Whoever is not named narrows what the answer reads to nothing.
+ * large, or in a meeting's chat (`isMeeting`). Whoever is not named
+ * narrows what the answer reads to nothing.
  */
 const audienceIn = async (
   env: Env,
@@ -444,6 +461,9 @@ const audienceIn = async (
   activity: Activity
 ): Promise<Audience> => {
   const nobody = { members: [], outsiders: true };
+  if (isMeeting(activity)) {
+    return nobody;
+  }
   // A channel thread's conversation is the channel's, with `;messageid=`.
   const [conversationId = activity.conversation.id] =
     activity.conversation.id.split(";");
@@ -673,8 +693,10 @@ const gate = async (
 /**
  * What a press on a card's button does, on any platform, by the member
  * the door let in, in their own private chat: Confirm or Cancel on a card
- * of held writes (press.ts), or Start on a card offering a workflow
- * (workflow-offers.ts), which starts it if it is theirs.
+ * of held writes (press.ts), Start on a card offering a workflow
+ * (workflow-offers.ts), which starts it if it is theirs, or Undo on the
+ * notice of a memory of theirs, taken only from their direct message
+ * (`inDirect`, undo.ts).
  */
 const onPresses = (
   env: Env,
@@ -684,15 +706,20 @@ const onPresses = (
     userId,
     state,
     locale,
+    inDirect,
   }: {
     platform: "teams" | "slack";
     userId: string;
     state: StateAdapter;
     locale: ChannelLocale;
+    inDirect: boolean;
   }
 ): void => {
   chat.onAction([confirmAction, cancelAction], async (event) => {
     await pressCard(env, { platform, userId, event, state });
+  });
+  chat.onAction(undoAction, async (event) => {
+    await pressUndo(env, { platform, userId, event, state }, inDirect);
   });
   chat.onAction(startAction, async (event) => {
     if (event.thread === null) {
@@ -705,7 +732,14 @@ const onPresses = (
       threadId: event.threadId,
       locale,
     });
-    await event.thread.post(pressSaid(pressed.line, locale, pressed.workflow));
+    // The workflow's name, which the model may have written, inert
+    // (inert.ts); on Slack on a card, where no mention in it resolves.
+    const line = pressSaid(
+      pressed.line,
+      locale,
+      inertInMessage(platform)(pressed.workflow ?? "")
+    );
+    await event.thread.post(platform === "slack" ? lineCard(line) : line);
   });
 };
 
@@ -781,6 +815,8 @@ const slackPressResponse = async (
     userId: writer.userId,
     state,
     locale: "en",
+    // Only a press in their direct message gets this far.
+    inDirect: true,
   });
   return await chat.webhooks.slack(
     new Request(request.url, {
@@ -972,9 +1008,6 @@ const slackResponse = async (
   const takeOn = handoff ?? answerInChat(env);
   chat.onDirectMessage(async (thread, message) => {
     await keepConversation(env, "slack", thread.id, userId);
-    // Slack takes a reply whole, no stream: it has it once the handler
-    // posted it, so what comes after goes right after, in order.
-    const later: (() => Promise<unknown>)[] = [];
     await takeOn({
       platform: "slack",
       userId,
@@ -982,14 +1015,7 @@ const slackResponse = async (
       message,
       acts: reach.acts,
       place: direct,
-      afterward: (send) => {
-        later.push(send);
-      },
     });
-    for (const send of later) {
-      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
-      await send();
-    }
   });
   return await chat.webhooks.slack(
     new Request(request.url, {
@@ -1053,13 +1079,27 @@ export const channelResponse = async (
     ctx.waitUntil(countSignal(env, platform, "refused"));
     return new Response("Unauthorized", { status: 401 });
   }
-  const parsed = activitySchema.safeParse(jsonOf(body));
+  const sent = jsonOf(body);
+  const parsed = activitySchema.safeParse(sent);
   // Verified, but nothing the door takes (a typing indicator has a
   // `from`; an installation update may not): acknowledged, and dropped.
   if (!parsed.success || parsed.data.type !== "message") {
     return new Response(null, { status: 200 });
   }
-  const activity = parsed.data;
+  // In a direct message, what they said, without a message their reply
+  // quotes (quoted-reply.ts): read so by the door and every handler after
+  // it. Only there, where `remember` may keep their words: in a group chat
+  // or channel the quote is the only copy the turn gets of what it answers.
+  const text =
+    parsed.data.text === undefined ||
+    parsed.data.conversation.conversationType !== "personal"
+      ? parsed.data.text
+      : await withoutQuotedReply(parsed.data.text);
+  const activity = { ...parsed.data, text };
+  const theirs =
+    text === parsed.data.text
+      ? body
+      : JSON.stringify({ ...activityFieldsSchema.parse(sent), text });
   const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
   const adapter = await teamsAdapter(env, teamsKeys);
   const { line, userId, acts, kept, place } = await gate(
@@ -1085,10 +1125,6 @@ export const channelResponse = async (
     concurrency: "queue",
   });
   const takeOn = handoff ?? answerInChat(env);
-  const later: (() => Promise<unknown>)[] = [];
-  const afterward = (send: () => Promise<unknown>): void => {
-    later.push(send);
-  };
   chat.onDirectMessage(async (thread, message) => {
     // Only what the door itself took for a direct message: never one it
     // read as a group chat or channel, whatever the SDK makes of it.
@@ -1110,7 +1146,6 @@ export const channelResponse = async (
       acts: acts ?? false,
       kept,
       place,
-      afterward,
     });
   });
   onPresses(env, chat, {
@@ -1118,6 +1153,7 @@ export const channelResponse = async (
     userId,
     state,
     locale: localeOf(activity.locale),
+    inDirect: place?.kind === "direct",
   });
   // A thumb on one of his answers: kept on the request it is for, only
   // when that request is the presser's own (stephen-requests.ts).
@@ -1148,7 +1184,6 @@ export const channelResponse = async (
       acts: acts ?? false,
       kept,
       place,
-      afterward,
     });
   });
   // Answered at once: the platform gives up on a webhook long before an
@@ -1169,14 +1204,10 @@ export const channelResponse = async (
       new Request(request.url, {
         method: "POST",
         headers: request.headers,
-        body,
+        body: theirs,
       }),
       { waitUntil: background }
     );
-    for (const send of later) {
-      // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
-      await send();
-    }
   };
   background(handled());
   return new Response(null, { status: 200 });

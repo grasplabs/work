@@ -160,6 +160,7 @@ const objectNamespaces = (
   WORKSPACES: env.WORKSPACES,
   APPS: env.APPS,
   APP_PREVIEWS: env.APP_PREVIEWS,
+  DRAFT_WATCHES: env.DRAFT_WATCHES,
   AUDIT_LOG: env.AUDIT_LOG,
   BUILTINS: env.BUILTINS,
   CLOCK: env.CLOCK,
@@ -197,8 +198,7 @@ const r2 = (bucket: R2Bucket) => async () => await bucket.head(absentKey);
  * The model files bucket answers, and holds every file of the model core
  * runs at its size and, where R2 kept one, its SHA-256: the deploy copied
  * them in before core went live, so a deployment without them stops here
- * rather than at its first question. With no model shipped, answering is
- * all it asks.
+ * rather than at its first question.
  */
 const modelFiles = (bucket: R2Bucket) => async () => {
   await bucket.head(absentKey);
@@ -216,7 +216,6 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
   const namespaces = Object.entries(objectNamespaces(env));
   const [
     db,
-    knowledge,
     files,
     auditArchive,
     brainObjects,
@@ -229,7 +228,6 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     ...namespaced
   ] = await Promise.all([
     answers("DB", d1(env.DB)),
-    answers("KNOWLEDGE", d1(env.KNOWLEDGE)),
     answers("FILES", r2(env.FILES)),
     answers("AUDIT_ARCHIVE", r2(env.AUDIT_ARCHIVE)),
     answers("BRAIN_OBJECTS", r2(env.BRAIN_OBJECTS)),
@@ -249,7 +247,6 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     clientId: env.CLIENT_ID ?? null,
     bindings: {
       DB: db,
-      KNOWLEDGE: knowledge,
       FILES: files,
       AUDIT_ARCHIVE: auditArchive,
       BRAIN_OBJECTS: brainObjects,

@@ -1,0 +1,1 @@
+ALTER TABLE `brain_sync_sources` ADD `last_error_at` integer;

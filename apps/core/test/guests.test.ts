@@ -12,10 +12,11 @@ import {
 import { z } from "zod";
 
 import { addSource } from "../src/brain-next.ts";
-import { grantReviewed, release, requestGranted } from "./apps.ts";
+import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   answering,
+  ask,
   bindGuests,
   call,
   codeOf,
@@ -508,11 +509,9 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
     );
     await bindGuests(app, permission);
     const bound = await call(app, builder.userId, "list");
-    // Version 2 invites too: what was approved serves it no more. (Its
-    // permission, which changes things, is asked for again with it, and
-    // an admin grants it again.)
+    // Version 2 invites too: the binding approved for less serves it no
+    // more, until an admin binds it again. (The permission stays granted.)
     await release(builder, app, guestFiles());
-    await grantReviewed(admin.api, permission);
     const widened = await call(app, builder.userId, "list");
     const binding = await bindGuests(app, permission);
     const { token } = await invite(app, builder.userId);
@@ -556,6 +555,31 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
       },
       rebound: 200,
       otherPermission: { status: 404, code: "guest.link_invalid" },
+    });
+  });
+
+  it("invite no one from an App that may hold what the Brain recalled: a guest is outside the company", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { app } = await guestApp(builder);
+    const before = await invite(app, builder.userId);
+    // Then the App is granted the Brain, as an admin's grant writes it.
+    await env.DB.prepare(
+      `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+        actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+       VALUES (?, 'app', ?, 'platform', 'platform', '["brain"]', ?, 'active', 'test', 0, 'test', 0)`
+    )
+      .bind(
+        crypto.randomUUID(),
+        app,
+        `BRAIN_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`
+      )
+      .run();
+    expect({
+      before: before.link.length > 0,
+      after: await ask(app, builder.userId),
+    }).toStrictEqual({
+      before: true,
+      after: { error: "permission.not_allowed" },
     });
   });
 });

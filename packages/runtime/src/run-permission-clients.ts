@@ -156,6 +156,37 @@ const graspOf = (
   );
 };
 
+/**
+ * `ctx.brain`: its declared operations, each a call of its own name,
+ * `recall` as `recall`, and a dotted one under its group: `skills.select`
+ * as `skills.select`, `entities.get` as `entities.get`.
+ */
+const brainOf = (
+  operations: readonly string[],
+  call: (method: string) => (...args: unknown[]) => Promise<unknown>
+): Readonly<Record<string, unknown>> => {
+  const groups = new Map<string, [string, unknown][]>();
+  const members: [string, unknown][] = [];
+  for (const operation of operations) {
+    const dot = operation.indexOf(".");
+    if (dot === -1) {
+      members.push([operation, call(operation)]);
+    } else {
+      const group = operation.slice(0, dot);
+      groups.set(group, [
+        ...(groups.get(group) ?? []),
+        [operation.slice(dot + 1), call(operation)],
+      ]);
+    }
+  }
+  return membersOf<unknown>([
+    ...members,
+    ...[...groups].map(
+      ([group, grouped]) => [group, membersOf(grouped)] as const
+    ),
+  ]);
+};
+
 /** The client of `permission`, over `channel`. */
 const clientOf = (
   permission: AnyPermission,
@@ -169,7 +200,10 @@ const clientOf = (
   if (kind === "ai") {
     return membersOf([["generate", generateOf(call("generate"))]]);
   }
-  if (kind === "brain" || kind === "guests") {
+  if (kind === "brain") {
+    return brainOf(permission.operations, call);
+  }
+  if (kind === "guests") {
     return membersOf(
       permission.operations.map((method) => [method, call(method)])
     );

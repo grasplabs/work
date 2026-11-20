@@ -143,7 +143,7 @@ export const isSensitive = (param: Param): boolean => !isPlain(param);
  * key, as an App's `permissions` are: `ai` is the workflow's one model,
  * whose alias is `ai`; `connections`, `decisions` and `events` are the
  * catalog's connectors, decision contracts and event contracts; `files`
- * are the run's own files and `brain` one Brain collection each, which a
+ * are the run's own files and `brain` the Brain, which a
  * `call` step reaches as `ctx.files.<alias>` and `ctx.brain.<alias>`;
  * `apps` are Apps whose queries and mutations it calls, each by the App's
  * ID and each function's stable ID (`AppPermission`).
@@ -323,12 +323,23 @@ export const filesActions = ["read", "write", "list", "delete"] as const;
 export type FilesAction = (typeof filesActions)[number];
 
 /**
- * What a `call` step on a `brain` permission does with its one Brain
- * collection, as `ctx.brain.<alias>.<action>` names it: searches it, reads
- * an entry, or recalls what bears on a question, each only as the run's
- * person may read it.
+ * What a `call` step on a `brain` permission does, as
+ * `ctx.brain.<alias>.<action>` names it, of what everyone in the company
+ * may read, whoever the run acts for, as an App's action does: `recall`
+ * recalls what bears on a question (`{ question, budget: { tokens },
+ * asOf? }`); `skills.select` selects the skills for a task (`{ task }`),
+ * and `skills.read` reads one at the version selected (`{ skill: { scope,
+ * name, version } }`); `entities.get` reads an entity's card (`{ entity,
+ * asOf?, after? }`) and `entities.find` finds entities (`{ kind?, name?,
+ * identifier?, after? }`).
  */
-export const brainActions = ["search", "read", "recall"] as const;
+export const brainActions = [
+  "recall",
+  "skills.select",
+  "skills.read",
+  "entities.get",
+  "entities.find",
+] as const;
 export type BrainAction = (typeof brainActions)[number];
 
 /**
@@ -347,8 +358,8 @@ export interface ConnectionCallStep extends CallBase {
 
 /**
  * A call of a workflow's typed member: a connection's action
- * (`ctx.connections`), the run's own files (`ctx.files`), a Brain
- * collection (`ctx.brain`), or a query or mutation of an App
+ * (`ctx.connections`), the run's own files (`ctx.files`), the Brain
+ * (`ctx.brain`), or a query or mutation of an App
  * (`ctx.apps.<app>.<path>`, `function` its stable ID, which the App's
  * permission lists). One step type for every member call: the key that
  * names its permission says which kind it is, as `ctx.<kind>.<alias>`

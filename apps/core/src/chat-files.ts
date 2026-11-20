@@ -6,7 +6,6 @@ import {
 } from "@grasp-os/shared/chat";
 import type { ChatFileType } from "@grasp-os/shared/chat";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
 import { uploadErrors, uploadNameSchema } from "@grasp-os/shared/uploads";
 import { z } from "zod";
@@ -68,7 +67,7 @@ const extractedText = async (
     if (error instanceof ExtractorUnavailableError) {
       throw agentErrors.create("agent.file_busy");
     }
-    if (knowledgeErrors.codeOf(error) === "knowledge.too_large") {
+    if (uploadErrors.codeOf(error) === "upload.text_too_large") {
       throw agentErrors.create("agent.file_too_large");
     }
     if (isExpectedError(error)) {

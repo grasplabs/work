@@ -7,6 +7,7 @@ import type {
   ChatUpdate,
 } from "@grasp-os/shared/chat";
 import { blueprintIdSchema } from "@grasp-os/shared/ids";
+import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
@@ -36,8 +37,10 @@ import { sendDeadlineMs } from "./use-ask.ts";
 
 // Chat's own page from Make something: ideas to start from in place of the
 // questions (an App's blueprints, a workflow's starting sentences), each
-// only filling the box, nothing made; the first question makes the chat
-// with what to make, which the chat keeps. Core is faked at its session.
+// only filling the box, nothing made; from an opportunity an admin drafts,
+// the box starts with its brief, nothing asked until it is sent; the
+// first question makes the chat with what to make, which the chat keeps.
+// Core is faked at its session.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -80,11 +83,33 @@ const agent = (id: string, name: string): ChatAgent => ({
   face: "",
   job: "",
   model: null,
+  own: false,
 });
+
+/** A team's routine as an admin reads it on Opportunities. */
+const opportunity: Opportunity = {
+  routine: "work-1",
+  evidence: "drawing-1",
+  name: "handling client requests",
+  local: "klantverzoeken afhandelen",
+  team: "team-1",
+  steps: ["Read the request", "Look it up in Exact", "Send the quote"],
+  casesPerWeek: 50,
+  hoursPerWeek: 20.8,
+  basis: "described",
+  seen: null,
+  differs: null,
+  form: "workflow",
+  covers: null,
+  setup: ["Exact"],
+  personApproves: [3],
+  dismissed: false,
+};
 
 /**
  * Chat's page, from Make something `make` with `ideas`, against a fake
- * core whose person may talk to `agents`; the address naming `named`.
+ * core whose person may talk to `agents`; the address naming `named`, and
+ * the opportunity `from` whose brief the box starts with.
  */
 const shown = async (
   make?: ChatMake,
@@ -95,10 +120,13 @@ const shown = async (
     models = Promise.resolve(["openai/gpt-5"]),
     confirmed = Promise.resolve(true),
     reach,
+    from,
     watch = async () => await Promise.withResolvers<never>().promise,
   }: {
     agents?: ChatAgent[];
     named?: string;
+    /** The opportunity whose brief the box starts with. */
+    from?: Opportunity;
     /** What core answers asking for the models, once it does. */
     models?: Promise<string[]>;
     /** When core confirms a question sent. */
@@ -125,7 +153,9 @@ const shown = async (
       return await Promise.resolve({ id: "chat-1", title });
     },
     send: async (chatId: string, question: ChatQuestion) => {
-      asked.push(`send ${chatId} ${question.text}`);
+      asked.push(
+        `send ${chatId} ${question.text}${question.mentions === undefined ? "" : ` ${JSON.stringify(question.mentions)}`}`
+      );
       await confirmed;
     },
     watch,
@@ -169,7 +199,18 @@ const shown = async (
   const page = createRoute({
     getParentRoute: () => shell,
     path: "/",
-    component: () => <ChatStart agent={named} ideas={read} make={make} />,
+    component: () => (
+      <ChatStart
+        agent={named}
+        ideas={read}
+        make={make}
+        opportunity={
+          from === undefined
+            ? undefined
+            : Promise.resolve({ state: "ready", data: from })
+        }
+      />
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([shell.addChildren([page])]),
@@ -230,28 +271,6 @@ const pick = async (title: string): Promise<void> => {
   await settled();
 };
 
-/** Presses `element` as a pointer does. */
-const pressOn = async (element: Element | undefined): Promise<void> => {
-  if (!(element instanceof HTMLElement)) {
-    throw new TypeError(
-      `Nothing to press among: ${[...document.querySelectorAll("[role]")].map((each) => `${each.getAttribute("role")}:${each.textContent.trim().slice(0, 20)}`).join(" | ")}`
-    );
-  }
-  await act(async () => {
-    element.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, button: 0 })
-    );
-    element.click();
-    await Promise.resolve();
-  });
-  await settled();
-};
-/** A menu row or option by the words it starts with. */
-const byWords = (words: string): Element | undefined =>
-  [...document.querySelectorAll('[role^="menuitem"], [role="option"]')].find(
-    (each) => each.textContent.includes(words)
-  );
-
 describe("Chat's page from Make something", () => {
   afterEach(() => {
     act(() => {
@@ -296,6 +315,88 @@ describe("Chat's page from Make something", () => {
       box: "Keep track of the month-end close: who does what, and remind people when they're late.",
       asked: [],
     });
+  });
+
+  it("starts the box with the brief of an opportunity an admin drafts, and asks nothing until it is sent", async () => {
+    const { asked } = await shown({ kind: "workflow" }, undefined, {
+      from: opportunity,
+    });
+    const before = [...asked];
+    const brief = [
+      "Draft a workflow for the opportunity “Handling client requests (klantverzoeken afhandelen)”.",
+      "How the team does it today:",
+      "1. Read the request",
+      "2. Look it up in Exact",
+      "3. Send the quote (a person approves this step)",
+      "Cases a week: 50.",
+      "Hours a week by hand: 20.8.",
+      "Connect first: Exact.",
+    ];
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({ before, asked }).toStrictEqual({
+      before: [],
+      // Make something's own chat, made to make a workflow and named
+      // after the brief's first words, its first question the brief, a
+      // paragraph a line.
+      asked: [
+        'create Draft a workflow for the opportunity “Handling client requests (klantverzoeken … {"kind":"workflow"}',
+        `send chat-1 ${brief.join("\n")}`,
+      ],
+    });
+  });
+
+  it("starts the brief of an opportunity only seen in activity with the steps seen, the ones that copy data marked", async () => {
+    const { asked } = await shown({ kind: "workflow" }, undefined, {
+      from: {
+        ...opportunity,
+        name: "Exact invoices.read → Google Sheets rows.add",
+        local: undefined,
+        steps: [],
+        casesPerWeek: null,
+        hoursPerWeek: null,
+        basis: "observed",
+        seen: {
+          steps: [
+            {
+              system: "Exact",
+              step: "invoices.read",
+              hoursAfter: null,
+              copied: false,
+            },
+            {
+              system: "Google Sheets",
+              step: "rows.add",
+              hoursAfter: 1,
+              copied: true,
+            },
+          ],
+          variants: [],
+        },
+        setup: [],
+        personApproves: [],
+      },
+    });
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect(asked.at(-1)).toBe(
+      `send chat-1 ${[
+        "Draft a workflow for the opportunity “Exact invoices.read → Google Sheets rows.add”.",
+        "What five or more of the team were seen doing:",
+        "1. Exact: invoices.read",
+        "2. Google Sheets: rows.add (copied from another system)",
+      ].join("\n")}`
+    );
   });
 
   it("makes the chat with what to make, which it keeps, on the first question", async () => {
@@ -564,11 +665,12 @@ describe("Chat's page from Make something", () => {
     }
   });
 
-  it("starts the chat with the agent the address names, among those the person may talk to", async () => {
+  it("mentions the agent the address names in the box, so the question goes to it, among those the person may talk to", async () => {
     const { asked } = await shown(undefined, undefined, {
       agents: [agent("organization", "Grasp"), agent("agent-2", "Claire")],
       named: "agent-2",
     });
+    const prefilled = box().value;
 
     await act(async () => {
       typeIn(box(), "Which invoices are late?");
@@ -580,35 +682,20 @@ describe("Chat's page from Make something", () => {
     });
     await settled();
 
-    expect(asked).toStrictEqual([
-      "create Which invoices are late? null with agent-2",
-      "send chat-1 Which invoices are late?",
-    ]);
+    expect({ prefilled, asked }).toStrictEqual({
+      prefilled: "@Claire ",
+      asked: [
+        "create @Claire Which invoices are late? null with agent-2",
+        'send chat-1 @Claire Which invoices are late? [{"kind":"agent","id":"agent-2"}]',
+      ],
+    });
   });
 
-  it("starts the chat with the agent chosen in the box's plus menu, the company's first until then", async () => {
-    const { asked } = await shown(undefined, undefined, {
-      agents: [agent("organization", "Grasp"), agent("agent-2", "Claire")],
+  it("mentions nobody for an agent the person may not talk to", async () => {
+    await shown(undefined, undefined, {
+      agents: [agent("organization", "Grasp")],
+      named: "agent-hidden",
     });
-    await pressOn(
-      // The plus, by the part's own English name (no catalogue here).
-      document.querySelector('[aria-label="Add to message"]') ?? undefined
-    );
-    await pressOn(byWords("Agent"));
-    await pressOn(byWords("Claire"));
-    await act(async () => {
-      typeIn(box(), "Which invoices are late?");
-      await Promise.resolve();
-    });
-    await act(async () => {
-      box().closest("form")?.requestSubmit();
-      await Promise.resolve();
-    });
-    await settled();
-
-    expect(asked).toStrictEqual([
-      "create Which invoices are late? null with agent-2",
-      "send chat-1 Which invoices are late?",
-    ]);
+    expect(box().value).toBe("");
   });
 });

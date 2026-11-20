@@ -10,7 +10,8 @@ export const notificationErrors = defineErrorFamily({
 // What core tells a signed-in person in the product (core's
 // notifications.ts): that an admin asked them one of the brain's open
 // questions, that a
-// schedule trigger of theirs stopped, that connect stopped hearing a
+// schedule trigger of theirs stopped, that someone else made another
+// version of a workflow their triggers start live, that connect stopped hearing a
 // mailbox or drive their triggers listen to, or that packages of an App
 // or workflow they build or approved were revoked as malware, or what an
 // App's server code told them (`ctx.notifyPeople`, core's
@@ -49,6 +50,24 @@ export interface TriggerStoppedNotification {
   workflow: string;
   workflowName: string;
   /** When it stopped (ISO 8601). */
+  at: string;
+  read: boolean;
+}
+
+/**
+ * Someone else made another version of a workflow the person's triggers
+ * start live (core's workflow-publish.ts): their triggers start it from
+ * then on, acting as them. Listed while the trigger is still theirs and
+ * not deleted.
+ */
+export interface TriggerWorkflowChangedNotification {
+  id: string;
+  type: "trigger_workflow_changed";
+  trigger: string;
+  /** The workflow the trigger starts: its ID and name. */
+  workflow: string;
+  workflowName: string;
+  /** When it first changed since they read the last of these (ISO 8601). */
   at: string;
   read: boolean;
 }
@@ -119,6 +138,7 @@ export type Notification =
   | AppMessageNotification
   | GapAskedNotification
   | TriggerStoppedNotification
+  | TriggerWorkflowChangedNotification
   | PackageNotification
   | EventsStoppedNotification;
 

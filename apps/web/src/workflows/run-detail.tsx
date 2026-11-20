@@ -3,6 +3,7 @@ import type {
   WorkflowResourceRun,
   WorkflowRunStatus,
 } from "@grasp-os/shared/workflow-resources";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
@@ -105,6 +106,30 @@ export const RunStatusBadge = ({ status }: { status: WorkflowRunStatus }) => {
     <Badge size="sm" tone={runToneOf(status)}>
       {t(runStatusLabels[status])}
     </Badge>
+  );
+};
+
+/**
+ * How many kept values a run started without, if any: core withheld them
+ * as the runs that kept them read something no longer there to read, and
+ * the run read them as unset (core's workflow-state.ts).
+ */
+export const StartedWithout = ({ run }: { run: WorkflowResourceRun }) => {
+  const { t } = useLingui();
+  const count = run.stateWithheld;
+  if (count === undefined) {
+    return null;
+  }
+  return (
+    <div {...stylex.props(styles.card)}>
+      <Text size="sm" tone="muted">
+        {t`${plural(count, {
+          one: "It started without # kept value: the run that kept it read something that is no longer there to read.",
+          other:
+            "It started without # kept values: the runs that kept them read something that is no longer there to read.",
+        })}`}
+      </Text>
+    </div>
   );
 };
 
@@ -347,6 +372,10 @@ const RunPanel = ({
         },
         { id: "version", name: t`Version`, detail: String(run.version) },
       ],
+      // The kept values it started without, if any, under its facts.
+      ...(run.stateWithheld === undefined
+        ? {}
+        : { content: <StartedWithout run={run} /> }),
     },
   ];
   const result = resultLabelOf(run);

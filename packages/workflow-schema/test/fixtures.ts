@@ -416,25 +416,26 @@ export const fileSteps = () => [
     args: { file: { $expr: "listed[0].file" } },
   },
   {
-    id: "searched",
-    type: "call",
-    brain: "handbook",
-    action: "search",
-    args: { text: { $expr: "notes.text" } },
-  },
-  {
-    id: "doc",
-    type: "call",
-    brain: "handbook",
-    action: "read",
-    args: { id: { $expr: 'searched[0]?.id ?? ""' } },
-  },
-  {
     id: "recalled",
     type: "call",
     brain: "handbook",
     action: "recall",
-    args: { query: { $expr: "doc.title" } },
+    args: { question: { $expr: "notes.text" }, budget: { tokens: 800 } },
+  },
+  {
+    id: "chosen",
+    type: "call",
+    brain: "handbook",
+    action: "skills.select",
+    args: { task: { $expr: "notes.text" } },
+  },
+  {
+    id: "howTo",
+    type: "call",
+    brain: "handbook",
+    action: "skills.read",
+    // The skill a selection gave, at its version, as it gave it.
+    args: { skill: { $expr: "chosen.skills[0]" } },
   },
   {
     id: "summary",
@@ -444,7 +445,10 @@ export const fileSteps = () => [
     args: {
       name: "summary.md",
       type: "text/markdown",
-      text: { $expr: 'doc.text + " (" + recalled.items.length + ")"' },
+      text: {
+        $expr:
+          'recalled.items.map((item) => item.text).join("\\n") + " (" + recalled.items.length + ")\\n" + howTo.text',
+      },
     },
   },
   {

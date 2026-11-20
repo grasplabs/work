@@ -5,10 +5,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
   resourceRunFor,
@@ -17,6 +14,7 @@ import {
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { resumed, runInstance, sleeping, stopped, woken } from "./runs.ts";
 import { unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Typed failures of grasp-workflow/2 runs, published and started as a
 // builder would, from their threat model. A catch takes only a failure
@@ -83,10 +81,7 @@ const definitionOf = (steps: unknown[]) =>
 /** A workflow of `by`'s, published once from `definition`. */
 const published = async (by: Acting, definition: string) => {
   const workflow = await createWorkflowResource(env, by, `flow-${unique()}`);
-  await publishWorkflowVersion(env, by, workflow.id, {
-    definition,
-    basedOn: null,
-  });
+  await publishDefinition(env, by, workflow.id, definition);
   return workflow;
 };
 
@@ -96,7 +91,7 @@ const startFor = async (by: Acting, id: string, who = "Ada") => {
     env,
     { type: "person", person: by },
     id,
-    { version: 1, args: { who }, key: unique() }
+    { expected: 1, args: { who }, key: unique() }
   );
   return runId;
 };

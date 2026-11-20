@@ -1,9 +1,12 @@
 import type {
   Agent,
+  AgentApp,
+  AgentAppsWorkedOut,
   AgentDocument,
   AgentSettings,
   AgentUsage,
   AgentWake,
+  OwnAgentsUsage,
 } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
@@ -36,7 +39,10 @@ import type {
   OfferedCatalog,
   AppPointerSetting,
   SharedMailboxSetting,
+  SharedSyncPlaces,
+  ConnectionBrainAudienceSetting,
   ToolClassSetting,
+  ToolkitKeyField,
 } from "@grasp-os/shared/connect";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
@@ -46,15 +52,27 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
+import { waitUntil } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import {
+  listAgentApps,
+  setAgentApp,
+  workOutAgentApps,
+} from "./agent-app-access.ts";
+import {
+  adoptAgent,
   changeAgent,
+  declineAgent,
+  listOfferedAgents,
+  offerOwnAgent,
   listAgents,
+  listOwnAgents,
   deleteAgent,
   makeAgent,
+  makeOwnAgent,
   readAgentSettings,
   setAgentPaused,
   setAgentReach,
@@ -65,7 +83,7 @@ import {
   listAgentDocuments,
   removeAgentDocument,
 } from "./agent-documents.ts";
-import { agentsUsage } from "./agent-usage.ts";
+import { agentsUsage, ownAgentsUsage } from "./agent-usage.ts";
 import {
   deleteAgentWake,
   listAgentWakes,
@@ -80,7 +98,13 @@ import {
 } from "./audit-outbox.ts";
 import { providerIds, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
+import { eraseCaptures } from "./brain-next-origins.ts";
 import { listAppRequests, requestApp } from "./catalog-requests.ts";
+import {
+  readConnectionAudiences,
+  setConnectionAudience,
+} from "./connection-audiences.ts";
+import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import {
   accounts,
   hiddenConnectors,
@@ -95,6 +119,12 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { pointSharedMailbox, readSharedMailboxes } from "./shared-mailboxes.ts";
+import {
+  closeOnDisconnect,
+  eraseBrainReads,
+  mayHoldReadsOf,
+} from "./shared-reads.ts";
+import { claimConnectedTokens } from "./source-readers.ts";
 import { routeMember } from "./staff-audit.ts";
 import {
   readStephenReach,
@@ -102,6 +132,7 @@ import {
   setStephenPlace,
   setStephenReach,
 } from "./stephen-reach.ts";
+import { pickSyncPlaces, readSyncPlaces } from "./sync-picks.ts";
 import {
   anyMailboxPointed,
   classesOn,
@@ -122,6 +153,9 @@ const connectToolkitRequestSchema = z.object({
   returnTo: z.string().default("/"),
 });
 type ConnectToolkitRequest = Parameters<ConnectionsApi["connectToolkit"]>[0];
+type ConnectToolkitWithKeyRequest = Parameters<
+  ConnectionsApi["connectToolkitWithKey"]
+>[0];
 
 /** What the frontend sends to start: checked here, as it came over the wire. */
 const startRequestSchema = z.strictObject({
@@ -181,6 +215,34 @@ export const connectionOwnersOf = async (
     pages.map(async (page) => await env.CONNECT.connectionOwners(page))
   );
   return owners.flat();
+};
+
+/**
+ * Erases what the Brain kept through `connectionId` (connection-
+ * capture.ts) once `person` disconnected it, in the background
+ * (`waitUntil`), when it is their own connection of a kind capture keeps
+ * reads from (`mayHoldCapturesOf`). The disconnect never waits on it: should it
+ * fail, it is logged, and the drain of connect's audit outbox erases them
+ * before the disconnect's event leaves it (capture-erasures.ts), which
+ * also records the erasure. Until it ran, a read under way may still land
+ * in the connection's group, and goes with it.
+ */
+const eraseCapturesSoon = async (
+  env: Env,
+  person: ConnectionPerson,
+  connectionId: string
+): Promise<void> => {
+  try {
+    const [owner] = await connectionOwnersOf(env, [connectionId]);
+    if (owner !== undefined && mayHoldCapturesOf(owner, person.userId)) {
+      await eraseCaptures(env, person.userId, connectionId);
+    }
+  } catch (error) {
+    log.warn("connection.captures_not_erased_yet", {
+      connectionId,
+      ...errorFields(error),
+    });
+  }
 };
 
 /** The organization's tenant at `provider`, from the sign-in config. */
@@ -495,6 +557,58 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   }
 
   /**
+   * What an admin types to connect a toolkit with a key, as Composio
+   * describes it: connect checks the role and the toolkit.
+   */
+  async keyFields(toolkit: string): Promise<ToolkitKeyField[]> {
+    const person = await this.#person();
+    return await this.#env.CONNECT.toolkitKeyFields({ person, toolkit });
+  }
+
+  /**
+   * Connecting a toolkit with a key the admin typed: core passes it on to
+   * connect and keeps nothing of it, as connect does on to Composio; connect
+   * checks the rest (the role, the toolkit, the fields, the tools, the
+   * consent). The answer is the page to send the browser to, as a sign-in's
+   * is the provider's.
+   */
+  async connectToolkitWithKey(
+    request: ConnectToolkitWithKeyRequest
+  ): Promise<{ url: string }> {
+    const person = await this.#person();
+    const parsed = connectToolkitRequestSchema.safeParse(request);
+    const config = signInConfig(this.#env);
+    if (config === undefined) {
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
+    const back = parsed.success
+      ? onOrigin(config.origin, parsed.data.returnTo)
+      : undefined;
+    if (back === undefined) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    const { toolkit, tools, consent, values } = request;
+    const slug = composioToolkitSchema.safeParse(toolkit);
+    if (slug.success) {
+      await requireOffered(this.#env, person, {
+        source: "composio",
+        id: slug.data,
+        scope: "shared",
+      });
+    }
+    const { connectionId } = await this.#env.CONNECT.connectToolkitWithKey({
+      person,
+      toolkit,
+      tools,
+      consent,
+      values,
+      origin: config.origin,
+    });
+    back.searchParams.set("connection", connectionId);
+    return { url: back.href };
+  }
+
+  /**
    * Changes which tools a shared Composio connection allows, as the
    * signed-in person: connect checks the rest (the role, the connection,
    * the tools), and audits it (GRA-993).
@@ -527,12 +641,28 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
             .from(users)
             .where(inList(users.id, ids));
     const names = new Map(people.map(({ id, name }) => [id, name]));
+    // A shared connection the Brain may hold reads of (shared-reads.ts):
+    // its disconnect erases them, so the page says so, as for a person's
+    // own (`mayHoldCapturesOf`). Said to admins alone, who disconnect and
+    // erase it: a member outside its audience learns nothing of it.
+    const holdingShared = isAdmin(person.role)
+      ? await mayHoldReadsOf(
+          this.#env,
+          listed.flatMap(({ id, ownerUserId }) =>
+            ownerUserId === null ? [id] : []
+          )
+        )
+      : new Set<string>();
     return listed.map((connection) => ({
       ...connection,
       connectedByName:
         connection.connectedBy === null
           ? null
           : (names.get(connection.connectedBy) ?? null),
+      ...(mayHoldCapturesOf(connection, person.userId) ||
+      holdingShared.has(connection.id)
+        ? { keepsReads: true as const }
+        : {}),
     }));
   }
 
@@ -592,7 +722,31 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
 
   async disconnect(connectionId: string): Promise<{ revoked: boolean }> {
     const person = await this.#person();
-    return await this.#env.CONNECT.disconnect({ person, connectionId });
+    // Whose it is, read before connect stops it (it keeps its owner).
+    const [owner] = await connectionOwnersOf(this.#env, [connectionId]);
+    // A revocation never waits on the Brain: connect stops it first, and
+    // what the Brain kept through it goes in the background
+    // (`eraseCapturesSoon`), so a slow store never holds the answer up.
+    const disconnected = await this.#env.CONNECT.disconnect({
+      person,
+      connectionId,
+    });
+    waitUntil(eraseCapturesSoon(this.#env, person, connectionId));
+    // A shared connection's records in the Brain: closed before this
+    // answers, so nobody reads them from then on and no audience is
+    // opened on it again; connect's record of the disconnect erases them
+    // (shared-reads.ts, capture-erasures.ts). A close that fails fails
+    // the disconnect, so it is never answered as done while its records
+    // can still be read: disconnecting again is safe, as connect answers
+    // an already stopped connection as not revoked, and the close runs
+    // again.
+    if (owner?.id === connectionId && owner.ownerUserId === null) {
+      await closeOnDisconnect(this.#env, connectionId, {
+        type: "person",
+        userId: person.userId,
+      });
+    }
+    return disconnected;
   }
 
   // Anyone signed in may see what can be connected; connect checks the
@@ -716,6 +870,61 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     });
   }
 
+  async brainAudiences(): Promise<ConnectionBrainAudienceSetting[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await readConnectionAudiences(this.#env, identity)
+    );
+  }
+
+  async setBrainAudience(
+    connectionId: unknown,
+    audience: unknown,
+    from: unknown,
+    acknowledged?: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setConnectionAudience(
+        this.#env,
+        identity,
+        connectionId,
+        audience,
+        from,
+        acknowledged
+      );
+    });
+  }
+
+  async eraseBrainReads(connectionId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await eraseBrainReads(this.#env, identity, connectionId);
+    });
+  }
+
+  async syncPlaces(connectionId: unknown): Promise<SharedSyncPlaces | null> {
+    return await withPerson(
+      this.#check,
+      async (identity) =>
+        await readSyncPlaces(
+          this.#env,
+          identity,
+          async () => await personOf(this.#env, identity),
+          connectionId
+        )
+    );
+  }
+
+  async pickSyncPlaces(request: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await pickSyncPlaces(
+        this.#env,
+        identity,
+        async () => await personOf(this.#env, identity),
+        request
+      );
+    });
+  }
+
   async stephenReach(): Promise<StephenReach> {
     return await withPerson(this.#check, async (identity) => {
       requireAdmin(identity);
@@ -761,6 +970,76 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       requireAdmin(identity);
       return await agentsUsage(this.#env, spendMonth(this.#env));
     });
+  }
+
+  async ownAgents(): Promise<Agent[]> {
+    return await withPerson(this.#check, async (identity) =>
+      // Grasp's staff are no one of the company: they have none.
+      identity.staff ? [] : await listOwnAgents(this.#env, identity.userId)
+    );
+  }
+
+  async makeOwnAgent(input: unknown): Promise<Agent> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await makeOwnAgent(this.#env, identity, input)
+    );
+  }
+
+  async offerOwnAgent(agentId: unknown, offered: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await offerOwnAgent(this.#env, identity, agentId, offered);
+    });
+  }
+
+  async offeredAgents(): Promise<Agent[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listOfferedAgents(this.#env, identity)
+    );
+  }
+
+  async adoptAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await adoptAgent(this.#env, identity, agentId);
+    });
+  }
+
+  async declineAgent(agentId: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await declineAgent(this.#env, identity, agentId);
+    });
+  }
+
+  async ownAgentsUsage(): Promise<OwnAgentsUsage[]> {
+    return await withPerson(this.#check, async (identity) => {
+      requireAdmin(identity);
+      return await ownAgentsUsage(this.#env, spendMonth(this.#env));
+    });
+  }
+
+  async agentApps(agentId: unknown): Promise<AgentApp[]> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await listAgentApps(this.#env, identity, agentId)
+    );
+  }
+
+  async setAgentApp(
+    agentId: unknown,
+    app: unknown,
+    on: unknown
+  ): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await setAgentApp(this.#env, identity, agentId, app, on);
+    });
+  }
+
+  async workOutAgentApps(agentId: unknown): Promise<AgentAppsWorkedOut> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await workOutAgentApps(this.#env, identity, agentId)
+    );
   }
 
   async makeAgent(input: unknown): Promise<Agent> {
@@ -989,6 +1268,14 @@ export const handleConnectionCallback = async (
       // Only whether there is one matters; the provider's text isn't kept.
       error: params.get("error")?.slice(0, 64) ?? undefined,
     });
+    // The accounts it proves are theirs, for the reader lists the Brain
+    // copies (GRA-1761): failed, the flow fails, and connecting again in
+    // place claims them.
+    await claimConnectedTokens(
+      env,
+      identity.userId,
+      await env.CONNECT.personalAccounts(identity.userId)
+    );
   } catch (error) {
     return failed(errorCodeOf(error));
   }

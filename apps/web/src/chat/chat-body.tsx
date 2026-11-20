@@ -11,7 +11,6 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import { agentModelOf } from "./agent-choice.tsx";
 import { AskOrCompose } from "./asked-questions.tsx";
-import { pendingPlan } from "./build-progress.tsx";
 import { BuildsFailure, workOf } from "./builds.tsx";
 import { ConnectionRequests } from "./connection-requests.tsx";
 import type {
@@ -20,6 +19,7 @@ import type {
   ModelsUnavailable,
 } from "./global-chat.tsx";
 import { HeldWrites } from "./held-writes.tsx";
+import { pendingCard } from "./make-card.tsx";
 import { PackageRequests } from "./package-requests.tsx";
 import { ChatSources } from "./sources.tsx";
 import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
@@ -134,7 +134,8 @@ export const ChatConversation = ({
   focusBox: () => void;
 }) => {
   const { t } = useLingui();
-  const { chatId, finding, view, failure, empty, ask, composer } = chat;
+  const { chatId, finding, view, failure, empty, ask, composer, offered } =
+    chat;
   // A subject's chat, while core finds it, or why it gave none.
   if (finding.searching || finding.failure !== undefined) {
     return finding.failure === undefined ? (
@@ -162,6 +163,7 @@ export const ChatConversation = ({
   return (
     <Suspense fallback={<Loading />}>
       <ChatThread
+        agents={offered?.agents}
         chatId={chatId}
         compact={compact}
         loaded={view.loaded || failure !== undefined}
@@ -208,7 +210,18 @@ export const ChatConversation = ({
             ) : null}
           </div>
         )}
-        <HeldWrites chatId={chatId} version={view.held} />
+        <HeldWrites
+          chatId={chatId}
+          // Confirmed, the agent reads how it ended and goes on, in a turn
+          // the person's own message starts, as for approved packages
+          // below: the decision itself reaches it as a note (GRA-2224).
+          onConfirmed={() => {
+            if (!view.running) {
+              void ask(t`Confirmed. Carry on.`);
+            }
+          }}
+          version={view.held}
+        />
         <ConnectionRequests chatId={chatId} version={view.held} />
         <PackageRequests
           chatId={chatId}
@@ -258,23 +271,6 @@ const ModelsUnavailableNotice = ({
   );
 };
 
-/**
- * Whether the fold of what the chat's answers drew on gives way over the
- * box: over the agent's questions or a plan that waits, which take the
- * person's eye, and when the last answer's own sources (its pile) are
- * right above it.
- */
-export const sourcesGiveWay = (
-  messages: ChatBodyValues["view"]["messages"],
-  asking: ChatBodyValues["asking"],
-  planWaits: boolean
-): boolean => {
-  const last = messages.findLast(({ role }) => role === "assistant");
-  const cites =
-    last !== undefined && "citations" in last && last.citations.length > 0;
-  return asking !== undefined || planWaits || cites;
-};
-
 /** The box to ask in, or the agent's questions in its place; `inColumn` on a chat's page, as wide as its thread. */
 export const ChatFooter = ({
   chat,
@@ -302,11 +298,15 @@ export const ChatFooter = ({
   const work = workOf(builds);
   // Which of the company's agents answers here, where there are several.
   const agents = offered?.agents ?? [];
-  // Under a plan that waits for the person, the box is where to change it.
+  // Under a card that waits for the person, the box is where to change it.
+  const waiting = pendingCard(view.messages, view.running)?.kind;
+  const changeWords = {
+    planned: t`Change something about the plan`,
+    agentDraft: t`Change something about the agent`,
+    agentChange: t`Change something about the change`,
+  };
   const placeholder =
-    pendingPlan(view.messages, view.running) === undefined
-      ? words.placeholder
-      : t`Change something about the plan`;
+    waiting === undefined ? words.placeholder : changeWords[waiting];
   // When the running turn began: its question's time.
   const turnSince = view.running
     ? view.messages.findLast(({ role }) => role === "user")?.at
@@ -322,13 +322,9 @@ export const ChatFooter = ({
       <ChatSources
         names={sourceNames}
         provenance={view.provenance}
-        sourcesShown={
-          !sourcesGiveWay(
-            view.messages,
-            asking,
-            pendingPlan(view.messages, view.running) !== undefined
-          )
-        }
+        // Over the agent's questions or a card that waits, which take the
+        // person's eye, the fold of what the answers drew on gives way.
+        sourcesShown={asking === undefined && waiting === undefined}
       />
       <AskOrCompose
         {...composer}

@@ -14,7 +14,14 @@
 import { expectTypeOf } from "vite-plus/test";
 
 import { defineApp, permission } from "../src/index.ts";
-import type { ConnectorAction, ConnectorContract } from "../src/index.ts";
+import type {
+  BrainCard,
+  BrainPack,
+  BrainSkill,
+  BrainSkillText,
+  ConnectorAction,
+  ConnectorContract,
+} from "../src/index.ts";
 import { serverModule } from "../src/server.ts";
 import type { ActionCtx } from "../src/server.ts";
 import type { JsonValue } from "../src/value-descriptor.ts";
@@ -274,17 +281,60 @@ expectTypeOf(
 ).resolves.toEqualTypeOf<{ tags: string[] }>();
 
 // The Brain and guest chats: the operations each declares, and no other.
-const brain = permission.brain({
-  operations: ["search"],
-  collections: ["handbook"],
-});
+const brain = permission.brain({ operations: ["recall"] });
 const guests = permission.guests({ operations: ["list", "revoke"] });
 declare const brainCtx: ActionCtx<typeof brain | typeof guests>;
-expectTypeOf(brainCtx.brain.search({ text: "leave" })).resolves.toEqualTypeOf<
-  { title: string; excerpt: string }[]
->();
+expectTypeOf(
+  brainCtx.brain.recall({ question: "leave", budget: { tokens: 800 } })
+).resolves.toEqualTypeOf<BrainPack>();
+// The question, the budget and, to read the past, the moment: nothing else.
+await brainCtx.brain.recall({
+  question: "leave",
+  budget: { tokens: 800 },
+  asOf: "2026-03-14T23:59:59.999+01:00",
+});
+// @ts-expect-error -- a recall has a budget
+await brainCtx.brain.recall({ question: "leave" });
+await brainCtx.brain.recall({
+  question: "leave",
+  budget: { tokens: 800 },
+  // @ts-expect-error -- it reads as the person the call acts for, never another
+  person: "someone",
+});
+// The Brain's skills: only the operations declared, each its own shapes.
+const skillsBrain = permission.brain({
+  operations: ["skills.select", "skills.read"],
+});
+declare const skillsCtx: ActionCtx<typeof skillsBrain>;
+expectTypeOf(
+  skillsCtx.brain.skills.select({ task: "pay an invoice" })
+).resolves.toEqualTypeOf<{ readonly skills: readonly BrainSkill[] }>();
+expectTypeOf(
+  skillsCtx.brain.skills.read({
+    skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
+  })
+).resolves.toEqualTypeOf<BrainSkillText>();
+// @ts-expect-error -- a skill is read at a version
+await skillsCtx.brain.skills.read({ skill: { scope: "grasp", name: "x" } });
+expectTypeOf(skillsCtx.brain).not.toHaveProperty("recall");
+expectTypeOf(brainCtx.brain).not.toHaveProperty("skills");
+const selectOnly = permission.brain({ operations: ["skills.select"] });
+declare const selectCtx: ActionCtx<typeof selectOnly>;
+expectTypeOf(selectCtx.brain.skills).not.toHaveProperty("read");
+// Entities: each its own shapes, under the operations declared.
+const entitiesBrain = permission.brain({ operations: ["entities.get"] });
+declare const entitiesCtx: ActionCtx<typeof entitiesBrain>;
+expectTypeOf(
+  entitiesCtx.brain.entities.get({ entity: "e" })
+).resolves.toEqualTypeOf<BrainCard | null>();
+await entitiesCtx.brain.entities.get({
+  entity: "e",
+  // @ts-expect-error -- a card is read by its entity, as of a time, after a page
+  readers: [],
+});
+expectTypeOf(entitiesCtx.brain).not.toHaveProperty("recall");
+expectTypeOf(entitiesCtx.brain.entities).not.toHaveProperty("find");
 // Only the operations each declares.
-expectTypeOf(brainCtx.brain).not.toHaveProperty("read");
 await brainCtx.guests.revoke("chat");
 expectTypeOf(brainCtx.guests).not.toHaveProperty("invite");
 

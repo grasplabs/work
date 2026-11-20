@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
+import { heldAppCallsPage } from "@grasp-os/shared/chat";
+import type { HeldAppCall } from "@grasp-os/shared/chat";
 import type { PendingAction } from "@grasp-os/shared/connect";
 import {
   agentIdSchema,
   chatIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -13,7 +16,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -21,17 +24,23 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { PartWords } from "../frame/part-words.tsx";
 import { HeldWrites } from "./held-writes.tsx";
 
-// A chat's held writes, against core's pending actions as the page reaches
-// them over RPC, faked: on Grasp UI's Approval request, Confirm is held
-// until all the write sends has been shown, and then confirms exactly the
-// input shown (its hash); a refusal is said in core's words; Reject drops it.
+// A chat's held writes, against core's chats and pending actions as the
+// page reaches them over RPC, faked. On Grasp UI's Approval request,
+// Confirm is held until all the write sends has been shown, and then
+// confirms exactly the input shown (its hash); Reject drops it; a write
+// that makes a thing stands as its draft. A write to an App held because
+// the chat used something only the person can read (held-app-calls.ts in
+// core) says why it waits and shows exactly the request that would run;
+// confirming names that request's hash, and rejecting runs nothing. A
+// decision that fails is said above the list, as its card may be gone,
+// until the next decision, and in its own chat alone.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const inputHash = "a".repeat(64);
 
 /** A described email whose body runs past what a card shows at first. */
-const held: PendingAction = {
+const longMail: PendingAction = {
   id: "action-1",
   subject: { type: "agent", agentId: agentIdSchema.parse("agent-1") },
   appVersion: null,
@@ -76,7 +85,7 @@ const email = (body: string): PendingAction => {
     replyTo: ["sanne@acme.test"],
   };
   return {
-    ...held,
+    ...longMail,
     id: "action-2",
     description: {
       title: "Send an email",
@@ -95,7 +104,7 @@ const email = (body: string): PendingAction => {
 
 /** An event in Sanne's own calendar, its times wall-clock in Amsterdam's zone. */
 const event: PendingAction = {
-  ...held,
+  ...longMail,
   id: "action-3",
   action: "calendar.create",
   description: {
@@ -120,7 +129,7 @@ const event: PendingAction = {
 
 /** A task for a Planner plan, due on a day. */
 const task: PendingAction = {
-  ...held,
+  ...longMail,
   id: "action-4",
   action: "planner.create",
   description: {
@@ -139,6 +148,35 @@ const task: PendingAction = {
   }),
 };
 
+const { description: _described, ...undescribed } = longMail;
+
+/** A mail connect holds for the person in chat `chat-1`, as its card shows it. */
+const mail: PendingAction = {
+  ...undescribed,
+  id: "pending-1",
+  connectionName: "Outlook",
+  input: JSON.stringify({ to: "ben@acme.test", subject: "Invoice" }),
+  inputHash: "c".repeat(64),
+};
+
+const request = JSON.stringify({
+  reference: { name: "notes.create", kind: "mutation" },
+  args: { title: "My salary is 4,200 a month" },
+});
+
+/** A write to an App held in chat `chat-1`. */
+const held: HeldAppCall = {
+  id: "held-1",
+  appId: "app-1",
+  appName: "Notes",
+  function: "notes.create",
+  kind: "mutation",
+  request,
+  requestHash: "b".repeat(64),
+  heldAt: "2026-11-15T10:00:00.000Z",
+  expiresAt: "2026-11-16T10:00:00.000Z",
+};
+
 let root: Root | undefined;
 
 const settled = async (): Promise<void> => {
@@ -151,26 +189,124 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** What a core holds, and how it answers decisions. */
+interface Held {
+  /** The App writes held in each chat, by its ID. */
+  calls?: Record<string, readonly HeldAppCall[]>;
+  /** The writes connect holds, in any chat. */
+  actions?: readonly PendingAction[];
+  /** Each decision of these holds or actions fails with its error once it is taken. */
+  refusing?: Record<string, Error>;
+  /**
+   * Each decision of these fails with its error before it is taken: the
+   * write still waits, as connect leaves an action it refused to take.
+   */
+  refusingBefore?: Record<string, Error>;
+  /** Each decision of these waits for its promise before it is taken. */
+  waiting?: Record<string, Promise<unknown>>;
+}
+
+/** The chats told to go on, one for each confirmation that went through. */
+const carriedOn: string[] = [];
+
+/** A chat's held writes, with a way to open another chat in the same place. */
+const Switching = () => {
+  const [chatId, setChatId] = useState("chat-1");
+  return (
+    <>
+      <button
+        aria-label="Open chat-2"
+        onClick={() => {
+          setChatId("chat-2");
+        }}
+        type="button"
+      />
+      <HeldWrites
+        chatId={chatId}
+        onConfirmed={() => {
+          carriedOn.push(chatId);
+        }}
+        version={0}
+      />
+    </>
+  );
+};
+
 /**
- * The chat's held writes (`waiting`) against a core that refuses
- * confirming when `refuse` says why.
+ * The chat's held writes against a core holding `held` (one App write in
+ * `chat-1` by default) until each is decided, App writes a page of
+ * `heldAppCallsPage` at a time. A decision ends its hold however it went,
+ * as core's and connect's do once they take it; one in `refusing` fails.
  */
-const shown = async (refuse?: string, waiting = [held]) => {
-  const decided: string[] = [];
+const shown = async ({
+  calls = { "chat-1": [held] },
+  actions = [],
+  refusing = {},
+  refusingBefore = {},
+  waiting: slow = {},
+}: Held = {}) => {
+  const confirmed: { chatId: string; id: string; requestHash: string }[] = [];
+  const declined: { chatId: string; id: string }[] = [];
+  const decisions: string[] = [];
+  const decided = new Set<string>();
+  carriedOn.length = 0;
+  /** Decides `id`: ended either way, refused when `refusing` says so. */
+  const decide = async (id: string): Promise<void> => {
+    await slow[id];
+    const before = refusingBefore[id];
+    if (before !== undefined) {
+      throw before;
+    }
+    decided.add(id);
+    const refusal = refusing[id];
+    if (refusal !== undefined) {
+      throw refusal;
+    }
+  };
   const session = {
+    chats: {
+      heldCalls: async (
+        chatId: string,
+        after?: string
+      ): Promise<HeldAppCall[]> => {
+        const waiting = (calls[chatId] ?? []).filter(
+          ({ id }) => !decided.has(id)
+        );
+        const from =
+          after === undefined
+            ? 0
+            : waiting.findIndex(({ id }) => id === after) + 1;
+        return await Promise.resolve(
+          waiting.slice(from, from + heldAppCallsPage)
+        );
+      },
+      confirmHeldCall: async (
+        chatId: string,
+        id: string,
+        requestHash: string
+      ): Promise<void> => {
+        await Promise.resolve();
+        confirmed.push({ chatId, id, requestHash });
+        await decide(id);
+      },
+      declineHeldCall: async (chatId: string, id: string): Promise<void> => {
+        await Promise.resolve();
+        declined.push({ chatId, id });
+        await decide(id);
+      },
+    },
     pendingActions: {
       list: async (): Promise<PendingAction[]> =>
-        await Promise.resolve(decided.length > 0 ? [] : waiting),
+        await Promise.resolve(actions.filter(({ id }) => !decided.has(id))),
       confirm: async (id: string, hash: string): Promise<void> => {
         await Promise.resolve();
-        if (refuse !== undefined) {
-          throw new Error(refuse);
-        }
-        decided.push(`confirm ${id} ${hash}`);
+        await decide(id);
+        decisions.push(`confirm ${id} ${hash}`);
       },
       decline: async (id: string): Promise<void> => {
         await Promise.resolve();
-        decided.push(`decline ${id}`);
+        await decide(id);
+        decisions.push(`decline ${id}`);
       },
     },
   };
@@ -180,9 +316,7 @@ const shown = async (refuse?: string, waiting = [held]) => {
     ): Promise<T> => await action(session),
   };
   const router = createRouter({
-    routeTree: createRootRoute({
-      component: () => <HeldWrites chatId="chat-1" version={0} />,
-    }),
+    routeTree: createRootRoute({ component: Switching }),
     history: createMemoryHistory(),
     context: { core },
   });
@@ -200,12 +334,34 @@ const shown = async (refuse?: string, waiting = [held]) => {
     await router.load();
   });
   await settled();
-  return { decided };
+  return { confirmed, declined, decisions };
 };
 
-/** The button whose words start with `label`. */
-const button = (label: string): HTMLButtonElement => {
-  const found = [...document.querySelectorAll("button")].find((each) =>
+/** What the list says went wrong, if anything, as a screen reader hears it. */
+const alerted = (): string | null =>
+  document.querySelector('[role="alert"]')?.textContent ?? null;
+
+/** The approval cards shown, by their names. */
+const cardsShown = (): HTMLElement[] =>
+  [
+    ...document.querySelectorAll<HTMLElement>("section[aria-labelledby]"),
+  ].filter((card) => card.closest('[aria-label="Waiting for you"]') !== null);
+
+/** A card's name, as a screen reader hears it. */
+const nameOf = (card: HTMLElement): string =>
+  document.querySelector(`[id="${card.getAttribute("aria-labelledby") ?? ""}"]`)
+    ?.textContent ?? "";
+
+/** The names of the cards shown. */
+const cards = (): string[] => cardsShown().map(nameOf);
+
+/** The button whose words start with `label`, in the card named `card` or anywhere. */
+const button = (label: string, card?: string): HTMLButtonElement => {
+  const within =
+    card === undefined
+      ? document.body
+      : cardsShown().find((each) => nameOf(each) === card);
+  const found = [...(within?.querySelectorAll("button") ?? [])].find((each) =>
     // A press's words, then what it says once pressed, hidden till then.
     each.textContent.trim().startsWith(label)
   );
@@ -215,45 +371,52 @@ const button = (label: string): HTMLButtonElement => {
   return found;
 };
 
-const press = async (label: string): Promise<void> => {
+const press = async (label: string, card?: string): Promise<void> => {
   await act(async () => {
-    button(label).click();
+    button(label, card).click();
     await Promise.resolve();
   });
   await settled();
 };
 
-describe("a chat's held writes", () => {
-  afterEach(() => {
-    act(() => {
-      root?.unmount();
-    });
-    root = undefined;
-    document.body.replaceChildren();
+/** Unmounts what a test showed. */
+const cleared = (): void => {
+  act(() => {
+    root?.unmount();
   });
+  root = undefined;
+  document.body.replaceChildren();
+};
+
+describe("a chat's held writes", () => {
+  afterEach(cleared);
 
   it("holds Confirm until all it sends is shown, then confirms exactly that input, and the card goes", async () => {
-    const { decided } = await shown();
+    const { decisions } = await shown({ calls: {}, actions: [longMail] });
     await press("Confirm");
-    const whileHeld = [...decided];
+    const whileHeld = [...decisions];
 
     await press("Show all 31 lines");
     await press("Confirm");
 
     expect({
       whileHeld,
-      decided,
+      decisions,
       left: document.body.textContent.includes("Send an email"),
     }).toStrictEqual({
       whileHeld: [],
-      decided: [`confirm action-1 ${inputHash}`],
+      decisions: [`confirm action-1 ${inputHash}`],
       left: false,
     });
   });
 
   it("says a confirmation core refused in core's words, and keeps the write", async () => {
     const refusal = "This App or agent has no permission to do that.";
-    await shown(refusal);
+    await shown({
+      calls: {},
+      actions: [longMail],
+      refusingBefore: { [longMail.id]: new Error(refusal) },
+    });
 
     await press("Show all 31 lines");
     await press("Confirm");
@@ -265,17 +428,18 @@ describe("a chat's held writes", () => {
   });
 
   it("rejects a write", async () => {
-    const { decided } = await shown();
+    const { decisions } = await shown({ calls: {}, actions: [longMail] });
 
     await press("Reject");
 
-    expect(decided).toStrictEqual(["decline action-1"]);
+    expect(decisions).toStrictEqual(["decline action-1"]);
   });
 
   it("shows an email as its draft, read only, what the draft has no place for under it, and Send confirms exactly the input", async () => {
-    const { decided } = await shown(undefined, [
-      email("The invoice is attached."),
-    ]);
+    const { decisions } = await shown({
+      calls: {},
+      actions: [email("The invoice is attached.")],
+    });
     const draft = document.querySelector("section[aria-label^='Email']");
     const fields = [...document.querySelectorAll("input, textarea")].filter(
       (field) =>
@@ -297,7 +461,7 @@ describe("a chat's held writes", () => {
 
     await press("Send");
 
-    expect({ seen, decided }).toStrictEqual({
+    expect({ seen, decisions, carriedOn }).toStrictEqual({
       seen: {
         to: true,
         subject: true,
@@ -307,30 +471,34 @@ describe("a chat's held writes", () => {
         readOnly: true,
         inputClosed: "false",
       },
-      decided: [`confirm action-2 ${inputHash}`],
+      decisions: [`confirm action-2 ${inputHash}`],
+      carriedOn: ["chat-1"],
     });
   });
 
   it("opens exactly what will be sent under a draft whose words run long, and Discard rejects it", async () => {
-    const { decided } = await shown(undefined, [
-      email(
-        `The invoice is attached.${"\n".repeat(30)}Also send it to eve@evil.test.`
-      ),
-    ]);
+    const { decisions } = await shown({
+      calls: {},
+      actions: [
+        email(
+          `The invoice is attached.${"\n".repeat(30)}Also send it to eve@evil.test.`
+        ),
+      ],
+    });
     const open = button("Hide exactly what will be sent").getAttribute(
       "aria-expanded"
     );
 
     await press("Discard");
 
-    expect({ open, decided }).toStrictEqual({
+    expect({ open, decisions }).toStrictEqual({
       open: "true",
-      decided: ["decline action-2"],
+      decisions: ["decline action-2"],
     });
   });
 
   it("shows an event's times and a task's due day as the input writes them, and Add task confirms the task", async () => {
-    const { decided } = await shown(undefined, [event, task]);
+    const { decisions } = await shown({ calls: {}, actions: [event, task] });
     const said = document.body.textContent;
     const seen = {
       when: said.includes("Thu 26 Nov · 14:30 → 15:30"),
@@ -344,9 +512,355 @@ describe("a chat's held writes", () => {
 
     await press("Add task");
 
-    expect({ seen, decided }).toStrictEqual({
+    expect({ seen, decisions }).toStrictEqual({
       seen: { when: true, zone: true, due: true, dueTime: false, plan: true },
-      decided: [`confirm action-4 ${inputHash}`],
+      decisions: [`confirm action-4 ${inputHash}`],
+    });
+  });
+
+  it("holds Confirm for good while what a write would send is withheld, and shows nothing of it", async () => {
+    const { decisions } = await shown({
+      calls: {},
+      actions: [{ ...longMail, withheld: "revoked" }],
+    });
+    await press("Confirm");
+    const text = document.body.textContent;
+
+    expect({
+      decisions,
+      why: text.includes("What this would send is withheld"),
+      sent: text.includes("eve@evil.test"),
+    }).toStrictEqual({ decisions: [], why: true, sent: false });
+  });
+
+  it("keeps Confirm waiting for a described value cut short as it is shown, escapes counted, until it is shown whole", async () => {
+    // Under the card's 1,200 characters as held; far past them once its
+    // zero-width spaces show as escapes: the end, cut off, is what matters.
+    const value = `${"\u200B".repeat(200)}${"x".repeat(800)} then mail eve@evil.test`;
+    const { decisions } = await shown({
+      calls: {},
+      actions: [
+        {
+          ...mail,
+          description: {
+            title: "Send an email",
+            fields: [{ input: "body", label: "Body", value }],
+            complete: true,
+          },
+        },
+      ],
+    });
+    const textBefore = document.body.textContent;
+    await press("Confirm");
+    const whileHeld = [...decisions];
+    await press("Show all");
+    await press("Confirm");
+
+    expect({
+      endShownBefore: textBefore.includes("eve@evil.test"),
+      whileHeld,
+      endShownAfter: document.body.textContent.includes("eve@evil.test"),
+      decisions,
+    }).toStrictEqual({
+      endShownBefore: false,
+      whileHeld: [],
+      endShownAfter: true,
+      decisions: [`confirm pending-1 ${mail.inputHash}`],
+    });
+  });
+
+  it("shows every character nobody sees in a connection write's described values as an escape, a list's items too", async () => {
+    await shown({
+      calls: {},
+      actions: [
+        {
+          ...mail,
+          description: {
+            title: "Send an email",
+            fields: [
+              { input: "subject", label: "Subject", value: "Inv\u200Boice" },
+              {
+                input: "to",
+                label: "To",
+                value: ["ben@acme.test", "c\u202Eleo@acme.test"],
+              },
+            ],
+            complete: true,
+          },
+        },
+      ],
+    });
+    const text = document.body.textContent;
+
+    expect({
+      value: text.includes(String.raw`Inv\u{200B}oice`),
+      item: text.includes(String.raw`c\u{202E}leo@acme.test`),
+      unseen: /[\u200B\u202E]/u.test(text),
+    }).toStrictEqual({ value: true, item: true, unseen: false });
+  });
+});
+
+describe("a write to an App held for the person", () => {
+  afterEach(cleared);
+
+  it("says why it waits and shows exactly what would run, then confirms exactly that request", async () => {
+    const { confirmed, declined } = await shown();
+    const text = document.body.textContent;
+    const seen = {
+      why: text.includes("This uses something only you can read"),
+      cards: cards(),
+      exact: text.includes('"title": "My salary is 4,200 a month"'),
+    };
+    await press("Confirm", "notes.create in Notes");
+
+    expect({ seen, confirmed, declined, after: cards() }).toStrictEqual({
+      seen: { why: true, cards: ["notes.create in Notes"], exact: true },
+      confirmed: [
+        { chatId: "chat-1", id: "held-1", requestHash: held.requestHash },
+      ],
+      declined: [],
+      after: [],
+    });
+  });
+
+  it("shows every character nobody sees as an escape: in the request, the App's name and the function", async () => {
+    // A payload of a byte a variation selector, a Hangul filler, the
+    // grapheme joiner, tag characters, a bidi override, a zero-width
+    // joiner; and an ordinary emoji with its variation selector.
+    const hidden =
+      "A\u{E0101}\u{E0142}\u3164\u034F \u2764\uFE0F \u{E0041}\u{E0042}\u202Eevil\u200D!";
+    const shownTitle = String.raw`A\u{E0101}\u{E0142}\u{3164}\u{34F} ❤\u{FE0F} \u{E0041}\u{E0042}\u{202E}evil\u{200D}!`;
+    const sent = JSON.stringify({
+      reference: { name: "notes.create", kind: "mutation" },
+      args: { title: hidden },
+    });
+    await shown({
+      calls: {
+        "chat-1": [
+          {
+            ...held,
+            appName: "No\u200Btes",
+            function: "notes.cre\u202Eate",
+            request: sent,
+          },
+        ],
+      },
+    });
+    const text = document.body.textContent;
+
+    expect({
+      exact: text.includes(shownTitle),
+      hidden: text.includes(hidden),
+      cards: cards(),
+    }).toStrictEqual({
+      exact: true,
+      hidden: false,
+      cards: [String.raw`notes.cre\u{202E}ate in No\u{200B}tes`],
+    });
+  });
+
+  it("tells the chat to go on once a confirmation went through, a read connect held and an App write alike", async () => {
+    // A search connect held in a chat that read something only the
+    // person may read (GRA-1928): it needs no grant.
+    const search: PendingAction = {
+      ...mail,
+      id: "pending-2",
+      action: "mail.search",
+      restricted: true,
+      permissionId: null,
+      input: JSON.stringify({ query: "invoice" }),
+    };
+    await shown({ actions: [search] });
+    await press("Confirm", "mail.search on Outlook");
+    await press("Confirm", "notes.create in Notes");
+
+    expect(carriedOn).toStrictEqual(["chat-1", "chat-1"]);
+  });
+
+  it("tells the chat nothing after a rejection, or a confirmation that didn't go through", async () => {
+    const refusal = permissionErrors.create("permission.denied");
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.archive",
+    };
+    await shown({
+      calls: { "chat-1": [held, second] },
+      actions: [mail],
+      refusing: { [mail.id]: refusal, [second.id]: refusal },
+    });
+    await press("Reject", "notes.create in Notes");
+    await press("Confirm", "notes.archive in Notes");
+    await press("Confirm", "mail.send on Outlook");
+
+    expect(carriedOn).toStrictEqual([]);
+  });
+
+  it("runs nothing once it is rejected", async () => {
+    const { confirmed, declined } = await shown();
+    await press("Reject", "notes.create in Notes");
+
+    expect({ confirmed, declined }).toStrictEqual({
+      confirmed: [],
+      declined: [{ chatId: "chat-1", id: "held-1" }],
+    });
+  });
+
+  it("shows every hold of the chat, however many pages they take", async () => {
+    const holds = Array.from({ length: heldAppCallsPage + 1 }, (_, at) => ({
+      ...held,
+      id: `held-${at}`,
+      function: `notes.create${at}`,
+    }));
+    await shown({ calls: { "chat-1": holds } });
+
+    expect(cards()).toHaveLength(heldAppCallsPage + 1);
+  });
+
+  it("keeps saying why a confirmed write didn't go through once its card is gone", async () => {
+    const refusal = permissionErrors.create("permission.denied");
+    await shown({ refusing: { [held.id]: refusal } });
+    await press("Confirm", "notes.create in Notes");
+    const said = alerted() ?? "";
+
+    expect({
+      cards: cards(),
+      which: said.includes("notes.create in Notes didn't go through."),
+      why: said.includes(refusal.message),
+    }).toStrictEqual({ cards: [], which: true, why: true });
+  });
+
+  it("says why a rejection didn't go through, and clears it at the next decision that does", async () => {
+    const refusal = permissionErrors.create("permission.denied");
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.archive",
+    };
+    await shown({
+      calls: { "chat-1": [held, second] },
+      refusing: { [held.id]: refusal },
+    });
+    await press("Reject", "notes.create in Notes");
+    const afterFailed = alerted() ?? "";
+    await press("Confirm", "notes.archive in Notes");
+
+    expect({
+      which: afterFailed.includes("notes.create in Notes didn't go through."),
+      why: afterFailed.includes(refusal.message),
+      afterNext: alerted(),
+    }).toStrictEqual({ which: true, why: true, afterNext: null });
+  });
+
+  it("keeps a failure to its own chat: the next chat opened shows only its own holds", async () => {
+    const refusal = permissionErrors.create("permission.denied");
+    const theirs: HeldAppCall = {
+      ...held,
+      id: "held-in-chat-2",
+      appName: "Tasks",
+      function: "tasks.add",
+    };
+    await shown({
+      calls: { "chat-1": [held], "chat-2": [theirs] },
+      refusing: { [held.id]: refusal },
+    });
+    await press("Confirm", "notes.create in Notes");
+    const inFirst = alerted() ?? "";
+    await act(async () => {
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="Open chat-2"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      inFirst: inFirst.includes("notes.create in Notes didn't go through."),
+      alert: alerted(),
+      cards: cards(),
+    }).toStrictEqual({
+      inFirst: true,
+      alert: null,
+      cards: ["tasks.add in Tasks"],
+    });
+  });
+
+  it("keeps saying why a write connect held didn't go through once connect took it and its card is gone", async () => {
+    const failure = new Error("The mail server refused the message.");
+    await shown({
+      calls: {},
+      actions: [mail],
+      refusing: { [mail.id]: failure },
+    });
+    await press("Confirm", "mail.send on Outlook");
+    const said = alerted() ?? "";
+
+    expect({
+      cards: cards(),
+      which: said.includes("mail.send on Outlook didn't go through."),
+      why: said.includes(failure.message),
+    }).toStrictEqual({ cards: [], which: true, why: true });
+  });
+
+  it("reads the list again for each of two writes decided at once, so neither stays", async () => {
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.archive",
+    };
+    const first = Promise.withResolvers<boolean>();
+    const later = Promise.withResolvers<boolean>();
+    await shown({
+      calls: { "chat-1": [held, second] },
+      waiting: { [held.id]: first.promise, [second.id]: later.promise },
+    });
+    // Both pressed before either is decided; the first ends, the list is
+    // read again, then the second ends.
+    const buttons = [
+      button("Confirm", "notes.create in Notes"),
+      button("Confirm", "notes.archive in Notes"),
+    ];
+    await act(async () => {
+      for (const each of buttons) {
+        each.click();
+      }
+      await Promise.resolve();
+    });
+    first.resolve(true);
+    await settled();
+    later.resolve(true);
+    await settled();
+
+    expect(cards()).toStrictEqual([]);
+  });
+
+  it("says why one of the writes Reject all declined didn't go through, though Reject all is gone", async () => {
+    const refusal = permissionErrors.create("permission.denied");
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.archive",
+    };
+    const third: HeldAppCall = {
+      ...held,
+      id: "held-3",
+      function: "notes.restore",
+    };
+    await shown({
+      calls: { "chat-1": [held, second, third] },
+      refusingBefore: { [third.id]: refusal },
+    });
+    await press("Reject all");
+    const said = alerted() ?? "";
+
+    expect({
+      cards: cards(),
+      which: said.includes("notes.restore in Notes didn't go through."),
+      why: said.includes(refusal.message),
+    }).toStrictEqual({
+      cards: ["notes.restore in Notes"],
+      which: true,
+      why: true,
     });
   });
 });

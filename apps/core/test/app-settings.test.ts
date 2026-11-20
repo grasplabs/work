@@ -4,9 +4,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { updateApp } from "../src/app-settings.ts";
+import { newTeam } from "./admin-teams.ts";
 import { outlook, published, release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
 import { racingDb } from "./racing-db.ts";
 import {
   auditedDuring,

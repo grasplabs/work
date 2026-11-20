@@ -67,6 +67,12 @@ const answered = async (follower: Follower) => {
   );
 };
 
+/**
+ * Whether `callId` is a code step's, never the recall before a question
+ * that every turn runs (turn-recall.ts names its calls `recall_…`).
+ */
+const ofCode = (callId: string): boolean => !callId.startsWith("recall_");
+
 /** What a page shows of a call: everything but when. */
 const line = ({ at: _at, ...event }: ChatToolEvent) => event;
 
@@ -74,14 +80,14 @@ const line = ({ at: _at, ...event }: ChatToolEvent) => event;
 const stepCode = `export default async (self, env) => {
   const files = await env.chat.files();
   const workflows = await env.workflows.independent();
-  const found = await env.knowledge.search("the secret parental leave policy");
+  const found = await env.skills.select({ task: "the secret parental leave policy" });
   let refused = false;
   try {
-    await env.knowledge.read("doc-that-is-not-there");
+    await env.skills.read({ skill: { scope: "company", name: "not-there", version: 1 } });
   } catch {
     refused = true;
   }
-  return { files: files.length, workflows: workflows.length, hits: found.hits.length, refused };
+  return { files: files.length, workflows: workflows.length, hits: found.skills.length, refused };
 };`;
 
 describe("a chat's tool lines", () => {
@@ -96,15 +102,15 @@ describe("a chat's tool lines", () => {
 
     const result = follower
       .messages()
-      .find((message) => message.role === "result");
+      .find((message) => message.role === "result" && ofCode(message.callId));
     const callId = result?.role === "result" ? result.callId : "none";
-    const tools = follower.tools();
+    const tools = follower.tools().filter((tool) => tool.callId === callId);
     expect({
       result: result?.text,
       lines: tools.map(line),
       // Each came once, in the order the code made them.
       ids: tools.map(({ id }) => id),
-      // The search's words are the person's question: never on a line.
+      // The task's words are the person's question: never on a line.
       leaked: JSON.stringify(tools).includes("secret"),
       // Refused with an error code, never a message.
       code: /^[a-z_]+\.[a-z_]+$/u.test(tools[3]?.reason ?? ""),
@@ -133,16 +139,16 @@ describe("a chat's tool lines", () => {
         {
           id: tools[2]?.id,
           callId,
-          method: "knowledge.search",
+          method: "skills.select",
           target: null,
-          summary: { hits: 0 },
+          summary: { skills: 0 },
           outcome: "ok",
           reason: null,
         },
         {
           id: tools[3]?.id,
           callId,
-          method: "knowledge.read",
+          method: "skills.read",
           target: null,
           summary: {},
           outcome: "refused",
@@ -174,18 +180,23 @@ describe("a chat's tool lines", () => {
     await ann.chats.send(chat.id, { text: "Anything attached?", model });
     await answered(first);
     await ann.chats.send(chat.id, { text: "Any workflows?", model });
+    /** The lines of `follower`'s code steps. */
+    const codeLines = (tools: readonly ChatToolEvent[] = []) =>
+      tools.filter(({ callId }) => ofCode(callId));
     await vi.waitFor(
       () => {
-        expect(first.tools()).toHaveLength(2);
+        expect(codeLines(first.tools())).toHaveLength(2);
       },
       { timeout: 10_000 }
     );
     await answered(first);
-    const streamed = first.tools();
+    const streamed = codeLines(first.tools());
     const steps = first
       .messages()
       .flatMap((message) =>
-        message.role === "result" ? [message.callId] : []
+        message.role === "result" && ofCode(message.callId)
+          ? [message.callId]
+          : []
       );
 
     // Opened later, it comes in the first update with the messages.
@@ -211,8 +222,8 @@ describe("a chat's tool lines", () => {
 
     expect({
       methods: streamed.map(({ method, callId }) => [method, callId]),
-      later: later.updates[0]?.tools,
-      restarted: restarted.updates[0]?.tools,
+      later: codeLines(later.updates[0]?.tools),
+      restarted: codeLines(restarted.updates[0]?.tools),
     }).toStrictEqual({
       methods: [
         ["chat.files", steps[0]],

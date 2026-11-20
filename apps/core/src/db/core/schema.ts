@@ -5,6 +5,16 @@ import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { ChatFileType } from "@grasp-os/shared/chat";
 import type { DependencyFinding } from "@grasp-os/shared/dependencies";
 import { modelRoles } from "@grasp-os/shared/deployment-config";
+import type {
+  DirectoryDeletedFailure,
+  DirectoryProvider,
+  DirectoryReadFailure,
+} from "@grasp-os/shared/directory";
+import {
+  directoryGroupHelds,
+  directoryGroupKinds,
+  directoryGroupMembersFrom,
+} from "@grasp-os/shared/directory";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
 import type {
@@ -12,6 +22,7 @@ import type {
   DeclaredPermission,
 } from "@grasp-os/shared/permissions";
 import { signalKinds } from "@grasp-os/shared/signals";
+import { subjectKinds } from "@grasp-os/shared/subject";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 /**
  * Core D1 database: identity (Better Auth), permissions and the App registry.
@@ -24,6 +35,7 @@ import type { RunFailure } from "@grasp-os/shared/workflows";
 import { sql } from "drizzle-orm";
 import {
   check,
+  foreignKey,
   index,
   integer,
   primaryKey,
@@ -64,6 +76,12 @@ export const sessions = sqliteTable(
     activeTeamId: text("active_team_id"),
     /** A Grasp staff session: time-bound, and not a member of the organization. */
     staff: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * A session for someone's own interview alone, made while the gate is
+     * closed (onboarding/gate.ts, GRA-1790): it opens their interview and
+     * nothing else of Grasp, and the gate's opening ends it.
+     */
+    interview: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("sessions_user_id_idx").on(table.userId)]
 );
@@ -94,6 +112,26 @@ export const accounts = sqliteTable(
      * so staff sessions can be checked against the current staff list.
      */
     oid: text(),
+    /**
+     * The address the ID token of the latest sign-in gave and marked
+     * verified (`email_verified`, Google's): what an item's reader list
+     * may name this account by (source-readers.ts). Null for Entra, whose
+     * `email` claim is not verified.
+     */
+    verifiedEmail: text("verified_email"),
+    /**
+     * When the latest sign-in confirmed `verified_email`: the address
+     * counts only within a day of it (source-readers.ts,
+     * `readerProofMaxAgeMs`), as every proof of an address does.
+     */
+    verifiedEmailAt: timestamp("verified_email_at"),
+    /**
+     * The tenant the ID token of the latest sign-in was checked against
+     * (Entra's `tid`, Google's `hd`): this account counts as a reader in a
+     * copied list only while the sign-in config names that tenant
+     * (source-readers.ts).
+     */
+    verifiedTenant: text("verified_tenant"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
@@ -102,6 +140,19 @@ export const accounts = sqliteTable(
     // Who writes in Teams, by the object id its messages carry
     // (channels/who.ts).
     index("accounts_oid_idx").on(table.oid),
+    // The directory's people by the object id a sign-in of a provider
+    // kept, compared lower case as the daily read keeps it
+    // (directory-ties.ts), with no other comparison of the id changed.
+    index("accounts_provider_oid_lower_idx").on(
+      table.providerId,
+      sql`lower(${table.oid})`
+    ),
+    // Google's directory people by the sign-in's own ID (its `sub`), as
+    // directory-ties.ts compares it: through `lower()`, like Entra's.
+    index("accounts_provider_account_lower_idx").on(
+      table.providerId,
+      sql`lower(${table.accountId})`
+    ),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
       table.accountId
@@ -153,7 +204,7 @@ export const organizations = sqliteTable("organizations", {
 
 /**
  * The organization's settings an admin keeps beside its name and time zone
- * (org-settings.ts): one row per kind (`billing`), its value as
+ * (org-settings.ts): one row per kind (`billing`, `own_agents`), its value as
  * JSON, checked again as it is read. None until an admin saves one.
  */
 export const orgSettings = sqliteTable("org_settings", {
@@ -175,6 +226,27 @@ export const members = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     role: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * When the member was suspended: they may not act or be read as
+     * (membership-sql.ts `mayAct`), and everything of theirs stays as it
+     * is, for when it is lifted. Null while they may act. Written by the
+     * directory's daily read alone (directory-suspensions.ts); no client
+     * can (Better Auth's `input: false`, auth.ts).
+     */
+    suspendedAt: timestamp("suspended_at"),
+    /**
+     * What suspended them: `directory`, the daily read, which alone lifts
+     * the suspensions it made. Null while they may act.
+     */
+    suspendedBy: text("suspended_by"),
+    /**
+     * Unused, and always null: the lift by hand it was added for was
+     * taken back (GRA-2141), as only the directory lifts a suspension.
+     * Nothing reads or writes it. Dropped by a later contract migration,
+     * as columns go only once no release a client may roll back to has
+     * them.
+     */
+    keptActiveAt: timestamp("kept_active_at"),
   },
   (table) => [
     uniqueIndex("members_organization_user_idx").on(
@@ -361,7 +433,7 @@ export const channelConversations = sqliteTable(
 );
 /**
  * A workflow Stephen offered to start, on a card in a person's chat app:
- * the workflow, the exact version and input the card shows, and, once the
+ * the workflow and the input the card shows, and, once the
  * person pressed Start, where they pressed it and the start it made, so
  * the run's end is told there once (`toldAt`). Good for a day unpressed
  * (`expiresAt`). Kept by channels/workflow-offers.ts.
@@ -380,8 +452,16 @@ export const chatWorkflowOffers = sqliteTable(
     workflowId: text("workflow_id").notNull(),
     /** Its name when offered, as the card shows it. */
     workflowName: text("workflow_name").notNull(),
-    version: integer().notNull(),
-    /** Its input, as the version's contract took it: canonical JSON. */
+    /**
+     * Unused since a press starts the version live as it is pressed:
+     * written and read by nothing. Dropped in a later release (expand,
+     * then contract).
+     */
+    version: integer(),
+    /**
+     * Its input, as the live version's contract took it as it was
+     * offered: canonical JSON, checked again by the start.
+     */
     input: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
@@ -428,7 +508,7 @@ export const channelSignals = sqliteTable(
 
 /**
  * Who is in a chat that others share, a group chat or channel on a chat
- * platform, as its agent reads for it (`knowledge/access.ts`): kept by the
+ * platform, as its agent reads for it (chat-audiences.ts): kept by the
  * Workspace object that holds the chat, before each turn, from the
  * platform's roster then. The agent reads only what every member may
  * read, and nothing at all with `outsiders` in it: anyone Grasp can't name
@@ -507,6 +587,258 @@ export const teamMembers = sqliteTable(
 );
 
 /**
+ * The confirmed staff list whose teams were last made in Settings ›
+ * Members (GRA-2055), by the onboarding store's version of them: one row
+ * for the company. Each sync claims its version here, only when it is
+ * newer, in the same batch as its writes, and each write holds only while
+ * the row names that version (staff-list-teams.ts `syncTeams`): an older
+ * confirm never makes a team after a newer one.
+ */
+export const staffListSynced = sqliteTable("staff_list_synced", {
+  organizationId: text("organization_id").primaryKey(),
+  version: integer().notNull(),
+});
+
+/**
+ * The ids of every team deleted (GRA-2055), kept for good: written by the
+ * trigger `teams_delete_retires` (migration 0278, staff_list_teams) in the statement that
+ * deletes the row, so no code of any release, before this one or after a
+ * rollback, deletes a team without it. The staff list makes a members'
+ * team only under an id not here, checked in the statement that makes it
+ * (staff-list-teams.ts `syncTeams`), so a deleted team's id never
+ * comes back with what was shared with it, whatever the onboarding's
+ * store holds.
+ */
+export const retiredTeamIds = sqliteTable("retired_team_ids", {
+  id: text().primaryKey(),
+});
+
+/**
+ * Everyone the organization's directory listed at its last daily read
+ * that was applied whole (GRA-2056, directory-people.ts): the provider's
+ * ID of each, in the tenant read, with what later reads act on, and the
+ * member they are tied to. Written by that read alone, which replaces
+ * every row of its provider in one batch, and by the tie at sign-in
+ * (`userId` alone). No name, address, title or manager: nothing reads
+ * them here. A person's erasure deletes their rows.
+ */
+export const directoryPeople = sqliteTable(
+  "directory_people",
+  {
+    /** The directory read (`microsoft-directory`). */
+    provider: text().notNull(),
+    /** The provider's tenant the read came from (Entra's tenant ID). */
+    tenant: text().notNull(),
+    /** The provider's ID of the person (Entra's object ID), lower case. */
+    accountId: text("account_id").notNull(),
+    /** Their department, as connect cleaned it; empty for none. */
+    department: text().notNull(),
+    /** Whether their account is turned on; nothing acts on it yet. */
+    enabled: integer({ mode: "boolean" }).notNull(),
+    /**
+     * Whether their account is turned off because it was deleted (Entra
+     * keeps a deleted account 30 days), as the read found it.
+     */
+    deleted: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The member whose sign-in account names the same ID in the same
+     * tenant, while they are a member (`tieDirectoryPeople`); null for
+     * nobody.
+     */
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.tenant, table.accountId] }),
+    index("directory_people_user_id_idx").on(table.userId),
+  ]
+);
+
+/**
+ * Which members' team each department of the directory fills (GRA-2056,
+ * directory-teams.ts): by the team's id, linked by name once, when the
+ * read first met the department and exactly one team had its name
+ * (`teamNameKey`); held by id after, so a rename of either never breaks
+ * it. Goes with the team. Names a department and a team, no person.
+ */
+export const directoryDepartments = sqliteTable(
+  "directory_departments",
+  {
+    provider: text().notNull(),
+    /** The department as the read keeps it (`directory_people.department`). */
+    department: text().notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.department] }),
+    index("directory_departments_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The team memberships the directory's daily read made (GRA-2056,
+ * directory-teams.ts), by the membership's own key: the only ones it ever
+ * takes away. Goes with the membership however it goes (by hand, with
+ * the team, a removal or an erasure). Better Auth's `team_members` takes
+ * no field of ours, so this is the mark beside it.
+ */
+export const directoryMemberships = sqliteTable("directory_memberships", {
+  membershipKey: text("membership_key")
+    .primaryKey()
+    .references(() => teamMembers.membershipKey, { onDelete: "cascade" }),
+});
+
+/**
+ * A member an admin put in a team, or took out of it, by hand (GRA-2056):
+ * the directory's read never changes that pair until an admin lets it
+ * (`releaseTeamPin`, members.ts). Written in Better Auth's before hooks
+ * of the two routes that change a membership by hand (auth.ts).
+ */
+export const teamPins = sqliteTable(
+  "team_pins",
+  {
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Kept in the team (true) or out of it (false): the read never takes
+     * them out of it, or never puts them in it (directory-teams.ts).
+     */
+    kept: integer({ mode: "boolean" }).notNull(),
+    pinnedAt: timestamp("pinned_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.teamId] }),
+    index("team_pins_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The directory's groups an admin mapped to a members' team (GRA-2056,
+ * directory-groups.ts): the daily read places each group's members in its
+ * team. One team per group, by the group's Entra object ID, so a rename
+ * changes only the name kept here. Goes with the team. Holds no person:
+ * who mapped it is in the audit log.
+ */
+export const directoryGroupTeams = sqliteTable(
+  "directory_group_teams",
+  {
+    /** The directory read (`microsoft-directory`). */
+    provider: text().notNull(),
+    /** The group's Entra object ID, lower case. */
+    groupId: text("group_id").notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    /** The group's name, kind and who decides its members, as Microsoft last answered. */
+    name: text().notNull(),
+    kind: text({ enum: directoryGroupKinds }).notNull(),
+    membersFrom: text("members_from", {
+      enum: directoryGroupMembersFrom,
+    }).notNull(),
+    mappedAt: timestamp("mapped_at").notNull(),
+    /**
+     * When the daily read last read the group whole: until it has, since
+     * the group was mapped to this team, the mapping places nobody.
+     */
+    readAt: timestamp("read_at"),
+    /**
+     * Why the last read left the group as it was, null when it didn't:
+     * `gone` (Microsoft has no such group), `refused` (Microsoft refused
+     * to read it), `not_mappable` (it can't be a team's now) or `empty`.
+     */
+    held: text({ enum: directoryGroupHelds }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.groupId] }),
+    index("directory_group_teams_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The members of each group mapped to a team (GRA-2056,
+ * directory-group-reads.ts) or named by a copied reader list (GRA-2146,
+ * directory-reader-groups.ts), nested groups' included, as the last read
+ * that read the group whole listed them: one row per group and person the
+ * read keeps (`directory_people`), by the provider's ID. Goes with the
+ * person's row, so with them leaving the directory or being erased; and
+ * once the group is neither mapped nor named (`unneededGroupRows`).
+ */
+export const directoryGroupMembers = sqliteTable(
+  "directory_group_members",
+  {
+    provider: text().notNull(),
+    tenant: text().notNull(),
+    groupId: text("group_id").notNull(),
+    accountId: text("account_id").notNull(),
+    /**
+     * When the read that last listed them in the group started: a proof
+     * of the group for a reader list counts a day from it
+     * (source-readers.ts `provedGroupsOf`). 0 proves nothing.
+     */
+    readAt: timestamp("read_at")
+      .notNull()
+      .default(sql`0`),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.provider, table.groupId, table.tenant, table.accountId],
+    }),
+    index("directory_group_members_person_idx").on(
+      table.provider,
+      table.tenant,
+      table.accountId
+    ),
+    foreignKey({
+      columns: [table.provider, table.tenant, table.accountId],
+      foreignColumns: [
+        directoryPeople.provider,
+        directoryPeople.tenant,
+        directoryPeople.accountId,
+      ],
+    }).onDelete("cascade"),
+  ]
+);
+
+/**
+ * Where each provider's daily read of the directory stands (GRA-2056,
+ * directory-people.ts), for the admin: the read last applied, what it
+ * counted, and the last failure since. `run` and `startedAt` are the
+ * claim of the newest read, taken in the batch that applies it, which
+ * holds only while no later-started read claimed it: an older read never
+ * lands after a newer one.
+ */
+export const directoryReads = sqliteTable("directory_reads", {
+  provider: text().$type<DirectoryProvider>().primaryKey(),
+  /** The directory connection last read or tried. */
+  connectionId: text("connection_id").notNull(),
+  tenant: text().notNull(),
+  run: text(),
+  startedAt: timestamp("started_at"),
+  /** When the last read was applied; null before one was. */
+  readAt: timestamp("read_at"),
+  /** How many people that read listed, and how many of them were turned off. */
+  people: integer(),
+  disabled: integer(),
+  /** The last read's failure since `readAt`, as a directory error code. */
+  failure: text().$type<DirectoryReadFailure>(),
+  failedAt: timestamp("failed_at"),
+  /**
+   * Why the last applied read went on without the deleted accounts, as a
+   * directory error code (`directory.deleted_refused` or
+   * `directory.deleted_unsupported`): nobody was suspended for having
+   * left. Null when it read them.
+   */
+  deletedFailure: text("deleted_failure").$type<DirectoryDeletedFailure>(),
+});
+
+/**
  * Part of the SSO plugin's model, and stays empty: sign-in providers come
  * only from deployment config, and registering one in-product is refused.
  */
@@ -563,12 +895,13 @@ export const auditOutboxRejected = sqliteTable(
  * and revoke columns ever change.
  *
  * The object is stored by type: a connection is `object_id`, with
- * `resource` naming one resource in it or null for all of it; a collection
- * is `object_id`; a workflow is its workflow resource's ID in `object_id`;
- * an App is its ID in `object_id`: an agent's, to call its functions,
- * with `resource` null; a workflow's, to call one of them, with that
- * function's stable ID in `resource`. `actions` is a JSON array of action
- * names.
+ * `resource` naming one resource in it or null for all of it; a workflow
+ * is its workflow resource's ID in `object_id`; an App is its ID in
+ * `object_id`: an agent's, to call its functions, with `resource` null; a
+ * workflow's, to call one of them, with that function's stable ID in
+ * `resource`. `actions` is a JSON array of action names. Rows of a kind
+ * the platform removed (a store's) may remain, which every read takes as
+ * not there (`servedSql` in permissions.ts).
  */
 export const permissions = sqliteTable(
   "permissions",
@@ -579,7 +912,7 @@ export const permissions = sqliteTable(
     }).notNull(),
     subjectId: text("subject_id").notNull(),
     objectType: text("object_type", {
-      enum: ["connection", "collection", "workflow", "app", "platform"],
+      enum: ["connection", "workflow", "app", "platform"],
     }).notNull(),
     objectId: text("object_id").notNull(),
     resource: text(),
@@ -615,6 +948,14 @@ export const permissions = sqliteTable(
      * changes, so this is read from connect once, as it is asked for.
      */
     personal: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The teams an App's `brain` permission reaches, by ID: a JSON array
+     * as text (`PermissionObject`'s `teams`), read with `storedTeamsOf`
+     * (brain-grant-teams.ts) so a malformed row breaks no one else's read;
+     * null for every other permission, and for a `brain` one that reaches
+     * the company alone. Set as it is asked for, never changed after.
+     */
+    teams: text(),
   },
   (table) => [
     index("permissions_subject_idx").on(
@@ -955,8 +1296,9 @@ export const blueprints = sqliteTable(
     appId: text("app_id").references(() => apps.id),
     version: integer(),
     /**
-     * Whether an admin approved its code: a copy's first version is
-     * approved only then (`madeCurrent`).
+     * Unused since an admin approves access, never a version: nothing
+     * reads it, and it is written false. Dropped in a later release
+     * (expand, then contract).
      */
     approved: integer({ mode: "boolean" }).notNull(),
     /**
@@ -986,8 +1328,8 @@ export const blueprints = sqliteTable(
 /**
  * Where an App created from a blueprint came from (src/app-blueprints.ts):
  * the blueprint, the version of its App a marked one was (null for a
- * built-in), the tree it was copied from, and that tree's code
- * (`codeIdentity`), stored under the App as a version's tree is, for an
+ * built-in), the tree it was copied from, and that tree's code as it was
+ * taken, stored under the App as a version's tree is, for an
  * update to be merged over. Written in the batch that creates the App
  * from the blueprint, and moved on to a built-in's newer code only in the
  * batch that commits an update a builder accepted: unlike
@@ -1030,9 +1372,9 @@ export const appVersions = sqliteTable(
     parent: integer(),
     tree: text().notNull(),
     /**
-     * The hash of the version's code (`codeIdentity`, apps.ts): its files
-     * but AGENTS.md, which agents write and nothing builds or runs. Null
-     * for a version committed before the column, which is no blueprint's.
+     * The hash of the version's code: its tree, the whole of its code.
+     * Null for a version committed before the column, which is no
+     * blueprint's.
      */
     code: text(),
     /**
@@ -1048,15 +1390,17 @@ export const appVersions = sqliteTable(
     definitionHash: text("definition_hash"),
     files: integer().notNull(),
     authorId: text("author_id").notNull(),
+    /**
+     * Unused since every version is a published draft, which says nothing
+     * of its own: written empty. Dropped in a later release (expand, then
+     * contract).
+     */
     message: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
     /**
-     * Whether an admin approved this version's code for the App's
-     * permissions to change things with (permissions.ts, `authorize`): 1
-     * once an admin made it current or granted a permission while it was,
-     * or it is an App's first version copied from a blueprint; 0 once
-     * someone who couldn't grant made it current, until then. Null for one
-     * never made current, which never runs.
+     * Unused since an admin approves access, never a version: nothing
+     * reads it, and it is written null. Dropped in a later release
+     * (expand, then contract).
      */
     approved: integer(),
     /**
@@ -1086,7 +1430,7 @@ export const appVersions = sqliteTable(
     /**
      * What people call it, `YY.MM.N` as the platform's releases are
      * (@grasp-os/shared/release-id): given in the statement that first
-     * makes it live (apps.ts, `makeCurrent`), so only a version that went
+     * makes it live (apps.ts, `activateVersion`), so only a version that went
      * live has one and the count has no gaps; kept when a roll back makes
      * it live again. Null for a version never live. The integer `version`
      * stays its ID.
@@ -1114,7 +1458,13 @@ export const appVersions = sqliteTable(
 );
 
 /**
- * Each App's draft (src/app-drafts.ts): the one every builder of the App
+ * Unused since every subject's draft is in `drafts` (src/drafts.ts),
+ * which started empty (migration 0250): nothing reads or writes
+ * it. Kept while a release that writes it may serve or be rolled back to
+ * (expand, then contract); dropped in a later release, as are the four
+ * tables after it.
+ *
+ * Each App's draft: the one every builder of the App
  * and their chats' agents write, over the version it began from (`base`,
  * null for an App with none). Each write is the next `revision`, and
  * lands only over the revision it read, so of two writes made from the
@@ -1139,8 +1489,8 @@ export const appDrafts = sqliteTable("app_drafts", {
 });
 
 /**
- * A draft's changes (`appDrafts`): a file's new content by path, or null
- * to delete it, a row each, so no row holds more than one file.
+ * Unused (as `appDrafts`): a draft's changes, a file's new content by
+ * path, or null to delete it, a row each. Dropped in a later release.
  */
 export const appDraftFiles = sqliteTable(
   "app_draft_files",
@@ -1155,7 +1505,8 @@ export const appDraftFiles = sqliteTable(
 );
 
 /**
- * The undo points of each App's draft: one per agent turn that wrote it,
+ * Unused (as `appDrafts`), dropped in a later release: the undo points of
+ * each App's draft, now `draft_checkpoints`. One per agent turn that wrote it,
  * kept as the turn left the draft, one per person's own edit, and one per
  * restore. `number` counts up from 1 per App in the order they landed;
  * `revision` is the draft's revision it made, `base` the version it is
@@ -1194,7 +1545,8 @@ export const appDraftPoints = sqliteTable(
 );
 
 /**
- * What an undo point (`appDraftPoints`) changes over its base: each
+ * Unused (as `appDrafts`), dropped in a later release, now
+ * `draft_checkpoint_files`: what an undo point (`appDraftPoints`) changes over its base: each
  * path's content by its SHA-256 (`appDraftContents`), or null to delete
  * the file, a row each.
  */
@@ -1213,8 +1565,8 @@ export const appDraftPointFiles = sqliteTable(
 );
 
 /**
- * The contents an App's undo points name, each once, by its SHA-256: most
- * writes change a file or two, so the points share the rest.
+ * Unused (as `appDrafts`), dropped in a later release, now `draft_blobs`:
+ * the contents an App's undo points name, each once, by its SHA-256.
  */
 export const appDraftContents = sqliteTable(
   "app_draft_contents",
@@ -1226,6 +1578,140 @@ export const appDraftContents = sqliteTable(
     content: text().notNull(),
   },
   (table) => [primaryKey({ columns: [table.appId, table.sha256] })]
+);
+
+/**
+ * The draft of each App and workflow (src/drafts.ts), keyed by its
+ * subject (`subject_kind`, `subject_id`): the one every builder of it and
+ * their chats' agents write, over the version it began from (`base`, null
+ * for one with none). Each write is the next `revision`, and lands only
+ * over the revision it read, so of two writes made from the same read the
+ * second is refused. A draft whose changes are all gone (published or
+ * discarded) keeps its row and its revision. A workflow's draft is one
+ * file, `workflow.json`.
+ */
+export const drafts = sqliteTable(
+  "drafts",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    base: integer(),
+    revision: integer().notNull(),
+    /**
+     * An App draft's own definition, as its text (`definitionText`), next
+     * to its changed files: what the definition tools change. Null while
+     * it is its base's, and always for a workflow.
+     */
+    definition: text(),
+    updatedAt: timestamp("updated_at").notNull(),
+    /** Who wrote it last: the person, themselves or through their chat's agent. */
+    updatedBy: text("updated_by").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.subjectKind, table.subjectId] })]
+);
+
+/**
+ * A draft's changes (`drafts`): a file's new content by path, or null to
+ * delete it, a row each, so no row holds more than one file.
+ */
+export const draftFiles = sqliteTable(
+  "draft_files",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    path: text().notNull(),
+    content: text(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.path],
+    }),
+  ]
+);
+
+/**
+ * The checkpoints of each draft: one per agent turn that wrote it, kept
+ * as the turn left the draft, one per person's own edit, and one per
+ * restore, discard, publish and roll back. `number` counts up from 1 per
+ * subject in the order they landed; `revision` is the draft's revision
+ * it made, `base` the version it is over, `definition` its own definition
+ * (as `drafts.definition`), and `content_hash` the SHA-256 of what it
+ * holds (the canonical JSON of `base`, each path's content hash and its
+ * definition). Who wrote it: `person_id`, through the agent of chat
+ * `chat_id` in turn `turn_id` (its last write in the code step
+ * `call_id`), or themselves, restoring checkpoint `restored_from`. The
+ * draft's own rows hold only the latest; these hold every one, to list,
+ * preview and restore, and to say what a chat worked on.
+ */
+export const draftCheckpoints = sqliteTable(
+  "draft_checkpoints",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    number: integer().notNull(),
+    revision: integer().notNull(),
+    base: integer(),
+    definition: text(),
+    contentHash: text("content_hash").notNull(),
+    personId: text("person_id").notNull(),
+    chatId: text("chat_id"),
+    turnId: text("turn_id"),
+    callId: text("call_id"),
+    restoredFrom: integer("restored_from"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.number],
+    }),
+    // What a chat worked on, and what its turn wrote, without a scan.
+    index("draft_checkpoints_chat").on(table.chatId, table.turnId),
+  ]
+);
+
+/**
+ * What a checkpoint (`draftCheckpoints`) changes over its base: each
+ * path's content by its SHA-256 (`draftBlobs`), or null to delete the
+ * file, a row each.
+ */
+export const draftCheckpointFiles = sqliteTable(
+  "draft_checkpoint_files",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    number: integer().notNull(),
+    path: text().notNull(),
+    sha256: text(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.number, table.path],
+    }),
+    index("draft_checkpoint_files_content").on(
+      table.subjectKind,
+      table.subjectId,
+      table.sha256
+    ),
+  ]
+);
+
+/**
+ * The contents a subject's checkpoints name, each once, by its SHA-256:
+ * most writes change a file or two, so the checkpoints share the rest.
+ */
+export const draftBlobs = sqliteTable(
+  "draft_blobs",
+  {
+    subjectKind: text("subject_kind", { enum: subjectKinds }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    sha256: text().notNull(),
+    content: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.subjectKind, table.subjectId, table.sha256],
+    }),
+  ]
 );
 
 /**
@@ -1471,7 +1957,7 @@ export const sdkResourceBindings = sqliteTable(
         "model",
         "decision",
         "event",
-        "knowledge",
+        "brain",
         "files",
       ],
     }).notNull(),
@@ -1804,7 +2290,7 @@ export const appResourceBindings = sqliteTable(
       .references(() => apps.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["model", "connector", "knowledge", "grasp", "guests"],
+      enum: ["model", "connector", "brain", "grasp", "guests"],
     }).notNull(),
     target: text().notNull(),
     declarationHash: text("declaration_hash").notNull(),
@@ -2386,14 +2872,9 @@ export const brainCaptureIntents = sqliteTable(
 );
 
 /**
- * Every document version a run's recalls cited (GRA-299; workflows/
- * run-evidence.ts), with the Brain binding's permission each came through:
- * identifiers and a stand-in for each text only. It only grows while
- * the run lives, so no recall can narrow it, and before the run's next
- * model, connection or App call, decision or output, the host checks the
- * run may still read them all, under those permissions, as they were
- * recalled. A run that may no longer, or whose recalled text a purge
- * rewrote, is refused from then on. Goes with the run's details.
+ * What a run's recalls of the old Brain cited (GRA-299). Nothing writes or
+ * reads it since GRA-1941; it stays for a rollback to the release before, which
+ * still does, and the next contract migration drops it (expand, then contract).
  */
 export const runBrainEvidence = sqliteTable(
   "run_brain_evidence",
@@ -2404,8 +2885,8 @@ export const runBrainEvidence = sqliteTable(
     /** The document's version it recalled. */
     version: integer().notNull(),
     /**
-     * What stood for that version's text as it was recalled (`PinnedVersion`
-     * in @grasp-os/brain/recall-store): changed by a purge.
+     * What stood for that version's text as it was recalled, by today's
+     * Brain's recall, gone since GRA-1941.
      */
     pinned: text().notNull(),
     /**
@@ -2434,6 +2915,106 @@ export const runBrainEvidence = sqliteTable(
 );
 
 /**
+ * Every version of the Brain a run's recalls handed it (workflows/
+ * run-evidence.ts), by its source as its producer names it and its
+ * number, with the permission to read the Brain it came through:
+ * identifiers only. A version never changes, so a row means the same text
+ * for as long as it is kept. It only grows while the run lives, and
+ * before the run's next model, connection or App call, decision or
+ * output, the host checks the run may still read them all: each grant
+ * still the run's, and each version still one its person may read. A run
+ * that may no longer is refused from then on. Goes with the run's details,
+ * unless a key of its workflow's state names the run (`keptRunEvidence`).
+ */
+export const runBrainVersions = sqliteTable(
+  "run_brain_versions",
+  {
+    runId: text("run_id").notNull(),
+    producer: text().notNull(),
+    sourceId: text("source_id").notNull(),
+    version: integer().notNull(),
+    permissionId: text("permission_id").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.runId,
+        table.producer,
+        table.sourceId,
+        table.version,
+        table.permissionId,
+      ],
+    }),
+  ]
+);
+
+/**
+ * Every memory of the Brain's shared store a run's entity reads rested on
+ * (workflows/run-evidence.ts, GRA-1985): the memories of a card or a page
+ * of entities, the ones that named them and made them seen, by id, with
+ * the permission to read the Brain it came through: identifiers only, no
+ * person's. An id is never used again, so a row means the same memory for
+ * as long as it is kept. It only grows while the run lives, and before
+ * the run's next model, connection or App call, decision or output, the
+ * host checks the company may still read them all and their writers
+ * haven't retired them: one a person's erasure took, retired or taken
+ * back, or whose source was erased or narrowed, refuses the run from then
+ * on. Goes with the run's details, unless a key of its workflow's state
+ * names the run (`keptRunEvidence`).
+ */
+export const runBrainMemories = sqliteTable(
+  "run_brain_memories",
+  {
+    runId: text("run_id").notNull(),
+    memoryId: text("memory_id").notNull(),
+    permissionId: text("permission_id").notNull(),
+    recordedAt: timestamp("recorded_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.runId, table.memoryId, table.permissionId],
+    }),
+  ]
+);
+
+/**
+ * The runs whose evidence (`runBrainVersions`, `runBrainMemories`,
+ * `runChatSources`) retention kept past their details, as a key of their
+ * workflow's state named them then (workflows/retention.ts, GRA-1996):
+ * that key is read only while what they read holds (workflow-state.ts).
+ * Once no key names one any more, its evidence and its row here go.
+ * Identifiers only.
+ */
+export const keptRunEvidence = sqliteTable("kept_run_evidence", {
+  runId: text("run_id").primaryKey(),
+  keptAt: timestamp("kept_at").notNull(),
+});
+
+/**
+ * The runs that wrote the keys of the state a run started from
+ * (workflow-state.ts `readableStateOf`, GRA-1996), written as it is
+ * admitted (workflow-starts.ts): every check of the run covers their own
+ * evidence too (workflows/resource-reads.ts), one hop, so a copy it
+ * carries from that state follows what they read. Identifiers only. Goes
+ * with the run's details, unless a key of its workflow's state names the
+ * run itself; then with the run's release, once no key does
+ * (workflows/retention.ts). A run kept only as another run's writer keeps
+ * none of its own.
+ */
+export const runStateWriters = sqliteTable(
+  "run_state_writers",
+  {
+    runId: text("run_id").notNull(),
+    writerRunId: text("writer_run_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.writerRunId] }),
+    index("run_state_writers_writer_idx").on(table.writerRunId),
+  ]
+);
+
+/**
  * Nothing writes or reads it. Kept until GRA-1589 drops it, so a core
  * still serving during a rollout keeps working (expand, then contract).
  */
@@ -2455,7 +3036,8 @@ export const runEvidenceHolds = sqliteTable(
  * chat's scope, copied once as the start is admitted. Before anything
  * leaves the run, the host checks the chat's agent may still read them all
  * for its person (history-access.ts, `readableSources`): a run is held to
- * what its input may carry. Goes with the run's details.
+ * what its input may carry. Goes with the run's details, unless a key of
+ * its workflow's state names the run (`keptRunEvidence`).
  */
 export const runChatSources = sqliteTable(
   "run_chat_sources",
@@ -3174,10 +3756,263 @@ export const sharedMailboxPointers = sqliteTable("shared_mailbox_pointers", {
 });
 
 /**
+ * Who may read in the Brain what agents read through a shared connection
+ * (connection-audiences.ts, GRA-1831): one row per shared connection an
+ * admin chose an audience for, by connect's connection ID. `team_id` is
+ * the one team; null is everyone in the company. No row is nobody.
+ */
+export const connectionBrainAudiences = sqliteTable(
+  "connection_brain_audiences",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    teamId: text("team_id"),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  }
+);
+
+/**
+ * Each record kept in the Brain from what agents read through a shared
+ * connection (shared-reads.ts, GRA-1831), by its source's id under the
+ * `connected` kind: written before the Brain is given the key, so every key
+ * the Brain holds of a connection is named here, for its erasure to find.
+ * `generation` is the connection's erasure generation it was kept in
+ * (`connection_brain_erasures`); `read_at` when it was last read.
+ */
+export const connectionBrainReads = sqliteTable(
+  "connection_brain_reads",
+  {
+    sourceId: text("source_id").primaryKey(),
+    connectionId: text("connection_id").notNull(),
+    generation: integer().notNull(),
+    readAt: timestamp("read_at").notNull(),
+  },
+  (table) => [
+    index("connection_brain_reads_connection_idx").on(
+      table.connectionId,
+      table.generation
+    ),
+  ]
+);
+
+/**
+ * The erasures of what the Brain kept from a shared connection
+ * (shared-reads.ts, GRA-1831), one row per connection ever erased: the
+ * generation the keys it keeps from now on are under (every older one is
+ * erased or being erased), whether an erasure is under way (`erasing`,
+ * which the clock completes), the request it serves (an audit event's
+ * id), who asked and when (`actor`, an audit actor as JSON), how many
+ * records it has erased so far, and whether a disconnect closed the
+ * connection for good (`closed`: no audience is opened on it again).
+ */
+export const connectionBrainErasures = sqliteTable(
+  "connection_brain_erasures",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    generation: integer().notNull(),
+    erasing: integer({ mode: "boolean" }).notNull(),
+    request: text().notNull(),
+    actor: text().notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+    erased: integer().notNull(),
+    closed: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("connection_brain_erasures_erasing_idx").on(table.erasing)]
+);
+
+/**
+ * The sources native sync reads into the Brain (brain-sync.ts, GRA-1758),
+ * one row per connection, sync (`feed`) and place: whose connection it is
+ * (`personId`; null for a shared connection's picked places, which no
+ * one person owns: GRA-1719) and how to name its items' readers
+ * (`provider`, `tenant`,
+ * `account`, its own account as its items' readers name it, as connect
+ * last listed them), where its next page reads
+ * on from (`cursor`, null to list it from the start), the number of its
+ * latest listing (`listing`; an item a listing named carries it) and
+ * whether that listing is under way (`listingOpen`: from a null cursor
+ * until its first page with nothing more), when it is next due, the run
+ * that holds it (`leaseId` until `leaseUntil`), when a page last applied
+ * and the code of the latest failure and when it was (`lastErrorAt`),
+ * kept after a later page applies, for the staff's view, and what the page under way did so
+ * far in the Brain (`added`, `changed`, `removed`), counted once each,
+ * whichever run did it, for the page's one audit event. Beside it, the
+ * daily full relist: its own cursor (`relistCursor`), whether one is under
+ * way (`relisting`), when its next page is due, or the next one starts
+ * (`relistAt`), and when the one under way was due to start
+ * (`relistSince`), by which an overdue relist is seen; and whether an
+ * item of it may still be leaving a key a stopped run left unerased
+ * (`leavesOwed`), cleared when a page commits. The kind of items it
+ * brings (`kind`: mail and events relist names only), whether its place
+ * is no longer listed (`dropped`: read no more, its keys erased by the
+ * clock, then the row deleted), and whether its relist is fetching what
+ * its names-only listing found unknown or changed (`relistCatchUp`).
+ * For a sync that lists places, the places listing that named the place
+ * last (`seenIn`); its listing itself is a row of its own here, place
+ * `:places`, its cursor where the listing goes on, and, for a shared
+ * connection's picked places, the version of the picks whose un-picked
+ * places core last hid (`picksVersion`: connect's, one up with each save;
+ * brain-sync.ts `hideUnpickedPlaces`).
+ */
+export const brainSyncSources = sqliteTable(
+  "brain_sync_sources",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    place: text().notNull(),
+    personId: text("person_id"),
+    provider: text().notNull(),
+    tenant: text(),
+    account: text(),
+    cursor: text(),
+    listing: integer().notNull(),
+    listingOpen: integer("listing_open", { mode: "boolean" }).notNull(),
+    dueAt: timestamp("due_at").notNull(),
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
+    lastSuccessAt: timestamp("last_success_at"),
+    lastError: text("last_error"),
+    added: integer().notNull(),
+    changed: integer().notNull(),
+    removed: integer().notNull(),
+    relistCursor: text("relist_cursor"),
+    relisting: integer({ mode: "boolean" }).notNull(),
+    relistAt: timestamp("relist_at").notNull(),
+    relistSince: timestamp("relist_since"),
+    leavesOwed: integer("leaves_owed", { mode: "boolean" }).notNull(),
+    kind: text({ enum: ["mail", "file", "event"] }).notNull(),
+    dropped: integer({ mode: "boolean" }).notNull(),
+    relistCatchUp: integer("relist_catch_up", { mode: "boolean" }).notNull(),
+    seenIn: integer("seen_in"),
+    lastErrorAt: timestamp("last_error_at"),
+    picksVersion: integer("picks_version"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
+    index("brain_sync_sources_due_idx").on(table.dueAt),
+    // The live places of shared connections, read with every read of the
+    // Brain (connection-audiences.ts `sharedPlacesRead`).
+    index("brain_sync_sources_person_idx").on(table.personId, table.dropped),
+  ]
+);
+
+/**
+ * Each item native sync handed the Brain (brain-sync.ts), by connection,
+ * sync and the provider's ID of it (unique within the connection), the
+ * place whose source added it (`place`): its source's key under `sync:`
+ * (`key`, its `generation` the key's middle part, one up each time the
+ * item leaves the Brain, so a key erased is never added to again), the
+ * store it is in now (`own`, `shared`, or null when it is in neither),
+ * the change last added (null while an add is under way), the Brain's
+ * version of it as last answered, a hash of the provider's change marker
+ * it was added at (`marker`), the item it is part of (an attachment's
+ * message), the listing that last named it, and the key it is leaving
+ * (`leaving`, in the store `leavingStore`): named here before the Brain
+ * erases it, so an erase a stopped run left is finished on its next read,
+ * and a disconnect's erasure finds it; and since when its removal is held
+ * (`heldSince`: gone from one place of a sync that lists places, kept
+ * until the others have read, so a move between two leaves no hole), and
+ * when a page last saved a change of it (`savedAt`: one saved since its
+ * source last committed a page is the uncommitted page's own, whose step
+ * a replay of that page records again). Never its readers: each
+ * page gives them to the Brain again, so nothing here names a person.
+ * Core names a key here before the Brain is given it, so a disconnect's
+ * erasure finds every key it gave.
+ */
+export const brainSyncItems = sqliteTable(
+  "brain_sync_items",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    itemId: text("item_id").notNull(),
+    place: text().notNull(),
+    key: text().notNull(),
+    generation: integer().notNull(),
+    store: text({ enum: ["own", "shared"] }),
+    change: text(),
+    version: integer(),
+    marker: text(),
+    partOf: text("part_of"),
+    listing: integer().notNull(),
+    leaving: text(),
+    leavingStore: text("leaving_store", { enum: ["own", "shared"] }),
+    heldSince: timestamp("held_since"),
+    savedAt: timestamp("saved_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.itemId] }),
+    index("brain_sync_items_store_idx").on(table.connectionId, table.store),
+    index("brain_sync_items_leaving_idx").on(
+      table.connectionId,
+      table.feed,
+      table.leaving
+    ),
+    index("brain_sync_items_place_idx").on(
+      table.connectionId,
+      table.feed,
+      table.place
+    ),
+    index("brain_sync_items_part_of_idx").on(
+      table.connectionId,
+      table.feed,
+      table.partOf
+    ),
+  ]
+);
+
+/**
+ * What a source's names-only relist (brain-sync.ts) found unknown, held
+ * without content, or at another version than held, by the provider's ID:
+ * fetched once in full after that listing, then forgotten. Emptied when a
+ * relist starts, so a relist catches up at most once.
+ */
+export const brainSyncCatchUps = sqliteTable(
+  "brain_sync_catch_ups",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    place: text().notNull(),
+    itemId: text("item_id").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.connectionId, table.feed, table.place, table.itemId],
+    }),
+  ]
+);
+
+/**
+ * The connections a disconnect closed for native sync (brain-sync.ts),
+ * one row each, kept for good: nothing is synced or named under one again.
+ * The disconnect it serves (connect's event's id), who disconnected and
+ * when (`actor`, an audit actor as JSON, cleared once the erasure it owed
+ * ended and its event was written), whether erasing what it synced
+ * into the shared store is under way (`erasing`, which the clock
+ * completes), and how many sources it erased.
+ */
+export const brainSyncDisconnects = sqliteTable(
+  "brain_sync_disconnects",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    request: text().notNull(),
+    actor: text(),
+    requestedAt: timestamp("requested_at").notNull(),
+    erasing: integer({ mode: "boolean" }).notNull(),
+    erased: integer().notNull(),
+    /** The run that holds the erase, until when: its token (brain-sync.ts `takeErasure`). */
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
+  },
+  (table) => [index("brain_sync_disconnects_erasing_idx").on(table.erasing)]
+);
+
+/**
  * The company's agents an admin made or changed (agents.ts): one row per
- * agent, by the ID its permissions, audit events and memory path name.
+ * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is
- * for; `instructions` what it is told on top of Grasp's own rules;
+ * for (what an agent is told is its instruction file in the Brain,
+ * instruction-files.ts; the database's `instructions` column, nullable and
+ * unnamed here, is dropped in a later release: expand, then contract);
  * `modelRole` the role it asks the gateway for, or null for the model a
  * chat would use anyway; `state` whether it answers. No row for the
  * first agent, the organization's: as Grasp ships it.
@@ -3195,7 +4030,6 @@ export const agents = sqliteTable(
     nameKey: text("name_key"),
     face: text().notNull(),
     job: text().notNull(),
-    instructions: text().notNull(),
     modelRole: text("model_role", { enum: modelRoles }),
     /** The model its turns use, `<provider>/<model>`; null: the asker's own. */
     model: text(),
@@ -3205,6 +4039,18 @@ export const agents = sqliteTable(
      * made, which takes one; its name's key is cleared, free for another.
      */
     state: text({ enum: ["on", "paused", "deleted"] }).notNull(),
+    /**
+     * The person whose own agent it is (agents.ts): only they see, ask
+     * and change it, and it goes when they are erased. Null: one of the
+     * company's. Its name's key is null, as two people may each call
+     * theirs the same.
+     */
+    ownerId: text("owner_id"),
+    /**
+     * When its owner offered a person's own agent to the company, for its
+     * admins to take on (agent-builder.ts, `adoptAgent`); null for none.
+     */
+    offeredAt: timestamp("offered_at"),
     madeBy: text("made_by").notNull(),
     madeAt: timestamp("made_at").notNull(),
     changedBy: text("changed_by").notNull(),
@@ -3214,6 +4060,10 @@ export const agents = sqliteTable(
     // No two agents answer to one name, however it is capitalised: people
     // say which agent they mean by it.
     uniqueIndex("agents_name_key_idx").on(table.nameKey),
+    // A person's own agents, and dropping them when they are erased.
+    index("agents_owner_idx")
+      .on(table.ownerId)
+      .where(sql`${table.ownerId} IS NOT NULL`),
   ]
 );
 
@@ -3328,6 +4178,27 @@ export const agentDocuments = sqliteTable(
 );
 
 /**
+ * The apps an agent may use (agent-apps.ts), by catalog entry
+ * (`<source>:<id>`). An agent with no row uses any app its classes allow,
+ * as before agents had apps; one with rows, only those `on`. A `removed`
+ * row keeps an app someone took off from coming back when its apps are
+ * worked out again. Gone with the agent.
+ */
+export const agentApps = sqliteTable(
+  "agent_apps",
+  {
+    agentId: text("agent_id").notNull(),
+    app: text().notNull(),
+    name: text().notNull(),
+    state: text({ enum: ["on", "removed"] }).notNull(),
+    source: text({ enum: ["instructions", "person"] }).notNull(),
+    changedBy: text("changed_by").notNull(),
+    changedAt: timestamp("changed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.app] })]
+);
+
+/**
  * How an agent narrows a class of tools the company turned on
  * (agent-reach.ts): one row per agent and class an admin changed.
  * `asClass`: as the company has the class. It only narrows: the class
@@ -3416,6 +4287,93 @@ export const appRequests = sqliteTable(
     uniqueIndex("app_requests_name_key_idx").on(table.nameKey),
     index("app_requests_requested_at_idx").on(table.requestedAt),
   ]
+);
+
+/**
+ * A person's ask to share one of their own skills with the company or one
+ * of their teams (skill-shares.ts, GRA-1754, GRA-1844). `text` is the exact
+ * `SKILL.md` they asked to share, kept only while it waits: an admin
+ * decides that text and no other (`skillDecisions` takes it on).
+ * `audience` is whom for: `company`, or `team:<teamId>` (brain-next.ts
+ * `audienceKeyOf`); nullable only as schemas expand, and a row without
+ * one is never decided or listed, never read as the company's. At most
+ * one waits per person, name and audience; asking again, deleting the
+ * skill or being removed takes the waiting one away, so a decision on it
+ * is refused, and one for a team is decided only while its person is in
+ * that team.
+ */
+export const skillShares = sqliteTable(
+  "skill_shares",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    text: text(),
+    requestedBy: text("requested_by").notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+    status: text({ enum: ["pending", "approved", "declined"] }).notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+    audience: text(),
+  },
+  (table) => [
+    uniqueIndex("skill_shares_waiting_idx")
+      .on(table.requestedBy, table.name, table.audience)
+      .where(sql`status = 'pending'`),
+    index("skill_shares_status_idx").on(table.status, table.requestedAt),
+  ]
+);
+
+/**
+ * The admins' decisions on the shared skills, the one record of what
+ * should be live (skill-shares.ts): numbered per audience and name
+ * (`seq`), the latest is what the Brain follows, an approved share's text
+ * (`share_id`) or a retirement (none). `audience` as `skillShares`'s: a
+ * row without one is never reconciled, never read as the company's. `text` is what the decision writes, kept with it so
+ * an erasure of the asker never takes a decision's text away. `outcome` is
+ * what became of it in the Brain, recorded once by the reconciler:
+ * `landed` at `version`, or `superseded` by a later decision before it
+ * did; null while it is on its way.
+ */
+export const skillDecisions = sqliteTable(
+  "skill_decisions",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    seq: integer().notNull(),
+    shareId: text("share_id"),
+    text: text().notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at").notNull(),
+    outcome: text({ enum: ["landed", "superseded"] }),
+    version: integer(),
+    audience: text(),
+  },
+  (table) => [
+    uniqueIndex("skill_decisions_sequence_idx").on(
+      table.audience,
+      table.name,
+      table.seq
+    ),
+    index("skill_decisions_share_idx").on(table.shareId),
+    index("skill_decisions_open_idx")
+      .on(table.audience, table.name)
+      .where(sql`outcome IS NULL`),
+  ]
+);
+
+/**
+ * The names of their own skills people deleted for good: no ask of one is
+ * written from then on (skill-shares.ts). The name can't be used again
+ * (the Brain closes its key), so the row is never taken back; it goes with
+ * its person's erasure.
+ */
+export const skillDeletions = sqliteTable(
+  "skill_deletions",
+  {
+    personId: text("person_id").notNull(),
+    name: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.personId, table.name] })]
 );
 
 /**
@@ -3565,7 +4523,9 @@ export const platformVersions = sqliteTable("platform_versions", {
  * What core tells a person in the product (src/notifications.ts): that an
  * admin asked them one of the brain's open questions (`gap_asked`,
  * src/brain-gaps.ts), that a schedule trigger of theirs stopped
- * (`trigger_stopped`), that connect stopped hearing a source their
+ * (`trigger_stopped`), that someone else made another version of a
+ * workflow their triggers start live (`trigger_workflow_changed`), that
+ * connect stopped hearing a source their
  * triggers listen to (`events_stopped`), that packages of an App they
  * build were revoked as malware
  * (`package_revoked`), or what an App told them (`app_message`). A
@@ -3582,6 +4542,7 @@ export const notifications = sqliteTable(
       enum: [
         "gap_asked",
         "trigger_stopped",
+        "trigger_workflow_changed",
         "package_revoked",
         "package_advisory",
         "events_stopped",
@@ -3598,8 +4559,9 @@ export const notifications = sqliteTable(
     readAt: timestamp("read_at"),
     /**
      * The schedule trigger a `trigger_stopped` row says stopped
-     * (workflows/schedule-triggers.ts); its `workflow_id` is the workflow
-     * resource the trigger starts.
+     * (workflows/schedule-triggers.ts), or a trigger of the person's whose
+     * workflow a `trigger_workflow_changed` row says changed; its
+     * `workflow_id` is the workflow resource the trigger starts.
      */
     triggerId: text("trigger_id"),
     /**
@@ -3951,6 +4913,11 @@ export const workflowResources = sqliteTable(
      * owner turns it on.
      */
     askable: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * The name people gave it, shown where `name` would be; null for none.
+     * `name` stays the key everything references.
+     */
+    title: text(),
   },
   (table) => [
     // Listing reads a person's own workflows by owner (`listWorkflowResources`).
@@ -3991,7 +4958,12 @@ export const workflowResourceVersions = sqliteTable(
       .notNull()
       .references(() => workflowResources.id),
     version: integer().notNull(),
-    definitionVersion: text("definition_version").notNull(),
+    /**
+     * The semantic version publication gives the version's contract (its
+     * catalog key's), unique per workflow: the column keeps its first
+     * name, which the release before writes too.
+     */
+    contractVersion: text("definition_version").notNull(),
     definition: text().notNull(),
     definitionJsonHash: text("definition_json_hash").notNull(),
     profileVersion: text("profile_version").notNull(),
@@ -4013,12 +4985,23 @@ export const workflowResourceVersions = sqliteTable(
      * before seals, which this release refuses, to publish again.
      */
     sealId: text("seal_id"),
+    /**
+     * What people call it, `YY.MM.N`, as an App's version
+     * (`app_versions.label`): given in the batch that first makes it live
+     * (src/workflow-publish.ts) and kept when a roll back makes it live
+     * again. Null for a version never live.
+     */
+    label: text(),
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.version] }),
     uniqueIndex("workflow_resource_versions_definition_version").on(
       table.workflowResourceId,
-      table.definitionVersion
+      table.contractVersion
+    ),
+    uniqueIndex("workflow_resource_versions_label").on(
+      table.workflowResourceId,
+      table.label
     ),
   ]
 );
@@ -4057,43 +5040,103 @@ export const workflowResourceMembers = sqliteTable(
 
 /**
  * Independent triggers (spec 15, 24; src/trigger-resources.ts): what
- * starts one exact workflow version on its own (a system event, a
- * connector event, a webhook, a schedule, mail to its address), owned by
- * whoever created it, never by the workflow's owner or an App. `current_version` names the
- * version (`trigger_resource_versions`) future starts use; `enabled` false,
- * or `deleted_at`, stops future starts, never runs already started. Its
- * starts need a permission of its own (`start` on the workflow) like any
- * other subject's.
+ * starts one workflow on its own, at the version live as each run starts
+ * (a system event, a connector event, a webhook, a schedule, mail to its
+ * address), owned by whoever created it, never by the workflow's owner or
+ * an App, and configured once, as it is created: a trigger has no
+ * versions. `enabled` false, or `deleted_at`, stops future starts, never
+ * runs already started. Its starts need a permission of its own (`start`
+ * on the workflow) like any other subject's.
  */
-export const triggerResources = sqliteTable("trigger_resources", {
-  id: text().primaryKey(),
-  ownerId: text("owner_id").notNull(),
-  kind: text({
-    enum: ["connector", "webhook", "schedule", "email"],
-  }).notNull(),
-  currentVersion: integer("current_version").notNull(),
-  enabled: integer({ mode: "boolean" }).notNull(),
-  createdAt: timestamp("created_at").notNull(),
-  deletedAt: timestamp("deleted_at"),
-  /**
-   * For an email trigger: the part before the `@` of the address it
-   * receives mail at, the name its builder chose or `trigger-<token>`
-   * (128 random bits), set as it is created and never changed, and set to
-   * null as it is deleted, which frees it (workflows/email-addresses.ts);
-   * null for any other kind. Unlike its ID, shown only to whoever may see
-   * the trigger; a chosen name is audited as it is created, a random one
-   * never logged or audited.
-   */
-  emailAddress: text("email_address").unique(),
-  /**
-   * Never written or read since webhook triggers start on event sources
-   * (GRA-1560, `event_sources`). Kept, with the token's index, until
-   * GRA-1659 drops them (expand, then contract).
-   */
-  webhookToken: text("webhook_token").unique(),
-  webhookSecretGeneration: integer("webhook_secret_generation"),
-  webhookSecretRevokedAt: timestamp("webhook_secret_revoked_at"),
-});
+export const triggerResources = sqliteTable(
+  "trigger_resources",
+  {
+    id: text().primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    kind: text({
+      enum: ["connector", "webhook", "schedule", "email"],
+    }).notNull(),
+    /**
+     * Unused since a trigger has no versions: written 1, as it is NOT
+     * NULL, and read by nothing. Dropped in a later release (expand, then
+     * contract).
+     */
+    currentVersion: integer("current_version").notNull(),
+    enabled: integer({ mode: "boolean" }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    deletedAt: timestamp("deleted_at"),
+    /**
+     * For an email trigger: the part before the `@` of the address it
+     * receives mail at, the name its builder chose or `trigger-<token>`
+     * (128 random bits), set as it is created and never changed, and set to
+     * null as it is deleted, which frees it (workflows/email-addresses.ts);
+     * null for any other kind. Unlike its ID, shown only to whoever may see
+     * the trigger; a chosen name is audited as it is created, a random one
+     * never logged or audited.
+     */
+    emailAddress: text("email_address").unique(),
+    /**
+     * Never written or read since webhook triggers start on event sources
+     * (GRA-1560, `event_sources`). Kept, with the token's index, until
+     * GRA-1659 drops them (expand, then contract).
+     */
+    webhookToken: text("webhook_token").unique(),
+    webhookSecretGeneration: integer("webhook_secret_generation"),
+    webhookSecretRevokedAt: timestamp("webhook_secret_revoked_at"),
+    /**
+     * The workflow it starts, the SHA-256 of its configuration, and the
+     * person its starts act for (`principal_binding`, a user ID the host
+     * bound at creation: who created it, never the workflow's owner). Every
+     * trigger is created with all three (trigger-resources.ts); the empty
+     * default is only there because SQLite adds a NOT NULL column only with
+     * one, and migration 0251 copied each existing trigger's from the
+     * version it ran (`trigger_resource_versions`).
+     */
+    workflowResourceId: text("workflow_resource_id").notNull().default(""),
+    configHash: text("config_hash").notNull().default(""),
+    principalBinding: text("principal_binding").notNull().default(""),
+    /** A connector trigger's event type, or a webhook trigger's. */
+    eventType: text("event_type"),
+    /**
+     * For a schedule trigger: its five-field cron expression, the IANA time
+     * zone it is read in, and the input each of its runs starts with
+     * (canonical JSON, accepted by the workflow's live version as the
+     * trigger was created, and checked again by every start), all checked as
+     * it was created (trigger-resources.ts). Null for any other kind.
+     */
+    scheduleCron: text("schedule_cron"),
+    scheduleTimeZone: text("schedule_time_zone"),
+    scheduleInput: text("schedule_input"),
+    /**
+     * For a connector trigger: the connection whose events start it, the
+     * part of it (a mailbox, a drive) or null for the account's own, and
+     * how each event becomes its run's input (canonical JSON: input fields
+     * to JSON Pointers into the event, and literal defaults), checked as it
+     * was created (trigger-resources.ts). An email trigger keeps its
+     * mapping of each message here too, with no connection. Null for any
+     * other kind.
+     */
+    connectionId: text("connection_id"),
+    connectionResource: text("connection_resource"),
+    inputMapping: text("input_mapping"),
+    /**
+     * For a webhook trigger (GRA-1560): the event source whose events
+     * start it (`event_sources`), of type `event_type`; each event's data
+     * is its run's input. Null for any other kind.
+     */
+    eventSourceId: text("event_source_id"),
+  },
+  (table) => [
+    // The webhook triggers that take a source's events.
+    index("trigger_resources_source")
+      .on(table.eventSourceId, table.eventType)
+      .where(sql`${table.eventSourceId} IS NOT NULL`),
+    // The connector triggers that take a connection's events.
+    index("trigger_resources_connection")
+      .on(table.connectionId, table.eventType)
+      .where(sql`${table.connectionId} IS NOT NULL`),
+  ]
+);
 
 /**
  * The deployment's event sources (GRA-1560, event-sources.ts): where an
@@ -4114,6 +5157,65 @@ export const eventSources = sqliteTable("event_sources", {
   createdAt: timestamp("created_at").notNull(),
   deletedAt: timestamp("deleted_at"),
 });
+
+/**
+ * What an event source accepted, for its admins to see
+ * (workflows/source-deliveries.ts): one row for each delivery it accepted
+ * (its ID the hash of the source and its `webhook-id`, so a sender's
+ * retry is the same row) and each test event an admin sent it (`test`), with the event's type,
+ * how many triggers it started (`triggers`; none for a test) and its data
+ * (`payload`, JSON), which is set to null a day after `received_at`; the
+ * row is deleted after seven days, or with its source. A source holds its
+ * newest `eventSourceRetention.perSource` at most. Never a refused
+ * delivery, and never a header, a signature or a sender's address.
+ */
+export const eventSourceDeliveries = sqliteTable(
+  "event_source_deliveries",
+  {
+    id: text().primaryKey(),
+    sourceId: text("source_id").notNull(),
+    receivedAt: timestamp("received_at").notNull(),
+    eventType: text("event_type").notNull(),
+    test: integer({ mode: "boolean" }).notNull(),
+    triggers: integer().notNull(),
+    payload: text(),
+  },
+  (table) => [
+    // A source's deliveries, newest first.
+    index("event_source_deliveries_source").on(
+      table.sourceId,
+      table.receivedAt,
+      table.id
+    ),
+    // What the clock clears and deletes by age.
+    index("event_source_deliveries_received").on(table.receivedAt),
+  ]
+);
+
+/**
+ * How many deliveries an event source accepted or refused, by the hour
+ * (workflows/source-deliveries.ts): one row for each source, outcome
+ * (`accepted`, or why it refused: `eventSourceRefusalReasons`) and hour
+ * (`hour`, when it began), with how many and when the last was. A flood
+ * of refused deliveries writes as many rows as there are reasons an hour,
+ * and nothing of any of them. Deleted after seven days, or with its
+ * source.
+ */
+export const eventSourceCounts = sqliteTable(
+  "event_source_counts",
+  {
+    sourceId: text("source_id").notNull(),
+    outcome: text().notNull(),
+    hour: timestamp("hour").notNull(),
+    count: integer().notNull(),
+    lastAt: timestamp("last_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sourceId, table.outcome, table.hour] }),
+    // What the clock deletes by age.
+    index("event_source_counts_hour").on(table.hour),
+  ]
+);
 
 /**
  * The runs waiting now for an event source's event by a match
@@ -4208,12 +5310,10 @@ export const keptEventKeys = sqliteTable(
 );
 
 /**
- * Each version of a trigger, written once: the exact workflow version it
- * starts (never "the latest": a new workflow version changes no trigger
- * until one is explicitly updated to it), the SHA-256 of its
- * configuration, and the person its starts act for (`principal_binding`,
- * a user ID the host bound at creation: who created it, never the
- * workflow's owner).
+ * Unused since a trigger has no versions and keeps its configuration on
+ * its own row (`trigger_resources`, where migration 0251 copied each
+ * trigger's): written and read by nothing. Dropped in a later release
+ * (expand, then contract).
  */
 export const triggerResourceVersions = sqliteTable(
   "trigger_resource_versions",
@@ -4285,11 +5385,10 @@ export const triggerResourceVersions = sqliteTable(
 
 /**
  * When each schedule trigger next starts its run (workflows/schedule-
- * triggers.ts): the occurrence due next for the trigger version it was
- * worked out for (`version`), none once it stopped. Only a live, enabled
- * trigger whose current version is `version` starts anything; the rest
- * wait here untouched until enabling or moving the trigger works out its
- * next occurrence again, from then. `failed_starts` counts the starts in a
+ * triggers.ts): the occurrence due next, none once it stopped. Only a
+ * live, enabled trigger starts anything; a disabled one's waits here
+ * untouched until enabling it works out its next occurrence again, from
+ * then. `failed_starts` counts the starts in a
  * row that were refused or failed in the workflow's own terms, toward
  * stopping it; `attempts` counts every failed try of the occurrence due,
  * core's own failures too, each try waiting twice as long as the one
@@ -4301,7 +5400,11 @@ export const triggerSchedules = sqliteTable(
     triggerId: text("trigger_id")
       .primaryKey()
       .references(() => triggerResources.id),
-    version: integer().notNull(),
+    /**
+     * Unused since a trigger has no versions: written and read by
+     * nothing. Dropped in a later release (expand, then contract).
+     */
+    version: integer(),
     nextAt: timestamp("next_at"),
     failedStarts: integer("failed_starts").notNull().default(0),
     attempts: integer().notNull().default(0),
@@ -4322,7 +5425,8 @@ export const triggerSchedules = sqliteTable(
 /**
  * The starts of independent workflows a chat's agent asked for, held
  * until the person it acts for confirms them in Grasp (src/held-starts.ts):
- * the workflow and version, the input exactly as it would start (canonical
+ * the workflow, whose version live as it is confirmed starts, the input
+ * exactly as it would start (canonical
  * JSON, with its SHA-256), the agent, its person and its chat, and the
  * agent's key, scoped to the chat. One per chat and key: the agent asking
  * again is the same start. Decided once: confirmed (with the start it
@@ -4343,7 +5447,12 @@ export const agentHeldStarts = sqliteTable(
     workflowResourceId: text("workflow_resource_id")
       .notNull()
       .references(() => workflowResources.id),
-    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    /**
+     * Unused since a held start starts the version live as it is
+     * confirmed: written and read by nothing. Dropped in a later release
+     * (expand, then contract).
+     */
+    workflowResourceVersion: integer("workflow_resource_version"),
     /** Null once the start is no longer open (held-starts.ts). */
     input: text(),
     inputHash: text("input_hash").notNull(),
@@ -4434,7 +5543,7 @@ export const triggerHourSlots = sqliteTable(
  * same start sent again is the same start, and one person's key never
  * reaches another's start. It pins the exact workflow version and manifest, who
  * invoked it (a person, an App, an agent or a trigger, with the App
- * version or trigger version), the person it acts for, the workflow's
+ * version for an App), the person it acts for, the workflow's
  * policy generation it was admitted under and its validated input
  * (canonical JSON, with its SHA-256). Never changed after, but for its
  * input and frozen parameter values, which run retention removes
@@ -4457,7 +5566,10 @@ export const workflowStartReceipts = sqliteTable(
     manifestHash: text("manifest_hash").notNull(),
     /** The App version, for an App's start; null otherwise. */
     originAppVersion: integer("origin_app_version"),
-    /** The trigger version, for a trigger's start; null otherwise. */
+    /**
+     * Unused since a trigger has no versions: written null, and read by
+     * nothing. Dropped in a later release (expand, then contract).
+     */
     triggerVersion: integer("trigger_version"),
     principalId: text("principal_id").notNull(),
     authorityGeneration: integer("authority_generation").notNull(),
@@ -4495,10 +5607,18 @@ export const workflowStartReceipts = sqliteTable(
      * read once and frozen: the hash of its snapshot
      * (`workflowStateSnapshots`), which every activation of its run reads
      * (`$state`); null for a start that admits no run, and once retention
-     * removed its details. Last, as the admitting statement writes every
-     * column in order.
+     * removed its details. The admitting statement writes every column in
+     * order.
      */
     stateHash: text("state_hash"),
+    /**
+     * How many keys of what the workflow kept its run started without:
+     * withheld, as the run that set each read what the company may no
+     * longer read (workflow-state.ts `readableStateOf`, GRA-1996); null
+     * for none. The run's page says so. Last, as the admitting statement
+     * writes every column in order.
+     */
+    stateWithheld: integer("state_withheld"),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -4655,6 +5775,14 @@ export const workflowResourceRuns = sqliteTable(
      * (signals.ts).
      */
     failedTask: text("failed_task"),
+    /**
+     * When it first kept something it read through a connection in its
+     * person's own Brain store (connection-capture.ts `captureRunRead`),
+     * set before the Brain is written: such a run hands over only how it
+     * ended (run-evidence.ts `readAnything`), never a second copy that
+     * would outlive the capture's erasure. Null for a run that kept none.
+     */
+    capturedAt: timestamp("captured_at"),
   },
   (table) => [
     // Dropped with its column (GRA-1589).
@@ -4969,10 +6097,10 @@ export const workflowCatalogContracts = sqliteTable(
   "workflow_catalog_contracts",
   {
     key: text().primaryKey(),
-    // An older row may still say `template` (or `operation`): read as not
+    // An older row may still say `template`, `operation` or `knowledge`: read as not
     // there, as every read filters by the kinds still served.
     kind: text({
-      enum: ["connector", "model", "decision", "event", "knowledge", "files"],
+      enum: ["connector", "model", "decision", "event", "brain", "files"],
     }).notNull(),
     contract: text().notNull(),
     fingerprint: text().notNull(),
@@ -4984,12 +6112,12 @@ export const workflowCatalogContracts = sqliteTable(
 /**
  * Which concrete resource serves each catalog binding of an independent
  * workflow (src/workflow-bindings.ts): approved by an admin for the
- * declaration they reviewed (its kind, contract key and fingerprint) in
- * the exact version they reviewed (`reviewed_version`), and serving that
- * version alone: another version, newer or older, is code nobody reviewed
- * for it. `target` is the resource (JSON, `WorkflowBindingTarget`). At
- * most one active approval per version and alias; approving another
- * revokes it in the same batch. Revoked rows stay.
+ * declaration they reviewed (its alias, kind, contract key and
+ * fingerprint), in the version they reviewed it in (`reviewed_version`),
+ * and serving every version that declares it so. `target` is the resource
+ * (JSON, `WorkflowBindingTarget`). At most one active approval per
+ * binding; approving another revokes it in the same batch, and revoking
+ * one holds for every version. Revoked rows stay.
  */
 export const workflowBindingApprovals = sqliteTable(
   "workflow_binding_approvals",
@@ -4999,10 +6127,11 @@ export const workflowBindingApprovals = sqliteTable(
       .notNull()
       .references(() => workflowResources.id),
     alias: text().notNull(),
-    // An older row may still say `template`: read as not there, as every
-    // read filters by the kinds still served.
+    // Migration 0252 removed the rows of kinds there are no more
+    // (`template`, `knowledge`, `operation`); every read still filters by
+    // the kinds served, for a row an older core writes after a roll back.
     kind: text({
-      enum: ["connector", "model", "decision", "event", "knowledge", "files"],
+      enum: ["connector", "model", "decision", "event", "brain", "files"],
     }).notNull(),
     contractId: text("contract_id").notNull(),
     fingerprint: text().notNull(),
@@ -5015,8 +6144,23 @@ export const workflowBindingApprovals = sqliteTable(
     revokedAt: timestamp("revoked_at"),
   },
   (table) => [
+    /**
+     * Unused since an approval serves every version declaring its binding
+     * (src/workflow-bindings.ts): kept while a release that relies on it
+     * may serve or be rolled back to, dropped in a later one.
+     */
     uniqueIndex("workflow_binding_approvals_active_idx")
       .on(table.workflowResourceId, table.reviewedVersion, table.alias)
+      .where(sql`${table.status} = 'active'`),
+    // One active approval per binding: its alias's declaration.
+    uniqueIndex("workflow_binding_approvals_binding_idx")
+      .on(
+        table.workflowResourceId,
+        table.alias,
+        table.kind,
+        table.contractId,
+        table.fingerprint
+      )
       .where(sql`${table.status} = 'active'`),
   ]
 );
@@ -5071,7 +6215,12 @@ export const workflowState = sqliteTable(
     runId: text("run_id").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.workflowResourceId, table.key] })]
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.key] }),
+    // The keys a run set, as retention asks while it keeps the run's
+    // evidence (workflows/retention.ts, `keptEvidenceReleased`).
+    index("workflow_state_run_idx").on(table.runId),
+  ]
 );
 
 /**
@@ -5114,8 +6263,12 @@ export const workflowStateSnapshots = sqliteTable("workflow_state_snapshots", {
 });
 
 /**
+ * Unused since a workflow's draft is in `drafts` (src/drafts.ts): nothing
+ * reads or writes it. Kept while a release that writes it may serve or be
+ * rolled back to (expand, then contract); dropped in a later release.
+ *
  * The draft of each independent workflow's next definition, as its
- * builders edit it (src/workflow-drafts.ts): one row per accepted edit,
+ * builders edited it: one row per accepted edit,
  * `revision` counting them from 1. An edit names the revision it read and
  * inserts the next one, so of two concurrent edits the second is refused
  * and the first stays. `source` is the text as edited, JSON or not;
@@ -5186,13 +6339,14 @@ export const workflowResourceDraftInspections = sqliteTable(
 );
 
 /**
- * Where each independent workflow is in its life (src/workflow-lifecycle.ts):
- * one row, once something about it was set, moved on by every write
- * (`revision`), each write only over the revision it read. `stage` is the
- * stage a builder set; null follows the workflow (drafted, published,
- * live). `live_version` is the version that went live last, through an
- * approval of `go_live_version` by someone other than who asked for it.
- * While `paused_at` is set it starts no runs (workflow-starts.ts).
+ * Whether each independent workflow is paused (src/workflow-pause.ts):
+ * one row, once it was paused, moved on by every write (`revision`), each
+ * write only over the revision it read. While `paused_at` is set it
+ * starts no runs (workflow-starts.ts). Its stage and go-live columns are
+ * unused since a workflow's live version is its current one, made live
+ * by a publish (src/workflow-publish.ts): nothing reads or writes them;
+ * kept while a release that writes them may serve or be rolled back to
+ * (expand, then contract), and dropped in a later release.
  */
 export const workflowResourceLifecycles = sqliteTable(
   "workflow_resource_lifecycles",
@@ -5224,11 +6378,11 @@ export const workflowResourceLifecycles = sqliteTable(
 );
 
 /**
- * Which exact version of an independent workflow each App binds, by an
- * alias of the App's (src/app-workflow-bindings.ts). A binding pins the
- * version and grants nothing: starting it still takes the App's own
+ * Which independent workflow each App binds, by an alias of the App's
+ * (src/app-workflow-bindings.ts), whose live version its starts run. A
+ * binding grants nothing: starting it still takes the App's own
  * `start` permission. At most one active binding per App and alias;
- * moving to another version is a new binding. Removed ones stay.
+ * binding another workflow is a new binding. Removed ones stay.
  */
 export const appWorkflowBindings = sqliteTable(
   "app_workflow_bindings",
@@ -5241,12 +6395,28 @@ export const appWorkflowBindings = sqliteTable(
     workflowResourceId: text("workflow_resource_id")
       .notNull()
       .references(() => workflowResources.id),
+    /**
+     * The version it was made at, whose contract was checked against the
+     * App's declaration. A binding follows its workflow's live version
+     * (src/app-workflow-bindings.ts): starts never run this one for it.
+     */
     workflowResourceVersion: integer("workflow_resource_version").notNull(),
     status: text({ enum: ["active", "removed"] }).notNull(),
     boundBy: text("bound_by").notNull(),
     boundAt: timestamp("bound_at").notNull(),
     removedBy: text("removed_by"),
     removedAt: timestamp("removed_at"),
+    /**
+     * What the App's live version declares of the workflow under the
+     * alias (its events, listen tasks and decisions), as canonical JSON,
+     * set each time an App version is made live (apps.ts,
+     * `activateVersion`); null while it declares nothing, none is live,
+     * or the App was restored and made none live since (app-status.ts).
+     * What a workflow's publish checks its version against
+     * (src/app-workflow-bindings.ts, `requireBoundAppsDeclare`), so it
+     * never loads an App's release.
+     */
+    contract: text(),
   },
   (table) => [
     uniqueIndex("app_workflow_bindings_active_idx")
@@ -5295,6 +6465,8 @@ export const workflowCandidateRuns = sqliteTable(
      * activation. A test run writes none back.
      */
     stateHash: text("state_hash"),
+    /** How many kept keys it started without, as a start's receipt says. */
+    stateWithheld: integer("state_withheld"),
     fixtures: text().notNull(),
     status: text({
       enum: ["starting", "running", "completed", "failed", "cancelled"],
@@ -5329,7 +6501,7 @@ export const workflowCandidateRuns = sqliteTable(
 );
 
 /**
- * Tests of a draft's checkpoint over recent real items (GRA-513,
+ * Tests of a draft at one revision over recent real items (GRA-513,
  * workflows/item-tests.ts): one row per item, the run whose input it took,
  * and the test run that ran it, or why none did. A started item's row is
  * written with its test run's, and none changes; swept with the test runs,
@@ -5389,7 +6561,9 @@ export const workflowResourceProcesses = sqliteTable(
  * over, in the order they were added. `body` is the record as
  * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
  * compares as the same text. No row names who added it: the audit log does.
- * Never written over, but for a content purge rewriting its words.
+ * The database's `purged_at` column, left from the Knowledge term purge
+ * (gone since GRA-1911), is unnamed here and dropped in a later release
+ * (expand, then contract).
  */
 export const brainRecords = sqliteTable(
   "brain_records",
@@ -5418,16 +6592,10 @@ export const brainRecords = sqliteTable(
     body: text().notNull(),
     addedAt: timestamp("added_at").notNull(),
     /**
-     * When a Knowledge content purge last rewrote `body` (brain-records.ts
-     * `brainRecordErasure`): the record is the company's as purged from
-     * then on, and the same id sent again is left as it is, never its
-     * words put back.
-     */
-    purgedAt: timestamp("purged_at"),
-    /**
-     * When the record stopped counting (brain-records.ts
-     * `retireOnboardingRecords`): what a replaced kickoff transcript gave
-     * the brain. Kept, never deleted, and left out of `brain.read`.
+     * When the record stopped counting: what a replaced kickoff transcript
+     * gave the brain, left out of `brain.read`. Nothing sets it any more
+     * (GRA-1748: the kickoff is a source of the new Brain, and its rows
+     * here were removed by migration 0259); dropped in a later release.
      */
     retiredAt: timestamp("retired_at"),
     /**
@@ -5455,23 +6623,27 @@ export const brainTeamGroups = sqliteTable("brain_team_groups", {
   teamIds: text("team_ids").notNull(),
   /** Its place in the company's order. */
   position: integer().notNull(),
-  /** When an admin confirmed it; null while it is only Grasp's proposal. */
+  /**
+   * When it was kept: set on every row, as every group counts (GRA-1993).
+   * Kept for the release before, which reads a row without it as a
+   * proposal (expand, then contract).
+   */
   confirmedAt: timestamp("confirmed_at"),
   savedAt: timestamp("saved_at").notNull(),
 });
 
 /**
- * Each time an admin confirmed the groups of teams (brain-team-groups.ts):
- * the groups whole, as they were before and as confirmed, so an earlier
- * set can be put back. Never changed or deleted; the audit event of the
- * save names its id, and who saved it.
+ * Each time an admin saved the groups of teams, or Grasp arranged them
+ * (brain-team-groups.ts): the groups whole, as they were before and after,
+ * so an earlier set can be put back. Never changed or deleted; the audit
+ * event of the change names its id, and who made it.
  */
 export const brainTeamGroupSaves = sqliteTable("brain_team_group_saves", {
   id: text().primaryKey(),
   savedAt: timestamp("saved_at").notNull(),
   /** The groups before, as JSON: each one's id, name, teams and whether confirmed. */
   before: text().notNull(),
-  /** The groups as confirmed, as JSON, the same way. */
+  /** The groups after, as JSON, the same way. */
   after: text().notNull(),
 });
 
@@ -5491,47 +6663,13 @@ export const brainGapStates = sqliteTable("brain_gap_states", {
   answeredBy: text("answered_by"),
 });
 
-// Knowledge's host tables: Grasp's own records about Knowledge, kept here
-// and not in Knowledge's database, which holds only the Brain's own
-// (collections, documents, versions, sections, links, payloads, search).
-// They name Knowledge's collections and documents by ID, with no foreign
-// key: no batch holds both databases.
-
-/** The teams that may read a `teams` collection (knowledge/access.ts). */
-export const collectionTeams = sqliteTable(
-  "collection_teams",
-  {
-    /** A collection in Knowledge. */
-    collectionId: text("collection_id").notNull(),
-    teamId: text("team_id").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.collectionId, table.teamId] }),
-    index("collection_teams_team_id_idx").on(table.teamId),
-  ]
-);
+// What is left of Knowledge's host tables: Grasp's own records about the
+// old Brain's Knowledge database, gone since GRA-1941.
 
 /**
- * Which version of each App its entry in the Apps collection holds
- * (knowledge/apps-collection.ts): written once the entry is, so it never
- * names a version the entry doesn't have. An App whose current version
- * differs, or that has no row, is indexed again.
- */
-export const appEntries = sqliteTable("app_entries", {
-  appId: text("app_id").primaryKey(),
-  version: integer().notNull(),
-  /**
-   * The SHA-256 of the name and description the entry holds; null for
-   * none read yet, which is indexed again.
-   */
-  described: text(),
-  indexedAt: timestamp("indexed_at").notNull(),
-});
-
-/**
- * A file uploaded into a collection (knowledge/uploads.ts): its original,
- * kept in R2 under its hash, and where extracting its text into the
- * document at `path` stands. Only the person who uploaded it sees it.
+ * A file once uploaded into a Knowledge collection. Nothing writes or reads it
+ * since GRA-1941; it stays for a rollback to the release before, which still
+ * does, and the next contract migration drops it (expand, then contract).
  */
 export const uploads = sqliteTable(
   "uploads",
@@ -5549,10 +6687,6 @@ export const uploads = sqliteTable(
     uploadedBy: text("uploaded_by").notNull(),
     /** JSON: the audit log's actor for the person who uploaded it. */
     actor: text().notNull(),
-    /**
-     * `saving`: claimed for the save of its text, which a purge's
-     * forgetting refuses (knowledge/uploads.ts).
-     */
     status: text({
       enum: ["pending", "extracting", "saving", "ready", "failed"],
     }).notNull(),
@@ -5576,10 +6710,9 @@ export const uploads = sqliteTable(
 );
 
 /**
- * Originals to delete from R2 (knowledge/uploads.ts), by key: recorded
- * with the upload, before its original is stored, and cleared once it is
- * saved; recorded again by a purge. Deleted by the failure that makes one
- * unneeded, or by the clock once its upload is gone or failed.
+ * Originals of `uploads` to delete from R2. Nothing writes or reads it since
+ * GRA-1941; it stays for a rollback to the release before, which still does,
+ * and the next contract migration drops it (expand, then contract).
  */
 export const uploadCleanups = sqliteTable("upload_cleanups", {
   /** The original's key in R2. */
@@ -5594,9 +6727,9 @@ export const uploadCleanups = sqliteTable("upload_cleanups", {
 });
 
 /**
- * The daily computations of Knowledge's usage signals
- * (knowledge/signals.ts), one row per attempt, as
- * `improvement_signal_computations` has them (src/daily-claims.ts).
+ * The daily computations of Knowledge's usage signals. Nothing writes or
+ * reads it; `knowledge_signals` references it, and the next contract
+ * migration drops both (expand, then contract).
  */
 export const knowledgeSignalComputations = sqliteTable(
   "knowledge_signal_computations",
@@ -5617,17 +6750,9 @@ export const knowledgeSignalComputations = sqliteTable(
 );
 
 /**
- * The usage signals of a computation: one per kind, collection and subject
- * (a search's key, or a document's ID), for the collection's owner, with
- * an ID derived from those three, the same in every computation. Readers
- * take only the finished computation started last, so a computation's
- * signals show all at once when it finishes, and never those of one that
- * doesn't. Written under the computation's ID: one that outlived its lease
- * and lost its row fails on the foreign key. `evidence` is JSON, IDs and
- * counts only; `evidence_at` is when its latest evidence was seen (a
- * question's latest search), null for a document's. Reads check the
- * collection (and the document) in Knowledge, and so never show a signal
- * about one that's gone.
+ * Knowledge's usage signals. Nothing writes or reads it since GRA-1941; it
+ * stays for a rollback to the release before, which still does, and the next
+ * contract migration drops it (expand, then contract).
  */
 export const knowledgeSignals = sqliteTable(
   "knowledge_signals",
@@ -5665,26 +6790,6 @@ export const knowledgeSignals = sqliteTable(
       table.value,
       table.id
     ),
-  ]
-);
-
-/**
- * Signals an owner dismissed, by kind, collection and subject, so they
- * outlast the computations: a signal is hidden while it has no evidence
- * newer than its dismissal. A computation's finish removes those whose
- * signal it no longer has, or has with newer evidence, so a signal that
- * went away and came back shows again.
- */
-export const knowledgeSignalDismissals = sqliteTable(
-  "knowledge_signal_dismissals",
-  {
-    kind: text({ enum: knowledgeSignalKinds }).notNull(),
-    collectionId: text("collection_id").notNull(),
-    subject: text().notNull(),
-    dismissedAt: timestamp("dismissed_at").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.kind, table.collectionId, table.subject] }),
   ]
 );
 
@@ -5728,6 +6833,7 @@ export const stephenRequests = sqliteTable(
     index("stephen_requests_day_idx").on(table.day),
     index("stephen_requests_person_idx").on(table.personId, table.chatId),
     index("stephen_requests_question_idx").on(table.questionId),
+    index("stephen_requests_topic_idx").on(table.topicId),
   ]
 );
 
@@ -5989,12 +7095,75 @@ export const providerHealth = sqliteTable(
 );
 
 /**
+ * Files people uploaded straight into the Brain (brain-uploads.ts), each
+ * a source `upload:<id>` there: who uploaded it and who may read it,
+ * fixed for its life, and, for one shared with a team or everyone, the
+ * name of the file its current version came from, for an admin's listing
+ * of shared uploads to erase (no content: the text is the Brain's alone,
+ * and an upload for one person keeps even its name in their own store).
+ * A row is written before the Brain is given anything under its key, and
+ * goes only once that key was erased, so every upload the Brain holds is
+ * named here for its deletion.
+ */
+export const brainUploads = sqliteTable(
+  "brain_uploads",
+  {
+    id: text().primaryKey(),
+    uploadedBy: text("uploaded_by").notNull(),
+    /** The file's name, as its uploader gave it: null for `me`. */
+    name: text(),
+    /** Who may read it: its uploader alone, a team, or everyone. */
+    readers: text({ enum: ["me", "team", "everyone"] }).notNull(),
+    /** The team, for `team`. */
+    teamId: text("team_id"),
+    /**
+     * Its current version, as the Brain answered the add that made it: 0
+     * until the first lands. A retried add the Brain answers with an older
+     * version changes nothing here.
+     */
+    version: integer().notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    /**
+     * When its uploader removed it, a shared one (only they remove):
+     * out of use in the Brain for good, its history kept, until an admin
+     * erases it (brain-uploads.ts). Null while it is in use. Written first,
+     * before the Brain is asked, with `removalOwed`.
+     */
+    removedAt: timestamp("removed_at"),
+    /**
+     * Whether the removal is still owed: the Brain's removal not yet known
+     * to have returned, or its event not yet stored. The clock completes it
+     * (`completeOwedRemovals`).
+     */
+    removalOwed: integer("removal_owed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+  },
+  (table) => [
+    check(
+      "brain_uploads_team_named",
+      sql`${table.readers} <> 'team' OR ${table.teamId} IS NOT NULL`
+    ),
+    // The removals still owed, oldest first, for the clock to complete
+    // (brain-uploads.ts `completeOwedRemovals`): never the whole table. Its
+    // condition a literal, as the query writes it, so SQLite uses it.
+    index("brain_uploads_removal_owed_idx")
+      .on(table.removedAt)
+      .where(sql.raw("removal_owed = 1")),
+  ]
+);
+
+/**
  * What core has still to hand over to the new Brain (src/brain-hand-overs.ts):
  * a source by its producer's kind and that producer's id for it, noted from
- * the audit event of the change that touched it, until the Brain's work
- * queue took it. Never content: what is handed over is read from core's
- * records when the Brain's queue runs the hand-over. `noting` is new each
- * time it is noted, so the relay removes only the noting it put on the queue.
+ * the audit event of the change that touched it, until its hand-over ended:
+ * the row goes in the same batch as the one event that says how
+ * (src/brain-sources.ts). Never content: what is handed over is read from
+ * core's records when the Brain's queue runs the hand-over. `noting` is the
+ * ID of the event that noted it, so the relay marks, and a hand-over ends,
+ * only the noting it took; a source noted anew by another event is handed
+ * over again.
  */
 export const brainHandOvers = sqliteTable(
   "brain_hand_overs",
@@ -6004,10 +7173,72 @@ export const brainHandOvers = sqliteTable(
     sourceId: text("source_id").notNull(),
     noting: text().notNull(),
     notedAt: timestamp("noted_at").notNull(),
+    /**
+     * When the relay put this noting on the Brain's queue; null until then,
+     * and again once it is noted anew.
+     */
+    relayedAt: timestamp("relayed_at"),
   },
   (table) => [
     primaryKey({ columns: [table.producer, table.sourceId] }),
-    index("brain_hand_overs_noted_at_idx").on(table.notedAt),
+    // What the relay reads, oldest first: only what it has yet to relay,
+    // so it never steps over notings already on the queue.
+    index("brain_hand_overs_unrelayed_idx")
+      .on(table.notedAt)
+      .where(sql`${table.relayedAt} IS NULL`),
+  ]
+);
+
+/**
+ * Whose run results the new Brain holds, by workflow (src/brain-run-sources.ts):
+ * one row per person and workflow a run of theirs was handed over for, in
+ * their own store (not one an App started). When they lose the workflow's
+ * role, the clock marks the row revoked and owed, then the Brain takes those
+ * runs' sources out of use a page at a time (history kept), then the
+ * removal is no longer owed and its one event is stored. A work record for the clock alone: no read of the Brain reads it.
+ */
+export const brainRunSources = sqliteTable(
+  "brain_run_sources",
+  {
+    personId: text("person_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    /** Whether a run of theirs was handed over since the last revocation. */
+    inUse: integer("in_use", { mode: "boolean" }).notNull().default(true),
+    /** When the last revocation was marked: the runs created by then are its. */
+    revokedAt: timestamp("revoked_at"),
+    /** How many runs that revocation covers, counted when it was marked. */
+    runs: integer(),
+    /** Whether that revocation's removal or its event is still owed. */
+    removalOwed: integer("removal_owed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /**
+     * Where the owed removal's next page starts, in the order of the index
+     * its runs are read by: after the run created at `removedThroughAt`
+     * with ID `removedThrough`, the last it took out of use. Before its
+     * first page, the last revocation's moment and no run (after every run
+     * that one covered), or both null for a first revocation.
+     */
+    removedThroughAt: timestamp("removed_through_at"),
+    removedThrough: text("removed_through"),
+    /**
+     * When a tick last took the owed removal for a page, whether the page
+     * went through or failed: the clock gives the one tried longest ago
+     * its turn first, those never tried before all. Null until then.
+     */
+    triedAt: timestamp("tried_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.personId, table.workflowId] }),
+    // What the clock checks each minute: the rows in use alone, and the
+    // removals still owed, those tried longest ago (or never) first. Each
+    // condition a literal, as the queries write it, so SQLite uses it.
+    index("brain_run_sources_in_use_idx")
+      .on(table.personId, table.workflowId)
+      .where(sql.raw("in_use = 1")),
+    index("brain_run_sources_owed_idx")
+      .on(table.triedAt, table.revokedAt)
+      .where(sql.raw("removal_owed = 1")),
   ]
 );
 
@@ -6032,8 +7263,134 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
   parked: integer().notNull(),
   /** Whether a step of its tick last failed, its queue is paused, or its ledger isn't read through. */
   failing: integer({ mode: "boolean" }).notNull(),
-  /** Whether a model ships and its rebuild for that model isn't done. */
+  /** Whether its rebuild for the model core runs isn't done yet. */
   notRebuilt: integer("not_rebuilt", { mode: "boolean" }).notNull(),
   /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
   nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),
 });
+
+/**
+ * Every address a person's sign-ins proved (`accounts.verified_email`),
+ * the current one and those a later sign-in replaced (auth.ts): for their
+ * erasure alone, which forgets the reader tokens of each and then these
+ * rows (person-erasure.ts `identity`, source-readers.ts). Nothing reads
+ * it for access: a past address proves nothing.
+ */
+export const signInAddresses = sqliteTable(
+  "sign_in_addresses",
+  {
+    userId: text("user_id").notNull(),
+    address: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.address] })]
+);
+
+/**
+ * The token the Brain knows each account on a copied reader list by
+ * (source-readers.ts, GRA-1761), so the Brain never holds an address or an
+ * object ID, and nor does this table: `key` is a keyed hash of the account
+ * as lists name it (`<provider>:<account>`, compared form), `token` random,
+ * minted the first time a list names the account. `person` is the member
+ * who last proved the account theirs as they read (null until one has):
+ * erasing them deletes their rows (person-erasure.ts `identity`), so the
+ * lists made before name a token nobody holds again; a later list naming
+ * the account mints a new one.
+ */
+export const sourceReaderTokens = sqliteTable(
+  "source_reader_tokens",
+  {
+    key: text().primaryKey(),
+    person: text(),
+    token: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("source_reader_tokens_person_idx").on(table.person)]
+);
+
+/**
+ * Every group of a provider's that a copied reader list ever named
+ * (source-readers.ts `readerPrincipalsOf`, GRA-1761), by the Brain's name
+ * of it (`group:<provider>:<tenant>:<group>`), written before the list
+ * reaches the Brain. A person reads as only those of their own groups
+ * that are here (`heldPrincipalsOf`): the groups sources are shared with,
+ * however many groups they are in. A group is no person; nothing is
+ * removed, as a name no source holds any more costs a reader nothing.
+ */
+export const sourceReaderGroups = sqliteTable("source_reader_groups", {
+  name: text().primaryKey(),
+  /**
+   * When the last whole read of an Entra group's members that was kept
+   * started (GRA-2146), by either read that keeps them: the daily read of
+   * a group mapped to a team (directory-group-reads.ts) or the read of
+   * the groups reader lists name (directory-reader-groups.ts); null while
+   * none was. No older read's rows land after it, and the second read
+   * paces itself by it. What proves a group is
+   * `directory_group_members.read_at`.
+   */
+  directoryReadAt: timestamp("directory_read_at"),
+  /**
+   * The clock's slot of the directory's last try of the group, whether it
+   * read it whole or not: the reads take groups the longest untried
+   * first, so one that keeps failing holds up no other.
+   */
+  directoryTriedAt: timestamp("directory_tried_at"),
+});
+
+/**
+ * No longer read or written (GRA-2207): what a place picked on a shared
+ * connection holds is read by the connection's audience, not by the
+ * readers its source names, so no pair of a place and a reader is kept.
+ * The table stays until a later release drops it (expand, then contract),
+ * so a release before this one, after a rollback, finds it as it left it.
+ * It held pairs of a place's group and a reader as the Brain names them
+ * (an account's token, a tenant, a group), never an address or an object
+ * ID.
+ */
+export const sourceReaderPairs = sqliteTable(
+  "source_reader_pairs",
+  {
+    place: text().notNull(),
+    principal: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.place, table.principal] }),
+    // A read finds a person's pairs by the readers they proved.
+    index("source_reader_pairs_principal_idx").on(table.principal, table.place),
+  ]
+);
+
+/**
+ * What Grasp proposes for a team's routine (opportunities.ts, GRA-1750),
+ * at the evidence it rests on: the model's answer, held to what it was
+ * given, kept so it is asked once per evidence. Only while that evidence
+ * stands: an opportunity list forgets the rest. No person's data: a form,
+ * an App's id, systems from the catalog and step numbers.
+ */
+export const opportunityProposals = sqliteTable(
+  "opportunity_proposals",
+  {
+    /** The onboarding's id for the team's piece of work. */
+    routine: text().notNull(),
+    /** The drawing it rests on, by its id in the Brain. */
+    evidence: text().notNull(),
+    /** The proposal, as JSON (opportunities.ts `proposalSchema`). */
+    proposal: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.routine, table.evidence] })]
+);
+
+/**
+ * Opportunities an admin dismissed (opportunities.ts, GRA-1750), each at
+ * the evidence it was shown with: hidden until that changes. Who dismissed
+ * it is in the audit log, not here.
+ */
+export const opportunityDismissals = sqliteTable(
+  "opportunity_dismissals",
+  {
+    routine: text().notNull(),
+    evidence: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.routine, table.evidence] })]
+);

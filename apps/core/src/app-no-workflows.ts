@@ -2,8 +2,8 @@ import { appErrors } from "@grasp-os/shared/apps";
 
 // An App holds no workflows of its own (GRA-1367): what runs on its own is
 // an independent workflow the App binds under an alias, whose every call
-// is a binding of its validated definition that an admin approves for
-// that exact version. So no version of an App holds code under
+// is a binding of its validated definition that an admin approves. So no
+// version of an App holds code under
 // `workflows/`: every write that makes one (a commit, a chat's proposed
 // draft, an App created or updated from a blueprint) refuses such files,
 // naming them, and nothing in an App is code that runs outside the

@@ -15,7 +15,7 @@ import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInWithRole, unique } from "./sign-in.ts";
+import { signedInWithRole, uniqueWord } from "./sign-in.ts";
 
 // The new Brain's first path (GRA-1720): core adds a source with who may
 // read it and recalls it by words, as a member core resolves from its own
@@ -29,10 +29,17 @@ import { signedInWithRole, unique } from "./sign-in.ts";
 const idp = mockIdp();
 
 /** A word no other test's sources hold. */
-const word = () => `w${unique()}`;
+const word = uniqueWord;
 
-/** What core or the store says when it refuses an input. */
-const refused = /^(?:The Brain refused it|Refused)/u;
+/**
+ * What core or the Brain says when it refuses an input: core's own
+ * check, the Brain's, or a text the Brain can't keep.
+ */
+const refused =
+  /^(?:The Brain refused it|Refused|There's no text in this to keep|This text is too large for the Brain to keep)/u;
+
+/** What core answers an argument that isn't of the kind its call takes. */
+const invalid = { code: "brain.request_invalid" };
 
 /** A member of the organization, signed in. */
 const person = async (): Promise<string> => {
@@ -361,7 +368,7 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     const secret = word();
     for (const readers of [
       {},
-      { kind: "everyone" },
+      { kind: "anyone" },
       { kind: "audience", group: "everyone" },
       { kind: "owner", personId: "" },
       { kind: "owner" },
@@ -371,7 +378,9 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
       { kind: "none", personId: reader },
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
-      await expect(addUnchecked(secret, readers)).rejects.toThrow(refused);
+      await expect(addUnchecked(secret, readers)).rejects.toMatchObject(
+        invalid
+      );
     }
     await expect(
       addUnchecked("", { kind: "owner", personId: reader })
@@ -394,7 +403,7 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
           question: "anything",
           budget: { tokens: recallBudgetMax },
         })
-      ).rejects.toThrow(refused);
+      ).rejects.toMatchObject(invalid);
     }
   });
 
@@ -403,13 +412,17 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     await newTeam("");
     await join("", reader);
 
-    await expect(recalledAs(reader, "anything")).rejects.toThrow(refused);
+    await expect(recalledAs(reader, "anything")).rejects.toMatchObject(invalid);
   });
 
-  it("holds to its bounds: as many teams as a reader may have, and no more", async () => {
+  it("holds to its bounds: as many teams as a reader's groups hold beside the company, the members and their tenant's, and no more", async () => {
     const [atMost, overMost] = await Promise.all([person(), person()]);
-    await inTeams(atMost, readerGroupsMax);
-    await inTeams(overMost, readerGroupsMax + 1);
+    // A member's reader holds the company's group too, and the members'
+    // (what members read as themselves alone, a team's claim), and, read
+    // as themselves, the tenant they sign in from (source-readers.ts; an
+    // account's own only once a copied list names it).
+    await inTeams(atMost, readerGroupsMax - 3);
+    await inTeams(overMost, readerGroupsMax - 2);
     const secret = word();
     const id = await add(secret, { kind: "owner", personId: atMost });
 
@@ -423,6 +436,6 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     ).rejects.toThrow(refused);
     await expect(
       recalledAs(atMost, "a".repeat(questionMaxLength + 1))
-    ).rejects.toThrow(refused);
+    ).rejects.toMatchObject(invalid);
   });
 });

@@ -39,6 +39,7 @@ import type { Acting } from "../auth/identity.ts";
 import {
   runLineageAttempts,
   runLineages,
+  runStateWriters,
   workflowCandidateRuns,
   workflowItemTests,
   workflowResources,
@@ -56,20 +57,25 @@ import {
   storeBuild,
   workflowManifestFormat,
 } from "../workflow-builds.ts";
-import { draftCheckpoint } from "../workflow-drafts.ts";
+import { draftText } from "../workflow-editor.ts";
 import { candidateParams } from "../workflow-params.ts";
 import {
   candidateBuildOf,
   liveWorkflow,
   requireWorkflowRole,
 } from "../workflow-resources.ts";
-import { acceptedInput } from "../workflow-starts.ts";
-import { workflowStateOf } from "../workflow-state.ts";
+import {
+  acceptedInput,
+  writersAdmitted,
+  writersHeldSql,
+} from "../workflow-starts.ts";
+import { readableStateOf } from "../workflow-state.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
 import { modelCallLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
 import type { CandidateBinding } from "./resource-authority.ts";
+import { endedRunResultWithheld } from "./resource-reads.ts";
 import { tracedSteps } from "./resource-run-trace.ts";
 import {
   engineResultOf,
@@ -81,8 +87,8 @@ import type { EngineStatus } from "./runs.ts";
 import type { HostedResourceRun } from "./sealed-run.ts";
 import { snapshotFrom, snapshotOf, snapshotStored } from "./state-snapshots.ts";
 
-// Test runs of a workflow's draft checkpoint, never published (GRA-815,
-// spec 13.10 and 22.7): a builder runs the exact checkpoint they checked,
+// Test runs of a workflow's draft, never published (GRA-815,
+// spec 13.10 and 22.7): a builder runs the exact revision they checked,
 // before anyone else's runs can, to see what it does. Threat model, each
 // tried in candidate-runs.test.ts:
 //
@@ -97,9 +103,10 @@ import { snapshotFrom, snapshotOf, snapshotStored } from "./state-snapshots.ts";
 //   else the defaults (`candidateParams`), never the values set on the
 //   workflow: its builder wrote its code, and a sensitive value they can't
 //   read could otherwise be handed back to them in its output.
-// - Running what wasn't checked. Only the latest draft revision, once it
-//   passed, and only at the revision the start names
-//   (`draftCheckpoint`): compiled as a publication would compile it,
+// - Running what wasn't checked. Only the draft at exactly the revision
+//   the start names (`draftText`, `draft.conflict` once it moved), and
+//   only once it passes (`workflow.definition_invalid` otherwise):
+//   compiled as a publication would compile it,
 //   pinned by its manifest's hash, and verified on every load as a
 //   version's build is (`loadCandidateBuild`).
 // - Someone else's draft. Only the workflow's builders start, read or
@@ -320,11 +327,11 @@ const rowOf = async (env: Env, id: string): Promise<CandidateRow | undefined> =>
     .get();
 
 /**
- * Starts a test run of workflow `id`'s draft checkpoint for `by`, one of
- * its builders, from `input` (`workflowCandidateStartSchema`): the
- * checkpoint at exactly the revision it names, compiled now into a build
+ * Starts a test run of workflow `id`'s draft for `by`, one of its
+ * builders, from `input` (`workflowCandidateStartSchema`): the draft at
+ * exactly the revision it names, compiled now into a build
  * of its own and pinned to it; its args and parameters checked against
- * the checkpoint's contract; every call it will make answered from the
+ * the draft's contract; every call it will make answered from the
  * start's fixtures. Its run's ID.
  */
 export const startCandidateRun = async (
@@ -359,14 +366,18 @@ export const startCandidateRun = async (
     workflowCandidateStartSchema,
     input
   );
-  const checkpoint = await draftCheckpoint(env, workflow.id, revision);
-  const built = await candidateBuildOf(env, by, workflow, checkpoint.source);
+  const source = await draftText(env, workflow.id, revision);
+  const built = await candidateBuildOf(env, by, workflow, source);
   const inputText = acceptedInput(JSON.stringify(built.contract.args), given);
   const paramsText = candidateParams(built.contract, params);
-  // What the workflow keeps between its runs, read once and frozen with
-  // the row, as a start's receipt freezes it: the test reads it, and
-  // writes nothing back (sealed-run.ts, `stepRecording`).
-  const snapshot = await snapshotFrom(await workflowStateOf(env, workflow.id));
+  // What the workflow keeps between its runs that its builder may read
+  // (workflow-state.ts `readableStateOf`), read once and frozen with the
+  // row, as a start's receipt freezes it: the test reads it, and writes
+  // nothing back (sealed-run.ts, `stepRecording`). The runs that set its
+  // keys are recorded as a start records them (`writersAdmitted`), so what
+  // the test returns is held to what they read (`candidateRunFor`).
+  const readable = await readableStateOf(env, workflow.id, by.userId);
+  const snapshot = await snapshotFrom(readable.values);
   const runId = crypto.randomUUID();
   // Its build's own seal (sealed-artifacts.ts), which its row names.
   const reservation = newSeal();
@@ -395,12 +406,15 @@ export const startCandidateRun = async (
   const manifestHash = await sha256Hex(manifest);
   const db = drizzle(env.DB);
   const createdAt = new Date();
-  // Written only while the workflow is live and its person is under both
-  // limits: otherwise NULL, which fails the batch (`allowed`).
+  // Written only while the workflow is live, its person is under both
+  // limits, and each run that set a key it froze still keeps its evidence
+  // (`writersHeldSql`, as a start's admission requires): otherwise NULL,
+  // which fails the batch (`allowed`).
   const { going, kept } = countsOf(workflow.id, by.userId);
   const allowed = sql<string>`(SELECT ${workflowResources.id} FROM ${workflowResources}
     WHERE ${workflowResources.id} = ${workflow.id} AND ${workflowResources.deletedAt} IS NULL
-      AND ${going} < ${maxLiveCandidateRuns} AND ${kept} < ${maxKeptCandidateRuns})`;
+      AND ${going} < ${maxLiveCandidateRuns} AND ${kept} < ${maxKeptCandidateRuns}
+      AND ${writersHeldSql(readable)})`;
   try {
     // Its build's bytes, referenced by its seal and stored before the row
     // that names them; given back, as is any part stored, if the row
@@ -424,10 +438,18 @@ export const startCandidateRun = async (
         input: inputText,
         params: paramsText,
         stateHash: snapshot.hash,
+        stateWithheld: readable.withheld > 0 ? readable.withheld : null,
         fixtures: canonicalJson(fixtures),
         status: "starting",
         createdAt,
       }),
+      ...writersAdmitted(
+        env,
+        runId,
+        readable,
+        sql`EXISTS (SELECT 1 FROM ${workflowCandidateRuns}
+          WHERE ${workflowCandidateRuns.id} = ${runId})`
+      ),
       ...(item === undefined
         ? []
         : [db.insert(workflowItemTests).values(item(runId))]),
@@ -442,6 +464,10 @@ export const startCandidateRun = async (
           revision,
           build: built.compiled.build.hash,
           fixtures: Object.keys(fixtures).length,
+          // How many kept keys it reads as unset (GRA-1996).
+          ...(readable.withheld > 0
+            ? { stateWithheld: readable.withheld }
+            : {}),
         },
       }),
     ]);
@@ -455,6 +481,9 @@ export const startCandidateRun = async (
       }
       // Another start took the last place meanwhile: refused as it is.
       await requireUnderLimits(env, workflow.id, by.userId);
+      // A run that set a key it froze was released meanwhile: refused as
+      // a start is, and the next freezes the state anew.
+      throw workflowResourceErrors.create("workflow.start_denied");
     }
     throw error;
   }
@@ -540,7 +569,7 @@ const loadedCandidateRun = async (
     run: {
       runId,
       workflowId: pin.workflow,
-      // No version's: a test run of a checkpoint.
+      // No version's: a test run of a draft.
       version: 0,
       principal: row.principalId,
       input: z.json().parse(JSON.parse(row.input)),
@@ -708,11 +737,36 @@ export const candidateRunFor = async (
     buildHash: row.buildHash,
     principal: row.principalId,
     status: row.status,
+    ...(row.stateWithheld === null ? {} : { stateWithheld: row.stateWithheld }),
     createdAt: row.createdAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,
   };
   if (row.status !== "completed" && row.status !== "failed") {
     return run;
+  }
+  // What it returned or why it failed may hold what the kept state it
+  // started from copied: withheld as a run's is (resource-runs.ts), once
+  // what the runs that set that state read is no longer the company's, or
+  // they were never recorded (`endedRunResultWithheld`, GRA-1996), its
+  // status and times shown.
+  if (
+    await endedRunResultWithheld(
+      env,
+      {
+        runId: row.id,
+        workflowId: row.workflowResourceId,
+        principal: row.principalId,
+      },
+      row.stateHash
+    )
+  ) {
+    return {
+      ...run,
+      error: {
+        code: "brain.revoked",
+        message: workflowResourceErrors.create("brain.revoked").message,
+      },
+    };
   }
   const result = await engineResultOf(env, row.id);
   // Core's own reason for a run the engine never had, else the engine's.
@@ -951,6 +1005,9 @@ const removed = async (
       db.delete(runLineageAttempts).where(eq(runLineageAttempts.rootRunId, id)),
       db.delete(runLineages).where(eq(runLineages.rootRunId, id)),
       db.delete(workflowCandidateRuns).where(eq(workflowCandidateRuns.id, id)),
+      // And the runs whose keys it started from: while it is kept, so is
+      // their evidence (retention.ts).
+      db.delete(runStateWriters).where(eq(runStateWriters.runId, id)),
       // The item it ran goes with it, in the same batch: while the run is
       // kept, so is what makes it its tester's alone (`readsItemRun`).
       db

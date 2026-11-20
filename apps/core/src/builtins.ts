@@ -1,4 +1,3 @@
-import knowledgeMigrations from "@grasp-os/brain/migrations/journal" with { type: "json" };
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -12,7 +11,6 @@ import { installBuiltinBlueprint } from "./app-blueprints.ts";
 import { installShippedSkills } from "./brain-skills.ts";
 import coreMigrations from "./db/core/migrations/meta/_journal.json" with { type: "json" };
 import { inJurisdiction } from "./durable-objects.ts";
-import { syncGraspSkills } from "./knowledge/grasp-skills.ts";
 import { releaseContracts } from "./release-contracts.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import type { ShippedSkill } from "./shipped-skills.ts";
@@ -22,9 +20,8 @@ import { ensureReleaseContract } from "./workflow-catalog.ts";
 // request: the built-in blueprints
 // (apps/core/blueprints/, embedded by build-blueprints.ts, each installed
 // as a blueprint like any other, app-blueprints.ts), the general catalog
-// contracts (release-contracts.ts), and the Grasp skills, into Knowledge
-// (knowledge/grasp-skills.ts) and the Brain (brain-skills.ts), until the
-// cutover (GRA-1735) leaves the Brain alone. Workers have no deploy hook, so the first
+// contracts (release-contracts.ts), and the Grasp skills, into the Brain
+// (brain-skills.ts). Workers have no deploy hook, so the first
 // request core serves after the router's check starts the install, in the
 // background (`installBuiltinsOnce`), once per isolate.
 //
@@ -145,27 +142,21 @@ const installContracts = async (
 };
 
 /**
- * The core and Knowledge databases' latest migrations: part of the
- * fingerprint, so a release that changes either schema installs again, as
- * what the install writes may have moved or been cleared, such as the
- * Grasp skills (a migration can't reach the fingerprint, which lives in
- * the singleton's storage).
+ * The core database's latest migration: part of the fingerprint, so a
+ * release that changes its schema installs again, as what the install
+ * writes may have moved or been cleared (a migration can't reach the
+ * fingerprint, which lives in the singleton's storage).
  */
 const coreSchema = coreMigrations.entries.at(-1)?.tag ?? null;
-const knowledgeSchema = knowledgeMigrations.entries.at(-1)?.tag ?? null;
 
 /** The fingerprint of what installing `of` writes. */
 export const fingerprintOf = async (of: ReleaseFingerprint): Promise<string> =>
   await sha256Hex(
     canonicalJson({
       schema: coreSchema,
-      knowledgeSchema,
       blueprints: of.blueprintsDigest,
       contracts: of.contracts,
       skills: of.skills.map(({ name, text }) => ({ name, text })),
-      // The skills go into the Brain too (GRA-1826): a release whose
-      // skills didn't change installs them there once.
-      skillsIn: ["knowledge", "brain"],
     })
   );
 
@@ -185,13 +176,8 @@ export const installBuiltins = async (
   }
   const blueprints = await installBlueprints(env, of.blueprints);
   const contracts = await installContracts(env, of.contracts);
-  // Knowledge keeps each at `<name>/SKILL.md`, until the cutover.
-  const skills = await syncGraspSkills(
-    env,
-    of.skills.map(({ name, text }) => ({ path: `${name}/SKILL.md`, text }))
-  );
-  const brainSkills = await installShippedSkills(env, of.skills);
-  const complete = blueprints && contracts && skills && brainSkills;
+  const skills = await installShippedSkills(env, of.skills);
+  const complete = blueprints && contracts && skills;
   if (complete) {
     await storage.put(installedKey, fingerprint);
   }

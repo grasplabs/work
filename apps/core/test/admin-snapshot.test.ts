@@ -5,6 +5,7 @@ import {
 } from "@grasp-os/shared/admin-snapshot";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
+import { participationNotice } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { onboardingSummaryPurpose } from "@grasp-os/shared/onboarding-summary";
@@ -125,7 +126,8 @@ const progress = (): InterviewProgress => ({
     { from: "person", text: sentinel, typed: true },
   ],
   facts: [
-    { id: "f1", tag: "step", text: sentinel, record: sentinel },
+    // Shared with the team as how they work; the next only counted anonymously.
+    { id: "f1", tag: "step", text: sentinel, record: sentinel, share: "team" },
     { id: "f2", tag: "wait", text: `${sentinel}, twice`, record: "x" },
     {
       id: "f3",
@@ -133,7 +135,10 @@ const progress = (): InterviewProgress => ({
       text: "Their own sheet",
       record: "y",
       out: true,
+      share: "team",
     },
+    // Only used to know whom to ask: never shared, whatever it says.
+    { id: "f4", tag: "who", text: "Sam does it", record: "z", share: "team" },
   ],
   phase: "steps",
   wants: "answer",
@@ -191,9 +196,12 @@ const running = async () => {
   const link = (await store.linkOf(ids.lea)) ?? "";
   const secret = link.split("#")[1] ?? "";
   const mark = await sha256Hex(secret);
-  const key = await sha256Hex("lea's device");
-  await store.openLink(mark, null, key);
-  await store.saveInterview(mark, key, 0, progress());
+  // Opened as Lea's account, signed in as the address her link went to.
+  const account = "lea's account";
+  await store.openLink(mark, { account, address: "lea@acme.test" });
+  // She takes part before anything she says is kept, as her page has her.
+  await store.participate(mark, account, participationNotice.version);
+  await store.saveInterview(mark, account, 0, progress());
   await store.meter({
     purpose: "interviews",
     model: `claude-opus-${id}`,
@@ -431,9 +439,11 @@ describe("the admin snapshot", () => {
           phase: "steps",
           stoppedAt: "steps",
           minutes: 0,
-          facts: 2,
+          facts: 3,
           out: 1,
           confirmed: 1,
+          // Of the three kept in, one shared as how the team works: no word of any.
+          shared: 1,
           rating: 4,
           typed: true,
           interviewer: null,
@@ -501,7 +511,7 @@ describe("the admin snapshot", () => {
       people: leads.map((lead, at) => ({
         id: lead,
         name: `Lead ${at}`,
-        email: "",
+        email: `${lead}@acme.test`,
         team: `team-${at}`,
         title: "",
         away: false,
@@ -519,9 +529,10 @@ describe("the admin snapshot", () => {
       leads.map(async (lead) => {
         const secret = ((await store.linkOf(lead)) ?? "").split("#")[1] ?? "";
         const mark = await sha256Hex(secret);
-        const key = await sha256Hex(`${lead}'s device`);
-        await store.openLink(mark, null, key);
-        await store.saveInterview(mark, key, 0, progress());
+        const account = `${lead}'s account`;
+        await store.openLink(mark, { account, address: `${lead}@acme.test` });
+        await store.participate(mark, account, participationNotice.version);
+        await store.saveInterview(mark, account, 0, progress());
       })
     );
 
@@ -534,7 +545,7 @@ describe("the admin snapshot", () => {
     expect({
       interviews: counted.length,
       facts: [...new Set(counted.map(({ facts }) => facts))],
-    }).toStrictEqual({ interviews: 110, facts: [2] });
+    }).toStrictEqual({ interviews: 110, facts: [3] });
   });
 
   it("puts every read in the company's audit log, by the staff member the console names", async () => {

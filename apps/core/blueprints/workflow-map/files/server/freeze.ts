@@ -74,7 +74,6 @@ const kindOrder = [
   "failing_step",
   "correction",
   "cost_per_run",
-  "unanswered_question",
 ];
 
 /**

@@ -6,6 +6,7 @@ import type { PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 
+import { recallsTheBrain } from "./app-provenance.ts";
 import { inviteGuest, listGuests, readGuest, revokeGuest } from "./guests.ts";
 import type { BindingCaller, ResourceAdapter } from "./resource-adapter.ts";
 import { platformGrantOf } from "./resource-platform.ts";
@@ -98,6 +99,11 @@ const inviteFor = async (
     caller.context.type !== "app" ||
     caller.context.appId !== caller.app
   ) {
+    throw functionErrors.create("permission.not_allowed");
+  }
+  // A guest is outside the company, as a visitor is: an App that may hold
+  // what the Brain recalled invites none (app-provenance.ts).
+  if (await recallsTheBrain(env, caller.app)) {
     throw functionErrors.create("permission.not_allowed");
   }
   return await inviteGuest(

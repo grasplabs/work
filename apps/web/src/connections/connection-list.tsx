@@ -1,5 +1,6 @@
 import {
   composioConsentText,
+  composioKeyConsentText,
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
 import type { ListedConnection } from "@grasp-os/shared/connect";
@@ -43,6 +44,8 @@ import { FactRow, RowAlert, SettingsRows } from "../grasp/setting-row/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import { BrainAudience, useBrainAudiences } from "./brain-audience.tsx";
+import type { AudiencesRead } from "./brain-audience.tsx";
 import { canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 import { useChange } from "./use-change.ts";
@@ -205,6 +208,22 @@ const ConsentRecord = ({ connection }: { connection: ListedConnection }) => {
     connection.tools === undefined || connection.tools.length === 0
       ? t`Tools allowed: none recorded`
       : t`Tools allowed: ${ph({ tools: formatList(connection.tools) })}`;
+  // The consent for how it was made, as connect recorded it; none where it
+  // wasn't recorded.
+  const consent =
+    connection.composioAuth === undefined
+      ? undefined
+      : {
+          managed: composioConsentText,
+          key: composioKeyConsentText,
+        }[connection.composioAuth];
+  if (consent === undefined) {
+    return (
+      <FactRow label={t`Consent`}>
+        <Text size="sm">{tools}</Text>
+      </FactRow>
+    );
+  }
   return (
     <FactRow
       help={t`This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown.`}
@@ -212,7 +231,7 @@ const ConsentRecord = ({ connection }: { connection: ListedConnection }) => {
     >
       <Collapsible title={t`${who} consented to this before connecting it`}>
         <Text size="sm" tone="muted">
-          {composioConsentText}
+          {consent}
         </Text>
         <Text size="sm">{tools}</Text>
       </Collapsible>
@@ -303,6 +322,9 @@ const DisconnectContent = ({
       <AlertDialogTitle>{t`Disconnect ${label}?`}</AlertDialogTitle>
       <AlertDialogDescription>
         {t`Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again.`}
+        {connection.keepsReads === true
+          ? ` ${t`Everything the Brain kept from it is erased for good.`}`
+          : null}
       </AlertDialogDescription>
       {failure === undefined ? null : <Alert title={failure} tone="danger" />}
       <AlertDialogFooter>
@@ -366,6 +388,30 @@ export const DisconnectDialog = ({
   </AlertDialog>
 );
 
+/** A connection's name: its app's, with its account's where the provider names one. */
+const labelOf = (
+  connection: ListedConnection,
+  integration: Integration
+): string =>
+  connection.accountName === null
+    ? integration.name
+    : `${integration.name} (${connection.accountName})`;
+
+/**
+ * Whether `identity` chooses who may read in the Brain what agents read
+ * through `connection` (brain-audience.tsx): one of the company's own
+ * admins, never Grasp staff, on a shared connection still connected.
+ * Core checks it again.
+ */
+const choosesBrainAudience = (
+  connection: ListedConnection,
+  identity: Identity
+): boolean =>
+  isAdmin(identity.role) &&
+  !identity.staff &&
+  connection.scope === "shared" &&
+  connection.status !== "disconnected";
+
 /**
  * One connection to the integration, as the prototype's Account section
  * shows it: its account, where it stands, who connected it and when, and
@@ -376,11 +422,17 @@ const ConnectionItem = ({
   integration,
   held,
   identity,
+  audiences,
+  onAudienceChanged,
 }: {
   connection: ListedConnection;
   integration: Integration;
   held: HeldPermissions | undefined;
   identity: Identity;
+  /** Every shared connection's Brain audience, read once for the page. */
+  audiences: AudiencesRead;
+  /** A change or an erase of one was asked for: they are read again. */
+  onAudienceChanged: () => void;
 }) => {
   const { t } = useLingui();
   const admin = isAdmin(identity.role);
@@ -389,8 +441,7 @@ const ConnectionItem = ({
   const mayDisconnect = connection.scope === "personal" || admin;
   const reconnectable = canReconnect(connection, integration.offered, identity);
   const { accountName } = connection;
-  const { name } = integration;
-  const label = accountName === null ? name : `${name} (${accountName})`;
+  const label = labelOf(connection, integration);
   const connectedBy =
     connection.connectedBy === identity.userId
       ? t`You`
@@ -450,6 +501,14 @@ const ConnectionItem = ({
           <ConsentRecord connection={connection} />
         ) : null}
       </SettingsRows>
+      {choosesBrainAudience(connection, identity) ? (
+        <BrainAudience
+          audiences={audiences}
+          connection={connection}
+          label={label}
+          onChanged={onAudienceChanged}
+        />
+      ) : null}
       {held === undefined ? null : (
         <Holders
           held={held}
@@ -471,30 +530,42 @@ export const ConnectionList = ({
   /** Undefined for someone who can't list permissions. */
   held: Loaded<HeldPermissions> | undefined;
   identity: Identity;
-}) =>
-  integration.connections.map((connection) => (
+}) => {
+  // Read once for every card that chooses one, never a read a card.
+  const { read: audiences, onChanged } = useBrainAudiences(
+    integration.connections.some((connection) =>
+      choosesBrainAudience(connection, identity)
+    )
+  );
+  return integration.connections.map((connection) => (
     <ConnectionItem
+      audiences={audiences}
       connection={connection}
       held={held?.state === "ready" ? held.data : undefined}
       identity={identity}
       integration={integration}
       key={connection.id}
+      onAudienceChanged={onChanged}
     />
   ));
+};
 
 /**
  * What an app's one connection holds beyond what the app's page says of it
  * (its account, who connected it, signing in again and disconnecting): the
- * consent a Composio one was connected with, and, for admins and builders,
- * which Apps and agents hold a permission for it. Nothing for someone who
- * would see neither.
+ * consent a Composio one was connected with; for admins and builders,
+ * which Apps and agents hold a permission for it; and, for the company's
+ * admins on a shared one, who may read in the Brain what agents read
+ * through it. Nothing for someone who would see none of these.
  */
 export const ConnectionAccess = ({
   connection,
+  integration,
   held,
   identity,
 }: {
   connection: ListedConnection;
+  integration: Integration;
   /** Undefined for someone who can't list permissions. */
   held: Loaded<HeldPermissions> | undefined;
   identity: Identity;
@@ -502,7 +573,9 @@ export const ConnectionAccess = ({
   const { t } = useLingui();
   const consented = connection.source === "composio";
   const holders = held?.state === "ready" ? held.data : undefined;
-  if (!consented && holders === undefined) {
+  const chooses = choosesBrainAudience(connection, identity);
+  const { read: audiences, onChanged } = useBrainAudiences(chooses);
+  if (!consented && holders === undefined && !chooses) {
     return null;
   }
   return (
@@ -511,6 +584,14 @@ export const ConnectionAccess = ({
         <SettingsRows>
           <ConsentRecord connection={connection} />
         </SettingsRows>
+      ) : null}
+      {chooses ? (
+        <BrainAudience
+          audiences={audiences}
+          connection={connection}
+          label={labelOf(connection, integration)}
+          onChanged={onChanged}
+        />
       ) : null}
       {holders === undefined ? null : (
         <Holders

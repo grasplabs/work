@@ -93,13 +93,40 @@ const idSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]{1,60}$/u, "Letters, digits, - and _ only");
 
+/**
+ * A team's name as people mean it, whichever way it is written: trimmed,
+ * in one Unicode form (NFC) and lower case. Two names with the same key are
+ * the same team, to the web's staff list and to core alike.
+ */
+export const teamNameKey = (name: string): string =>
+  name.trim().normalize("NFC").toLowerCase();
+
+/**
+ * What Settings › Members answers a team change the staff list stops
+ * (GRA-2055), as Better Auth's error `code`: deleting a team the saved or
+ * confirmed list names, or making one under a name the list gives a team
+ * it hasn't made yet.
+ */
+export const staffListTeamRefusals = {
+  onList: "STAFF_LIST_TEAM_ON_LIST",
+  notMadeYet: "STAFF_LIST_TEAM_NOT_MADE_YET",
+} as const;
+
 /** A team, as the staff list and its admin have it. */
 export const rosterTeamSchema = z.strictObject({
+  /**
+   * The members' team it is (GRA-2055): core saves a team under the id of
+   * the members' team with this id or, failing that, with its name, and
+   * makes a new one, under an id of its own, for any other.
+   */
   id: idSchema,
   name: nameSchema,
   /** Its lead, by person: someone in the team. */
   lead: idSchema.nullable(),
-  /** What it does, once its lead said so. */
+  /**
+   * What it does, in the admin's own words: every member reads it once the
+   * admin confirms the list. Never what a lead's map says (GRA-1748).
+   */
   does: z.string().trim().max(200).default(""),
   /** Not taking part: nobody in it gets a link. */
   off: z.boolean().default(false),
@@ -110,7 +137,10 @@ export type RosterTeam = z.output<typeof rosterTeamSchema>;
 export const rosterPersonSchema = z.strictObject({
   id: idSchema,
   name: nameSchema,
-  /** Empty when they have none: their link is handed to them on paper. */
+  /**
+   * Empty when they have none: their link can be handed to them on paper,
+   * and opens once the list has an address they sign in with (GRA-1790).
+   */
   email: z.union([z.literal(""), z.email().max(120)]).default(""),
   team: idSchema,
   title: z.string().trim().max(80).default(""),
@@ -253,6 +283,19 @@ export interface OnboardingView {
   agreed: boolean;
   /** Grasp paused the interviews: no link opens and none goes out. */
   paused: boolean;
+  /**
+   * The kickoff: `in` while it is kept, which the admin can delete
+   * (`deleteKickoff`); `erasing` once deleted while what it gave the brain
+   * is still being erased, which finishes by itself; null without one.
+   */
+  kickoff: "in" | "erasing" | null;
+  /**
+   * The company's teams in the Brain (GRA-1748): `in` while it holds them,
+   * which the admin can erase (`eraseTeamsFromBrain`); `erasing` once
+   * erased while that is still under way, which finishes by itself; null
+   * while it holds none.
+   */
+  teamsInBrain: "in" | "erasing" | null;
   /**
    * The sponsor's first name, when the kickoff named them; null before it
    * is in, or when it did not. The one word of the kickoff the admin sees.
@@ -452,6 +495,19 @@ export interface OnboardingApi
   links: () => Promise<LinkToSend[]>;
   /** The admin took these people's links to send: they are new no more. */
   linksTaken: (people: string[]) => Promise<void>;
+  /**
+   * Deletes the kickoff for good, and everything drawn from it: what the
+   * admin's onboarding, Stephen and the brain knew of it. Asked again, it
+   * finishes what a failed delete left.
+   */
+  deleteKickoff: () => Promise<void>;
+  /**
+   * The admin erases the company's teams from the Brain (GRA-1748): every
+   * version of what it was given of them, for everyone. The roster stays
+   * as it is, and the next confirmed save gives the Brain the teams afresh.
+   * Asked again, it finishes what a failed erase left.
+   */
+  eraseTeamsFromBrain: () => Promise<void>;
 }
 
 /** Why the onboarding refused something. */
@@ -459,6 +515,10 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.invalid": "That isn't something the onboarding takes.",
   "onboarding.staff_only": "Only Grasp's staff do that.",
   "onboarding.no_roster": "Add who works where first.",
+  "onboarding.kickoff_unfinished":
+    "The kickoff is deleted. What was drawn from it is still being erased, and that finishes by itself.",
+  "onboarding.teams_unfinished":
+    "The teams are being erased from the Brain. That isn't finished yet, and it finishes by itself.",
   "onboarding.past": "The interviews can't start in the past.",
   "onboarding.no_link": "That person has no link out yet.",
   "onboarding.not_found": "Nobody on the list by that id.",

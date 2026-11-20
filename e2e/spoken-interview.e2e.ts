@@ -14,7 +14,7 @@ import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import { z } from "zod";
 
 import { test } from "./csp.ts";
-import { invited } from "./interview-turns.ts";
+import { addressOf, invited, signedInFor } from "./interview-turns.ts";
 import { signInStaff } from "./people.ts";
 
 // An interview by voice, end to end (GRA-383): someone talks with Stephen
@@ -338,6 +338,7 @@ test("an interview by voice: he answers when they are done, drops his answer whe
   });
   await watchLoop(page);
 
+  await signedInFor(page, addressOf(person));
   await page.goto(link);
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Stephen", exact: true }).click();

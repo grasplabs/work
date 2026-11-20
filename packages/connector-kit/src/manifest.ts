@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/shared/connect";
 import { attachmentsProperty } from "@grasp-os/shared/connector-attachments";
 import { permissionActionSchema } from "@grasp-os/shared/permissions";
+import { syncCursorSchema, syncItemKindSchema } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
 import { endpointHost, signInSchema } from "./sign-in.ts";
@@ -15,6 +16,12 @@ import { endpointHost, signInSchema } from "./sign-in.ts";
 // next to the module's code, so connect decides by the manifest alone which
 // provider's token a call gets, and where that call may go (threat model
 // R9, Q11): the connector's code can't widen either.
+
+/**
+ * How a caller wants a file's content, in a tool that answers a file
+ * (`answersFile`): as text, or base64 for extraction.
+ */
+export const readAsSchema = z.enum(["text", "base64"]);
 
 /**
  * Tool `_meta` key: the name of the one input property that selects the
@@ -166,6 +173,13 @@ export type RecoveryMode = (typeof recoveryModes)[number];
  * provider's: the egress drops it from theirs.
  */
 export const egressHeader = "grasp-egress";
+
+/**
+ * The error a provider's answer fails with once it passes what connect's
+ * egress reads of one answer: its body stops with this message, which a
+ * connector tells apart from any other failure (`isTooLarge` in sync.ts).
+ */
+export const egressTooLargeMessage = "The provider's response is too large";
 
 /** The kinds of answer connect's egress gives itself, as `egressHeader` says. */
 export const egressKind = {
@@ -364,6 +378,11 @@ const actionManifestSchema = z.strictObject({
    */
   answersFile: z.literal(true).optional(),
   /**
+   * It reads one item and answers its content, naming exactly that item in
+   * its provenance: what core keeps as a source in the Brain (GRA-1730).
+   */
+  answersItem: z.literal(true).optional(),
+  /**
    * It attaches files (GRA-887): its input has an `attachments` property
    * naming each by digest, and its bytes come beside the input
    * (`attachmentsMetaKey`). In its generated contract the property names
@@ -390,6 +409,73 @@ const maxHosts = 16;
 /** A connector's name: its package's, and its app's slug. */
 export const connectorNameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/u);
 
+/** A sync's name, as core asks for it: `drive`, `gmail`, `calendar`. */
+export const syncNameSchema = z.string().regex(/^[a-z][a-z\d-]{0,63}$/u);
+
+/**
+ * A sync (sync.ts), as the manifest declares it: the kind of item it
+ * reads, and the only requests it may send, all reads.
+ */
+export const syncManifestSchema = z.strictObject({
+  kind: syncItemKindSchema,
+  /**
+   * What it reads: of a personal connection, `own`, the whole account, or
+   * `listed`, places of the account the sync lists itself
+   * (`syncPlacesMethod`); of a shared connection, `picked`, the places of
+   * the connected account an admin picked from those it lists (shared
+   * drives, document libraries). Each place is read as a source of its
+   * own with its own cursor.
+   */
+  places: z.enum(["own", "listed", "picked"]).default("own"),
+  routes: z
+    .array(routeSchema)
+    .min(1)
+    .max(maxRoutes)
+    .refine(
+      (routes) => routes.every(({ method }) => method === "GET"),
+      "A sync only reads: its routes are GETs"
+    ),
+});
+export type SyncManifest = z.infer<typeof syncManifestSchema>;
+
+/**
+ * Requests a connector's isolate may send per call, every one through
+ * connect's egress: the limit connect loads each isolate with
+ * (connect's connector-isolate.ts).
+ */
+export const connectorIsolateRequests = 50;
+
+/** The JSON-RPC method connect asks a connector for a sync page by. */
+export const syncMethod = "grasp-os/sync";
+
+/** The JSON-RPC method connect asks a sync's places by. */
+export const syncPlacesMethod = "grasp-os/sync-places";
+
+/** What connect asks a connector for its sync's places. */
+export const syncPlacesParamsSchema = z.strictObject({
+  name: syncNameSchema,
+  /** Where a listing too long for one read goes on; null from the start. */
+  cursor: syncCursorSchema.nullable(),
+});
+
+/** What connect asks a connector's sync for. */
+export const syncParamsSchema = z.strictObject({
+  name: syncNameSchema,
+  /** `own`, the connection's own account, or a picked place. */
+  place: z.string().min(1).max(256),
+  /** Null for the first listing. */
+  cursor: syncCursorSchema.nullable(),
+  /** A names-only listing (`SyncPageRequest.names`). */
+  names: z.boolean().optional(),
+  /** Those items alone, in full (`SyncPageRequest.ids`): one request each at most. */
+  ids: z
+    .array(z.string().min(1).max(1024))
+    .min(1)
+    .max(connectorIsolateRequests)
+    .optional(),
+});
+export type SyncParams = z.infer<typeof syncParamsSchema>;
+
 export const connectorManifestSchema = z
   .strictObject({
     name: connectorNameSchema,
@@ -411,6 +497,11 @@ export const connectorManifestSchema = z
     hosts: z.array(hostSchema).min(1).max(maxHosts),
     /** Each action (tool) by name, and the only requests it may send. */
     actions: z.record(permissionActionSchema, actionManifestSchema),
+    /**
+     * Each sync (sync.ts) by name, and the only requests it may send:
+     * none for a connector that syncs nothing.
+     */
+    syncs: z.record(syncNameSchema, syncManifestSchema).optional(),
   })
   .refine(
     ({ provider, signIn }) =>
@@ -434,8 +525,8 @@ export const connectorManifestSchema = z
     "The account lookup goes to one of the connector's hosts"
   )
   .refine(
-    ({ hosts, actions }) =>
-      Object.values(actions).every(({ routes }) =>
+    ({ hosts, actions, syncs = {} }) =>
+      [...Object.values(actions), ...Object.values(syncs)].every(({ routes }) =>
         routes.every(({ host }) => hosts.includes(host))
       ),
     "Every route's host must be one of the connector's hosts"
@@ -464,6 +555,13 @@ export const connectorManifestSchema = z
         ({ answersFile, readOnly }) => answersFile !== true || readOnly
       ),
     "Only a read-only action answers a file"
+  )
+  .refine(
+    ({ actions }) =>
+      Object.values(actions).every(
+        ({ answersItem, readOnly }) => answersItem !== true || readOnly
+      ),
+    "Only a read-only action answers an item"
   )
   .refine(
     ({ actions }) =>

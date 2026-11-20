@@ -12,16 +12,16 @@ import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DataPolicyRpc } from "./data-policy-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
+import { DirectoryGroupsRpc } from "./directory-groups.ts";
+import { DraftsRpc } from "./drafts-rpc.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
-import { MemoryRpc } from "./knowledge/memory-rpc.ts";
-import { KnowledgeRpc } from "./knowledge/rpc.ts";
-import { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
-import { UploadsRpc } from "./knowledge/uploads-rpc.ts";
+import { InstructionsRpc } from "./instructions-rpc.ts";
 import { MembersRpc } from "./members.ts";
 import { ModelsRpc } from "./models-rpc.ts";
 import { NotificationsRpc } from "./notifications.ts";
 import { OnboardingGateRpc } from "./onboarding/gate-rpc.ts";
 import { OnboardingRpc } from "./onboarding/rpc.ts";
+import { OpportunitiesRpc } from "./opportunities-rpc.ts";
 import { OrgSettingsRpc } from "./org-settings.ts";
 import { OrganizationRpc } from "./organization.ts";
 import { setOwnName } from "./own-name.ts";
@@ -36,9 +36,11 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
+import { SkillsRpc } from "./skills-rpc.ts";
 import { staffAudited } from "./staff-audit.ts";
 import { StephenRequestsRpc } from "./stephen-requests.ts";
 import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
+import { VersionsRpc } from "./versions-rpc.ts";
 import { WaitingRpc } from "./waiting-rpc.ts";
 import { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
 import { WorkflowsRpc } from "./workflows/rpc.ts";
@@ -60,13 +62,14 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   /** The check for what only the client's own members do. */
   readonly #full: SessionCheck;
   readonly #apps: AppsRpc;
-  readonly #knowledge: KnowledgeRpc;
+  readonly #drafts: DraftsRpc;
+  readonly #versions: VersionsRpc;
   readonly #brain: BrainRpc;
   readonly #brainSources: BrainSourcesRpc;
+  readonly #skills: SkillsRpc;
   readonly #brainMemories: BrainMemoriesRpc;
-  readonly #knowledgeSignals: KnowledgeSignalsRpc;
-  readonly #memory: MemoryRpc;
-  readonly #uploads: UploadsRpc;
+  readonly #opportunities: OpportunitiesRpc;
+  readonly #instructions: InstructionsRpc;
   readonly #permissions: PermissionsRpc;
   readonly #resourceBindings: ResourceBindingsRpc;
   readonly #connections: ConnectionsRpc;
@@ -79,6 +82,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #pages: PagesRpc;
   readonly #dataPolicy: DataPolicyRpc;
   readonly #members: MembersRpc;
+  readonly #directoryGroups: DirectoryGroupsRpc;
   readonly #organization: OrganizationRpc;
   readonly #orgSettings: OrgSettingsRpc;
   readonly #stephenRequests: StephenRequestsRpc;
@@ -109,13 +113,14 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     const full = fullAccess(check);
     this.#full = full;
     this.#apps = new AppsRpc(env, full);
-    this.#knowledge = new KnowledgeRpc(env, full);
+    this.#drafts = new DraftsRpc(env, full);
+    this.#versions = new VersionsRpc(env, full);
     this.#brain = new BrainRpc(env, full);
     this.#brainSources = new BrainSourcesRpc(env, full);
+    this.#skills = new SkillsRpc(env, full);
     this.#brainMemories = new BrainMemoriesRpc(env, full);
-    this.#knowledgeSignals = new KnowledgeSignalsRpc(env, full);
-    this.#memory = new MemoryRpc(env, full);
-    this.#uploads = new UploadsRpc(env, full);
+    this.#opportunities = new OpportunitiesRpc(env, full);
+    this.#instructions = new InstructionsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
@@ -128,6 +133,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#pages = new PagesRpc(env, full);
     this.#dataPolicy = new DataPolicyRpc(env, full);
     this.#members = new MembersRpc(env, full);
+    this.#directoryGroups = new DirectoryGroupsRpc(env, full);
     this.#organization = new OrganizationRpc(env, full);
     this.#orgSettings = new OrgSettingsRpc(env, full);
     this.#stephenRequests = new StephenRequestsRpc(env, full);
@@ -151,8 +157,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       connections: this.#connections,
       decisions: this.#decisions,
       heldStarts: this.#heldStarts,
-      lifecycles: this.#workflowResources.lifecycle,
       bindings: this.#workflowResources,
+      skills: this.#skills,
     });
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingGate = new OnboardingGateRpc(env, check);
@@ -161,7 +167,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       onboarding: this.#onboarding,
       workflows: this.#workflows,
       signals: this.#signals,
-      knowledgeSignals: this.#knowledgeSignals,
       apps: this.#apps,
     });
   }
@@ -206,10 +211,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#apps;
   }
 
-  get knowledge(): KnowledgeRpc {
-    return this.#knowledge;
-  }
-
   get brain(): BrainRpc {
     return this.#brain;
   }
@@ -218,20 +219,20 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#brainSources;
   }
 
+  get skills(): SkillsRpc {
+    return this.#skills;
+  }
+
   get brainMemories(): BrainMemoriesRpc {
     return this.#brainMemories;
   }
 
-  get knowledgeSignals(): KnowledgeSignalsRpc {
-    return this.#knowledgeSignals;
+  get opportunities(): OpportunitiesRpc {
+    return this.#opportunities;
   }
 
-  get memory(): MemoryRpc {
-    return this.#memory;
-  }
-
-  get uploads(): UploadsRpc {
-    return this.#uploads;
+  get instructions(): InstructionsRpc {
+    return this.#instructions;
   }
 
   get permissions(): PermissionsRpc {
@@ -244,6 +245,14 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get connections(): ConnectionsRpc {
     return this.#connections;
+  }
+
+  get drafts(): DraftsRpc {
+    return this.#drafts;
+  }
+
+  get versions(): VersionsRpc {
+    return this.#versions;
   }
 
   get workflows(): WorkflowsRpc {
@@ -276,6 +285,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get members(): MembersRpc {
     return this.#members;
+  }
+
+  get directoryGroups(): DirectoryGroupsRpc {
+    return this.#directoryGroups;
   }
 
   get organization(): OrganizationRpc {

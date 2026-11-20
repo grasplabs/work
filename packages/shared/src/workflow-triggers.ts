@@ -10,8 +10,8 @@ import { emailLocalPartSchema } from "./workflows.ts";
 
 // An independent workflow's triggers (platform specification 15, 24), as
 // the session's `workflowResources.triggers` serves them: each a resource
-// of its own that starts one exact version of one workflow on its own,
-// acting for the person who created it. Who may do what, and why, is in
+// of its own that starts one workflow on its own, at the version live as
+// it starts, acting for the person who created it. Who may do what, and why, is in
 // core's trigger-resources.ts.
 
 /** The kinds of trigger: what each is started by. */
@@ -25,14 +25,12 @@ export const triggerKinds = [
 export type TriggerKind = (typeof triggerKinds)[number];
 
 /**
- * A new trigger: its kind, the exact published version of the workflow it
- * starts, and its own configuration, checked against the kind's schema
- * below.
+ * A new trigger: its kind, the workflow it starts, and its own
+ * configuration, checked against the kind's schema below.
  */
 export const workflowTriggerCreateSchema = z.strictObject({
   kind: z.enum(triggerKinds),
   workflowId: z.string().min(1).max(128),
-  version: z.number().int().positive(),
   /** The trigger's own configuration: its schedule, event type, mapping. */
   config: z.json(),
 });
@@ -137,13 +135,10 @@ export const webhookTriggerConfigSchema = z.strictObject({
 export interface WorkflowTrigger {
   id: string;
   kind: TriggerKind;
-  /** Who created it, and may move it to another version or enable it. */
+  /** Who created it, and may enable it again. */
   owner: string;
-  /** Its own version: one more each time it moves to another workflow version. */
-  version: number;
+  /** The workflow it starts, at the version live as each run starts. */
   workflowId: string;
-  /** The exact workflow version it starts, never "the latest". */
-  workflowVersion: number;
   /** The person its runs act for: its creator. */
   principal: string;
   enabled: boolean;
@@ -297,11 +292,6 @@ export interface WorkflowTriggersApi {
    * Deleting the trigger revokes them.
    */
   create: (input: unknown) => Promise<CreatedWorkflowTrigger>;
-  /**
-   * Moves trigger `id` to another published version of its workflow; for
-   * its owner while they still build the workflow, audited.
-   */
-  setVersion: (id: string, version: number) => Promise<WorkflowTrigger>;
   /**
    * Disables trigger `id`, for its owner, the workflow's builders and the
    * organization's admins, or enables it again, for its owner while they

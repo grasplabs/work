@@ -143,6 +143,16 @@ describe("model settings", { timeout: 60_000 }, () => {
     });
   });
 
+  it("tell every member what people call each chosen model", async () => {
+    await choose(anthropic, mistral);
+    const { session } = await signedInWithRole(idp, "user");
+    const { core } = await openRpc(session, { coreEnv: envWith() });
+    await expect(core.authenticate().chats.names()).resolves.toStrictEqual({
+      [anthropic]: "Claude Sonnet 4.5 (latest)",
+      [mistral]: "Mistral Large (latest)",
+    });
+  });
+
   it("give every role the organization's default model, and none until it chose one", async () => {
     await choose(anthropic, euModel);
     const coreEnv = envWith();

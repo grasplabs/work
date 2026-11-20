@@ -1,0 +1,445 @@
+import {
+  brainReportPath,
+  brainReportPurpose,
+  brainReportSchema,
+} from "@grasp-os/shared/brain-report";
+import type {
+  BrainReport,
+  BrainSyncConnection,
+} from "@grasp-os/shared/brain-report";
+import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
+import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
+import { env } from "cloudflare:workers";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
+
+import {
+  connectSampleFeed,
+  feedPage,
+  goneItem,
+  idp,
+  mailItem,
+  ownSourcesOnly,
+  parkWorkerSources,
+  setUpTime,
+  syncAt,
+} from "./brain-sync-world.ts";
+import { mockIdpWith } from "./idp.ts";
+import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
+
+mockIdpWith(idp);
+
+// Each synced connection as Grasp's staff see it in a client's Brain
+// report (src/brain-report.ts, src/brain-sync.ts `syncForStaff`,
+// GRA-1817): when it last synced, whether it is behind, and its latest
+// error by code and time, read through the admin's signed request and in
+// the company's audit log; each connection by a hash of its ID, never
+// whose it is, its account or anything it holds. The shared world, fakes
+// and parking of other files' sources are in test/brain-sync-world.ts;
+// each test runs at times of its own (`syncAt`), against the real clock
+// the report reads by.
+
+const staffEmail = "grace.hopper@grasp.test";
+
+/** A mail holding `text`, as a sync item. */
+const mail = (id: string, text: string) => mailItem(id, text);
+
+/** A person's sample account connected, with its subject. */
+const connectSample = async (
+  person: Awaited<ReturnType<typeof signedInApi>>,
+  pages: Record<string, unknown>
+) => {
+  const connected = await connectSampleFeed(person, pages);
+  return { ...connected, subject: String(person.person.oid) };
+};
+
+/** Reads the report as the admin does, signed for a read, for `staffEmail`. */
+const readReport = async (): Promise<{
+  status: number;
+  text: string;
+  report: BrainReport | null;
+}> => {
+  const body = JSON.stringify({
+    sentAt: new Date().toISOString(),
+    staff: { email: staffEmail },
+  });
+  const key = await hkdfHmacKey(env.BETTER_AUTH_SECRET, brainReportPurpose, [
+    "sign",
+  ]);
+  const signature = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  const response = await routed(brainReportPath, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      [platformUpdateSignatureHeader]: signature,
+    },
+    body,
+  });
+  const text = await response.text();
+  const parsed = brainReportSchema.safeParse(
+    response.ok ? JSON.parse(text) : null
+  );
+  return {
+    status: response.status,
+    text,
+    report: parsed.success ? parsed.data : null,
+  };
+};
+
+/** Every sync of `connectionId` as `report` shows it. */
+const rowsOf = async (
+  report: BrainReport | null,
+  connectionId: string
+): Promise<BrainSyncConnection[]> => {
+  const hash = await sha256Hex(connectionId);
+  return (report?.sync?.connections ?? []).filter(
+    (each) => each.connection === hash.slice(0, 12)
+  );
+};
+
+/** The `feed` sync of `connectionId` as `report` shows it. */
+const syncOf = async (
+  report: BrainReport | null,
+  connectionId: string,
+  feed = "files"
+): Promise<BrainSyncConnection> => {
+  const rows = await rowsOf(report, connectionId);
+  const row = rows.find((each) => each.feed === feed);
+  if (row === undefined) {
+    throw new Error(`Expected the ${feed} sync of ${connectionId}`);
+  }
+  return row;
+};
+
+/**
+ * A folder of the `folders` sync whose change feed holds `id`, then
+ * nothing, and whose names-only listing (its daily relist) names it.
+ */
+const folder = (id: string) => ({
+  changes: {
+    "": feedPage([mail(id, `Mail ${id}`)], "f1"),
+    f1: feedPage([], "f1"),
+  },
+  names: { "": feedPage([{ ...mail(id, ""), content: null }], "n") },
+});
+
+const hourMs = 60 * 60 * 1000;
+const dayMs = 24 * hourMs;
+
+describe("native sync, as Grasp's staff see it", () => {
+  beforeAll(parkWorkerSources, setUpTime.timeout);
+  beforeEach(ownSourcesOnly);
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it(
+    "counts a page a run's budget stopped as no failure, for a source that never failed",
+    setUpTime,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const { connectionId, world } = await connectSample(person, {
+        "": feedPage([mail("memo", "Memo")], "m1"),
+        m1: feedPage([], "m1"),
+      });
+      // Its folders list as none: that listing gets through too.
+      await world({ places: [] });
+      const first = Date.now();
+      await syncAt(first);
+      // Runs at one time, each with a call more, until one claims a source
+      // of the connection and runs out of calls before its page is done.
+      const said: unknown[] = [];
+      const spy = vi.spyOn(console, "info").mockImplementation((...line) => {
+        said.push(line);
+      });
+      let stopped = false;
+      try {
+        for (let left = 1; left < 60 && !stopped; left += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one run after another
+          await syncAt(first + 2 * 60_000, { left });
+          stopped = said.some((line) => {
+            const text = JSON.stringify(line);
+            return (
+              text.includes("brain.sync.budget_spent") &&
+              text.includes(connectionId)
+            );
+          });
+        }
+      } finally {
+        spy.mockRestore();
+      }
+
+      const { report } = await readReport();
+      const rows = await rowsOf(report, connectionId);
+
+      expect({
+        stopped,
+        rows: rows.map(({ feed, failing, error }) => ({
+          feed,
+          failing,
+          error,
+        })),
+      }).toStrictEqual({
+        stopped: true,
+        rows: [
+          { feed: "files", failing: false, error: null },
+          { feed: "folders", failing: false, error: null },
+        ],
+      });
+    }
+  );
+
+  it(
+    "shows a connection that synced, one that fails and one that is behind, by code and time, with nothing of whose or what, and records the read",
+    setUpTime,
+    async () => {
+      const [synced, failing, behind] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      const word = `Quokka${unique()}`;
+      const ok = await connectSample(synced, {
+        "": feedPage([mail("memo", `Memo ${word}`)], "m1"),
+        m1: feedPage([], "m1"),
+      });
+      const broken = await connectSample(failing, { "": feedPage([], "m1") });
+      await broken.world({ failing: ["files"] });
+      const firstRun = Date.now();
+      await syncAt(firstRun);
+      // Connected two days ago, its sources made by a run whose budget
+      // ran out before it read anything: no run read it since.
+      const late = await connectSample(behind, { "": feedPage([], "m1") });
+      const twoDaysAgo = firstRun - 2 * dayMs;
+      let made = false;
+      for (let left = 1; left < 20 && !made; left += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one run after another
+        await syncAt(twoDaysAgo, { left });
+        // oxlint-disable-next-line no-await-in-loop -- read after each run
+        const row = await env.DB.prepare(
+          "SELECT count(*) AS count FROM brain_sync_sources WHERE connection_id = ?"
+        )
+          .bind(late.connectionId)
+          .first<{ count: number }>();
+        made = (row?.count ?? 0) > 0;
+      }
+
+      let read: Awaited<ReturnType<typeof readReport>> | undefined;
+      const events = await auditedDuring(async () => {
+        read = await readReport();
+      });
+      const { status, text, report } = read ?? {
+        status: 0,
+        text: "",
+        report: null,
+      };
+      const [okRow, brokenRow, lateRow] = await Promise.all([
+        syncOf(report, ok.connectionId),
+        syncOf(report, broken.connectionId),
+        syncOf(report, late.connectionId),
+      ]);
+      const ago = (at: string | null): number | null =>
+        at === null ? null : firstRun - Date.parse(at);
+
+      expect({
+        status,
+        made,
+        ok: {
+          phase: okRow.phase,
+          items: okRow.items,
+          synced: ago(okRow.syncedAt) === 0,
+          behind: okRow.behindSince,
+          overdue: okRow.relistOverdue,
+          error: okRow.error,
+          failing: okRow.failing,
+        },
+        broken: {
+          phase: brokenRow.phase,
+          synced: brokenRow.syncedAt,
+          error: brokenRow.error?.code,
+          errorAt: ago(brokenRow.error?.at ?? null) === 0,
+          failing: brokenRow.failing,
+        },
+        late: {
+          synced: lateRow.syncedAt,
+          behindTwoDays: ago(lateRow.behindSince) === 2 * dayMs,
+          overdue: lateRow.relistOverdue,
+          error: lateRow.error,
+          failing: lateRow.failing,
+        },
+        named: [
+          ok.connectionId,
+          broken.connectionId,
+          late.connectionId,
+          ok.subject,
+          synced.userId,
+          word,
+          "acme.test",
+        ].filter((name) => text.includes(name)),
+        audited: events
+          .filter(({ action }) => action === "admin.brain.read")
+          .map(({ actor }) => actor),
+      }).toStrictEqual({
+        status: 200,
+        made: true,
+        ok: {
+          phase: "changes",
+          items: 1,
+          synced: true,
+          behind: null,
+          overdue: false,
+          error: null,
+          failing: false,
+        },
+        broken: {
+          phase: "listing",
+          synced: null,
+          error: "sync.provider_failed",
+          errorAt: true,
+          failing: true,
+        },
+        late: {
+          synced: null,
+          behindTwoDays: true,
+          overdue: true,
+          error: null,
+          failing: false,
+        },
+        named: [],
+        audited: [{ type: "staff", userId: staffEmail, via: "console" }],
+      });
+    }
+  );
+
+  it(
+    "keeps a connection's latest error, no longer failing, once a later read gets through",
+    setUpTime,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const { connectionId, world } = await connectSample(person, {
+        "": feedPage([], "m1"),
+        m1: feedPage([], "m1"),
+      });
+      await world({ failing: ["files"] });
+      const failedAt = Date.now() + hourMs;
+      await syncAt(failedAt);
+      await world({ failing: [] });
+      await syncAt(failedAt + hourMs);
+
+      const { report } = await readReport();
+      const row = await syncOf(report, connectionId);
+
+      expect({
+        error: row.error,
+        failing: row.failing,
+        synced: row.syncedAt,
+      }).toStrictEqual({
+        error: {
+          code: "sync.provider_failed",
+          at: new Date(failedAt).toISOString(),
+        },
+        failing: false,
+        synced: new Date(failedAt + hourMs).toISOString(),
+      });
+    }
+  );
+
+  it(
+    "leaves out a place the folders listing dropped, with its failures",
+    setUpTime,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const { connectionId, world } = await connectSample(person, {
+        "": feedPage([], "m1"),
+        m1: feedPage([], "m1"),
+      });
+      // Two folders, one of which fails every read.
+      await world({
+        places: ["inbox", "old"],
+        folders: { inbox: folder("inbox/a"), old: folder("old/b") },
+        failing: ["old"],
+      });
+      const now = Date.now();
+      await syncAt(now - 2 * dayMs);
+      const { report: earlier } = await readReport();
+      const before = await syncOf(earlier, connectionId, "folders");
+      // The folder deleted: the next day's listing drops it, after the run
+      // read it, and failed, once more.
+      await world({ places: ["inbox"] });
+      await syncAt(now - 30_000);
+
+      const { report } = await readReport();
+      const after = await syncOf(report, connectionId, "folders");
+
+      expect({
+        before: before.failing,
+        after: {
+          failing: after.failing,
+          error: after.error,
+          behind: after.behindSince,
+          items: after.items,
+        },
+      }).toStrictEqual({
+        before: true,
+        after: { failing: false, error: null, behind: null, items: 1 },
+      });
+    }
+  );
+
+  it(
+    "counts only the items a sync holds, not one that went away",
+    setUpTime,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const { connectionId } = await connectSample(person, {
+        "": feedPage([mail("kept", "Kept"), mail("memo", "Memo")], "m1"),
+        m1: feedPage([goneItem("memo")], "m2"),
+        m2: feedPage([], "m2"),
+      });
+      const at = Date.now() + 3 * hourMs;
+      await syncAt(at);
+      await syncAt(at + 2 * 60_000);
+
+      const { report } = await readReport();
+      const row = await syncOf(report, connectionId);
+
+      expect(row.items).toBe(1);
+    }
+  );
+
+  it("shows nothing to a signed-in admin of the company without the admin's signature, and records nothing", async () => {
+    const person = await signedInApi(idp, "admin");
+    let status = 0;
+    let text = "";
+    const events = await auditedDuring(async () => {
+      const answer = await routed(brainReportPath, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: person.session },
+        body: JSON.stringify({
+          sentAt: new Date().toISOString(),
+          staff: { email: staffEmail },
+        }),
+      });
+      ({ status } = answer);
+      text = await answer.text();
+    });
+
+    expect({
+      status,
+      sync: text.includes("connections"),
+      audited: events.filter(({ action }) => action.startsWith("admin.brain")),
+    }).toStrictEqual({ status: 401, sync: false, audited: [] });
+  });
+});

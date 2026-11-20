@@ -11,6 +11,7 @@ import {
   Contrast,
   Link,
   Lock,
+  Note,
   People,
   Person,
 } from "../grasp/icons/index.ts";
@@ -32,14 +33,17 @@ export type SettingsHref =
   | "/settings/billing"
   | "/settings/profile"
   | "/settings/appearance"
+  | "/settings/instructions"
   | "/settings/security";
 
 /**
- * Who may see a section: everyone; the organization's admins, Grasp
- * staff signed in as one included; or its admins who are its own people,
- * never Grasp staff (its members and the outside systems that call in).
+ * Who may see a section: everyone; the organization's own people, never
+ * Grasp staff (what their chats start with); the organization's admins,
+ * Grasp staff signed in as one included; or its admins who are its own
+ * people, never Grasp staff (its members and the outside systems that
+ * call in).
  */
-export type SettingsAudience = "everyone" | "admins" | "own-admins";
+export type SettingsAudience = "everyone" | "own" | "admins" | "own-admins";
 
 export type SettingsGroupId = "workspace" | "account";
 
@@ -86,6 +90,15 @@ export const settingsSections: readonly SettingsSection[] = [
     group: "account",
     icon: Contrast,
     audience: "everyone",
+  },
+  {
+    // What their chats start with: Grasp's staff have no chats here.
+    id: "instructions",
+    label: msg`Instructions`,
+    href: "/settings/instructions",
+    group: "account",
+    icon: Note,
+    audience: "own",
   },
   {
     id: "security",
@@ -159,6 +172,9 @@ const maySee = (
 ): boolean => {
   if (audience === "everyone") {
     return true;
+  }
+  if (audience === "own") {
+    return !viewer.staff;
   }
   return isAdmin(viewer.role) && (audience === "admins" || !viewer.staff);
 };

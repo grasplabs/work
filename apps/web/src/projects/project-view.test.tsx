@@ -102,8 +102,6 @@ const chatOf = (id: string, title: string): ChatSummary => ({
   createdAt: "2026-11-01T10:00:00.000Z",
   lastAt: "2026-11-01T10:00:00.000Z",
   running: false,
-  appId: null,
-  via: "web",
   make: null,
   archived: false,
 });

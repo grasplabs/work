@@ -25,8 +25,8 @@ import { inJurisdiction } from "../durable-objects.ts";
 // Object per run (`WORKFLOW_RUNS`, run-object.ts), the only authority on
 // the run's steps, waits and lifecycle. It runs on Cloudflare and on plain
 // workerd alike, its objects in the EU where the platform has
-// jurisdictions (durable-objects.ts). Every run, a workflow's or one of
-// core's own, is a run of one definition, `grasp`, so its object is named
+// jurisdictions (durable-objects.ts). Every run is a run of one
+// definition, `grasp`, so its object is named
 // by the run's ID alone; what it runs is the opaque version it was created
 // with (`pinOf`), which the dispatcher checks against the run's row on
 // every activation (dispatcher.ts).
@@ -62,23 +62,6 @@ export interface AdmittedEngineEvent {
 }
 
 /**
- * A workflow of core's own, not an App's, run on the same engine and
- * dispatcher: extracting an upload's text (knowledge/extraction.ts),
- * publishing a document version's sections to
- * search (knowledge/indexing.ts), linking a Brain source's entities
- * (packages/brain's entities.ts), or consolidating a scope's episodes into
- * lesson candidates (brain-consolidation.ts).
- */
-export const internalWorkflows = [
-  "extraction",
-  "indexing",
-  "linking",
-  "consolidation",
-] as const;
-
-export type InternalWorkflow = (typeof internalWorkflows)[number];
-
-/**
  * What a run of an independent workflow is pinned to (resource-runs.ts):
  * the workflow, its exact version, and the manifest that version sealed,
  * which names the build it runs. The dispatcher loads nothing else.
@@ -101,7 +84,7 @@ export interface PinnedCandidateRun {
 
 /**
  * What a run executes: an independent workflow's sealed version, a test
- * run of its draft's checkpoint, or one of core's own.
+ * run of its draft at one revision, or a run an App's test started.
  */
 export type RunPin =
   | ({ type: "resource" } & PinnedResourceRun)
@@ -111,8 +94,7 @@ export type RunPin =
    * (fixture-runs.ts): the same sealed version, run on the same engine,
    * with nothing of the organization's around it.
    */
-  | ({ type: "fixture" } & PinnedResourceRun)
-  | { type: "internal"; workflow: InternalWorkflow };
+  | ({ type: "fixture" } & PinnedResourceRun);
 
 /** The one definition every run is a run of. */
 export const runDefinition = "grasp";
@@ -155,9 +137,6 @@ const pinSchema = z.union([
       version,
       manifest,
     })),
-  z
-    .tuple([z.literal("internal"), z.enum(internalWorkflows)])
-    .transform(([, workflow]): RunPin => ({ type: "internal", workflow })),
 ]);
 
 /** A pin as the engine keeps it: the run's opaque definition version. */
@@ -181,9 +160,6 @@ const versionOf = (pin: RunPin): string => {
         pin.version,
         pin.manifest,
       ]);
-    }
-    case "internal": {
-      return JSON.stringify(["internal", pin.workflow]);
     }
     default: {
       return pin satisfies never;
@@ -256,12 +232,6 @@ export interface RunEngine {
    * was replayed; nothing when the engine has no such run.
    */
   succeededSteps: (id: string, name: string) => Promise<number | undefined>;
-  /** As `createResource`, for a run of one of core's own workflows. */
-  createInternal: (run: {
-    id: string;
-    workflow: InternalWorkflow;
-    input: Json;
-  }) => Promise<void>;
   /** Where the engine has the run; nothing when it has no such run. */
   status: (id: string) => Promise<InstanceStatus | undefined>;
   /**
@@ -397,13 +367,6 @@ export const markResourceRunStopped = async (
 ): Promise<"marked" | "rolling_back" | "ended" | "missing"> =>
   await runObjectOf(env, id).markStopped(id, actor, Date.now());
 
-/**
- * A run's params, as the engine keeps them: its input under `input`, left
- * out when the run has none, so a run started with nothing gets nothing
- * (the engine makes absent params `{}`, as Cloudflare does).
- */
-export const runParamsSchema = z.object({ input: z.json().optional() });
-
 /** Admits the run `id` of `pin`: created once, however often sent. */
 const admit = async (
   env: Env,
@@ -443,9 +406,6 @@ export const runEngine = (env: Env): RunEngine => ({
   fixtureWaits: async (id) => await runObjectOf(env, id).fixtureWaits(),
   succeededSteps: async (id, name) =>
     await runStub(env, id).succeededSteps(name),
-  createInternal: async ({ id, workflow, input }) => {
-    await admit(env, id, { type: "internal", workflow }, input);
-  },
   status: async (id) => await runStub(env, id).status(),
   controlState: async (id) => await runStub(env, id).controlState(),
   terminate: async (id, generation) => {

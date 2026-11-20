@@ -1,7 +1,13 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { portTransport } from "@grasp-os/shared/page-port";
+import type { CoreApi } from "@grasp-os/shared/rpc";
+import { RpcSession, RpcStub, RpcTarget } from "capnweb";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { Session } from "../core.ts";
+import { wait } from "../core.ts";
 import { CoreLink, retryingOn } from "./core-link.ts";
+import { previewTarget } from "./page-host.ts";
 
 // A frame's call on its connection (core-link.ts `retryingOn`): what
 // stops while the session is on its way, such as a frame that left the
@@ -115,5 +121,114 @@ describe("a frame's link to core after its connection drops", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(ended).toBe(0);
     await expect(codeOf(link.session())).resolves.toBe("resolved");
+  });
+});
+
+// A preview stopped as its link closes, as when the page around it goes
+// (the frame's cleanups close its link first): what was on its way then
+// fails quietly, as Cap'n Web rejects every call of a session whose main
+// stub is disposed. Core is a real Cap'n Web session over a message port,
+// as it is over the page's WebSocket: signed in as Ada, its frame
+// following a live query, answering the first subscription and never the
+// next, so the one the preview asks for as it moves on is on its way.
+
+/** Core, as Ada's session, as her preview's frame's way to its App. */
+class PreviewCore extends RpcTarget {
+  readonly userId = "ada";
+  watched = 0;
+  closed = false;
+
+  authenticate(): this {
+    return this;
+  }
+
+  whoami(): { userId: string } {
+    return { userId: this.userId };
+  }
+
+  get pages(): this {
+    return this;
+  }
+
+  // The frame's own way to its App (`pages.frame`).
+  frame(): this {
+    return this;
+  }
+
+  async watchQuery(): Promise<{ release: () => Promise<void> }> {
+    this.watched += 1;
+    if (this.watched > 1) {
+      return await Promise.withResolvers<never>().promise;
+    }
+    return await Promise.resolve({
+      release: async () => {
+        await Promise.resolve();
+      },
+    });
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+}
+
+describe("a preview stopped as its link closes", () => {
+  it("lets go of what it followed without an unhandled error", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const core = new PreviewCore();
+      const link = new CoreLink(
+        () => {
+          // Never ends here.
+        },
+        () => {
+          const { port1, port2 } = new MessageChannel();
+          // oxlint-disable-next-line no-new -- the session serves core's side
+          new RpcSession(portTransport(port1), core);
+          return new RpcSession<CoreApi>(portTransport(port2)).getRemoteMain();
+        }
+      );
+      const target = previewTarget(
+        link,
+        {
+          app: appIdSchema.parse("notes"),
+          name: "Notes",
+          artifact: "artifact",
+          frameToken: "token",
+          lease: "lease",
+          revision: 1,
+        },
+        {
+          current: () => "/",
+          moved: () => {
+            // The page keeps no address here.
+          },
+          follow: () => {
+            // The page's address never moves here.
+          },
+        }
+      );
+      using toFrame = new RpcStub(async () => {
+        await Promise.resolve();
+      });
+      await target.watchQuery("{}", toFrame);
+      // The frame takes the draft's next write: its query is followed again.
+      target.moved(2);
+      await vi.waitFor(() => {
+        expect(core.watched).toBe(2);
+      });
+      // Stopped: its link first, then what it held.
+      link.close();
+      target.close();
+      // Rejections nobody handled are told after the turns that made them.
+      await wait(0);
+      expect(unhandled).toStrictEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 });

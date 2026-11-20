@@ -16,17 +16,19 @@
 # an admin makes outside the queue lands without it. A pull request's run,
 # draft or not, is fast feedback for review: the fast checks (static,
 # generated, wasm), the release build, the admin's build and core on
-# plain workerd, a few minutes on seven runners. Marking a draft ready
+# plain workerd, a few minutes on nine runners. Marking a draft ready
 # runs them again, so its title and description, which become the commit
 # on main, are checked as they stood then (an edit after that isn't). The
 # test shards, the e2e stack and its parts, and the admin's journeys run
-# on the merge queue, a run by hand and the nightly run. A full run is 63
+# on the merge queue, a run by hand and the nightly run. A full run is 78
 # jobs, within the account's 60 concurrent runners because the e2e jobs
-# start only once e2e-build is done, when the quick jobs have ended (at
-# 67 jobs the most running at once was 52 to 56, November 2026). A pull
-# request's full run beside the queue's left one of them waiting for
-# runners, minutes at a time (November 2026): one full run per merge
-# halves that.
+# start only once e2e-build is done, when the quick jobs have ended: at 78
+# the most running at once was 56 (run 44331739408, November 2026). Two
+# full runs at once don't fit: a pull request's full run beside the
+# queue's leaves the later one's jobs waiting for runners, minutes at a
+# time (November 2026). That is accepted rather than fewer test shards,
+# which took a shard past four minutes: a pull request gets one full run,
+# on its final head, so it happens about once per merge.
 #
 # A full run runs everything at once: every test project, every journey,
 # the builds. Only `check`, and the e2e jobs on e2e-build's stack, wait
@@ -60,13 +62,78 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  # Format, lint and types, the migrations' check against main, and on a
-  # pull request its branch name and title, which becomes the commit on
-  # main and the release note. The other repo checks, and that generated
-  # files are committed, run beside it (generated, below). Part of the
-  # required `check` (below).
+  # Format, lint and types, and on a pull request its branch name and
+  # title, which becomes the commit on main and the release note. The
+  # other repo checks, those that read git history among them, and that
+  # generated files are committed, run beside it (generated, below):
+  # static is a pull request's slowest check job, and needs no history of
+  # its own. Part of the required `check` (below).
+  #
+  # Lint and types in three parts, a runner each: `vp check` took 55 to
+  # 96 s of the job on the runner's 4 CPUs, most of it the type-aware lint
+  # building each TypeScript project (November 2026). `core` checks
+  # apps/core, `apps` the other apps named below, and `main` every other
+  # path in the tree, worked out from `git ls-files`, so a new folder is
+  # checked without anyone adding it here. Unquoted (core.quotePath): a
+  # quoted name would match no file, and a path that matches nothing
+  # beside paths that do is skipped without a word. The parts' programs barely
+  # overlap: apart they checked the same 3,793 files as the whole, in
+  # about the whole's time added up. A file is reported in one part only,
+  # and a type error a change in a package causes in an app is that app's
+  # file, in its part. In two parts, core in `main`, `main` took 90 s and
+  # `apps` 52 s.
   static:
-    name: static
+    name: static (${{ matrix.part }})
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # Each part says what failed in it.
+      fail-fast: false
+      matrix:
+        part: [main, core, apps]
+    env:
+      CORE_PART: apps/core
+      APPS_PART: apps/web apps/admin apps/connect apps/docs apps/router
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Saves what its setup missed (a changed lockfile, a new Vite+), for
+      # this branch's next run: static runs on every event but a push, where
+      # release saves. One part saves, so two don't pack the same files.
+      - uses: ./.github/actions/setup
+        with:
+          save: ${{ matrix.part == 'main' }}
+      - if: matrix.part == 'main'
+        run: vp fmt --check
+      - if: matrix.part == 'main'
+        run: |
+          mapfile -t paths < <(git -c core.quotePath=false ls-files | awk -F/ '{ print ($1 == "apps" ? $1 "/" $2 : $1) }' | sort -u | grep -vxF -f <(tr ' ' '\n' <<< "$CORE_PART $APPS_PART"))
+          vp check --no-fmt "${paths[@]}"
+      - if: matrix.part == 'core'
+        run: vp check --no-fmt "$CORE_PART"
+      - if: matrix.part == 'apps'
+        # Word-split on purpose: one path each.
+        run: vp check --no-fmt $APPS_PART
+      # The merge queue has no branch or title of its own: the pull
+      # request's were checked before it joined.
+      - if: matrix.part == 'main' && github.event_name == 'pull_request'
+        run: vp run check:branch
+      - if: matrix.part == 'main' && github.event_name == 'pull_request'
+        run: printf '%s\n' "$PR_TITLE" | vp exec commitlint
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+
+  # static's other half, beside it: the repo checks, the migrations' check
+  # against main and the pull request's attribution, and that generated
+  # files (Worker types, migrations, the frontend's translation catalogs)
+  # are committed. In static, after `vp check`, the tree's checks added
+  # about 40 s to the run's longest check job, and the two that read
+  # history 3 s and the full history's checkout (November 2026). Part of
+  # the required `check` (below).
+  generated:
+    name: generated
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -74,27 +141,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # check:migrations compares with origin/main. Without blobs: git
-          # fetches the few it reads when it reads them, and the full
-          # history's took most of this job's 9 s checkout.
+          # check:migrations compares with origin/main, and the attribution
+          # reads the pull request's commits. Without blobs: git fetches the
+          # few it reads when it reads them, and the full history's took
+          # most of a 9 s checkout.
           fetch-depth: 0
           filter: blob:none
-      # Saves what its setup missed (a changed lockfile, a new Vite+), for
-      # this branch's next run: static runs on every event but a push, where
-      # release saves.
       - uses: ./.github/actions/setup
-        with:
-          save: true
-      - run: vp check
       - run: vp run check:migrations
-      # The merge queue has no branch or title of its own: the pull
-      # request's were checked before it joined.
-      - if: github.event_name == 'pull_request'
-        run: vp run check:branch
-      - if: github.event_name == 'pull_request'
-        run: printf '%s\n' "$PR_TITLE" | vp exec commitlint
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
       # The squash commit on main is the title, the description and a
       # Co-authored-by trailer for each co-author of the PR's commits, its
       # authors among them: none may credit an AI tool
@@ -108,22 +162,6 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
-
-  # static's other half, beside it: the repo checks that read only the
-  # tree, and that generated files (Worker types, migrations, the
-  # frontend's translation catalogs) are committed. In static, after `vp
-  # check`, they added about 40 s to the run's longest check job
-  # (November 2026). Part of the required `check` (below).
-  generated:
-    name: generated
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
       - run: vp run check:secrets
       - run: vp run check:docs
       - run: vp run check:product-name
@@ -138,15 +176,16 @@ jobs:
   # of every project's test files, split by how long each takes
   # (scripts/test-sequencer.ts, with the times in
   # scripts/test-durations.json), so the shards end together and together
-  # run every file once; `--shard` takes the count from the matrix. Thirty
-  # shards: each about half a minute of setup, up to a minute and a half
-  # before core's first test (its global setup's builds and its runtime's
-  # first load of core) and two to three minutes of tests (November 2026).
-  # Forty ended only about 20 s sooner, as each is then set by that start
-  # and its longest file, and with them a run took more than the account's
-  # 60 concurrent runners (measured: 60 jobs at once, no more), so the
-  # journeys waited for runners. The split gives each group its shards
-  # by when they would end (scripts/test-shards.ts): the brain's group,
+  # run every file once; `--shard` takes the count from the matrix.
+  # Forty-two shards: each about half a minute of setup, up to a minute
+  # and a half before core's first test (its global setup's builds and its
+  # runtime's first load of core) and two to three minutes of tests. On
+  # thirty, with each file's setup counted, core's shards took up to 360 s
+  # (November 2026, GRA-2052); on forty-two the slowest took 278 s, about
+  # 20 runner-minutes a run more. With them a full run fits the account's
+  # 60 concurrent runners, two full runs at once don't (above). The split
+  # gives each group its shards by when they would end
+  # (scripts/test-shards.ts): the brain's group,
   # run alone and its files one at a time, ended the run in 6 of 10 queue
   # runs on two shards, 103 to 170 s of files each after core's start,
   # 130 to 240 s in all; on three, about 50 s sooner (November 2026). The
@@ -195,6 +234,18 @@ jobs:
             28,
             29,
             30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
           ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -225,11 +276,13 @@ jobs:
       # one before had ended, up to two minutes a group. Six shards took
       # 14 to 16 minutes (October 2026, GRA-1094). No shard's time can be
       # shorter than its longest file's, so split a file that sets it
-      # rather than adding shards. Refresh the durations from the shards'
-      # test-progress artifacts when the split drifts
-      # (scripts/test-durations.ts): of the brain's two shards, balanced on
-      # paper, one ran 161 s of files and the other 134 s on durations a
-      # month old (November 2026).
+      # rather than adding shards. A file of 120 s or more runs on a shard
+      # of its own (scripts/test-shards.ts, `aloneSeconds`): packed beside
+      # others, the new Brain's leak test slowed to six minutes and its
+      # shard ran out of this step (November 2026). Refresh the durations
+      # from the shards' test-progress artifacts when the split drifts
+      # (scripts/test-durations.ts): durations a day old put that test at
+      # a third of what it took.
       # A failed test is tried once more: a third of pull request runs
       # failed, most often on a few flaky files, each a whole re-run of CI
       # (October 2026). The flaky
@@ -339,7 +392,7 @@ jobs:
   # one runner: each check builds only when what it covers changed against
   # the base (the merge commit's first parent), and on every full run (by
   # hand, nightly). Apart, each took a runner for 7 to 20 s of git on most
-  # runs, two of a full run's 63 jobs against the account's 60 runners
+  # runs, two of a full run's jobs against the account's 60 runners
   # (November 2026). Each check runs even when the other failed, so a run
   # says what failed in both. Part of the required `check`.
   #
@@ -582,6 +635,15 @@ jobs:
           # of Grasp's go: on one stack, the onboarding's 13 tests took
           # 120-145 s and ended the e2e run; these 5 were about 60 s of
           # them locally, and need nothing of the others (November 2026).
+          # The Brain found by meaning (e2e/brain-meaning.e2e.ts), the one
+          # stack that runs the model core ships: its loads held the
+          # stack's one thread long enough to fail tests beside them
+          # (playwright.config.ts).
+          - {
+              part: brain-meaning,
+              project: brain-meaning,
+              artifact: brain-meaning,
+            }
           - {
               part: onboarding-flow,
               project: onboarding-flow,
@@ -616,6 +678,18 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-stack
+      # The brain-meaning part's stack runs the model files main keeps
+      # (.github/workflows/model-files.yml), which it puts in its state as
+      # it starts (playwright.config.ts); no other part loads the model.
+      # No cache main kept (evicted, or never filled): fail here, naming
+      # it, rather than minutes later as a test that found nothing.
+      - if: matrix.project == 'brain-meaning'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/grasp-os/model-files
+          key: model-files-${{ github.run_id }}
+          restore-keys: model-files-
+          fail-on-cache-miss: true
       # Beside the journeys, the runner's memory once a minute, as in the
       # test shards (scripts/memory-log.ts).
       - run: |

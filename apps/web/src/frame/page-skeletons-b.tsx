@@ -38,7 +38,7 @@ const styles = stylex.create({
   // A pane of its own that scrolls, as the Brain's pages and settings have.
   pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
   // The Brain's column for its pages (brain-home.tsx's `blockStyles.column`,
-  // memory-page.tsx, sources-page.tsx).
+  // memories-page.tsx, sources-page.tsx).
   brainColumn: {
     boxSizing: "border-box",
     width: "100%",
@@ -137,7 +137,12 @@ const useBrainPage = (): { page: BrainPage; section: string | undefined } => {
   if (at("/brain/activity")) {
     return { page: "activity", section: undefined };
   }
-  if (at("/brain/memory")) {
+  // Memories, Skills and Opportunities: each a list of records under its title.
+  if (
+    at("/brain/memories") ||
+    at("/brain/skills") ||
+    at("/brain/opportunities")
+  ) {
     return { page: "memory", section: undefined };
   }
   if (at("/brain/sources")) {
@@ -217,7 +222,8 @@ export const BrainPending = () => {
       { label: brain, to: "/brain" },
       { label: t({ message: "Activity", context: "the brain's log" }) },
     ],
-    memory: [{ label: brain, to: "/brain" }, { label: t`Memory` }],
+    // As the layout says them while they show: the Brain alone.
+    memory: [{ label: brain }],
     sources: [
       { label: brain, to: "/brain" },
       { label: t({ message: "Sources", context: "the Brain's sources page" }) },

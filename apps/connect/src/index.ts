@@ -29,6 +29,7 @@ import type {
   ConnectApi,
   ConnectCall,
   ConnectionOwner,
+  PersonalAccount,
   ConnectionPerson,
   ConnectionSummary,
   OrganizationConnection,
@@ -41,18 +42,25 @@ import type {
   ErasePersonal,
   FinishConnection,
   HeldCall,
+  HeldIn,
   HeldOutcome,
   OutboxedConnectorEvent,
   PendingAction,
   StartConnection,
   ConnectWithKey,
   StartToolkitConnection,
+  ToolkitKeyField,
+  ToolkitKeyFieldsRequest,
+  ConnectToolkitWithKey,
   ChangeToolkitTools,
   UnknownOutcome,
   UnknownOutcomeListing,
 } from "@grasp-os/shared/connect";
 import type {
   DirectoryConnection,
+  DirectoryDeletedRead,
+  DirectoryGroupRead,
+  DirectoryGroupSearch,
   DirectoryLookup,
   DirectoryRead,
 } from "@grasp-os/shared/directory";
@@ -71,6 +79,12 @@ import type {
   NpmMalwareReports,
   NpmMetadata,
 } from "@grasp-os/shared/packages";
+import type {
+  SyncPage,
+  SyncPlaceChoices,
+  SyncPlaces,
+  SyncSourcePage,
+} from "@grasp-os/shared/sync";
 import type { ClockRegistration } from "@grasp-os/workerflow/clock";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
@@ -100,9 +114,11 @@ import { clock } from "./clock.ts";
 import {
   finishToolkitFlow,
   changeToolkitTools,
+  connectToolkitWithKey,
   startToolkitConnection,
+  toolkitKeyFields,
 } from "./composio-connections.ts";
-import { connectionOwners } from "./connections.ts";
+import { connectionOwners, personalAccounts } from "./connections.ts";
 import {
   actionShape,
   connectorContract,
@@ -111,8 +127,13 @@ import {
 } from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
 import {
+  readDirectoryGroup,
+  searchDirectoryGroups,
+} from "./directory-groups.ts";
+import {
   directoryConnections,
   lookUpInDirectory,
+  readDeletedDirectoryUsers,
   readDirectory,
 } from "./directory.ts";
 import {
@@ -173,9 +194,17 @@ import {
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
-import { erasePersonal } from "./person-erasure.ts";
+import { beginErasure, erasePersonal } from "./person-erasure.ts";
 import { probeBindings } from "./probe.ts";
+import { readReaderGroups } from "./reader-groups.ts";
 import { revocationsByHand } from "./revocations-by-hand.ts";
+import {
+  listSyncPlaces,
+  listSyncSources,
+  pickSyncPlaces,
+  readSyncPage,
+  syncPlaceChoices,
+} from "./sync.ts";
 import { webhookPost } from "./webhooks.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
@@ -314,7 +343,12 @@ export default class Connect
    * src/provision-probe.ts).
    */
   async ensureClock(): Promise<ClockRegistration> {
-    return await clock(this.env).ensureRegistered();
+    // As data, its call to the clock's object released here: handed on as
+    // it is, that call's result would carry its release on to core, which
+    // reads the answer and keeps nothing of it.
+    using registration = await clock(this.env).ensureRegistered();
+    const { armed, tasks } = registration;
+    return { armed, tasks };
   }
 
   /**
@@ -339,8 +373,8 @@ export default class Connect
   // connect recorded, appends them to the audit log, then acknowledges them,
   // with those the log can't take, which connect moves aside.
 
-  async takeAuditEvents(): Promise<OutboxedAuditEvent[]> {
-    return await takeAuditEvents(this.env);
+  async takeAuditEvents(held?: unknown): Promise<OutboxedAuditEvent[]> {
+    return await takeAuditEvents(this.env, held);
   }
 
   async ackAuditEvents(appended: unknown, rejected?: unknown): Promise<void> {
@@ -401,6 +435,14 @@ export default class Connect
     return await connectionOwners(this.env.DB, connectionIds);
   }
 
+  async personalAccounts(userId: unknown): Promise<PersonalAccount[]> {
+    return await personalAccounts(this.env.DB, userId);
+  }
+
+  async readReaderGroups(request: unknown): Promise<{ read: number }> {
+    return { read: await readReaderGroups(this.env, request) };
+  }
+
   async requireClassRights(
     request: RequireClassRights
   ): Promise<{ reconnect: number }> {
@@ -430,6 +472,10 @@ export default class Connect
     return await erasePersonal(this.env, request);
   }
 
+  async beginErasure(request: ErasePersonal): Promise<void> {
+    await beginErasure(this.env, request);
+  }
+
   async abandonFlow(state: string): Promise<void> {
     await abandonFlow(this.env, state);
   }
@@ -441,6 +487,21 @@ export default class Connect
     request: StartToolkitConnection
   ): Promise<{ url: string }> {
     return await startToolkitConnection(this.env, request);
+  }
+
+  // Connecting one that takes a key, with what the admin typed: no flow,
+  // nothing kept of the key (src/composio-connections.ts).
+
+  async toolkitKeyFields(
+    request: ToolkitKeyFieldsRequest
+  ): Promise<ToolkitKeyField[]> {
+    return await toolkitKeyFields(this.env, request);
+  }
+
+  async connectToolkitWithKey(
+    request: ConnectToolkitWithKey
+  ): Promise<{ connectionId: string }> {
+    return await connectToolkitWithKey(this.env, request);
   }
 
   async changeToolkitTools(
@@ -569,8 +630,25 @@ export default class Connect
     return await readDirectory(this.env, request);
   }
 
+  async readDeletedDirectoryUsers(
+    request: unknown
+  ): Promise<DirectoryDeletedRead> {
+    return await readDeletedDirectoryUsers(this.env, request);
+  }
+
   async lookUpInDirectory(request: unknown): Promise<DirectoryLookup> {
     return await lookUpInDirectory(this.env, request);
+  }
+
+  // The directory's groups (src/directory-groups.ts): for an admin to map
+  // one to a team, and for the daily read to place its members.
+
+  async searchDirectoryGroups(request: unknown): Promise<DirectoryGroupSearch> {
+    return await searchDirectoryGroups(this.env, request);
+  }
+
+  async readDirectoryGroup(request: unknown): Promise<DirectoryGroupRead> {
+    return await readDirectoryGroup(this.env, request);
   }
 
   // The HR platform (src/hr.ts): for the onboarding, in core, only.
@@ -600,6 +678,38 @@ export default class Connect
 
   async readPlaceFile(request: unknown): Promise<PlaceFile> {
     return await readPlaceFile(this.env, request);
+  }
+
+  // Native sync (src/sync.ts): one page of a source's changes, for core's
+  // sync run, which applies it to the Brain and keeps the cursor.
+
+  async readSyncPage(request: unknown): Promise<SyncPage> {
+    return await readSyncPage(this.env, request);
+  }
+
+  async syncSources(request: unknown): Promise<SyncSourcePage> {
+    return await listSyncSources(this.env, request);
+  }
+
+  /** The places of a connection's sync, each a source of its own. */
+  async listSyncPlaces(request: unknown): Promise<SyncPlaces> {
+    return await listSyncPlaces(this.env, request);
+  }
+
+  /**
+   * What an admin may pick for a shared connection's sync (shared drives,
+   * document libraries), a read at a time, each with whether it is picked;
+   * null when the connection has no sync of picked places.
+   */
+  async syncPlaceChoices(request: unknown): Promise<SyncPlaceChoices | null> {
+    return await syncPlaceChoices(this.env, request);
+  }
+
+  /** An admin's picks of a shared connection's places to sync. Audited. */
+  async pickSyncPlaces(
+    request: unknown
+  ): Promise<{ places: string[]; version: number }> {
+    return await pickSyncPlaces(this.env, request);
   }
 
   // Generated connector contracts (src/contracts.ts): what an App's
@@ -636,8 +746,11 @@ export default class Connect
   // Held actions (src/pending.ts). Core names the person from their
   // session; only they see and decide what waits for them.
 
-  async listPendingActions(person: ConnectionPerson): Promise<PendingAction[]> {
-    return await listPendingActions(this.env, person);
+  async listPendingActions(
+    person: ConnectionPerson,
+    heldIn: HeldIn
+  ): Promise<PendingAction[]> {
+    return await listPendingActions(this.env, person, heldIn);
   }
 
   async refuseConfirmation(request: unknown): Promise<void> {
@@ -947,6 +1060,7 @@ export default class Connect
       replayed: done.replayed,
       recovery: done.recovery,
       provenance: done.result.provenance,
+      provider: progress.provider,
       pendingActionId: done.pending?.id ?? held?.id,
       http: progress.http,
     };
@@ -976,7 +1090,9 @@ export default class Connect
       });
     }
     if (done.pending === undefined) {
-      return done.result;
+      return done.keep === undefined
+        ? done.result
+        : { ...done.result, keep: done.keep };
     }
     // A run's step can't carry on with an answer that says "held": it ends
     // as held, and core waits for the person's decision before running it

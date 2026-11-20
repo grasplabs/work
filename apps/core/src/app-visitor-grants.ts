@@ -4,11 +4,13 @@ import {
 } from "@grasp-os/shared/app-visitors";
 import type { AppVisitorGrants } from "@grasp-os/shared/app-visitors";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { recallsTheBrain } from "./app-provenance.ts";
 import { loadRelease } from "./app-releases.ts";
 import { editableApp } from "./apps.ts";
 import {
@@ -154,6 +156,14 @@ export const setAppVisitorGrants = async (
   const version = found.currentVersion;
   if (version === null) {
     throw appVisitorErrors.create("visitor.invalid");
+  }
+  // An App that may hold what the Brain recalled grants visitors nothing
+  // (app-visitors.ts); taking every grant off stays possible.
+  if (
+    parsed.data.length > 0 &&
+    (await recallsTheBrain(env, appIdSchema.parse(found.id)))
+  ) {
+    throw appVisitorErrors.create("visitor.not_granted");
   }
   const release = await loadRelease(env, found.id, version);
   const wanted = [...new Set(parsed.data)].toSorted();

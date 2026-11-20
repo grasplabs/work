@@ -42,7 +42,7 @@ import { z } from "zod";
 import { apisFor } from "./agent-apis.ts";
 import { turnCheck } from "./agent-builds.ts";
 import { isMessage, showThinkingName } from "./agent-messages.ts";
-import { rememberTool } from "./agent-remember.ts";
+import { lastWordsOf, rememberTool } from "./agent-remember.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { showThinking } from "./agent-thinking.ts";
@@ -56,7 +56,6 @@ import type {
   TurnOutcome,
 } from "./agent.ts";
 import { memberOf } from "./auth/identity.ts";
-import type { TurnFacts } from "./brain-capture.ts";
 import { readThinkingBrain } from "./brain-rpc.ts";
 import {
   chatAgent,
@@ -69,6 +68,7 @@ import {
   rebase,
   recallTextOf,
 } from "./chat-agent.ts";
+import type { Audience } from "./chat-audiences.ts";
 import { coreMessageProvider, shownBuiltSchema } from "./chat-messages.ts";
 import type { ShownBuilt } from "./chat-messages.ts";
 import { codeTimeoutMs } from "./code-mode.ts";
@@ -118,33 +118,49 @@ export interface TurnRequest {
     make?: ChatMake;
     /** Build it, said to the chat's plan: what core made of it (`ChatsApi.build`). */
     built?: QuestionBuilt;
+    /**
+     * The person's question again, for the next agent they addressed in
+     * it (workspace.ts, `send`): for the model, never shown as a question.
+     */
+    followUp?: true;
   };
   /** A chat others share, which reads only what they all may. */
   shared: boolean;
   /**
+   * Who is in a chat others share, as the turn was admitted for
+   * (`chat_audiences`, kept from the platform's roster for the message):
+   * with anyone Grasp can't name as a member in it, its recall reads
+   * nothing (turn-recall.ts). None in one's own; a shared chat's turn
+   * without it recalls nothing.
+   */
+  audience?: Audience;
+  /**
    * Whether the answer reaches the person alone, so the recall before the
    * question may hold what only they may read (their own store,
-   * turn-recall.ts): their own chat in Grasp, in a turn they started
-   * (workspace.ts, `answersAlone`).
+   * turn-recall.ts): their own chat, in Grasp or their direct message on
+   * a chat app, in a turn they started (workspace.ts, `answersAlone`).
    */
   personal: boolean;
-  /** Whether the chat's agent holds the brain permission. */
-  readsBrain: boolean;
   context: TurnContext;
   /** What the turn's capture for the Brain records besides how it ended. */
   capture: {
-    /** The model the Workspace admitted. */
-    model: string;
-    /** A shared chat's members as the turn read for them; null for one's own. */
-    audience: string[] | null;
+    /**
+     * Whether its person asked it there and then: never so for a turn
+     * something woke (`Workspace.askUnattended`).
+     */
+    attended: boolean;
   };
 }
 
-/** What a turn's capture for the Brain holds, as its ChatSession delivers it. */
-export type TurnCapture = Pick<
-  TurnFacts,
-  "turnId" | "outcome" | "answerId" | "model" | "audience"
->;
+/**
+ * What a turn's capture for the Brain holds, as its ChatSession delivers
+ * it: how it ended, the message it answered with, if any, and whether its
+ * person asked it there and then (`Workspace.captureTurn`).
+ */
+export type TurnCapture = {
+  outcome: TurnOutcome;
+  answerId: number | null;
+} & Pick<TurnRequest["capture"], "attended">;
 
 /** Why a turn stopped before it answered, when no model said so. */
 export type TurnStop = "history_revoked" | "person_inactive" | "unreadable";
@@ -282,14 +298,20 @@ const questionFilesSchema = z.array(z.string());
 
 /**
  * What a question's entry keeps besides its message: the files it carries,
- * what its Build it built, and its recall's call, so the chat shows the
- * recall as a step of its own. Each read on its own: one that doesn't
+ * what its Build it built, its recall's call, so the chat shows the recall
+ * as a step of its own, and that it is a question again for the next
+ * agent addressed (`followUp`), which isn't shown. Each read on its own: one that doesn't
  * parse is left out alone, never the others with it. Only the shape this
  * code writes: nothing is released, so no older one is read.
  */
 export const questionDataOf = (
   data: unknown
-): { files: string[]; built?: ShownBuilt; recall?: QuestionRecall } => {
+): {
+  files: string[];
+  built?: ShownBuilt;
+  recall?: QuestionRecall;
+  followUp?: true;
+} => {
   const field = (key: string): unknown =>
     typeof data === "object" && data !== null
       ? Reflect.get(data, key)
@@ -301,6 +323,7 @@ export const questionDataOf = (
     files: files.success ? files.data : [],
     ...(built.success ? { built: built.data } : {}),
     ...(recall.success ? { recall: recall.data } : {}),
+    ...(field("followUp") === true ? { followUp: true as const } : {}),
   };
 };
 
@@ -466,7 +489,12 @@ const shownOf = (entry: EntryRecord): TurnMessage[] => {
     return [];
   }
   if (entry.kind === questionKind && message.role === "user") {
-    const { files, built, recall } = questionDataOf(entry.data);
+    const { files, built, recall, followUp } = questionDataOf(entry.data);
+    // The question again for the next agent addressed in it: the person
+    // sees their question once, and each agent's answer after it.
+    if (followUp === true) {
+      return [];
+    }
     const recalled = recall === undefined ? undefined : recallTextOf(message);
     return [
       {
@@ -575,6 +603,13 @@ export class ChatHarness {
   #active: string | undefined;
   /** The rebase under way (`rebase`): a note waits for it. */
   #rebasing: Promise<void> | undefined;
+  /**
+   * The agent's last words before the turn's question, from the context
+   * as rebased for it (`#submit`): what its `remember` checks a short
+   * answer against (agent-remember.ts), never what the chat may no longer
+   * read. None for a turn a restart set up again.
+   */
+  #answering: string | undefined;
   /** Whether pi runs the agent now (`pi.live.run`). */
   #running = false;
   /** The answer streaming in, as `pi.live` has it now. */
@@ -906,11 +941,10 @@ export class ChatHarness {
       turn.request = JSON.stringify({ ...request, context: { skills: [] } });
       if (end !== undefined && end.stopped === undefined) {
         const owed: TurnCapture = {
-          turnId,
           outcome: end.outcome,
           answerId: turn.answerId,
-          model: request.capture.model,
-          audience: request.capture.audience,
+          // A request kept before it said is no one's there and then.
+          attended: request.capture.attended,
         };
         await tx.doc(CaptureDoc, turnId, owed);
         turn.captureOwed = true;
@@ -1038,15 +1072,17 @@ export class ChatHarness {
       turn.answerId = null;
       turn.captureOwed = false;
     }, context);
+    this.#answering = undefined;
     const turn = await this.#setUp(request);
     await this.#rebaseIfNeeded(request);
+    // Read from the context as rebased, as the turn's model is given it.
+    const { messages } = await this.#conversation.context(context);
+    this.#answering = lastWordsOf(messages);
     // At least once: should the object reset before the submit below, the
     // turn asked again sets up and recalls again, a second recall run
     // audited as the first was. Who reads the answer decides what it may
     // hand over (turn-recall.ts).
-    const recall = request.readsBrain
-      ? await this.#recall(turn, request)
-      : undefined;
+    const recall = await this.#recall(turn, request);
     try {
       return await this.#conversation.submit(
         {
@@ -1068,6 +1104,7 @@ export class ChatHarness {
             kind: questionKind,
             data: {
               files: request.question.files.map(({ id }) => id),
+              ...(request.question.followUp === true ? { followUp: true } : {}),
               // Shown with the person's Build it, as what it built.
               ...(request.question.built === undefined
                 ? {}
@@ -1101,14 +1138,16 @@ export class ChatHarness {
    */
   async #recall(
     turn: CodeTurn,
-    { question: { text }, shared, personal }: TurnRequest
+    { question: { text }, shared, audience, personal }: TurnRequest
   ) {
     const { messages } = await this.#conversation.context(context);
     return await recallForTurn(
       {
         env: this.#env,
         turn,
-        conversation: shared ? "shared" : "own",
+        conversation: shared
+          ? { outsiders: audience?.outsiders ?? null }
+          : "own",
         personal,
         history: messages,
         provenance: this.#sources,
@@ -1329,7 +1368,7 @@ export class ChatHarness {
     /** The lines the turn's runs sent the Workspace, one after another. */
     let logged: Promise<void> = Promise.resolve();
     const turn: CodeTurn = {
-      apis: apisFor(request.shared, request.readsBrain),
+      apis: apisFor(request.shared),
       scope,
       runs: {
         open: async (opening) =>
@@ -1370,21 +1409,33 @@ export class ChatHarness {
           : { ...request.context, make: request.question.make },
       assets: env.ASSETS,
       history: transcript.messages,
-      // Only in a person's own chat in Grasp's app, in a turn they started:
-      // what they said there is the only word of theirs it may keep, and
-      // only Grasp's app shows the notice and its Undo (agent-remember.ts).
-      // A turn nobody started (a wake) has no word of theirs.
-      ...(!request.shared && scope.unattended !== true && scope.via === "web"
-        ? { remember: rememberTool(env, scope, request.question.text) }
-        : {}),
-      // Only in a person's own chat, by an agent that may read the brain.
-      ...(request.readsBrain && !request.shared
+      // Only where the answer reaches the person alone, in a turn they
+      // started (`personal`, workspace.ts `answersAlone`): their own chat
+      // in Grasp's app, or their direct message on a chat app (GRA-1920),
+      // each of which shows a notice of every memory with its Undo
+      // (agent-remember.ts; channels/remembered.ts). What they said there
+      // is the only word of theirs it may keep. Never a chat others share,
+      // nor a turn nobody started (a wake), which has no word of theirs,
+      // nor a next agent's turn of a question addressed to several
+      // (`followUp`), which starts from core's words, never theirs.
+      ...(request.personal && request.question.followUp !== true
         ? {
-            thinking: showThinking(
-              async () => await brainOf(env, scope.personId)
+            remember: rememberTool(
+              env,
+              scope,
+              request.question.text,
+              () => this.#answering
             ),
           }
         : {}),
+      // Only in a person's own chat.
+      ...(request.shared
+        ? {}
+        : {
+            thinking: showThinking(
+              async () => await brainOf(env, scope.personId)
+            ),
+          }),
       withheld: async () => {
         const checked = await this.#guard(scope);
         this.#sources = checked.sources;
@@ -1585,7 +1636,9 @@ export class ChatHarness {
   /**
    * Delivers the capture turn `key` owes (`captureTurn`), naming its
    * answer as the copies kept it (`#copy` keeps it there), then retires
-   * it: at least once, kept once by its event ID.
+   * it: at least once, as a call retried or a retire that failed delivers
+   * it again. The Workspace notes it once whatever: one event, by an ID
+   * the turn's source gives it (`Workspace.captureTurn`).
    */
   async #deliver(scope: TurnRequest["scope"], key: string): Promise<void> {
     const owed = await this.#harness.snapshot(CaptureDoc, key, context);
@@ -1691,11 +1744,10 @@ export class ChatHarness {
       if (turn.ended && turn.captureOwed && request !== undefined) {
         // Owed, so there: the seed is never used.
         const owed = await tx.doc(CaptureDoc, request.turnId, {
-          turnId: request.turnId,
           outcome: "answered",
           answerId,
-          model: request.capture.model,
-          audience: request.capture.audience,
+          // A request kept before it said is no one's there and then.
+          attended: request.capture.attended,
         });
         owed.answerId = answerId;
       }

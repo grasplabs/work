@@ -21,8 +21,8 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { MakeCard } from "./make-card.tsx";
 
 // The plan Grasp's agent proposes before it makes anything new
 // (`proposePlan`), in the chat's thread: what Grasp will make in plain
@@ -135,10 +135,10 @@ export const PlanCard = ({
     workflow: t`Runs on its own`,
   };
   return (
-    <SectionCard
+    <MakeCard
+      actions={actions}
       description={t`Nothing is made until you say Build it. You can change any of it first.`}
-      footer={actions}
-      headingLevel={2}
+      label={t`Here's what Grasp will make`}
       title={t`Here's what Grasp will make`}
     >
       <ItemGroup>
@@ -159,6 +159,6 @@ export const PlanCard = ({
           name={plan.who}
         />
       </ItemGroup>
-    </SectionCard>
+    </MakeCard>
   );
 };

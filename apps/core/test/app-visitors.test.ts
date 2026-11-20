@@ -9,15 +9,19 @@ import {
   pageLeaseHeader,
   pagePersonHeader,
 } from "@grasp-os/shared/pages";
+import {
+  createExecutionContext,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appVisitorResponse, sweepAppVisitors } from "../src/app-visitors.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { commitApp, testApp } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
-import { published } from "./apps.ts";
+import { commitApp, published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
 import type { CapturedMail } from "./mail-capture.ts";
@@ -103,22 +107,30 @@ const releasedNotes = async (
   app: string,
   files: TestSource = notesFiles
 ): Promise<void> => {
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    app,
-    files,
-    "First"
-  );
-  await builder.api.apps.versions.publish(app, version);
+  const { version } = await commitApp(builder.api, app, files);
+  await builder.api.versions.rollback({ kind: "app", id: app }, version);
 };
 
-/** Posts a visitor's request, as their page does. */
-const post = async (body: unknown): Promise<Response> =>
-  await routed(appVisitorApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+/**
+ * Posts a visitor's request, as their page does, and waits for what core
+ * does after answering: asking looks the address up, sends its code and
+ * audits it then (`waitUntil`).
+ */
+const post = async (body: unknown): Promise<Response> => {
+  const ctx = createExecutionContext();
+  const response = await routed(
+    appVisitorApiPath,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    env,
+    ctx
+  );
+  await waitOnExecutionContext(ctx);
+  return response;
+};
 
 /** The status and code of an answer: `ok` for a 2xx. */
 const answerOf = async (response: Response) => {

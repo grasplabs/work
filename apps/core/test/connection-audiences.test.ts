@@ -1,0 +1,678 @@
+import { recallBudgetMax } from "@grasp-os/brain-next/contract";
+import type { ConnectionBrainAudience } from "@grasp-os/shared/connect";
+import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { describe, expect, it } from "vite-plus/test";
+
+import {
+  addSource,
+  listSourcesAs,
+  readSourceVersionAs,
+  recallAs,
+} from "../src/brain-next.ts";
+import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import { setConnectionAudience } from "../src/connection-audiences.ts";
+import { teams } from "../src/db/core/schema.ts";
+import { chooseAudience } from "./brain-audiences.ts";
+import { join, leave, newTeam } from "./brain-next-leaks-harness.ts";
+import { afterFirstRead } from "./d1-after-first-read.ts";
+import { mockIdp } from "./idp.ts";
+import {
+  auditedDuring,
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  signedInWithRole,
+  staffPerson,
+  unique,
+  uniqueWord,
+  whoami,
+} from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
+
+// Who may read in the Brain what agents read through a shared connection
+// (GRA-1831): the audience an admin chooses for the connection, one team
+// or everyone, decided from core's records at every read. These start
+// from the ways it can fail: someone outside the audience reading it, at
+// any reach, after leaving the team, or once the team is gone; the
+// audience set by someone other than the company's own admins, on a
+// personal connection, or without a trace; and what is kept for a
+// connection's audience landing anywhere else.
+
+const idp = mockIdp();
+
+/** Signing people in can be slow on CI. */
+const setUpTime = { timeout: 60_000 };
+
+/** A connection in connect's registry: shared unless `owner` is named. */
+const connection = async ({
+  owner = null,
+  status = "active",
+}: {
+  owner?: string | null;
+  status?: "active" | "disconnected";
+} = {}): Promise<string> => {
+  const id = `connection-hubspot-${unique()}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'hubspot', ?, ?, ?, 'composio', 'hubspot', ?, ?)"
+    )
+    .bind(id, owner === null ? "shared" : "personal", owner, status, now, now)
+    .run();
+  return id;
+};
+
+/** What an agent read through `connectionId`, kept with `marker` for its audience. */
+const keptThrough = async (
+  connectionId: string,
+  marker: string
+): Promise<SourceRef> => {
+  const source: SourceRef = {
+    producer: "connected",
+    id: `${connectionId}/${crypto.randomUUID()}`,
+  };
+  await addSource(env, {
+    source,
+    change: crypto.randomUUID(),
+    text: `Deal Rotterdam warehouse ${marker}`,
+    readers: { kind: "connection", connectionId },
+  });
+  return source;
+};
+
+/** Whether a reader found it, at each reach `findsAt` asks at. */
+interface Reaches {
+  person: boolean;
+  teams: boolean;
+  namedTeams: boolean;
+  company: boolean;
+}
+
+/**
+ * Whether `personId` finds `source` holding `marker` at each reach: as
+ * themselves, as their teams (a chat's code in their own chat), as the
+ * company with `teamIds` named (an App granted those teams), and as the
+ * company alone (a shared thread, any other App or workflow).
+ */
+const findsAt = async (
+  personId: string,
+  source: SourceRef,
+  marker: string,
+  teamIds: string[] = []
+): Promise<Reaches> => {
+  const finds = async (reach: {
+    personal: boolean;
+    company?: true;
+    teams?: string[];
+  }): Promise<boolean> => {
+    const { items } = await recallAs(env, personId, {
+      ...reach,
+      question: marker,
+      budget: { tokens: recallBudgetMax },
+    });
+    return items.some(
+      ({ source: found, text }) =>
+        found.producer === source.producer &&
+        found.id === source.id &&
+        text.includes(marker)
+    );
+  };
+  const [person, ownTeams, namedTeams, company] = await Promise.all([
+    finds({ personal: true }),
+    finds({ personal: false }),
+    finds({ personal: false, company: true, teams: teamIds }),
+    finds({ personal: false, company: true }),
+  ]);
+  return { person, teams: ownTeams, namedTeams, company };
+};
+
+const nowhere: Reaches = {
+  person: false,
+  teams: false,
+  namedTeams: false,
+  company: false,
+};
+
+/** How core's read of an audience starts (connection-audiences.ts `heldBy`). */
+const audienceRead = 'select "team_id" from "connection_brain_audiences"';
+
+/** Whether `personId` reads `source`'s first version, as the Sources page does. */
+const readsVersion = async (
+  personId: string,
+  source: SourceRef
+): Promise<boolean> => {
+  const read = await readSourceVersionAs(env, personId, { source, version: 1 });
+  return read !== null;
+};
+
+/** Whether the Sources page lists `source` among `personId`'s first page. */
+const listsFor = async (
+  personId: string,
+  source: SourceRef
+): Promise<boolean> => {
+  const { sources } = await listSourcesAs(env, personId);
+  return sources.some(({ source: listed }) => listed.id === source.id);
+};
+
+/** What adding `source` for `readers` ends in: `ok`, or why it was refused. */
+const added = async (
+  source: SourceRef,
+  readers: SourceReaders
+): Promise<string> =>
+  await outcome(
+    addSource(env, {
+      source,
+      change: crypto.randomUUID(),
+      text: "Deal notes",
+      readers,
+    })
+  );
+
+describe("a shared connection's Brain audience", setUpTime, () => {
+  it("lets a team read what is kept for it, at every reach a document for that team reaches, and nobody else", async () => {
+    const [admin, { userId: seller }, { userId: outsider }] = await Promise.all(
+      [
+        signedInApi(idp, "admin"),
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]
+    );
+    const sales = await newTeam(seller);
+    const other = await newTeam(outsider);
+    const connectionId = await connection();
+    const marker = uniqueWord();
+    const source = await keptThrough(connectionId, marker);
+
+    // Nobody, until an admin chooses.
+    const before = await findsAt(seller, source, marker, [sales]);
+    await chooseAudience(admin.api, connectionId, {
+      kind: "team",
+      teamId: sales,
+    });
+    const audiences = await admin.api.connections.brainAudiences();
+
+    expect({
+      before,
+      seller: await findsAt(seller, source, marker, [sales]),
+      // An App granted a team they aren't in reads none of it.
+      sellerNamingAnother: await findsAt(seller, source, marker, [other]),
+      outsider: await findsAt(outsider, source, marker, [sales, other]),
+      // An admin's role reads nothing more.
+      admin: await findsAt(admin.userId, source, marker, [sales]),
+      versions: {
+        seller: await readsVersion(seller, source),
+        outsider: await readsVersion(outsider, source),
+      },
+      // Found by recall, never listed a row a record.
+      listed: await listsFor(seller, source),
+      audiences: audiences
+        .filter((each) => each.connectionId === connectionId)
+        .map(({ changedAt, ...each }) => ({
+          ...each,
+          changedAt:
+            changedAt === null || Number.isNaN(Date.parse(changedAt))
+              ? "not a time"
+              : "a time",
+        })),
+    }).toStrictEqual({
+      before: nowhere,
+      // As a document for Sales: never in a shared thread (the company
+      // alone), nor for an App granted other teams.
+      seller: { person: true, teams: true, namedTeams: true, company: false },
+      sellerNamingAnother: {
+        person: true,
+        teams: true,
+        namedTeams: false,
+        company: false,
+      },
+      outsider: nowhere,
+      admin: nowhere,
+      versions: { seller: true, outsider: false },
+      listed: false,
+      audiences: [
+        {
+          connectionId,
+          audience: { kind: "team", teamId: sales },
+          erasing: false,
+          changedBy: admin.userId,
+          changedAt: "a time",
+        },
+      ],
+    });
+  });
+
+  it("follows the team's members and the audience from the next read, widening to what was kept before and back to nobody", async () => {
+    const [admin, { userId: seller }, { userId: newcomer }] = await Promise.all(
+      [
+        signedInApi(idp, "admin"),
+        signedInWithRole(idp, "user"),
+        signedInWithRole(idp, "user"),
+      ]
+    );
+    const sales = await newTeam(seller);
+    const connectionId = await connection();
+    const marker = uniqueWord();
+    const source = await keptThrough(connectionId, marker);
+    /** Whether the seller and the newcomer find it, as `reach` reads. */
+    const seen = async (reach: keyof Reaches) => {
+      const [bySeller, byNewcomer] = await Promise.all([
+        findsAt(seller, source, marker),
+        findsAt(newcomer, source, marker),
+      ]);
+      return { seller: bySeller[reach], newcomer: byNewcomer[reach] };
+    };
+    await chooseAudience(admin.api, connectionId, {
+      kind: "team",
+      teamId: sales,
+    });
+    const teamOnly = await seen("person");
+    await join(sales, newcomer);
+    await leave(sales, seller);
+    const membersMoved = await seen("person");
+    await chooseAudience(admin.api, connectionId, {
+      kind: "everyone",
+    });
+    const everyone = await seen("company");
+    await chooseAudience(admin.api, connectionId, {
+      kind: "nobody",
+    });
+    const nobody = await seen("person");
+    // Kept meanwhile: the team's again once an admin says so.
+    await chooseAudience(admin.api, connectionId, {
+      kind: "team",
+      teamId: sales,
+    });
+    const teamAgain = await seen("person");
+
+    expect({
+      teamOnly,
+      membersMoved,
+      everyone,
+      nobody,
+      teamAgain,
+    }).toStrictEqual({
+      teamOnly: { seller: true, newcomer: false },
+      membersMoved: { seller: false, newcomer: true },
+      // Everyone in the company, a shared thread's reach included, and
+      // what was kept before too.
+      everyone: { seller: true, newcomer: true },
+      nobody: { seller: false, newcomer: false },
+      teamAgain: { seller: false, newcomer: true },
+    });
+  });
+
+  it("is nobody's once its team is gone, nor anyone's who isn't a member, Grasp staff included", async () => {
+    const [admin, { userId: seller }, former] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInWithRole(idp, "user"),
+      signedInWithRole(idp, "user"),
+    ]);
+    const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
+    const { userId: staff } = await whoami(staffSession);
+    const sales = await newTeam(seller, former.userId);
+    const connectionId = await connection();
+    const marker = uniqueWord();
+    const source = await keptThrough(connectionId, marker);
+    await chooseAudience(admin.api, connectionId, {
+      kind: "team",
+      teamId: sales,
+    });
+    const readsAs = async (personId: string) =>
+      await outcome(
+        recallAs(env, personId, {
+          personal: true,
+          question: marker,
+          budget: { tokens: recallBudgetMax },
+        })
+      );
+    // Staff act in a deployment only once added as a user.
+    const staffReads = await readsAs(staff);
+    await admin.api.members.remove(former.userId);
+    const formerReads = await readsAs(former.userId);
+    const sellerBefore = await findsAt(seller, source, marker, [sales]);
+    await drizzle(env.DB).delete(teams).where(eq(teams.id, sales));
+
+    expect({
+      staffReads,
+      formerReads,
+      sellerBefore,
+      sellerAfter: await findsAt(seller, source, marker, [sales]),
+    }).toStrictEqual({
+      staffReads: "permission.person_inactive",
+      formerReads: "permission.person_inactive",
+      sellerBefore: {
+        person: true,
+        teams: true,
+        namedTeams: true,
+        company: false,
+      },
+      sellerAfter: nowhere,
+    });
+  });
+
+  it("is set by the company's admins alone, on a shared connection connect holds, and each change is audited once", async () => {
+    const [admin, member, { userId: owner }] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "user"),
+      signedInWithRole(idp, "user"),
+    ]);
+    const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
+    const staffRpc = await openRpc(staffSession);
+    const staff = staffRpc.core.authenticate();
+    const sales = await newTeam(member.userId);
+    const [shared, personal, disconnected] = await Promise.all([
+      connection(),
+      connection({ owner }),
+      connection({ status: "disconnected" }),
+    ]);
+    const forSales = { kind: "team", teamId: sales } as const;
+
+    const refused = {
+      member: await outcome(chooseAudience(member.api, shared, forSales)),
+      staff: await outcome(chooseAudience(staff, shared, forSales)),
+      personal: await outcome(chooseAudience(admin.api, personal, forSales)),
+      disconnected: await outcome(
+        chooseAudience(admin.api, disconnected, forSales)
+      ),
+      unknown: await outcome(
+        chooseAudience(admin.api, `connection-${unique()}`, forSales)
+      ),
+      unknownTeam: await outcome(
+        chooseAudience(admin.api, shared, {
+          kind: "team",
+          teamId: crypto.randomUUID(),
+        })
+      ),
+      listedByMember: await outcome(member.api.connections.brainAudiences()),
+    };
+    const events = await auditedDuring(async () => {
+      await chooseAudience(admin.api, shared, forSales);
+      // The same again changes nothing, and records nothing.
+      await chooseAudience(admin.api, shared, forSales);
+      await chooseAudience(admin.api, shared, {
+        kind: "everyone",
+      });
+      await chooseAudience(admin.api, shared, { kind: "nobody" });
+      await chooseAudience(admin.api, shared, { kind: "nobody" });
+    });
+    const audiences = await admin.api.connections.brainAudiences();
+
+    expect({
+      refused,
+      events: events.map(({ action, actor, target, detail }) => ({
+        action,
+        actor,
+        target,
+        detail,
+      })),
+      audiences: audiences.filter(({ connectionId }) =>
+        [shared, personal, disconnected].includes(connectionId)
+      ),
+    }).toStrictEqual({
+      refused: {
+        member: "role.forbidden",
+        staff: "role.forbidden",
+        personal: "connection.invalid",
+        disconnected: "connection.invalid",
+        unknown: "connection.invalid",
+        unknownTeam: "connection.invalid",
+        listedByMember: "role.forbidden",
+      },
+      // Each with what it changed from.
+      events: [
+        { from: "nobody", team: sales, who: "team" },
+        { from: "team", fromTeam: sales, who: "everyone" },
+        { from: "everyone", who: "nobody" },
+      ].map((detail) => ({
+        action: "brain.connection_audience.changed",
+        actor: { type: "person", userId: admin.userId },
+        target: { type: "connection", id: shared },
+        detail,
+      })),
+      audiences: [],
+    });
+  });
+
+  it("opens to anyone new only once the admin confirmed it reads everything the connection brings, and records each refusal with that audience", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [sales, support] = await Promise.all([newTeam(), newTeam()]);
+    const shared = await connection();
+    const nobody = { kind: "nobody" } as const;
+    const everyone = { kind: "everyone" } as const;
+    const forSales = { kind: "team", teamId: sales } as const;
+    const forSupport = { kind: "team", teamId: support } as const;
+    const set = async (
+      next: ConnectionBrainAudience,
+      from: ConnectionBrainAudience,
+      acknowledged?: ConnectionBrainAudience
+    ): Promise<string> =>
+      await outcome(
+        admin.api.connections.setBrainAudience(
+          shared,
+          next,
+          from,
+          ...(acknowledged === undefined ? [] : [acknowledged])
+        )
+      );
+
+    const outcomes: Record<string, string> = {};
+    const events = await auditedDuring(async () => {
+      outcomes.unconfirmed = await set(forSales, nobody);
+      outcomes.otherConfirmed = await set(forSales, nobody, everyone);
+      outcomes.confirmed = await set(forSales, nobody, forSales);
+      // Another team is someone new too.
+      outcomes.anotherTeam = await set(forSupport, forSales);
+      outcomes.everyone = await set(everyone, forSales, everyone);
+      // Narrowing lets nobody new read: nothing to confirm.
+      outcomes.narrowed = await set(forSales, everyone);
+      outcomes.closed = await set(nobody, forSales);
+    });
+
+    expect({
+      outcomes,
+      refused: events
+        .filter(({ detail }) => detail?.outcome === "refused")
+        .map(({ action, target, detail }) => ({
+          action,
+          target: target?.id,
+          detail,
+        })),
+    }).toStrictEqual({
+      outcomes: {
+        unconfirmed: "sync.unacknowledged",
+        otherConfirmed: "sync.unacknowledged",
+        confirmed: "ok",
+        anotherTeam: "sync.unacknowledged",
+        everyone: "ok",
+        narrowed: "ok",
+        closed: "ok",
+      },
+      refused: [sales, sales, support].map((team) => ({
+        action: "brain.connection_audience.changed",
+        target: shared,
+        detail: {
+          outcome: "refused",
+          reason: "sync.unacknowledged",
+          who: "team",
+          team,
+        },
+      })),
+    });
+  });
+
+  it("refuses a change made from an audience that changed meanwhile, records nothing of it, and records what the other change replaced", async () => {
+    const [first, second] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "admin"),
+    ]);
+    const [sales, support] = await Promise.all([
+      newTeam(first.userId),
+      newTeam(second.userId),
+    ]);
+    const connectionId = await connection();
+    await chooseAudience(first.api, connectionId, {
+      kind: "team",
+      teamId: sales,
+    });
+    // The first admin looks at Sales and reads it; before they write, the
+    // second admin opens it to everyone.
+    const racing: Env = {
+      ...env,
+      DB: afterFirstRead(env.DB, audienceRead, async () => {
+        await chooseAudience(second.api, connectionId, {
+          kind: "everyone",
+        });
+      }),
+    };
+    const identity = await first.api.whoami();
+
+    let refused = "";
+    const events = await auditedDuring(async () => {
+      refused = await outcome(
+        setConnectionAudience(
+          racing,
+          identity,
+          connectionId,
+          { kind: "team", teamId: support },
+          { kind: "team", teamId: sales },
+          { kind: "team", teamId: support }
+        )
+      );
+    });
+    // A page left open on Sales, after another admin closed it to nobody:
+    // choosing a team from there is refused too, never a silent opening.
+    await chooseAudience(second.api, connectionId, { kind: "nobody" });
+    const stale = await outcome(
+      first.api.connections.setBrainAudience(
+        connectionId,
+        { kind: "team", teamId: support },
+        { kind: "team", teamId: sales },
+        { kind: "team", teamId: support }
+      )
+    );
+    const audiences = await first.api.connections.brainAudiences();
+
+    expect({
+      refused,
+      stale,
+      events: events.flatMap(({ action, actor, detail }) =>
+        action === "brain.connection_audience.changed"
+          ? [{ actor, detail }]
+          : []
+      ),
+      now: audiences
+        .filter((each) => each.connectionId === connectionId)
+        .map(({ audience }) => audience),
+    }).toStrictEqual({
+      refused: "connection.brain_audience_changed",
+      stale: "connection.brain_audience_changed",
+      events: [
+        {
+          actor: { type: "person", userId: second.userId },
+          detail: { from: "team", fromTeam: sales, who: "everyone" },
+        },
+      ],
+      now: [],
+    });
+  });
+
+  it("is closed to nobody on any connection, one disconnected included, from the next read", async () => {
+    const [admin, { userId: member }] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInWithRole(idp, "user"),
+    ]);
+    const connectionId = await connection();
+    const marker = uniqueWord();
+    const source = await keptThrough(connectionId, marker);
+    await chooseAudience(admin.api, connectionId, {
+      kind: "everyone",
+    });
+    const before = await findsAt(member, source, marker);
+    await connectDb()
+      .prepare("UPDATE connections SET status = 'disconnected' WHERE id = ?")
+      .bind(connectionId)
+      .run();
+
+    expect({
+      before: before.person,
+      // Opening it again needs a connection connect holds; closing doesn't.
+      everyoneAgain: await outcome(
+        chooseAudience(admin.api, connectionId, {
+          kind: "team",
+          teamId: await newTeam(member),
+        })
+      ),
+      nobody: await outcome(
+        chooseAudience(admin.api, connectionId, {
+          kind: "nobody",
+        })
+      ),
+      gone: await outcome(
+        chooseAudience(admin.api, `connection-${unique()}`, {
+          kind: "nobody",
+        })
+      ),
+      after: await findsAt(member, source, marker),
+    }).toStrictEqual({
+      before: true,
+      everyoneAgain: "connection.invalid",
+      nobody: "ok",
+      gone: "ok",
+      after: nowhere,
+    });
+  });
+
+  it("keeps what is read through a shared connection for its audience alone, under its own key, and nothing else for one", async () => {
+    const connectionId = await connection();
+    const { userId: person } = await signedInWithRole(idp, "user");
+    const forConnection: SourceReaders = { kind: "connection", connectionId };
+    const under = (): string => `${connectionId}/${crypto.randomUUID()}`;
+    const refusedAs =
+      "Refused: only what agents read through a shared connection is for its audience, keyed under it";
+
+    expect({
+      kept: await added({ producer: "connected", id: under() }, forConnection),
+      forEveryone: await added(
+        { producer: "connected", id: under() },
+        { kind: "everyone" }
+      ),
+      forOnePerson: await added(
+        { producer: "connected", id: under() },
+        { kind: "owner", personId: person }
+      ),
+      anotherConnectionsKey: await added(
+        {
+          producer: "connected",
+          id: `connection-other/${crypto.randomUUID()}`,
+        },
+        forConnection
+      ),
+      aCaptureForIt: await added(
+        { producer: "capture", id: under() },
+        forConnection
+      ),
+      // Under the connection's own key, so only the rule that nothing
+      // else is for a connection's audience can refuse them.
+      anUploadForIt: await added(
+        { producer: "upload", id: under() },
+        forConnection
+      ),
+      aKickoffForIt: await added(
+        { producer: "kickoff", id: under() },
+        forConnection
+      ),
+    }).toStrictEqual({
+      kept: "ok",
+      forEveryone: `Error: ${refusedAs}`,
+      forOnePerson: `Error: ${refusedAs}`,
+      anotherConnectionsKey: `Error: ${refusedAs}`,
+      // A capture is one person's own, refused as such first.
+      aCaptureForIt: "Error: Refused: a capture is for one person alone",
+      anUploadForIt: `Error: ${refusedAs}`,
+      aKickoffForIt: `Error: ${refusedAs}`,
+    });
+  });
+});

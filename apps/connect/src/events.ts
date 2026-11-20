@@ -23,8 +23,10 @@ import {
   notExists,
   sql,
 } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { recordEventIf, recordEvents } from "./audit.ts";
@@ -183,26 +185,23 @@ const mayListen = (
     ? kind.wholeConnection
     : kind.isResource(listener.resource));
 
-/** D1 binds at most 100 values a statement. */
-const idsPerQuery = 90;
+/**
+ * `column IN (...ids)`, the IDs bound as one JSON parameter however many
+ * there are: D1 binds at most 100 to a statement.
+ */
+const among = (column: SQLiteColumn, ids: readonly string[]): SQL =>
+  sql`${column} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`;
 
 /** The connections `ids` name. */
 const connectionsOf = async (
   db: D1Database,
   ids: readonly string[]
 ): Promise<Map<string, Connection>> => {
-  const found = new Map<string, Connection>();
-  for (let at = 0; at < ids.length; at += idsPerQuery) {
-    // oxlint-disable-next-line no-await-in-loop -- a few chunks, in turn
-    const rows = await drizzle(db)
-      .select()
-      .from(connections)
-      .where(inArray(connections.id, ids.slice(at, at + idsPerQuery)));
-    for (const row of rows) {
-      found.set(row.id, row);
-    }
-  }
-  return found;
+  const rows = await drizzle(db)
+    .select()
+    .from(connections)
+    .where(among(connections.id, ids));
+  return new Map(rows.map((row) => [row.id, row]));
 };
 
 type SourceKey = Pick<EventSource, "connectionId" | "type" | "resource">;
@@ -872,22 +871,17 @@ const droppedEntry = (
 };
 
 /** The outboxed events `ids` name, with their attempts so far. */
-const outboxedRows = async (db: D1Database, ids: readonly string[]) => {
-  const rows: { id: string; event: string; attempts: number }[] = [];
-  for (let at = 0; at < ids.length; at += idsPerQuery) {
-    // oxlint-disable-next-line no-await-in-loop -- one chunk at most, in practice
-    const found = await drizzle(db)
-      .select({
-        id: connectorEvents.id,
-        event: connectorEvents.event,
-        attempts: connectorEvents.attempts,
-      })
-      .from(connectorEvents)
-      .where(inArray(connectorEvents.id, ids.slice(at, at + idsPerQuery)));
-    rows.push(...found);
-  }
-  return rows;
-};
+const outboxedRows = async (db: D1Database, ids: readonly string[]) =>
+  ids.length === 0
+    ? []
+    : await drizzle(db)
+        .select({
+          id: connectorEvents.id,
+          event: connectorEvents.event,
+          attempts: connectorEvents.attempts,
+        })
+        .from(connectorEvents)
+        .where(among(connectorEvents.id, ids));
 
 /**
  * `ConnectApi.ackConnectorEvents`: removes the events done, and has each
@@ -911,11 +905,9 @@ export const ackConnectorEvents = async (
   const statements: BatchItem<"sqlite">[] = [];
   const dropped: AuditEntry[] = [];
   const remove = (ids: readonly string[]): void => {
-    for (let at = 0; at < ids.length; at += idsPerQuery) {
+    if (ids.length > 0) {
       statements.push(
-        db
-          .delete(connectorEvents)
-          .where(inArray(connectorEvents.id, ids.slice(at, at + idsPerQuery)))
+        db.delete(connectorEvents).where(among(connectorEvents.id, ids))
       );
     }
   };
@@ -937,7 +929,7 @@ export const ackConnectorEvents = async (
   const retried = failedRows
     .filter(({ attempts }) => attempts + 1 < maxDeliveryAttempts)
     .map(({ id }) => id);
-  for (let at = 0; at < retried.length; at += idsPerQuery) {
+  if (retried.length > 0) {
     statements.push(
       db
         .update(connectorEvents)
@@ -945,7 +937,7 @@ export const ackConnectorEvents = async (
           attempts: sql`${connectorEvents.attempts} + 1`,
           retryAt: sql`${now} + min(60000 * (1 << min(${connectorEvents.attempts}, 6)), ${maxWaitMs})`,
         })
-        .where(inArray(connectorEvents.id, retried.slice(at, at + idsPerQuery)))
+        .where(among(connectorEvents.id, retried))
     );
   }
   const [firstDropped, ...moreDropped] = dropped;

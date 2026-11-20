@@ -1,19 +1,24 @@
+import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import {
   composioConsentText,
+  composioKeyConsentText,
   composioToolName,
   composioToolsSchema,
   connectionCallbackPath,
   connectionErrors,
   changeToolkitToolsSchema,
   connectErrors,
+  connectToolkitWithKeySchema,
   finishConnectionSchema,
   oauthFlowLifetimeMs,
   startToolkitConnectionSchema,
+  toolkitKeyFieldsSchema,
 } from "@grasp-os/shared/connect";
 import type {
   ComposioAccountState,
   ComposioToolRule,
   ConnectionPerson,
+  ToolkitKeyField,
 } from "@grasp-os/shared/connect";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierSchema } from "@grasp-os/shared/ids";
@@ -28,6 +33,7 @@ import {
   isNull,
   lt,
   lte,
+  ne,
   or,
   sql,
 } from "drizzle-orm";
@@ -37,7 +43,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { recordEvents, recordEventsIf } from "./audit.ts";
-import { composioEntry, composioTools } from "./catalog.ts";
+import { composioEntry, composioTools, keyAuthOf } from "./catalog.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
 import {
   auditRefusal,
@@ -499,45 +505,31 @@ const checkedTools = async (
 };
 
 /**
- * Starts connecting a toolkit for an admin who consented: records their
- * consent with the flow, and returns Composio's auth link.
+ * The events of an admin's consent to connecting `toolkit` with `tools`:
+ * the consent, with the hash of the text they consented to (`consent`),
+ * and the read tools by name (`connection.consent.read_tools`), those
+ * Composio didn't tag read-only (`hinted`) first. `detail` goes in the
+ * consent's own.
  */
-export const startToolkitConnection = async (
-  env: Env,
-  request: unknown
-): Promise<{ url: string }> => {
-  const { person, toolkit, tools, origin, returnTo } = connectionErrors.parse(
-    "connection.invalid",
-    startToolkitConnectionSchema,
-    request
-  );
-  await refuseUnlessAdmin(env, person, toolkit);
-  const key = composioKey(env);
-  if (key === undefined || new URL(origin).origin !== origin) {
-    throw connectionErrors.create("connection.provider_unavailable");
+const consentEvents = async (
+  person: ConnectionPerson,
+  {
+    toolkit,
+    flowId,
+    tools,
+    hinted,
+    consent,
+    detail = {},
+  }: {
+    toolkit: string;
+    flowId: string;
+    tools: readonly (string | ComposioToolRule)[];
+    hinted: ReadonlySet<string>;
+    consent: string;
+    detail?: Record<string, AuditDetailValue>;
   }
-  // Composio holds no app for it: starting would make an auth config it
-  // refuses, so nothing is made, and the attempt is recorded.
-  const { auth } = await composioEntry(key, toolkit);
-  if (auth === "own") {
-    await auditRefusal(env, person, "connection.connect", {
-      ...detailOf(toolkit),
-      outcome: "refused",
-      reason: "connection.own_auth_required",
-    });
-    throw connectionErrors.create("connection.own_auth_required");
-  }
-  // Only tools the toolkit has, each held to a resource only by one of its
-  // own input properties (`checkedTools`).
-  const { fits, hinted } = await checkedTools(key, toolkit, tools);
+): Promise<[AuditEntry, ...AuditEntry[]]> => {
   const readTools = readToolsOf(tools);
-  if (!fits) {
-    throw connectionErrors.create("connection.invalid");
-  }
-
-  const state = randomToken();
-  const stateHash = await sha256Hex(state);
-  const flowId = crypto.randomUUID();
   const unhinted = readTools.filter((tool) => !hinted.has(tool));
   // The unhinted first, so they are the ones named if names are cut off.
   const named = packedNames(unhinted);
@@ -556,6 +548,73 @@ export const startToolkitConnection = async (
         ...names,
       })
     );
+  return [
+    connectionEvent(person, "connection.consent", undefined, {
+      ...detailOf(toolkit),
+      ...detail,
+      outcome: "ok",
+      tokenHolder: "composio",
+      consentHash: await sha256Hex(consent),
+      flowId,
+      toolsHash: await sha256Hex(JSON.stringify(tools)),
+      toolCount: tools.length,
+      readCount: readTools.length,
+      unhintedReadCount: unhinted.length,
+      // Only when names were cut off: how many, and their hash.
+      ...(unnamed.length === 0
+        ? {}
+        : {
+            unnamedReadCount: unnamed.length,
+            unnamedReadHash: await sha256Hex(unnamed.join(",")),
+          }),
+    }),
+    ...namesOf(named.details, false),
+    ...namesOf(namedHinted.details, true),
+  ];
+};
+
+/**
+ * Starts connecting a toolkit for an admin who consented: records their
+ * consent with the flow, and returns Composio's auth link.
+ */
+export const startToolkitConnection = async (
+  env: Env,
+  request: unknown
+): Promise<{ url: string }> => {
+  const { person, toolkit, tools, origin, returnTo } = connectionErrors.parse(
+    "connection.invalid",
+    startToolkitConnectionSchema,
+    request
+  );
+  await refuseUnlessAdmin(env, person, toolkit);
+  const key = composioKey(env);
+  if (key === undefined || new URL(origin).origin !== origin) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  // Composio holds no app for it: starting would make an auth config it
+  // refuses, so nothing is made, and the attempt is recorded. One that
+  // takes a key is connected with it (`connectToolkitWithKey`).
+  const { auth } = await composioEntry(key, toolkit);
+  if (auth !== "managed") {
+    const reason =
+      auth === "own" ? "connection.own_auth_required" : "connection.invalid";
+    await auditRefusal(env, person, "connection.connect", {
+      ...detailOf(toolkit),
+      outcome: "refused",
+      reason,
+    });
+    throw connectionErrors.create(reason);
+  }
+  // Only tools the toolkit has, each held to a resource only by one of its
+  // own input properties (`checkedTools`).
+  const { fits, hinted } = await checkedTools(key, toolkit, tools);
+  if (!fits) {
+    throw connectionErrors.create("connection.invalid");
+  }
+
+  const state = randomToken();
+  const stateHash = await sha256Hex(state);
+  const flowId = crypto.randomUUID();
   const storedTools = JSON.stringify(tools);
   // On the client's own origin even in relay mode
   // (@grasp-os/shared/oauth-relay): the provider returns to Composio's own
@@ -609,28 +668,13 @@ export const startToolkitConnection = async (
     // The flow takes over what the cleanup row held, in one transaction.
     await recordEvents(
       env,
-      [
-        connectionEvent(person, "connection.consent", undefined, {
-          ...detailOf(toolkit),
-          outcome: "ok",
-          tokenHolder: "composio",
-          consentHash: await sha256Hex(composioConsentText),
-          flowId,
-          toolsHash: await sha256Hex(storedTools),
-          toolCount: tools.length,
-          readCount: readTools.length,
-          unhintedReadCount: unhinted.length,
-          // Only when names were cut off: how many, and their hash.
-          ...(unnamed.length === 0
-            ? {}
-            : {
-                unnamedReadCount: unnamed.length,
-                unnamedReadHash: await sha256Hex(unnamed.join(",")),
-              }),
-        }),
-        ...namesOf(named.details, false),
-        ...namesOf(namedHinted.details, true),
-      ],
+      await consentEvents(person, {
+        toolkit,
+        flowId,
+        tools,
+        hinted,
+        consent: composioConsentText,
+      }),
       [
         // Only for someone whose erasure hasn't begun, both or neither:
         // a start under way as it began keeps its cleanup row, and the
@@ -798,6 +842,137 @@ const isServerFor = (
   );
 };
 
+/** Whether `toolkit` has a shared Composio connection that isn't disconnected. */
+const hasLiveShared = async (env: Env, toolkit: string): Promise<boolean> => {
+  const [live] = await drizzle(env.DB)
+    .select({ id: connections.id })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.provider, toolkit),
+        eq(connections.serverKind, "composio"),
+        eq(connections.scope, "shared"),
+        ne(connections.status, "disconnected")
+      )
+    )
+    .limit(1);
+  return live !== undefined;
+};
+
+/** A connected account connect made at Composio, to serve as a connection. */
+interface Made {
+  flowId: string;
+  toolkit: string;
+  authConfigId: string;
+  connectedAccountId: string;
+  /** The allowed tools, as stored (JSON). */
+  tools: string;
+}
+
+/**
+ * Serves the connected account `account` as a connection of `person`'s:
+ * checks it is the one made, active, for its toolkit, makes an MCP server
+ * at Composio with only its auth config and the allowed tools (noted in
+ * `made` and in its cleanup row), and stores the connection with that
+ * server's URL for that one account, with `events` for its ID in the same
+ * batch, which also clears the cleanup row. The connection's ID, or
+ * `undefined` when the account isn't the one made or isn't active.
+ * Throws {@link ComposioError} when Composio fails.
+ */
+const serveAndStore = async (
+  env: Env,
+  key: string,
+  person: ConnectionPerson,
+  account: Made,
+  made: AtComposio,
+  events: (connectionId: string) => [AuditEntry, ...AuditEntry[]],
+  auth: "managed" | "key"
+): Promise<string | undefined> => {
+  const held = await composioRequest(key, {
+    path: `/connected_accounts/${encodeURIComponent(account.connectedAccountId)}`,
+    schema: connectedAccountSchema,
+  });
+  const isThisOne =
+    held.id === account.connectedAccountId &&
+    held.status === "ACTIVE" &&
+    held.toolkit.slug === account.toolkit &&
+    held.auth_config.id === account.authConfigId;
+  if (!isThisOne) {
+    return undefined;
+  }
+  const tools = composioToolsSchema.parse(JSON.parse(account.tools));
+  const server = await composioRequest(key, {
+    method: "POST",
+    path: "/mcp/servers",
+    body: {
+      // Its flow's marker: 4 to 30 letters, digits and hyphens.
+      name: markerOf(account.flowId),
+      auth_config_ids: [account.authConfigId],
+      allowed_tools: tools.map(composioToolName),
+    },
+    schema: mcpServerSchema,
+  });
+  made.serverId = server.id;
+  await drizzle(env.DB)
+    .update(composioCleanups)
+    .set({ serverId: server.id })
+    .where(eq(composioCleanups.id, account.flowId));
+  const { connected_account_urls: urls } = await composioRequest(key, {
+    method: "POST",
+    path: "/mcp/servers/generate",
+    body: {
+      mcp_server_id: server.id,
+      connected_account_ids: [account.connectedAccountId],
+    },
+    schema: mcpUrlsSchema,
+  });
+  const [url] = urls;
+  if (
+    urls.length !== 1 ||
+    url === undefined ||
+    !isServerFor(url, server.id, account.connectedAccountId)
+  ) {
+    throw new ComposioError("Composio's server URL isn't one connect calls");
+  }
+  const connectionId = crypto.randomUUID();
+  const now = new Date();
+  const db = drizzle(env.DB);
+  try {
+    await recordEvents(env, events(connectionId), [
+      // The connection takes over what the cleanup row held.
+      db
+        .delete(composioCleanups)
+        .where(eq(composioCleanups.id, account.flowId)),
+      db.insert(connections).values({
+        id: connectionId,
+        provider: account.toolkit,
+        scope: "shared",
+        ownerUserId: null,
+        status: "active",
+        serverKind: "composio",
+        server: url,
+        accountId: account.connectedAccountId,
+        connectedBy: person.userId,
+        composioServerId: server.id,
+        composioAuthConfigId: account.authConfigId,
+        composioAuth: auth,
+        tools: account.tools,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ]);
+  } catch (error) {
+    // A key connection is its toolkit's one live one (the schema's
+    // `connections_key_toolkit_idx`): of two stored at once, one fails
+    // whole, its events with it, and its caller deletes what it made.
+    if (auth === "key" && (await hasLiveShared(env, account.toolkit))) {
+      throw connectionErrors.create("connection.already_connected");
+    }
+    throw error;
+  }
+  return connectionId;
+};
+
 /**
  * Finishes a Composio flow for the admin who started it, once Composio
  * sent their browser back: the new connection.
@@ -836,91 +1011,31 @@ const finishToolkitConnection = async (
       await refuse("connection.provider_unavailable");
       throw connectionErrors.create("connection.provider_unavailable");
     }
-    const account = await composioRequest(key, {
-      path: `/connected_accounts/${encodeURIComponent(flow.connectedAccountId)}`,
-      schema: connectedAccountSchema,
-    });
-    const isThisFlows =
-      account.id === flow.connectedAccountId &&
-      account.status === "ACTIVE" &&
-      account.toolkit.slug === flow.toolkit &&
-      account.auth_config.id === flow.authConfigId;
-    if (!isThisFlows) {
-      await refuse("connection.provider_refused", "failed");
-      throw connectionErrors.create("connection.provider_refused");
-    }
     const tools = composioToolsSchema.parse(JSON.parse(flow.tools));
-    const server = await composioRequest(key, {
-      method: "POST",
-      path: "/mcp/servers",
-      body: {
-        // Its flow's marker: 4 to 30 letters, digits and hyphens.
-        name: markerOf(flow.flowId),
-        auth_config_ids: [flow.authConfigId],
-        allowed_tools: tools.map(composioToolName),
-      },
-      schema: mcpServerSchema,
-    });
-    made.serverId = server.id;
-    await drizzle(env.DB)
-      .update(composioCleanups)
-      .set({ serverId: server.id })
-      .where(eq(composioCleanups.id, flow.flowId));
-    const { connected_account_urls: urls } = await composioRequest(key, {
-      method: "POST",
-      path: "/mcp/servers/generate",
-      body: {
-        mcp_server_id: server.id,
-        connected_account_ids: [flow.connectedAccountId],
-      },
-      schema: mcpUrlsSchema,
-    });
-    const [url] = urls;
-    if (
-      urls.length !== 1 ||
-      url === undefined ||
-      !isServerFor(url, server.id, flow.connectedAccountId)
-    ) {
-      throw new ComposioError("Composio's server URL isn't one connect calls");
-    }
-    const connectionId = crypto.randomUUID();
-    const now = new Date();
-    await recordEvents(
+    const toolsHash = await sha256Hex(flow.tools);
+    const connectionId = await serveAndStore(
       env,
-      [
-        connectionEvent(person, "connection.connect", connectionId, {
+      key,
+      person,
+      flow,
+      made,
+      (id) => [
+        connectionEvent(person, "connection.connect", id, {
           ...detail,
           outcome: "ok",
           tokenHolder: "composio",
           flowId: flow.flowId,
-          toolsHash: await sha256Hex(flow.tools),
+          toolsHash,
           toolCount: tools.length,
           readCount: readToolsOf(tools).length,
         }),
       ],
-      [
-        // The connection takes over what the flow's cleanup row held.
-        drizzle(env.DB)
-          .delete(composioCleanups)
-          .where(eq(composioCleanups.id, flow.flowId)),
-        drizzle(env.DB).insert(connections).values({
-          id: connectionId,
-          provider: flow.toolkit,
-          scope: "shared",
-          ownerUserId: null,
-          status: "active",
-          serverKind: "composio",
-          server: url,
-          accountId: flow.connectedAccountId,
-          connectedBy: person.userId,
-          composioServerId: server.id,
-          composioAuthConfigId: flow.authConfigId,
-          tools: flow.tools,
-          createdAt: now,
-          updatedAt: now,
-        }),
-      ]
+      "managed"
     );
+    if (connectionId === undefined) {
+      await refuse("connection.provider_refused", "failed");
+      throw connectionErrors.create("connection.provider_refused");
+    }
     return { connectionId, returnTo: flow.returnTo };
   } catch (error) {
     await carryOutCleanup(env, flow.flowId, made, markerOf(flow.flowId));
@@ -952,6 +1067,224 @@ export const finishToolkitFlow = async (
     return undefined;
   }
   return await finishToolkitConnection(env, person, flow);
+};
+
+/**
+ * What an admin types to connect `toolkit` with a key, as Composio
+ * describes it now (`keyAuthOf`): admins only, never Grasp staff.
+ */
+export const toolkitKeyFields = async (
+  env: Env,
+  request: unknown
+): Promise<ToolkitKeyField[]> => {
+  const { person, toolkit } = connectionErrors.parse(
+    "connection.invalid",
+    toolkitKeyFieldsSchema,
+    request
+  );
+  await refuseUnlessAdmin(env, person, toolkit);
+  const key = composioKey(env);
+  if (key === undefined) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  const { fields } = await keyAuthOf(key, toolkit);
+  return fields;
+};
+
+/** Composio's slug for credentials the provider checked and refused. */
+const credentialsRejected = "ConnectedAccount_CredentialValidationRejected";
+
+/** What Composio answers to a connected account made with credentials. */
+const createdAccountSchema = z.object({ id: idSchema });
+
+/**
+ * What the admin typed (`values`), as Composio's connected account takes
+ * it (`val`), when it is exactly what `fields` ask for: only their names,
+ * every required one filled in. Empty values are left out, as not given.
+ */
+const valuesFor = (
+  fields: readonly ToolkitKeyField[],
+  values: Readonly<Record<string, string>>
+): Record<string, string> | undefined => {
+  const named = new Set(fields.map(({ name }) => name));
+  const given = Object.entries(values).filter(([, value]) => value !== "");
+  const fits =
+    given.every(([name]) => named.has(name)) &&
+    fields.every(
+      ({ name, required }) => !required || given.some(([each]) => each === name)
+    );
+  return fits ? Object.fromEntries(given) : undefined;
+};
+
+/**
+ * Connects a toolkit that takes a key with what an admin typed, for an
+ * admin who consented to Composio holding it: one shared connection, as a
+ * sign-in makes, without a browser leaving Grasp. The values go to
+ * Composio in one request and nowhere else: never stored, logged, audited
+ * or answered, a failure's included. Only the field names Composio lists
+ * for the toolkit now are taken, and its scheme is Composio's.
+ *
+ * As a start does, it records its cleanup first, under a marker everything
+ * it makes at Composio carries, and deletes all of it there again if
+ * anything fails; a key the provider refused is
+ * `connection.key_rejected`.
+ */
+export const connectToolkitWithKey = async (
+  env: Env,
+  request: unknown
+): Promise<{ connectionId: string }> => {
+  // No issues attached: a record's keys are the sender's to choose.
+  const parsed = connectToolkitWithKeySchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectionErrors.create("connection.invalid");
+  }
+  const { person, toolkit, tools, values, origin } = parsed.data;
+  await refuseUnlessAdmin(env, person, toolkit);
+  const key = composioKey(env);
+  if (key === undefined || new URL(origin).origin !== origin) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  const detail = detailOf(toolkit);
+  const refuse = async (
+    reason: string,
+    outcome: "refused" | "failed" = "refused"
+  ): Promise<void> => {
+    await auditRefusal(env, person, "connection.connect", {
+      ...detail,
+      outcome,
+      reason,
+    });
+  };
+  let auth: Awaited<ReturnType<typeof keyAuthOf>>;
+  try {
+    auth = await keyAuthOf(key, toolkit);
+  } catch (error) {
+    if (connectionErrors.codeOf(error) === "connection.own_auth_required") {
+      await refuse("connection.own_auth_required");
+    }
+    throw error;
+  }
+  const val = valuesFor(auth.fields, values);
+  const { fits, hinted } = await checkedTools(key, toolkit, tools);
+  if (val === undefined || !fits) {
+    throw connectionErrors.create("connection.invalid");
+  }
+  // Its one shared connection is there already: nothing is made. Two
+  // connects at once both pass this; storing keeps one (`serveAndStore`).
+  if (await hasLiveShared(env, toolkit)) {
+    await refuse("connection.already_connected");
+    throw connectionErrors.create("connection.already_connected");
+  }
+  const fieldNames = Object.keys(val).toSorted().join(",");
+  const flowId = crypto.randomUUID();
+  const marker = markerOf(flowId);
+  const db = drizzle(env.DB);
+  const thisCleanup = eq(composioCleanups.id, flowId);
+  // Intent first, as a start's: the clock finds by its marker whatever
+  // this makes and doesn't keep.
+  await db.insert(composioCleanups).values({
+    id: flowId,
+    marker,
+    retryAt: new Date(Date.now() + underWayMs),
+    createdAt: new Date(Date.now()),
+  });
+  const made: AtComposio = {};
+  try {
+    const { auth_config: authConfig } = await composioRequest(key, {
+      method: "POST",
+      path: "/auth_configs",
+      body: {
+        toolkit: { slug: toolkit },
+        // Empty credentials: the key comes with the connected account.
+        auth_config: {
+          type: "use_custom_auth",
+          authScheme: auth.scheme,
+          credentials: {},
+          name: marker,
+        },
+      },
+      schema: authConfigSchema,
+    });
+    made.authConfigId = authConfig.id;
+    await db
+      .update(composioCleanups)
+      .set({ authConfigId: authConfig.id })
+      .where(thisCleanup);
+    const account = await composioRequest(key, {
+      method: "POST",
+      path: "/connected_accounts",
+      body: {
+        auth_config: { id: authConfig.id },
+        connection: {
+          user_id: composioUserOf(origin),
+          state: { authScheme: auth.scheme, val: { ...val, status: "ACTIVE" } },
+        },
+      },
+      schema: createdAccountSchema,
+    });
+    made.connectedAccountId = account.id;
+    await db
+      .update(composioCleanups)
+      .set({ connectedAccountId: account.id })
+      .where(thisCleanup);
+    const storedTools = JSON.stringify(tools);
+    const consented = await consentEvents(person, {
+      toolkit,
+      flowId,
+      tools,
+      hinted,
+      consent: composioKeyConsentText,
+      detail: { scheme: auth.scheme, fields: fieldNames },
+    });
+    const toolsHash = await sha256Hex(storedTools);
+    const connectionId = await serveAndStore(
+      env,
+      key,
+      person,
+      {
+        flowId,
+        toolkit,
+        authConfigId: authConfig.id,
+        connectedAccountId: account.id,
+        tools: storedTools,
+      },
+      made,
+      (id) => [
+        ...consented,
+        connectionEvent(person, "connection.connect", id, {
+          ...detail,
+          outcome: "ok",
+          tokenHolder: "composio",
+          flowId,
+          scheme: auth.scheme,
+          fields: fieldNames,
+          toolsHash,
+          toolCount: tools.length,
+          readCount: readToolsOf(tools).length,
+        }),
+      ],
+      "key"
+    );
+    if (connectionId === undefined) {
+      throw new ComposioError("Composio's account isn't the one made");
+    }
+    return { connectionId };
+  } catch (error) {
+    await carryOutCleanup(env, flowId, made, marker);
+    if (connectionErrors.codeOf(error) === "connection.already_connected") {
+      // Another connect of the toolkit was stored first.
+      await refuse("connection.already_connected");
+    }
+    if (!(error instanceof ComposioError)) {
+      throw error;
+    }
+    const reason =
+      error.slug === credentialsRejected
+        ? "connection.key_rejected"
+        : "connection.provider_refused";
+    await refuse(reason, "failed");
+    throw connectionErrors.create(reason);
+  }
 };
 
 /** What connect reads of a connected account to say whether it works. */

@@ -113,6 +113,9 @@ const google = providerFetch({
 /** Sends one request to Google: its answer if it succeeded, else a ToolError. */
 export const googleFetch = google.fetch;
 
+/** The ToolError Google's answer to a GET that isn't a success stands for. */
+export const googleFailure = google.failure;
+
 /** Google's JSON answer, checked against what the tool expects of it. */
 export const googleJson = google.json;
 

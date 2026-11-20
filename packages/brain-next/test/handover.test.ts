@@ -19,7 +19,7 @@ const store = () => env.BRAIN_STORE.getByName("brain");
 /** The host's model: never asked here. */
 const quietAsk: AskModel = async () => {
   await Promise.resolve();
-  return { kind: "answer", text: "" };
+  return { kind: "answer", text: "", model: "test/model" };
 };
 
 /** No model ships: nothing is embedded. */
@@ -65,6 +65,7 @@ const tick = async (host: HandOvers, aheadMs = 0): Promise<void> => {
     at: new Date(clock.at),
     embedders: noEmbedders,
     handOvers: host,
+    contextTokens: null,
   });
 };
 

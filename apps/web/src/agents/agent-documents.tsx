@@ -1,5 +1,4 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { agentDocumentsMax } from "@grasp-os/shared/agents";
 import type { Agent, AgentDocument } from "@grasp-os/shared/agents";
 import {
   chatFileMaxBytes,
@@ -87,7 +86,6 @@ export const AgentDocuments = ({
   const { name } = agent;
   // The card's body, where File upload lists the files it is sending.
   const [sending, setSending] = useState<HTMLDivElement | null>(null);
-  const most = agentDocumentsMax;
   const kept = documents?.length ?? 0;
   const added = (at: string): string =>
     new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
@@ -126,18 +124,17 @@ export const AgentDocuments = ({
       // Behind the info mark: who may learn what a document says.
       info={t`Files ${name} reads when a question needs them. Anyone who may ask it can learn what they say.`}
       actions={
-        editing && kept < most ? (
+        editing ? (
           <FileUpload
             accept={accepted}
             disabled={!can}
             // Each file a new list: those core kept are documents' rows.
             key={kept}
             listIn={sending}
-            maxFiles={most - kept}
             maxSize={chatFileMaxBytes}
             multiple
             // Said to a screen reader on the button; refusals say the rest.
-            hint={t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most ${most} documents.`}
+            hint={t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each.`}
             upload={send}
             variant="button"
             words={{
@@ -154,9 +151,6 @@ export const AgentDocuments = ({
               refused: (file, reason) => {
                 if (reason === "file-too-large") {
                   return t`${file} is larger than 10 MB.`;
-                }
-                if (reason === "too-many-files") {
-                  return t`${file} is one more than ${most} documents.`;
                 }
                 return t`${file} isn't a kind of file an agent reads.`;
               },
@@ -180,13 +174,6 @@ export const AgentDocuments = ({
         <Empty size="sm">
           <EmptyHeader>
             <EmptyDescription>{t`${name} has no documents.`}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : null}
-      {editing && kept >= most ? (
-        <Empty size="sm">
-          <EmptyHeader>
-            <EmptyDescription>{t`${name} has ${most} documents, the most an agent keeps. Remove one to add another.`}</EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : null}

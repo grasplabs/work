@@ -146,6 +146,7 @@ import {
   InventoryError,
   placementOf,
   renderClientWorker,
+  resourceRoles,
 } from "./inventory.ts";
 import type {
   ClientPlacement,
@@ -1611,19 +1612,27 @@ const validate = async (
 };
 
 /**
- * The inventory's databases' ids by the release's names, each checked
+ * The ids of the databases the release names, by its names, each checked
  * against what the provider reports under its recorded name first: an id
  * that isn't the client's own database (recorded wrongly, or since
- * replaced) stops the operation before anything binds or migrates it.
+ * replaced) or one gone from the account stops the operation before
+ * anything binds or migrates it. A database the inventory still holds
+ * that the release doesn't name is neither bound nor migrated by it, so
+ * it isn't looked up: once no release names it, a person may delete it.
  */
 const observedDatabases = async (
   context: ProvisionContext,
   loaded: Loaded,
   inventory: readonly ClientResource[]
 ): Promise<Map<string, string>> => {
+  const named = new Set(resourceRoles(loaded.manifest).map(({ role }) => role));
   const databases = new Map<string, string>();
   for (const row of inventory) {
-    if (row.kind !== "d1_database" || row.lifecycle !== "allocated") {
+    if (
+      row.kind !== "d1_database" ||
+      row.lifecycle !== "allocated" ||
+      !named.has(row.role)
+    ) {
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- a few databases
@@ -1632,10 +1641,17 @@ const observedDatabases = async (
       loaded.accountId,
       row.physicalName
     );
-    if (row.providerId === null || found?.uuid !== row.providerId) {
+    // Never made again: a new database would be empty.
+    if (found === undefined) {
       throw new InventoryError(
         "foreign_resource",
-        `${loaded.held.clientId}'s ${row.role} isn't observed as ${row.physicalName}`
+        `${loaded.held.clientId}'s ${row.role}, ${row.physicalName}, is missing from its account`
+      );
+    }
+    if (row.providerId === null || found.uuid !== row.providerId) {
+      throw new InventoryError(
+        "foreign_resource",
+        `${loaded.held.clientId}'s ${row.role}: ${row.physicalName} is another database than the one recorded`
       );
     }
     databases.set(row.role.slice("d1:".length), row.providerId);

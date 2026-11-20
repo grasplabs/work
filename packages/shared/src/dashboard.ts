@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
-import type { KnowledgeSignalKind } from "./knowledge-signals.ts";
 import type { OnboardingProgress, Programme } from "./onboarding.ts";
 import type { SignalKind } from "./signals.ts";
 import { customWidgetIdSchema, customWidgetsMax } from "./widgets.ts";
@@ -98,9 +97,9 @@ export type BoardReportPart<T> =
   | { state: "read"; data: T }
   | { state: "unread"; code: string };
 
-/** How many signals of one kind there are, improvement and Knowledge alike. */
+/** How many improvement signals of one kind there are. */
 export interface SignalCount {
-  kind: SignalKind | KnowledgeSignalKind;
+  kind: SignalKind;
   count: number;
 }
 

@@ -67,10 +67,9 @@ describe("chat agent sandbox", () => {
       "import { env as imported, exports } from 'cloudflare:workers'; export default async (self, env) => ({ given: Object.keys(env), imported: Object.keys(imported ?? {}), exports: Object.keys(exports ?? {}) });"
     );
 
-    // No `env.brain`: its agent doesn't hold the brain permission.
     expect(result).toStrictEqual({
       isError: false,
-      text: `Returned:\n${JSON.stringify({ given: ["chat", "knowledge", "connections", "apps", "build", "workflows", "workflowBuild", "memory", "skills", "dashboard"], imported: [], exports: [] })}`,
+      text: `Returned:\n${JSON.stringify({ given: ["chat", "connections", "apps", "build", "workflows", "workflowBuild", "skills", "brain", "dashboard"], imported: [], exports: [] })}`,
     });
   });
 
@@ -81,7 +80,7 @@ describe("chat agent sandbox", () => {
 
     expect(result?.isError).toBeTruthy();
     expect(result?.text).toContain(
-      "This chat has no API named env.mailbox. It has: env.chat, env.knowledge, env.connections, env.apps, env.build, env.workflows, env.workflowBuild, env.memory, env.skills, env.dashboard."
+      "This chat has no API named env.mailbox. It has: env.chat, env.connections, env.apps, env.build, env.workflows, env.workflowBuild, env.skills, env.brain, env.dashboard."
     );
   });
 
@@ -374,9 +373,11 @@ describe("chat agent sandbox", () => {
     );
 
     const reply = ask("Wait, then look.");
+    // The question, the recall before it (its call and result), and the
+    // code step's call: the code is running.
     await vi.waitFor(
       async () => {
-        await expect(transcript(stub, chat.id)).resolves.toHaveLength(2);
+        await expect(transcript(stub, chat.id)).resolves.toHaveLength(4);
       },
       { timeout: 10_000 }
     );

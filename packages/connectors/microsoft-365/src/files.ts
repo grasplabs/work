@@ -1,10 +1,9 @@
 import { defineTool, ToolError } from "@grasp-os/connector-kit/connector";
+import { checkReadable, contentAs } from "@grasp-os/connector-kit/content";
 import {
-  checkReadable,
-  contentAs,
   readAsSchema,
-} from "@grasp-os/connector-kit/content";
-import { segmentValuePattern } from "@grasp-os/connector-kit/manifest";
+  segmentValuePattern,
+} from "@grasp-os/connector-kit/manifest";
 import { segment } from "@grasp-os/connector-kit/provider";
 import { z } from "zod";
 

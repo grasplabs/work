@@ -1,5 +1,6 @@
 import type { Workspace } from "@grasp-os/shared/brain";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import { rosterSchema } from "@grasp-os/shared/onboarding";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -9,16 +10,18 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { namedIn } from "./brain-intakes.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, holdAlarm, onLink } from "./interview-link.ts";
+import { aloneInTheStore, answering, onLink } from "./interview-link.ts";
 import {
   agree,
+  eightTeam,
   fact,
   fiveToldReply,
   intake,
   kept,
   mapped,
   openLink,
-  team,
+  sevenTeam,
+  sevenTold,
   ticketsReply,
   told,
 } from "./onboarding-team.ts";
@@ -60,7 +63,7 @@ const theOnboardings: { what: string; record: BrainRecordInput }[] = [
       type: "workflow",
       id: "wf-1",
       name: "Tickets",
-      teamId: "team-x",
+      teamId: "x",
       sourceId: "src-roster",
       status: "drawn",
     },
@@ -68,10 +71,6 @@ const theOnboardings: { what: string; record: BrainRecordInput }[] = [
   {
     what: "an onb- id",
     record: { type: "candidate", id: "onb-st-1", name: "Tickets" },
-  },
-  {
-    what: "a roster team's record",
-    record: { type: "team", id: "team-x", name: "Ops", sourceId: "src-roster" },
   },
 ];
 
@@ -109,7 +108,8 @@ const shownOf = (brain: Workspace, teamId: string) => {
       status: workflow?.status,
       steps: workflow?.baseline.steps.map(({ text }) => text),
       minutes: workflow?.baseline.steps[0]?.minutes,
-      people: drawing?.people,
+      // No count of people, in it or in any of its numbers (GRA-1987).
+      counted: JSON.stringify(drawing ?? {}).includes('"people"'),
       volumes: drawing?.volumes,
       takes: drawing?.takes,
       open: drawing?.open,
@@ -119,25 +119,30 @@ const shownOf = (brain: Workspace, teamId: string) => {
   };
 };
 
+/** The types of `records`, each once, in order. */
+const typesOf = (records: readonly { type: string }[]): string[] =>
+  [...new Set(records.map(({ type }) => type))].toSorted();
+
 describe(
   "what the onboarding learned, in the brain",
   { timeout: 120_000 },
   () => {
     // The test draws and gives the brain each team itself, with a model
     // faked: the store's own alarm, which has none, would try first.
-    beforeEach(holdAlarm);
+    beforeEach(aloneInTheStore);
 
     it("is the team, one source, its statements and the drawn workflow, read by every member, and no record names a person", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team needs to have claims.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       await answering([fiveToldReply(ids)], async () => await store.drawNext());
       const { gave } = await intake(ids);
       const member = await signedInApi(idp, "user");
       const brain = await member.api.brain.read();
       const records = await kept(ids);
-      const teamId = `team-${ids.team}`;
+      const teamId = ids.team;
       expect({
         gave,
         ...shownOf(brain, teamId),
@@ -147,13 +152,13 @@ describe(
         team: "Ops",
         source: {
           title: "Interviews with Ops",
-          how: "7 people",
+          // Never how many were interviewed (GRA-1987).
+          how: undefined,
           kind: "interview",
           who: null,
         },
         sources: 1,
-        // The five who said tickets come in through Zendesk, put together;
-        // what one of them said alone stays out.
+        // What they said of Zendesk, put together.
         statements: [
           {
             kind: "tool",
@@ -165,28 +170,22 @@ describe(
           name: "handling new tickets",
           local: "nieuwe tickets afhandelen",
           status: "drawn",
-          // What five told; the step only Max told stays out.
-          steps: ["Open the ticket.", "Send the answer."],
+          // What they told, the step only Max told too, its name out.
+          steps: [
+            "Open the ticket.",
+            "Ask someone when the customer number is missing.",
+            "Send the answer.",
+          ],
           // The median of the five's own normal minutes, never one of theirs
           // as a lowest or highest.
           minutes: { quickest: 4, normal: 4, longest: 4, basis: "estimated" },
-          people: 6,
-          volumes: [
-            {
-              of: "me",
-              per: "week",
-              // Medians of the five's quiet and busy weeks.
-              low: 32,
-              high: 52,
-              people: 5,
-              basis: "estimated",
-            },
-          ],
+          counted: false,
+          // Each gave a count of their own: never shown.
+          volumes: [],
           takes: {
             unit: "minutes",
             quickest: 3,
             longest: 45,
-            people: 5,
             basis: "estimated",
           },
           // Written for the next interviews from what few said: never the brain's.
@@ -208,14 +207,15 @@ describe(
           (sum, { interviews }) => sum + interviews,
           0
         ),
-      }).toStrictEqual({ mondays: true, fiveOrMore: true, counted: 7 });
+      }).toStrictEqual({ mondays: true, fiveOrMore: true, counted: 8 });
     });
 
     it("keeps only a drawing's newest checked version once it is drawn again, and knows whose interview each record rests on", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team's drawings need.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       await answering([fiveToldReply(ids)], async () => await store.drawNext());
       await intake(ids);
       const before = await kept(ids);
@@ -245,7 +245,7 @@ describe(
       const member = await signedInApi(idp, "user");
       const brain = await member.api.brain.read();
       const workflow = brain.workflows.find(
-        ({ teamId }) => teamId === `team-${ids.team}`
+        ({ teamId }) => teamId === ids.team
       );
       const restsOn = async (person: string) => {
         const sent = await store.sentFor(person);
@@ -286,21 +286,21 @@ describe(
         rests: {
           // The claim rests on the five who made it, the drawing on whom it
           // was drawn from.
-          max: ["statement", "workflow", "workflowVersion"],
-          mia: ["statement", "workflow", "workflowVersion"],
-          // The lead named the work, and was the drawing's context; the
-          // work rests on whom it was drawn from too.
-          lea: ["workflow", "workflowVersion"],
-          noor: ["statement", "workflow", "workflowVersion"],
+          max: ["statement", "workflowVersion"],
+          mia: ["statement", "workflowVersion"],
+          // The lead was the drawing's context.
+          lea: ["workflowVersion"],
+          noor: ["statement", "workflowVersion"],
         },
       });
     });
 
     it("takes out a drawing the brain holds from before, with no note of whom it rests on, once the work is drawn and checked anew", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team's drawings need.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       await answering([fiveToldReply(ids)], async () => await store.drawNext());
       await intake(ids);
       const first = await kept(ids);
@@ -327,7 +327,7 @@ describe(
       const member = await signedInApi(idp, "user");
       const brain = await member.api.brain.read();
       const workflow = brain.workflows.find(
-        ({ teamId }) => teamId === `team-${ids.team}`
+        ({ teamId }) => teamId === ids.team
       );
       const after = await kept(ids);
       const now = after.filter(({ type }) => type === "workflowVersion");
@@ -344,16 +344,20 @@ describe(
 
     it("counts a week's interviews only of people still taking part, and never moves a week a withdrawal took below five into another", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Eight tell their own work, and Lea leads: one of them and Lea
+      // going still leaves others who tell, so the team's interviews show.
+      const ids = await eightTeam();
       await mapped(ids);
-      await told(ids);
-      await answering([fiveToldReply(ids)], async () => await store.drawNext());
-      await intake(ids);
-      // Six finished in the week of 5 October, Noor the week after.
+      await sevenTold(ids);
+      await agree(ids.ada, [fact("a1", "step", "Answers the chat.")]);
+      // Six finished in the week of 5 October, the other three the week
+      // after.
       await runInDurableObject(store, (_instance, state) => {
         state.storage.sql.exec(
-          "UPDATE interview_states SET completed_at = CASE person WHEN ? THEN '2026-10-13T09:00:00.000Z' ELSE '2026-10-06T09:00:00.000Z' END WHERE completed_at IS NOT NULL",
-          ids.noor
+          "UPDATE interview_states SET completed_at = CASE WHEN person IN (?, ?, ?) THEN '2026-10-13T09:00:00.000Z' ELSE '2026-10-06T09:00:00.000Z' END WHERE completed_at IS NOT NULL",
+          ids.rik,
+          ids.sam,
+          ids.ada
         );
       });
       const member = await signedInApi(idp, "user");
@@ -364,62 +368,153 @@ describe(
       const before = await weeks();
       await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
       const oneWithdrew = await weeks();
-      await onLink({ action: "withdraw", ...(await openLink(ids.rik)) });
+      await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
       const twoWithdrew = await weeks();
       expect({ before, oneWithdrew, twoWithdrew }).toStrictEqual({
         before: [{ week: "2026-10-05", interviews: 6 }],
         oneWithdrew: [{ week: "2026-10-05", interviews: 5 }],
-        // The four left of that week stay out, and never join Noor's week,
-        // where the five they would make would tell how many were left.
+        // The four left of that week stay out, and never join the three of
+        // the week after, where the seven they would make would tell how
+        // many were left.
         twoWithdrew: [],
       });
     });
 
-    it("holds back a team until five who tell their own work agreed: its lead isn't counted", async () => {
+    it("asks no model for a team that can't show its results: nobody but its lead told it, switched off, or switched on again but waiting for the admin", async () => {
       const store = onboardingStore(env);
-      const ids = await team(["lea", "max", "mia", "mo", "noor", "pim"]);
+      const ids = await sevenTeam();
       await mapped(ids);
-      await agree(ids.max, [
-        fact("m2", "system", "Tickets arrive in Zendesk."),
-      ]);
-      await agree(ids.mia, [
-        fact(
-          "i2",
-          "wish",
-          "Would like the customer number filled in for them."
-        ),
-      ]);
-      await agree(ids.mo, [
-        fact("o1", "wait", "A ticket waits days for the customer's reply."),
-      ]);
-      await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
+      /** The team's next intake, the model putting the five's claim together: what it asked of it, and what it noted. */
+      const intakeNow = async () => {
+        const { gave, requests } = await intake(ids);
+        return {
+          gave,
+          asked: requests.length,
+          noted: typesOf(await kept(ids)),
+        };
+      };
+      /** Sam agrees to `facts`, and the work is drawn again: the team is due. */
+      const samTold = async (facts: string[], version?: number) => {
+        await agree(
+          ids.sam,
+          facts.map((text, at) => fact(`s${at}`, "step", text)),
+          version
+        );
+        await answering(
+          [ticketsReply(ids)],
+          async () => await store.drawNext()
+        );
+      };
+      // Only Lea told (she leads: not counted).
+      const none = await intakeNow();
+      // Six tell their work: the team's results may show, and its intake asks.
+      await told(ids);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
-      // Lea and four: five people, but only four whose facts reach it.
-      const early = await store.intakeNext();
-      const waiting = await kept(ids);
-      await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
-      await answering([ticketsReply(ids)], async () => await store.drawNext());
-      const late = await store.intakeNext();
-      const given = await kept(ids);
+      const telling = await intakeNow();
+      // Switched off, confirmed; then on again in a save not confirmed.
+      const view = await store.view();
+      const roster = view.roster ?? { teams: [], people: [] };
+      const by = { type: "system" } as const;
+      await store.saveRoster(
+        {
+          ...roster,
+          teams: roster.teams.map((each) => ({ ...each, off: true })),
+        },
+        by
+      );
+      await samTold(["Answers the phone.", "Logs the call."]);
+      const off = await intakeNow();
+      await store.saveRoster(roster, by, { confirmed: false });
+      await samTold(
+        ["Answers the phone.", "Logs the call.", "Closes the call."],
+        1
+      );
+      const waiting = await intakeNow();
+      const due = `brain:${ids.team}`;
       expect({
-        early,
-        waiting: waiting.length,
-        late,
-        types: [...new Set(given.map(({ type }) => type))].toSorted(),
+        none,
+        telling: { ...telling, asked: telling.asked > 0 },
+        off,
+        waiting,
       }).toStrictEqual({
-        early: `brain:${ids.team}`,
-        waiting: 0,
-        late: `brain:${ids.team}`,
-        // Nothing five of them said alike: no statement.
-        types: ["team", "workflow", "workflowVersion"],
+        none: { gave: due, asked: 0, noted: [] },
+        telling: {
+          gave: due,
+          asked: true,
+          noted: ["statement", "workflow", "workflowVersion"],
+        },
+        off: { gave: due, asked: 0, noted: [] },
+        waiting: { gave: due, asked: 0, noted: [] },
+      });
+    });
+
+    it("shows a member a team's name, its interviews and their weeks only while its results may show: not while nobody but its lead told it, nor once it is switched off or waiting for the admin", async () => {
+      const store = onboardingStore(env);
+      const ids = await sevenTeam();
+      await mapped(ids);
+      const member = await signedInApi(idp, "user");
+      const teamId = ids.team;
+      const shown = async () => {
+        const brain = await member.api.brain.read();
+        return {
+          team: brain.teams.some(({ id }) => id === teamId),
+          interviews: brain.sources.some(
+            ({ teamIds }) => teamIds?.includes(teamId) === true
+          ),
+          weeks: brain.interviewWeeks.reduce(
+            (sum, { interviews }) => sum + interviews,
+            0
+          ),
+        };
+      };
+      // Only Lea told, and the team's intake runs.
+      await intake(ids);
+      const none = await shown();
+      // Six tell their own work.
+      await told(ids);
+      await answering([ticketsReply(ids)], async () => await store.drawNext());
+      await intake(ids);
+      const six = await shown();
+      // The admin switches the team off, then on again in a save not
+      // confirmed, then confirms it.
+      const view = await store.view();
+      const roster = view.roster ?? { teams: [], people: [] };
+      const by = { type: "system" } as const;
+      await store.saveRoster(
+        {
+          ...roster,
+          teams: roster.teams.map((each) => ({ ...each, off: true })),
+        },
+        by
+      );
+      const off = await shown();
+      await store.saveRoster(roster, by, { confirmed: false });
+      const waiting = await shown();
+      await store.saveRoster(roster, by);
+      const confirmed = await shown();
+      await intake(ids);
+      const again = await shown();
+      expect({ none, six, off, waiting, confirmed, again }).toStrictEqual({
+        // The roster's team, as the admin confirmed it, without its
+        // interviews.
+        none: { team: true, interviews: false, weeks: 0 },
+        // Lea and the six, in a week of seven.
+        six: { team: true, interviews: true, weeks: 7 },
+        off: { team: false, interviews: false, weeks: 0 },
+        waiting: { team: false, interviews: false, weeks: 0 },
+        // A member reads the interviews as what its claims cite: back
+        // once its next intake notes them again.
+        confirmed: { team: true, interviews: false, weeks: 7 },
+        again: { team: true, interviews: true, weeks: 7 },
       });
     });
 
     it("gives its interviews' source no transcript and no statement, for members and admins alike, and nothing to staff or anyone outside", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team needs to have claims.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       // Rik also says something he doesn’t approve.
       await agree(
         ids.rik,
@@ -448,7 +543,7 @@ describe(
       );
       const staff = staffCore.authenticate();
       const { core: nobodyCore } = await openRpc();
-      const teamId = `team-${ids.team}`;
+      const teamId = ids.team;
       const records = await kept(ids);
       const said = [
         ...records.flatMap(({ type, body }) =>
@@ -464,22 +559,18 @@ describe(
         const source = brain.sources.find(
           ({ teamIds }) => teamIds?.includes(teamId) === true
         );
-        const opened =
-          source === undefined ? null : await api.brain.transcript(source.id);
-        const shown = JSON.stringify([source, opened]);
+        const shown = JSON.stringify(source);
         return {
           listed: source === undefined ? null : { how: source.how },
           turns: source?.transcriptTurns,
           inListing: source?.transcript,
-          opened,
           statements: said.filter((words) => shown.includes(words)),
         };
       };
       const safe = {
-        listed: { how: "7 people" },
+        listed: { how: undefined },
         turns: undefined,
         inListing: undefined,
-        opened: null,
         statements: [],
       };
       expect({
@@ -488,23 +579,13 @@ describe(
         staff: await outcome(staff.brain.read()),
         admin: await shownTo(admin.api),
         member: await shownTo(member.api),
-        nobody: {
-          read: await outcome(nobodyCore.authenticate().brain.read()),
-          opened: await outcome(
-            nobodyCore
-              .authenticate()
-              .brain.transcript(`onb-src-${"0".repeat(32)}`)
-          ),
-        },
+        nobody: await outcome(nobodyCore.authenticate().brain.read()),
       }).toStrictEqual({
         said: true,
         staff: "role.forbidden",
         admin: safe,
         member: safe,
-        nobody: {
-          read: "auth.unauthenticated",
-          opened: "auth.unauthenticated",
-        },
+        nobody: "auth.unauthenticated",
       });
     });
 
@@ -516,5 +597,23 @@ describe(
         expect(result).toBe("brain.record_invalid");
       }
     );
+
+    it("is the onboarding's alone: an admin can't add a team record under a staff-list team's id", async () => {
+      const admin = await signedInApi(idp, "admin");
+      // The staff list names its team by its members' team's id (GRA-2055).
+      await onboardingStore(env).saveRoster(
+        rosterSchema.parse({
+          teams: [{ id: "x", name: "Ops", lead: null }],
+          people: [{ id: "p", name: "Pat", team: "x" }],
+        }),
+        { type: "system" }
+      );
+      const result = await outcome(
+        admin.api.brain.addRecords([
+          { type: "team", id: "x", name: "Ops", sourceId: "src-roster" },
+        ])
+      );
+      expect(result).toBe("brain.record_invalid");
+    });
   }
 );

@@ -35,9 +35,11 @@
 //   minutes, and no stacks). A run with tests that time out for a reason
 //   of their own fails anyway; ending it costs only the files left to run;
 // - writes a line per finished file too, with how long Vitest timed it,
-//   hooks included (`file <ms>ms <project> <file>`): the shard split's
-//   durations (test-durations.ts), which a file's tests alone undercount
-//   by its `beforeAll`;
+//   hooks, setup files and import included (`file <ms>ms <project>
+//   <file>`): the shard split's durations (test-durations.ts), which a
+//   file's tests alone undercount by its `beforeAll`, and its tests and
+//   hooks alone by its setup, which took 3 to 10 s a file of core's in CI
+//   (November 2026);
 // - before it ends a run, prints the thread stacks of every workerd the
 //   run started, when GRASP_STALL_DUMP_STACKS is "gdb" (stack-dump.ts):
 //   what the stalled runtime is stuck in, which nothing else records;
@@ -95,8 +97,15 @@ export interface ReportedModule {
   readonly children: { allTests: () => Iterable<ReportedCase> };
   /** "queued" or "pending" until the file has run. */
   state: () => string;
-  /** How long its tests and hooks took, by Vitest's own timing. */
-  diagnostic?: () => { readonly duration: number };
+  /**
+   * How long its tests and hooks took, by Vitest's own timing, and before
+   * them its setup files and its import.
+   */
+  diagnostic?: () => {
+    readonly duration: number;
+    readonly setupDuration: number;
+    readonly collectDuration: number;
+  };
 }
 
 /** What the reporter reads of a test: Vitest's `TestCase` has it. */
@@ -566,10 +575,12 @@ export default class StallReporter implements Reporter {
   #moduleDone(testModule: ReportedModule): void {
     this.#lastHeard = Date.now();
     if (this.#modules.has(testModule.id) && moduleEnded(testModule)) {
-      const duration = testModule.diagnostic?.().duration;
-      if (duration !== undefined) {
+      const timed = testModule.diagnostic?.();
+      if (timed !== undefined) {
+        const took =
+          timed.setupDuration + timed.collectDuration + timed.duration;
         this.#progress?.write(
-          `${new Date().toISOString()} file ${Math.round(duration)}ms ${moduleName(testModule)}\n`
+          `${new Date().toISOString()} file ${Math.round(took)}ms ${moduleName(testModule)}\n`
         );
       }
     }

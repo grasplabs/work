@@ -57,6 +57,7 @@ const deliver = async (
     }),
     headers: new Headers(),
     rawSize: rawSize ?? bytes.byteLength,
+    canBeForwarded: true,
     setReject: (reason) => {
       disposition.rejected = reason;
     },

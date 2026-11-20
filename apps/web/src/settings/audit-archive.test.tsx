@@ -110,7 +110,7 @@ const settled = async (): Promise<void> => {
   });
 };
 
-const directory = { people: new Map(), apps: new Map() };
+const directory = { people: new Map(), teams: new Map(), apps: new Map() };
 
 /**
  * The events as the page shows them for `search`: the bar over them, the

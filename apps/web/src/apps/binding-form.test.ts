@@ -4,29 +4,24 @@ import type {
 } from "@grasp-os/shared/resource-bindings";
 import { describe, expect, it } from "vite-plus/test";
 
-import { allChosen, formKey, targetOf } from "./binding-form.ts";
+import { formKey, targetOf } from "./binding-form.ts";
 
-/** Knowledge declared with `collections`, offered `permissions`. */
-const knowledge = (
-  collections: string[],
-  permissions: string[] = ["p-handbook", "p-salaries"]
+/** The Brain declared with `operations`, offered `permissions`. */
+const brain = (
+  operations: string[] = ["recall"],
+  permissions: string[] = ["p-brain", "p-other"]
 ): DeclaredResource => ({
-  alias: "help",
-  kind: "knowledge",
+  alias: "brain",
+  kind: "brain",
   contract: null,
   actions: [],
-  operations: ["search"],
-  collections,
+  operations,
   maxOutputTokens: null,
   state: "unbound",
   binding: null,
   choices: {
-    kind: "knowledge",
-    permissions: permissions.map((permissionId) => ({
-      permissionId,
-      collectionId: `c-${permissionId}`,
-      name: null,
-    })),
+    kind: "brain",
+    permissions: permissions.map((permissionId) => ({ permissionId })),
     truncated: false,
   },
 });
@@ -39,58 +34,38 @@ const choicesOf = (resource: DeclaredResource): BindingChoices => {
 };
 
 describe("a resource's bind form", () => {
-  it("sends only the collections declared now, whatever the form held before", () => {
-    // Chosen while `handbook` and `salaries` were declared; then a newer
-    // version declares `handbook` and `policies`.
-    const chosen = { handbook: "p-handbook", salaries: "p-salaries" };
-    const now = knowledge(["handbook", "policies"]);
-    const unfinished = targetOf(now, choicesOf(now), "", chosen);
-    const finished = targetOf(now, choicesOf(now), "", {
-      ...chosen,
-      policies: "p-salaries",
-    });
-    expect({
-      ready: allChosen(now.collections, chosen),
-      unfinished,
-      finished,
-    }).toStrictEqual({
-      ready: false,
-      unfinished: undefined,
-      finished: {
-        kind: "knowledge",
-        collections: { handbook: "p-handbook", policies: "p-salaries" },
-      },
+  it("sends the permission picked, of the kind offered", () => {
+    expect(targetOf(choicesOf(brain()), "p-other")).toStrictEqual({
+      kind: "brain",
+      permissionId: "p-other",
     });
   });
 
   it("names nothing that isn't offered now", () => {
-    const resource = knowledge(["handbook"]);
     const model: BindingChoices = {
       kind: "model",
       models: ["a/b"],
       truncated: false,
     };
     expect({
-      model: targetOf(resource, model, "c/d", {}),
+      model: targetOf(model, "c/d"),
       grasp: targetOf(
-        resource,
         { kind: "grasp", permissions: [], truncated: false },
-        "p-statistics",
-        {}
+        "p-statistics"
       ),
-    }).toStrictEqual({ model: undefined, grasp: undefined });
+      // Picked while it was offered; a refreshed review no longer offers it.
+      brain: targetOf(choicesOf(brain(["recall"], ["p-new"])), "p-brain"),
+    }).toStrictEqual({ model: undefined, grasp: undefined, brain: undefined });
   });
 
   it("starts afresh when the declaration, the version or the offers change", () => {
-    const before = knowledge(["handbook", "salaries"]);
+    const before = brain();
     const key = formKey("app", 1, before);
     expect({
-      same: formKey("app", 1, knowledge(["handbook", "salaries"])) === key,
-      declaration: formKey("app", 1, knowledge(["handbook"])) === key,
+      same: formKey("app", 1, brain()) === key,
+      declaration: formKey("app", 1, brain(["recall", "remember"])) === key,
       version: formKey("app", 2, before) === key,
-      offers:
-        formKey("app", 1, knowledge(["handbook", "salaries"], ["p-other"])) ===
-        key,
+      offers: formKey("app", 1, brain(["recall"], ["p-new"])) === key,
     }).toStrictEqual({
       same: true,
       declaration: false,

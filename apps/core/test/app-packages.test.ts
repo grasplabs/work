@@ -2,10 +2,11 @@ import { kitModuleName, packageModuleName } from "@grasp-os/compiler";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { publishVersion } from "../src/app-publish.ts";
+import { appKind } from "../src/apps.ts";
 import { decideDependency } from "../src/packages/requests.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import { buildAppCode, buildPages } from "../src/pages.ts";
+import { rollback } from "../src/publish.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
@@ -143,7 +144,7 @@ describe("an App's approved packages", () => {
 
     const pages = await buildPages(env, files.files, fixture.app);
     await seal(fixture);
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const doubled = await calledAs(
       fixture.owner,
       fixture.app,
@@ -180,7 +181,7 @@ describe("an App's approved packages", () => {
 
     const pages = await buildPages(env, files.files, fixture.app);
     await seal(fixture);
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const doubled = await calledAs(
       fixture.owner,
       fixture.app,
@@ -287,7 +288,7 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
     const fixture = await appWith(appFiles(page, server), "Charts");
     await approved(fixture, [page, server]);
     await seal(fixture);
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
 
     const reached = await calledAs(fixture.owner, fixture.app, {
       name: "points.reached",
@@ -326,8 +327,7 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
       fixture.app,
       withFiles(files, {
         "src/routes/index.tsx": `${files.files["src/routes/index.tsx"]}// Again.\n`,
-      }),
-      "Again"
+      })
     );
     await seal(fixture, 2);
     // Release 1, the one bundling the replaced graph, held past retention.
@@ -380,9 +380,15 @@ export default appTest(schema, {
     const fixture = await appWith(files, "Charts");
     await approved(fixture, [page, server]);
 
-    const published = await publishVersion(env, fixture.owner, fixture.app, 1);
+    const published = await rollback(
+      env,
+      appKind,
+      fixture.owner,
+      fixture.app,
+      1
+    );
 
-    expect(published.currentVersion).toBe(1);
+    expect(published.version).toBe(1);
   });
 
   it("are no longer loaded, built or served once revoked as malware", async () => {
@@ -391,7 +397,7 @@ export default appTest(schema, {
     const fixture = await appWith(files, "Charts");
     const request = await approved(fixture, [page, server]);
     await seal(fixture);
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     await reportToOsv(server, "1.0.0", "MAL-2026-50001");
     await rescannedUntil(request.id, new Date());
 

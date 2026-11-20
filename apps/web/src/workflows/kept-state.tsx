@@ -1,5 +1,8 @@
 import { workflowStateMaxBytes } from "@grasp-os/shared/workflow-resources";
-import type { WorkflowState } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowState,
+  WorkflowStateEntry,
+} from "@grasp-os/shared/workflow-resources";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -26,15 +29,17 @@ import {
   TableHeader,
   TableRow,
 } from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // What a workflow keeps between its runs (core's workflow-state.ts): each
 // key with its value, the run that set it last and when, for its builders
-// and the organization's admins, as its runs' results are. They may empty
-// it; core records who did, and a step that wrote before never writes
-// again.
+// and the organization's admins, as its runs' results are. A key whose run
+// read what may no longer be read is withheld, its value never served.
+// They may empty it; core records who did, and a step that wrote before
+// never writes again.
 
 const styles = stylex.create({
   // A value is JSON of any length: it breaks anywhere rather than widen the table.
@@ -44,6 +49,33 @@ const styles = stylex.create({
 
 /** Kilobytes, rounded up, as the page says a size. */
 const kilobytes = (bytes: number): number => Math.ceil(bytes / 1024);
+
+/**
+ * A key's value, or why it isn't shown: the run that set it read what may
+ * no longer be read (core leaves it out of what later runs read), or that
+ * can't be checked now.
+ */
+const KeptValue = ({
+  value,
+  withheld,
+}: Pick<WorkflowStateEntry, "value" | "withheld">) => {
+  const { t } = useLingui();
+  if (withheld === "revoked") {
+    return (
+      <Text element="span" size="sm" tone="muted">
+        {t`Withheld: the run that kept it read something that is no longer there to read, so later runs start without it.`}
+      </Text>
+    );
+  }
+  if (withheld === "unchecked") {
+    return (
+      <Text element="span" size="sm" tone="muted">
+        {t`Can't be shown right now.`}
+      </Text>
+    );
+  }
+  return <code {...stylex.props(styles.value)}>{JSON.stringify(value)}</code>;
+};
 
 const KeptEntries = ({
   workflow,
@@ -127,15 +159,13 @@ const KeptEntries = ({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {state.entries.map(({ key, value, updatedAt }) => (
+            {state.entries.map(({ key, value, withheld, updatedAt }) => (
               <TableRow key={key}>
                 <TableCell>
                   <code>{key}</code>
                 </TableCell>
                 <TableCell>
-                  <code {...stylex.props(styles.value)}>
-                    {JSON.stringify(value)}
-                  </code>
+                  <KeptValue value={value} withheld={withheld} />
                 </TableCell>
                 <TableCell>{formatTime(updatedAt)}</TableCell>
               </TableRow>

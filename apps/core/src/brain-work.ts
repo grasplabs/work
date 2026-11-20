@@ -66,7 +66,7 @@ const holdersOf = (team: Team, role: string): number =>
 /**
  * Who said a sentence, as the company may read it: their role in their
  * team where five or more of the team hold it, else the team; nothing
- * until five or more told about the work, or where no team is known.
+ * until the work is heard, or where no team is known.
  */
 const byOf = (
   heard: boolean,
@@ -164,8 +164,9 @@ export const knowledgeOf = (
   const statements = ws.statements.filter(
     (statement) => statement.candidateId === id
   );
-  // Enough people told about it: its newest drawing rests on five or
-  // more, or five or more conversations said what the brain holds of it.
+  // Heard: a drawing of it stands (one shows from the first person who
+  // told it, GRA-1987, and only while it stands), or five or more
+  // conversations said what the brain holds of it.
   const conversations = new Set(
     statements
       .filter(
@@ -176,18 +177,29 @@ export const knowledgeOf = (
       )
       .map(({ sourceId }) => sourceId)
   );
-  const heard =
-    Math.max(drawing?.people ?? 0, conversations.size) >= minTeamShown;
+  // Who said a statement of another source is named only on that source's
+  // own floor, five or more conversations, never because a drawing of the
+  // work stands: one person who shared how their team works never makes
+  // the team and a role show beside a statement they didn't choose to
+  // share. A drawing names its team alone, as the team's (GRA-1987).
+  const statementsHeard = conversations.size >= minTeamShown;
+  const heard = drawing !== undefined || statementsHeard;
+  // More of its team may still be heard about a drawn piece of work: it
+  // shows from the first who told it (GRA-1987), and asking only puts it
+  // first for the team's next newcomers. Any other, only until it is heard.
+  const askable = drawing !== undefined || !heard;
   return {
     id,
     name: workflow?.name ?? candidate?.name ?? id,
     sentences: [
-      ...(drawing === undefined ? [] : drawingSentences(drawing, team, heard)),
-      ...statements.map((statement) => statementSentence(ws, statement, heard)),
+      ...(drawing === undefined ? [] : drawingSentences(drawing, team, true)),
+      ...statements.map((statement) =>
+        statementSentence(ws, statement, statementsHeard)
+      ),
     ],
     confidence: heard ? "heard" : "waiting",
-    canAskMore: canAskMore && !heard,
-    moreAsked: moreAsked && !heard,
+    canAskMore: canAskMore && askable,
+    moreAsked: moreAsked && askable,
   };
 };
 

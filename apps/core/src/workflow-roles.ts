@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { viaProjectSql } from "./project-sql.ts";
@@ -7,18 +8,20 @@ import { viaProjectSql } from "./project-sql.ts";
 // Who has a role in an independent workflow, as SQL read in the statement
 // that decides: what a start requires of the person it acts for
 // (workflow-starts.ts), and what every call of a run requires of its
-// principal again (workflows/resource-authority.ts).
+// principal again (workflows/resource-authority.ts), and whether a
+// person's run results stay in use in the Brain (brain-run-sources.ts).
 
 /**
  * That `person` has a role in workflow `id` now, as SQL: an admin of the
  * organization, its owner, or someone it is shared with, as a person,
  * through a team or through a project they are in now (Better Auth's `team_members`, read in
  * this statement, never the session's list of teams). Only while they
- * are an active member.
+ * are an active member. Each of `person` and `id` an ID, or a column
+ * holding one.
  */
 export const workflowRoleSql = (
-  person: string,
-  id: string
+  person: string | SQLiteColumn,
+  id: string | SQLiteColumn
 ): SQL => sql`(${activeMember(person)}
   AND (${activeMember(person, ["admin"])}
     OR EXISTS (SELECT 1 FROM workflow_resources AS owned

@@ -1,3 +1,4 @@
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
@@ -35,7 +36,7 @@ export const DeleteWorkflow = ({
   resource,
   admin,
 }: {
-  resource: Pick<WorkflowResource, "id" | "name" | "role">;
+  resource: Pick<WorkflowResource, "id" | "name" | "title" | "role">;
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
 }) => {
@@ -44,7 +45,7 @@ export const DeleteWorkflow = ({
   const { failure, run } = useCoreAction();
   const [release, setRelease] = useState(false);
   const [releaseFailure, setReleaseFailure] = useState<string>();
-  const { name } = resource;
+  const name = workflowLabel(resource);
   const reason = releaseFailure;
 
   if (resource.role !== "builder") {
@@ -65,7 +66,7 @@ export const DeleteWorkflow = ({
       // Deleted already: a refused release is said on the page, and the
       // name can be released later in Settings.
       const released = await run(async (session) => {
-        await session.workflowResources.releaseName(name);
+        await session.workflowResources.releaseName(resource.name);
         return true;
       }, setReleaseFailure);
       if (released !== true) {
