@@ -7,17 +7,14 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { Combobox } from "../grasp/combobox/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { OrgCard } from "../settings/org-card.tsx";
-import {
-  SectionNotLoaded,
-  SettingsError,
-  SettingsLoading,
-} from "../settings/section.tsx";
+import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 import { SignInRow } from "../settings/sign-in-settings.tsx";
 import { StaffAccessSection } from "../settings/staff-access.tsx";
 import {
@@ -185,7 +182,7 @@ const TimeZoneField = ({
           // Read-only while its own save runs, not disabled: a disabled field drops the keyboard's focus.
           readOnly={!canChange || busy}
           size="sm"
-          triggerLabel={t`Show the time zones`}
+          words={{ trigger: t`Show the time zones` }}
           value={saved}
         />
       )}
@@ -230,7 +227,11 @@ const StaffAccess = ({
     return <StaffAccessSection editable={editable} staff={read.data} />;
   }
   return (
-    <SectionCard density="compact" title={t`Grasp staff access`}>
+    <SectionCard
+      variant="grouped"
+      density="compact"
+      title={t`Grasp staff access`}
+    >
       <SectionNotLoaded page={read} />
     </SectionCard>
   );
@@ -246,7 +247,11 @@ const Workspace = () => {
       {page.state === "ready" ? (
         <WorkspaceSettings canChange={editable} organization={page.data} />
       ) : (
-        <SectionCard density="compact" title={t`Organization`}>
+        <SectionCard
+          variant="grouped"
+          density="compact"
+          title={t`Organization`}
+        >
           <SectionNotLoaded page={page} />
         </SectionCard>
       )}
@@ -257,8 +262,17 @@ const Workspace = () => {
   );
 };
 
+/** The organization's card, the time zone and sign-in, then staff access. */
+const WorkspacePending = () => (
+  <PageSkeletonSettings
+    header={false}
+    help={false}
+    sections={[{ rows: 5, title: false }, { rows: 2, title: false }, 1]}
+  />
+);
+
 export const Route = createFileRoute("/_shell/settings/workspace")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: WorkspacePending,
   errorComponent: SettingsError,
   component: Workspace,
   loader: async ({ context: { core, identity } }) => {

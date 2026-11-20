@@ -166,7 +166,10 @@ const allow = (): HTMLElement | null | undefined =>
   [...document.querySelectorAll("li")]
     .find(
       (each) =>
-        each.textContent?.includes("HUBSPOT_LIST_CONTACTS") &&
+        // The tool HUBSPOT_LIST_CONTACTS, as it shows.
+
+        // The tool HUBSPOT_LIST_CONTACTS, as it shows.
+        each.textContent?.includes("List contacts") &&
         each.querySelector("li") === null
     )
     ?.querySelector<HTMLElement>("label");

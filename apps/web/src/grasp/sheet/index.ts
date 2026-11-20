@@ -4,7 +4,11 @@ export type { SheetProps } from "./sheet";
 export { SheetTrigger } from "./trigger";
 export type { SheetTriggerProps } from "./trigger";
 export { SheetClose, SheetContent, SheetPanel } from "./panel";
-export type { SheetContentProps, SheetPanelProps } from "./panel";
+export type {
+  SheetCloseProps,
+  SheetContentProps,
+  SheetPanelProps,
+} from "./panel";
 export { SheetTitle } from "./title";
 export type { SheetTitleProps } from "./title";
 export { SheetDescription } from "./description";

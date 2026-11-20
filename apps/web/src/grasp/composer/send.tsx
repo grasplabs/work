@@ -1,6 +1,3 @@
-// ComposerSend: the last button of a composer's footer (composer.tsx). Grasp's ink Button with an
-// up arrow; dim while there is nothing to send; a stop square while an answer is being written.
-// It is UI SDK's Button, so an agent presses it by name and its press returns the send's Promise.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -60,7 +57,7 @@ const SendOrStop = ({
         <Button
           {...props}
           data-slot="composer-send"
-          variant="ink"
+          variant={off ? "ghost" : "ink"}
           size="sm"
           icon={ArrowUp}
           aria-label={sendLabel}

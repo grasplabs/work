@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import type { IconTileLook } from "../icon-tile";
 import type { IconData } from "../icons";
+import type { KeyValueItem } from "../key-value";
 import type { PanelLayoutStyle } from "../panel";
 
 /** One row of a section's card: a thing of some kind, by name. */
@@ -35,6 +36,13 @@ export interface InspectorSection {
   hint?: string;
   /** Its rows. With none (and no `text` or `content`) the card is one row that adds the first. */
   rows?: readonly InspectorRow[];
+  /**
+   * Facts about the thing, a name and a value each ("Owner", "Mara Jensen"), in its card at the
+   * panel's own inset, one hairline between them; a long value goes under its name. A value is
+   * words or a node (a link, a person, a badge); a missing one shows a quiet dash and says the
+   * panel's `none` word.
+   */
+  facts?: readonly KeyValueItem[];
   /** Long words in its card, folded with a fade and an expand button. */
   text?: ReactNode;
   /** Anything else in its card, where rows and text do not fit: Key value rows, a small form. */
@@ -75,6 +83,8 @@ export interface InspectorPanelWords {
   close: string;
   /** The views' tabs. */
   views: string;
+  /** A fact with no value, said where the dash shows: "Not set". */
+  none: string;
 }
 
 /** Every prop an InspectorPanel takes. */
@@ -115,10 +125,16 @@ export interface InspectorPanelProps {
   view?: string;
   /** Called with the view chosen. */
   onViewChange?: (view: string) => void;
-  /** On the high lift with the panel's corner, as beside a page. In a Sheet, set it false. @default true */
+  /** On the high lift with the panel's corner, as beside a page. In a Sheet, set it false; in App shell's `pagePanel` it is off by itself. @default true */
   framed?: boolean;
   /** The faint dither behind the head. @default false */
   texture?: boolean;
+  /**
+   * The object is not there yet (a page's first paint): the head's title, and its line when
+   * `description` is given (even empty), are quiet placeholders in their own lines. Give the
+   * sections as they will stand, with placeholders as their values. @default false
+   */
+  loading?: boolean;
   /** The words it shows and says, to replace the English ones: any of them. */
   words?: Partial<InspectorPanelWords>;
   /** @deprecated Use `layout`. */

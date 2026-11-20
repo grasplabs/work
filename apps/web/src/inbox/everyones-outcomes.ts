@@ -1,10 +1,10 @@
 import type { UnknownOutcomeListing } from "@grasp-os/shared/connect";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { loadEveryPage } from "../dashboard/outcome-pages.ts";
 import { readPeople } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { loadEveryPage } from "./outcome-pages.ts";
 
 // Every person's open calls of unknown outcome, for the organization's own
 // admins (once Settings › Unknown outcomes, now a group of the inbox):

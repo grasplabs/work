@@ -227,6 +227,7 @@ export const Body = <Row extends RowData>({
             row={row}
             groupBy={groupBy}
             words={words}
+            tone={props.groupTone?.(String(row.getGroupingValue(groupBy)))}
           />
         ) : (
           <DataRow
@@ -236,7 +237,13 @@ export const Body = <Row extends RowData>({
             words={words}
             selectable={selectable}
             rowActions={props.rowActions}
+            status={props.rowStatus?.(row.original)}
             detail={props.detail}
+            opening={{
+              href: props.rowHref,
+              onOpen: props.onRowOpen,
+              current: props.rowCurrent,
+            }}
           />
         )
       )}

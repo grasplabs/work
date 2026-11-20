@@ -70,7 +70,7 @@ const EndStaffAccess = ({
   };
   return (
     <AlertDialog>
-      <AlertDialogTrigger size="sm">
+      <AlertDialogTrigger size="xs">
         {t`End staff access now`}
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -117,6 +117,7 @@ export const StaffAccessSection = ({
   const until = formatDateTime(staff.until);
   return (
     <SectionCard
+      variant="grouped"
       {...(editable
         ? { actions: <EndStaffAccess onFailure={setFailure} /> }
         : {})}
@@ -133,9 +134,7 @@ export const StaffAccessSection = ({
         {/* Until when, in a field that only reads, with what staff reach at its end. */}
         <SettingRow label={t`Open until`}>
           {(field) => (
-            // BUILDER: InputGroup has no `sm` size, so this field stands taller than an `sm` Input;
-            // asked of the library.
-            <InputGroup layout={controlStyles.fill}>
+            <InputGroup size="sm" layout={controlStyles.fill}>
               <InputGroupInput {...field} readOnly value={until} />
               <InputGroupText>
                 {staff.scope === "onboarding" ? (

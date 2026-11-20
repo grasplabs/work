@@ -1,9 +1,10 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import { chatTitleSchema } from "@grasp-os/shared/chat";
 import { useLingui } from "@lingui/react/macro";
-import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
+import { useMatchLatest } from "../frame/match-latest.ts";
 import type { MenuEntries } from "../grasp/context-menu/index.ts";
 import { Archive, ArrowRight, Edit, Trash } from "../grasp/icons/index.ts";
 import type { SidebarRow } from "../grasp/sidebar/index.ts";
@@ -114,7 +115,7 @@ export const useRecentChats = ({
 }): SidebarRow[] => {
   const { t } = useLingui();
   const chats = useChats(enabled);
-  const matchRoute = useMatchRoute();
+  const matchRoute = useMatchLatest();
   const goTo = useGoToChat();
   const askDelete = useAskDeleteChat();
   const changes = useRowChanges();
@@ -133,7 +134,7 @@ export const useRecentChats = ({
       // In the regular weight, as "All chats" under them is.
       quiet: true,
       render: <Link {...chatLink(chat.id)} />,
-      current: matchRoute(chatLink(chat.id)) !== false,
+      current: matchRoute({ ...chatLink(chat.id) }) !== false,
       // Its agent is still answering: the Working mark at the row's end.
       working: chat.running,
       workingLabel: t`Answering`,

@@ -206,8 +206,10 @@
   /* Type: weights and tracking. */
   /* Every serif title and all running text. */
   --grasp-weight-regular: 400;
-  /* Labels, buttons and small titles in the sans. Nothing heavier exists. */
+  /* Labels, buttons and small titles in the sans. Nothing heavier but weight-semibold's one use. */
   --grasp-weight-medium: 500;
+  /* A group's name standing on the page's ground over its card of rows (a grouped Section card), so it reads apart from the rows' own labels. Nothing else until a second use is argued. */
+  --grasp-weight-semibold: 600;
   /* Serif titles from title-sm up. */
   --grasp-tracking-title: -0.02em;
   /* A component's own words, its small titles included: set here, never inherited from the page around it. */
@@ -698,9 +700,9 @@
     oklch(0.173 0.028 169.36 / 0.32),
     oklch(0 0 none / 0.56)
   );
-  /* How small a dialog starts as it opens, and ends as it closes. Dropped with reduced motion. */
-  --grasp-dialog-from-scale: 0.96;
-  /* How far below its place a dialog starts as it opens. Dropped with reduced motion. */
+  /* How small a dialog starts as it opens, and ends as it closes, growing from the trigger that opened it (or its own centre with none): 0.92 reads as coming from the button and stays calm; 0.96 was right but unreadable, 0.90 felt thrown (19 Nov 2026). Dropped with reduced motion. */
+  --grasp-dialog-from-scale: 0.92;
+  /* How far below its place a dialog with no trigger starts as it opens; one opened from a trigger grows from it with no drop, which would fight its origin. Dropped with reduced motion. */
   --grasp-dialog-from-shift: 8px;
   /* A phone drawn in a stage: as wide as a common phone. */
   --grasp-stage-phone-width: 360px;
@@ -731,6 +733,10 @@
   --grasp-popover-gap: var(--grasp-space-2);
   /* The width of a popover: a title, a sentence or two, and two actions that keep their width while they work. */
   --grasp-popover-width: 20rem;
+  /* The least width of a hover card sized to what it holds: a name and a short line still read as a card, not a tooltip. */
+  --grasp-hover-card-min-width: 12rem;
+  /* The most width of a hover card sized to what it holds: past it a long line wraps, so the card stays a preview. */
+  --grasp-hover-card-max-width: 24rem;
   /* The ground of a tooltip: night at 90% in light, a lighter raised night in dark, so it separates from either page. */
   --grasp-tooltip-fill: light-dark(
     oklch(0.173 0.028 169.36 / 0.9),
@@ -1067,6 +1073,159 @@
   --grasp-app-preview-bezel: 10px;
   /* The device look's outer corner. */
   --grasp-app-preview-device-corner: 28px;
+  /* Agent figure: agent figure palettes. */
+  /* Agent figure, evergreen palette: its night (the figure's own ground). */
+  --grasp-agent-figure-evergreen-0: var(--grasp-light-ink);
+  /* Agent figure, evergreen palette: its deepest light. */
+  --grasp-agent-figure-evergreen-1: var(--grasp-light-pine);
+  /* Agent figure, evergreen palette: its deep light. */
+  --grasp-agent-figure-evergreen-2: var(--grasp-light-mint);
+  /* Agent figure, evergreen palette: its middle light. */
+  --grasp-agent-figure-evergreen-3: var(--grasp-light-sea);
+  /* Agent figure, evergreen palette: its bright light. */
+  --grasp-agent-figure-evergreen-4: var(--grasp-light-lime);
+  /* Agent figure, evergreen palette: its brightest light. */
+  --grasp-agent-figure-evergreen-5: var(--grasp-light-paper);
+  /* Agent figure, meadow palette: its night (the figure's own ground). */
+  --grasp-agent-figure-meadow-0: color-mix(
+    in oklch,
+    var(--grasp-light-pine) 40%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, meadow palette: its deepest light. */
+  --grasp-agent-figure-meadow-1: var(--grasp-light-pine);
+  /* Agent figure, meadow palette: its deep light. */
+  --grasp-agent-figure-meadow-2: color-mix(
+    in oklch,
+    var(--grasp-light-mint) 70%,
+    var(--grasp-light-lime)
+  );
+  /* Agent figure, meadow palette: its middle light. */
+  --grasp-agent-figure-meadow-3: var(--grasp-light-lime);
+  /* Agent figure, meadow palette: its bright light. */
+  --grasp-agent-figure-meadow-4: color-mix(
+    in oklch,
+    var(--grasp-light-lime) 50%,
+    var(--grasp-light-paper)
+  );
+  /* Agent figure, meadow palette: its brightest light. */
+  --grasp-agent-figure-meadow-5: var(--grasp-light-paper);
+  /* Agent figure, ember palette: its night (the figure's own ground). */
+  --grasp-agent-figure-ember-0: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 22%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, ember palette: its deepest light. */
+  --grasp-agent-figure-ember-1: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 60%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, ember palette: its deep light. */
+  --grasp-agent-figure-ember-2: var(--grasp-brain-heat);
+  /* Agent figure, ember palette: its middle light. */
+  --grasp-agent-figure-ember-3: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 45%,
+    var(--grasp-brain-glow)
+  );
+  /* Agent figure, ember palette: its bright light. */
+  --grasp-agent-figure-ember-4: var(--grasp-brain-glow);
+  /* Agent figure, ember palette: its brightest light. */
+  --grasp-agent-figure-ember-5: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 40%,
+    var(--grasp-light-paper)
+  );
+  /* Agent figure, amber palette: its night (the figure's own ground). */
+  --grasp-agent-figure-amber-0: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 18%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, amber palette: its deepest light. */
+  --grasp-agent-figure-amber-1: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 45%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, amber palette: its deep light. */
+  --grasp-agent-figure-amber-2: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 75%,
+    var(--grasp-brain-heat)
+  );
+  /* Agent figure, amber palette: its middle light. */
+  --grasp-agent-figure-amber-3: var(--grasp-brain-glow);
+  /* Agent figure, amber palette: its bright light. */
+  --grasp-agent-figure-amber-4: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 55%,
+    var(--grasp-light-paper)
+  );
+  /* Agent figure, amber palette: its brightest light. */
+  --grasp-agent-figure-amber-5: var(--grasp-light-paper);
+  /* Agent figure, ocean palette: its night (the figure's own ground). */
+  --grasp-agent-figure-ocean-0: color-mix(
+    in oklch,
+    var(--grasp-info) 22%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, ocean palette: its deepest light. */
+  --grasp-agent-figure-ocean-1: color-mix(
+    in oklch,
+    var(--grasp-info) 55%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, ocean palette: its deep light. */
+  --grasp-agent-figure-ocean-2: var(--grasp-info);
+  /* Agent figure, ocean palette: its middle light. */
+  --grasp-agent-figure-ocean-3: color-mix(
+    in oklch,
+    var(--grasp-info) 55%,
+    var(--grasp-light-sea)
+  );
+  /* Agent figure, ocean palette: its bright light. */
+  --grasp-agent-figure-ocean-4: color-mix(
+    in oklch,
+    var(--grasp-info) 30%,
+    var(--grasp-light-paper)
+  );
+  /* Agent figure, ocean palette: its brightest light. */
+  --grasp-agent-figure-ocean-5: var(--grasp-light-paper);
+  /* Agent figure, moon palette: its night (the figure's own ground). */
+  --grasp-agent-figure-moon-0: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 10%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, moon palette: its deepest light. */
+  --grasp-agent-figure-moon-1: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 30%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, moon palette: its deep light. */
+  --grasp-agent-figure-moon-2: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 50%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, moon palette: its middle light. */
+  --grasp-agent-figure-moon-3: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 70%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, moon palette: its bright light. */
+  --grasp-agent-figure-moon-4: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 86%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, moon palette: its brightest light. */
+  --grasp-agent-figure-moon-5: var(--grasp-light-paper);
   /* App card: app card tones. */
   /* Sea's first stop: a cool blue grey. */
   --grasp-app-card-sea-from: light-dark(
@@ -1169,6 +1328,14 @@
     0 12px 28px -14px var(--grasp-shade-soft);
   /* How far the frame rises under the pointer. */
   --grasp-app-card-rise: -2px;
+  /* A drawn ground's hue (rose): the light's ramp turned to it, each stop at the light's own lightness and chroma, kept to the few Ruben chose (19 Nov: "don't go overboard with colouring"): the green, rose, coral, olive and teal. */
+  --grasp-app-card-ground-hue-rose: 5;
+  /* A drawn ground's hue (coral): the light's ramp turned to it, each stop at the light's own lightness and chroma, kept to the few Ruben chose (19 Nov: "don't go overboard with colouring"): the green, rose, coral, olive and teal. */
+  --grasp-app-card-ground-hue-coral: 35;
+  /* A drawn ground's hue (olive): the light's ramp turned to it, each stop at the light's own lightness and chroma, kept to the few Ruben chose (19 Nov: "don't go overboard with colouring"): the green, rose, coral, olive and teal. */
+  --grasp-app-card-ground-hue-olive: 115;
+  /* A drawn ground's hue (teal): the light's ramp turned to it, each stop at the light's own lightness and chroma, kept to the few Ruben chose (19 Nov: "don't go overboard with colouring"): the green, rose, coral, olive and teal. */
+  --grasp-app-card-ground-hue-teal: 195;
   /* Text shimmer: text shimmer. */
   /* The light crossing a line of what an agent is doing, at its quietest: pine. */
   --grasp-text-shimmer-soft: var(--grasp-pine);
@@ -1252,6 +1419,11 @@
   --grasp-table-row-fill-chosen-mint: var(--grasp-grid-range-wash);
   /* The head's ground in the soft look. */
   --grasp-table-head-fill-soft: var(--grasp-soft);
+  /* A column's name in the head: the muted words, a step lighter in dark, so they reach 4.5:1 on the page's own ground as the plain head draws them. */
+  --grasp-table-head-text: light-dark(
+    var(--grasp-muted),
+    oklch(0.72 0.025 158)
+  );
   /* The chip a sorted head's place stands in, in the quiet look. */
   --grasp-table-sort-chip: color-mix(
     in oklch,
@@ -1408,6 +1580,10 @@
   --grasp-composer-width: 36rem;
   /* The tallest a composer's text grows before it scrolls inside. */
   --grasp-composer-height: 12rem;
+  /* The least width of the one-row composer (compact), whoever holds it: in a holder that sizes to what it holds, the row is this wide, or the holder's width when that is less. */
+  --grasp-composer-row-least: 20rem;
+  /* The least width of the one row's text: narrower, the model's level folds to its mark, then the controls drop under the text. The text never gives. */
+  --grasp-composer-field-least: 8rem;
   /* The working light: lime, sea and mint in beams with dark gaps between, ending as it starts so it loops without a seam. */
   --grasp-composer-light: linear-gradient(
     90deg,
@@ -1480,6 +1656,15 @@
   --grasp-chat-text: var(--grasp-text-sm);
   /* The line height of chat-text: a little more room than text-sm's, for reading at length. */
   --grasp-chat-text-line: 1.375rem;
+  /* Draft: draft. */
+  /* The widest a draft in the answer grows: the answer's column. */
+  --grasp-draft-width: 40rem;
+  /* One hour's height in an event draft's day. */
+  --grasp-draft-hour: 4rem;
+  /* The width of the hours down the side of an event draft's day. */
+  --grasp-draft-scale: 3rem;
+  /* The pitch of the hatch that marks busy time in an event draft's day. */
+  --grasp-draft-hatch: 6px;
   /* Audio player: audio player. */
   /* The widest an audio player's bar grows. */
   --grasp-audio-width: 40rem;
@@ -1554,12 +1739,18 @@
   --grasp-shell-icon-gap: 10px;
   /* A row's icon. */
   --grasp-shell-icon: 16px;
+  /* The width of the Sidebar's tree guide, the stem and branches of its nested rows, and a Tree's (tree-guide): a hairline, as the product drew it (Ruben, 19 November). */
+  --grasp-shell-guide: var(--grasp-hairline);
   /* A button that is only an icon in the frame (the sidebar's toggle). */
   --grasp-shell-icon-button: 28px;
   /* A row's corner. */
   --grasp-shell-corner: 6px;
   /* The page card's corner. */
   --grasp-shell-card-corner: 12px;
+  /* The Composer's corner in the panels' card: its squircle cuts in no deeper than the card's round corner round it. */
+  --grasp-shell-panel-composer-corner: calc(
+    var(--grasp-shell-card-corner) * 1.84
+  );
   /* The corner of a window round the shell: the card's corner plus its inset, so the two nest. */
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
@@ -1586,6 +1777,8 @@
   --grasp-shell-page-inline: var(--grasp-space-6);
   /* The layer a page's own bar and the dock stand on, above what scrolls in the page's card. */
   --grasp-shell-page-layer: 30;
+  /* The width the dock gives what it holds (the chat's idle bar), or the dock's whole width when that is less. */
+  --grasp-shell-dock-width: 32rem;
   /* The room under the last thing on a page. */
   --grasp-shell-page-room-below: 32px;
   /* The room under a page with a chat box floating over its foot, so its last row scrolls clear. */
@@ -1739,6 +1932,26 @@
   --grasp-tree-row-inset: var(--grasp-space-2);
   /* A tree row's corner: small, as a list item's. */
   --grasp-tree-row-corner: 8px;
+  /* The room between two rows of a tree. */
+  --grasp-tree-row-gap: var(--grasp-hairline);
+  /* A tree row's words. */
+  --grasp-tree-text: var(--grasp-text);
+  /* The room between a tree row's chevron, icon and words. */
+  --grasp-tree-icon-gap: var(--grasp-space-2);
+  /* The width of a tree's guide (`guides`): its stem and elbows, the Sidebar's own. */
+  --grasp-tree-guide: var(--grasp-shell-guide);
+  /* A tree row's chevron and icon: quieter than its words, unless a host draws them in the words' colour (a sidebar does). */
+  --grasp-tree-icon: var(--grasp-muted);
+  /* A tree row's words under a pointer: as they stand, unless a host brightens them (a sidebar does). */
+  --grasp-tree-text-hover: var(--grasp-text);
+  /* The words of a chosen row and of the current page. */
+  --grasp-tree-text-chosen: var(--grasp-ink);
+  /* A tree row's words' weight. */
+  --grasp-tree-weight: var(--grasp-weight-regular);
+  /* The current page's words: a step heavier. */
+  --grasp-tree-weight-current: var(--grasp-weight-medium);
+  /* A tree row's letter spacing: as set, unless a host draws its rows closer (a sidebar does). */
+  --grasp-tree-tracking: normal;
   /* A tree's row under a pointer: a third of the current page's fill, so a row under the pointer is never taken for the current page (A3-nav-06), as the sidebar's hover is to its selected row. */
   --grasp-tree-fill-hover: light-dark(
     oklch(0.29 0.05 162 / 0.035),
@@ -1821,8 +2034,11 @@
   /* A theme's crossfade of the whole page, when a product chooses it over the reveal. */
   --grasp-theme-fade: 280ms;
   /* Code block: code block. */
-  /* The ground of a block of code: one solid soft ground, no ring, as the docs' own code. */
-  --grasp-code-block-fill: var(--grasp-soft);
+  /* The ground of a block of code: a wash over whatever it stands on (night in light, light in dark), so it reads as one step off the page, a card or the App shell's card alike; with the edge round it. Solid soft stood 1.01:1 on the shell's card in dark. */
+  --grasp-code-block-fill: light-dark(
+    oklch(0.29 0.05 162 / 0.035),
+    oklch(0.96 0.02 150 / 0.04)
+  );
   /* The row over a block of code: its file name, its language and the copy button. */
   --grasp-code-block-head: 36px;
   /* The height of a line of code: 1.5rem (24px at the usual size), so code has room to breathe. */
@@ -2018,6 +2234,8 @@
   --grasp-chat-start-gap: var(--grasp-space-8);
   /* The widest the question and the box to ask in run, where a chat starts: the product's Chat page. */
   --grasp-chat-start-width: 48rem;
+  /* The widest a chat's column runs, its thread and the box under it: as wide as where the chat started, so the box keeps its width from the first question on. */
+  --grasp-chat-width: var(--grasp-chat-start-width);
   /* Sign in: sign in. */
   /* The sign-in page's ground under the glass door, and all it shows where the door cannot draw: night in both themes, as the website's login. */
   --grasp-sign-in-night: var(--grasp-light-night);
@@ -2034,6 +2252,8 @@
   --grasp-inspector-bar: 48px;
   /* The room round an inspector's content: one left edge for its tile, its title and its cards. */
   --grasp-inspector-pad: var(--grasp-space-6);
+  /* How tall a page's head stands to its line, beside the page's own panel: a page band and the panel's head (its bar, its title) both, so their two foot lines are one line (the bar's 48px and space-20). */
+  --grasp-inspector-head: 128px;
   /* The room under an inspector's last section, so it never ends on the window's edge. */
   --grasp-inspector-pad-end: var(--grasp-space-20);
   /* Between the sections of an inspector, and between its head and its first section. */
@@ -2058,6 +2278,12 @@
   --grasp-inspector-tile-icon: 24px;
   /* The tile's corner, in the system's squircle: the corner a 40px square takes. */
   --grasp-inspector-tile-corner: 14px;
+  /* The small tile, for an object in a dense table row: as tall as a person's picture there. */
+  --grasp-inspector-tile-sm: var(--grasp-avatar-xs);
+  /* The icon inside the small tile. */
+  --grasp-inspector-tile-sm-icon: 14px;
+  /* The small tile's corner, in the system's squircle: the corner a 24px square takes. */
+  --grasp-inspector-tile-sm-corner: 8px;
   /* The quiet tile: a wash of the light's mint behind the icon. */
   --grasp-inspector-tile-tint: light-dark(
     oklch(0.8005 0.1625 165.25 / 0.14),

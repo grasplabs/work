@@ -3,7 +3,7 @@
 "use client";
 
 import type { RowData } from "@tanstack/react-table";
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef } from "react";
 
 import { isSet } from "./filters";
 import type { DataTableView } from "./location";
@@ -61,6 +61,13 @@ const viewOf = <Row extends RowData>(
   if (flags.pinning && start.length + end.length > 0) {
     view.pinned = { start, end };
   }
+  if (
+    flags.grouping &&
+    props.groupBy !== undefined &&
+    own.closedGroups.length > 0
+  ) {
+    view.closed = [...own.closedGroups];
+  }
   return view;
 };
 
@@ -103,9 +110,13 @@ export const useView = <Row extends RowData>(
     if (flags.pinning && view.pinned !== undefined) {
       own.setPinned(view.pinned);
     }
+    if (flags.grouping && props.groupBy !== undefined) {
+      own.setClosedGroups(view.closed ?? []);
+    }
   });
 
-  useEffect(() => {
+  // Read before the first paint, so a closed group never shows open for a frame.
+  useLayoutEffect(() => {
     if (location !== undefined) {
       apply(location.read());
       readRef.current = "read";

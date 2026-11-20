@@ -29,7 +29,9 @@ import { simply } from "../motion/simply.stylex";
 import { Spinner } from "../spinner";
 import { spinnerVars } from "../spinner/spinner.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { Tip, withTip } from "../tooltip/tip";
 import { useWords } from "../words/words";
+import { wrap } from "../wrap/wrap";
 import { buttonMarker, layerMarker } from "./button.stylex";
 import { HoldFill, holdLook } from "./hold-fill";
 import { HoldContext, assignRef, useHoldLabels } from "./use-hold";
@@ -157,6 +159,12 @@ interface ButtonBase {
    * @default { holdTo: (words) => `Hold to ${words}`, ask: (words) => `${words}?`, confirm: "Confirm", cancel: "Cancel" }
    */
   holdLabels?: Partial<ButtonHoldLabels>;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ cancel: "Keep it" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it (`holdLabels`) still wins until the
+   * release's step 5. Its life's words (`workingLabel`, `doneLabel`, `failedLabel`) stay its own props.
+   */
+  words?: Partial<ButtonOwnWords>;
 }
 
 /** A plain button: it does its work and the page shows the result. */
@@ -269,7 +277,6 @@ const styles = stylex.create({
     // column it stands in. It is never cut off, unless the caller asks for `truncate` (cut, below).
     whiteSpace: "normal",
     overflowWrap: "anywhere",
-    hyphens: "auto",
     userSelect: "none",
     WebkitTapHighlightColor: "transparent",
     touchAction: "manipulation",
@@ -993,6 +1000,7 @@ const lookOf = ({
   stylex.props(
     buttonMarker,
     styles.base,
+    wrap.words,
     styles[size],
     styles.inGroup,
     iconOnly && styles.square,
@@ -1186,6 +1194,7 @@ const Pressable = ({
     focusableWhenDisabled = false,
     pendingAnnouncement = "",
     onClick,
+    words: wordsGiven,
     ...rest
   } = read;
   const extra: Record<string, unknown> = rest;
@@ -1218,7 +1227,7 @@ const Pressable = ({
   // The result is said once, by the page's one polite voice (src/announce), when it changes.
   // Nothing is put beside the button, so it stays a single element in a row or a group.
   // workingLabel is said, not shown: the words on the button stay its own while it works.
-  const ownWords = useWords("button", buttonWords);
+  const ownWords = useWords("button", buttonWords, wordsGiven);
   useSaid(
     saidFor(state, {
       working: workingLabel,
@@ -1336,7 +1345,7 @@ const LazyHold = (allProps: ButtonProps) => {
   const early = useRef(false);
   const words =
     typeof allProps.children === "string" ? allProps.children : allProps.label;
-  const { holdTo } = useHoldLabels(allProps.holdLabels);
+  const { holdTo } = useHoldLabels(allProps.holdLabels, allProps.words);
   const name = words === undefined || words === "" ? undefined : holdTo(words);
   const waiting = { holding: false, ms: 0, name };
   const keep = (event: MouseEvent<HTMLElement>) => {
@@ -1375,6 +1384,48 @@ const LazyCut = (allProps: ButtonProps) => (
 const drawnByPart = (props: Record<string, unknown>) =>
   typeof props["data-slot"] === "string";
 
+/**
+ * The name an icon-only button shows in a tooltip of its own: its `aria-label`, unless a tooltip
+ * already drives it (TooltipTrigger, a layer's `tooltip`, a cut Button mark it data-tooltip-trigger).
+ */
+const shownName = (
+  props: Record<string, unknown>,
+  label: string | undefined
+) => {
+  const name = givenName(props) ?? label;
+  const free =
+    props.icon !== undefined &&
+    isEmpty(props.children) &&
+    props["data-tooltip-trigger"] === undefined;
+  return free && name !== undefined && name !== "" ? name : undefined;
+};
+
+/**
+ * The button, with its name in a Tooltip when it shows only an icon. The tooltip repeats the name,
+ * so it is no description: a screen reader hears it once. Imported, not loaded lazily: a late swap
+ * of the element would drop its focus and the refs held on it, and an icon-only button is on nearly
+ * every page.
+ */
+const Shown = (allProps: ButtonProps) => {
+  const name = shownName({ ...allProps }, allProps.label);
+  if (name === undefined) {
+    return <Pressable {...allProps} held={null} />;
+  }
+  return (
+    <Tip
+      name
+      tooltip={name}
+      render={(tip) => (
+        <Pressable
+          {...allProps}
+          {...withTip({ ...allProps }, tip)}
+          held={null}
+        />
+      )}
+    />
+  );
+};
+
 export const Button = (allProps: ButtonProps) => {
   // A hold is a popover's trigger first (hold.tsx), which draws this Button inside it.
   const held = useContext(HoldContext);
@@ -1384,8 +1435,12 @@ export const Button = (allProps: ButtonProps) => {
       allProps.truncate === true &&
       held === null &&
       !drawnByPart({ ...allProps });
-    return cut ? (
-      <LazyCut {...allProps} />
+    if (cut) {
+      return <LazyCut {...allProps} />;
+    }
+    // Inside a hold the popover's trigger speaks for it ("Hold to delete"): no tooltip of its own.
+    return held === null ? (
+      <Shown {...allProps} />
     ) : (
       <Pressable {...allProps} held={held} />
     );

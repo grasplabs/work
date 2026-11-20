@@ -14,7 +14,12 @@ import type { Session } from "../core.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Command } from "../grasp/command/index.ts";
+import {
+  Command,
+  CommandInput,
+  CommandEmpty,
+  CommandList,
+} from "../grasp/command/index.ts";
 import { Cross, Plus } from "../grasp/icons/index.ts";
 import {
   Item,
@@ -90,9 +95,7 @@ const AddPicker = ({
       </PopoverTrigger>
       <PopoverContent align="end">
         <Command
-          aria-label={t`Search integrations`}
           bare
-          empty={t`No integrations match your search.`}
           items={entries.map((entry) => ({
             value: integrationKey(entry.source, entry.id),
             label: entry.name,
@@ -105,8 +108,14 @@ const AddPicker = ({
               onAdd(entry);
             }
           }}
-          placeholder={t`Search integrations`}
-        />
+        >
+          <CommandInput
+            aria-label={t`Search integrations`}
+            placeholder={t`Search integrations`}
+          />
+          <CommandEmpty>{t`No integrations match your search.`}</CommandEmpty>
+          <CommandList />
+        </Command>
       </PopoverContent>
     </Popover>
   );
@@ -207,7 +216,7 @@ export const AppIntegrations = ({
                 line.why.length === 1 && line.why[0] === "added";
               return (
                 <Item key={line.key} size="xs">
-                  <ItemMedia>
+                  <ItemMedia align="center">
                     <ProviderMark
                       id={line.ref.id}
                       logo={line.logo}

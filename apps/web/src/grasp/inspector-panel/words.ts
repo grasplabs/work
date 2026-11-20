@@ -10,6 +10,7 @@ export const englishWords: InspectorPanelWords = {
   showAll: (label) => `Show all the ${label.toLowerCase()}`,
   close: "Close",
   views: "Views",
+  none: "Not set",
 };
 
 declare module "../words/words" {

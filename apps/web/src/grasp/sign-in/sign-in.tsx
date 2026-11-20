@@ -42,10 +42,11 @@ import { Heading } from "../heading/heading";
 import { ArrowRight, BrandGrasp, Icon } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
+import type { LayoutStyle } from "../layout/layout";
 import { Link } from "../link/link";
 import { simply } from "../motion/simply.stylex";
 import { Text } from "../text/text";
-import { grasp, media } from "../tokens/tokens.stylex";
+import { grasp } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
 import { idleDoor, startDoor } from "./door";
 import type { Door } from "./door";
@@ -59,23 +60,8 @@ import {
 import { signInWords } from "./words";
 import type { SignInNoticeWords, SignInWords } from "./words";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the page sits and how big it is. */
-export type SignInLayoutStyle = stylex.StyleXStyles<{
-  width?: Layout;
-  minWidth?: Layout;
-  maxWidth?: Layout;
-  height?: Layout;
-  minHeight?: Layout;
-  maxHeight?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginInline?: Layout;
-  flexGrow?: Layout;
-  alignSelf?: Layout;
-  gridArea?: Layout;
-}>;
+export type SignInLayoutStyle = LayoutStyle;
 
 /** An identity provider the organisation has set up: its key, its name and its own mark. */
 export interface SignInProvider {
@@ -210,7 +196,7 @@ const styles = stylex.create({
     backgroundColor: grasp.signInVeil,
     opacity: 0,
     transitionProperty: "opacity",
-    transitionDuration: { default: grasp.durationUi, [media.reduced]: "0s" },
+    transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
   veilOn: { opacity: 1 },
@@ -329,7 +315,7 @@ const styles = stylex.create({
   // Leaving: everything but the chosen way fades as the door opens at it.
   fades: {
     transitionProperty: "opacity",
-    transitionDuration: { default: grasp.durationUi, [media.reduced]: "0s" },
+    transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
   gone: { opacity: 0 },

@@ -388,7 +388,7 @@ export const RequestPlan = ({
             people, who show nothing on their own): a chart of zeros says
             nothing, so it says why instead. */}
         {page.tooFew || report.total.requests === 0 ? (
-          <Empty size="section">
+          <Empty size="md">
             <EmptyHeader>
               <EmptyDescription>
                 <NothingDrawn

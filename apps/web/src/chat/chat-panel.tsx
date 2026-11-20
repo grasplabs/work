@@ -1,3 +1,4 @@
+import type { ChatSummary } from "@grasp-os/shared/chat";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import {
@@ -18,14 +19,8 @@ import type {
   AppShellPanelPlacement,
   AppShellPanelPosition,
 } from "../grasp/app-shell/index.ts";
-import { Cross, Edit } from "../grasp/icons/index.ts";
-import type { IconData } from "../grasp/icons/index.ts";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipShortcut,
-  TooltipTrigger,
-} from "../grasp/tooltip/index.ts";
+import type { DropdownMenuAction } from "../grasp/dropdown-menu/index.ts";
+import { Edit } from "../grasp/icons/index.ts";
 import { setActiveChat, startAfresh } from "./active-chat.ts";
 import { BrainQuestions } from "./brain-questions.tsx";
 import { boxOf, ChatConversation, ChatFooter } from "./chat-body.tsx";
@@ -40,9 +35,9 @@ import {
   useChatLayout,
 } from "./chat-layout.ts";
 import { chatLink } from "./chat-link.ts";
-import { ChatMoreMenu, ChatPanelTitle } from "./chat-more.tsx";
+import { ChatPanelTitle, useChatMenu } from "./chat-more.tsx";
 import { allows, useOpenChat } from "./chat-presence.ts";
-import { chatKey, useGlobalChat } from "./global-chat.tsx";
+import { useGlobalChat } from "./global-chat.tsx";
 import { reading } from "./reading.stylex.ts";
 
 // Grasp's chat open (global-chat.tsx), in App shell's panels: docked beside
@@ -86,36 +81,6 @@ const panelStyles = stylex.create({
   },
 });
 
-/** A button in the chat's head: an icon, named, its name and shortcut in a tooltip. */
-const HeaderButton = ({
-  icon,
-  label,
-  shortcut,
-  onClick,
-}: {
-  icon: IconData;
-  label: string;
-  /** Its keys, as Tooltip names them ("mod+j"). */
-  shortcut?: string;
-  onClick: () => void;
-}) => (
-  <Tooltip shortcut={shortcut}>
-    <TooltipTrigger
-      icon={icon}
-      aria-label={label}
-      onClick={() => {
-        onClick();
-      }}
-      size="sm"
-      variant="ghost"
-    />
-    <TooltipContent>
-      {label}
-      {shortcut === undefined ? null : <TooltipShortcut />}
-    </TooltipContent>
-  </Tooltip>
-);
-
 /** The open chat's name; a chat not made yet is a new chat. */
 const ChatTitle = () => {
   const { t } = useLingui();
@@ -128,20 +93,17 @@ const ChatTitle = () => {
   );
 };
 
-/**
- * The head's own buttons, after the shell's switch and full screen: start
- * afresh, open the chat as its own page (chat-page.tsx), its menu, close.
- */
-const HeaderActions = () => {
+/** "New chat" as an item of the head's menu, once a chat is open. */
+const useFreshItem = (): DropdownMenuAction[] => {
   const { t } = useLingui();
-  const { chatId, slot, keptOpen, summary, sourceNames } = useGlobalChat();
-  return (
-    <>
-      {chatId === undefined ? null : (
-        <HeaderButton
-          icon={Edit}
-          label={t`New chat`}
-          onClick={() => {
+  const { chatId, slot } = useGlobalChat();
+  return chatId === undefined
+    ? []
+    : [
+        {
+          label: t`New chat`,
+          icon: Edit,
+          onSelect: () => {
             // A subject's slot would find the chat that last worked on it
             // again: it starts afresh instead.
             if (slot === "chat") {
@@ -149,26 +111,78 @@ const HeaderActions = () => {
             } else {
               startAfresh(slot);
             }
-          }}
-        />
-      )}
-      {summary === undefined ? null : (
-        <ChatMoreMenu
-          chat={summary}
-          key={summary.id}
-          sourceNames={sourceNames}
-        />
-      )}
-      {/* About the page's subject it stays open (chat-subject.ts). */}
-      {keptOpen ? null : (
-        <HeaderButton
-          icon={Cross}
-          label={t`Close`}
-          onClick={closeChat}
-          shortcut={`mod+${chatKey}`}
-        />
-      )}
+          },
+        },
+      ];
+};
+
+/** What every head of the chat's panel takes, whatever is open in it. */
+interface HeadProps {
+  expanded: boolean;
+  menu: readonly DropdownMenuAction[];
+}
+
+/**
+ * The library's window head: the chat's name (renamed where it stands),
+ * full screen, the "…" with the head's own items and ours, and close. About
+ * the page's subject the chat stays open, so it has no close
+ * (chat-subject.ts).
+ */
+const Head = ({ expanded, menu }: HeadProps) => {
+  const { chatId, keptOpen } = useGlobalChat();
+  return (
+    <AppShellPanelHead
+      expanded={expanded}
+      menu={menu}
+      onExpandedChange={expandChat}
+      {...(keptOpen ? {} : { onClose: closeChat })}
+      // A chat not made yet has no page until its first question. The
+      // router's link, so opening it doesn't load the app anew.
+      {...(chatId === undefined
+        ? {}
+        : {
+            pageHref: `/chats/${chatId}`,
+            pageRender: <Link {...chatLink(chatId)} />,
+          })}
+      title={<ChatTitle />}
+    />
+  );
+};
+
+/** The head of an open chat: its own menu after "New chat", and the delete's dialog. */
+const OpenChatHead = ({
+  chat,
+  expanded,
+  fresh,
+}: {
+  chat: ChatSummary;
+  expanded: boolean;
+  fresh: readonly DropdownMenuAction[];
+}) => {
+  const { sourceNames } = useGlobalChat();
+  const { actions, dialog } = useChatMenu({ chat, sourceNames });
+  return (
+    <>
+      <Head expanded={expanded} menu={[...fresh, ...actions]} />
+      {dialog}
     </>
+  );
+};
+
+/** The panel's head, for a chat not made yet or the open one. */
+const PanelHead = ({ expanded }: { expanded: boolean }) => {
+  const { summary } = useGlobalChat();
+  const fresh = useFreshItem();
+  return summary === undefined ? (
+    <Head expanded={expanded} menu={fresh} />
+  ) : (
+    // Its own for each chat: a delete opened for one is never another's.
+    <OpenChatHead
+      chat={summary}
+      expanded={expanded}
+      fresh={fresh}
+      key={summary.id}
+    />
   );
 };
 
@@ -278,24 +292,11 @@ const Body = ({ open, expanded }: { open: boolean; expanded: boolean }) => {
 
 /** The open chat as App shell's panels hold it: its head, its thread and its box. */
 export const ChatPanel = () => {
-  const { stage, chatId } = useGlobalChat();
+  const { stage } = useGlobalChat();
   const { expanded } = useChatLayout();
   return (
     <div {...stylex.props(panelStyles.content)}>
-      <AppShellPanelHead
-        actions={<HeaderActions />}
-        expanded={expanded}
-        onExpandedChange={expandChat}
-        // A chat not made yet has no page until its first question. The
-        // router's link, so opening it doesn't load the app anew.
-        {...(chatId === undefined
-          ? {}
-          : {
-              pageHref: `/chats/${chatId}`,
-              pageRender: <Link {...chatLink(chatId)} />,
-            })}
-        title={<ChatTitle />}
-      />
+      <PanelHead expanded={expanded} />
       <Body expanded={expanded} open={stage.card} />
     </div>
   );

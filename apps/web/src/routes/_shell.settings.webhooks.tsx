@@ -1,12 +1,13 @@
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import {
   EventSourcesSettings,
   sourceStartsOf,
 } from "../settings/event-sources.tsx";
-import { SettingsError, SettingsLoading } from "../settings/section.tsx";
+import { SettingsError } from "../settings/section.tsx";
 
 // Settings › Incoming events (at /settings/webhooks, kept for links), for
 // the organization's own admins: the event sources outside systems send
@@ -19,6 +20,11 @@ const IncomingEventsPage = () => {
   return <EventSourcesSettings page={sources} starts={starts} />;
 };
 
+/** The sources' card, as tall as its empty state. */
+const IncomingEventsPending = () => (
+  <PageSkeletonSettings header={false} help={false} sections={[3]} />
+);
+
 export const Route = createFileRoute("/_shell/settings/webhooks")({
   // Only the organization's own admins manage sources: anyone else who
   // follows a link here goes to their own settings. Core refuses them all
@@ -29,7 +35,7 @@ export const Route = createFileRoute("/_shell/settings/webhooks")({
       throw redirect({ to: "/settings/profile", replace: true });
     }
   },
-  pendingComponent: SettingsLoading,
+  pendingComponent: IncomingEventsPending,
   errorComponent: SettingsError,
   component: IncomingEventsPage,
   loader: async ({ context: { core } }) => {

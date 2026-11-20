@@ -85,8 +85,14 @@ export type BrandIconTone = "brand" | "mono";
 
 /** Every prop a BrandIcon takes. */
 export interface BrandIconProps {
-  /** Whose mark: `slack`, `google`, `linkedin`, `chatgpt` and the rest of the set. */
-  brand: Brand;
+  /** Whose mark: `slack`, `google`, `linkedin`, `chatgpt` and the rest of the set. Leave it out for a brand the set has no mark for, and give `name`. */
+  brand?: Brand;
+  /**
+   * A brand with no mark in the set ("Acme CRM"): the tile shows its first letter on the tile's quiet
+   * ground, in the same squircle, and the name is the tile's name for a screen reader. Ignored when
+   * `brand` is given.
+   */
+  name?: string;
   /**
    * The tile's size, as Avatar's: `xs` 24px, `sm` 32px, `md` 40px, `lg` 48px. The mark is half of
    * it. Without a tile, the mark alone is that half.
@@ -163,6 +169,20 @@ const styles = stylex.create({
     borderRadius: `min(${grasp.corner}, calc(${grasp.avatarLg} / 2))`,
     [iconVars.size]: `calc(${grasp.avatarLg} / 2)`,
   },
+  // A brand with no mark: its first letter on the tile's quiet ground, the tile's own corner and edge,
+  // the letter at half the tile, as the mark would be.
+  fallback: {
+    backgroundColor: grasp.soft,
+    color: grasp.muted,
+    fontFamily: grasp.fontSans,
+    fontWeight: grasp.weightMedium,
+    lineHeight: 1,
+    userSelect: "none",
+  },
+  letterXs: { fontSize: `calc(${grasp.avatarXs} / 2)` },
+  letterSm: { fontSize: `calc(${grasp.avatarSm} / 2)` },
+  letterMd: { fontSize: `calc(${grasp.avatarMd} / 2)` },
+  letterLg: { fontSize: `calc(${grasp.avatarLg} / 2)` },
   // Without a tile only the mark's size counts.
   bareXs: { [iconVars.size]: `calc(${grasp.avatarXs} / 2)` },
   bareSm: { [iconVars.size]: `calc(${grasp.avatarSm} / 2)` },
@@ -177,14 +197,50 @@ const bareSizes = {
   lg: styles.bareLg,
 } as const;
 
-/** A brand's mark, on a tile or alone, named by the brand unless it is decorative. */
+const letterSizes = {
+  xs: styles.letterXs,
+  sm: styles.letterSm,
+  md: styles.letterMd,
+  lg: styles.letterLg,
+} as const;
+
+// The first character as a person sees it (an accent with its letter, an emoji whole), as Avatar's.
+const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
+const firstLetter = (name: string) =>
+  (
+    segmenter.segment(name.trim())[Symbol.iterator]().next().value?.segment ??
+    ""
+  ).toLocaleUpperCase();
+
+/** A brand's mark, on a tile or alone, named by the brand unless it is decorative; a brand with no mark, its first letter on the tile. */
 export const BrandIcon = ({
   brand,
+  name: given,
   size = "sm",
   tile = true,
   tone = "brand",
   decorative = false,
 }: BrandIconProps) => {
+  if (brand === undefined) {
+    const name = given ?? "";
+    return (
+      <span
+        data-slot="brand-icon"
+        data-fallback=""
+        role={decorative ? undefined : "img"}
+        aria-label={decorative ? undefined : name}
+        aria-hidden={decorative || undefined}
+        {...stylex.props(
+          styles.tile,
+          styles[size],
+          styles.fallback,
+          letterSizes[size]
+        )}
+      >
+        <span aria-hidden="true">{firstLetter(name)}</span>
+      </span>
+    );
+  }
   const { mark, name } = brands[brand];
   return (
     <span

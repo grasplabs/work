@@ -32,10 +32,12 @@ import {
   readItemProject,
 } from "../frame/item-shell.tsx";
 import {
-  NotLoadedState,
-  PageLoading,
-  PageNotLoaded,
-} from "../frame/page-states.tsx";
+  WORKFLOW_GENERAL,
+  Fill,
+  LoadingBar,
+  SettingsPending,
+} from "../frame/page-skeletons-b.tsx";
+import { NotLoadedState, PageNotLoaded } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
@@ -721,6 +723,26 @@ interface WorkflowSearch {
   run?: string;
 }
 
+/**
+ * The workflow before it is read: the bar, its name to come, and the view
+ * the address names. Its settings wait as cards; its flow and its runs
+ * draw themselves in, as no skeleton has a canvas's shape, and who sees
+ * which by default waits on the read.
+ */
+const WorkflowPending = () => {
+  const { view } = Route.useSearch();
+  return (
+    <>
+      <LoadingBar />
+      <Fill>
+        {view === "settings" ? (
+          <SettingsPending sections={WORKFLOW_GENERAL} />
+        ) : null}
+      </Fill>
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   // Grasp's chat has no place here but its builders', about the workflow,
   // docked beside it (chat/chat-subject.ts).
@@ -738,7 +760,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
         : {}),
     };
   },
-  pendingComponent: PageLoading,
+  pendingComponent: WorkflowPending,
   loaderDeps: ({ search: { project } }) => ({ project }),
   loader: async ({
     context: { core, identity },

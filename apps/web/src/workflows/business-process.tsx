@@ -8,6 +8,15 @@ import * as stylex from "@stylexjs/stylex";
 import { ErrorText } from "../error-text.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import {
+  AppRecord,
+  Chart,
+  Conversation,
+  Money,
+  People,
+  Scale,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import {
   Select,
   SelectContent,
   SelectTrigger,
@@ -34,6 +43,16 @@ export const processNames: Readonly<
   r2c: msg({ message: "Risk-to-Compliance", context: "business process" }),
   r2r: msg({ message: "Record-to-Report", context: "business process" }),
   h2r: msg({ message: "Hire-to-Retire", context: "business process" }),
+};
+
+/** Each process's icon from the library's set, for a part that takes one (an Icon tile). */
+export const processIcons: Readonly<Record<BusinessProcess, IconData>> = {
+  o2c: Money,
+  i2r: Conversation,
+  p2p: AppRecord,
+  r2c: Scale,
+  r2r: Chart,
+  h2r: People,
 };
 
 /** What each process covers, for someone who never heard its name. */

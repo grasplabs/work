@@ -243,15 +243,32 @@ const confirmation = () =>
 const labelled = (label: string) =>
   [...document.querySelectorAll(`[aria-label="${label}"]`)].at(-1);
 
+/** A Field label's required mark, at the end of its text. */
+const REQUIRED_MARK = /\*$/u;
+
 /** The control the label `label` is for: the last one, or the `first`. */
 const labelledBy = (label: string, which: "first" | "last" = "last") => {
   const labels = [...document.querySelectorAll("label")];
-  const matches = (each: HTMLLabelElement) => each.textContent.trim() === label;
+  // A Field's label carries its required mark in its text, shown only when
+  // the control is required: the name is what stands before it.
+  const matches = (each: HTMLLabelElement) =>
+    each.textContent.trim().replace(REQUIRED_MARK, "") === label;
   const named =
     which === "first" ? labels.find(matches) : labels.findLast(matches);
-  return named?.htmlFor === undefined || named.htmlFor === ""
-    ? undefined
-    : document.querySelector(`[id="${named.htmlFor}"]`);
+  if (named === undefined) {
+    return null;
+  }
+  // By the label's `for`, or by the control that names itself by the label
+  // (a Field's label and its Switch).
+  const byFor =
+    named.htmlFor === ""
+      ? null
+      : document.querySelector(`[id="${named.htmlFor}"]`);
+  const byName =
+    named.id === ""
+      ? null
+      : document.querySelector(`[aria-labelledby~="${named.id}"]`);
+  return byFor ?? byName;
 };
 
 /** Types `value` into the input named `label`. */

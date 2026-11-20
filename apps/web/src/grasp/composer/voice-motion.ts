@@ -59,6 +59,13 @@ const GATE_SHARE = 1.8;
 const GATE_MARGIN = 0.012;
 /** The spring's speed, in radians a second: it reaches a rise in about 30ms. */
 const SPRING = 62;
+/**
+ * The spring's longest step, in seconds. Stepped one value at a time, a spring this fast holds only
+ * while a step is short against it (its speed times the step well under 2): at 30 frames a second
+ * one step of 33ms threw the level past any bound and the band filled into a block. A frame is cut
+ * into steps no longer than this, so a slow frame, or a slow device, draws the same voice.
+ */
+const SPRING_STEP = 0.004;
 /** Its damping on the way up (under critical, so a small overshoot) and on the way down. */
 const DAMP_UP = 0.58;
 const DAMP_DOWN = 1.05;
@@ -103,15 +110,21 @@ export const follower = (): Follower => {
       envelope +=
         (heard - envelope) *
         (1 - Math.exp(-time / (heard > envelope ? ATTACK : RELEASE)));
-      // 4. The spring, in two half-steps so a slow frame stays steady.
+      // 4. The spring, in steps short enough to hold at any frame rate (SPRING_STEP).
       const damping = envelope > drawn ? DAMP_UP : DAMP_DOWN;
-      for (let half = 0; half < 2; half += 1) {
-        const h = time / 2;
+      const steps = Math.max(2, Math.ceil(time / SPRING_STEP));
+      const h = time / steps;
+      for (let each = 0; each < steps; each += 1) {
         speed +=
           (SPRING * SPRING * (envelope - drawn) -
             2 * damping * SPRING * speed) *
           h;
         drawn += speed * h;
+      }
+      // Its overshoot is a lift, never past the top: the drawn level stays within 0 and 1.
+      if (drawn > 1) {
+        drawn = 1;
+        speed = Math.min(0, speed);
       }
       // On the way down it never passes below the envelope's own fall.
       if (drawn < 0) {

@@ -144,7 +144,7 @@ const Needs = ({
   }
   if (needs === null) {
     return (
-      <Empty size="section">
+      <Empty size="md">
         <EmptyHeader>
           <EmptyDescription>{t`What needs you can't be read right now.`}</EmptyDescription>
         </EmptyHeader>
@@ -161,7 +161,7 @@ const Needs = ({
   return (
     <>
       {waiting.length === 0 ? (
-        <Empty size="section">
+        <Empty size="md">
           <EmptyHeader>
             <EmptyDescription>{t`Nothing waits on you.`}</EmptyDescription>
           </EmptyHeader>

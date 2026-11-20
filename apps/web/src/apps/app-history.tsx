@@ -20,7 +20,6 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
 import { readPeople } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList, formatSince } from "../format.ts";
@@ -62,6 +61,7 @@ import {
 } from "../grasp/sheet/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { decidesRequests } from "../inbox/waiting.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -583,7 +583,7 @@ const VersionChanges = ({
         }
       }}
       open
-      size="wide"
+      size="lg"
     >
       <SheetContent closeLabel={t`Close`}>
         <SheetTitle>

@@ -152,7 +152,7 @@ export const VersionSource = ({
         {shown === undefined ? null : (
           <CodeBlock
             code={shown.text}
-            copyLabel={t`Copy the definition`}
+            words={{ copy: t`Copy the definition` }}
             language="json"
             languageLabel={t`The definition of version ${shownVersion}`}
             lineNumbers={false}

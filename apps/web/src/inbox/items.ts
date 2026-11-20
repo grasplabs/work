@@ -19,20 +19,20 @@ import type {
 import { plural, t } from "@lingui/core/macro";
 
 import {
-  requestNextRun,
   requestRow,
+  requestAsker,
   requestWords,
 } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
-import type { NotificationsPage } from "../dashboard/notifications-page.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
-import type { Interviews, Viewer, Waiting } from "../dashboard/waiting.ts";
 import { formatDate, formatDateTime } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { quietTeamOf } from "../onboarding/interviews-progress.tsx";
 import { linksOf } from "../onboarding/links-to-send.ts";
 import { listeningOf } from "../onboarding/setup.ts";
+import type { NotificationsPage } from "./notifications-page.ts";
+import { decidesRequests } from "./waiting.ts";
+import type { Interviews, Viewer, Waiting } from "./waiting.ts";
 
 // The inbox, as the prototype derives it (`lib/inbox.ts`): what waits on a
 // person to decide, each item made from what core says waits now, so an
@@ -133,6 +133,8 @@ export interface InboxItem {
   calm?: boolean;
   /** What the list says under its name, in place of its kind and date. */
   summary?: string;
+  /** Who asks, by name, where the item says it: an approval's quiet line names them. */
+  asker?: string;
   /** Whose it is, when it is someone's: their face stands for it in the list. */
   face?: string;
   source: InboxSource;
@@ -314,21 +316,16 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
     const { directory } = pending;
     const who = requestWords(request, directory);
-    const { binding } = request;
     return {
+      asker: requestAsker(request, directory),
       id: `request:${request.id}`,
       kind: "permissionRequest",
       title: t`Grant ${who}?`,
       // The row says who asks and, where the request says it plainly, what.
       context: requestRow(request, directory),
       body: [],
-      facts: [
-        // A schedule's name in code ("START") says no more than its title.
-        ...(requestNextRun(request) === undefined
-          ? [{ label: t`Binding`, value: binding }]
-          : []),
-        { label: t`Asked`, value: formatDateTime(request.requestedAt) },
-      ],
+      // Who asked and when stand under the request's Details.
+      facts: [],
       about:
         request.subject.type === "app"
           ? {
@@ -349,12 +346,16 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
  */
 const workflowGoLiveItems = (
   goLives: readonly WorkflowGoLiveItem[],
-  me: string
+  me: string,
+  people: ReadonlyMap<string, string> | undefined
 ): InboxItem[] =>
   goLives.map((item) => {
     const { workflow, version } = item;
     const { name } = workflow;
     return {
+      asker: item.selfApproval
+        ? t`You`
+        : (people?.get(item.requestedBy) ?? t`A builder`),
       id: item.id,
       kind: "goLive",
       title: t`Let version ${version} of ${name} go live?`,
@@ -881,7 +882,7 @@ export const inboxItems = (
     ...heldStartItems(heldStarts, me),
     ...outcomeItems(outcomes, me),
     ...(requests === undefined ? [] : requestItems(requests)),
-    ...workflowGoLiveItems(workflowGoLives, me),
+    ...workflowGoLiveItems(workflowGoLives, me, waiting.goLivePeople),
     ...bindingItems(bindings, readAt),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
     ...gapItems(gaps, askedGaps),

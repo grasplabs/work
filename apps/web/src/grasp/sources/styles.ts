@@ -362,6 +362,9 @@ export const sourceStyles = stylex.create({
   },
   // Under a pointer the count steps aside as far as the last mark, so the room between them holds.
   pileCount: {
+    // "6 sources" is one label: it never breaks between the number and the word.
+    flexShrink: 0,
+    whiteSpace: "nowrap",
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,

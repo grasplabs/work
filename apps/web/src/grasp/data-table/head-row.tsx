@@ -7,7 +7,9 @@ import type { RowData } from "@tanstack/react-table";
 import { useRef, useState } from "react";
 import type { DragEvent } from "react";
 
+import { Info } from "../icons";
 import { TableHead, TableRow } from "../table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
 import { ChooseAll } from "./choose";
 import { ColumnMenu } from "./column-menu";
 import { ResizeHandle } from "./resize-handle";
@@ -17,11 +19,76 @@ import type { DataTableWords } from "./words";
 
 type Side = "before" | "after";
 
+/** The info mark beside a column's name: a ghost button whose tooltip says more about the column. */
+const ColumnInfo = ({ info, label }: { info: string; label: string }) => (
+  <span {...stylex.props(styles.after)}>
+    <Tooltip>
+      <TooltipTrigger
+        icon={Info}
+        aria-label={label}
+        variant="ghost"
+        size="xs"
+      />
+      <TooltipContent>{info}</TooltipContent>
+    </Tooltip>
+  </span>
+);
+
 const sideOf = (event: DragEvent<HTMLTableCellElement>): Side => {
   const box = event.currentTarget.getBoundingClientRect();
   const rtl = getComputedStyle(event.currentTarget).direction === "rtl";
   const firstHalf = event.clientX < box.left + box.width / 2;
   return firstHalf === rtl ? "after" : "before";
+};
+
+/** Whether a column's head holds anything after its name: its info, its menu, its resize handle. */
+const endsAt = <Row extends RowData>(model: Model<Row>, key: string) =>
+  model.flags.hiding ||
+  model.flags.ordering ||
+  model.flags.pinning ||
+  (model.flags.resizing && model.sized) ||
+  model.infoOf(key) !== undefined;
+
+/** What stands after a column's name: its info mark, its menu, its resize handle. */
+const HeadEnd = <Row extends RowData>({
+  model,
+  column,
+  header,
+  words,
+}: {
+  model: Model<Row>;
+  column: TableColumn<Row>;
+  header: string;
+  words: DataTableWords;
+}) => {
+  const hasMenu =
+    model.flags.hiding || model.flags.ordering || model.flags.pinning;
+  const hasHandle = model.flags.resizing && model.sized;
+  const info = model.infoOf(column.id);
+  return (
+    <>
+      {info !== undefined && (
+        <ColumnInfo info={info} label={words.columnInfo(header)} />
+      )}
+      {hasMenu && (
+        <span {...stylex.props(styles.after)}>
+          <ColumnMenu
+            model={model}
+            column={column}
+            header={header}
+            words={words}
+          />
+        </span>
+      )}
+      {hasHandle && (
+        <ResizeHandle
+          model={model}
+          column={column}
+          label={words.width(header)}
+        />
+      )}
+    </>
+  );
 };
 
 interface HeadProps<Row extends RowData> {
@@ -48,31 +115,9 @@ const Head = <Row extends RowData>({
   const sortable = column.getCanSort();
   const at = model.sortOf(column.id);
   const sortedCount = model.own.sort.length;
-  const hasMenu =
-    model.flags.hiding || model.flags.ordering || model.flags.pinning;
-  const hasHandle = model.flags.resizing && model.sized;
-  const after =
-    hasMenu || hasHandle ? (
-      <>
-        {hasMenu && (
-          <span {...stylex.props(styles.after)}>
-            <ColumnMenu
-              model={model}
-              column={column}
-              header={header}
-              words={words}
-            />
-          </span>
-        )}
-        {hasHandle && (
-          <ResizeHandle
-            model={model}
-            column={column}
-            label={words.width(header)}
-          />
-        )}
-      </>
-    ) : undefined;
+  const after = endsAt(model, column.id) ? (
+    <HeadEnd model={model} column={column} header={header} words={words} />
+  ) : undefined;
   const drag = model.flags.ordering
     ? {
         draggable: true,
@@ -126,6 +171,7 @@ const Head = <Row extends RowData>({
       end={after}
       column={column.id}
       drag={drag}
+      hideBelow={model.hideOf(column.id)}
     >
       {header}
     </TableHead>

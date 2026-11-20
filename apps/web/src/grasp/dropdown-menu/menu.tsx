@@ -27,6 +27,7 @@ import type { ReactNode } from "react";
 
 import { useWords, withGiven } from "../words/words";
 import { dropdownMenuWords } from "./words";
+import type { DropdownMenuWords } from "./words";
 
 /**
  * What an item with work (item.tsx) needs from its menu: the controller that closes it once the work
@@ -77,6 +78,12 @@ export interface DropdownMenuProps {
    * @default "Working"
    */
   pendingAnnouncement?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ working: "Saving" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<DropdownMenuWords>;
 }
 
 /** The root: holds the trigger and the panel, and renders nothing of its own. */
@@ -85,10 +92,11 @@ export const DropdownMenu = ({
   controller,
   onOpenChange,
   pendingAnnouncement: pendingAnnouncementGiven,
+  words,
   ...rest
 }: DropdownMenuProps) => {
   const { working: pendingAnnouncement } = withGiven(
-    useWords("dropdownMenu", dropdownMenuWords),
+    useWords("dropdownMenu", dropdownMenuWords, words),
     { working: pendingAnnouncementGiven }
   );
   // One of its own when none is passed, so an item can close it once its work is done.

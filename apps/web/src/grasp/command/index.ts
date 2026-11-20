@@ -1,9 +1,23 @@
-export { Command, CommandMatch } from "./command";
+export {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandMatch,
+  CommandSeparator,
+} from "./command";
 export type {
+  CommandEmptyProps,
   CommandEntry,
   CommandGroupEntry,
+  CommandGroupProps,
+  CommandInputProps,
+  CommandItemProps,
   CommandItems,
   CommandLayoutStyle,
+  CommandListProps,
   CommandProps,
   CommandRowAction,
 } from "./command";

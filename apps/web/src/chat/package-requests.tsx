@@ -13,7 +13,10 @@ import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
-import { ApprovalRequest } from "../grasp/approval-request/index.ts";
+import {
+  ApprovalRequest,
+  ApprovalRequestApprove,
+} from "../grasp/approval-request/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -158,7 +161,6 @@ const PackageRequest = ({
           detail: t`Taken out`,
         })),
       ]}
-      approveLabel={t`Approve the packages`}
       onApprove={async () => {
         await decide(true);
       }}
@@ -168,6 +170,7 @@ const PackageRequest = ({
       title={t`Add npm packages to ${subject}`}
       words={{ ...words, decline: t`Deny` }}
     >
+      <ApprovalRequestApprove>{t`Approve the packages`}</ApprovalRequestApprove>
       <div {...stylex.props(styles.details)}>
         <Text size="sm">{request.purpose}</Text>
         <KeyValueList

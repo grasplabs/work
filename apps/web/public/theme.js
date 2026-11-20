@@ -54,3 +54,16 @@ const readKept = (key) => {
     }
   });
 }
+
+// The frame's ground in the first paint, before any module runs
+// (index.html's `.frame-ground`, src/styles.css): where someone was signed
+// in here when Grasp last asked (src/frame/signed-in-here.ts keeps that,
+// and nothing of who), with the sidebar folded or open as it was left
+// (src/fold.ts's cookie). Nowhere else, so a browser nobody is signed in
+// on paints nothing of the frame. The app replaces it as it starts.
+if (readKept("grasp.signed-in") === "1") {
+  const folded = document.cookie
+    .split("; ")
+    .includes("grasp-sidebar-folded=yes");
+  document.documentElement.dataset.frameGround = folded ? "folded" : "open";
+}

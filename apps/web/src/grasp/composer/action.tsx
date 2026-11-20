@@ -1,5 +1,3 @@
-// ComposerAction: a round icon button in a composer's footer (composer.tsx), such as Add or
-// Dictate. It is UI SDK's Button drawn as a small quiet Grasp Button, so an agent finds it by name.
 "use client";
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
@@ -9,7 +7,7 @@ import type { MouseEvent } from "react";
 
 import { Button } from "../button";
 import type { IconData } from "../icons";
-import { useComposerDisabled, useVoiceAlone, useVoiceBeside } from "./context";
+import { useComposerDisabled } from "./context";
 import { cornerStyles } from "./corner";
 
 /** Every prop a ComposerAction takes. */
@@ -34,13 +32,8 @@ export interface ComposerActionProps {
   pressed?: boolean;
 }
 
-/** Filled alone or pressed on; bare in voice's place beside Send; else quiet with its edge (Add). */
-const variantOf = (alone: boolean, pressed: boolean, beside: boolean) => {
-  if (alone || pressed) {
-    return "ink";
-  }
-  return beside ? "ghost" : "quiet";
-};
+/** Filled while pressed on (dictation listening); else bare: just its icon. */
+const variantOf = (pressed: boolean) => (pressed ? "ink" : "ghost");
 
 /** A round icon button for a composer's `start` or `end`. */
 export const ComposerAction = ({
@@ -52,10 +45,6 @@ export const ComposerAction = ({
   pressed,
 }: ComposerActionProps) => {
   const disabled = useComposerDisabled() || own;
-  // Voice input standing alone in send's place is filled, as send is; so is an action pressed on.
-  const alone = useVoiceAlone();
-  // In voice's place beside Send, once there is text, it goes quiet: bare, as the listening row's.
-  const beside = useVoiceBeside();
   // First or last in its side of the footer, it nests in the card's corner (corner.ts).
   return (
     <span {...stylex.props(cornerStyles.nest)}>
@@ -67,7 +56,7 @@ export const ComposerAction = ({
         render={(props: Record<string, unknown>) => (
           <Button
             {...props}
-            variant={variantOf(alone, pressed === true, beside)}
+            variant={variantOf(pressed === true)}
             size="sm"
             icon={icon}
             aria-label={label}

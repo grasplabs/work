@@ -35,6 +35,7 @@ import { controlStyles } from "./control";
 import { stopEscape } from "./escape";
 import { tabOutTarget } from "./tab-out";
 import { useComposerWords } from "./words";
+import type { ComposerWords } from "./words";
 
 /** One agent a message can go to. */
 export interface ComposerAgentOption {
@@ -85,6 +86,12 @@ export interface ComposerAgentProps {
    * @default "No agents found"
    */
   emptyLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords) `composer.agent` group, key by key
+   * (`{ search: "Find an agent" }`). Any left out are the catalogue's, else English. A flat text prop given beside it
+   * (`aria-label`, `searchLabel`, `emptyLabel`) still wins until the release's step 5.
+   */
+  words?: Partial<ComposerWords["agent"]>;
 }
 
 /** Past this many agents a search field stands above them. */
@@ -514,10 +521,11 @@ export const ComposerAgent = ({
   "aria-label": labelGiven,
   searchLabel: searchGiven,
   emptyLabel: emptyGiven,
+  words: own,
 }: ComposerAgentProps) => {
   const disabled = useComposerDisabled();
   // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
-  const words = useComposerWords("agent");
+  const words = useComposerWords("agent", own);
   const label = labelGiven ?? words.label;
   const searchLabel = searchGiven ?? words.search;
   const emptyLabel = emptyGiven ?? words.empty;

@@ -12,6 +12,7 @@ import { ArrowUp, Edit, Trash } from "../icons";
 import type { IconData } from "../icons";
 import { grasp } from "../tokens/tokens.stylex";
 import { useComposerWords } from "./words";
+import type { ComposerWords } from "./words";
 
 /** One waiting message. */
 export interface ComposerQueued {
@@ -55,6 +56,12 @@ export interface ComposerQueueProps {
    * @default true
    */
   defaultOpen?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords) `composer.queue` group, key by key
+   * (`{ edit: (text) => "Change: " + text }`). Any left out are the catalogue's, else English. A flat text prop given beside it
+   * (`queuedLabel`, `editLabel`, `sendNowLabel`, `removeLabel`) still wins until the release's step 5.
+   */
+  words?: Partial<ComposerWords["queue"]>;
 }
 
 const styles = stylex.create({
@@ -139,9 +146,10 @@ export const ComposerQueue = ({
   onEdit,
   onRemove,
   defaultOpen = true,
+  words: own,
 }: ComposerQueueProps) => {
   // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
-  const words = useComposerWords("queue");
+  const words = useComposerWords("queue", own);
   const queuedLabel = queuedGiven ?? words.queued;
   const editLabel = editGiven ?? words.edit;
   const sendNowLabel = sendNowGiven ?? words.sendNow;

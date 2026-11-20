@@ -260,9 +260,7 @@ export const ReleaseDialog = ({
             ) : null}
           </DialogBody>
         )}
-        {failure === undefined ? null : (
-          <Alert title={failure} variant="danger" />
-        )}
+        {failure === undefined ? null : <Alert title={failure} tone="danger" />}
         <DialogFooter>
           <DialogAction>{t`Cancel`}</DialogAction>
           <DialogAction

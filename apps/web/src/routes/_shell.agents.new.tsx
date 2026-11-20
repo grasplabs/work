@@ -10,13 +10,14 @@ import { SiteHeader } from "../frame/site-header.tsx";
 
 const NewAgentPage = () => {
   const { t } = useLingui();
-  const models = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
+  const taken = Route.useLoaderData();
   return (
     <>
       <SiteHeader
         crumbs={[{ label: t`Agents`, to: "/agents" }, { label: t`New agent` }]}
       />
-      <NewAgent models={models} />
+      <NewAgent personId={identity.userId} taken={taken} />
     </>
   );
 };
@@ -29,12 +30,14 @@ export const Route = createFileRoute("/_shell/agents/new")({
     }
   },
   component: NewAgentPage,
-  // The models an agent can be given: none when core won't say.
+  // The names other agents have, so none is offered or taken twice: none
+  // when core won't say, and core still refuses a name in use.
   loader: async ({ context: { core } }): Promise<string[]> => {
     try {
-      return await core.withSession(
-        async (session) => await session.chats.models()
+      const agents = await core.withSession(
+        async (session) => await session.connections.agents()
       );
+      return agents.map(({ name }) => name);
     } catch {
       return [];
     }

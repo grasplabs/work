@@ -1,0 +1,366 @@
+// The figures, live: one frame loop for every figure and aura on the page, as Damsko's Stephen
+// study runs them (grasplabs/ui `site/study/stephen/live.ts`). Each steps only while it is in
+// view and the tab is shown, and repaints only when a cell changed. Cells are painted one pixel
+// each into a small image, scaled up to the canvas without smoothing, so every cell lands on whole
+// device pixels. A palette's colours are read from the tokens through a probe in the figure's own
+// place, once per theme. No React render per frame; with reduced motion, one still.
+import type { Body, FigureShape, FigureState, Lean } from "./body.ts";
+import {
+  CODES,
+  bodyOf,
+  hash,
+  paintBody,
+  paintStill,
+  setPose,
+  stepBody,
+  thresholdAt,
+} from "./body.ts";
+
+/** The grid a figure of `size` CSS pixels gets: 2px cells from 120px up, 1px below. */
+export const gridFor = (size: number): { n: number; pitch: number } => {
+  const pitch = size >= 120 ? 2 : 1;
+  return { n: Math.floor(size / pitch), pitch };
+};
+
+interface Instance {
+  step: (dt: number) => void;
+  shown: boolean;
+}
+
+const instances = new Set<Instance>();
+let frame = 0;
+let last = 0;
+
+const loop = (ms: number) => {
+  frame = requestAnimationFrame(loop);
+  const dt = last === 0 ? 1 / 60 : Math.min(0.1, (ms - last) / 1000);
+  last = ms;
+  for (const instance of instances) {
+    if (instance.shown) {
+      instance.step(dt);
+    }
+  }
+};
+
+const wake = () => {
+  const any = [...instances].some((instance) => instance.shown);
+  const visible = document.visibilityState === "visible";
+  if (any && visible && frame === 0) {
+    last = 0;
+    frame = requestAnimationFrame(loop);
+  } else if ((!any || !visible) && frame !== 0) {
+    cancelAnimationFrame(frame);
+    frame = 0;
+  }
+};
+
+const pointer = { x: 0, y: 0, seen: false };
+let watching = false;
+const watchPage = () => {
+  if (watching) {
+    return;
+  }
+  watching = true;
+  document.addEventListener("visibilitychange", wake);
+  window.addEventListener("pointermove", (event) => {
+    pointer.x = event.clientX;
+    pointer.y = event.clientY;
+    pointer.seen = true;
+  });
+};
+
+/** The palette's colours as bytes (RGBA), code by code: nothing, then the palette's own. */
+const resolve = (
+  host: HTMLElement,
+  colours: readonly string[]
+): Uint8ClampedArray => {
+  const probe = document.createElement("span");
+  host.append(probe);
+  const paint = document.createElement("canvas").getContext("2d", {
+    willReadFrequently: true,
+  });
+  const rgba = new Uint8ClampedArray(CODES * 4);
+  for (const [index, colour] of colours.entries()) {
+    probe.style.color = colour;
+    const resolved = getComputedStyle(probe).color;
+    if (paint !== null) {
+      paint.clearRect(0, 0, 1, 1);
+      paint.fillStyle = resolved;
+      paint.fillRect(0, 0, 1, 1);
+      rgba.set(paint.getImageData(0, 0, 1, 1).data, (index + 1) * 4);
+    }
+  }
+  probe.remove();
+  return rgba;
+};
+
+/** Paints `out`'s codes on `canvas`, `columns` by `rows` cells, in `colours`. */
+const painter = (canvas: HTMLCanvasElement, columns: number, rows: number) => {
+  const ctx = canvas.getContext("2d");
+  const small = document.createElement("canvas");
+  small.width = columns;
+  small.height = rows;
+  const smallCtx = small.getContext("2d");
+  const image = smallCtx?.createImageData(columns, rows);
+  const drawn = new Uint8Array(columns * rows).fill(255);
+  return {
+    forget: () => {
+      drawn.fill(255);
+    },
+    paint: (out: Uint8Array, colours: Uint8ClampedArray) => {
+      if (ctx === null || smallCtx === null || image === undefined) {
+        return;
+      }
+      if (out.every((value, cell) => value === drawn[cell])) {
+        return;
+      }
+      drawn.set(out);
+      const { data } = image;
+      for (const [cell, value] of out.entries()) {
+        data.set(colours.subarray(value * 4, value * 4 + 4), cell * 4);
+      }
+      smallCtx.putImageData(image, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(small, 0, 0, canvas.width, canvas.height);
+    },
+  };
+};
+
+/** Starts `instance` while `canvas` is in view, and repaints on a change of theme. */
+const run = (
+  canvas: HTMLCanvasElement,
+  instance: Instance,
+  recolour: () => void
+) => {
+  watchPage();
+  instances.add(instance);
+  const seen = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      instance.shown = entry.isIntersecting;
+    }
+    wake();
+  });
+  seen.observe(canvas);
+  const themeWatch = new MutationObserver(recolour);
+  themeWatch.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme", "class", "style"],
+  });
+  const scheme = matchMedia("(prefers-color-scheme: dark)");
+  scheme.addEventListener("change", recolour);
+  return () => {
+    instances.delete(instance);
+    seen.disconnect();
+    themeWatch.disconnect();
+    scheme.removeEventListener("change", recolour);
+    wake();
+  };
+};
+
+const reducedMotion = () =>
+  matchMedia("(prefers-reduced-motion: reduce)").matches;
+const ratioOf = () => Math.max(1, Math.round(window.devicePixelRatio || 1));
+
+/** A figure, live on `canvas`. */
+export interface LiveFigure {
+  pose: (state: FigureState, shape: FigureShape) => void;
+  recolour: (colours: readonly string[]) => void;
+  stop: () => void;
+}
+
+export const mountFigure = (
+  canvas: HTMLCanvasElement,
+  options: {
+    size: number;
+    state: FigureState;
+    shape: FigureShape;
+    colours: readonly string[];
+    follow: boolean;
+    seed: number;
+  }
+): LiveFigure => {
+  const { n, pitch } = gridFor(options.size);
+  const reduced = reducedMotion();
+  const ratio = ratioOf();
+  canvas.width = n * pitch * ratio;
+  canvas.height = n * pitch * ratio;
+  const host = canvas.parentElement ?? canvas;
+  const cells = painter(canvas, n, n);
+  let given = options.colours;
+  let colours = resolve(host, given);
+  const out = new Uint8Array(n * n);
+  const lean: Lean = { x: 0, y: 0 };
+  const body: Body = bodyOf(options.state, options.shape, options.seed);
+  const draw = () => {
+    if (reduced) {
+      paintStill(body.state, body.shape, n, out);
+    } else {
+      paintBody(body, lean, n, out);
+    }
+    cells.paint(out, colours);
+  };
+  const instance: Instance = {
+    shown: false,
+    step: (dt) => {
+      if (reduced) {
+        return;
+      }
+      // The light leans a little to the pointer, eased, on the one that follows.
+      if (options.follow && pointer.seen) {
+        const box = canvas.getBoundingClientRect();
+        const dx =
+          (pointer.x - (box.left + box.width / 2)) /
+          Math.max(200, box.width * 2.5);
+        const dy =
+          -(pointer.y - (box.top + box.height / 2)) /
+          Math.max(200, box.height * 2.5);
+        const ease = 1 - Math.exp(-dt / 0.4);
+        lean.x += (Math.max(-1, Math.min(1, dx)) - lean.x) * ease;
+        lean.y += (Math.max(-1, Math.min(1, dy)) - lean.y) * ease;
+      }
+      stepBody(body, dt);
+      draw();
+    },
+  };
+  const repaint = () => {
+    colours = resolve(host, given);
+    cells.forget();
+    draw();
+  };
+  const stop = run(canvas, instance, repaint);
+  draw();
+  return {
+    pose: (state, shape) => {
+      setPose(body, state, shape);
+      if (reduced) {
+        draw();
+      }
+    },
+    recolour: (next) => {
+      given = next;
+      repaint();
+    },
+    stop,
+  };
+};
+
+/** An aura's cells: Damsko's fine dither, a 1px dot on a 3px pitch (`grasp/dither`'s dots). */
+const AURA_PITCH = 3;
+
+/**
+ * The aura: the palette's own night behind a figure, clean, with a soft light behind where it
+ * stands and a few points of light that come and go, in the palette's darker steps only, so the
+ * figure is the brightest thing on it. Dithered on Bayer's thresholds as the figure is, drawn as
+ * Damsko's fine dots on the night.
+ */
+export const mountAura = (
+  canvas: HTMLCanvasElement,
+  options: { colours: readonly string[]; seed: number; bright: number }
+): { recolour: (colours: readonly string[]) => void; stop: () => void } => {
+  const reduced = reducedMotion();
+  const host = canvas.parentElement ?? canvas;
+  const ctx = canvas.getContext("2d");
+  const small = document.createElement("canvas");
+  const smallCtx = small.getContext("2d");
+  let image: ImageData | undefined;
+  let given = options.colours;
+  let colours = resolve(host, given);
+  let columns = 0;
+  let rows = 0;
+  let seconds = options.seed * 13.7;
+  let since = 1;
+  const size = () => {
+    const box = canvas.getBoundingClientRect();
+    const ratio = ratioOf();
+    columns = Math.max(1, Math.ceil(box.width / AURA_PITCH));
+    rows = Math.max(1, Math.ceil(box.height / AURA_PITCH));
+    small.width = columns * AURA_PITCH;
+    small.height = rows * AURA_PITCH;
+    canvas.width = small.width * ratio;
+    canvas.height = small.height * ratio;
+    image = smallCtx?.createImageData(small.width, small.height);
+  };
+  const draw = () => {
+    if (ctx === null || smallCtx === null || image === undefined) {
+      return;
+    }
+    const { data } = image;
+    const width = columns * AURA_PITCH;
+    const ground = colours.subarray(4, 8);
+    const aspect = columns / Math.max(1, rows);
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const x = ((column + 0.5) / columns) * 2 - 1;
+        const y = ((row + 0.5) / rows) * 2 - 1;
+        // A soft light behind where the figure stands.
+        const dx = x * aspect * 0.62;
+        const behind = Math.exp(-(dx * dx + y * y) / 0.55);
+        // A few points of light, each coming and going at its own pace.
+        const chance = hash(column * 1.31, row * 2.17);
+        const twinkle =
+          chance > 0.985
+            ? 0.5 + 0.5 * Math.sin(seconds * (0.6 + chance * 1.4) + chance * 40)
+            : 0;
+        const light = options.bright * (0.62 * behind + 0.9 * twinkle);
+        const level = Math.max(
+          0,
+          Math.min(3, Math.floor(light * 3 + thresholdAt(column, row) - 0.5))
+        );
+        const lit = colours.subarray((level + 1) * 4, (level + 2) * 4);
+        for (let down = 0; down < AURA_PITCH; down += 1) {
+          for (let across = 0; across < AURA_PITCH; across += 1) {
+            const dot = down === 0 && across === 0;
+            const at =
+              ((row * AURA_PITCH + down) * width +
+                column * AURA_PITCH +
+                across) *
+              4;
+            data.set(dot ? lit : ground, at);
+          }
+        }
+      }
+    }
+    smallCtx.putImageData(image, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(small, 0, 0, canvas.width, canvas.height);
+  };
+  const instance: Instance = {
+    shown: false,
+    // It drifts slowly: drawn about twelve times a second, which its pace needs.
+    step: (dt) => {
+      if (reduced) {
+        return;
+      }
+      seconds += dt;
+      since += dt;
+      if (since >= 1 / 12) {
+        since = 0;
+        draw();
+      }
+    },
+  };
+  const repaint = () => {
+    colours = resolve(host, given);
+    draw();
+  };
+  const stopRun = run(canvas, instance, repaint);
+  const resized = new ResizeObserver(() => {
+    size();
+    draw();
+  });
+  resized.observe(canvas);
+  size();
+  draw();
+  return {
+    recolour: (next) => {
+      given = next;
+      repaint();
+    },
+    stop: () => {
+      resized.disconnect();
+      stopRun();
+    },
+  };
+};

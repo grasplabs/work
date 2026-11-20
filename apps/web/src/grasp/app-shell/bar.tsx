@@ -16,6 +16,7 @@ import { useWords, withGiven } from "../words/words";
 import { cardLine } from "./card-line.stylex";
 import { RenamableName } from "./rename";
 import { appShellWords } from "./words";
+import type { AppShellWords } from "./words";
 
 /** A step on the way to the page, in the page bar. The last is the page itself. */
 export interface AppShellCrumb {
@@ -90,6 +91,11 @@ export interface AppShellBarProps {
    * @default "Breadcrumb"
    */
   breadcrumbLabel?: string;
+  /**
+   * This bar's own words, over the catalogue's (GraspWords), key by key (`{ more: "More on this
+   * page" }`). Any left out are the catalogue's, else English. A flat prop beside it still wins.
+   */
+  words?: Partial<AppShellWords>;
   /**
    * The crumbs are not known yet: the bar keeps its height and shows a placeholder in their place
    * (Skeleton's dot field), and says it is busy, so nothing jumps when they arrive.
@@ -243,7 +249,7 @@ const styles = stylex.create({
     columnGap: grasp.space2,
     // A second line starts past the nav's clip (its padding, RING_REACH, below this line).
     rowGap: RING_REACH,
-    blockSize: { default: grasp.textXsLine, [media.coarse]: grasp.tap },
+    blockSize: { default: grasp.textSmLine, [media.coarse]: grasp.tap },
     minWidth: 0,
     margin: 0,
     padding: 0,
@@ -285,21 +291,14 @@ const styles = stylex.create({
       [CARD_PHONE]: "none",
     },
   },
-  // The crumbs' list may shrink, so the page's name is cut short rather than the bar overflowing.
-  // Never wider than its room: what does not fit is cut at its own edge, never laid over the next
-  // part of the bar. The clip spares a link's focus ring: the nav reaches a ring's width past the
-  // crumbs on every side (padding) and gives it back (margin), so it takes no more room. Not
-  // overflow-clip-margin: Chromium computes a calc() there to 0 and cut the ring (F01).
-  // Never narrower than the page's crumb at its least (F02): the page's name keeps its stub inside
-  // the nav's clip, and what does not fit beside it gives way (the bar's measure, `fitCrumbs`).
-  // The crumbs go whole only at the very last, in a bar that holds more than a phone has room for
-  // (fitBar): the page's name stands as its heading under the bar.
   nav: {
     display: { default: "flex", ":is([data-gone])": "none" },
     minWidth: `calc(${PAGE_LEAST} + 2 * ${RING_REACH})`,
     overflow: "clip",
     padding: RING_REACH,
     margin: `calc(-1 * ${RING_REACH})`,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
   },
   // A finger needs 44px: on a touch screen a crumb's link is that tall.
   link: {
@@ -323,6 +322,10 @@ const styles = stylex.create({
     minInlineSize: { default: null, [media.coarse]: grasp.tap },
     paddingInline: CRUMB_ROOM,
     marginInline: `calc(-1 * ${CRUMB_ROOM})`,
+    // At text-sm the words sit lower in their 20px line: a hairline under them, given back, keeps
+    // the ring as far below the descenders as above the capitals (F40).
+    paddingBlockEnd: grasp.hairline,
+    marginBlockEnd: `calc(-1 * ${grasp.hairline})`,
   },
   page: {
     minWidth: 0,
@@ -1313,6 +1316,7 @@ export const PageBar = ({
   actionItems,
   moreLabel,
   breadcrumbLabel,
+  words,
   loading = false,
   barEnd,
 }: AppShellBarProps & {
@@ -1321,10 +1325,10 @@ export const PageBar = ({
   barEnd?: ReactNode;
 }) => {
   const [bar, setBar] = useState<HTMLElement | null>(null);
-  const { breadcrumb, more } = withGiven(useWords("appShell", appShellWords), {
-    breadcrumb: breadcrumbLabel,
-    more: moreLabel,
-  });
+  const { breadcrumb, more } = withGiven(
+    useWords("appShell", appShellWords, words),
+    { breadcrumb: breadcrumbLabel, more: moreLabel }
+  );
   // How many of the action items the last measure folded into the More menu.
   const [folded, setFolded] = useState(0);
   useFitBar(bar, setFolded);

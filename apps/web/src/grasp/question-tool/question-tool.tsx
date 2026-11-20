@@ -6,6 +6,7 @@
 //     failedLabel="Could not send the answer" onSubmit={answer} onSkip={skip} />
 //   <QuestionTool kind="multi" ... />        several choices
 //   <QuestionTool kind="text" ... />         free text
+//   <QuestionTool loading ... />             before its question arrives: quiet lines in its boxes
 //
 // The choices are UI SDK's RadioGroup and CheckboxGroup, the text UI SDK's Input and Textarea, and
 // Send answer UI SDK's Button, so an agent can answer by name, and an answer that fails to send fails for
@@ -25,7 +26,7 @@ import {
   Radio as RadioPrimitive,
   RadioGroup as RadioGroupPrimitive,
 } from "@ui-sdk/react/radio";
-import { useEffect, useId, useRef, useState } from "react";
+import { isValidElement, useEffect, useId, useRef, useState } from "react";
 import type {
   KeyboardEvent,
   ReactElement,
@@ -40,6 +41,8 @@ import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { scroll } from "../scroll/scroll";
+import { Skeleton } from "../skeleton";
+import { StepFoot } from "../step-foot";
 import { Textarea } from "../textarea";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
@@ -117,15 +120,21 @@ export interface QuestionToolProps {
    * the card waits; on success it shows the answer, on failure `failedLabel` shows under it.
    */
   onSubmit: (answer: string[]) => unknown;
-  /** The words when the answer could not be sent, shown under the card and given to an agent. */
-  failedLabel: string;
+  /**
+   * The words when the answer could not be sent, shown under the card and given to an agent.
+   * @default "Could not send the answer"
+   */
+  failedLabel?: string;
   /** Skips the question. Without it, there is no Skip. */
   onSkip?: () => unknown;
   /**
    * The submit button's words.
    * @default "Send answer"
+   * @deprecated Use `QuestionToolSubmit`.
    */
   submitLabel?: string;
+  /** A QuestionToolSubmit, when Send's words should say more than "Send answer" ("Next", "Send answers"). */
+  children?: ReactNode;
   /**
    * Send is held: it stays where it is and can still be reached, but does not send, and
    * `submitDisabledReason` says why beside it (the host has no assistant connected, say).
@@ -145,8 +154,8 @@ export interface QuestionToolProps {
    */
   embedded?: boolean;
   /**
-   * One of several questions asked in turn: its place ("2 of 3") shows at the head's end. Set
-   * `submitLabel` to "Next" on all but the last, and drive the steps from `onSubmit`.
+   * One of several questions asked in turn: its place ("2 of 3") shows at the head's end. Give
+   * a QuestionToolSubmit "Next" on all but the last, and drive the steps from `onSubmit`.
    */
   step?: { index: number; count: number };
   /**
@@ -184,6 +193,21 @@ export interface QuestionToolProps {
   style?: QuestionToolLayoutStyle;
   /** Layout only: margins, alignment and width. The look belongs to the card. */
   layout?: QuestionToolLayoutStyle;
+  /**
+   * Before the question arrives (a page's first paint): the card stands in its place with the
+   * question and every choice as quiet lines in their own boxes (a `question` already known, the
+   * page's own words, stands as words, so it wraps where it will), one row per `options` entry (a
+   * second line where it has a `description`) and the Other row, or the text box for `text`; Back,
+   * Skip and Send stand still. Nothing in it can be pressed, and it says it is busy.
+   * @default false
+   */
+  loading?: boolean;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ other: "In my own words", skip: "Type instead" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<QuestionToolWords>;
 }
 
 // Runs a task, then `after` whether it worked or failed. The React Compiler cannot compile a
@@ -780,7 +804,7 @@ interface FooterProps {
   backLabel: string;
 }
 
-/** Back, Skip and Submit. */
+/** Back, Skip and Submit: StepFoot in a card's look, with no bar; why Send waits read with it. */
 const QuestionFooter = ({
   empty,
   held,
@@ -793,69 +817,182 @@ const QuestionFooter = ({
   onBack,
   backLabel,
 }: FooterProps) => (
-  <div {...stylex.props(styles.footer)}>
-    {held && heldReason !== undefined && heldReason !== "" ? (
-      <p
-        id={heldId}
-        data-slot="question-tool-held"
-        {...stylex.props(styles.held)}
-      >
-        {heldReason}
-      </p>
-    ) : null}
-    {onBack !== undefined && (
-      <PressPrimitive
-        onClick={() => {
-          onBack();
-        }}
-        pendingAnnouncement=""
-        render={(props: Record<string, unknown>) => (
-          <Button {...props} variant="ghost" size="sm" layout={styles.back}>
-            {backLabel}
-          </Button>
-        )}
-      />
-    )}
-    {onSkip !== undefined && (
-      <PressPrimitive
-        onClick={() => {
-          onSkip();
-        }}
-        pendingAnnouncement=""
-        render={(props: Record<string, unknown>) => (
-          <Button {...props} variant="ghost" size="sm">
-            {skipLabel}
-          </Button>
-        )}
-      />
-    )}
-    {/* Held, Send keeps its place in the keys' order (aria-disabled), so its reason is reached. */}
-    <PressPrimitive
-      onClick={onSubmit}
+  <div data-slot="question-tool-footer" {...stylex.props(styles.footer)}>
+    <StepFoot
+      size="sm"
+      keys={false}
+      onBack={onBack}
+      onNext={onSubmit}
+      finishLabel={submitLabel}
       disabled={empty || held}
-      focusableWhenDisabled={held}
-      aria-describedby={
-        held && heldReason !== undefined && heldReason !== ""
-          ? heldId
-          : undefined
+      note={
+        held && heldReason !== undefined && heldReason !== "" ? (
+          <span id={heldId} data-slot="question-tool-held">
+            {heldReason}
+          </span>
+        ) : undefined
       }
-      pendingAnnouncement=""
-      render={(props: Record<string, unknown>) => (
-        <Button
-          {...props}
-          variant="ink"
-          size="sm"
-          disabled={empty || held}
-          focusableWhenDisabled={held}
-        >
-          {submitLabel}
-        </Button>
-      )}
+      extra={
+        onSkip === undefined ? undefined : (
+          <PressPrimitive
+            onClick={() => {
+              onSkip();
+            }}
+            pendingAnnouncement=""
+            render={(props: Record<string, unknown>) => (
+              <Button {...props} variant="ghost" size="sm">
+                {skipLabel}
+              </Button>
+            )}
+          />
+        )
+      }
+      words={{ back: backLabel }}
     />
   </div>
 );
 
-// The props with their defaults filled in: the caller's words, else the catalogue's, else English.
+const waits = stylex.create({
+  // The question's line, as long as a short question, never past the card.
+  question: { width: "24rem", maxWidth: "100%" },
+  // A choice's words and its line under them, at their own text's line heights.
+  label: { width: "10rem", maxWidth: "100%" },
+  description: { width: "16rem", maxWidth: "100%", height: grasp.textXsLine },
+  // The mark, in its own square.
+  mark: { flexShrink: 0, width: grasp.kbdHeight, height: grasp.kbdHeight },
+});
+
+/** One choice waiting: its card, its mark's square, its words' line and, when it has one, its line under them. */
+const WaitingRow = ({ described }: { described: boolean }) => (
+  <span data-slot="question-tool-row" {...stylex.props(styles.row)}>
+    <span {...stylex.props(styles.markLine)}>
+      <Skeleton variant="block" layout={waits.mark} />
+    </span>
+    <span {...stylex.props(styles.words)}>
+      <Skeleton layout={waits.label} />
+      {described ? <Skeleton layout={waits.description} /> : null}
+    </span>
+  </span>
+);
+
+/** The body waiting: a row per choice (and Other) in the choices' own grid, or the text box. */
+const WaitingBody = ({
+  kind,
+  cards,
+  columns,
+}: {
+  kind: QuestionKind;
+  cards: QuestionOption[];
+  columns: 1 | 2;
+}) => {
+  if (kind === "text") {
+    return <Textarea aria-hidden="true" rows={2} />;
+  }
+  return (
+    <ChoiceList columns={columns}>
+      <div
+        {...stylex.props(styles.choices, columns === 2 && styles.twoColumns)}
+      >
+        {cards.map((option) => (
+          <WaitingRow
+            key={option.value}
+            described={
+              option.description !== undefined && option.description !== ""
+            }
+          />
+        ))}
+      </div>
+    </ChoiceList>
+  );
+};
+
+/** The card before its question arrives: the same boxes, quiet lines in them, nothing pressable. */
+const QuestionWaiting = (props: Resolved) => {
+  const { kind, options, embedded } = props;
+  const cards: QuestionOption[] =
+    kind !== "text" && props.other
+      ? [...options, { value: OTHER, label: props.otherLabel }]
+      : options;
+  return (
+    <div
+      inert
+      aria-busy="true"
+      data-slot="question-tool"
+      data-loading=""
+      {...stylex.props(
+        styles.root,
+        rootWidth(embedded),
+        props.layout ?? props.style
+      )}
+    >
+      <div {...stylex.props(styles.card, embedded && styles.bare)}>
+        <div {...stylex.props(styles.head)}>
+          <p {...stylex.props(styles.eyebrow, props.step && styles.eyebrowRow)}>
+            <span>{props.label}</span>
+            {props.step && (
+              <span {...stylex.props(styles.step)}>
+                {props.stepLabel(props.step.index + 1, props.step.count)}
+              </span>
+            )}
+          </p>
+          <p
+            data-slot="question-tool-question"
+            {...stylex.props(styles.question)}
+          >
+            {props.question === "" ? (
+              <Skeleton text="md" layout={waits.question} />
+            ) : (
+              props.question
+            )}
+          </p>
+        </div>
+        <WaitingBody kind={kind} cards={cards} columns={props.columns} />
+        <div data-slot="question-tool-footer" {...stylex.props(styles.footer)}>
+          {props.onBack !== undefined && (
+            <Button variant="ghost" size="sm" layout={styles.back}>
+              {props.backLabel}
+            </Button>
+          )}
+          {props.onSkip !== undefined && (
+            <Button variant="ghost" size="sm">
+              {props.skipLabel}
+            </Button>
+          )}
+          {/* Nothing is chosen when the question arrives, so Send waits as it will stand then: off. */}
+          <Button variant="ink" size="sm" disabled>
+            {props.submitLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/** Every prop a QuestionToolSubmit takes. */
+export interface QuestionToolSubmitProps {
+  /** Send's words, when they should say more than "Send answer" ("Next" on all but the last step). */
+  children: string;
+}
+
+/**
+ * Send's words, inside a QuestionTool. It describes; the card draws Send with them (held, working,
+ * failed), so it draws nothing of its own.
+ */
+export const QuestionToolSubmit = (_props: QuestionToolSubmitProps) => null;
+
+const isSubmit = (
+  child: ReactNode
+): child is ReactElement<QuestionToolSubmitProps> =>
+  isValidElement(child) && child.type === QuestionToolSubmit;
+
+// The words of the card's QuestionToolSubmit, when it holds one.
+const submitOf = (children: ReactNode): string | undefined => {
+  const all: ReactNode[] = [children].flat();
+  return all.find(isSubmit)?.props.children;
+};
+
+// The props with their defaults filled in: the caller's words, else the catalogue's, else English;
+// Send's part over the older prop.
 const withDefaults = (props: QuestionToolProps, words: QuestionToolWords) => ({
   options: props.options ?? noOptions,
   other: props.other ?? true,
@@ -863,10 +1000,11 @@ const withDefaults = (props: QuestionToolProps, words: QuestionToolWords) => ({
   stepLabel: props.stepLabel ?? words.step,
   columns: props.columns ?? 1,
   label: props.label ?? words.name,
-  submitLabel: props.submitLabel ?? words.submit,
+  submitLabel: submitOf(props.children) ?? props.submitLabel ?? words.submit,
   skipLabel: props.skipLabel ?? words.skip,
   backLabel: props.backLabel ?? words.back,
   recommendedLabel: props.recommendedLabel ?? words.recommended,
+  failedLabel: props.failedLabel ?? words.failed,
   embedded: props.embedded ?? false,
 });
 
@@ -1036,10 +1174,13 @@ const QuestionCard = (props: Resolved) => {
       return;
     }
     const controls = controlsIn(root.current);
+    // A text question has no choices: its box takes the focus.
     (
       controls.find(
         (control) => control.getAttribute("aria-checked") === "true"
-      ) ?? controls[0]
+      ) ??
+      controls[0] ??
+      root.current?.querySelector<HTMLElement>("textarea")
     )?.focus({ preventScroll: true });
   }, [embedded, sent]);
 
@@ -1103,6 +1244,7 @@ const QuestionCard = (props: Resolved) => {
     return (
       <label
         key={option.value}
+        data-slot="question-tool-row"
         data-chosen={on || undefined}
         {...stylex.props(rowMarker, styles.row, focus.within)}
       >
@@ -1150,7 +1292,11 @@ const QuestionCard = (props: Resolved) => {
               </span>
             )}
           </p>
-          <p id={questionId} {...stylex.props(styles.question)}>
+          <p
+            id={questionId}
+            data-slot="question-tool-question"
+            {...stylex.props(styles.question)}
+          >
             {question}
           </p>
         </div>
@@ -1197,7 +1343,10 @@ const QuestionCard = (props: Resolved) => {
 
 /** An assistant's question, answered by a choice, several choices or the person's own words. */
 export const QuestionTool = (props: QuestionToolProps) => {
-  const words = useWords("questionTool", questionToolWords);
+  const words = useWords("questionTool", questionToolWords, props.words);
+  if (props.loading === true) {
+    return <QuestionWaiting {...props} {...withDefaults(props, words)} />;
+  }
   return <QuestionCard {...props} {...withDefaults(props, words)} />;
 };
 

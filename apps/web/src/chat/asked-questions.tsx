@@ -12,7 +12,10 @@ import type { ReactNode } from "react";
 import { formatList } from "../format.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Icon, Question } from "../grasp/icons/index.ts";
-import { QuestionTool } from "../grasp/question-tool/index.ts";
+import {
+  QuestionTool,
+  QuestionToolSubmit,
+} from "../grasp/question-tool/index.ts";
 import type { QuestionAnswer } from "../grasp/question-tool/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -247,13 +250,20 @@ const AskedQuestions = ({
   return (
     <ChoiceFocus key={step} picked={answer.picked[0]} own={answer.own}>
       <QuestionTool
-        backLabel={t`Back`}
-        embedded
-        failedLabel={
-          lacksModel(model)
+        words={{
+          back: t`Back`,
+          other: t`In my own words`,
+          recommended: t({
+            message: "Recommended",
+            context: "the option the assistant would pick",
+          }),
+          skip: t`Type instead`,
+          step: (number, count) => t`${number} of ${count}`,
+          failed: lacksModel(model)
             ? t`Connect an AI provider before sending.`
-            : (failure ?? t`Could not send`)
-        }
+            : (failure ?? t`Could not send`),
+        }}
+        embedded
         // Another question's card is a card of its own.
         key={step}
         kind={item.multiple === true ? "multi" : "single"}
@@ -290,18 +300,12 @@ const AskedQuestions = ({
           description: option.description,
           recommended: index === item.recommended,
         }))}
-        otherLabel={t`In my own words`}
         question={item.question}
-        recommendedLabel={t({
-          message: "Recommended",
-          context: "the option the assistant would pick",
-        })}
-        skipLabel={t`Type instead`}
         step={{ index: step, count: total }}
-        stepLabel={(number, count) => t`${number} of ${count}`}
-        submitLabel={last ? t`Send` : t`Next`}
         value={cardValueOf(answer)}
-      />
+      >
+        <QuestionToolSubmit>{last ? t`Send` : t`Next`}</QuestionToolSubmit>
+      </QuestionTool>
     </ChoiceFocus>
   );
 };

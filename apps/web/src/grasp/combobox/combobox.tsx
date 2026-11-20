@@ -52,6 +52,7 @@ import {
   targetStyles,
 } from "../input/input";
 import type { LayoutStyle } from "../layout/layout";
+import { originFrom, pressedJustNow } from "../motion/origin";
 import { simply } from "../motion/simply.stylex";
 import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
@@ -61,6 +62,7 @@ import { useWords, withGiven } from "../words/words";
 import { listStyles } from "./list.styles";
 import { listMarker } from "./list.stylex";
 import { comboboxNotices, comboboxWords } from "./words";
+import type { ComboboxWords } from "./words";
 
 export type ComboboxSize = "sm" | "md" | "lg";
 
@@ -102,6 +104,12 @@ export interface ComboboxProps {
   empty?: string;
   /** The name of the button that opens the list. @default "Show the choices" */
   triggerLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ trigger: "Show the models" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<ComboboxWords>;
   /**
    * The height, the same as Input's and Button's: `sm` 32px, `md` 36px, `lg` 44px. On a touch
    * screen every size has a 44px target, and every item in the list is 44px tall.
@@ -332,6 +340,7 @@ export const Combobox = ({
   size = "md",
   empty: emptyGiven,
   triggerLabel: triggerLabelGiven,
+  words,
   placeholder,
   style: styleProp,
   layout,
@@ -340,8 +349,13 @@ export const Combobox = ({
   onValueChange,
   ...options
 }: ComboboxProps) => {
+  const chevron = useRef<HTMLButtonElement>(null);
+  const pressedAt = useRef(0);
+  const fromChevron = originFrom(() =>
+    pressedJustNow(pressedAt.current) ? chevron.current : null
+  );
   const { empty, trigger: triggerLabel } = withGiven(
-    useWords("combobox", comboboxWords),
+    useWords("combobox", comboboxWords, words),
     { empty: emptyGiven, trigger: triggerLabelGiven }
   );
   // The value is always an item's: a value from outside the list (an agent's, or code's) is refused,
@@ -432,6 +446,11 @@ export const Combobox = ({
           )}
         />
         <ComboboxTrigger
+          ref={chevron}
+          onPointerDown={(event) => {
+            pressedAt.current =
+              Date.now() - (performance.now() - event.timeStamp);
+          }}
           aria-label={triggerLabel}
           className={(state: ComboboxTriggerState) =>
             className(
@@ -460,6 +479,7 @@ export const Combobox = ({
         </ComboboxTrigger>
       </div>
       <ComboboxContent
+        ref={fromChevron}
         sideOffset={popup.gap}
         collisionPadding={popup.gutter}
         {...stylex.props(

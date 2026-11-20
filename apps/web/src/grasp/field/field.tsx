@@ -33,9 +33,10 @@ import {
   choiceIds,
   rowStyles,
 } from "../choice/row";
-import { RequiredMark, labelStyles } from "../label/label";
+import { labelStyles } from "../label/label";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp } from "../tokens/tokens.stylex";
+import { wrap } from "../wrap/wrap";
 import { fieldMarker } from "./field.stylex";
 
 /** What a caller may style: where the field sits, and how wide it is. Never its look. */
@@ -54,9 +55,14 @@ const styles = stylex.create({
   // The required mark shows when the field holds a required control. Read from the page itself
   // (:has), so it is there before any script runs and with none.
   mark: {
-    display: {
-      default: "none",
-      [stylex.when.ancestor(":has(:required)", fieldMarker)]: "inline",
+    "::after": {
+      content: {
+        default: "none",
+        [stylex.when.ancestor(":has(:required)", fieldMarker)]: '"*" / ""',
+      },
+      marginInlineStart: grasp.space1,
+      fontWeight: grasp.weightRegular,
+      color: grasp.muted,
     },
   },
 });
@@ -71,8 +77,9 @@ export const noteStyles = stylex.create({
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
     fontWeight: grasp.weightRegular,
+    // Hyphenated only when long (src/wrap, on each note below); a word too long for its line
+    // still breaks.
     overflowWrap: "anywhere",
-    hyphens: "auto",
     // No word left alone on a last line.
     textWrap: "pretty",
   },
@@ -80,7 +87,8 @@ export const noteStyles = stylex.create({
     color: grasp.muted,
     opacity: { default: 1, ":is([data-disabled])": grasp.dim },
   },
-  // What is wrong, in words, in danger. The control's hairline turns danger with it.
+  // What is wrong, in words, in danger. The control's hairline turns danger with it. A short word
+  // is never cut ("al-ready" read as a second fault): src/wrap.
   error: {
     color: grasp.danger,
   },
@@ -108,7 +116,8 @@ export interface FieldProps extends Omit<
   /**
    * How its parts stand. `vertical`: label, control, description and error, one under the other.
    * `horizontal`: a Checkbox or a Radio first, then its words (a FieldContent), on one row at least
-   * 44px tall that a press anywhere on works.
+   * 44px tall that a press anywhere on works; or the words first and a Switch at the end, as in a
+   * list of settings.
    * @default "vertical"
    */
   orientation?: FieldOrientation;
@@ -143,11 +152,12 @@ const ChoiceField = ({
   const groupOff = useContext(ChoiceOff);
   const own = useId();
   const box = `choice${own}`;
+  // The control first, or, holding a switch, the words first and the switch at the end.
   const row = stylex.props(
     choiceMarker,
     fieldMarker,
     rowStyles.row,
-    rowStyles.start,
+    rowStyles.either,
     layout
   );
   if (grouped) {
@@ -221,7 +231,7 @@ export const FieldLabel = ({ children, ...rest }: FieldLabelProps) => {
         id={choiceIds(box).label}
         htmlFor={rest.htmlFor ?? box}
         data-disabled={off ? true : undefined}
-        {...stylex.props(labelStyles.label)}
+        {...stylex.props(labelStyles.label, wrap.words)}
       >
         {children}
       </LabelPrimitive>
@@ -235,10 +245,9 @@ export const FieldLabel = ({ children, ...rest }: FieldLabelProps) => {
     <FieldLabelPrimitive
       {...rest}
       {...row}
-      {...stylex.props(labelStyles.label)}
+      {...stylex.props(labelStyles.label, wrap.words, styles.mark)}
     >
       {children}
-      <RequiredMark layout={styles.mark} />
     </FieldLabelPrimitive>
   );
 };
@@ -266,7 +275,7 @@ export const FieldDescription = ({
       <p
         id={choiceIds(box).description}
         data-disabled={off ? true : undefined}
-        {...stylex.props(noteStyles.note, noteStyles.description)}
+        {...stylex.props(noteStyles.note, wrap.words, noteStyles.description)}
       >
         {children}
       </p>
@@ -275,7 +284,7 @@ export const FieldDescription = ({
   return (
     <FieldDescriptionPrimitive
       {...rest}
-      {...stylex.props(noteStyles.note, noteStyles.description)}
+      {...stylex.props(noteStyles.note, wrap.words, noteStyles.description)}
     >
       {children}
     </FieldDescriptionPrimitive>

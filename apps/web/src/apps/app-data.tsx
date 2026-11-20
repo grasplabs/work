@@ -17,7 +17,7 @@ import type { ReactNode } from "react";
 
 import { downloadCsv } from "../csv.ts";
 import { readPeople } from "../directory.ts";
-import { formatDateTime, valueText } from "../format.ts";
+import { formatDateTime, formatNumber, valueText } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -51,8 +51,8 @@ import {
   Database,
   Download,
   Icon,
+  More,
   Search,
-  Sortable,
   Upload,
 } from "../grasp/icons/index.ts";
 import {
@@ -61,6 +61,7 @@ import {
   InputGroupText,
 } from "../grasp/input-group/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
+import { Link } from "../grasp/link/index.ts";
 import {
   Select,
   SelectContent,
@@ -75,6 +76,7 @@ import {
   SheetTitle,
 } from "../grasp/sheet/index.ts";
 import { Text } from "../grasp/text/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
@@ -84,8 +86,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // Reading only, but for an import, which core checks row by row and lands
 // whole or not at all.
 
-// Grasp UI has no token for a toolbar field's measure: the table picker
-// and the find-by-ID field are as wide as the old grid's bar had them.
+// Grasp UI has no token for a toolbar field's measure: the find-by-ID
+// field is as wide as the old grid's bar had it.
 const BAR_FIELD = "14rem";
 
 /**
@@ -127,6 +129,8 @@ const styles = stylex.create({
     borderBottomColor: grasp.line,
   },
   spacer: { flexGrow: 1 },
+  // A button centres its words; a row's name starts where its header does.
+  nameButton: { textAlign: "start" },
   barField: { width: BAR_FIELD, maxWidth: "100%" },
   notes: {
     display: "grid",
@@ -135,9 +139,6 @@ const styles = stylex.create({
     paddingBlock: grasp.space2,
     paddingInline: grasp.space3,
   },
-  // A note, and what to do about it beside it.
-  note: { display: "flex", alignItems: "center", gap: grasp.space2 },
-  noteWords: { flexGrow: 1 },
   grid: { flexGrow: 1, minHeight: 0, overflow: "auto" },
   // A record's sheet and a history entry: their parts, one under the other.
   stack: { display: "grid", gap: grasp.space4 },
@@ -671,10 +672,29 @@ const ImportDialog = ({
   );
 };
 
+const minuteMs = 60_000;
+const hourMs = 60 * minuteMs;
+const dayMs = 24 * hourMs;
+
+/** How long ago `value` was ("3 hours ago"), as the page's language says it. */
+const formatAgo = (value: string, now: Date = new Date()): string => {
+  const ago = Math.max(0, now.getTime() - new Date(value).getTime());
+  const say = new Intl.RelativeTimeFormat(i18n.locale, { numeric: "auto" });
+  if (ago >= dayMs) {
+    return say.format(-Math.floor(ago / dayMs), "day");
+  }
+  if (ago >= hourMs) {
+    return say.format(-Math.floor(ago / hourMs), "hour");
+  }
+  return say.format(-Math.floor(ago / minuteMs), "minute");
+};
+
 /** A column of a table's records: the field whose values it shows, and its name in the head. */
 export interface RecordColumn {
   field: string;
   header: string;
+  /** A number: aligned to the end, as a table's numbers are. */
+  number?: boolean;
 }
 
 /** The words the record columns say, translated where they are made. */
@@ -683,64 +703,93 @@ interface RecordColumnWords {
   changed: string;
 }
 
-/** The table's columns: each record's ID, which opens it, its fields, and when it last changed. */
+/**
+ * The table's columns: each record by what people call it (`recordName`),
+ * which opens it, its fields, and when it last changed. The first column
+ * names the row, as a table's does, so the field that names it (`title`,
+ * else `name`) has no column of its own besides; numbers and the time
+ * stand at the row's end.
+ */
 const recordColumns = (
   columns: readonly RecordColumn[],
   words: RecordColumnWords,
   onOpen: (record: AppDataRecord) => void
-): DataTableColumn<AppDataRecord>[] => [
-  {
-    key: "_id",
-    header: words.record,
-    control: true,
-    value: (record) => record.id,
-    cell: (record) => (
-      <Button
-        onClick={() => {
-          onOpen(record);
-        }}
-        size="xs"
-        title={record.id}
-        variant="ghost"
-      >
-        {/* A UUIDv7 starts with its time, the same for records made
-            together: its end tells them apart. */}
-        {`…${record.id.slice(-6)}`}
-      </Button>
-    ),
-  },
-  ...columns.map(({ field, header }): DataTableColumn<AppDataRecord> => ({
-    key: field,
-    header,
-    value: (record) => {
-      const value = record.fields[field];
-      return value === undefined || value === null ? "" : valueText(value);
+): DataTableColumn<AppDataRecord>[] => {
+  const naming =
+    columns.find(({ field }) => field === "title") ??
+    columns.find(({ field }) => field === "name");
+  return [
+    {
+      key: "_id",
+      header: words.record,
+      // The row's name: it wraps in whole words where the row is narrow,
+      // as a table's first column does, so it stands in no control's box.
+      value: (record) => recordName(record),
+      // Until the library's table opens a row itself, the name is a link
+      // drawn as a button: start-aligned under its header, wrapping in
+      // whole words, with no padding of its own.
+      cell: (record) => (
+        <Link
+          render={
+            <button
+              aria-label={recordName(record)}
+              onClick={() => {
+                onOpen(record);
+              }}
+              // Its whole ID, for whoever looks a record up by it.
+              title={record.id}
+              type="button"
+              {...stylex.props(styles.nameButton)}
+            />
+          }
+          variant="standalone"
+        >
+          {recordName(record)}
+        </Link>
+      ),
     },
-  })),
-  {
-    key: "_updatedAt",
-    header: words.changed,
-    value: (record) => record.updatedAt,
-    cell: (record) => (
-      <Text element="span" size="sm" tone="muted">
-        {formatDateTime(record.updatedAt)}
-      </Text>
-    ),
-  },
-];
+    ...columns
+      .filter((column) => column !== naming)
+      .map(({ field, header, number }): DataTableColumn<AppDataRecord> => ({
+        key: field,
+        header,
+        ...(number === true ? { align: "end" } : {}),
+        value: (record) => {
+          const value = record.fields[field];
+          return value === undefined || value === null ? "" : valueText(value);
+        },
+      })),
+    {
+      key: "_updatedAt",
+      header: words.changed,
+      align: "end",
+      value: (record) => record.updatedAt,
+      // How long ago, the full time on hover: the same date five times
+      // over says nothing a row needs.
+      cell: (record) => (
+        <span title={formatDateTime(record.updatedAt)}>
+          <Text element="span" size="sm" tone="muted">
+            {formatAgo(record.updatedAt)}
+          </Text>
+        </span>
+      ),
+    },
+  ];
+};
 
-/** What a read of records ran into: the App moved on, an ID found nothing, a failure. */
+/**
+ * What finding, exporting or importing ran into: the App moved on, an ID
+ * found nothing, a call that failed. A page of records that failed to
+ * load is the table's own to say (its `failed`), with Try again.
+ */
 const RecordNotes = ({
   stale,
   missing,
   failure,
-  onRetry,
 }: {
   stale: boolean;
   missing: boolean;
   failure: string | undefined;
-  /** Reads again what failed to load; none for a failure nothing reads again. */
-  onRetry?: () => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -750,35 +799,27 @@ const RecordNotes = ({
   return (
     <div {...stylex.props(styles.notes)}>
       {stale ? (
-        <div {...stylex.props(styles.note)}>
-          <Alert layout={styles.noteWords} tone="attention">
-            {t`This App changed. Reload to see its current version.`}
-          </Alert>
-          <Button
-            onClick={() => {
-              void router.invalidate();
-            }}
-            size="sm"
-          >
-            {t`Reload`}
-          </Button>
-        </div>
+        <Alert
+          action={
+            <Button
+              onClick={() => {
+                void router.invalidate();
+              }}
+              size="xs"
+              variant="quiet"
+            >
+              {t`Reload`}
+            </Button>
+          }
+          tone="attention"
+        >
+          {t`This App changed. Reload to see its current version.`}
+        </Alert>
       ) : null}
       {missing ? (
         <Alert>{t`No record of this table has that ID.`}</Alert>
       ) : null}
-      {failure === undefined ? null : (
-        <div {...stylex.props(styles.note)}>
-          <Alert layout={styles.noteWords} tone="danger">
-            {failure}
-          </Alert>
-          {onRetry === undefined ? null : (
-            <Button onClick={onRetry} size="sm">
-              {t`Try again`}
-            </Button>
-          )}
-        </div>
-      )}
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
     </div>
   );
 };
@@ -916,7 +957,7 @@ const RecordActions = ({
         <DropdownMenuTrigger
           aria-label={t`Import or export`}
           disabled={busy}
-          icon={Sortable}
+          icon={More}
           size="sm"
           title={t`Import or export`}
           variant="ghost"
@@ -1047,19 +1088,29 @@ export const TableRecords = ({
       </div>
       {instead}
       {instead === undefined ? (
-        <RecordNotes
-          failure={pages.failure ?? action.failure}
-          {...(pages.failure === undefined ? {} : { onRetry: pages.retry })}
-          missing={missing}
-          stale={stale}
-        />
+        <RecordNotes failure={action.failure} missing={missing} stale={stale} />
       ) : null}
       {instead === undefined ? (
         <div {...stylex.props(styles.grid)}>
           <DataTable
             columns={tableColumns}
             density="compact"
-            empty={{ description: t`No records` }}
+            empty={
+              read?.source.kind === "test"
+                ? {
+                    title: t`No example records`,
+                    description: t`Reset the example data to fill it.`,
+                  }
+                : {
+                    title: t`No records yet`,
+                    description: t`They show here as people use the App.`,
+                  }
+            }
+            {...(pages.failure === undefined
+              ? {}
+              : {
+                  failed: { description: pages.failure, onRetry: pages.retry },
+                })}
             hasMore={pages.more && pages.failure === undefined}
             label={label}
             loading={pages.loading}
@@ -1134,32 +1185,43 @@ export const AppData = ({
       </Empty>
     );
   }
-  const items = tables.map(({ name }) => ({ value: name, label: name }));
   return (
     <TableRecords
       app={app}
       // Its own state for each App and table: nothing read of one is
       // shown, or kept, for another.
       key={`${app}/${version}/${table.name}`}
-      columns={table.fields.map(({ name }) => ({ field: name, header: name }))}
+      columns={table.fields.map(({ name, kind }) => ({
+        field: name,
+        header: name,
+        number: kind === "number",
+      }))}
       label={table.name}
       table={table}
       toolbar={
-        <Select
-          items={items}
-          layout={styles.barField}
-          onValueChange={(value) => {
+        // The App's tables, each with how many records it holds.
+        <ToggleGroup
+          aria-label={t`Table`}
+          onValueChange={(chosen: unknown[]) => {
+            const [value] = chosen;
             if (typeof value === "string") {
               setPicked({ app, table: value });
             }
           }}
-          value={table.name}
+          size="sm"
+          value={[table.name]}
         >
-          <SelectTrigger aria-label={t`Table`} size="sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent />
-        </Select>
+          {tables.map(({ name, records }) => (
+            <Toggle key={name} value={name}>
+              {name}
+              {records === null ? null : (
+                <Text element="span" size="xs" tone="muted">
+                  {formatNumber(records)}
+                </Text>
+              )}
+            </Toggle>
+          ))}
+        </ToggleGroup>
       }
       source={{ kind: "live", version }}
     />

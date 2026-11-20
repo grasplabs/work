@@ -37,6 +37,7 @@ import { ChevronDown, Icon } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
+import { simply } from "../motion/simply.stylex";
 import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
@@ -208,7 +209,7 @@ const styles = stylex.create({
     gridArea: "1 / 1",
     minWidth: 0,
     transitionProperty: "opacity, visibility",
-    transitionDuration: { default: grasp.durationUi, [media.reduced]: "0s" },
+    transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
     transitionBehavior: "allow-discrete",
   },
@@ -322,7 +323,7 @@ const styles = stylex.create({
     flexShrink: 0,
     color: grasp.muted,
     transitionProperty: "transform",
-    transitionDuration: { default: grasp.durationUi, [media.reduced]: "0s" },
+    transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
   chevronOpen: { transform: "rotate(0.5turn)" },

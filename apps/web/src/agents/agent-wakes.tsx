@@ -17,7 +17,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
 import { Form, FormRow } from "../grasp/form/index.ts";
 import { CalendarIcon, Plus, Trash } from "../grasp/icons/index.ts";
@@ -33,7 +33,12 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { Select } from "../grasp/select/index.ts";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+} from "../grasp/select/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { toast } from "../grasp/toast/index.ts";
@@ -106,7 +111,7 @@ export const useWhen = () => {
 };
 
 /** How a wake-up's last one went, in words; undefined before its first. */
-const useLast = () => {
+export const useLast = () => {
   const { t, i18n } = useLingui();
   return ({ lastAt, lastOutcome }: AgentWake): string | undefined => {
     if (lastAt === null || lastOutcome === null) {
@@ -259,7 +264,12 @@ const NewWake = ({
                       }
                     }}
                     value={rhythm}
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent />
+                  </Select>
                 </Field>
                 <Field disabled={!can}>
                   <FieldLabel>{t`Time`}</FieldLabel>
@@ -278,7 +288,12 @@ const NewWake = ({
                     setPerson(value ?? "");
                   }}
                   value={person}
-                />
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent />
+                </Select>
               </Field>
               <Field disabled={!can}>
                 <FieldLabel>{t`What to ask it each time`}</FieldLabel>
@@ -342,6 +357,7 @@ export const AgentWakes = ({
   return (
     // No title: the side nav says "Schedule" already; Add a time at its foot.
     <SectionCard
+      variant="grouped"
       aria-label={t`Schedule`}
       density="compact"
       flush
@@ -359,7 +375,11 @@ export const AgentWakes = ({
         : {})}
     >
       {wakes.length === 0 ? (
-        <Empty size="inline">{t`${name} only works when asked.`}</Empty>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`${name} only works when asked.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <ItemGroup separated>
           {wakes.map((wake) => {
@@ -384,19 +404,20 @@ export const AgentWakes = ({
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
-                  <Switch
-                    checked={wake.state === "on"}
-                    disabled={!can}
-                    label={t`On`}
-                    onCheckedChange={(next) => {
-                      void change(async (session) => {
-                        await session.connections.setAgentWakePaused(
-                          wake.id,
-                          !next
-                        );
-                      });
-                    }}
-                  />
+                  <Field orientation="horizontal" disabled={!can}>
+                    <FieldLabel>{t`On`}</FieldLabel>
+                    <Switch
+                      checked={wake.state === "on"}
+                      onCheckedChange={(next) => {
+                        void change(async (session) => {
+                          await session.connections.setAgentWakePaused(
+                            wake.id,
+                            !next
+                          );
+                        });
+                      }}
+                    />
+                  </Field>
                   {editable ? (
                     <Button
                       aria-label={t`Remove ${when}, for ${person}`}

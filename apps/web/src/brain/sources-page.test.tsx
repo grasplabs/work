@@ -407,7 +407,7 @@ describe(SourcesPage, () => {
     }).toStrictEqual({ calls: ["list", "search invoices"], shown: true });
   });
 
-  it("says for each connection that agents search it live and the Brain keeps nothing, and says when there are none", async () => {
+  it("says for each connection that agents search it live and the Brain keeps nothing, and leaves the section out when there are none", async () => {
     await shown([
       { name: "Gmail", status: "connected", via: "direct", matches: [] },
       { name: "HubSpot", status: "connected", via: "composio", matches: [] },
@@ -425,7 +425,7 @@ describe(SourcesPage, () => {
         "How your connections feed the Brain" +
         "Gmail: agents search it live when you ask. The Brain keeps nothing from it." +
         "HubSpot: agents search it live when you ask. The Brain keeps nothing from it.",
-      none: "How your connections feed the BrainYou have no connections yet.",
+      none: "",
     });
   });
 

@@ -12,7 +12,7 @@ import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { Tooltip, TooltipContent } from "../tooltip";
-import { useWords } from "../words/words";
+import { useWords, withGiven } from "../words/words";
 import { canPress, shownState } from "./reach";
 import type { StepperProps, StepperState, StepperStep } from "./stepper";
 import { stepMarker } from "./stepper.stylex";
@@ -1218,13 +1218,19 @@ export const LookStepper = ({
   countLabel: countGiven,
   finishedLabel: finishedGiven,
   working = false,
+  words,
 }: StepperProps) => {
-  // Its words: the product's, by its catalogue, else English; the caller's props still win.
-  const catalogued = useWords("stepper", stepperWords);
-  const countLabel = countGiven ?? catalogued.count;
-  const finishedLabel = finishedGiven ?? catalogued.finished;
+  // Its words: the instance's, else the product's by its catalogue, else English; the caller's props still win.
+  const {
+    count: countLabel,
+    finished: finishedLabel,
+    states: stateWords,
+  } = withGiven(useWords("stepper", stepperWords, words), {
+    count: countGiven,
+    finished: finishedGiven,
+  });
   const drawn: Look = look === "classic" ? "light" : look;
-  const said = { ...catalogued.states, ...stateLabels };
+  const said = { ...stateWords, ...stateLabels };
   const across = orientation === "horizontal";
   const count = steps.length;
   const states = steps.map((step, index) => stateOf(step, index, current));

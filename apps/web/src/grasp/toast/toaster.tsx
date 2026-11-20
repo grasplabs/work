@@ -49,6 +49,7 @@ import { useWords, withGiven } from "../words/words";
 import { queueOf, toast } from "./queue";
 import { toastStyles as styles } from "./styles";
 import { toasterNotices, toasterWords } from "./words";
+import type { ToasterWords } from "./words";
 
 /** Every prop a Toaster takes. */
 export interface ToasterProps {
@@ -101,6 +102,12 @@ export interface ToasterProps {
    * @default "Close"
    */
   closeLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ failed: "Not done" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<ToasterWords>;
 }
 
 /** What a toast's `data` may carry: `icon` replaces its type's icon, `null` leaves it without one. */
@@ -192,6 +199,7 @@ export const Toaster = ({
   shortcut = "F6",
   pendingLabel: pendingGiven,
   closeLabel: closeGiven,
+  words,
 }: ToasterProps) => {
   useOneRegion(toaster ?? toast, side, align);
   const {
@@ -199,7 +207,7 @@ export const Toaster = ({
     failed: failedLabel,
     pending: pendingLabel,
     close: closeLabel,
-  } = withGiven(useWords("toaster", toasterWords), {
+  } = withGiven(useWords("toaster", toasterWords, words), {
     name: named ?? labelDeprecated,
     failed: failedGiven,
     pending: pendingGiven,
@@ -283,7 +291,7 @@ export const Toaster = ({
                   {data.action ? (
                     <ActionPrimitive
                       render={(props, state: ToastButtonState) => {
-                        const words = textOf(data.action?.label);
+                        const actionWords = textOf(data.action?.label);
                         // A Promise from the action shows its work, and a failure says so, as a Button does.
                         const current = actionState(state);
                         return (
@@ -292,7 +300,7 @@ export const Toaster = ({
                             variant="quiet"
                             size="sm"
                             status={current}
-                            doneLabel={words}
+                            doneLabel={actionWords}
                             failedLabel={failedLabel}
                           >
                             {wordsOf(data.action?.label)}

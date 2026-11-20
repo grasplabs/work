@@ -7,6 +7,7 @@ import { useState } from "react";
 import { formatDay } from "../format.ts";
 import { EmptyCard } from "../frame/page.tsx";
 import { Heading } from "../grasp/heading/index.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
 import { File, Listening, Question, Search } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import {
@@ -171,14 +172,6 @@ const styles = stylex.create({
     backgroundColor: grasp.quiet,
   },
   aside: { display: "flex", flexShrink: 0 },
-  unseen: {
-    position: "absolute",
-    width: grasp.hairline,
-    height: grasp.hairline,
-    overflow: "hidden",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
-  },
 });
 
 /** The tab a value of the tabs names, if it names one. */
@@ -215,7 +208,8 @@ const DayColumns = ({ days, today }: { days: LogDay[]; today: string }) => {
   const lessMotion = useLessMotion();
   const columns = logColumns(days, today);
   const [first] = columns;
-  if (first === undefined) {
+  // One day alone is no chart: its column would be a lone dot in an empty band.
+  if (first === undefined || columns.length < 2) {
     return null;
   }
   return (
@@ -328,7 +322,7 @@ const Aside = ({ entry }: { entry: LogEntry }) => {
   return (
     <ItemActions>
       <span title={t`What the brain kept of it`} {...stylex.props(styles.said)}>
-        <span {...stylex.props(styles.unseen)}>
+        <span {...stylex.props(visuallyHidden)}>
           {t`${plural(said, { one: "# thing said", other: "# things said" })}`}
         </span>
         {Array.from({ length: Math.min(said, mostSaid) }, (_, index) => (

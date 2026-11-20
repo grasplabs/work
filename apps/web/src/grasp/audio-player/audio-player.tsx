@@ -52,6 +52,7 @@ import { timelineMarker } from "./markers.stylex";
 import { useStill } from "./still-context";
 import type { AudioStill } from "./still-context";
 import { audioPlayerWords } from "./words";
+import type { AudioPlayerOwnWords } from "./words";
 
 /** What a caller may style: where the bar sits and how wide it is. Never its look. */
 export type AudioPlayerLayoutStyle = LayoutStyle;
@@ -119,8 +120,13 @@ export interface AudioPlayerProps {
    * @default "Loading the sound"
    */
   loadingLabel?: string;
-  /** The words it writes itself, any of them replaced: the buttons' names and how a time is said. */
-  words?: Partial<AudioPlayerWords>;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ failed: "This recording is gone" }`):
+   * the buttons' names, how a time is said, and the catalogue's `failed` and `loading`. Any left out are the
+   * catalogue's, else English. A flat text prop given beside it (`failedLabel`, `loadingLabel`) still wins until the
+   * release's step 5.
+   */
+  words?: Partial<AudioPlayerWords & AudioPlayerOwnWords>;
   /**
    * Where a play starts, in seconds: the first play, and the first after a new `src` or a new
    * `startAt`, and a play after it stopped at `endAt`. A seek before the first play wins.
@@ -736,7 +742,7 @@ export const AudioPlayer = ({
   layout,
 }: AudioPlayerProps) => {
   const { failed: failedLabel, loading: loadingLabel } = withGiven(
-    useWords("audioPlayer", audioPlayerWords),
+    useWords("audioPlayer", audioPlayerWords, given),
     { failed: failedGiven, loading: loadingGiven }
   );
   const words = { ...englishWords, ...given };
