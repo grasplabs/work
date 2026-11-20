@@ -4513,14 +4513,6 @@ msgid "Changed which integrations are offered"
 msgstr "Geändert, welche Integrationen angeboten werden"
 
 #: src/activity/audit-words.ts
-msgid "Changed who may reach an agent"
-msgstr "Geändert, wer einen Agenten erreichen darf"
-
-#: src/activity/audit-words.ts
-msgid "Changed who may reach Stephen"
-msgstr "Geändert, wer Stephen erreichen darf"
-
-#: src/activity/audit-words.ts
 msgid "Changed who reaches Stephen in a place"
 msgstr "Geändert, wer Stephen an einem Ort erreicht"
 
@@ -6150,8 +6142,8 @@ msgid "Deleted an agent"
 msgstr "Einen Agenten gelöscht"
 
 #: src/activity/audit-words.ts
-msgid "Deleted an agent's wake-up"
-msgstr "Einen Weckruf eines Agenten gelöscht"
+msgid "Deleted an agent's schedule"
+msgstr "Den Zeitplan eines Agenten gelöscht"
 
 #: src/activity/audit-words.ts
 msgid "Deleted an AI provider's key"
@@ -13485,8 +13477,8 @@ msgid "Paused or resumed an agent"
 msgstr "Einen Agenten pausiert oder fortgesetzt"
 
 #: src/activity/audit-words.ts
-msgid "Paused or resumed an agent's wake-up"
-msgstr "Einen Weckruf eines Agenten pausiert oder fortgesetzt"
+msgid "Paused or resumed an agent's schedule"
+msgstr "Den Zeitplan eines Agenten pausiert oder fortgesetzt"
 
 #: src/inbox/interviews-item.tsx
 msgid "Paused: no link opens and none goes out."
@@ -13850,6 +13842,10 @@ msgstr "Breite der Vorschau"
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Vorschau: ändert nichts, liest keine echten Daten"
+
+#: src/activity/audit-words.ts
+msgid "Previewed a file"
+msgstr "Eine Dateivorschau angesehen"
 
 #: src/frame/part-words.tsx
 msgid "Previous"
@@ -15922,8 +15918,8 @@ msgid "Set tool by tool"
 msgstr "Tool für Tool festgelegt"
 
 #: src/activity/audit-words.ts
-msgid "Set up an agent's wake-up"
-msgstr "Einen Weckruf für einen Agenten eingerichtet"
+msgid "Set up a schedule for an agent"
+msgstr "Einen Zeitplan für einen Agenten eingerichtet"
 
 #: src/workflows/resource-params.tsx
 msgid "Set. Type a new value to replace it."
@@ -19158,9 +19154,17 @@ msgstr "Ton einschalten"
 msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
 msgstr "Aktivieren Sie das Konto im Verzeichnis wieder, dann hebt Grasp die Sperre beim nächsten täglichen Abgleich auf. Um den Zugang endgültig zu beenden, entfernen Sie die Person."
 
+#: src/activity/audit-words.ts
+msgid "Turned an agent on or off, or changed who may reach it"
+msgstr "Einen Agenten ein- oder ausgeschaltet oder geändert, wer ihn erreichen darf"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."
 msgstr "Eingeschaltet, da es nur liest: {turned}."
+
+#: src/activity/audit-words.ts
+msgid "Turned Stephen on or off, or changed who may reach him"
+msgstr "Stephen ein- oder ausgeschaltet oder geändert, wer ihn erreichen darf"
 
 #: src/agents/agent-templates.ts
 msgid "Turns long documents into the points that matter."
@@ -19691,8 +19695,8 @@ msgid "View in map"
 msgstr "In der Karte zeigen"
 
 #: src/activity/audit-words.ts
-msgid "Viewed or changed something as Grasp staff"
-msgstr "Als Grasp-Mitarbeitende etwas angesehen oder geändert"
+msgid "Viewed something as Grasp staff"
+msgstr "Als Grasp-Mitarbeitende:r etwas angesehen"
 
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx

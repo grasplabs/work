@@ -4513,14 +4513,6 @@ msgid "Changed which integrations are offered"
 msgstr "Gewijzigd welke integraties worden aangeboden"
 
 #: src/activity/audit-words.ts
-msgid "Changed who may reach an agent"
-msgstr "Gewijzigd wie een agent mag bereiken"
-
-#: src/activity/audit-words.ts
-msgid "Changed who may reach Stephen"
-msgstr "Gewijzigd wie Stephen mag bereiken"
-
-#: src/activity/audit-words.ts
 msgid "Changed who reaches Stephen in a place"
 msgstr "Gewijzigd wie Stephen op een plek bereikt"
 
@@ -6150,8 +6142,8 @@ msgid "Deleted an agent"
 msgstr "Een agent verwijderd"
 
 #: src/activity/audit-words.ts
-msgid "Deleted an agent's wake-up"
-msgstr "Een wekmoment van een agent verwijderd"
+msgid "Deleted an agent's schedule"
+msgstr "Het schema van een agent verwijderd"
 
 #: src/activity/audit-words.ts
 msgid "Deleted an AI provider's key"
@@ -13485,8 +13477,8 @@ msgid "Paused or resumed an agent"
 msgstr "Een agent gepauzeerd of hervat"
 
 #: src/activity/audit-words.ts
-msgid "Paused or resumed an agent's wake-up"
-msgstr "Een wekmoment van een agent gepauzeerd of hervat"
+msgid "Paused or resumed an agent's schedule"
+msgstr "Het schema van een agent gepauzeerd of hervat"
 
 #: src/inbox/interviews-item.tsx
 msgid "Paused: no link opens and none goes out."
@@ -13850,6 +13842,10 @@ msgstr "Breedte van het voorbeeld"
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Voorbeeld: wijzigt niets, leest geen echte gegevens"
+
+#: src/activity/audit-words.ts
+msgid "Previewed a file"
+msgstr "Een voorbeeld van een bestand bekeken"
 
 #: src/frame/part-words.tsx
 msgid "Previous"
@@ -15922,8 +15918,8 @@ msgid "Set tool by tool"
 msgstr "Per tool ingesteld"
 
 #: src/activity/audit-words.ts
-msgid "Set up an agent's wake-up"
-msgstr "Een wekmoment voor een agent ingesteld"
+msgid "Set up a schedule for an agent"
+msgstr "Een schema voor een agent ingesteld"
 
 #: src/workflows/resource-params.tsx
 msgid "Set. Type a new value to replace it."
@@ -19158,9 +19154,17 @@ msgstr "Geluid aanzetten"
 msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
 msgstr "Schakel het account in de directory weer in, dan heft Grasp de schorsing op bij de volgende dagelijkse uitlezing. Wil je hun toegang voorgoed beëindigen, verwijder hen dan."
 
+#: src/activity/audit-words.ts
+msgid "Turned an agent on or off, or changed who may reach it"
+msgstr "Een agent aan- of uitgezet, of gewijzigd wie hem mag bereiken"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."
 msgstr "Aangezet, omdat het alleen leest: {turned}."
+
+#: src/activity/audit-words.ts
+msgid "Turned Stephen on or off, or changed who may reach him"
+msgstr "Stephen aan- of uitgezet, of gewijzigd wie hem mag bereiken"
 
 #: src/agents/agent-templates.ts
 msgid "Turns long documents into the points that matter."
@@ -19691,8 +19695,8 @@ msgid "View in map"
 msgstr "Bekijken op de kaart"
 
 #: src/activity/audit-words.ts
-msgid "Viewed or changed something as Grasp staff"
-msgstr "Als Grasp-medewerker iets bekeken of gewijzigd"
+msgid "Viewed something as Grasp staff"
+msgstr "Als Grasp-medewerker iets bekeken"
 
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx

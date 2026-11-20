@@ -498,12 +498,15 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Offered an agent to the company, or took the offer back`,
   },
   { action: "agent.paused", text: msg`Paused or resumed an agent` },
-  { action: "agent.reach.changed", text: msg`Changed who may reach an agent` },
-  { action: "agent.wake.deleted", text: msg`Deleted an agent's wake-up` },
-  { action: "agent.wake.made", text: msg`Set up an agent's wake-up` },
+  {
+    action: "agent.reach.changed",
+    text: msg`Turned an agent on or off, or changed who may reach it`,
+  },
+  { action: "agent.wake.deleted", text: msg`Deleted an agent's schedule` },
+  { action: "agent.wake.made", text: msg`Set up a schedule for an agent` },
   {
     action: "agent.wake.paused",
-    text: msg`Paused or resumed an agent's wake-up`,
+    text: msg`Paused or resumed an agent's schedule`,
   },
   {
     action: "brain.connection_audience.changed",
@@ -572,6 +575,7 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Stopped matching a directory group to a team`,
   },
   { action: "file.downloaded", text: msg`Downloaded a file` },
+  { action: "file.previewed", text: msg`Previewed a file` },
   { action: "file.sent_to_run", text: msg`Handed a file to a run` },
   { action: "instructions.saved", text: msg`Saved instructions` },
   {
@@ -606,13 +610,16 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   {
     action: "staff.accessed",
-    text: msg`Viewed or changed something as Grasp staff`,
+    text: msg`Viewed something as Grasp staff`,
   },
   {
     action: "stephen.place.changed",
     text: msg`Changed who reaches Stephen in a place`,
   },
-  { action: "stephen.reach.changed", text: msg`Changed who may reach Stephen` },
+  {
+    action: "stephen.reach.changed",
+    text: msg`Turned Stephen on or off, or changed who may reach him`,
+  },
   { action: "store.created", text: msg`Created a data store` },
   { action: "store.deleted", text: msg`Deleted a data store` },
   { action: "version.published", text: msg`Published a version` },

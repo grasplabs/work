@@ -4513,14 +4513,6 @@ msgid "Changed which integrations are offered"
 msgstr "A modifié les intégrations proposées"
 
 #: src/activity/audit-words.ts
-msgid "Changed who may reach an agent"
-msgstr "A modifié qui peut joindre un agent"
-
-#: src/activity/audit-words.ts
-msgid "Changed who may reach Stephen"
-msgstr "A modifié qui peut joindre Stephen"
-
-#: src/activity/audit-words.ts
 msgid "Changed who reaches Stephen in a place"
 msgstr "A modifié qui joint Stephen à un endroit"
 
@@ -6150,8 +6142,8 @@ msgid "Deleted an agent"
 msgstr "A supprimé un agent"
 
 #: src/activity/audit-words.ts
-msgid "Deleted an agent's wake-up"
-msgstr "A supprimé un réveil d’un agent"
+msgid "Deleted an agent's schedule"
+msgstr "A supprimé la planification d’un agent"
 
 #: src/activity/audit-words.ts
 msgid "Deleted an AI provider's key"
@@ -9235,7 +9227,7 @@ msgstr "Insérer"
 
 #: src/activity/audit-words.ts
 msgid "Installed Grasp's skills with a release"
-msgstr "A installé les compétences de Grasp avec une version"
+msgstr "A installé les skills de Grasp avec une version"
 
 #: src/chat/saved-memory.tsx
 msgid "Instruction"
@@ -13485,8 +13477,8 @@ msgid "Paused or resumed an agent"
 msgstr "A mis en pause ou relancé un agent"
 
 #: src/activity/audit-words.ts
-msgid "Paused or resumed an agent's wake-up"
-msgstr "A mis en pause ou relancé un réveil d’un agent"
+msgid "Paused or resumed an agent's schedule"
+msgstr "A mis en pause ou relancé la planification d’un agent"
 
 #: src/inbox/interviews-item.tsx
 msgid "Paused: no link opens and none goes out."
@@ -13850,6 +13842,10 @@ msgstr "Largeur de l’aperçu"
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Aperçu : ne modifie rien, ne lit aucune donnée réelle"
+
+#: src/activity/audit-words.ts
+msgid "Previewed a file"
+msgstr "A prévisualisé un fichier"
 
 #: src/frame/part-words.tsx
 msgid "Previous"
@@ -15922,8 +15918,8 @@ msgid "Set tool by tool"
 msgstr "Réglé outil par outil"
 
 #: src/activity/audit-words.ts
-msgid "Set up an agent's wake-up"
-msgstr "A programmé un réveil d’un agent"
+msgid "Set up a schedule for an agent"
+msgstr "A configuré une planification pour un agent"
 
 #: src/workflows/resource-params.tsx
 msgid "Set. Type a new value to replace it."
@@ -19158,9 +19154,17 @@ msgstr "Activer le son"
 msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
 msgstr "Réactivez le compte dans l’annuaire, et Grasp lève la suspension à sa prochaine lecture quotidienne. Pour mettre fin à son accès définitivement, retirez cette personne."
 
+#: src/activity/audit-words.ts
+msgid "Turned an agent on or off, or changed who may reach it"
+msgstr "A activé ou désactivé un agent, ou modifié qui peut le joindre"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."
 msgstr "Activé, car il ne fait que lire : {turned}."
+
+#: src/activity/audit-words.ts
+msgid "Turned Stephen on or off, or changed who may reach him"
+msgstr "A activé ou désactivé Stephen, ou modifié qui peut le joindre"
 
 #: src/agents/agent-templates.ts
 msgid "Turns long documents into the points that matter."
@@ -19691,8 +19695,8 @@ msgid "View in map"
 msgstr "Voir sur la carte"
 
 #: src/activity/audit-words.ts
-msgid "Viewed or changed something as Grasp staff"
-msgstr "A consulté ou modifié quelque chose en tant que personnel de Grasp"
+msgid "Viewed something as Grasp staff"
+msgstr "A consulté quelque chose en tant que personnel de Grasp"
 
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx
