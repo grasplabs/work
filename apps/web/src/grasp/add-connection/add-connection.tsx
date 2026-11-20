@@ -3,7 +3,7 @@
 // (the groups are data), two tiles to a row, one on a phone. Each tile is the provider's mark in its
 // square, its name and its host, muted. A tile already connected ends in a quiet "Add another"; a
 // tile that opens the key step ends in a chevron. Choosing one moves the sheet to its key step: back,
-// the tile as its head, the key (masked, show and hide, Paste), an optional name, the link to where
+// the tile as its head, the key (masked, show and hide, Paste), a name if `nameField`, the link to where
 // keys are made, and Cancel and Connect. The host checks the key: `onConnect` resolves, and the step
 // says it connected, or rejects, and the key is cleared and the reason stands under it.
 //
@@ -65,6 +65,8 @@ export interface AddConnectionProps {
   icon?: IconData;
   /** Any of the words, in place of the English ones. */
   words?: Partial<AddConnectionWords>;
+  /** Ask for an optional name for the key, handed to `onConnect`. Give it only where the host keeps the name. @default false */
+  nameField?: boolean;
 }
 
 const arrive = stylex.keyframes({
@@ -134,6 +136,7 @@ export const AddConnection = ({
   size = "sm",
   icon = Plus,
   words: given,
+  nameField = false,
 }: AddConnectionProps) => {
   const words = useWords("addConnection", addConnectionWords, given);
   const formId = useId();
@@ -275,6 +278,7 @@ export const AddConnection = ({
               ) : (
                 <KeyStep
                   provider={provider}
+                  nameField={nameField}
                   values={values}
                   onValues={(next) => {
                     setValues(next);

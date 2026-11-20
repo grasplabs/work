@@ -21,7 +21,6 @@ msgid "(company)"
 msgstr "(entreprise)"
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgctxt "a field that may stay empty"
 msgid "(optional)"
 msgstr "(facultatif)"

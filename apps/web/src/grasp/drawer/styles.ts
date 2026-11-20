@@ -94,6 +94,20 @@ export const drawerStyles = stylex.create({
       ':is([data-side="top"])': `0 0 ${grasp.corner} ${grasp.corner}`,
       [sideways]: grasp.corner,
     },
+    // A sheet slides in from its side and back out to it (UI SDK marks the first and last frame with
+    // data-starting-style and data-ending-style): the library's open time and curve, none with
+    // reduced motion.
+    translate: {
+      default: null,
+      ':is([data-side="right"]):is([data-starting-style], [data-ending-style])': `calc(100% + ${grasp.sheetInset}) 0`,
+      ':is([data-side="left"]):is([data-starting-style], [data-ending-style])': `calc(-100% - ${grasp.sheetInset}) 0`,
+    },
+    transitionProperty: { default: null, [sideways]: "translate" },
+    transitionDuration: {
+      default: null,
+      [sideways]: { default: grasp.durationOpen, [media.reduced]: "0s" },
+    },
+    transitionTimingFunction: { default: null, [sideways]: grasp.ease },
   },
 
   // A wide sheet, and a full one: a chart or a table opened in full. Never closer than the inset

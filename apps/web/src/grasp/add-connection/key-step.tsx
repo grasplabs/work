@@ -1,6 +1,6 @@
 // The key step of Add connection: a back control, the chosen provider's tile as its head, then its
 // address (an endpoint of your own), the key (masked, with show and hide, and Paste while it is
-// empty), an optional name and the link to where its keys are made. Connected, the form gives way to
+// empty), an optional name where the host keeps one (`nameField`) and the link to where its keys are made. Connected, the form gives way to
 // one line that says so. The sheet's foot holds Cancel and Connect, or Done.
 "use client";
 
@@ -78,6 +78,8 @@ const pasted = (event: ClipboardEvent<HTMLInputElement>) => {
 /** Every prop the key step takes: the provider, what the fields hold, and where it stands. */
 export interface KeyStepProps {
   provider: AddConnectionProvider;
+  /** The optional name under the key. */
+  nameField: boolean;
   values: KeyStepValues;
   onValues: (values: KeyStepValues) => void;
   status: AddConnectionStatus;
@@ -96,6 +98,7 @@ export interface KeyStepProps {
 /** The address, the key, the name and the link out. */
 const KeyFields = ({
   provider,
+  nameField,
   values,
   onValues,
   status,
@@ -165,21 +168,23 @@ const KeyFields = ({
         <FieldError match="valueMissing">{words.keyMissing}</FieldError>
         {status === "refused" && <FieldError match>{refusal}</FieldError>}
       </Field>
-      <Field name="name">
-        <FieldLabel>
-          {words.name}{" "}
-          <span {...stylex.props(styles.optional)}>{words.nameOptional}</span>
-        </FieldLabel>
-        <Input
-          autoComplete="off"
-          readOnly={working}
-          value={values.name}
-          onValueChange={(name: string) => {
-            onValues({ ...values, name });
-          }}
-        />
-        <FieldDescription>{words.nameNote}</FieldDescription>
-      </Field>
+      {nameField && (
+        <Field name="name">
+          <FieldLabel>
+            {words.name}{" "}
+            <span {...stylex.props(styles.optional)}>{words.nameOptional}</span>
+          </FieldLabel>
+          <Input
+            autoComplete="off"
+            readOnly={working}
+            value={values.name}
+            onValueChange={(name: string) => {
+              onValues({ ...values, name });
+            }}
+          />
+          <FieldDescription>{words.nameNote}</FieldDescription>
+        </Field>
+      )}
       {provider.keyUrl !== undefined && provider.keyUrl !== "" && (
         <Link
           href={provider.keyUrl}
