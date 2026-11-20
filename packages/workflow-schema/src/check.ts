@@ -902,7 +902,24 @@ const permissionFor = (
   const declared = Object.hasOwn(walk.bindings, alias)
     ? walk.bindings[alias]
     : undefined;
-  // The Brain's reads, by its own alias, need no declaration.
+  // An App's permission is no binding (`bindingsOf`), but holds its alias
+  // all the same: none of these steps calls it. (One a binding shares is
+  // refused as a duplicate alias already.)
+  if (
+    declared === undefined &&
+    Object.hasOwn(walk.document.permissions?.apps ?? {}, alias)
+  ) {
+    problem(
+      walk,
+      pointer,
+      "workflow.permission_kind",
+      `\`${alias}\` is an App permission; this step calls ${kinds.join(" or ")}.`,
+      `Name a permission under \`permissions.${under}\`.`
+    );
+    return undefined;
+  }
+  // The Brain's reads, by its own alias, need no declaration: a permission
+  // declared under it, of any kind, wins.
   const binding =
     declared === undefined &&
     alias === brainDefaultAlias &&
