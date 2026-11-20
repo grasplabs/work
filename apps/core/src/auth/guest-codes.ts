@@ -223,7 +223,7 @@ export const guestCodeAsked = async (
 
 /** Whether `userId` is a guest now (`guestNow`). */
 export const isGuestNow = async (
-  env: Env,
+  env: Pick<Env, "DB">,
   userId: string
 ): Promise<boolean> => {
   const row = await drizzle(env.DB).get<{ guest: number }>(

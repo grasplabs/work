@@ -22,8 +22,10 @@ import {
   openRpc,
   outcome,
   routed,
+  signedIn,
   signedInApi,
   signedInWithRole,
+  staffPerson,
   unique,
 } from "./sign-in.ts";
 import { storedGrant } from "./stored-grants.ts";
@@ -33,8 +35,9 @@ import { connectDb } from "./test-env.ts";
 // on the issue: what a guest's session reaches (an App shared with them,
 // as its user, and nothing else of the platform, guest-access.ts); who
 // may share an App with a guest, and in which role; an App that holds a
-// source reaching a guest only through an admin's share, at sharing and
-// on every request; what a guest is inside the App (who they are, never
+// source reaching no guest, whoever shares it, at sharing and on every
+// request, a call, a live query or a stream already running included;
+// what a guest is inside the App (who they are, never
 // the directory nor the Brain, a user's rows of its store); and access
 // that ends with the share. The route families a guest is still refused
 // are in guest-role.test.ts.
@@ -237,6 +240,20 @@ export const waitThenShare = action({
       // Refused: what it read is still its answer.
     }
     return read;
+  },
+});
+
+/** Says each step, one every 100 ms, a hundred times. */
+export const ticks = action({
+  args: {},
+  returns: v.null(),
+  stream: v.object({ step: v.number() }),
+  handler: async (ctx) => {
+    for (let step = 1; step <= 100; step += 1) {
+      await ctx.emit({ step });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return null;
   },
 });
 
@@ -454,6 +471,21 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
         text: "hello",
       }),
       otherOpen: await outcome(guest.api.pages.open(other.app)),
+      // A problem in its page, to its error log; another App's refused.
+      report: await outcome(
+        guest.api.pages.report(
+          shared.app,
+          { version: shared.release.manifest.resourceVersion, path: "/" },
+          { kind: "error", message: "Broken" }
+        )
+      ),
+      otherReport: await outcome(
+        guest.api.pages.report(
+          other.app,
+          { version: other.release.manifest.resourceVersion, path: "/" },
+          { kind: "error", message: "Broken" }
+        )
+      ),
       otherFrame: await outcome(guest.api.pages.frame(other.app, "lease")),
       otherVersion: await outcome(
         firstVersion(
@@ -478,6 +510,8 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
       home: [shared.app],
       call: "ok",
       otherOpen: "app.not_found",
+      report: "ok",
+      otherReport: "app.not_found",
       otherFrame: "app.not_found",
       otherVersion: "app.not_found",
       version: shared.release.manifest.resourceVersion,
@@ -497,6 +531,9 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     const guest = await signedInGuest();
     await share(builder, app, member);
+    const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
+    const { core: staffCore } = await openRpc(staffSession);
+    const staff = { api: staffCore.authenticate() };
 
     const offered = await builder.api.apps.members.candidates(app);
     const asBuilder = await outcome(
@@ -520,12 +557,15 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
       toBuilder: await guestIn(builder),
       // Someone who only uses it isn't told the guest's address.
       toMember: await guestIn(member),
+      // Nor is Grasp staff, who reach none of it.
+      toStaff: await outcome(staff.api.apps.members.candidates(app)),
     }).toStrictEqual({
       offered: { id: guest.userId, name: guest.person.email, guest: true },
       asBuilder: "app.member_invalid",
       asUser: "ok",
       toBuilder: { name: guest.person.email, role: "user", guest: true },
       toMember: { name: "", role: "user", guest: true },
+      toStaff: "role.forbidden",
     });
   });
 
@@ -697,15 +737,153 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
     }).toStrictEqual({ answer: "app.unreadable", rows: ["before"] });
   });
 
-  it("is its user inside it: told who they are, never the directory or the Brain, and a user's rows of its store", async () => {
+  it("is pushed nothing a live query read after the App gained a source, though it was following it", async () => {
     const shared = await desk();
-    const { builder, app } = shared;
-    const admin = await signedInApi(idp, "admin");
+    const { builder, app, release } = shared;
     const member = await signedInApi(idp, "user");
     const guest = await signedInGuest();
     await share(builder, app, member);
-    // An admin's share: the App reads the Brain once called, by default.
-    await share(admin, app, guest);
+    await share(builder, app, guest);
+    const lease = await leaseOf(guest, app);
+    if (lease.refused !== undefined) {
+      throw new Error(lease.refused);
+    }
+    const pushes: string[] = [];
+    const first = Promise.withResolvers<null>();
+    const subscription = await guest.api.pages
+      .frame(app, lease.lease)
+      .watchQuery(
+        JSON.stringify({
+          reference: {
+            name: "desk.shared",
+            kind: release.app.functions["desk.shared"]?.kind,
+          },
+          args: {},
+        }),
+        (push) => {
+          pushes.push(JSON.stringify(push.result));
+          first.resolve(null);
+        }
+      );
+    await first.promise;
+
+    // Within the second a look at access was kept for: the App gains a
+    // source, then a member writes what the query reads.
+    await readsTheBrain(app);
+    await call(shared, member, "desk.putShared", { text: "after the source" });
+    for (
+      let polls = 0;
+      polls < 50 && !pushes.some((push) => push.includes('"ok":false'));
+      polls += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- until the query is told
+      await scheduler.wait(100);
+    }
+    await subscription.release();
+
+    const last = z
+      .object({ ok: z.literal(false), error: z.object({ code: z.string() }) })
+      .safeParse(JSON.parse(pushes.at(-1) ?? "null"));
+    expect({
+      leaked: pushes.some((push) => push.includes("after the source")),
+      // The query ends refused, as for someone the App isn't open to.
+      refused: last.success ? last.data.error.code : undefined,
+    }).toStrictEqual({ leaked: false, refused: "app.not_found" });
+  });
+
+  it("is sent no more of a stream's progress once the App gains a source while it runs", async () => {
+    const shared = await desk();
+    const { builder, app, release } = shared;
+    const guest = await signedInGuest();
+    await share(builder, app, guest);
+    const lease = await leaseOf(guest, app);
+    if (lease.refused !== undefined) {
+      throw new Error(lease.refused);
+    }
+    const response = await routed(`${appFunctionPath}/${app}/stream`, {
+      method: "POST",
+      headers: {
+        origin: clientOrigin,
+        "content-type": "application/json",
+        cookie: guest.session,
+        [pagePersonHeader]: guest.userId,
+        [pageLeaseHeader]: lease.lease,
+      },
+      body: JSON.stringify({
+        reference: {
+          name: "desk.ticks",
+          kind: release.app.functions["desk.ticks"]?.kind,
+        },
+        args: {},
+        idempotencyKey: `ticks-${unique()}`,
+      }),
+    });
+    const reader = response.body
+      ?.pipeThrough(new TextDecoderStream())
+      .getReader();
+    if (reader === undefined) {
+      throw new Error("The stream has no body");
+    }
+    let buffered = "";
+    /** The next frame's type, and its error's code if it has one. */
+    const nextFrame = async (): Promise<string> => {
+      for (;;) {
+        const end = buffered.indexOf("\n");
+        if (end !== -1) {
+          const line = buffered.slice(0, end);
+          buffered = buffered.slice(end + 1);
+          const frame = z
+            .looseObject({
+              type: z.string(),
+              error: z.object({ code: z.string() }).optional(),
+            })
+            .parse(JSON.parse(line));
+          return frame.error === undefined
+            ? frame.type
+            : `${frame.type} ${frame.error.code}`;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one chunk after another
+        const { done, value } = await reader.read();
+        if (done) {
+          return "ended";
+        }
+        buffered += value;
+      }
+    };
+    const before = await nextFrame();
+
+    await readsTheBrain(app);
+    // What follows, until the stream is refused or ends: at most the one
+    // frame already on its way when the source was gained.
+    const after: string[] = [];
+    for (let frames = 0; frames < 60; frames += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one frame after another
+      const frame = await nextFrame();
+      after.push(frame);
+      if (frame.startsWith("refused") || frame === "ended") {
+        break;
+      }
+    }
+    await reader.cancel();
+
+    expect({
+      before,
+      progressAfter: after.filter((frame) => frame === "progress").length <= 1,
+      last: after.at(-1),
+    }).toStrictEqual({
+      before: "progress",
+      progressAfter: true,
+      last: "refused app.unreadable",
+    });
+  });
+
+  it("is its user inside it: told who they are, never the directory or the Brain, and a user's rows of its store", async () => {
+    const shared = await desk();
+    const { builder, app } = shared;
+    const member = await signedInApi(idp, "user");
+    const guest = await signedInGuest();
+    await share(builder, app, member);
+    await share(builder, app, guest);
     const written = [];
     for (const [path, row] of [
       ["desk.putNote", { text: "member's note" }],
@@ -740,7 +918,13 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
       }),
       tasks: await call(shared, guest, "desk.tasks"),
       brain: await call(shared, guest, "desk.ask"),
-      // Reading the Brain by default marked the App as holding a source.
+      // Refused before the App is marked as reading the Brain: it stays
+      // open to guests.
+      marked: await env.DB.prepare(
+        "SELECT count(*) AS n FROM brain_default_reads WHERE subject_id = ?"
+      )
+        .bind(app)
+        .first<number>("n"),
       afterBrain: await call(shared, guest, "desk.notes"),
       memberBrain: await call(shared, member, "desk.ask"),
     };
@@ -764,10 +948,10 @@ describe("a guest shared an App", { timeout: 120_000 }, () => {
       accounts: [],
       emptyTeam: "data.write_denied",
       tasks: [],
-      // The read marks the App as holding a source, so the answer goes
-      // to no guest.
-      brain: "app.unreadable",
-      afterBrain: "app.unreadable",
+      // In the function host's words for a Brain read refused.
+      brain: "permission.unavailable",
+      marked: 0,
+      afterBrain: ["guest's note"],
       memberBrain: "ok",
     });
   });

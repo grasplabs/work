@@ -4,7 +4,7 @@ import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
@@ -17,13 +17,9 @@ import {
 } from "../db/core/schema.ts";
 import { staffMayStay } from "../onboarding/gate.ts";
 import { reachesWorkspace } from "../session-check.ts";
-import {
-  authFor,
-  currentMembership,
-  guestNow,
-  organizationId,
-} from "./auth.ts";
+import { authFor, currentMembership, organizationId } from "./auth.ts";
 import { providerIds, signInConfig } from "./config.ts";
+import { isGuestNow } from "./guest-codes.ts";
 
 /**
  * A member's reads as `memberOf` makes them, for one batch with others,
@@ -62,17 +58,6 @@ export const memberRole = async (
   const [membership] = await read;
   const role = roleSchema.safeParse(membership?.role);
   return role.success ? role.data : undefined;
-};
-
-/** Whether `userId` is a guest of the organization now (`guestNow`). */
-export const isGuest = async (
-  database: Pick<Env, "DB">,
-  userId: string
-): Promise<boolean> => {
-  const row = await drizzle(database.DB).get<{ guest: number }>(
-    sql`SELECT ${guestNow(userId)} AS guest`
-  );
-  return row.guest === 1;
 };
 
 /** A person's name as their account holds it, read now; `undefined` for none. */
@@ -158,7 +143,7 @@ export const appUserOf = async (
   if (member !== undefined) {
     return member;
   }
-  return (await isGuest({ DB: database }, userId))
+  return (await isGuestNow({ DB: database }, userId))
     ? { userId, role: "user", teams: [], staff: false, guest: true }
     : undefined;
 };
@@ -277,7 +262,7 @@ const guestIdentity = async (
   if (session.staff || session.interview) {
     return undefined;
   }
-  return (await isGuest(env, session.userId))
+  return (await isGuestNow(env, session.userId))
     ? {
         userId: session.userId,
         email: session.email,
