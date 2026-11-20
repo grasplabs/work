@@ -109,7 +109,7 @@ const styles = stylex.create({
   },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
   // Your own row has no menu: its room is kept, so every role stands on one edge.
-  menuRoom: { width: grasp.controlXs, flexShrink: 0 },
+  menuRoom: { width: grasp.controlSm, flexShrink: 0 },
   // The roles compared: each name over what it may do.
   roles: {
     display: "grid",
@@ -277,7 +277,7 @@ const MemberActions = ({
               disabled={busy}
               icon={More}
               aria-label={t`Actions for ${who}`}
-              size="xs"
+              size="sm"
               variant="ghost"
             />
             <DropdownMenuContent align="end">
@@ -352,7 +352,7 @@ const RolesButton = () => {
       <PopoverTrigger
         aria-label={t`Roles`}
         icon={Info}
-        size="xs"
+        size="sm"
         variant="ghost"
       />
       {/* It only explains: focus stays on the button, so no ring frames the panel. */}
@@ -634,7 +634,7 @@ const PeopleTable = ({
       actions={
         <>
           <RolesButton />
-          <InputGroup layout={styles.search}>
+          <InputGroup layout={styles.search} size="sm">
             <InputGroupText icon={Search} />
             <InputGroupInput
               aria-label={t`Search members`}

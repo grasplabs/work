@@ -87,7 +87,7 @@ export const BackdropSettings = ({ userId }: { userId: string }) => {
           onClick={() => {
             chooseLook(userId, randomLook(look));
           }}
-          size="xs"
+          size="sm"
           variant="quiet"
         >
           {t`Randomize`}

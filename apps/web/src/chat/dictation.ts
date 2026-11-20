@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 import type { ComposerVoiceProblem } from "../grasp/composer/index.ts";
 import type { Locale } from "../i18n.ts";
 import { openLiveLine } from "../interview/live-line.ts";
@@ -57,6 +59,30 @@ export interface DictationSource {
   mute: (muted: boolean) => void;
 }
 
+/**
+ * Core refused to listen in this visit because live transcription isn't
+ * set up for this deployment: no box offers core's dictation again until
+ * the page loads anew. In memory only, so a deployment set up later offers
+ * it on the next visit. This goes once core says up front whether live
+ * transcription is set up (GRA-2232).
+ */
+let notSetUp = false;
+const notSetUpHeard = new Set<() => void>();
+
+const hearNotSetUp = (changed: () => void): (() => void) => {
+  notSetUpHeard.add(changed);
+  return () => {
+    notSetUpHeard.delete(changed);
+  };
+};
+
+const noteNotSetUp = (): void => {
+  notSetUp = true;
+  for (const changed of notSetUpHeard) {
+    changed();
+  }
+};
+
 /** How long core's line may take to listen before it counts as failed, in ms. */
 const lineReadyMs = 10_000;
 
@@ -98,6 +124,9 @@ const coreSource = (locale: Locale): DictationSource => {
           onRefused: (code) => {
             line?.drop();
             stop();
+            if (code === "transcription.unavailable") {
+              noteNotSetUp();
+            }
             listener.problem(
               code === "transcription.limited" ? "limited" : "failed",
               code === "transcription.unavailable"
@@ -309,6 +338,17 @@ const browserSource = (
     },
   };
 };
+
+/**
+ * Whether this person can dictate here, as far as the page knows before a
+ * try: an admin through core's transcription, unless core refused it in
+ * this visit as not set up; anyone else through the browser's
+ * recognition, where the browser has one.
+ */
+export const useCanDictate = (admin: boolean): boolean =>
+  useSyncExternalStore(hearNotSetUp, () =>
+    admin ? !notSetUp : recognitionOf() !== undefined
+  );
 
 /**
  * Where `locale`'s dictation comes from for this person: core's own for an

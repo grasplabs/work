@@ -315,6 +315,14 @@ msgstr "{count, plural, one {# change to its data} other {# changes to its data}
 msgid "{count, plural, one {# change waits for you to confirm or reject it.} other {# changes wait for you to confirm or reject them.}}"
 msgstr "{count, plural, one {# change waits for you to confirm or reject it.} other {# changes wait for you to confirm or reject them.}}"
 
+#: src/chat/sources.tsx
+msgid "{count, plural, one {# collection} other {# collections}}"
+msgstr "{count, plural, one {# collection} other {# collections}}"
+
+#: src/chat/sources.tsx
+msgid "{count, plural, one {# connection} other {# connections}}"
+msgstr "{count, plural, one {# connection} other {# connections}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {# conversation came in: with the board, the teams and their people.} other {# conversations came in: with the board, the teams and their people.}}"
 msgstr "{count, plural, one {# conversation came in: with the board, the teams and their people.} other {# conversations came in: with the board, the teams and their people.}}"
@@ -354,6 +362,10 @@ msgstr "{count, plural, one {# interview in week {week}} other {# interviews in 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
 msgstr "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
+
+#: src/chat/sources.tsx
+msgid "{count, plural, one {# memory} other {# memories}}"
+msgstr "{count, plural, one {# memory} other {# memories}}"
 
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more App this chat worked on} other {# more Apps this chat worked on}}"
@@ -445,10 +457,6 @@ msgstr "{count, plural, one {Add # document} other {Add # documents}}"
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Adding up the hours of # workflow} other {Adding up the hours of # workflows}}"
 msgstr "{count, plural, one {Adding up the hours of # workflow} other {Adding up the hours of # workflows}}"
-
-#: src/chat/sources.tsx
-msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
-msgstr "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 
 #: src/chat/asked-questions.tsx
 msgid "{count, plural, one {Asked you a question} other {Asked you # questions}}"
@@ -1887,6 +1895,10 @@ msgstr "A project groups apps and workflows for a process, a team or a goal. Put
 msgid "A question"
 msgstr "A question"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "A receipt for each payment"
+msgstr "A receipt for each payment"
+
 #: src/apps/field-kinds.tsx
 msgid "A record of another table"
 msgstr "A record of another table"
@@ -3281,8 +3293,11 @@ msgstr "As the company has it"
 msgid "As your device"
 msgstr "As your device"
 
-#: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
+msgid "As your endpoint names it, such as llama-3.3-70b"
+msgstr "As your endpoint names it, such as llama-3.3-70b"
+
+#: src/onboarding/ai-step.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
 msgstr "As your endpoint names it, such as llama-3.3-70b."
 
@@ -5010,6 +5025,7 @@ msgstr "Connecting your Microsoft 365"
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/resource-bindings.tsx
+#: src/chat/sources.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
@@ -6288,6 +6304,10 @@ msgstr "Each area is erased on its own. One that fails is tried again until it i
 msgid "Each as the company has it, or for fewer people. Never more."
 msgstr "Each as the company has it, or for fewer people. Never more."
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "Each invoice to your billing email"
+msgstr "Each invoice to your billing email"
+
 #: src/inbox/interviews-item.tsx
 msgid "Each link is its owner's own: send it only to them."
 msgstr "Each link is its owner's own: send it only to them."
@@ -6437,8 +6457,8 @@ msgid "End Grasp staff access now?"
 msgstr "End Grasp staff access now?"
 
 #: src/settings/staff-access.tsx
-msgid "End staff access now"
-msgstr "End staff access now"
+msgid "End now"
+msgstr "End now"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -7317,6 +7337,10 @@ msgstr "For Stephen's requests, about “{label}” ({why}), do this: {proposal}
 msgid "For the {owner}"
 msgstr "For the {owner}"
 
+#: src/settings/ai-providers.tsx
+msgid "For when the default's provider is down"
+msgstr "For when the default's provider is down"
+
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "For whom"
@@ -7863,8 +7887,8 @@ msgid "Grasp's own rules always hold over these."
 msgstr "Grasp's own rules always hold over these."
 
 #: src/settings/staff-access.tsx
-msgid "Grasp's team can help until then, unless you end it"
-msgstr "Grasp's team can help until then, unless you end it"
+msgid "Grasp's team can help here until then"
+msgstr "Grasp's team can help here until then"
 
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
@@ -9255,6 +9279,7 @@ msgstr "Kinds of field"
 msgid "Kinds of highlight"
 msgstr "Kinds of highlight"
 
+#: src/chat/sources.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -12525,10 +12550,6 @@ msgstr "passage {number}"
 #: src/interview/words.ts
 msgid "Passing it on"
 msgstr "Passing it on"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Passwords and two-step sign-in live with your organization"
-msgstr "Passwords and two-step sign-in live with your organization"
 
 #: src/frame/part-words.tsx
 msgctxt "put the copied key in the field"
@@ -18108,6 +18129,7 @@ msgid "United States"
 msgstr "United States"
 
 #: src/activity/pending.tsx
+#: src/chat/sources.tsx
 msgid "Unknown"
 msgstr "Unknown"
 
@@ -18304,8 +18326,8 @@ msgid "Used by {queries}"
 msgstr "Used by {queries}"
 
 #: src/settings/ai-providers.tsx
-msgid "Used in this order when the default's provider is down."
-msgstr "Used in this order when the default's provider is down."
+msgid "Used in this order when the default's provider is down"
+msgstr "Used in this order when the default's provider is down"
 
 #: src/labels.ts
 msgid "User"
@@ -18809,6 +18831,10 @@ msgstr "What {alias} reaches"
 msgid "What <0/> changed"
 msgstr "What <0/> changed"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "What AI costs this month"
+msgstr "What AI costs this month"
+
 #: src/brain/brain-atlas.ts
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
@@ -18830,6 +18856,10 @@ msgstr "What changes"
 msgctxt "the files a change touches"
 msgid "What changes"
 msgstr "What changes"
+
+#: src/settings/ai-providers.tsx
+msgid "What chat, agents and workflows run on"
+msgstr "What chat, agents and workflows run on"
 
 #: src/inbox/report-view.tsx
 msgid "What could be better"
@@ -20147,6 +20177,10 @@ msgstr "Your message"
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Your organization doesn't allow this model. Pick another one."
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Your organization manages your password"
+msgstr "Your organization manages your password"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx

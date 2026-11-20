@@ -565,7 +565,7 @@ export const RemovedActions = ({ person }: { person: RemovedPerson }) => {
           <DropdownMenuTrigger
             aria-label={t`Actions for ${who}`}
             icon={More}
-            size="xs"
+            size="sm"
             variant="ghost"
           />
           <DropdownMenuContent align="end">

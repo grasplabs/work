@@ -259,7 +259,7 @@ const Security = () => {
       <SectionCard variant="grouped" density="compact" flush title={t`Sign-in`}>
         <SettingsRows>
           <ReadOnlyRow
-            help={t`Passwords and two-step sign-in live with your organization`}
+            help={t`Your organization manages your password`}
             label={t`Signed in with`}
             value={signedInWith}
           />
@@ -323,7 +323,6 @@ const chatAccounts = async (
 const SecurityPending = () => (
   <PageSkeletonSettings
     header={false}
-    help={false}
     sections={[1, { rows: 10, variant: "items" }]}
   />
 );

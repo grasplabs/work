@@ -315,6 +315,14 @@ msgstr "{count, plural, one {# cambio en sus datos} other {# cambios en sus dato
 msgid "{count, plural, one {# change waits for you to confirm or reject it.} other {# changes wait for you to confirm or reject them.}}"
 msgstr "{count, plural, one {# cambio espera a que lo confirmes o lo rechaces.} other {# cambios esperan a que los confirmes o los rechaces.}}"
 
+#: src/chat/sources.tsx
+msgid "{count, plural, one {# collection} other {# collections}}"
+msgstr "{count, plural, one {# colección} other {# colecciones}}"
+
+#: src/chat/sources.tsx
+msgid "{count, plural, one {# connection} other {# connections}}"
+msgstr "{count, plural, one {# conexión} other {# conexiones}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {# conversation came in: with the board, the teams and their people.} other {# conversations came in: with the board, the teams and their people.}}"
 msgstr "{count, plural, one {Llegó # conversación: con la dirección, los equipos y su gente.} other {Llegaron # conversaciones: con la dirección, los equipos y su gente.}}"
@@ -354,6 +362,10 @@ msgstr "{count, plural, one {# entrevista en la semana {week}} other {# entrevis
 #: src/brain/brain.ts
 msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
 msgstr "{count, plural, one {# equipo invitado aún sin entrevistar: {teams}.} other {# equipos invitados aún sin entrevistar: {teams}.}}"
+
+#: src/chat/sources.tsx
+msgid "{count, plural, one {# memory} other {# memories}}"
+msgstr "{count, plural, one {# recuerdo} other {# recuerdos}}"
 
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more App this chat worked on} other {# more Apps this chat worked on}}"
@@ -445,10 +457,6 @@ msgstr "{count, plural, one {Añadir # documento} other {Añadir # documentos}}"
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Adding up the hours of # workflow} other {Adding up the hours of # workflows}}"
 msgstr "{count, plural, one {Sumando las horas de # flujo de trabajo} other {Sumando las horas de # flujos de trabajo}}"
-
-#: src/chat/sources.tsx
-msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
-msgstr "{count, plural, one {Las respuestas se basan en # fuente} other {Las respuestas se basan en # fuentes}}"
 
 #: src/chat/asked-questions.tsx
 msgid "{count, plural, one {Asked you a question} other {Asked you # questions}}"
@@ -1887,6 +1895,10 @@ msgstr "Un proyecto agrupa apps y flujos de trabajo de un proceso, un equipo o u
 msgid "A question"
 msgstr "Una pregunta"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "A receipt for each payment"
+msgstr "Un recibo por cada pago"
+
 #: src/apps/field-kinds.tsx
 msgid "A record of another table"
 msgstr "Un registro de otra tabla"
@@ -3281,8 +3293,11 @@ msgstr "Como lo tiene la empresa"
 msgid "As your device"
 msgstr "Como tu dispositivo"
 
-#: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
+msgid "As your endpoint names it, such as llama-3.3-70b"
+msgstr "Como lo llama tu endpoint, por ejemplo llama-3.3-70b"
+
+#: src/onboarding/ai-step.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
 msgstr "Tal como lo llama tu endpoint, por ejemplo llama-3.3-70b."
 
@@ -5010,6 +5025,7 @@ msgstr "Conectando tu Microsoft 365"
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/resource-bindings.tsx
+#: src/chat/sources.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
@@ -6288,6 +6304,10 @@ msgstr "Cada área se borra por separado. Si una falla, se vuelve a intentar has
 msgid "Each as the company has it, or for fewer people. Never more."
 msgstr "Cada una como la tiene la empresa, o para menos personas. Nunca para más."
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "Each invoice to your billing email"
+msgstr "Cada factura a tu correo de facturación"
+
 #: src/inbox/interviews-item.tsx
 msgid "Each link is its owner's own: send it only to them."
 msgstr "Cada enlace es de su dueño: envíalo solo a esa persona."
@@ -6437,8 +6457,8 @@ msgid "End Grasp staff access now?"
 msgstr "¿Terminar ahora el acceso del personal de Grasp?"
 
 #: src/settings/staff-access.tsx
-msgid "End staff access now"
-msgstr "Terminar ahora el acceso del personal"
+msgid "End now"
+msgstr "Terminar ahora"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -7317,6 +7337,10 @@ msgstr "Para las solicitudes de Stephen, sobre «{label}» ({why}), haz esto: {p
 msgid "For the {owner}"
 msgstr "Para {owner}"
 
+#: src/settings/ai-providers.tsx
+msgid "For when the default's provider is down"
+msgstr "Para cuando el proveedor del modelo predeterminado no responda"
+
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Para quién"
@@ -7863,8 +7887,8 @@ msgid "Grasp's own rules always hold over these."
 msgstr "Las reglas propias de Grasp siempre prevalecen."
 
 #: src/settings/staff-access.tsx
-msgid "Grasp's team can help until then, unless you end it"
-msgstr "Hasta entonces el equipo de Grasp puede ayudar, salvo que lo termines"
+msgid "Grasp's team can help here until then"
+msgstr "Hasta entonces el equipo de Grasp puede ayudar aquí"
 
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
@@ -9255,6 +9279,7 @@ msgstr "Tipos de campo"
 msgid "Kinds of highlight"
 msgstr "Tipos de momentos destacados"
 
+#: src/chat/sources.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -12525,10 +12550,6 @@ msgstr "pasaje {number}"
 #: src/interview/words.ts
 msgid "Passing it on"
 msgstr "Traspaso"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Passwords and two-step sign-in live with your organization"
-msgstr "Las contraseñas y el inicio de sesión en dos pasos los gestiona tu organización"
 
 #: src/frame/part-words.tsx
 msgctxt "put the copied key in the field"
@@ -18108,6 +18129,7 @@ msgid "United States"
 msgstr "Estados Unidos"
 
 #: src/activity/pending.tsx
+#: src/chat/sources.tsx
 msgid "Unknown"
 msgstr "Desconocida"
 
@@ -18304,8 +18326,8 @@ msgid "Used by {queries}"
 msgstr "Usado por {queries}"
 
 #: src/settings/ai-providers.tsx
-msgid "Used in this order when the default's provider is down."
-msgstr "Se usan en este orden cuando el proveedor del predeterminado no funciona."
+msgid "Used in this order when the default's provider is down"
+msgstr "Se usan en este orden si el proveedor del modelo predeterminado no responde"
 
 #: src/labels.ts
 msgid "User"
@@ -18809,6 +18831,10 @@ msgstr "A qué accede {alias}"
 msgid "What <0/> changed"
 msgstr "Qué cambió <0/>"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "What AI costs this month"
+msgstr "Lo que cuesta la IA este mes"
+
 #: src/brain/brain-atlas.ts
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
@@ -18830,6 +18856,10 @@ msgstr "Qué cambia"
 msgctxt "the files a change touches"
 msgid "What changes"
 msgstr "Qué cambia"
+
+#: src/settings/ai-providers.tsx
+msgid "What chat, agents and workflows run on"
+msgstr "Con lo que funcionan el chat, los agentes y los flujos de trabajo"
 
 #: src/inbox/report-view.tsx
 msgid "What could be better"
@@ -20147,6 +20177,10 @@ msgstr "Tu mensaje"
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Tu organización no permite este modelo. Elige otro."
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Your organization manages your password"
+msgstr "Tu organización gestiona tu contraseña"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx

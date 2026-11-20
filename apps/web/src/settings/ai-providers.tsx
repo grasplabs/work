@@ -666,7 +666,7 @@ const AddProviderDialog = ({
         onClick={() => {
           setOpen(true);
         }}
-        size="xs"
+        size="sm"
         variant="ink"
       >
         {t`Add a provider`}
@@ -823,7 +823,7 @@ const NameModel = ({ onName }: { onName: (model: string) => void }) => {
   };
   return (
     <SettingRow
-      info={t`As your endpoint names it, such as llama-3.3-70b.`}
+      help={t`As your endpoint names it, such as llama-3.3-70b`}
       label={t`Your endpoint's model`}
     >
       {(field) => (
@@ -874,7 +874,7 @@ const Fallbacks = ({
   };
   return (
     <FactRow
-      info={t`Used in this order when the default's provider is down.`}
+      help={t`Used in this order when the default's provider is down`}
       label={t`Fallbacks`}
     >
       <ol aria-label={t`Fallbacks`} {...stylex.props(styles.list)}>
@@ -1001,6 +1001,7 @@ const Models = ({
         ) : null}
         {editable ? (
           <SettingRow
+            help={t`What chat, agents and workflows run on`}
             label={t`Default model`}
             onRetry={() => {
               if (last !== undefined) {
@@ -1033,7 +1034,11 @@ const Models = ({
             )}
           </SettingRow>
         ) : (
-          <ReadOnlyRow label={t`Default model`} value={defaultName} />
+          <ReadOnlyRow
+            help={t`What chat, agents and workflows run on`}
+            label={t`Default model`}
+            value={defaultName}
+          />
         )}
         {choice !== null && defaultModel === null && editable ? (
           <RowAlert variant="attention">
@@ -1050,7 +1055,10 @@ const Models = ({
           />
         )}
         {editable && choice !== null && fallbacks.length < fallbacksMax ? (
-          <SettingRow label={t`Add a fallback`}>
+          <SettingRow
+            help={t`For when the default's provider is down`}
+            label={t`Add a fallback`}
+          >
             {(field) => (
               <Combobox
                 {...field}
