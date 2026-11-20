@@ -301,7 +301,7 @@ msgstr "{count, plural, one {{names} werken hier, aan # stuk werk dat naar voren
 
 #: src/inbox/items.ts
 msgid "{count, plural, one {# binding} other {# bindings}}"
-msgstr "{count, plural, one {# verbinding} other {# verbindingen}}"
+msgstr "{count, plural, one {# koppeling} other {# koppelingen}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# blocker} other {# blockers}}"
