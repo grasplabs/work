@@ -24,12 +24,7 @@ describe(brainLog, () => {
     expect({
       weeks: entries
         .filter((entry) => entry.interviews !== undefined)
-        .map(({ day, interviews, title, by }) => ({
-          day,
-          interviews,
-          title,
-          by,
-        })),
+        .map(({ day, interviews, title }) => ({ day, interviews, title })),
       conversations: entries.filter(({ id }) => conversations.has(id)),
     }).toStrictEqual({
       weeks: [
@@ -37,30 +32,30 @@ describe(brainLog, () => {
           day: "2026-08-31",
           interviews: { count: 12, week: 36 },
           title: "",
-          by: undefined,
         },
         {
           day: "2026-08-24",
           interviews: { count: 9, week: 35 },
           title: "",
-          by: undefined,
         },
       ],
       conversations: [],
     });
   });
 
-  it("names an answered question by the role it was asked of, and keeps the days newest first", () => {
+  it("dates an answered question on the day it was closed, and keeps the days newest first", () => {
+    const closed = ws.gaps.find((gap) => gap.closedAt !== undefined);
     const answered = entries.find(
-      (entry) => entry.question?.step === "answered"
+      (entry) =>
+        entry.question?.step === "answered" && entry.question.gap === closed?.id
     );
     expect({
-      by: answered?.by,
+      day: answered?.day,
       newestFirst: entries
         .map(({ day }) => day)
         .every((day, index, days) => (days[index - 1] ?? day) >= day),
     }).toStrictEqual({
-      by: "CFO",
+      day: closed?.closedAt?.slice(0, 10),
       newestFirst: true,
     });
   });
@@ -71,7 +66,9 @@ describe(brainLog, () => {
       lastWeek: log.lastWeek.every(
         ({ day }) => day >= "2026-08-24" && day < "2026-08-31"
       ),
-      earlier: log.earlier.every(({ day }) => day < "2026-08-24"),
+      earlier:
+        log.earlier.length > 0 &&
+        log.earlier.every(({ day }) => day < "2026-08-24"),
       weeks: [log.thisWeek, log.lastWeek].map(
         (stretch) =>
           stretch.find((entry) => entry.interviews !== undefined)?.interviews

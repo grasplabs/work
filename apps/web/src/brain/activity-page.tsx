@@ -14,7 +14,7 @@ import {
   useRouteContext,
   useRouter,
 } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { formatDateTime, formatDay } from "../format.ts";
@@ -200,6 +200,9 @@ export const ActivityPage = () => {
   const [failed, setFailed] = useState<{ gap: string; reason: string }>();
   const fresh = useFresh();
   const [open, setOpen] = useState<string>();
+  // Where the reader was in the log: on a phone the open line takes the page's place, and closing it comes back here.
+  const pane = useRef<HTMLDivElement>(null);
+  const readAt = useRef(0);
 
   const notes = new Map(brain.notes.map((note) => [note.id, note]));
   const sources = new Map(
@@ -312,7 +315,9 @@ export const ActivityPage = () => {
             meta: [t`Came in ${at}`],
             kept: [],
             changed: [],
-            goes: { to: "note", id: change.source.id },
+            ...(notes.has(change.source.id)
+              ? { goes: { to: "note", id: change.source.id } }
+              : {}),
           }
         : sourceOpened(source, Inbox);
     }
@@ -415,7 +420,7 @@ export const ActivityPage = () => {
     changed: t`Pages it changed`,
   };
   return (
-    <div {...stylex.props(styles.pane)}>
+    <div ref={pane} {...stylex.props(styles.pane)}>
       <div
         {...stylex.props(
           styles.split,
@@ -431,13 +436,24 @@ export const ActivityPage = () => {
               label,
               lines: lines.map(({ line }) => line),
             }))}
-            onOpen={setOpen}
+            onOpen={(id) => {
+              readAt.current = pane.current?.scrollTop ?? 0;
+              setOpen(id);
+            }}
             waiting={waitingListed.map(({ line }) => line)}
             words={words}
           />
         </div>
         {inHand === undefined ? null : (
-          <div {...stylex.props(styles.inspector)}>
+          <div
+            // The line in hand takes focus, so a screen reader is where it opened.
+            ref={(node) => {
+              node?.focus();
+            }}
+            key={open}
+            tabIndex={-1}
+            {...stylex.props(styles.inspector)}
+          >
             <BrainActivityInspector
               actions={
                 <>
@@ -483,6 +499,9 @@ export const ActivityPage = () => {
               }
               onClose={() => {
                 setOpen(undefined);
+                requestAnimationFrame(() => {
+                  pane.current?.scrollTo({ top: readAt.current });
+                });
               }}
               onOpenPage={(id) => {
                 go({ to: "note", id });

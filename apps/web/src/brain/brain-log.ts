@@ -26,19 +26,15 @@ export interface LogEntry {
   day: string;
   /** What it was, as the source names it; for a question, the question. Empty for a week's interviews. */
   title: string;
-  /** Who gave it, and how, as a role: "Head of finance · Live, 45 minutes". */
-  by?: string;
   /** The note it opens. */
   opens?: string;
   /** The interviews of one week, which are one line with how many there were: never who talked, nor on which day. */
   interviews?: { count: number; week: number };
-  /** For a question: noticed, sent to who can answer it, or answered, and whether it is still open. */
+  /** For a question: noticed, sent to who can answer it, or answered. */
   question?: {
     /** The gap it is. */
     gap: string;
     step: "noticed" | "asked" | "answered";
-    open: boolean;
-    answer?: string;
   };
 }
 
@@ -71,20 +67,17 @@ const entriesOf = (ws: Workspace, brain: Brain): LogEntry[] => {
     if (kind === "interview" || !inBrain.has(source.id)) {
       continue;
     }
-    const by = [source.who, source.how].filter(Boolean).join(" · ");
     entries.push({
       id: source.id,
       kind,
       day: source.date,
       title: source.title,
-      ...(by === "" ? {} : { by }),
       opens: source.id,
     });
   }
   // Grasp's questions: noticed in a source, sent to who can answer it, answered.
   const dated = new Map(ws.sources.map((source) => [source.id, source.date]));
   for (const gap of ws.gaps) {
-    const open = gap.closedAt === undefined;
     const opens = inBrain.has(gap.id) ? { opens: gap.id } : {};
     const noticed = dated.get(gap.sourceId);
     const line = { kind: "question" as const, title: gap.question };
@@ -94,7 +87,7 @@ const entriesOf = (ws: Workspace, brain: Brain): LogEntry[] => {
         id: `${gap.id}:noticed`,
         day: noticed,
         ...opens,
-        question: { gap: gap.id, step: "noticed", open },
+        question: { gap: gap.id, step: "noticed" },
       });
     }
     if (gap.askedAt !== undefined) {
@@ -102,25 +95,17 @@ const entriesOf = (ws: Workspace, brain: Brain): LogEntry[] => {
         ...line,
         id: `${gap.id}:asked`,
         day: gap.askedAt.slice(0, 10),
-        by: gap.owner,
         ...opens,
-        question: { gap: gap.id, step: "asked", open },
+        question: { gap: gap.id, step: "asked" },
       });
     }
     if (gap.closedAt !== undefined) {
-      // Answered by the role it was asked of: never the name of whoever typed the answer.
       entries.push({
         ...line,
         id: `${gap.id}:answered`,
         day: gap.closedAt.slice(0, 10),
-        by: gap.owner,
         ...opens,
-        question: {
-          gap: gap.id,
-          step: "answered",
-          open: false,
-          ...(gap.answer === undefined ? {} : { answer: gap.answer }),
-        },
+        question: { gap: gap.id, step: "answered" },
       });
     }
   }
@@ -136,7 +121,7 @@ export interface LogStretches {
 
 const weekMs = 7 * 86_400_000;
 
-/** The Monday of the week `day` is in, as an ISO date. */
+/** The Monday of the week `day` (an ISO date) is in, in milliseconds since the epoch. */
 const mondayOf = (day: string): number => {
   const at = Date.parse(`${day}T12:00:00Z`);
   return at - ((new Date(at).getUTCDay() + 6) % 7) * 86_400_000;
