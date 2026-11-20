@@ -158,6 +158,8 @@ export const reservedAppLinks: ReadonlySet<string> = new Set([
   "connections",
   "dashboard",
   "decisions",
+  // A guest's home (apps/web/src/routes/guest.tsx).
+  "guest",
   "inbox",
   "integrations",
   "interview",

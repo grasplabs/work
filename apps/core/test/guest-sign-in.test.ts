@@ -334,17 +334,6 @@ describe("inviting a guest", () => {
   });
 });
 
-/** The Apps the person behind `cookie` lists, as a member's page does. */
-const appsOf = async (cookie: string) => {
-  const { core } = await openRpc(cookie);
-  try {
-    using session = core.authenticate();
-    return await session.apps.list();
-  } finally {
-    core[Symbol.dispose]();
-  }
-};
-
 describe("a guest signing in with a code", () => {
   it("is mailed a short-lived code that signs them in to a session reaching nothing, audited", async () => {
     const mail = await mailbox();
@@ -358,11 +347,12 @@ describe("a guest signing in with a code", () => {
       cookie = signedIn.session ?? "";
     });
 
+    const connection = await openRpc(cookie);
     expect({
       signedIn: cookie !== "",
-      // A member's call: a guest reaches only what guest-access.ts lets
-      // through (guest-apps.test.ts).
-      rpc: await outcome(appsOf(cookie)),
+      // Their connection answers who they are and the Apps shared with
+      // them alone (guest-access.ts): anything else, as nobody's.
+      rpc: await outcome(connection.core.authenticate().apps.list()),
       session: sessionSchema.parse(await sessionOf(cookie)),
       events: events
         .filter(({ action }) => action.startsWith("member.guest"))

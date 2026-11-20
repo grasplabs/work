@@ -1,10 +1,12 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { functionErrors } from "@grasp-os/shared/functions";
 import { permissionIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionId, AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { drizzle } from "drizzle-orm/d1";
 
+import { isGuestNow } from "./auth/guest-codes.ts";
 import { appUsersReadBy, appWriteFor } from "./brain-app-writes.ts";
 import { entitiesCallFor, recallFor, skillsCallFor } from "./brain-recall.ts";
 import type { RecallCaller } from "./brain-recall.ts";
@@ -127,9 +129,10 @@ export const brainAdapter: ResourceAdapter<"brain"> = {
  * function host lets through alone (the runtime's `brainByDefault`): of
  * only what everyone in the company may read, with no grant, so no
  * team's and nobody's own (`recallFor`, `byDefault`), for a person each
- * read finds a member now, as every reader of the Brain. The App is
- * marked (`brain_default_reads`), for good, before anything is read: from
- * then on it takes no guests, as a granted App
+ * read finds a member now, as every reader of the Brain. A guest's call
+ * never gets here: it is refused before anything else. The App is marked
+ * (`brain_default_reads`), for good, before anything is read: from then
+ * on it takes no guests, as a granted App
  * (app-provenance.ts `holdsAnySource`). A mark that can't be written
  * refuses the read.
  */
@@ -140,6 +143,13 @@ export const brainByDefault = (
   kind: "brain",
   contract: null,
   call: async (method, args) => {
+    // A guest's call (guest-access.ts) reads nothing of the Brain, which
+    // is a member's: refused before the mark, which would close the App
+    // to every guest for good (app-access.ts) for a read never made.
+    if (await isGuestNow(env, caller.authority.onBehalfOf)) {
+      // In the function host's words, as a refused read of the Brain.
+      throw functionErrors.create("permission.unavailable");
+    }
     await drizzle(env.DB)
       .insert(brainDefaultReads)
       .values({

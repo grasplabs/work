@@ -447,7 +447,7 @@ const hasRoleNow = async (
  * The live Apps `by` may open now (`PagesApi.opensApps`): each App they
  * have a role in that is live, checked as opening it is (`usableApp`),
  * so one they would be refused (one they can't read, or for a guest one
- * holding a source an admin didn't share) isn't listed. Counted as the
+ * that holds a source) isn't listed. Counted as the
  * sidebar's reads are.
  */
 const openableApps = async (env: Env, by: Identity): Promise<OpenableApp[]> => {

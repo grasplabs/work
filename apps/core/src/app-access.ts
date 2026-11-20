@@ -78,7 +78,7 @@ import type { SharedRole } from "./sharing.ts";
  * Who asks, as far as their role in an App goes. A guest (`guest`,
  * guest-access.ts) has a role only through a share with them as a
  * person, as the App's user, and only in an App that holds no source,
- * unless an admin shared it with them (`requireAppRole`).
+ * whoever shared it (`requireAppRole`).
  */
 export type Person = Pick<Identity, "userId" | "role" | "teams" | "guest">;
 

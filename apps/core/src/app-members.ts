@@ -42,7 +42,7 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import { activeMember, guestNow, mayAct, organizationId } from "./auth/auth.ts";
-import { isGuest } from "./auth/identity.ts";
+import { isGuestNow } from "./auth/guest-codes.ts";
 import {
   apps,
   appMembers,
@@ -413,7 +413,7 @@ export const addMember = async (
   requireNotStaff(by);
   const member = appErrors.parse("app.invalid", newSubjectMemberSchema, input);
   await requireSharable(env, member, sharingRules(found, member), by);
-  const guest = member.type === "person" && (await isGuest(env, member.id));
+  const guest = member.type === "person" && (await isGuestNow(env, member.id));
   if (guest) {
     await requireGuestShareable(env, by, found, member);
   }

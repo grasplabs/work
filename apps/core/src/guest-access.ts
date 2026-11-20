@@ -21,7 +21,7 @@ import type { SessionCheck } from "./session-check.ts";
 //
 // Which Apps a guest reaches is decided where every App's access is
 // (app-access.ts): only one shared with them as a person, as its user,
-// and one that holds a source only while an admin shared it.
+// and never one that holds a source, whoever shared it.
 
 /** What a guest's connection may call over `/rpc`, as `<namespace>.<method>`. */
 export const guestRpc = [

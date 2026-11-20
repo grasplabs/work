@@ -572,8 +572,9 @@ const memberCall = async (
   );
   // A guest's answer goes out only while they still have the App, read
   // again now: one that gained a source while the call ran (GRA-2235,
-  // app-access.ts) keeps what the call read here. A keyed action's and a
-  // stream's are held to it before each frame (`stillTheirs`).
+  // app-access.ts) keeps what the call read here. A keyed action's answer
+  // is held to it by `stillTheirs` before it goes out; a stream's before
+  // its result and, for a guest, before each frame (`relay`).
   if (person.guest === true) {
     await functionRoles(env, person, id);
   }
@@ -749,6 +750,17 @@ const relay = (
         }
         const frame = frameOf(line);
         if (frame.type !== "result") {
+          // A guest's progress goes out only while they still have the
+          // App, read again before each frame: one that gained a source
+          // meanwhile closes to them at once (GRA-2235, app-access.ts).
+          if (call.person.guest === true) {
+            try {
+              await still("push");
+            } catch (error) {
+              await refuse?.(error);
+              return;
+            }
+          }
           controller.enqueue(encoder.encode(`${line}\n`));
           return;
         }

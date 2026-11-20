@@ -12,7 +12,8 @@ import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { activeMember, guestNow, mayAct, organizationId } from "./auth/auth.ts";
-import { isGuest, memberRole } from "./auth/identity.ts";
+import { isGuestNow } from "./auth/guest-codes.ts";
+import { memberRole } from "./auth/identity.ts";
 import { members, projects, teams, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { buildsProjectsOf, requireProjectRole } from "./project-access.ts";
@@ -190,7 +191,7 @@ export const requireSharable = async (
   if (
     role === undefined &&
     rules.guestIssue !== undefined &&
-    (await isGuest(env, member.id))
+    (await isGuestNow(env, member.id))
   ) {
     // A guest is only ever its user.
     if (rules.builds) {
