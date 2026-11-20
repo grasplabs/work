@@ -1891,6 +1891,10 @@ msgstr "Een project groepeert apps en workflows voor een proces, een team of een
 msgid "A question"
 msgstr "Een vraag"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "A receipt for each payment"
+msgstr "Een betaalbewijs voor elke betaling"
+
 #: src/apps/field-kinds.tsx
 msgid "A record of another table"
 msgstr "Een record van een andere tabel"
@@ -3273,8 +3277,11 @@ msgstr "Zoals het bedrijf het heeft"
 msgid "As your device"
 msgstr "Zoals je apparaat"
 
-#: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
+msgid "As your endpoint names it, such as llama-3.3-70b"
+msgstr "Zoals je endpoint het noemt, zoals llama-3.3-70b"
+
+#: src/onboarding/ai-step.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
 msgstr "Zoals je endpoint het noemt, bijvoorbeeld llama-3.3-70b."
 
@@ -6281,6 +6288,10 @@ msgstr "Elk onderdeel wordt apart gewist. Mislukt er een, dan wordt het opnieuw 
 msgid "Each as the company has it, or for fewer people. Never more."
 msgstr "Elk zoals het bedrijf het heeft, of voor minder mensen. Nooit voor meer."
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "Each invoice to your billing email"
+msgstr "Elke factuur naar je factuur-e-mailadres"
+
 #: src/inbox/interviews-item.tsx
 msgid "Each link is its owner's own: send it only to them."
 msgstr "Elke link hoort bij één persoon: stuur hem alleen naar die persoon."
@@ -6430,8 +6441,8 @@ msgid "End Grasp staff access now?"
 msgstr "Toegang van Grasp-medewerkers nu beëindigen?"
 
 #: src/settings/staff-access.tsx
-msgid "End staff access now"
-msgstr "Toegang van medewerkers nu beëindigen"
+msgid "End now"
+msgstr "Nu beëindigen"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -7310,6 +7321,10 @@ msgstr "Voor Stephens verzoeken, over “{label}” ({why}), doe dit: {proposal}
 msgid "For the {owner}"
 msgstr "Voor {owner}"
 
+#: src/settings/ai-providers.tsx
+msgid "For when the default's provider is down"
+msgstr "Voor als de aanbieder van het standaardmodel uitvalt"
+
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Voor wie"
@@ -7852,8 +7867,8 @@ msgid "Grasp's own rules always hold over these."
 msgstr "De eigen regels van Grasp gaan hier altijd boven."
 
 #: src/settings/staff-access.tsx
-msgid "Grasp's team can help until then, unless you end it"
-msgstr "Tot dan kan het team van Grasp helpen, tenzij je het beëindigt"
+msgid "Grasp's team can help here until then"
+msgstr "Tot dan kan het team van Grasp hier helpen"
 
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
@@ -12497,10 +12512,6 @@ msgstr "passage {number}"
 #: src/interview/words.ts
 msgid "Passing it on"
 msgstr "Doorgeven"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Passwords and two-step sign-in live with your organization"
-msgstr "Wachtwoorden en inloggen in twee stappen regelt je organisatie"
 
 #: src/settings/invitations.tsx
 msgid "Paste several at once, split by commas or lines."
@@ -18256,8 +18267,8 @@ msgid "Used by {queries}"
 msgstr "Gebruikt door {queries}"
 
 #: src/settings/ai-providers.tsx
-msgid "Used in this order when the default's provider is down."
-msgstr "In deze volgorde gebruikt als de provider van het standaardmodel niet werkt."
+msgid "Used in this order when the default's provider is down"
+msgstr "In deze volgorde gebruikt als de aanbieder van het standaardmodel uitvalt"
 
 #: src/labels.ts
 msgid "User"
@@ -18761,6 +18772,10 @@ msgstr "Wat {alias} bereikt"
 msgid "What <0/> changed"
 msgstr "Wat <0/> veranderde"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "What AI costs this month"
+msgstr "Wat AI deze maand kost"
+
 #: src/brain/brain-atlas.ts
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
@@ -18782,6 +18797,10 @@ msgstr "Wat er verandert"
 msgctxt "the files a change touches"
 msgid "What changes"
 msgstr "Wat er verandert"
+
+#: src/settings/ai-providers.tsx
+msgid "What chat, agents and workflows run on"
+msgstr "Waar chat, agents en workflows op draaien"
 
 #: src/inbox/report-view.tsx
 msgid "What could be better"
@@ -20099,6 +20118,10 @@ msgstr "Je bericht"
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Je organisatie staat dit model niet toe. Kies een ander model."
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Your organization manages your password"
+msgstr "Je organisatie beheert je wachtwoord"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx

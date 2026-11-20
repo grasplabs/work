@@ -62,7 +62,6 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
                 chooseComposerLook(userId, { ...look, accent });
               }
             }}
-            size="sm"
             value={[look.accent]}
           >
             {composerAccents.map((accent) => (
@@ -81,7 +80,6 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
                 chooseComposerLook(userId, { ...look, edge });
               }
             }}
-            size="sm"
             value={[look.edge]}
           >
             {composerEdges.map((edge) => (

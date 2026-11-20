@@ -70,9 +70,7 @@ const EndStaffAccess = ({
   };
   return (
     <AlertDialog>
-      <AlertDialogTrigger size="xs">
-        {t`End staff access now`}
-      </AlertDialogTrigger>
+      <AlertDialogTrigger size="sm">{t`End now`}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogTitle>{t`End Grasp staff access now?`}</AlertDialogTitle>
         <AlertDialogDescription>
@@ -131,7 +129,7 @@ export const StaffAccessSection = ({
         )}
         {/* Until when, in a field that only reads, with what staff reach at its end. */}
         <SettingRow
-          help={t`Grasp's team can help until then, unless you end it`}
+          help={t`Grasp's team can help here until then`}
           label={t`Open until`}
         >
           {(field) => (

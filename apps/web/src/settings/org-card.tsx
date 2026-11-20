@@ -120,11 +120,12 @@ const styles = stylex.create({
     lineHeight: { default: grasp.titleMdLine, [NARROW]: grasp.titleSmLine },
     fontWeight: grasp.weightRegular,
   },
+  // A long name wraps under itself rather than lose its end, on a phone too.
   name: {
     margin: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    minWidth: 0,
+    overflowWrap: "break-word",
+    textWrap: "balance",
   },
   // The field in place: a box round the words as wide as they are, its edge
   // a step out from them, so nothing moves when it opens or closes. A hidden

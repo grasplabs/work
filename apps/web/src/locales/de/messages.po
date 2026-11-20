@@ -1891,6 +1891,10 @@ msgstr "Ein Projekt bündelt Apps und Workflows für einen Prozess, ein Team ode
 msgid "A question"
 msgstr "Eine Frage"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "A receipt for each payment"
+msgstr "Ein Beleg für jede Zahlung"
+
 #: src/apps/field-kinds.tsx
 msgid "A record of another table"
 msgstr "Ein Datensatz einer anderen Tabelle"
@@ -3273,8 +3277,11 @@ msgstr "Wie im Unternehmen"
 msgid "As your device"
 msgstr "Wie Ihr Gerät"
 
-#: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
+msgid "As your endpoint names it, such as llama-3.3-70b"
+msgstr "So, wie Ihr Endpunkt es nennt, etwa llama-3.3-70b"
+
+#: src/onboarding/ai-step.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
 msgstr "So, wie Ihr Endpunkt es nennt, etwa llama-3.3-70b."
 
@@ -6281,6 +6288,10 @@ msgstr "Jeder Bereich wird für sich gelöscht. Schlägt einer fehl, wird er ern
 msgid "Each as the company has it, or for fewer people. Never more."
 msgstr "Jede so, wie das Unternehmen sie hat, oder für weniger Personen. Nie für mehr."
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "Each invoice to your billing email"
+msgstr "Jede Rechnung an Ihre Rechnungs-E-Mail"
+
 #: src/inbox/interviews-item.tsx
 msgid "Each link is its owner's own: send it only to them."
 msgstr "Jeder Link gehört einer Person: Schick ihn nur ihr."
@@ -6430,8 +6441,8 @@ msgid "End Grasp staff access now?"
 msgstr "Zugriff der Grasp-Mitarbeitenden jetzt beenden?"
 
 #: src/settings/staff-access.tsx
-msgid "End staff access now"
-msgstr "Mitarbeiterzugriff jetzt beenden"
+msgid "End now"
+msgstr "Jetzt beenden"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -7310,6 +7321,10 @@ msgstr "Für Stephens Anfragen, zu „{label}“ ({why}), tu Folgendes: {proposa
 msgid "For the {owner}"
 msgstr "Für {owner}"
 
+#: src/settings/ai-providers.tsx
+msgid "For when the default's provider is down"
+msgstr "Für den Fall, dass der Anbieter des Standardmodells ausfällt"
+
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
 msgstr "Für wen"
@@ -7852,8 +7867,8 @@ msgid "Grasp's own rules always hold over these."
 msgstr "Die eigenen Regeln von Grasp gehen immer vor."
 
 #: src/settings/staff-access.tsx
-msgid "Grasp's team can help until then, unless you end it"
-msgstr "Bis dahin kann das Grasp-Team helfen, sofern Sie den Zugang nicht beenden"
+msgid "Grasp's team can help here until then"
+msgstr "Bis dahin kann das Grasp-Team hier helfen"
 
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
@@ -12497,10 +12512,6 @@ msgstr "Passage {number}"
 #: src/interview/words.ts
 msgid "Passing it on"
 msgstr "Weitergabe"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Passwords and two-step sign-in live with your organization"
-msgstr "Passwörter und Anmeldung in zwei Schritten verwaltet Ihre Organisation"
 
 #: src/settings/invitations.tsx
 msgid "Paste several at once, split by commas or lines."
@@ -18256,8 +18267,8 @@ msgid "Used by {queries}"
 msgstr "Genutzt von {queries}"
 
 #: src/settings/ai-providers.tsx
-msgid "Used in this order when the default's provider is down."
-msgstr "In dieser Reihenfolge verwendet, wenn der Anbieter des Standardmodells ausfällt."
+msgid "Used in this order when the default's provider is down"
+msgstr "In dieser Reihenfolge genutzt, wenn der Anbieter des Standardmodells ausfällt"
 
 #: src/labels.ts
 msgid "User"
@@ -18761,6 +18772,10 @@ msgstr "Worauf {alias} zugreift"
 msgid "What <0/> changed"
 msgstr "Was <0/> geändert hat"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "What AI costs this month"
+msgstr "Was KI diesen Monat kostet"
+
 #: src/brain/brain-atlas.ts
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
@@ -18782,6 +18797,10 @@ msgstr "Was sich ändert"
 msgctxt "the files a change touches"
 msgid "What changes"
 msgstr "Was sich ändert"
+
+#: src/settings/ai-providers.tsx
+msgid "What chat, agents and workflows run on"
+msgstr "Worauf Chat, Agenten und Workflows laufen"
 
 #: src/inbox/report-view.tsx
 msgid "What could be better"
@@ -20099,6 +20118,10 @@ msgstr "Ihre Nachricht"
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Ihre Organisation erlaubt dieses Modell nicht. Wählen Sie ein anderes."
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Your organization manages your password"
+msgstr "Ihre Organisation verwaltet Ihr Passwort"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
