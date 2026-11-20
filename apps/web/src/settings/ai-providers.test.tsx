@@ -584,6 +584,17 @@ describe("Settings › AI providers", () => {
       masked: true,
       kept: false,
     });
+
+    // Back from the connected step, the provider just connected is never
+    // added again: that would replace its working key.
+    await press(button("All providers"));
+    await press(button("Anthropic"));
+    await enter(textField("Key"), "sk-ant-another-key-9999");
+    await press(button("Connect"));
+    expect({
+      asked: asked.length,
+      why: text().includes("Anthropic is connected already."),
+    }).toStrictEqual({ asked: 2, why: true });
   });
 
   it("keeps no key its provider refuses in the Add a provider sheet: says why under the key, and removes it again", async () => {

@@ -24,6 +24,11 @@ msgstr "„{word}“ ist bereits hinzugefügt."
 msgid "(company)"
 msgstr "(Unternehmen)"
 
+#: src/frame/part-words.tsx
+msgctxt "a field that may stay empty"
+msgid "(optional)"
+msgstr "(optional)"
+
 #: src/brain/brain-source-contents.tsx
 msgctxt "a number that changed: what it was before"
 msgid "(was {before})"
@@ -940,6 +945,10 @@ msgstr "{name} hat etwas für Sie"
 #: src/settings/stephen-settings.tsx
 msgid "{name} in {appName}"
 msgstr "{name} in {appName}"
+
+#: src/settings/ai-providers.tsx
+msgid "{name} is connected already."
+msgstr "{name} ist bereits verbunden."
 
 #: src/onboarding/connect-steps.tsx
 msgid "{name} is connected. I’ll only read what you share with me."
@@ -12249,11 +12258,6 @@ msgstr "Opportunity-to-Cash"
 #: src/apps/field-editor.tsx
 msgid "Option {place}"
 msgstr "Option {place}"
-
-#: src/frame/part-words.tsx
-msgctxt "a field that may stay empty"
-msgid "Optional"
-msgstr "Optional"
 
 #: src/apps/field-editor.tsx
 msgid "Options"

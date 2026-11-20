@@ -615,14 +615,19 @@ const AddProviderSheet = ({
     <AddConnection
       groups={groups}
       onConnect={async ({ provider, key, address }) => {
-        await whileBusy(async () => {
-          await withReason(
-            connect(
-              organizationProviderIdSchema.parse(provider),
-              key,
-              address ?? ""
-            )
+        // Connected since the sheet opened (its tile stays for the connected
+        // step): adding it again would replace its working key, and remove
+        // it when the new one is refused. Its key is replaced from its row.
+        const addable = offered.find((each) => each.provider === provider);
+        if (addable === undefined) {
+          const name = providerName(
+            organizationProviderIdSchema.parse(provider),
+            shown.find((each) => each.provider === provider)?.label ?? ""
           );
+          throw new Error(t`${name} is connected already.`);
+        }
+        await whileBusy(async () => {
+          await withReason(connect(addable.provider, key, address ?? ""));
         }, setChecking);
       }}
       onOpenChange={(next) => {
