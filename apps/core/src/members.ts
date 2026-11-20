@@ -607,7 +607,15 @@ const setMemberRole = async (
   const membership = target.success
     ? await membershipOf(env, target.data)
     : undefined;
-  if (!(target.success && membership)) {
+  // A guest's membership holds no member role: no role change makes a
+  // guest a member (roles.ts `guestRole`).
+  if (
+    !(
+      target.success &&
+      membership &&
+      roleSchema.safeParse(membership.role).success
+    )
+  ) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
   const newRole = parsedRole.data;

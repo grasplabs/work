@@ -168,6 +168,12 @@ export const staffRole = async (
  *
  * A session for someone's interview alone is nobody's here (GRA-1790).
  *
+ * So is a guest's (roles.ts `guestRole`): `memberOf` finds no member in
+ * them, so every route that asks who a request comes from, the ones
+ * added later included, answers a guest as nobody signed in. A route
+ * open to guests reads their session itself, as the interview's routes
+ * read theirs; none is yet.
+ *
  * A staff session reaches the onboarding alone, whatever the config's
  * staff scope: Grasp's staff identity is for managing a deployment, never
  * for acting inside the client's workspace. A staff member who needs to

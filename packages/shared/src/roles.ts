@@ -2,9 +2,17 @@ import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
 
-/** Roles a person can have inside a deployment (from Better Auth). */
+/** Roles a member of the company has inside a deployment (from Better Auth). */
 export const roleSchema = z.enum(["admin", "builder", "user"]);
 export type Role = z.infer<typeof roleSchema>;
+
+/**
+ * The membership role of a guest: someone outside the company with an
+ * account of the deployment, who reaches nothing of the platform. Not one
+ * of `roleSchema`'s on purpose: a guest is never a member, so every check
+ * that reads a membership's role as a member's finds none for them.
+ */
+export const guestRole = "guest";
 
 // What each role may do, as allow-lists: a role not named here, such as
 // one added later or one a membership row holds by mistake, gets nothing.
