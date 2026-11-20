@@ -133,6 +133,12 @@ const styles = stylex.create({
     justifyContent: "flex-end",
     gap: grasp.space2,
   },
+  // A text select at a row's end: past its own end padding and the chevron's side bearing, so its
+  // chevron's ink ends on the card's inset with the values in the rows around it.
+  pull: {
+    display: "inline-flex",
+    marginInlineEnd: `calc(-1 * (${grasp.space1} + ${grasp.iconSm} * 5 / 24))`,
+  },
   // A row of one line: its words at the start, its control at the end, at any width.
   line: {
     display: "grid",
@@ -299,7 +305,11 @@ const ToolLine = ({
         </span>
         <span {...stylex.props(styles.toolText)}>{tool.name}</span>
       </span>
-      <span {...stylex.props(styles.edge)}>{control}</span>
+      <span
+        {...stylex.props(styles.edge, editable && connected && styles.pull)}
+      >
+        {control}
+      </span>
     </li>
   );
 };
@@ -374,7 +384,11 @@ const GroupLine = ({
             </span>
           </span>
         </button>
-        <span {...stylex.props(styles.edge)}>{choice}</span>
+        <span
+          {...stylex.props(styles.edge, editable && connected && styles.pull)}
+        >
+          {choice}
+        </span>
       </RowFrame>
       {open ? (
         <ul id={toolsId} aria-label={name} {...stylex.props(styles.tools)}>
@@ -545,23 +559,25 @@ const WhoValue = ({
   onChange: AppPageProps["onForWhomChange"];
 }) =>
   editable ? (
-    <Select
-      value={connection.forWhom}
-      items={[
-        { value: "everyone", label: words.forEveryone },
-        { value: "you", label: words.forYou },
-      ]}
-      onValueChange={(next) => {
-        if (next === "everyone" || next === "you") {
-          onChange?.(next);
-        }
-      }}
-    >
-      <SelectTrigger variant="text" size="sm" aria-label={words.whoCanUse}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent />
-    </Select>
+    <span {...stylex.props(styles.pull)}>
+      <Select
+        value={connection.forWhom}
+        items={[
+          { value: "everyone", label: words.forEveryone },
+          { value: "you", label: words.forYou },
+        ]}
+        onValueChange={(next) => {
+          if (next === "everyone" || next === "you") {
+            onChange?.(next);
+          }
+        }}
+      >
+        <SelectTrigger variant="text" size="sm" aria-label={words.whoCanUse}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent />
+      </Select>
+    </span>
   ) : (
     <span {...stylex.props(styles.help)}>
       {connection.forWhom === "everyone" ? words.forEveryone : words.forYou}
