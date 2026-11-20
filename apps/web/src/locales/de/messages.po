@@ -16155,7 +16155,6 @@ msgid "Sign out this device?"
 msgstr "Dieses Gerät abmelden?"
 
 #: src/brain/brain-atlas.ts
-#: src/routes/_shell.settings.security.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in"
 msgstr "Anmeldung"
@@ -16203,10 +16202,6 @@ msgstr "Bei einer Verbindung erneut angemeldet"
 #: src/activity/audit-words.ts
 msgid "Signed in to an App as a visitor"
 msgstr "Hat sich als Besucher bei einer App angemeldet"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Signed in with"
-msgstr "Angemeldet mit"
 
 #: src/frame/part-words.tsx
 msgctxt "state of one app"
@@ -21292,18 +21287,10 @@ msgstr "Deine Anweisungen"
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Ihre Organisation erlaubt dieses Modell nicht. Wählen Sie ein anderes."
 
-#: src/routes/_shell.settings.security.tsx
-msgid "Your organization manages your password"
-msgstr "Ihre Organisation verwaltet Ihr Passwort"
-
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Ihre Organisation nutzt es über die Berechtigungen, die Sie erteilen."
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Your organization’s account"
-msgstr "Das Konto Ihrer Organisation"
 
 #: src/settings/sign-in-settings.tsx
 msgid "your organization’s work accounts"

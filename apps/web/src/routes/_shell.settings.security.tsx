@@ -1,4 +1,3 @@
-import type { SignInOption } from "@grasp-os/shared/rpc";
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
@@ -6,7 +5,6 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { deadline, unlessAborted } from "../core.ts";
 import { formatDateTime } from "../format.ts";
 import {
   AlertDialog,
@@ -32,16 +30,11 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import {
-  ChatAppsSection,
-  LinkedChatAccounts,
-} from "../settings/chat-accounts.tsx";
+import { ChatAppsSection } from "../settings/chat-accounts.tsx";
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
-import { ReadOnlyRow } from "../settings/read-only-row.tsx";
 import {
   SectionNotLoaded,
   SettingsError,
@@ -49,47 +42,19 @@ import {
 } from "../settings/section.tsx";
 import { useCore } from "../use-core.ts";
 
-// Settings › Security, as the library's Settings pattern has it (like
-// Profile): one compact card that says what the person signs in with, their
-// organization's name in a field that only reads; and one with the devices
-// they are signed in on, each with its kind's icon, this one marked. Each
-// device but this one can be signed out here; this one signs out from the
-// person menu. Core names no place a session signed in from.
+// Settings › Security, as the library's Settings pattern has it: the
+// Chat apps card, and the devices the person is signed in on, each with its
+// kind's icon, this one marked. Each device but this one can be signed out
+// here; this one signs out from the person menu. Core names no place a
+// session signed in from. How they sign in isn't shown here: the
+// organization sets that up (Settings › Workspace).
 //
-// The chat accounts linked to the person stand as quiet rows in the
-// Sign-in card, only when there are any (settings/chat-accounts.tsx). A
-// link a chat app sent lands here (routes/chat-link.tsx), so while one
-// waits in this tab the Chat apps card offers to confirm or turn it down;
-// once linked, the account stands among the rows. That card also deletes
-// the person's conversations with Stephen in chat apps. Never for Grasp
-// staff, who aren't the company's people. Devices show the newest ten, and all on a press.
-
-/** The staff's own way in (core's `providerIds.staff`): not the organization's. */
-const staffProvider = "grasp-staff";
-
-/**
- * What the person signed in with, in words: their organization's name (the
- * organization's one way in); for Grasp staff, Grasp's own.
- */
-const useSignedInWith = ({
-  options,
-  organization,
-  staff,
-}: {
-  options: SignInOption[];
-  organization: string | undefined;
-  staff: boolean;
-}): string => {
-  const { t } = useLingui();
-  const own = options.filter(
-    ({ providerId }) => (providerId === staffProvider) === staff
-  );
-  const [only] = own;
-  const provider = own.length === 1 ? only : undefined;
-  return staff
-    ? (provider?.label ?? "Grasp")
-    : (organization ?? provider?.label ?? t`Your organization’s account`);
-};
+// The Chat apps card (settings/chat-accounts.tsx) holds the chat accounts
+// linked to the person, as quiet rows when there are any; a link a chat app
+// sent, which lands here (routes/chat-link.tsx), while one waits in this
+// tab; and deleting the person's conversations with Stephen in chat apps.
+// Never for Grasp staff, who aren't the company's people. Devices show the
+// newest ten, and all on a press.
 
 /** What a session signed in on, in the page's language: "Chrome on macOS". */
 const useDeviceName = ({ browser, system }: SessionDevice): string => {
@@ -246,60 +211,15 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
 };
 
 const Security = () => {
-  const { t } = useLingui();
-  const { identity } = Route.useRouteContext();
-  const { options, organization, sessions, chat, waiting } =
-    Route.useLoaderData();
-  const signedInWith = useSignedInWith({
-    options,
-    organization,
-    staff: identity.staff,
-  });
+  const { sessions, chat, waiting } = Route.useLoaderData();
   return (
     <>
-      <SectionCard variant="grouped" density="compact" flush title={t`Sign-in`}>
-        <SettingsRows>
-          <ReadOnlyRow
-            help={t`Your organization manages your password`}
-            label={t`Signed in with`}
-            value={signedInWith}
-          />
-        </SettingsRows>
-        {chat?.state === "ready" ? (
-          <LinkedChatAccounts accounts={chat.data.accounts} />
-        ) : null}
-      </SectionCard>
       {chat === undefined ? null : (
         <ChatAppsSection chat={chat} waiting={waiting} />
       )}
       <Devices sessions={sessions} />
     </>
   );
-};
-
-/** How people sign in here; none when core doesn't say in time. */
-const signInOptions = async (
-  core: Pick<CoreConnection, "api">
-): Promise<SignInOption[]> => {
-  try {
-    const signal = deadline();
-    const api = await core.api(signal);
-    return await unlessAborted(Promise.resolve(api.signInOptions()), signal);
-  } catch {
-    return [];
-  }
-};
-
-/** The organization's name; none when it has none or core doesn't say in time. */
-const organizationName = async (
-  core: Pick<CoreConnection, "withSession">
-): Promise<string | undefined> => {
-  const read = await loadFromCore(
-    core,
-    async (session) => await session.organization.get()
-  );
-  const name = read.state === "ready" ? read.data.name.trim() : "";
-  return name === "" ? undefined : name;
 };
 
 /** The person's linked chat accounts, and the link a chat app sent them while one waits in this tab. */
@@ -322,7 +242,7 @@ const chatAccounts = async (
     };
   });
 
-/** How the person signs in, then their devices, as many as fill the first screen. */
+/** The Chat apps card, then the devices, as many as fill the first screen. */
 const SecurityPending = () => (
   <PageSkeletonSettings
     header={false}
@@ -336,15 +256,11 @@ export const Route = createFileRoute("/_shell/settings/security")({
   component: Security,
   loader: async ({ context: { core, identity } }) => {
     const secret = pendingChatLink();
-    const [options, organization, sessions, chat] = await Promise.all([
-      signInOptions(core),
-      organizationName(core),
+    const [sessions, chat] = await Promise.all([
       loadFromCore(core, async (session) => await session.sessions.list()),
       identity.staff ? undefined : chatAccounts(core, secret),
     ]);
     return {
-      options,
-      organization,
       sessions,
       chat,
       waiting: secret !== undefined,

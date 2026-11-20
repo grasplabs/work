@@ -16155,7 +16155,6 @@ msgid "Sign out this device?"
 msgstr "Dit apparaat uitloggen?"
 
 #: src/brain/brain-atlas.ts
-#: src/routes/_shell.settings.security.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in"
 msgstr "Inloggen"
@@ -16203,10 +16202,6 @@ msgstr "Opnieuw aangemeld bij een verbinding"
 #: src/activity/audit-words.ts
 msgid "Signed in to an App as a visitor"
 msgstr "Aangemeld bij een app als bezoeker"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Signed in with"
-msgstr "Ingelogd met"
 
 #: src/frame/part-words.tsx
 msgctxt "state of one app"
@@ -21292,18 +21287,10 @@ msgstr "Jouw instructies"
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Je organisatie staat dit model niet toe. Kies een ander model."
 
-#: src/routes/_shell.settings.security.tsx
-msgid "Your organization manages your password"
-msgstr "Je organisatie beheert je wachtwoord"
-
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Je organisatie gebruikt het via de toestemmingen die je geeft."
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Your organization’s account"
-msgstr "Het account van je organisatie"
 
 #: src/settings/sign-in-settings.tsx
 msgid "your organization’s work accounts"

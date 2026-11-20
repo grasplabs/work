@@ -71,7 +71,7 @@ test("an admin opens Settings on the workspace, and each section from the sideba
 
   await nav.getByRole("link", { name: "Security" }).click();
   await expect(page).toHaveURL(/\/settings\/security$/u);
-  await expect(sectionOf(page, "Sign-in")).toContainText("Signed in with");
+  await expect(sectionOf(page, "Devices")).toContainText("This device");
 });
 
 test("someone who isn't an admin opens Settings on their profile, with only their account's sections", async ({

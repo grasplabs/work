@@ -16155,7 +16155,6 @@ msgid "Sign out this device?"
 msgstr "¿Cerrar sesión en este dispositivo?"
 
 #: src/brain/brain-atlas.ts
-#: src/routes/_shell.settings.security.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in"
 msgstr "Inicio de sesión"
@@ -16203,10 +16202,6 @@ msgstr "Volvió a iniciar sesión en una conexión"
 #: src/activity/audit-words.ts
 msgid "Signed in to an App as a visitor"
 msgstr "Inició sesión en una aplicación como visitante"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Signed in with"
-msgstr "Sesión iniciada con"
 
 #: src/frame/part-words.tsx
 msgctxt "state of one app"
@@ -21292,18 +21287,10 @@ msgstr "Tus instrucciones"
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Tu organización no permite este modelo. Elige otro."
 
-#: src/routes/_shell.settings.security.tsx
-msgid "Your organization manages your password"
-msgstr "Tu organización gestiona tu contraseña"
-
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Tu organización lo usa mediante los permisos que concedes."
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Your organization’s account"
-msgstr "La cuenta de tu organización"
 
 #: src/settings/sign-in-settings.tsx
 msgid "your organization’s work accounts"
