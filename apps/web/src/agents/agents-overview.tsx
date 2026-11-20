@@ -99,8 +99,6 @@ interface Shown {
   job: string;
   /** The look it was given, as core keeps it. */
   face: string;
-  /** Whether the person may talk to it. */
-  usable: boolean;
   /** Whether it answers, for one of the person's own; undefined for any other. */
   own?: Agent["state"];
   /** As an admin reads it; undefined for anyone else. */
@@ -118,21 +116,13 @@ interface Shown {
 }
 type Managed = NonNullable<Shown["managed"]>;
 
-/**
- * The cards of the person's own agents, each opening its page, with a way
- * into a chat only for one core lists them as asking (`usable`): none
- * while the company has them off.
- */
-const ownShownOf = (
-  own: readonly Agent[],
-  usable: readonly ChatAgent[]
-): Shown[] =>
+/** The cards of the person's own agents, each opening its page. */
+const ownShownOf = (own: readonly Agent[]): Shown[] =>
   own.map(({ id, name, job, face, state }) => ({
     id,
     name,
     job,
     face,
-    usable: usable.some((each) => each.id === id),
     own: state,
     managed: undefined,
   }));
@@ -153,7 +143,6 @@ const shownOf = (
       name,
       job,
       face,
-      usable: true,
       managed: undefined,
     }));
   }
@@ -163,7 +152,6 @@ const shownOf = (
     name: agent.name,
     job: agent.job,
     face: agent.face,
-    usable: usable.some(({ id }) => id === agent.id),
     managed: {
       state: agent.state,
       first: agent.id === first?.id,
@@ -501,7 +489,7 @@ export const AgentsOverview = ({
   const { t } = useLingui();
   const factsOf = useFacts(managed?.teams ?? []);
   const agents = shownOf(usable, managed);
-  const mine = ownShownOf(own, usable);
+  const mine = ownShownOf(own);
   // One of the person's own says at its foot that it is theirs alone.
   const facts = (shown: Shown): Facts | undefined => {
     if (shown.managed !== undefined) {

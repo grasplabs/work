@@ -149,7 +149,8 @@ const AgentsLoading = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
   const { tab } = Route.useSearch();
-  const admin = isMemberAdmin(identity);
+  // As the loader reads it: whoever gets the tabs on the loaded page.
+  const admin = isAdmin(identity.role);
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Agents` }]} />
