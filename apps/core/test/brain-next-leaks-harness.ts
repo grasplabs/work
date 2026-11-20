@@ -380,13 +380,17 @@ const askedEachByMeaning = async (
   const value: [string, Answer[]][] = [];
   const lines: unknown[] = [];
   for (const [name, probe] of among) {
-    // The reader's own store embedded and asleep before each surface asks:
-    // a probe before this one may have changed it (an own source added or
-    // removed, a skill, a memory), and its tick, on its own alarm, would
-    // then embed between a marker's question and its twin's, moving what
-    // meaning finds and `fromOwn` for one of them alone (GRA-2140).
-    // oxlint-disable-next-line no-await-in-loop -- one surface at a time
-    await settledOwnStores([probing.personId]);
+    // In a pass that reads as the person, their own store embedded and
+    // asleep before each surface asks: a probe before this one may have
+    // changed it (an own source added or removed, a skill, a memory), and
+    // its tick, on its own alarm, would then embed between a marker's
+    // question and its twin's, moving what meaning finds and `fromOwn`
+    // for one of them alone (GRA-2140). A pass as the company never reads
+    // it, and holds that it is never even addressed.
+    if (probing.personal) {
+      // oxlint-disable-next-line no-await-in-loop -- one surface at a time
+      await settledOwnStores([probing.personId]);
+    }
     // oxlint-disable-next-line no-await-in-loop -- one surface at a time
     const asked = await recalledByMeaning(
       name,
