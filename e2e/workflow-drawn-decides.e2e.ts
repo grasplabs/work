@@ -14,8 +14,8 @@ import { origin } from "./stack.ts";
 // builder makes it from Make something, saying what they want done, and
 // Grasp's chat draws it once they say Build it (the stack's scripted
 // model saves an invoice approval, a person's decision, as its draft,
-// e2e/model-scripts.ts); the builder shares it with Share with your team
-// in its bar; an admin names who answers its decision in its Settings'
+// e2e/model-scripts.ts); the builder publishes it with Publish in its
+// bar; an admin names who answers its decision in its Settings'
 // Files and apps; the builder starts a run with Run, naming the
 // approver, whose nav counts the workflow that needs them, and who decides
 // from their inbox, on the decision's own page: its link, which anyone
@@ -115,15 +115,15 @@ const drawnAndPublished = async (
     pageRead
   );
 
-  // Share with your team, in its bar, makes the draft its first version.
+  // Publish, in its bar, makes the draft its first version.
   await page
-    .getByRole("button", { name: "Share with your team" })
+    .getByRole("button", { name: "Publish", exact: true })
     .click(pageRead);
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: "Share", exact: true })
+    .getByRole("button", { name: "Publish", exact: true })
     .click(pageRead);
-  await expect(page.getByText("Your changes are shared")).toBeVisible(pageRead);
+  await expect(page.getByText(`${planned} is live`)).toBeVisible(pageRead);
   return { workflow, name: newName };
 };
 

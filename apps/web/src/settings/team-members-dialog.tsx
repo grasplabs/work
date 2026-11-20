@@ -4,7 +4,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
-import { changeThenRefresh } from "../change-then-refresh.ts";
+import { Alert } from "../grasp/alert/index.ts";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Checkbox } from "../grasp/checkbox/index.ts";
 import {
@@ -39,6 +39,7 @@ import {
 import { ScrollArea } from "../grasp/scroll-area/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { addTeamMember, removeTeamMember, renameTeam } from "./team-changes.ts";
+import { useTeamChange } from "./use-team-change.ts";
 
 // A team's own dialog, as the library's Members pattern has it: its name,
 // renamed in a field, and one field to find the organization's members and
@@ -207,6 +208,7 @@ export const TeamDialog = ({
   const [chosen, setChosen] = useState<string[]>(team?.memberIds ?? []);
   const [query, setQuery] = useState("");
   const [problem, setProblem] = useState<string>();
+  const { failure, run } = useTeamChange(onChanged);
   // The order is set as the dialog opens: the team's people first.
   // oxlint-disable-next-line react/hook-use-state -- fixed as the dialog opens, never set
   const [order] = useState(() => teamFirst(members, team?.memberIds ?? []));
@@ -230,9 +232,17 @@ export const TeamDialog = ({
       setProblem(t`There is a team with this name already.`);
       throw new Error("The name is taken.");
     }
-    await changeThenRefresh(async () => {
-      await saveTeam(team, trimmed, chosen);
-    }, onChanged);
+    const current = team.name;
+    // Core's refusal, in words: the staff list's, or that only admins change teams.
+    const refused = await run(
+      async () => {
+        await saveTeam(team, trimmed, chosen);
+      },
+      t`${current} couldn't be saved. Try again.`
+    );
+    if (refused !== undefined) {
+      throw new Error(refused);
+    }
     onClose();
   };
   return (
@@ -305,6 +315,9 @@ export const TeamDialog = ({
                 {t`${plural(count, { one: "# person in the team", other: "# people in the team" })}`}
               </p>
             </section>
+            {failure === undefined ? null : (
+              <Alert tone="danger">{failure}</Alert>
+            )}
           </div>
         </DialogBody>
         <DialogFooter>

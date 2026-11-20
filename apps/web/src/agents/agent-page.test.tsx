@@ -1298,11 +1298,15 @@ describe("an agent's page", () => {
     const fake = fakeConnections();
     fake.outOfReach.saves = 1;
     await shown(fake, "new");
+    // The Brain still out of reach as its page opens: no file read, for
+    // either agent.
+    fake.outOfReach.reads = 2;
     await makeInChat({
       name: "Claire",
       instructions: claireTold,
       whose: "offered",
     });
+    const unreadable = document.body.textContent.includes("Not shown");
     /** The agent's page, opened again, as the address it was sent to. */
     const reopened = async (): Promise<void> => {
       act(() => {
@@ -1311,10 +1315,6 @@ describe("an agent's page", () => {
       document.body.replaceChildren();
       await shown(fake, { agent: "Claire", tab: "instructions" });
     };
-    // The Brain still out of reach: no file read, for either agent.
-    fake.outOfReach.reads = 2;
-    await reopened();
-    const unreadable = document.body.textContent.includes("Not shown");
     await reopened();
     const readable = {
       text: field("Instructions").value,
@@ -1349,13 +1349,8 @@ describe("an agent's page", () => {
       instructions: claireTold,
       whose: "offered",
     });
-    const at = router.state.location.href;
-    act(() => {
-      root?.unmount();
-    });
-    document.body.replaceChildren();
     // Its page, as the address it was sent to opens it.
-    await shown(fake, { agent: "Claire", tab: "instructions" });
+    const at = router.state.location.href;
     const shownThen = {
       text: field("Instructions").value,
       said: saysOutOfReach(),

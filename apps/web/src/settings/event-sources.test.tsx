@@ -226,6 +226,9 @@ const buttons = (text: string): HTMLButtonElement[] =>
     (each) => wordsOf(each) === text
   );
 
+/** The delivery's payload as the page shows it once asked for. */
+const payloadShown = '"invoice": "INV-42"';
+
 /** The button named `name`, by its label. */
 const named = (name: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
@@ -477,8 +480,9 @@ describe("the Incoming events settings", () => {
       delivery:
         opened.includes("payment.paid") &&
         opened.includes("Started 1 workflow"),
-      payloadBeforeAsked: opened.includes("INV-42"),
-      payload: withPayload.includes("INV-42"),
+      // As the payload stands, its JSON laid out: the source's own example of a body, beside it, is on one line.
+      payloadBeforeAsked: opened.includes(payloadShown),
+      payload: withPayload.includes(payloadShown),
       asked: asked.slice(askedOpened.length, askedOpened.length + 2),
       matched: [
         "2 triggers match this type. A test event starts no workflow.",

@@ -172,10 +172,12 @@ const allow = (): HTMLElement | null | undefined =>
   [...document.querySelectorAll("li")]
     .find(
       (each) =>
-        // The tool HUBSPOT_LIST_CONTACTS, as it shows.
+        // The tool HUBSPOT_LIST_CONTACTS, as it shows: "List contacts" in
+        // HubSpot's dialog, with its toolkit's name before it in another's.
 
-        // The tool HUBSPOT_LIST_CONTACTS, as it shows.
-        each.textContent?.includes("List contacts") &&
+        // The tool HUBSPOT_LIST_CONTACTS, as it shows: "List contacts" in
+        // HubSpot's dialog, with its toolkit's name before it in another's.
+        each.textContent?.toLowerCase().includes("list contacts") &&
         each.querySelector("li") === null
     )
     ?.querySelector<HTMLElement>("label");

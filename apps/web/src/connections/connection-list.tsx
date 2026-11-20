@@ -63,6 +63,14 @@ const styles = stylex.create({
     marginBlockStart: grasp.space3,
     marginBlockEnd: grasp.space1,
   },
+  // The consent, quoted as it was given.
+  quote: {
+    margin: 0,
+    paddingInlineStart: grasp.space3,
+    borderInlineStartWidth: grasp.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: grasp.line,
+  },
 });
 
 /** Every permission the person may list, and the Apps' names. */
@@ -230,9 +238,11 @@ const ConsentRecord = ({ connection }: { connection: ListedConnection }) => {
       label={t`Consent`}
     >
       <Collapsible title={t`${who} consented to this before connecting it`}>
-        <Text size="sm" tone="muted">
-          {consent}
-        </Text>
+        <blockquote {...stylex.props(styles.quote)}>
+          <Text size="sm" tone="muted">
+            {consent}
+          </Text>
+        </blockquote>
         <Text size="sm">{tools}</Text>
       </Collapsible>
     </FactRow>

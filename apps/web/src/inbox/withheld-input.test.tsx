@@ -85,6 +85,18 @@ const lostSend: UnknownOutcome = {
   cursor: "1.a",
 };
 
+/** A button's words as a screen reader hears them: what is hidden from it left out. */
+const wordsOf = (element: HTMLElement): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof HTMLElement)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+    hidden.remove();
+  }
+  return copy.textContent?.trim() ?? "";
+};
+
 /** What `node`, rendered in a router, shows: its text and its buttons, by label, each whether it is off or held. */
 const rendered = async (node: () => React.ReactNode) => {
   const rootRoute = createRootRoute({ component: Outlet });
@@ -118,8 +130,8 @@ const rendered = async (node: () => React.ReactNode) => {
         .map(
           (button) =>
             [
-              button.textContent ?? "",
-              button.disabled || Object.hasOwn(button.dataset, "held"),
+              wordsOf(button),
+              button.disabled || button.dataset.held !== undefined,
             ] as const
         )
         .filter(([label]) =>

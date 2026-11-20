@@ -11,10 +11,7 @@ import {
   ComposerAdd,
   ComposerSurface,
 } from "../grasp/composer/index.ts";
-import type {
-  ComposerAgentOption,
-  ComposerFile,
-} from "../grasp/composer/index.ts";
+import type { ComposerFile } from "../grasp/composer/index.ts";
 import { Lock } from "../grasp/icons/index.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
 import { accepted, useAttachmentWords } from "./chat-files.tsx";
@@ -110,14 +107,6 @@ export interface ChatComposerProps {
   disabled?: boolean;
   /** The longest message it takes; a question's by default. */
   maxLength?: number;
-  /**
-   * The agents the plus menu offers (agent-choice.tsx), with the chosen one
-   * (`agent`) and how to choose (`onAgent`): a new chat's box. The first is
-   * the default. None in an open chat, which stays with its agent.
-   */
-  agents?: readonly ComposerAgentOption[];
-  agent?: string;
-  onAgent?: (agent: string) => void;
   /** What takes the text's place while the assistant needs something first: its questions. */
   takeover?: ReactNode;
   /** Escape, or Type instead, leaves the takeover for the text. */
@@ -200,29 +189,6 @@ const activityOf = (
 };
 
 /**
- * The plus menu's agents, for a new chat's box: the first is the default,
- * a last row goes to all of them. Nothing where there is nothing to choose.
- */
-const useAgentMenu = (
-  agents: readonly ComposerAgentOption[],
-  agent: string | undefined,
-  onAgent: ((agent: string) => void) | undefined
-) => {
-  const { t } = useLingui();
-  const [first] = agents;
-  if (onAgent === undefined || first === undefined) {
-    return {};
-  }
-  return {
-    agents: [...agents],
-    all: { label: t`All agents`, href: "/agents" },
-    defaultAgent: first.value,
-    onValueChange: onAgent,
-    value: agent ?? first.value,
-  };
-};
-
-/**
  * Send, from the box: a press before core has said which models there
  * are waits for them and goes then, rather than being dropped while Send
  * looks ready; a press while a question is on its way is that question.
@@ -252,9 +218,6 @@ const useSendOnceReady = (
     }
   };
 };
-
-/** No agents to choose from: an open chat's box. */
-const noAgents: readonly ComposerAgentOption[] = [];
 
 /** The box to ask in. Controlled: the page keeps the text and the model. */
 export const ChatComposer = ({
@@ -292,9 +255,6 @@ export const ChatComposer = ({
   maxLength = maxQuestionLength,
   takeover,
   onTakeoverDismiss,
-  agents = noAgents,
-  agent,
-  onAgent,
 }: ChatComposerProps) => {
   const { t } = useLingui();
   const attachmentWords = useAttachmentWords("waiting");
@@ -305,7 +265,6 @@ export const ChatComposer = ({
   const answered = useJustAnswered(running);
   const dictating = useDictation(text, onText);
   const look = useOwnComposerLook();
-  const agentMenu = useAgentMenu(agents, agent, onAgent);
   const send = useSendOnceReady(models, busy, onSend);
   return (
     <Composer
@@ -326,7 +285,6 @@ export const ChatComposer = ({
             onAttach={(chosen) => {
               onAttach(chosen);
             }}
-            {...agentMenu}
           />
         )
       }

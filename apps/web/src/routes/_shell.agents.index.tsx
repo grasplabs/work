@@ -127,7 +127,9 @@ const AgentsPage = () => {
 /**
  * The Agents page before its agents arrive: its crumbs, then the library's
  * agents skeleton, its grid of portrait cards on the page's own paper, with
- * New agent in its place for whoever may make one.
+ * New agent in its place for whoever may make one: anyone but Grasp's
+ * staff, as people may make their own until an admin turns that off
+ * (`ownAgentsDefault`), which the page knows only once it has loaded.
  */
 const AgentsLoading = () => {
   const { t } = useLingui();
@@ -137,11 +139,11 @@ const AgentsLoading = () => {
       <SiteHeader crumbs={[{ label: t`Agents` }]} />
       <PageSkeletonAgents
         actions={
-          isMemberAdmin(identity) ? (
+          identity.staff ? undefined : (
             <Button icon={Plus} variant="ink">
               {t`New agent`}
             </Button>
-          ) : undefined
+          )
         }
         cards={4}
       />

@@ -571,6 +571,10 @@ msgstr "{count} requests last week, {by} fewer than the week before"
 msgid "{count} requests last week, {by} more than the week before"
 msgstr "{count} requests last week, {by} more than the week before"
 
+#: src/settings/team-members-dialog.tsx
+msgid "{current} couldn't be saved. Try again."
+msgstr "{current} couldn't be saved. Try again."
+
 #: src/workflows/today-lanes.tsx
 msgid "{cutOff, plural, one {# earlier run today isn't shown: only the latest fit} other {# earlier runs today aren't shown: only the latest fit}}"
 msgstr "{cutOff, plural, one {# earlier run today isn't shown: only the latest fit} other {# earlier runs today aren't shown: only the latest fit}}"
@@ -961,10 +965,6 @@ msgstr "{name} also needs “{kind}”, which changes or sends things."
 #: src/brain/skills-page.tsx
 msgid "{name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again."
 msgstr "{name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again."
-
-#: src/chat/agent-choice.tsx
-msgid "{name} answers in this chat"
-msgstr "{name} answers in this chat"
 
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
@@ -2770,10 +2770,6 @@ msgstr "All"
 #: src/brain/atlas-overlays.tsx
 msgid "All ({total})"
 msgstr "All ({total})"
-
-#: src/chat/chat-composer.tsx
-msgid "All agents"
-msgstr "All agents"
 
 #: src/agents/setup/apps-picker.tsx
 msgid "All apps"
@@ -13068,6 +13064,7 @@ msgstr "Operator"
 
 #: src/brain/brain-section.tsx
 #: src/brain/opportunities-page.tsx
+#: src/frame/page-skeletons-b.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the Brain's opportunities page"
 msgid "Opportunities"
@@ -20332,13 +20329,19 @@ msgstr "What this decision asks can't be shown right now."
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "What this decision asks is withheld, so you can only reject it."
 
-#: src/chat/held-writes.tsx
 #: src/inbox/item-detail.tsx
+msgid "What this would send can't be shown right now, so you can only decline it for now. Try again in a moment."
+msgstr "What this would send can't be shown right now, so you can only decline it for now. Try again in a moment."
+
+#: src/chat/held-writes.tsx
 msgid "What this would send can't be shown right now, so you can only reject it for now. Try again in a moment."
 msgstr "What this would send can't be shown right now, so you can only reject it for now. Try again in a moment."
 
-#: src/chat/held-writes.tsx
 #: src/inbox/item-detail.tsx
+msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only decline it."
+msgstr "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only decline it."
+
+#: src/chat/held-writes.tsx
 msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it."
 msgstr "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it."
 

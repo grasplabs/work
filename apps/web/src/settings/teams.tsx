@@ -18,6 +18,7 @@ import {
   AlertDialogContent,
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
 import { AvatarGroup } from "../grasp/avatar/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -358,6 +359,10 @@ const TeamRow = ({
             <AlertDialogDescription>
               {t`What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization.`}
             </AlertDialogDescription>
+            {/* Why core refused it, where the person is: the staff list's, or that only admins change teams. */}
+            {failure === undefined ? null : (
+              <Alert tone="danger">{failure}</Alert>
+            )}
             <AlertDialogFooter>
               <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
               <AlertDialogAction

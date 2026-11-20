@@ -613,6 +613,26 @@ const press = async (label: string): Promise<void> => {
   await settle();
 };
 
+/**
+ * Presses the open alert dialog's answer that says `label`. Its words come
+ * first: the library's action button also holds its working and failed words.
+ */
+const answer = async (label: string): Promise<void> => {
+  const found = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="alertdialog"] button'
+    ),
+  ].find((each) => each.textContent.trim().startsWith(label));
+  if (found === undefined) {
+    throw new TypeError(`No answer ${label}`);
+  }
+  await act(async () => {
+    found.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
 /** Searches for `question`. */
 const search = async (question: string): Promise<void> => {
   const box = document.querySelector("input");
@@ -1283,15 +1303,7 @@ describe(SourcesPage, () => {
     const told = document.body.textContent.includes(
       "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
     );
-    // The dialog's own button, after the panel's of the same word.
-    const confirm = [...document.querySelectorAll("button")].findLast(
-      (button) => button.textContent.trim() === "Delete"
-    );
-    await act(async () => {
-      confirm?.click();
-      await Promise.resolve();
-    });
-    await settle();
+    await answer("Delete");
 
     expect({
       told,
@@ -1330,15 +1342,7 @@ describe(SourcesPage, () => {
     await press("Erase for good");
     const told =
       document.querySelector('[role="alertdialog"]')?.textContent ?? "";
-    // The dialog's own button, after the row's of the same words.
-    const confirm = [...document.querySelectorAll("button")].findLast(
-      (button) => button.textContent.trim() === "Erase for good"
-    );
-    await act(async () => {
-      confirm?.click();
-      await Promise.resolve();
-    });
-    await settle();
+    await answer("Erase for good");
     await settle();
 
     expect({
@@ -1438,15 +1442,8 @@ describe(SourcesPage, () => {
     const afterPanel = calls.slice(before);
     // The first row's: Payroll.vtt.
     await press("Erase for good");
-    const confirm = [...document.querySelectorAll("button")].findLast(
-      (button) => button.textContent.trim() === "Erase for good"
-    );
     const beforeErase = calls.length;
-    await act(async () => {
-      confirm?.click();
-      await Promise.resolve();
-    });
-    await settle();
+    await answer("Erase for good");
     await settle();
 
     expect({

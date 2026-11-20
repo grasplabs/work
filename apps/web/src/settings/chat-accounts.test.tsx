@@ -79,9 +79,21 @@ const shown = async (answer: () => Promise<number>) => {
   return asked;
 };
 
+/** A button's words as a screen reader hears them: what is hidden from it left out. */
+const wordsOf = (element: HTMLElement): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof HTMLElement)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+    hidden.remove();
+  }
+  return copy.textContent?.trim() ?? "";
+};
+
 const press = async (name: string) => {
   const button = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === name
+    (each) => wordsOf(each) === name
   );
   if (button === undefined) {
     throw new TypeError(`No button ${name}`);

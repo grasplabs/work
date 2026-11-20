@@ -554,12 +554,13 @@ describe("a chat's held writes", () => {
     await press("Confirm");
     const whileHeld = [...decisions];
     await press("Show all");
+    const endShownAfter = document.body.textContent.includes("eve@evil.test");
     await press("Confirm");
 
     expect({
       endShownBefore: textBefore.includes("eve@evil.test"),
       whileHeld,
-      endShownAfter: document.body.textContent.includes("eve@evil.test"),
+      endShownAfter,
       decisions,
     }).toStrictEqual({
       endShownBefore: false,

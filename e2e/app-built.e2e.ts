@@ -155,16 +155,16 @@ test("a builder makes an App from what they want done, shares it with their team
   // Share gives it to whom they pick, Publish checks the draft and makes it
   // the first version. Everyone the stack signs in is called Person, and a builder
   // sees names, not emails: they are told apart by the ID each goes by.
+  const userIdEnd = `ID …${user.userId.slice(-namesakeIdEnd)}`;
   await page.getByRole("button", { name: "Share", exact: true }).click(built);
-  const sharing = page.getByRole("dialog");
-  await sharing
-    .getByRole("checkbox", {
-      name: `Person (ID …${user.userId.slice(-namesakeIdEnd)})`,
-    })
-    .check();
+  const sharing = page.getByRole("dialog", { name: `Share ${appPlanned}` });
+  await sharing.getByLabel("Add people, teams or projects").click();
+  await page
+    .getByRole("option", { name: "Person" })
+    .filter({ hasText: userIdEnd })
+    .click(built);
   blip.sharing = true;
-  await sharing.getByRole("button", { name: "Share", exact: true }).click();
-  await expect(page.getByText("Shared with Person")).toBeVisible(built);
+  await sharing.getByRole("button", { name: "Add", exact: true }).click();
   // Its read again after sharing lost its connection: Grasp can't be
   // reached, until a connection answers again, when the page reads the
   // App by itself, with no Try again.
@@ -188,13 +188,22 @@ test("a builder makes an App from what they want done, shares it with their team
   ).toBeAttached(built);
   await expect(unreachable).toHaveCount(0);
   expect(uncaught).toStrictEqual([]);
+  // The share held: Share lists them, its one Person.
+  await page.getByRole("button", { name: "Share", exact: true }).click(built);
+  await expect(
+    sharing
+      .getByRole("list", { name: "Shared with" })
+      .getByRole("listitem")
+      .filter({ hasText: "Person" })
+  ).toHaveCount(1, built);
+  await sharing.getByRole("button", { name: "Done", exact: true }).click();
   // Publish checks the draft and makes it the first version.
   await page.getByRole("button", { name: "Publish", exact: true }).click(built);
   await page
-    .getByRole("dialog")
+    .getByRole("dialog", { name: `Publish ${appPlanned}` })
     .getByRole("button", { name: "Publish", exact: true })
     .click(built);
-  await expect(page.getByText("is live")).toBeVisible(built);
+  await expect(page.getByText(`${appPlanned} is live`)).toBeVisible(built);
 
   // They use the live App: none of the preview's contacts, then theirs.
   const used = await pageOf(user);

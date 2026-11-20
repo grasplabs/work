@@ -344,13 +344,3 @@ export const requestWords = (
     msg`${ph({ subject })}: ${ph({ actions })} on ${ph({ object })}`
   );
 };
-
-/**
- * A request in a list's row: who asks, as `requestAsker` has it (a
- * schedule by what it is), the request's own sentence saying what.
- */
-export const requestRow = (
-  request: Permission,
-  directory: Directory,
-  now: Date = new Date()
-): string => requestAsker(request, directory, now);

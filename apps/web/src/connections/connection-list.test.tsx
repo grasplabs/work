@@ -113,7 +113,7 @@ const disconnectDialog = async (shown: CatalogConnection): Promise<string> => {
     trigger?.click();
     await Promise.resolve();
   });
-  return document.querySelector('[role="dialog"]')?.textContent ?? "";
+  return document.querySelector('[role="alertdialog"]')?.textContent ?? "";
 };
 
 const erased = "Everything the Brain kept from it is erased for good.";
@@ -159,6 +159,14 @@ describe("a Composio connection's consent", () => {
       await showing(
         connection(composioAuth === undefined ? {} : { composioAuth })
       );
+      // The consent is folded under who gave it: opened to read it.
+      const fold = [...document.querySelectorAll("button")].find((button) =>
+        button.textContent?.includes("consented to this before connecting it")
+      );
+      await act(async () => {
+        fold?.click();
+        await Promise.resolve();
+      });
       const quotes = [...document.querySelectorAll("blockquote")].map(
         (quote) => quote.textContent ?? ""
       );

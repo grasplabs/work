@@ -449,9 +449,9 @@ const HeldItem = ({
   // Nobody approves what they can't read: withheld, it is only declined.
   let approveHeld: string | undefined;
   if (action.withheld === "revoked") {
-    approveHeld = t`What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it.`;
+    approveHeld = t`What this would send is withheld: the run that asked for it may no longer read what it read, so you can only decline it.`;
   } else if (action.withheld === "unchecked") {
-    approveHeld = t`What this would send can't be shown right now, so you can only reject it for now. Try again in a moment.`;
+    approveHeld = t`What this would send can't be shown right now, so you can only decline it for now. Try again in a moment.`;
   } else if (shown.unseen) {
     approveHeld = t`Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm.`;
   }

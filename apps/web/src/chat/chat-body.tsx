@@ -271,6 +271,18 @@ const ModelsUnavailableNotice = ({
   );
 };
 
+/**
+ * Whether the fold of what the chat's answers drew on gives way over the
+ * box: over the agent's questions or a card that waits (a plan, an agent
+ * drafted or a change to one), which take the person's eye.
+ */
+export const sourcesGiveWay = (
+  messages: ChatBodyValues["view"]["messages"],
+  running: boolean,
+  asking?: ChatBodyValues["asking"]
+): boolean =>
+  asking !== undefined || pendingCard(messages, running) !== undefined;
+
 /** The box to ask in, or the agent's questions in its place; `inColumn` on a chat's page, as wide as its thread. */
 export const ChatFooter = ({
   chat,
@@ -322,9 +334,7 @@ export const ChatFooter = ({
       <ChatSources
         names={sourceNames}
         provenance={view.provenance}
-        // Over the agent's questions or a card that waits, which take the
-        // person's eye, the fold of what the answers drew on gives way.
-        sourcesShown={asking === undefined && waiting === undefined}
+        sourcesShown={!sourcesGiveWay(view.messages, view.running, asking)}
       />
       <AskOrCompose
         {...composer}

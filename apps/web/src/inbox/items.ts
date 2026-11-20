@@ -19,11 +19,7 @@ import type {
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
 
-import {
-  requestRow,
-  requestAsker,
-  requestWords,
-} from "../activity/pending.tsx";
+import { requestAsker, requestWords } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import { formatDate, formatDateTime } from "../format.ts";
@@ -329,7 +325,7 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
       kind: "permissionRequest",
       title: t`Grant ${who}?`,
       // The row says who asks and, where the request says it plainly, what.
-      context: requestRow(request, directory),
+      context: requestAsker(request, directory),
       body: [],
       // Who asked and when stand under the request's Details.
       facts: [],

@@ -167,11 +167,11 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
     .click();
   await expect(
     page
-      .getByRole("dialog")
+      .getByRole("alertdialog")
       .getByText("Everything the Brain kept from it is erased for good.")
   ).toBeVisible();
   await page
-    .getByRole("dialog")
+    .getByRole("alertdialog")
     .getByRole("button", { name: "Disconnect" })
     .click();
   await expect(expiredCard).toHaveCount(0);

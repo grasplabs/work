@@ -124,7 +124,14 @@ export const NotePending = () => (
 );
 
 /** The Brain's page the address names, as the layout lays it out. */
-type BrainPage = "map" | "activity" | "memory" | "sources" | "section" | "note";
+type BrainPage =
+  | "map"
+  | "activity"
+  | "memory"
+  | "opportunities"
+  | "sources"
+  | "section"
+  | "note";
 
 /**
  * Which of the Brain's pages the address names: the address being gone
@@ -137,13 +144,12 @@ const useBrainPage = (): { page: BrainPage; section: string | undefined } => {
   if (at("/brain/activity")) {
     return { page: "activity", section: undefined };
   }
-  // Memories, Skills and Opportunities: each a list of records under its title.
-  if (
-    at("/brain/memories") ||
-    at("/brain/skills") ||
-    at("/brain/opportunities")
-  ) {
+  // Memories and Skills: each a list of records under its title.
+  if (at("/brain/memories") || at("/brain/skills")) {
     return { page: "memory", section: undefined };
+  }
+  if (at("/brain/opportunities")) {
+    return { page: "opportunities", section: undefined };
   }
   if (at("/brain/sources")) {
     return { page: "sources", section: undefined };
@@ -174,7 +180,7 @@ const BrainBody = ({ page }: { page: BrainPage }) => {
           // Since you last looked, as a card of what came in.
           <PageSkeletonRecord descriptionLines={0} rows={5} />
         ) : null}
-        {page === "memory" ? (
+        {page === "memory" || page === "opportunities" ? (
           // Its kinds of record as tabs under the title, its records as Items.
           <PageSkeletonList
             descriptionLines={0}
@@ -224,6 +230,15 @@ export const BrainPending = () => {
     ],
     // As the layout says them while they show: the Brain alone.
     memory: [{ label: brain }],
+    opportunities: [
+      { label: brain, to: "/brain" },
+      {
+        label: t({
+          message: "Opportunities",
+          context: "the Brain's opportunities page",
+        }),
+      },
+    ],
     sources: [
       { label: brain, to: "/brain" },
       { label: t({ message: "Sources", context: "the Brain's sources page" }) },

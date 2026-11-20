@@ -571,6 +571,10 @@ msgstr "{count} demandes la semaine dernière, {by} de moins que la semaine pré
 msgid "{count} requests last week, {by} more than the week before"
 msgstr "{count} demandes la semaine dernière, {by} de plus que la semaine précédente"
 
+#: src/settings/team-members-dialog.tsx
+msgid "{current} couldn't be saved. Try again."
+msgstr "{current} n'a pas pu être enregistré. Réessayez."
+
 #: src/workflows/today-lanes.tsx
 msgid "{cutOff, plural, one {# earlier run today isn't shown: only the latest fit} other {# earlier runs today aren't shown: only the latest fit}}"
 msgstr "{cutOff, plural, one {# exécution plus ancienne d’aujourd’hui n’est pas affichée : seules les plus récentes tiennent} other {# exécutions plus anciennes d’aujourd’hui ne sont pas affichées : seules les plus récentes tiennent}}"
@@ -961,10 +965,6 @@ msgstr "{name} a aussi besoin de « {kind} », qui modifie ou envoie des choses.
 #: src/brain/skills-page.tsx
 msgid "{name} and every version of it are deleted for good, with a share of it that waits. You can't use its name again."
 msgstr "{name} et toutes ses versions sont supprimés définitivement, ainsi qu'une demande de partage en attente. Vous ne pourrez plus utiliser ce nom."
-
-#: src/chat/agent-choice.tsx
-msgid "{name} answers in this chat"
-msgstr "{name} répond dans ce chat"
 
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
@@ -2770,10 +2770,6 @@ msgstr "Tout"
 #: src/brain/atlas-overlays.tsx
 msgid "All ({total})"
 msgstr "Tous ({total})"
-
-#: src/chat/chat-composer.tsx
-msgid "All agents"
-msgstr "Tous les agents"
 
 #: src/agents/setup/apps-picker.tsx
 msgid "All apps"
@@ -13068,6 +13064,7 @@ msgstr "Opérateur"
 
 #: src/brain/brain-section.tsx
 #: src/brain/opportunities-page.tsx
+#: src/frame/page-skeletons-b.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the Brain's opportunities page"
 msgid "Opportunities"
@@ -20332,13 +20329,19 @@ msgstr "Ce que demande cette décision ne peut pas être affiché pour le moment
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Ce que demande cette décision est retenu : vous ne pouvez donc que la rejeter."
 
-#: src/chat/held-writes.tsx
 #: src/inbox/item-detail.tsx
+msgid "What this would send can't be shown right now, so you can only decline it for now. Try again in a moment."
+msgstr "Ce que cela enverrait ne peut pas être affiché pour l'instant, vous pouvez donc seulement le refuser pour le moment. Réessayez dans un instant."
+
+#: src/chat/held-writes.tsx
 msgid "What this would send can't be shown right now, so you can only reject it for now. Try again in a moment."
 msgstr "Ce que ceci enverrait ne peut pas être affiché pour l'instant : vous ne pouvez donc que le rejeter pour le moment. Réessayez dans un instant."
 
-#: src/chat/held-writes.tsx
 #: src/inbox/item-detail.tsx
+msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only decline it."
+msgstr "Ce que cela enverrait est retenu : l'exécution qui l'a demandé ne peut plus lire ce qu'elle a lu, vous pouvez donc seulement le refuser."
+
+#: src/chat/held-writes.tsx
 msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it."
 msgstr "Ce que ceci enverrait est retenu : l'exécution qui l'a demandé ne peut plus lire ce qu'elle a lu, vous ne pouvez donc que le rejeter."
 
