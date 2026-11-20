@@ -921,14 +921,14 @@ export const EventSourcesSettings = ({
       watch?.disconnect();
     };
   }, []);
-  const addButton = (variant: "quiet" | "ink") => (
+  const addButton = (
     <Button
       icon={Plus}
       onClick={() => {
         setAdding(true);
       }}
       size="sm"
-      variant={variant}
+      variant="quiet"
     >
       {t`Add a source`}
     </Button>
@@ -957,7 +957,7 @@ export const EventSourcesSettings = ({
   const list = (
     <SectionCard
       variant="grouped"
-      actions={sources.length > 0 ? addButton("quiet") : null}
+      actions={sources.length > 0 ? addButton : null}
       density="compact"
       flush
       title={t`Sources`}
@@ -977,7 +977,7 @@ export const EventSourcesSettings = ({
               {t`Add a source for each system that sends Grasp events.`}
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>{addButton("ink")}</EmptyContent>
+          <EmptyContent>{addButton}</EmptyContent>
         </Empty>
       ) : null}
       {sources.length > 0 ? (

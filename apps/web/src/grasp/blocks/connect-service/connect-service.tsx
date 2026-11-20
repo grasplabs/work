@@ -145,6 +145,11 @@ export interface ConnectServiceProps {
   onDisconnect?: () => unknown;
   /** Any of the words, in place of the English ones. */
   words?: Partial<ConnectServiceWords>;
+  /**
+   * Stands as a Settings section: Section card's grouped form, compact, the title on the page above
+   * the card, beside the other sections. @default false
+   */
+  grouped?: boolean;
 }
 
 const CUSTOM = "custom";
@@ -155,12 +160,11 @@ const grow = stylex.keyframes({
 });
 
 const styles = stylex.create({
-  // The tiles: equal, two in a row in a settings column (45rem), more in a wider card, fewer as the
-  // card narrows (by its own width); every tile in a row as tall as the tallest, a long name wrapping
-  // inside.
+  // The tiles: equal, four in a row in a card of the product's width (about 52rem), fewer as the card
+  // narrows (by its own width); every tile in a row as tall as the tallest, a long name wrapping inside.
   tiles: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(15rem, 100%), 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(10rem, 100%), 1fr))",
     gap: grasp.space3,
   },
   // A tile's box: the row's height, the tile filling it.
@@ -574,6 +578,12 @@ const Connected = ({
   );
 };
 
+/** The card's form: a Settings section's grouped and compact one, or the boxed card. */
+const cardLook = (grouped = false) =>
+  grouped
+    ? ({ variant: "grouped", density: "compact" } as const)
+    : ({ variant: "boxed", density: "comfortable" } as const);
+
 /** Connect a service by a key, in one card: the tiles, the form, the connected row. */
 export const ConnectService = ({
   title,
@@ -584,6 +594,7 @@ export const ConnectService = ({
   connected,
   onDisconnect,
   words: given,
+  grouped,
 }: ConnectServiceProps) => {
   // The product's words through GraspWords, then this instance's.
   const words = useWords("connectService", connectServiceWords, given);
@@ -643,7 +654,7 @@ export const ConnectService = ({
   };
   const chosenService = chosen === null ? undefined : serviceOf(chosen);
   return (
-    <SectionCard title={title}>
+    <SectionCard title={title} {...cardLook(grouped)}>
       <div
         ref={swap}
         data-slot="connect-service"

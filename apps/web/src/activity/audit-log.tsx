@@ -320,7 +320,7 @@ const LogSearchField = ({
       }}
       {...stylex.props(styles.search)}
     >
-      <InputGroup>
+      <InputGroup size="sm">
         <InputGroupText>
           <Icon icon={Search} />
         </InputGroupText>
@@ -385,7 +385,7 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
         }
       }}
     >
-      <PopoverTrigger icon={Sliders} size="md" variant="quiet">
+      <PopoverTrigger icon={Sliders} size="sm" variant="quiet">
         {set === 0
           ? t`Filters`
           : t`${plural(set, { one: "Filters, # set", other: "Filters, # set" })}`}
@@ -503,7 +503,7 @@ const LogExport = ({ search }: { search: LogSearch }) => {
   return (
     <span {...stylex.props(styles.end)}>
       <DropdownMenu>
-        <DropdownMenuTrigger chevron icon={Download} size="md" variant="quiet">
+        <DropdownMenuTrigger chevron icon={Download} size="sm" variant="quiet">
           {t`Export`}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

@@ -27,14 +27,16 @@ const Instructions = () => {
   return (
     <>
       <SectionCard
-        description={t`What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for.`}
+        density="compact"
+        description={t`What your own chats with Grasp start with. Only you read them.`}
         title={t`Your instructions`}
+        variant="grouped"
       >
         {own.state === "ready" ? (
           <InstructionFileEditor
-            description={t`Only you and your own chats read it, never a chat others share.`}
             file={{ scope: "person", personId: identity.userId }}
             label={t`Your instructions`}
+            labelHidden
             saved={own.data}
           />
         ) : (
@@ -43,19 +45,19 @@ const Instructions = () => {
       </SectionCard>
       {company === undefined ? null : (
         <SectionCard
+          density="compact"
           description={t`What every chat in the company starts with. Only admins change them.`}
           title={t`Company instructions`}
+          variant="grouped"
         >
           {company.state === "ready" ? (
             <SettingsStack>
               <InstructionFileEditor
-                description={t`The company’s rules for every agent.`}
                 file={companyInstructions}
                 label={t`Instructions`}
                 saved={company.data.instructions}
               />
               <InstructionFileEditor
-                description={t`What every agent should know about the company.`}
                 file={companyFacts}
                 label={t`Lasting facts`}
                 saved={company.data.facts}

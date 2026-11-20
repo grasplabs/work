@@ -63,10 +63,29 @@ const triedOf = (unsaved: Unsaved | undefined): Tried | undefined =>
     ? undefined
     : { change: unsaved.change, text: unsaved.text, after: 0 };
 
+/** The field's label, unless the card's title says it, and its sentence, if any. */
+const Words = ({
+  label,
+  labelHidden,
+  description,
+}: {
+  label: string;
+  labelHidden: boolean | undefined;
+  description: string | undefined;
+}) => (
+  <>
+    {labelHidden === true ? null : <FieldLabel>{label}</FieldLabel>}
+    {description === undefined ? null : (
+      <FieldDescription>{description}</FieldDescription>
+    )}
+  </>
+);
+
 export const InstructionFileEditor = ({
   file,
   saved,
   label,
+  labelHidden,
   description,
   onSaved,
   unsaved,
@@ -75,7 +94,9 @@ export const InstructionFileEditor = ({
   /** The file as it is now; null while it was never written. */
   saved: InstructionFileText | null;
   label: string;
-  description: string;
+  /** The label names the field for a screen reader only: the card's title already says it. */
+  labelHidden?: boolean;
+  description?: string;
   /** What else a save asks of core, once it landed and before the page is read again. */
   onSaved?: (session: Session) => Promise<void>;
   /**
@@ -152,9 +173,13 @@ export const InstructionFileEditor = ({
   };
   return (
     <Field disabled={busy} layout={styles.whole}>
-      <FieldLabel>{label}</FieldLabel>
-      <FieldDescription>{description}</FieldDescription>
+      <Words
+        description={description}
+        label={label}
+        labelHidden={labelHidden}
+      />
       <Textarea
+        aria-label={label}
         onValueChange={(next) => {
           setDraft({
             text: next,
@@ -187,7 +212,7 @@ export const InstructionFileEditor = ({
           disabled={busy || unchanged || stale || nothing}
           onClick={save}
           size="sm"
-          variant="ink"
+          variant="quiet"
         >
           {t`Save`}
         </Button>

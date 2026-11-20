@@ -414,9 +414,7 @@ describe("Settings › AI providers", () => {
     ].map((name) => button(name).disabled);
     expect({
       offered,
-      asks: text().includes(
-        "Choose the AI that Grasp's chat, agents and workflows run on."
-      ),
+      asks: text().includes("Use an OpenAI-compatible endpoint"),
     }).toStrictEqual({
       offered: [false, false, false, false, false],
       asks: true,
@@ -780,7 +778,7 @@ describe("Settings › AI providers", () => {
       ["add", { provider: "openai", key: pastedKey }],
       ["remove", "openai"],
     ]);
-    expect(text()).toContain("Choose the AI that Grasp's chat");
+    expect(text()).toContain("Use an OpenAI-compatible endpoint");
   });
 
   it("offers none of a removed provider's models, and asks for a new default before the fallbacks change when its was the default", async () => {
@@ -907,7 +905,7 @@ describe("Settings › AI providers", () => {
   it("asks for a provider only while nothing answers, not while it runs on Grasp's AI", async () => {
     const { api } = fakeAiProviders({ graspAvailable: true });
     await shown(api);
-    const asks = () => text().includes("Choose the AI that Grasp's chat");
+    const asks = () => text().includes("Use an OpenAI-compatible endpoint");
     const onOwn = asks();
     await press(button("Switch to Grasp’s AI"));
 
