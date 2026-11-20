@@ -59,8 +59,10 @@ import type {
 } from "@grasp-os/shared/onboarding-flow";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
+import { waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 
+import { readDirectoriesNow } from "../directory-people.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -199,8 +201,11 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         { held: async () => await store.heldTeams() }
       );
       const view = await store.saveRoster(named, by, { confirmed, minted });
-      if (confirmed) {
-        await syncTeams(this.#env, by);
+      // Teams it made are filled from the directory now, by the daily
+      // read itself, in the background: the admin's confirm neither waits
+      // for the read nor fails with it (GRA-2248).
+      if (confirmed && (await syncTeams(this.#env, by))) {
+        waitUntil(readDirectoriesNow(this.#env));
       }
       // A team the save took under seven loses its claims in the Brain now,
       // not only by core's clock (onboarding/new-brain.ts).
