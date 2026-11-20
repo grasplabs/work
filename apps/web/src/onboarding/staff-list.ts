@@ -1,5 +1,6 @@
 import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import {
+  noTeamId,
   onboardingPeopleMax,
   onboardingTeamsMax,
   teamNameKey,
@@ -211,8 +212,10 @@ const teamIdOf = (name: string): string => `t-${slugOf(name)}`;
  * "Sales - North", or two that share their first 36 letters) are two
  * teams: the one that comes first in the list keeps the id, the next gets
  * `-2`, and so on, so a list read again gives every team the id it had.
+ * The team named `noTeam`, for people the list gives no team, has its own
+ * id (`noTeamId`) in every language.
  */
-const teamIds = () => {
+const teamIds = (noTeam: string) => {
   const byName = new Map<string, string>();
   const taken = new Set<string>();
   return (name: string): { id: string; fresh: boolean } => {
@@ -220,6 +223,10 @@ const teamIds = () => {
     const known = byName.get(key);
     if (known !== undefined) {
       return { id: known, fresh: false };
+    }
+    if (key === teamNameKey(noTeam)) {
+      byName.set(key, noTeamId);
+      return { id: noTeamId, fresh: true };
     }
     const base = teamIdOf(name);
     let id = base;
@@ -319,7 +326,7 @@ const rosterOf = (
   noTeam: string
 ): Pick<StaffList, "roster" | "leadsFrom"> => {
   const teams = new Map<string, RosterTeam>();
-  const teamIdIn = teamIds();
+  const teamIdIn = teamIds(noTeam);
   const people: RosterPerson[] = [];
   const said: Said[] = [];
   for (const entry of entries) {
@@ -468,6 +475,10 @@ const underSavedIds = (
   const idOf = new Map<string, string>();
   const unmatched: string[] = [];
   for (const team of read.teams) {
+    // The team for people without one keeps its own id, whatever its name.
+    if (team.id === noTeamId) {
+      continue;
+    }
     const savedId = savedIds.get(teamNameKey(team.name));
     if (savedId === undefined) {
       unmatched.push(team.id);
