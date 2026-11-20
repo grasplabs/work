@@ -3,6 +3,8 @@ import type {
   SignInSettings,
 } from "@grasp-os/shared/org-settings";
 import { isAdmin } from "@grasp-os/shared/roles";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -21,22 +23,23 @@ import { controlStyles } from "./workspace-name.tsx";
 // people sign in, as Grasp set it up for the deployment
 // (`orgSettings.signIn`), as one row of the Organization card. Microsoft
 // 365 or Google Workspace stands in a field that only reads, whose
-// accounts it takes (the organization's own tenant or Workspace) behind
-// the row's info mark, and, only when it is missing, that the sign-in page
+// accounts it takes (the organization's own tenant or Workspace) under
+// its name, and, only when it is missing, that the sign-in page
 // doesn't offer it yet (its secret isn't set). Nothing here changes it,
 // and core never sends a secret, only whether one is set. The row reads
 // core itself, so the page's own read stays as it is.
 
 /** Whose accounts a way to sign in takes, in words; nothing when core doesn't say. */
-const pinnedOf = (
-  { provider, tenantId, hostedDomain }: SignInProvider,
-  t: ReturnType<typeof useLingui>["t"]
-): string | undefined => {
+const pinnedOf = ({
+  provider,
+  tenantId,
+  hostedDomain,
+}: SignInProvider): MessageDescriptor | undefined => {
   if (provider === "microsoft" && tenantId !== undefined) {
-    return t`Only your organization’s work accounts.`;
+    return msg`your organization’s work accounts`;
   }
   if (provider === "google" && hostedDomain !== undefined) {
-    return t`Only work accounts at ${hostedDomain}.`;
+    return msg`work accounts at ${hostedDomain}`;
   }
   return undefined;
 };
@@ -82,13 +85,16 @@ export const SignInView = ({
     );
   }
   const pinned = providers.flatMap((provider) => {
-    const words = pinnedOf(provider, t);
-    return words === undefined ? [] : [words];
+    const words = pinnedOf(provider);
+    return words === undefined ? [] : [i18n._(words)];
   });
+  const accounts = formatList(pinned);
   return (
     <>
       <SettingRow
-        {...(pinned.length === 0 ? {} : { info: pinned.join(" ") })}
+        help={
+          pinned.length === 0 ? t`How your people sign in` : t`Only ${accounts}`
+        }
         label={label}
       >
         {(field) => (

@@ -13,25 +13,18 @@ const styles = stylex.create({
   fill: { width: "100%" },
 });
 
-/** A value nobody changes here, in a read-only field; more about it behind the row's info mark. */
+/** A value nobody changes here, in a read-only field, with one short line under its name. */
 export const ReadOnlyRow = ({
   label,
   value,
-  info,
-  infoLabel,
+  help,
 }: {
   label: string;
   value: string;
-  /** More about it, behind the row's info mark. */
-  info?: string;
-  /** The info mark's name for a screen reader. */
-  infoLabel?: string;
+  /** One short line on what it is, under its name. */
+  help?: string;
 }) => (
-  <SettingRow
-    {...(info === undefined ? {} : { info })}
-    {...(infoLabel === undefined ? {} : { infoLabel })}
-    label={label}
-  >
+  <SettingRow {...(help === undefined ? {} : { help })} label={label}>
     {(field) => (
       <Input {...field} layout={styles.fill} readOnly size="sm" value={value} />
     )}

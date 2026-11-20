@@ -56,6 +56,11 @@ export interface SettingsSection {
   group: SettingsGroupId;
   icon: IconData;
   audience: SettingsAudience;
+  /**
+   * The page runs the page's whole width (a log beside its details);
+   * every other section stands in one centred column.
+   */
+  wide?: true;
 }
 
 export const settingsGroups: readonly SettingsGroup[] = [
@@ -126,6 +131,7 @@ export const settingsSections: readonly SettingsSection[] = [
     group: "workspace",
     icon: Clock,
     audience: "admins",
+    wide: true,
   },
   {
     // The event sources outside systems send events to.

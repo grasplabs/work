@@ -259,8 +259,7 @@ const Security = () => {
       <SectionCard variant="grouped" density="compact" flush title={t`Sign-in`}>
         <SettingsRows>
           <ReadOnlyRow
-            info={t`Passwords and two-step sign-in live with your organization’s account.`}
-            infoLabel={t`More about signing in`}
+            help={t`Passwords and two-step sign-in live with your organization`}
             label={t`Signed in with`}
             value={signedInWith}
           />

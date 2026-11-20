@@ -50,7 +50,10 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
         />
       </div>
       <SettingsRows>
-        <SettingRow label={t`Colour`}>
+        <SettingRow
+          help={t`The light around the box while Grasp works`}
+          label={t`Colour`}
+        >
           <ToggleGroup
             aria-label={t`Colour`}
             onValueChange={(value) => {
@@ -69,7 +72,7 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
             ))}
           </ToggleGroup>
         </SettingRow>
-        <SettingRow label={t`Edge`}>
+        <SettingRow help={t`How that light is drawn`} label={t`Edge`}>
           <ToggleGroup
             aria-label={t`Edge`}
             onValueChange={(value) => {
