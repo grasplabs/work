@@ -21330,10 +21330,6 @@ msgstr "Ihr eigener Vertrag mit Anthropic, OpenAI, Mistral oder einem anderen An
 msgid "Your own endpoint"
 msgstr "Eigener Endpunkt"
 
-#: src/brain/skills-page.tsx
-msgid "Your own skills are used in your own chats alone; shared with the company or a team, after an admin approves, by everyone in it. A skill is guidance: it never grants access."
-msgstr "Deine eigenen Skills werden nur in deinen eigenen Chats genutzt; mit dem Unternehmen oder einem Team geteilt, nach der Freigabe durch einen Admin, von allen darin. Ein Skill ist eine Anleitung: Er gewährt nie Zugriff."
-
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 msgid "Your own word"

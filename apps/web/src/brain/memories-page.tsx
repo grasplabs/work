@@ -47,6 +47,7 @@ import { Heading } from "../grasp/heading/index.ts";
 import {
   Item,
   ItemContent,
+  ItemDescription,
   ItemGroup,
   ItemTitle,
 } from "../grasp/item/index.ts";
@@ -427,7 +428,6 @@ const styles = stylex.create({
     gap: grasp.space2,
   },
   start: { alignSelf: "flex-start" },
-  muted: { color: grasp.muted },
   // Texts are shown as text, with their own line breaks.
   plain: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
   // The facts sources disagree on, a card each.
@@ -1204,16 +1204,16 @@ const EntityName = ({ entity }: { entity: BrainEntityListed }) => {
   }
   if (entity.unreadable) {
     return (
-      <span {...stylex.props(styles.muted)}>
+      <Text element="span" size="sm" tone="muted">
         <Trans>Something you corrected, which you can no longer read</Trans>
-      </span>
+      </Text>
     );
   }
   return (
     entity.name ?? (
-      <span {...stylex.props(styles.muted)}>
+      <Text element="span" size="sm" tone="muted">
         <Trans>Without a name</Trans>
-      </span>
+      </Text>
     )
   );
 };
@@ -1409,9 +1409,9 @@ const EntityList = ({
                 <EntityName entity={each} />
               </ItemTitle>
               {each.entity.store === "own" ? (
-                <span {...stylex.props(styles.row)}>
+                <ItemDescription>
                   <OnlyYou />
-                </span>
+                </ItemDescription>
               ) : null}
             </ItemContent>
           </Item>
@@ -1490,13 +1490,13 @@ const EntityPanel = ({
         <div {...stylex.props(styles.row)}>
           <Heading id={heading} level={3} size="ui-sm">
             {entity === null ? (
-              <span {...stylex.props(styles.muted)}>
+              <Text element="span" size="sm" tone="muted">
                 {items.length > 0 ? (
                   <Trans>Forgotten, kept as history</Trans>
                 ) : (
                   <Trans>Nothing you can read</Trans>
                 )}
-              </span>
+              </Text>
             ) : null}
             {entity === undefined || entity === null ? null : (
               <EntityName entity={entity} />

@@ -8712,6 +8712,10 @@ msgstr "Comment ils le remarqueraient : {notice}."
 msgid "How they would notice: not said yet."
 msgstr "Comment ils le remarqueraient : pas encore précisé."
 
+#: src/brain/skills-page.tsx
+msgid "How things are done here. Your own skills are used in your own chats alone. Sharing one with the company or one of your teams waits for an admin, and from then on the agents of everyone in it use it. A skill is guidance: it never grants access."
+msgstr "Comment on fait les choses ici. Vos propres skills ne servent que dans vos propres chats. Partager un skill avec l'entreprise ou l'une de vos équipes attend un administrateur, puis les agents de tous ceux qui en font partie l'utilisent. Un skill est un guide : il ne donne jamais d'accès."
+
 #: src/apps/app-settings.tsx
 msgid "How this App is built and what to keep in mind when changing it."
 msgstr "Comment cette App est construite et ce qu’il faut garder en tête pour la modifier."
@@ -21325,10 +21329,6 @@ msgstr "Votre propre contrat avec Anthropic, OpenAI, Mistral ou un autre fournis
 #: src/settings/ai-providers.tsx
 msgid "Your own endpoint"
 msgstr "Votre propre endpoint"
-
-#: src/brain/skills-page.tsx
-msgid "Your own skills are used in your own chats alone; shared with the company or a team, after an admin approves, by everyone in it. A skill is guidance: it never grants access."
-msgstr "Vos propres skills ne servent que dans vos propres chats ; partagés avec l'entreprise ou une équipe, après l'accord d'un administrateur, par tous ses membres. Un skill est un guide : il ne donne jamais d'accès."
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx

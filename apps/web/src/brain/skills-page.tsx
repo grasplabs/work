@@ -568,7 +568,7 @@ const ShareRequest = ({
             onClick={onApprove}
             size="sm"
             type="button"
-            variant="approve"
+            variant="quiet"
           >
             {t`Approve`}
           </Button>
@@ -1144,9 +1144,10 @@ export const SkillsPage = ({
         <PageHeader
           description={
             <Trans>
-              Your own skills are used in your own chats alone; shared with the
-              company or a team, after an admin approves, by everyone in it. A
-              skill is guidance: it never grants access.
+              How things are done here. Your own skills are used in your own
+              chats alone. Sharing one with the company or one of your teams
+              waits for an admin, and from then on the agents of everyone in it
+              use it. A skill is guidance: it never grants access.
             </Trans>
           }
           title={<Trans context="the Brain's skills page">Skills</Trans>}

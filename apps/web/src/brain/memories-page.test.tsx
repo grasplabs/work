@@ -388,6 +388,14 @@ describe(MemoriesPage, () => {
     const { calls } = await shown();
     await press("Show more");
     const listed = section("What the Brain remembers");
+    // The mark is said with the row, not only seen.
+    const globex = [...document.querySelectorAll("button")].find((button) =>
+      button.textContent.startsWith("Globex")
+    );
+    const globexSaid = (globex?.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.querySelector(`#${id}`)?.textContent ?? "")
+      .join(" ");
     await press("Acme");
     await press("Show more");
     const opened = section("What the Brain remembers");
@@ -400,6 +408,7 @@ describe(MemoriesPage, () => {
         "Without a name",
         "Something you corrected, which you can no longer read",
       ].map((text) => listed.includes(text)),
+      globexSaid,
       opened: [
         "Status: Paying",
         "Contact: You",
@@ -411,6 +420,7 @@ describe(MemoriesPage, () => {
       calls: calls.slice(1),
     }).toStrictEqual({
       listed: [true, true, true, true, true],
+      globexSaid: "Only you",
       opened: [true, true, true, true, true, true],
       calls: [
         "entities customer",
