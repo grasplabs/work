@@ -14,9 +14,11 @@ import {
   directoryGroupMembers,
   directoryGroupTeams,
   directoryPeople,
+  sourceReaderGroups,
 } from "./db/core/schema.ts";
 import { jsonValuesOf } from "./directory-teams.ts";
 import type { DirectoryKind } from "./directory-ties.ts";
+import { entraGroupPrefix } from "./source-readers.ts";
 
 // The daily read of the directory's mapped groups (GRA-2056, G3; the
 // threat model is on the issue): each group an admin mapped to a team
@@ -42,6 +44,11 @@ import type { DirectoryKind } from "./directory-ties.ts";
 //   unmapped meanwhile gets no rows: each needs its mapping.
 // - Someone the read keeps no row for (a guest, an erased person) in a
 //   group: each row needs the person's row, and goes with it.
+// - An older read of a group landing after a newer one, of either read
+//   (this one, or the read of the groups reader lists name,
+//   directory-reader-groups.ts), and bringing back someone the newer one
+//   no longer lists: a group's rows are replaced only while no whole read
+//   of it that started later was kept (`newerReadKept`).
 
 /** Why the read left a mapped group as it was (`directory_group_teams.held`). */
 export type GroupHeld = DirectoryGroupHeld;
@@ -56,7 +63,23 @@ export interface GroupRead {
   /** Its users, by the provider's ID, lower case: none when held. */
   users: string[];
   held: GroupHeld | null;
+  /** When its read started (the clock's time). */
+  startedAt: number;
 }
+
+/**
+ * That a whole read of the group the Brain names `name` that started after
+ * `startedAt` was kept, by either read that keeps a group's members, as
+ * SQL: `source_reader_groups.directory_read_at`, which each sets as it
+ * keeps a whole read of a group a reader list names. A group no list
+ * names has one reader alone, the daily read, whose claim orders its
+ * reads.
+ */
+export const newerReadKept = (name: SQL, startedAt: SQL): SQL => sql`EXISTS (
+  SELECT 1 FROM ${sourceReaderGroups}
+  WHERE ${sourceReaderGroups.name} = ${name}
+    AND ${sourceReaderGroups.directoryReadAt} > ${startedAt}
+)`;
 
 /** What reads every page of something through connect (directory-people.ts `everyPage`). */
 export type EveryPage = <Page extends { next: string | null }>(
@@ -65,18 +88,25 @@ export type EveryPage = <Page extends { next: string | null }>(
 ) => Promise<void>;
 
 /** The failures of a group's read that hold it rather than fail the read. */
-const holding = new Map<string | undefined, GroupHeld>([
+const holding = new Map<string | undefined, "gone" | "refused">([
   ["directory.group_gone", "gone"],
   ["directory.group_refused", "refused"],
 ]);
 
-/** The mapped group `groupId` read whole, or held. */
-const readGroup = async (
+/**
+ * The group `groupId` read whole through connect, every page: the group
+ * as Microsoft answered it and its users; or why it is held, for a
+ * failure that is this group's alone (`gone`, `refused`). Any other
+ * failure is thrown: nothing of a group read in part is answered.
+ */
+export const readWholeGroup = async (
   env: Env,
   connection: DirectoryConnection,
   everyPage: EveryPage,
-  { groupId, teamId }: { groupId: string; teamId: string }
-): Promise<GroupRead> => {
+  groupId: string
+): Promise<
+  { group: DirectoryGroup; users: string[] } | { held: "gone" | "refused" }
+> => {
   const users = new Set<string>();
   // The group, as the first page answers it.
   const answered: DirectoryGroup[] = [];
@@ -102,7 +132,7 @@ const readGroup = async (
     if (held === undefined) {
       throw error;
     }
-    return { groupId, teamId, group: null, users: [], held };
+    return { held };
   }
   // Connect answers the group on the first page: a read without it is
   // the provider failing.
@@ -110,19 +140,42 @@ const readGroup = async (
   if (group === undefined) {
     throw directoryErrors.create("directory.provider_failed");
   }
-  const { refusal } = group;
+  return { group, users: [...users] };
+};
+
+/** The mapped group `groupId` read whole, or held. */
+const readGroup = async (
+  env: Env,
+  connection: DirectoryConnection,
+  everyPage: EveryPage,
+  { groupId, teamId }: { groupId: string; teamId: string }
+): Promise<GroupRead> => {
+  const startedAt = Date.now();
+  const read = await readWholeGroup(env, connection, everyPage, groupId);
+  if ("held" in read) {
+    return {
+      groupId,
+      teamId,
+      group: null,
+      users: [],
+      held: read.held,
+      startedAt,
+    };
+  }
+  const { group, users } = read;
   let held: GroupHeld | null = null;
-  if (refusal !== null) {
+  if (group.refusal !== null) {
     held = "not_mappable";
-  } else if (users.size === 0) {
+  } else if (users.length === 0) {
     held = "empty";
   }
   return {
     groupId,
     teamId,
     group,
-    users: held === null ? [...users] : [],
+    users: held === null ? users : [],
     held,
+    startedAt,
   };
 };
 
@@ -152,8 +205,11 @@ export const mappedGroupsRead = async (
  * The statements that keep what the read found of the mapped groups, in
  * its batch after the people's rows and before the placement, each only
  * while `claimed` (the read's claim) holds: the rows of every group read
- * whole replaced, and each group's mapping marked read, or held, with its
- * name, kind and who decides its members as Microsoft answered now.
+ * whole replaced, unless a newer whole read of it was kept, each row
+ * from when its group's read started; each group's mapping marked read,
+ * or held, with its name, kind and who decides its members as Microsoft
+ * answered now; and, for a group a reader list names, its whole read
+ * recorded (`newerReadKept`).
  */
 export const groupStatements = (
   db: DrizzleD1Database,
@@ -166,13 +222,28 @@ export const groupStatements = (
   if (reads.length === 0) {
     return [];
   }
-  const whole = reads.filter(({ held }) => held === null);
-  const wholeIds = JSON.stringify(whole.map(({ groupId }) => groupId));
+  const whole = reads
+    .filter(({ held }) => held === null)
+    .map(({ groupId, users, startedAt }) => ({
+      groupId,
+      users,
+      startedAt,
+      // The Brain's name of it, as a reader list names it.
+      name: `${entraGroupPrefix}${tenant}:${groupId}`,
+    }));
+  const wholeReads = JSON.stringify(
+    whole.map(({ groupId, name, startedAt }) => [groupId, name, startedAt])
+  );
   const pairs = jsonValuesOf(
-    whole.flatMap(({ groupId, users }) =>
-      users.map((user) => [groupId, user] as const)
+    whole.flatMap(({ groupId, users, startedAt, name }) =>
+      users.map((user) => [groupId, user, startedAt, name] as const)
     )
   );
+  const stillMapped = (groupId: SQL) => sql`EXISTS (
+    SELECT 1 FROM ${directoryGroupTeams}
+    WHERE ${directoryGroupTeams.provider} = ${kind.provider}
+      AND ${directoryGroupTeams.groupId} = ${groupId}
+  )`;
   const outcomes = JSON.stringify(
     reads.map(({ groupId, held, group, teamId }) => [
       groupId,
@@ -191,36 +262,55 @@ export const groupStatements = (
   const outcome = (at: 1 | 2 | 3 | 4) =>
     sql`(SELECT value ->> ${sql.raw(String(at))} FROM json_each(${outcomes}) WHERE value ->> 0 = ${directoryGroupTeams.groupId})`;
   return [
-    db
-      .delete(directoryGroupMembers)
-      .where(
-        and(
-          eq(directoryGroupMembers.provider, kind.provider),
-          sql`${directoryGroupMembers.groupId} IN (SELECT value FROM json_each(${wholeIds}))`,
-          claimed
-        )
-      ),
+    db.delete(directoryGroupMembers).where(
+      and(
+        eq(directoryGroupMembers.provider, kind.provider),
+        sql`${directoryGroupMembers.groupId} IN (
+          SELECT value ->> 0 FROM json_each(${wholeReads})
+          WHERE NOT ${newerReadKept(sql`value ->> 1`, sql`value ->> 2`)}
+        )`,
+        // Only while still mapped: a group unmapped meanwhile that a
+        // reader list names is the reader groups' read's now
+        // (directory-reader-groups.ts), its rows as that read left them.
+        stillMapped(sql`${directoryGroupMembers.groupId}`),
+        claimed
+      )
+    ),
     ...pairs.map((value) =>
       db
         .insert(directoryGroupMembers)
         .select(
-          sql`SELECT ${kind.provider}, ${tenant}, value ->> 0, value ->> 1
+          sql`SELECT ${kind.provider}, ${tenant}, value ->> 0, value ->> 1, value ->> 2
             FROM json_each(${value})
             WHERE ${claimed}
+              AND NOT ${newerReadKept(sql`value ->> 3`, sql`value ->> 2`)}
               AND EXISTS (
                 SELECT 1 FROM ${directoryPeople}
                 WHERE ${directoryPeople.provider} = ${kind.provider}
                   AND ${directoryPeople.tenant} = ${tenant}
                   AND ${directoryPeople.accountId} = value ->> 1
               )
-              AND EXISTS (
-                SELECT 1 FROM ${directoryGroupTeams}
-                WHERE ${directoryGroupTeams.provider} = ${kind.provider}
-                  AND ${directoryGroupTeams.groupId} = value ->> 0
-              )`
+              AND ${stillMapped(sql`value ->> 0`)}`
         )
         .onConflictDoNothing()
     ),
+    // Each named group's whole read recorded, as its rows were kept.
+    db
+      .update(sourceReaderGroups)
+      .set({
+        directoryReadAt: sql`(SELECT value ->> 2 FROM json_each(${wholeReads}) WHERE value ->> 1 = ${sourceReaderGroups.name})`,
+      })
+      .where(
+        and(
+          sql`EXISTS (
+            SELECT 1 FROM json_each(${wholeReads})
+            WHERE value ->> 1 = ${sourceReaderGroups.name}
+              AND NOT ${newerReadKept(sql`value ->> 1`, sql`value ->> 2`)}
+              AND ${stillMapped(sql`value ->> 0`)}
+          )`,
+          claimed
+        )
+      ),
     db
       .update(directoryGroupTeams)
       .set({

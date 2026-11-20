@@ -178,10 +178,18 @@ const chosenFrom = async (
   session: Session,
   connectionId: string,
   next: ConnectionBrainAudience,
-  from: ConnectionBrainAudience
+  from: ConnectionBrainAudience,
+  confirmed: boolean
 ): Promise<"chosen" | "changed"> => {
   try {
-    await session.connections.setBrainAudience(connectionId, next, from);
+    await session.connections.setBrainAudience(
+      connectionId,
+      next,
+      from,
+      // Opening it to someone new is confirmed first (`WidenDialog`), and
+      // core refuses it unconfirmed.
+      ...(confirmed ? [next] : [])
+    );
     return "chosen";
   } catch (error) {
     if (
@@ -192,6 +200,15 @@ const chosenFrom = async (
     throw error;
   }
 };
+
+/** The name of `audience`'s team, if it is a team the list holds. */
+const teamNameOf = (
+  audience: ConnectionBrainAudience,
+  teams: readonly Team[]
+): string | undefined =>
+  audience.kind === "team"
+    ? teams.find(({ id }) => id === audience.teamId)?.name
+    : undefined;
 
 /** An audience as the select names it: `nobody`, `everyone`, or a team's ID. */
 const valueOf = (audience: ConnectionBrainAudience): string =>
@@ -229,10 +246,7 @@ const WidenDialog = ({
   onCancel: () => void;
 }) => {
   const { t } = useLingui();
-  const team =
-    next.kind === "team"
-      ? (teams.find(({ id }) => id === next.teamId)?.name ?? "")
-      : "";
+  const team = teamNameOf(next, teams);
   return (
     <Dialog
       onOpenChange={(open) => {
@@ -251,15 +265,25 @@ const WidenDialog = ({
             {next.kind === "everyone" ? (
               <Trans>
                 Everyone in the company will be able to find what agents read
-                through {label}, including what was kept before. Choose a team
-                if not everyone should see it.
+                through {label} and what is copied from it, including what was
+                kept before, whatever their permissions in {label}. Choose a
+                team if not everyone should see it.
               </Trans>
-            ) : (
+            ) : null}
+            {next.kind === "team" && team !== undefined ? (
               <Trans>
                 Everyone in {team} will be able to find what agents read through{" "}
-                {label}, including what was kept before.
+                {label} and what is copied from it, including what was kept
+                before, whatever their permissions in {label}.
               </Trans>
-            )}
+            ) : null}
+            {next.kind === "team" && team === undefined ? (
+              <Trans>
+                Everyone in this team will be able to find what agents read
+                through {label} and what is copied from it, including what was
+                kept before, whatever their permissions in {label}.
+              </Trans>
+            ) : null}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter closeLabel={t`Cancel`} showCloseButton>
@@ -384,13 +408,20 @@ export const BrainAudience = ({
   const erasing = setting?.erasing ?? false;
   const choose = (
     next: ConnectionBrainAudience,
-    from: ConnectionBrainAudience
+    from: ConnectionBrainAudience,
+    confirmed = false
   ): void => {
     setAsked(undefined);
     setChangedMeanwhile(false);
     void (async () => {
       await change(async (session) => {
-        const outcome = await chosenFrom(session, connection.id, next, from);
+        const outcome = await chosenFrom(
+          session,
+          connection.id,
+          next,
+          from,
+          confirmed
+        );
         setChangedMeanwhile(outcome === "changed");
       });
       onChanged();
@@ -431,10 +462,8 @@ export const BrainAudience = ({
       </Field>
       <p className="text-muted-foreground">
         <Trans>
-          Files copied from the places picked below are read only by those who
-          can open them in {label}, and the audience chosen here narrows that
-          further; what agents read through {label} is decided by this audience
-          alone.
+          Who may read it is decided inside Grasp, not by the permissions in{" "}
+          {label}: choose a team if not everyone should see it.
         </Trans>
       </p>
       {erasing ? (
@@ -464,12 +493,18 @@ export const BrainAudience = ({
             setAsked(undefined);
           }}
           onConfirm={() => {
-            choose(asked.next, asked.from);
+            choose(asked.next, asked.from, true);
           }}
           teams={teams}
         />
       )}
-      <SyncPlaces connection={connection} label={label} />
+      <SyncPlaces
+        audience={audience}
+        connection={connection}
+        label={label}
+        onAudienceStale={onChanged}
+        team={teamNameOf(audience, teams)}
+      />
       {!erasing &&
       (audience.kind !== "nobody" || connection.keepsReads === true) ? (
         <EraseKept connection={connection} label={label} onErased={onChanged} />

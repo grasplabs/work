@@ -81,7 +81,7 @@ import { saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
-import { acmeTenant } from "./sign-in-config.ts";
+import { acmeTenant, otherTenant } from "./sign-in-config.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import { holdsNothing } from "./stored-skills.ts";
 import {
@@ -369,7 +369,7 @@ describe(
         "the holder's own source": markerWord(),
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
-        "a file shared with a group the outsider proved they were in over a day ago":
+        "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
           markerWord(),
         "the holder's interview": markerWord(),
         "a source narrowed away from the outsider": markerWord(),
@@ -395,10 +395,6 @@ describe(
         "a file native sync copied from a place un-picked on a shared connection everyone may read":
           markerWord(),
         "a file native sync copied from a place picked on a shared connection with no Brain audience":
-          markerWord(),
-        "a file native sync copied from a place everyone may read in the Brain that its source lets the holder alone read":
-          markerWord(),
-        "a file native sync copied from a place everyone may read in the Brain whose readers couldn't be read":
           markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
@@ -447,7 +443,7 @@ describe(
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
-        "a file shared with a group the outsider proved they were in over a day ago":
+        "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
           staleGroupMarker,
         "the holder's interview": interviewMarker,
         "a source narrowed away from the outsider": narrowedMarker,
@@ -475,10 +471,6 @@ describe(
           unpickedPlaceMarker,
         "a file native sync copied from a place picked on a shared connection with no Brain audience":
           nobodyPlaceMarker,
-        "a file native sync copied from a place everyone may read in the Brain that its source lets the holder alone read":
-          holderPlaceMarker,
-        "a file native sync copied from a place everyone may read in the Brain whose readers couldn't be read":
-          unreadPlaceMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
         "a file the source shares with the holder, by their account":
@@ -871,22 +863,17 @@ describe(
         })}`,
       };
       // Copied by native sync from places an admin picked on shared
-      // connections (GRA-1719), each read by those of its readers at the
-      // source whom its place's group holds too (GRA-2145), a group a
+      // connections (GRA-1719), each for its place's own group, which a
       // reader holds beside the connection's audience only while the place
-      // is picked (brain-next.ts `withConnections`). The outsider may open
-      // the first three at the source: one for a team they aren't in; one
-      // whose place was un-picked, though everyone may read the
-      // connection; one whose connection has no audience. Two more that
-      // everyone may read in the Brain: one its source lets the holder
-      // alone read, one whose readers couldn't be read. Their places, as
-      // the sync run keeps them, are never due in a run.
+      // is picked (brain-next.ts `withConnections`): one for a team the
+      // outsider isn't in; one whose place was un-picked, though everyone
+      // may read the connection; one whose connection has no audience.
+      // Their places, as the sync run keeps them, are never due in a run.
       const neverDue = Date.parse("2100-01-01T00:00:00.000Z");
       const placeCopy = async (
         marker: string,
         audience: Parameters<typeof chooseAudience>[2] | undefined,
-        dropped: boolean,
-        readers: SourceReader[] = [accountOf(outsiderPerson)]
+        dropped: boolean
       ): Promise<SourceRef> => {
         // Its ID holds no marker: everyone holds the group of a connection
         // everyone may read.
@@ -915,13 +902,7 @@ describe(
           source,
           change: crypto.randomUUID(),
           text: `Site plan ${sharedWord} ${marker}`,
-          readers: {
-            kind: "place",
-            connectionId,
-            feed: "sites",
-            place,
-            readers,
-          },
+          readers: { kind: "place", connectionId, feed: "sites", place },
         });
         return source;
       };
@@ -939,18 +920,6 @@ describe(
         nobodyPlaceMarker,
         undefined,
         false
-      );
-      const holderPlaceId = await placeCopy(
-        holderPlaceMarker,
-        { kind: "everyone" },
-        false,
-        [accountOf(holderApi.person)]
-      );
-      const unreadPlaceId = await placeCopy(
-        unreadPlaceMarker,
-        { kind: "everyone" },
-        false,
-        []
       );
       // A step the holder took, kept as an event of a team of theirs large
       // enough to keep one (GRA-1763): nobody reads it back, that team
@@ -1121,6 +1090,33 @@ describe(
           readAtNow
         )
         .run();
+      // And with Entra groups the company's directory lists the outsider in
+      // (GRA-2146), tied to them by their object ID: one by a read over a
+      // day old, which proves nothing any more; and one read now, but named
+      // by the file in another tenant, which is another group.
+      const [directoryStaleGroup, directoryOtherTenantGroup] = [
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+      ];
+      const outsiderOid = String(outsiderPerson.oid).toLowerCase();
+      const directoryTenant = acmeTenant.toLowerCase();
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO directory_people (provider, tenant, account_id, department, enabled, user_id) VALUES ('microsoft-directory', ?, ?, '', 1, ?)"
+        ).bind(directoryTenant, outsiderOid, outsider),
+        env.DB.prepare(
+          "INSERT INTO directory_group_members (provider, tenant, group_id, account_id, read_at) VALUES ('microsoft-directory', ?, ?, ?, ?), ('microsoft-directory', ?, ?, ?, ?)"
+        ).bind(
+          directoryTenant,
+          directoryStaleGroup,
+          outsiderOid,
+          Date.now() - readerProofMaxAgeMs - 60_000,
+          directoryTenant,
+          directoryOtherTenantGroup,
+          outsiderOid,
+          Date.now()
+        ),
+      ]);
       const staleGroupId = await add(
         `Lease annex ${sharedWord} ${staleGroupMarker}`,
         {
@@ -1131,6 +1127,18 @@ describe(
               provider: "microsoft",
               tenant: acmeTenant,
               group: staleGroup,
+            },
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: acmeTenant,
+              group: directoryStaleGroup,
+            },
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: otherTenant,
+              group: directoryOtherTenantGroup,
             },
           ],
         }
@@ -1495,8 +1503,6 @@ describe(
           teamPlaceMarker,
           unpickedPlaceMarker,
           nobodyPlaceMarker,
-          holderPlaceMarker,
-          unreadPlaceMarker,
           readersMarker,
           staleReadersMarker,
           syncMarker,
@@ -1529,8 +1535,6 @@ describe(
           teamPlaceId,
           unpickedPlaceId,
           nobodyPlaceId,
-          holderPlaceId,
-          unreadPlaceId,
           readersId,
           staleReadersId,
           goneSyncId,
@@ -1701,19 +1705,9 @@ describe(
         unsharedReadMarker,
         unpickedPlaceMarker,
         nobodyPlaceMarker,
-        holderPlaceMarker,
-        unreadPlaceMarker,
-        placeMarkers: [
-          teamPlaceMarker,
-          unpickedPlaceMarker,
-          nobodyPlaceMarker,
-          holderPlaceMarker,
-          unreadPlaceMarker,
-        ],
+        placeMarkers: [teamPlaceMarker, unpickedPlaceMarker, nobodyPlaceMarker],
         unpickedPlaceId,
         nobodyPlaceId,
-        holderPlaceId,
-        unreadPlaceId,
         runMarker,
         askedMarker,
         answerMarker,
@@ -2171,8 +2165,6 @@ describe(
             world.unsharedReadMarker,
             world.unpickedPlaceMarker,
             world.nobodyPlaceMarker,
-            world.holderPlaceMarker,
-            world.unreadPlaceMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
             world.ownUploadMarker,
@@ -2191,8 +2183,6 @@ describe(
             world.runCaptureId,
             world.unpickedPlaceId,
             world.nobodyPlaceId,
-            world.holderPlaceId,
-            world.unreadPlaceId,
             world.runSource,
             world.turnSource
           ),
@@ -2321,7 +2311,7 @@ describe(
         },
         {
           "a source nobody is known to read": world.noneMarker,
-          "a file shared with a group the outsider proved they were in over a day ago":
+          "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
             world.staleGroupMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           "another agent's instruction file": world.agentFileMarker,
@@ -2389,7 +2379,7 @@ describe(
           "a memory shared with a team, though the holder is in the team":
             world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
-          "a file shared with a group the outsider proved they were in over a day ago":
+          "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
             world.staleGroupMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
@@ -2477,7 +2467,7 @@ describe(
           "a memory shared with a team the grant doesn't name, though the holder is in it":
             world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
-          "a file shared with a group the outsider proved they were in over a day ago":
+          "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
             world.staleGroupMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
