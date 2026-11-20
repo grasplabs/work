@@ -65,6 +65,13 @@ export interface Identity {
    * every staff session.
    */
   onboardingOnly?: true;
+  /**
+   * A guest (roles.ts `guestRole`): someone outside the company, who
+   * reaches only the Apps shared with them, as their user, and nothing
+   * else of the platform (core's guest-access.ts). Their `role` is
+   * `user` and they are in no team.
+   */
+  guest?: true;
   /** When the session ends (ISO 8601). */
   expiresAt: string;
 }

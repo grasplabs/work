@@ -35,10 +35,11 @@ import {
 // here:
 //
 // - A route answering a guest's session: every route that asks who a
-//   request comes from answers them exactly as nobody signed in.
+//   request comes from answers them exactly as nobody signed in, but
+//   those open to guests (guest-access.ts, guest-apps.test.ts).
 // - Better Auth's own organization routes: refused.
-// - Being counted as someone in the company: the people a member may
-//   share with, a team, the Brain.
+// - Being counted as someone in the company: a team, the Brain; offered
+//   to share an App with only marked as a guest.
 // - Opening an interview.
 // - Becoming, or ceasing to be, a guest by a side door: the members
 //   settings' role change, a sign-in through the company's IdP.
@@ -47,9 +48,14 @@ const idp = mockIdp();
 
 /** Makes the member `userId` a guest, as nothing in the product does yet. */
 const makeGuest = async (userId: string): Promise<void> => {
-  await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
-    .bind(guestRole, userId)
-    .run();
+  // Nameless, as guest-members.ts makes a guest.
+  await env.DB.batch([
+    env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?").bind(
+      guestRole,
+      userId
+    ),
+    env.DB.prepare("UPDATE users SET name = '' WHERE id = ?").bind(userId),
+  ]);
 };
 
 /** Someone signed in as a member, made a guest since. */
@@ -159,7 +165,7 @@ const recalled = async (personId: string): Promise<string> =>
   );
 
 describe("a guest", { timeout: 60_000 }, () => {
-  it("is answered as nobody signed in by every route, and refused by Better Auth's organization routes", async () => {
+  it("is answered as nobody signed in by every route but those open to guests, and refused by Better Auth's organization routes", async () => {
     const member = await signedInWithRole(idp, "user");
     const guest = await signedInGuest();
 
@@ -169,7 +175,16 @@ describe("a guest", { timeout: 60_000 }, () => {
       await routeAnswers(member.session),
     ];
 
-    expect(asGuest).toStrictEqual(nobody);
+    // Open to guests (guest-access.ts): who they are, and an App's page
+    // calls, files and links, answered as a member's are for an App that
+    // isn't theirs.
+    const openToGuests = ["rpc", "pageCall", "file", "upload", "link"] as const;
+    expect(asGuest).toStrictEqual({
+      ...nobody,
+      ...Object.fromEntries(
+        openToGuests.map((family) => [family, asMember[family]])
+      ),
+    });
     // Each route tells a member from nobody, so a guest answered as
     // nobody was refused for who they are.
     expect(
@@ -182,7 +197,7 @@ describe("a guest", { timeout: 60_000 }, () => {
     ).resolves.toStrictEqual([403, 200]);
   });
 
-  it("is never among the people a member may share with, nor put in a team", async () => {
+  it("is offered to share an App with only as a guest, and never put in a team", async () => {
     const owner = await signedInApi(idp, "admin");
     const colleague = await signedInWithRole(idp, "user");
     const guest = await signedInGuest();
@@ -205,11 +220,16 @@ describe("a guest", { timeout: 60_000 }, () => {
       .first<number>("n");
 
     expect({
-      colleague: offered.people.some(({ id }) => id === colleague.userId),
-      guest: offered.people.some(({ id }) => id === guest.userId),
+      colleague: offered.people.find(({ id }) => id === colleague.userId),
+      guest: offered.people.find(({ id }) => id === guest.userId),
       added: added.status,
       inTeams,
-    }).toStrictEqual({ colleague: true, guest: false, added: 403, inTeams: 0 });
+    }).toStrictEqual({
+      colleague: { id: colleague.userId, name: colleague.person.name },
+      guest: { id: guest.userId, name: guest.person.email, guest: true },
+      added: 403,
+      inTeams: 0,
+    });
   });
 
   it("is named to no member by Better Auth's own lists of the organization", async () => {

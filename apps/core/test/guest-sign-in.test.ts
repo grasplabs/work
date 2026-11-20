@@ -24,12 +24,12 @@ import type { CapturedMail } from "./mail-capture.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
+  openRpc,
   outcome,
   routed,
   sessionCookieName,
   signedInApi,
   unique,
-  whoami,
 } from "./sign-in.ts";
 
 // Guests (GRA-2235, pull request 2): an admin or a builder invites an
@@ -347,9 +347,12 @@ describe("a guest signing in with a code", () => {
       cookie = signedIn.session ?? "";
     });
 
+    const connection = await openRpc(cookie);
     expect({
       signedIn: cookie !== "",
-      rpc: await outcome(whoami(cookie)),
+      // Their connection answers who they are and the Apps shared with
+      // them alone (guest-access.ts): anything else, as nobody's.
+      rpc: await outcome(connection.core.authenticate().apps.list()),
       session: sessionSchema.parse(await sessionOf(cookie)),
       events: events
         .filter(({ action }) => action.startsWith("member.guest"))

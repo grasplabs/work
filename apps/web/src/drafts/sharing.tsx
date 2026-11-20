@@ -40,6 +40,7 @@ import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { usePeopleApart } from "../people/people-apart.ts";
 import type { PeopleApart } from "../people/people-apart.ts";
+import { GuestBadge } from "../people/person-picker.tsx";
 import { RoleSelect, SharePicker } from "../people/share-picker.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
@@ -257,8 +258,11 @@ const MemberRow = ({
   return (
     <TableRow>
       <TableCell variant="card">
-        <span className="flex flex-col">
-          {name}
+        <span className="flex flex-col items-start gap-1">
+          <span className="flex items-center gap-2">
+            {name}
+            {member.guest === true ? <GuestBadge /> : null}
+          </span>
           <ErrorText>{failure}</ErrorText>
         </span>
       </TableCell>

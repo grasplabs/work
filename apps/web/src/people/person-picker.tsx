@@ -1,4 +1,5 @@
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
+import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Command,
@@ -34,6 +35,8 @@ export interface Pickable {
   id: string;
   name: string;
   email?: string;
+  /** A guest, from outside the company: marked so where they are offered. */
+  guest?: true;
 }
 
 /**
@@ -64,6 +67,13 @@ export const PersonAvatar = ({ name }: { name: string }) => (
  * found by either their name or their email as typed, and under it what
  * tells them apart from someone of the same name (`usePeopleApart`).
  */
+/** Marks a guest, someone from outside the company, wherever they are listed. */
+export const GuestBadge = () => (
+  <Badge variant="outline">
+    <Trans>Guest</Trans>
+  </Badge>
+);
+
 export const PersonOption = ({
   person,
   checked = false,
@@ -90,6 +100,7 @@ export const PersonOption = ({
         <span className="text-muted-foreground truncate text-xs">{hint}</span>
       )}
     </span>
+    {person.guest === true ? <GuestBadge /> : null}
   </CommandItem>
 );
 

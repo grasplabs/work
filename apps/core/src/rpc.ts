@@ -12,8 +12,8 @@ import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
 import { RpcSession, WebSocketTransport } from "capnweb";
 
 import { oidcProviders, providerIds, signInConfig } from "./auth/config.ts";
-import { identify, signedInSession } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
+import { connectionSession } from "./guest-access.ts";
 import {
   coreRpcAccounting,
   CoreRpcTarget,
@@ -165,7 +165,10 @@ const sessionApi = (
     sessionRecheckMs,
     async (): Promise<Identity> => {
       recheckWhenDue(checkQuietly);
-      const identity = await identify(env, headers);
+      // A guest's too: each namespace answers them as nobody but for
+      // what guest-access.ts opens to them (session-rpc.ts).
+      const signedIn = await connectionSession(env, headers);
+      const identity = signedIn?.person;
       if (identity?.userId !== connectedAs.userId) {
         // After the refusal is on its way to the client.
         setTimeout(close, 0);
@@ -198,7 +201,7 @@ const browserConnection = async (
   headers: Headers,
   server: WebSocket
 ): Promise<{ api: CoreRpc; signedIn: boolean }> => {
-  const signedIn = await signedInSession(env, headers);
+  const signedIn = await connectionSession(env, headers);
   const session = signedIn
     ? sessionApi(
         {

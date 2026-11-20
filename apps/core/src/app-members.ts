@@ -24,6 +24,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
+import { appsBuiltBy, holdsAnySource } from "./app-access.ts";
 import {
   hasSources,
   readerOf,
@@ -39,7 +40,8 @@ import {
   outboxedEventWhere,
   storedEvent,
 } from "./audit-outbox.ts";
-import { activeMember, mayAct, organizationId } from "./auth/auth.ts";
+import { activeMember, guestNow, mayAct, organizationId } from "./auth/auth.ts";
+import { isGuestNow } from "./auth/guest-codes.ts";
 import {
   apps,
   appMembers,
@@ -61,6 +63,7 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import {
   memberEntry,
+  organizationGuests,
   requireNotStaff,
   requireSharable,
   shareCandidates,
@@ -76,14 +79,25 @@ import type { SharingRules } from "./sharing.ts";
 
 type Row = typeof appMembers.$inferSelect;
 
-const toMember = (row: Row, name: string | null): SubjectMember => ({
+const toMember = (
+  row: Row,
+  name: string | null,
+  guest: boolean
+): SubjectMember => ({
   type: row.memberType,
   id: row.memberId,
   name,
   role: row.role,
   addedBy: row.addedBy,
   addedAt: row.addedAt.toISOString(),
+  ...(guest ? { guest: true } : {}),
 });
+
+/** That an `app_members` row is a person's who is a guest now. */
+const guestRow = and(
+  eq(appMembers.memberType, "person"),
+  guestNow(appMembers.memberId)
+);
 
 /** The rows of `app` that are `member`. */
 const rowOf = (app: App, member: SubjectMemberRef) =>
@@ -96,15 +110,25 @@ const rowOf = (app: App, member: SubjectMemberRef) =>
 /**
  * The member rows `where` picks, each with the name of its person, team
  * or project, in the order they were shared or last changed. A project's
- * name only for someone in it (`by`): to anyone else it stays unnamed.
+ * name only for someone in it (`by`): to anyone else it stays unnamed. A
+ * guest, made without a name (guest-members.ts), is named by their
+ * address, only to whoever may share the App (`sharer`); to anyone else
+ * by their name as it is.
  */
 const namedMembers = async (
   env: Env,
   by: Identity,
-  where: SQL | undefined
+  where: SQL | undefined,
+  sharer: boolean
 ): Promise<SubjectMember[]> => {
   const rows = await drizzle(env.DB)
-    .select({ row: appMembers, person: users.name, team: teams.name })
+    .select({
+      row: appMembers,
+      person: users.name,
+      address: users.email,
+      team: teams.name,
+      guest: sql<number>`${guestRow}`,
+    })
     .from(appMembers)
     .leftJoin(
       users,
@@ -124,13 +148,14 @@ const namedMembers = async (
     .where(
       and(
         where,
-        // Only people in the organization now, and teams that still exist:
-        // the rest reach nothing.
+        // Only people in the organization now, its guests now, and teams
+        // that still exist: the rest reach nothing.
         or(
           and(
             eq(appMembers.memberType, "person"),
             activeMember(appMembers.memberId)
           ),
+          guestRow,
           and(eq(appMembers.memberType, "team"), isNotNull(teams.id)),
           and(
             eq(appMembers.memberType, "project"),
@@ -151,12 +176,13 @@ const namedMembers = async (
       .filter(({ row }) => row.memberType === "project")
       .map(({ row }) => row.memberId)
   );
-  return rows.map(({ row, person, team }) =>
+  return rows.map(({ row, person, address, team, guest }) =>
     toMember(
       row,
       row.memberType === "project"
         ? (projectNames.get(row.memberId) ?? null)
-        : (person ?? team)
+        : ((guest === 1 && sharer ? address : person) ?? team),
+      guest === 1
     )
   );
 };
@@ -171,6 +197,7 @@ const sharingRules = (app: App, member: NewSubjectMember): SharingRules => ({
   invalid,
   ownerIssue: "id: They own the App, and always build it.",
   buildsIssue: "role: Only the organization's admins and builders build Apps.",
+  guestIssue: "role: A guest only ever uses an App, and never builds it.",
 });
 
 /** The audit entry of a change by `by` to whom `app` is shared with. */
@@ -323,6 +350,38 @@ const requireReadable = async (
   });
 };
 
+/**
+ * Refuses sharing `app` with a guest, whoever shares it, when the App
+ * holds any source (`holdsAnySource`, GRA-2235), with
+ * `app.guest_sources`; the refusal is audited. The same rule holds on
+ * each of the guest's requests (app-access.ts `requireAppRole`).
+ */
+const requireGuestShareable = async (
+  env: Env,
+  by: Identity,
+  app: App,
+  member: NewSubjectMember
+): Promise<void> => {
+  if (!(await holdsAnySource(env, app.id))) {
+    return;
+  }
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      actor: actorOf(by),
+      action: "app.member.refused",
+      target: { type: "app", id: app.id },
+      detail: {
+        memberType: member.type,
+        member: member.id,
+        role: member.role,
+        reason: "app.guest_sources",
+      },
+    }),
+  ]);
+  throw appErrors.create("app.guest_sources");
+};
+
 /** Whom an App is shared with, in the order they were shared or changed. */
 export const listMembers = async (
   env: Env,
@@ -332,7 +391,10 @@ export const listMembers = async (
   // Whom it is shared with is none of its data: its owner and admins see
   // it outside a team its Brain grants name (GRA-1842).
   const { id } = await appFor(env, by, app, "user", { managing: true });
-  return await namedMembers(env, by, eq(appMembers.appId, id));
+  // Whoever may share it: its builders and the admins, never Grasp staff.
+  const builds = await appsBuiltBy(env, by, [id]);
+  const sharer = !by.staff && builds.has(id);
+  return await namedMembers(env, by, eq(appMembers.appId, id), sharer);
 };
 
 /**
@@ -350,6 +412,10 @@ export const addMember = async (
   requireNotStaff(by);
   const member = appErrors.parse("app.invalid", newSubjectMemberSchema, input);
   await requireSharable(env, member, sharingRules(found, member), by);
+  const guest = member.type === "person" && (await isGuestNow(env, member.id));
+  if (guest) {
+    await requireGuestShareable(env, by, found, member);
+  }
   await requireReadable(env, by, found, member);
   const db = drizzle(env.DB);
   const row: Row = {
@@ -417,7 +483,7 @@ export const addMember = async (
       await requireStillBuilt(env, member.id, by.userId);
     }
   }
-  const [added] = await namedMembers(env, by, rowOf(found, member));
+  const [added] = await namedMembers(env, by, rowOf(found, member), true);
   // Unshared since the batch above: nothing of it stands.
   if (!added) {
     throw appErrors.create("app.conflict");
@@ -528,7 +594,18 @@ export class AppMembersRpc extends CoreRpcTarget implements SubjectMembersApi {
   async candidates(app: string): Promise<ShareCandidates> {
     return await withPerson(this.#check, async (by) => {
       await editableApp(this.#env, by, app);
-      return await shareCandidates(this.#env, by);
+      const [candidates, guests] = await Promise.all([
+        shareCandidates(this.#env, by),
+        organizationGuests(this.#env),
+      ]);
+      // An App may be shared with a guest too, marked as one.
+      return {
+        ...candidates,
+        people: [...candidates.people, ...guests].toSorted(
+          (one, other) =>
+            one.name.localeCompare(other.name) || one.id.localeCompare(other.id)
+        ),
+      };
     });
   }
 }
