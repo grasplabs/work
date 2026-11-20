@@ -93,7 +93,7 @@ import { AgentWakes, useLast } from "./agent-wakes.tsx";
 
 // One agent's page, for the company's admins, on Grasp UI, in the
 // library's settings column: one column in the page's middle, a card of
-// rows per topic, every control at its own width on one edge. Its Page
+// rows per topic, the controls on one edge. Its Page
 // header holds the agent (picture, name, what it is for, whether it is
 // on) and the things done most: turning it off and on, Chat, and Edit,
 // which changes its name, job, picture and model in a dialog. Its parts
@@ -101,7 +101,7 @@ import { AgentWakes, useLast } from "./agent-wakes.tsx";
 // (agent-section.tsx), the part in the address (`?tab=`) so a link can
 // lead to an agent's access or its schedule:
 //
-// - Overview: its facts as a rail (whom it answers, what it may do, when
+// - Overview: its facts as rows (whom it answers, what it may do, when
 //   it works on its own, its model, this month's use) and what it did
 //   lately (its scheduled runs, and when it was last asked); Delete.
 // - Instructions: what it is told, and the documents it answers from.
