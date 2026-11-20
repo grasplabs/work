@@ -423,13 +423,18 @@ describe(MemoriesPage, () => {
 
   it("names the person's own entity as them, and another without a name as such", async () => {
     await shown();
-    const kind = document.querySelector("select");
+    const kind = document.querySelector<HTMLElement>('[role="combobox"]');
     if (!kind) {
       throw new TypeError("No kind to pick");
     }
     await act(async () => {
-      kind.value = "person";
-      kind.dispatchEvent(new Event("change", { bubbles: true }));
+      kind.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      document
+        .querySelector<HTMLElement>('[role="option"][id$="-option-person"]')
+        ?.click();
       await Promise.resolve();
     });
     await settle();
