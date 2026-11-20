@@ -28,7 +28,10 @@ export const intent = {
   ],
   variants: [
     { name: 'size="md"', when: "The default." },
-    { name: 'size="sm"', when: "In a dense table or toolbar." },
+    {
+      name: 'size="sm"',
+      when: "In a dense table or toolbar, a setting row or beside a section's heading.",
+    },
     { name: 'size="lg"', when: "The one field that matters on a phone." },
     {
       name: "secret",

@@ -93,7 +93,7 @@ import {
 import type { ComposerPicture, Insertion, Piece } from "./pictures";
 import { rowMarker } from "./row.stylex";
 import { ComposerSend } from "./send";
-import { ComposerVoice } from "./voice";
+import { ComposerVoice, VoiceProblem, stoppedBy } from "./voice";
 import type { ComposerVoiceProps } from "./voice";
 import { useComposerWords } from "./words";
 import type { ComposerWords } from "./words";
@@ -2724,21 +2724,28 @@ const ownMicrophone = (props: Resolved, text: string) => {
 
 /**
  * The footer's microphone and the dictation it hands the card to, from `onDictate` and
- * `dictation`; the host's own `voice` and `takeover` come first.
+ * `dictation`; the host's own `voice` and `takeover` come first. A problem that stops the
+ * dictation hands the card back to its text and stands in the band over it, in `top`'s place.
  */
-const dictationParts = (props: Resolved, text: string) => ({
-  voice: props.voice ?? ownMicrophone(props, text),
-  takeover:
-    props.takeover ??
-    (props.dictation === undefined ? undefined : (
-      <ComposerVoice
-        typed={text}
-        compact={props.compact}
-        {...props.dictation}
-      />
-    )),
-  dismiss: props.onTakeoverDismiss ?? props.dictation?.onCancel,
-});
+const dictationParts = (props: Resolved, text: string) => {
+  const { dictation } = props;
+  const problem = stoppedBy(dictation);
+  return {
+    voice: props.voice ?? ownMicrophone(props, text),
+    takeover:
+      props.takeover ??
+      (dictation === undefined || problem !== undefined ? undefined : (
+        <ComposerVoice typed={text} compact={props.compact} {...dictation} />
+      )),
+    top:
+      dictation === undefined || problem === undefined ? (
+        props.top
+      ) : (
+        <VoiceProblem {...dictation} problem={problem} />
+      ),
+    dismiss: props.onTakeoverDismiss ?? dictation?.onCancel,
+  };
+};
 
 /** What the card draws while it is still (`loading`): each live part kept in its room, the text a quiet line, Send off. */
 const stillOf = (
@@ -2775,7 +2782,7 @@ const ComposerForm = (props: Resolved) => {
   const [own, setOwn] = useState(props.defaultValue);
   const text = value ?? own;
   // A dictation's typed words, as the person reads them: a picture by its label.
-  const { voice, takeover, dismiss } = dictationParts(
+  const { voice, takeover, top, dismiss } = dictationParts(
     props,
     readableText(text)
   );
@@ -3077,9 +3084,7 @@ const ComposerForm = (props: Resolved) => {
       {/* One stacking context, three layers: the light at the bottom, then a band above the card
           (so the light never paints over its rows), then the card, which tucks over the band. */}
       <div {...stylex.props(styles.stack)}>
-        {Boolean(props.top) && (
-          <div {...stylex.props(styles.top)}>{props.top}</div>
-        )}
+        {Boolean(top) && <div {...stylex.props(styles.top)}>{top}</div>}
         <div data-slot="composer-card-room" {...stylex.props(styles.cardRoom)}>
           {still.light && (
             <ComposerGlow

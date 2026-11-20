@@ -96,19 +96,28 @@ const coreSource = (locale: Locale): DictationSource => {
   let unhear: (() => void) | undefined;
   let waiting = 0;
   let partial = "";
+  let cancelled = false;
   const stop = (): void => {
     window.clearTimeout(waiting);
     unhear?.();
-    line?.close();
-    hangUp();
     unhear = undefined;
+    // Gone before it closes, so its own close isn't heard as a line lost.
+    const was = line;
     line = undefined;
+    was?.close();
+    hangUp();
   };
   return {
     outside: false,
     start: (listener) => {
       void (async () => {
-        if (!(await reachMic())) {
+        const reached = await reachMic();
+        // Cancelled while the browser asked for the microphone.
+        if (cancelled) {
+          hangUp();
+          return;
+        }
+        if (!reached) {
           listener.problem(micProblem() ?? "failed");
           return;
         }
@@ -137,7 +146,7 @@ const coreSource = (locale: Locale): DictationSource => {
               window.clearTimeout(waiting);
               began = line.begin(new Int16Array(0));
               listener.ready();
-            } else if (!live) {
+            } else if (!live && line !== undefined) {
               // The line went down, before it listened or mid-way: what
               // came is kept in the box.
               window.clearTimeout(waiting);
@@ -166,6 +175,7 @@ const coreSource = (locale: Locale): DictationSource => {
       return words ?? partial;
     },
     cancel: () => {
+      cancelled = true;
       line?.drop();
       stop();
     },
@@ -231,7 +241,9 @@ const recognitionOf = (): (new () => Recognition) | undefined =>
 
 /** What the browser's recognition reports as an error, as the Composer says it. */
 const problemOf = (error: string): ComposerVoiceProblem => {
-  if (error === "not-allowed" || error === "service-not-allowed") {
+  // The microphone itself; `service-not-allowed` is the browser's own
+  // service refusing, which no setting of the person's mends: a failure.
+  if (error === "not-allowed") {
     return "blocked";
   }
   if (error === "audio-capture") {

@@ -33,6 +33,7 @@ import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useComposerListen, useComposerRowTall } from "./context";
 import { useStill } from "./still-context";
+import { ComposerSurface } from "./surface";
 import { startVoiceField } from "./voice-field";
 import type { VoiceField, VoiceFieldMode } from "./voice-field";
 import type { VoiceReading } from "./voice-motion";
@@ -81,6 +82,8 @@ export interface ComposerVoiceWords {
   mute: string;
   unmute: string;
   retry: string;
+  /** Takes a problem's band away, the typed words kept. */
+  dismiss: string;
   /** The level meter's name, read in forced colours. */
   level: string;
   problems: Record<ComposerVoiceProblem, string>;
@@ -1277,5 +1280,63 @@ export const ComposerVoice = ({
         {saidOf(phase, muted, problem, say)}
       </p>
     </div>
+  );
+};
+
+/** The problems that stop a dictation; `unheard` is a note while it listens on. */
+export const stoppedBy = (
+  dictation: Pick<ComposerVoiceProps, "phase" | "problem"> | undefined
+) =>
+  dictation?.phase === "problem" &&
+  dictation.problem !== undefined &&
+  dictation.problem !== "unheard"
+    ? dictation.problem
+    : undefined;
+
+// A problem that only the person can mend outside the page, or one past retrying, offers no Try again.
+const RETRIED: ReadonlySet<ComposerVoiceProblem> = new Set([
+  "blocked",
+  "missing",
+  "failed",
+]);
+
+/** Every prop the band for a dictation's problem takes. */
+interface VoiceProblemProps {
+  problem: ComposerVoiceProblem;
+  words?: Partial<ComposerVoiceWords>;
+  onRetry: () => void;
+  onCancel?: () => void;
+}
+
+/**
+ * A problem that stopped a dictation, as a band over the composer at rest (ComposerSurface): the
+ * card goes back to its text, the typed words kept, and the band says what happened, with Try again
+ * where another go can work and a quiet Dismiss.
+ */
+export const VoiceProblem = ({
+  problem,
+  words,
+  onRetry,
+  onCancel,
+}: VoiceProblemProps) => {
+  const say = sayOf(useComposerWords("voice"), words);
+  return (
+    <ComposerSurface
+      icon={Alert}
+      tone={problem === "failed" ? "danger" : "attention"}
+      action={
+        RETRIED.has(problem) ? (
+          <Button variant="quiet" size="sm" icon={Retry} onClick={onRetry}>
+            {say.retry}
+          </Button>
+        ) : undefined
+      }
+      onDismiss={onCancel}
+      dismissLabel={say.dismiss}
+    >
+      <span role="alert" data-slot="composer-voice-problem">
+        {say.problems[problem]}
+      </span>
+    </ComposerSurface>
   );
 };

@@ -17,7 +17,6 @@ msgid "“{word}” is already added."
 msgstr "“{word}” is already added."
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgctxt "a field that may stay empty"
 msgid "(optional)"
 msgstr "(optional)"
@@ -1903,7 +1902,6 @@ msgstr "A page was refused the App's data"
 msgid "A page your team opens"
 msgstr "A page your team opens"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "A part couldn't be made out. What came before is kept."
 msgstr "A part couldn't be made out. What came before is kept."
@@ -2716,6 +2714,10 @@ msgstr "Allow at least one tool to connect {app}."
 #: src/apps/field-editor.tsx
 msgid "Allow decimals"
 msgstr "Allow decimals"
+
+#: src/frame/part-words.tsx
+msgid "Allow the microphone in the browser's settings."
+msgstr "Allow the microphone in the browser's settings."
 
 #: src/interview/sound-check.tsx
 msgid "Allow the microphone when your browser asks."
@@ -3691,7 +3693,6 @@ msgctxt "a question going out"
 msgid "Asking"
 msgstr "Asking"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Asking for the microphone"
 msgstr "Asking for the microphone"
@@ -4157,7 +4158,6 @@ msgstr "Can't offer Run: {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/chat/use-dictation.ts
 #: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
@@ -5661,6 +5661,10 @@ msgid "Couldn't take that answer"
 msgstr "Couldn't take that answer"
 
 #: src/frame/part-words.tsx
+msgid "Couldn't write that down. What you typed is kept."
+msgstr "Couldn't write that down. What you typed is kept."
+
+#: src/frame/part-words.tsx
 msgid "Counted in the page's words. Code view marks them in its source."
 msgstr "Counted in the page's words. Code view marks them in its source."
 
@@ -6404,7 +6408,6 @@ msgid "done"
 msgstr "done"
 
 #: src/apps/blueprints.tsx
-#: src/chat/use-dictation.ts
 #: src/drafts/share-with-team.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/setup-steps.tsx
@@ -10153,7 +10156,6 @@ msgstr "Let’s start"
 msgid "Lets {field} in {table} hold more. Every record already fits."
 msgstr "Lets {field} in {table} hold more. Every record already fits."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Level"
 msgstr "Level"
@@ -10305,7 +10307,6 @@ msgstr "List what needs a decision, and from whom."
 msgid "List what was finished, and who did it."
 msgstr "List what was finished, and who did it."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 #: src/interview/voice-bar.tsx
 msgid "Listening"
@@ -11014,7 +11015,6 @@ msgstr "Moved old entries out of the audit trail"
 msgid "Mutations and actions of {app}"
 msgstr "Mutations and actions of {app}"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Mute"
 msgstr "Mute"
@@ -11024,7 +11024,6 @@ msgctxt "turn your microphone off for a moment"
 msgid "Mute"
 msgstr "Mute"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Muted"
 msgstr "Muted"
@@ -11533,7 +11532,6 @@ msgstr "No longer where it was"
 msgid "No matches"
 msgstr "No matches"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "No microphone was found."
 msgstr "No microphone was found."
@@ -13336,7 +13334,6 @@ msgid "Pause Stephen outside Grasp?"
 msgstr "Pause Stephen outside Grasp?"
 
 #: src/agents/agents-overview.tsx
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 #: src/settings/stephen-card.tsx
 #: src/workflows/runs.tsx
@@ -17361,7 +17358,6 @@ msgstr "That staff account hasn't been given access here."
 msgid "That way of signing in isn't set up here."
 msgstr "That way of signing in isn't set up here."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "That's as long as one dictation can be."
 msgstr "That's as long as one dictation can be."
@@ -17885,11 +17881,6 @@ msgstr "The logo could not be removed"
 msgid "The message"
 msgstr "The message"
 
-#: src/chat/use-dictation.ts
-#: src/frame/part-words.tsx
-msgid "The microphone is blocked for this site."
-msgstr "The microphone is blocked for this site."
-
 #: src/interview/words.ts
 msgid "The microphone is not available here. Type your answer."
 msgstr "The microphone is not available here. Type your answer."
@@ -18154,11 +18145,6 @@ msgstr "The week's figures"
 msgid "the whole connection"
 msgstr "the whole connection"
 
-#: src/chat/use-dictation.ts
-#: src/frame/part-words.tsx
-msgid "The words couldn't be written down. What you typed is kept."
-msgstr "The words couldn't be written down. What you typed is kept."
-
 #: src/workflows/delete-workflow.tsx
 msgid "The workflow is deleted, but its name wasn't released: {reason}"
 msgstr "The workflow is deleted, but its name wasn't released: {reason}"
@@ -18370,7 +18356,6 @@ msgstr "This App is archived. Restore it to share it."
 msgid "This App offers no options."
 msgstr "This App offers no options."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "This browser can't dictate."
 msgstr "This browser can't dictate."
@@ -18892,7 +18877,6 @@ msgstr "Try"
 #: src/chat/chat-body.tsx
 #: src/chat/chat-files.tsx
 #: src/chat/thread.tsx
-#: src/chat/use-dictation.ts
 #: src/connections/connect-dialog.tsx
 #: src/connections/sync-places.tsx
 #: src/decision-card.tsx
@@ -19125,7 +19109,6 @@ msgstr "Unlink"
 msgid "Unlink {app} account {shown}"
 msgstr "Unlink {app} account {shown}"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Unmute"
 msgstr "Unmute"
@@ -20968,7 +20951,6 @@ msgstr "Writing {file}"
 msgid "Writing a code step"
 msgstr "Writing a code step"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Writing it down"
 msgstr "Writing it down"

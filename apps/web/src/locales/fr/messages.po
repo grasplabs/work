@@ -17,7 +17,6 @@ msgid "“{word}” is already added."
 msgstr "« {word} » est déjà ajouté."
 
 #: src/frame/part-words.tsx
-#: src/settings/ai-providers.tsx
 msgctxt "a field that may stay empty"
 msgid "(optional)"
 msgstr "(facultatif)"
@@ -1903,7 +1902,6 @@ msgstr "Une page s’est vu refuser les données de l’application"
 msgid "A page your team opens"
 msgstr "Une page que votre équipe ouvre"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "A part couldn't be made out. What came before is kept."
 msgstr "Une partie n'a pas pu être comprise. Ce qui précède est conservé."
@@ -2716,6 +2714,10 @@ msgstr "Autorisez au moins un outil pour connecter {app}."
 #: src/apps/field-editor.tsx
 msgid "Allow decimals"
 msgstr "Autoriser les décimales"
+
+#: src/frame/part-words.tsx
+msgid "Allow the microphone in the browser's settings."
+msgstr "Autorisez le micro dans les réglages du navigateur."
 
 #: src/interview/sound-check.tsx
 msgid "Allow the microphone when your browser asks."
@@ -3691,7 +3693,6 @@ msgctxt "a question going out"
 msgid "Asking"
 msgstr "Envoi de la question"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Asking for the microphone"
 msgstr "Demande du micro"
@@ -4157,7 +4158,6 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/chat/use-dictation.ts
 #: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
@@ -5661,6 +5661,10 @@ msgid "Couldn't take that answer"
 msgstr "Impossible de prendre cette réponse"
 
 #: src/frame/part-words.tsx
+msgid "Couldn't write that down. What you typed is kept."
+msgstr "Impossible de transcrire cela. Ce que vous avez tapé est conservé."
+
+#: src/frame/part-words.tsx
 msgid "Counted in the page's words. Code view marks them in its source."
 msgstr "Compté dans les mots de la page. La vue Code les marque dans sa source."
 
@@ -6404,7 +6408,6 @@ msgid "done"
 msgstr "terminée"
 
 #: src/apps/blueprints.tsx
-#: src/chat/use-dictation.ts
 #: src/drafts/share-with-team.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/setup-steps.tsx
@@ -10153,7 +10156,6 @@ msgstr "Commençons"
 msgid "Lets {field} in {table} hold more. Every record already fits."
 msgstr "Permet à {field} dans {table} d’accepter davantage. Chaque enregistrement convient déjà."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Level"
 msgstr "Niveau"
@@ -10305,7 +10307,6 @@ msgstr "Liste ce qui demande une décision, et de qui."
 msgid "List what was finished, and who did it."
 msgstr "Liste ce qui a été terminé, et par qui."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 #: src/interview/voice-bar.tsx
 msgid "Listening"
@@ -11014,7 +11015,6 @@ msgstr "A déplacé d’anciennes entrées hors du journal d’audit"
 msgid "Mutations and actions of {app}"
 msgstr "Mutations et actions de {app}"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Mute"
 msgstr "Couper le micro"
@@ -11024,7 +11024,6 @@ msgctxt "turn your microphone off for a moment"
 msgid "Mute"
 msgstr "Couper le micro"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Muted"
 msgstr "Micro coupé"
@@ -11533,7 +11532,6 @@ msgstr "N’est plus là où il était"
 msgid "No matches"
 msgstr "Aucun résultat"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "No microphone was found."
 msgstr "Aucun micro n'a été trouvé."
@@ -13336,7 +13334,6 @@ msgid "Pause Stephen outside Grasp?"
 msgstr "Mettre Stephen en pause en dehors de Grasp ?"
 
 #: src/agents/agents-overview.tsx
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 #: src/settings/stephen-card.tsx
 #: src/workflows/runs.tsx
@@ -17361,7 +17358,6 @@ msgstr "Ce compte de l’équipe n’a pas reçu d’accès ici."
 msgid "That way of signing in isn't set up here."
 msgstr "Ce mode de connexion n’est pas configuré ici."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "That's as long as one dictation can be."
 msgstr "Une dictée ne peut pas être plus longue."
@@ -17885,11 +17881,6 @@ msgstr "Le logo n’a pas pu être supprimé"
 msgid "The message"
 msgstr "Le message"
 
-#: src/chat/use-dictation.ts
-#: src/frame/part-words.tsx
-msgid "The microphone is blocked for this site."
-msgstr "Le micro est bloqué pour ce site."
-
 #: src/interview/words.ts
 msgid "The microphone is not available here. Type your answer."
 msgstr "Le micro n’est pas disponible ici. Écrivez votre réponse."
@@ -18154,11 +18145,6 @@ msgstr "Les chiffres de la semaine"
 msgid "the whole connection"
 msgstr "toute la connexion"
 
-#: src/chat/use-dictation.ts
-#: src/frame/part-words.tsx
-msgid "The words couldn't be written down. What you typed is kept."
-msgstr "Les mots n'ont pas pu être transcrits. Ce que vous avez tapé est conservé."
-
 #: src/workflows/delete-workflow.tsx
 msgid "The workflow is deleted, but its name wasn't released: {reason}"
 msgstr "Le workflow est supprimé, mais son nom n’a pas été libéré : {reason}"
@@ -18370,7 +18356,6 @@ msgstr "Cette App est archivée. Restaurez-la pour la partager."
 msgid "This App offers no options."
 msgstr "Cette App ne propose aucune option."
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "This browser can't dictate."
 msgstr "Ce navigateur ne peut pas dicter."
@@ -18892,7 +18877,6 @@ msgstr "Essayer"
 #: src/chat/chat-body.tsx
 #: src/chat/chat-files.tsx
 #: src/chat/thread.tsx
-#: src/chat/use-dictation.ts
 #: src/connections/connect-dialog.tsx
 #: src/connections/sync-places.tsx
 #: src/decision-card.tsx
@@ -19125,7 +19109,6 @@ msgstr "Dissocier"
 msgid "Unlink {app} account {shown}"
 msgstr "Dissocier le compte {app} {shown}"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Unmute"
 msgstr "Rétablir le micro"
@@ -20968,7 +20951,6 @@ msgstr "Écriture de {file}"
 msgid "Writing a code step"
 msgstr "Écriture d'une étape de code"
 
-#: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 msgid "Writing it down"
 msgstr "Transcription en cours"

@@ -624,12 +624,6 @@ const AddProviderSheet = ({
       words={{
         trigger: t`Add a provider`,
         title: t`Add a provider`,
-        // In brackets, as the page's other optional fields say it; English
-        // takes the library's own words, which have none.
-        nameOptional: t({
-          message: "(optional)",
-          context: "a field that may stay empty",
-        }),
       }}
     />
   );

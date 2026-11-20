@@ -825,13 +825,14 @@ export const usePartWords = (): GraspWordsCatalog => {
         mute: t`Mute`,
         unmute: t`Unmute`,
         retry: t`Try again`,
+        dismiss: t`Dismiss`,
         level: t`Level`,
         problems: {
-          blocked: t`The microphone is blocked for this site.`,
+          blocked: t`Allow the microphone in the browser's settings.`,
           missing: t`No microphone was found.`,
           unsupported: t`This browser can't dictate.`,
           unheard: t`A part couldn't be made out. What came before is kept.`,
-          failed: t`The words couldn't be written down. What you typed is kept.`,
+          failed: t`Couldn't write that down. What you typed is kept.`,
           limited: t`That's as long as one dictation can be.`,
         },
         // Minutes and seconds, as every language here writes them.
