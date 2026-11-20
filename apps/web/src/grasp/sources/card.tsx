@@ -6,6 +6,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import { renderElement } from "@ui-sdk/react/primitive";
 import type { ReactNode } from "react";
 
 import { AgentActivity } from "../agent-activity";
@@ -143,24 +144,25 @@ const Peek = ({ peek }: { peek: NonNullable<Source["peek"]> }) => (
 );
 
 interface CardLinkProps {
-  href: string | undefined;
+  source: Source;
   words: string;
-  /** Runs when it is pressed; with no `href` the link is then a button. */
+  /** Runs when it is pressed; with no `href` or `render` the link is then a button. */
   onOpen?: () => void;
 }
 
 /** A link from the card: to an agent's or a workflow's run, or to correct a memory. */
-const CardLink = ({ href, words, onOpen }: CardLinkProps) => {
-  if (hasWords(href)) {
-    return (
-      <a
-        href={href}
-        data-slot="source-open"
-        onClick={onOpen}
-        {...stylex.props(styles.cardLink, focus.words)}
-      >
-        {words}
-      </a>
+const CardLink = ({ source, words, onOpen }: CardLinkProps) => {
+  if (hasWords(source.href) || source.render !== undefined) {
+    return renderElement(
+      "a",
+      {
+        href: source.href,
+        "data-slot": "source-open",
+        onClick: onOpen,
+        className: stylex.props(styles.cardLink, focus.words).className,
+        children: words,
+      },
+      source.render
     );
   }
   return onOpen === undefined ? null : (
@@ -208,7 +210,7 @@ const Inside = ({ source, labels, onOpen }: CardProps) => {
         {source.steps === undefined ? null : (
           <AgentActivity steps={[...source.steps]} />
         )}
-        <CardLink href={source.href} words={labels.openRun} onOpen={onOpen} />
+        <CardLink source={source} words={labels.openRun} onOpen={onOpen} />
       </>
     );
   }
@@ -227,7 +229,7 @@ const Inside = ({ source, labels, onOpen }: CardProps) => {
           />
         )}
         <InContext source={source} />
-        <CardLink href={source.href} words={labels.openRun} onOpen={onOpen} />
+        <CardLink source={source} words={labels.openRun} onOpen={onOpen} />
       </>
     );
   }
@@ -246,7 +248,7 @@ const Inside = ({ source, labels, onOpen }: CardProps) => {
         {source.fields === undefined ? null : (
           <KeyValueList items={source.fields} variant="inline" />
         )}
-        <CardLink href={source.href} words={labels.correct} />
+        <CardLink source={source} words={labels.correct} />
       </>
     );
   }
@@ -266,15 +268,25 @@ const Inside = ({ source, labels, onOpen }: CardProps) => {
   return <InContext source={source} />;
 };
 
-/** The card's head: the mark, where it lives, and when. */
+/** The card's head: the mark, where it lives, when, and whether it may no longer hold. */
 const Head = ({ source }: { source: Source }) => (
   <span {...stylex.props(styles.cardHead)}>
     <SourceTile source={source} size="pile" />
     <span>
-      {source.origin}
-      {hasWords(source.when) && kindOf(source) !== "message"
-        ? ` · ${source.when}`
-        : null}
+      {[source.origin, kindOf(source) === "message" ? undefined : source.when]
+        .filter(hasWords)
+        .join(" · ")}
+      {hasWords(source.stale) ? (
+        <>
+          {hasWords(source.origin) ||
+          (hasWords(source.when) && kindOf(source) !== "message")
+            ? " · "
+            : null}
+          <span data-slot="source-stale" {...stylex.props(styles.stale)}>
+            {source.stale}
+          </span>
+        </>
+      ) : null}
     </span>
   </span>
 );
@@ -318,6 +330,11 @@ export const SourceCard = ({ source, labels, onOpen }: CardProps) => {
       ) : (
         <Closed source={source} labels={labels} />
       )}
+      {accessOf(source) === "gone" &&
+      source.kept === true &&
+      hasWords(source.quote) ? (
+        <InContext source={source} />
+      ) : null}
       {open && hasWords(source.place) ? (
         <p {...stylex.props(styles.cardNote)}>{source.place}</p>
       ) : null}

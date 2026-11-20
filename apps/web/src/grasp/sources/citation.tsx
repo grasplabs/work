@@ -28,6 +28,11 @@ import type { Source, SourceMention } from "./types";
 export interface CitationProps extends SourceMention {
   /** The source's number: its place in the Sources' `items`, from 1. */
   n: number;
+  /**
+   * The marker's words in place of the number, where the source's own number says less: a meeting's
+   * moment ("12:04"), when there are no names to show. Its name still says the source.
+   */
+  label?: string;
 }
 
 /** A word joiner: the marker stays on the line of the word before it. */
@@ -113,7 +118,8 @@ const escapeFirst = (close: () => void) => {
   };
 };
 
-export const Citation = ({ n, ...mention }: CitationProps) => {
+export const Citation = ({ n, label, ...mention }: CitationProps) => {
+  const shown = label !== undefined && label !== "" ? label : n;
   const shared = useSources();
   const source = shared?.sources[n - 1];
   const [element, setElement] = useState<HTMLElement | null>(null);
@@ -149,7 +155,7 @@ export const Citation = ({ n, ...mention }: CitationProps) => {
     return (
       <>
         {join}
-        <span {...stylex.props(styles.marker, styles.numberBox)}>{n}</span>
+        <span {...stylex.props(styles.marker, styles.numberBox)}>{shown}</span>
       </>
     );
   }
@@ -174,7 +180,7 @@ export const Citation = ({ n, ...mention }: CitationProps) => {
           ref={setElement}
           aria-label={nameOf(shared, n, source, element)}
           data-slot="citation"
-          data-form="number"
+          data-form={shown === n ? "number" : "label"}
           onClick={(event: MouseEvent<HTMLElement>) => {
             // A plain press goes to the source's row, wherever it is: the list opens if it is
             // folded into the pile, and unfolds if the row is past its fold. With a modifier the
@@ -208,7 +214,7 @@ export const Citation = ({ n, ...mention }: CitationProps) => {
           )}
         >
           <span aria-hidden="true" {...stylex.props(styles.markerTarget)} />
-          {n}
+          {shown}
         </TriggerPrimitive>
         {open ? (
           <ContentPrimitive

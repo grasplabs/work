@@ -16,3 +16,10 @@ export type {
   SourcesLabels,
   SourceTranscriptLine,
 } from "./types";
+export {
+  SourceItem,
+  SourceItemParts,
+  sourceLinkOf,
+  sourcesByKind,
+} from "./item";
+export type { SourceItemPartsProps, SourceItemProps } from "./item";

@@ -305,6 +305,8 @@ export const sourceStyles = stylex.create({
     overflowWrap: "anywhere",
   },
   fresh: { color: grasp.mintDeep, fontWeight: grasp.weightMedium },
+  // It may no longer hold: in ink, medium, never in colour.
+  stale: { color: grasp.ink, fontWeight: grasp.weightMedium },
   gone: { color: grasp.danger },
   used: {
     margin: 0,

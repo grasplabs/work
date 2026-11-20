@@ -92,6 +92,9 @@ export const styles = stylex.create({
   kind: {
     display: "inline-flex",
     flexShrink: 0,
+    // A mark narrower than the icon (a brand's) still keeps the icon's room, so every name starts in one place.
+    justifyContent: "center",
+    minWidth: grasp.iconSm,
     alignItems: "center",
     height: { default: null, [STACK]: grasp.inspectorTextLine },
     color: grasp.inspectorKind,
