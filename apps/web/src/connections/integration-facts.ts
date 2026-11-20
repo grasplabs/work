@@ -37,9 +37,7 @@ export const useWhyNoConnect = () => {
           ? t`It isn't offered to your organization yet: offer it before connecting it.`
           : t`It isn't offered to your organization.`;
       }
-      if (isAdmin(identity.role)) {
-        return t`It isn't offered any more, so no one can connect it again.`;
-      }
+      return t`It isn't offered any more, so no one can connect it again.`;
     }
     return integration.source === "composio" &&
       integration.connections.length === 0

@@ -39,11 +39,11 @@ export type {
 } from "./model";
 export type { AppIntegrationWords } from "./words";
 export { appIntegrationWords } from "./words";
-export { groupTools } from "./tools";
+export { groupKeyOf, groupTools } from "./tools";
 export { needsYou, rollUp } from "./state";
 export { AppsState } from "./parts";
 export type { AppsStateProps } from "./parts";
-export type { ToolGroup } from "./tools";
+export type { ToolGroup, ToolGroupNamer } from "./tools";
 
 export { AppPanel } from "./panel";
 export type { AppPanelProps } from "./panel";

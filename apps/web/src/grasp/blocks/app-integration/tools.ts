@@ -274,8 +274,11 @@ const UNCOUNTED = new Set([
   "software",
 ]);
 
-/** A word as a group's name: an acronym as it is, else capitalised and, where it is a noun's singular, made plural. */
-const groupName = (word: string, cased: boolean) => {
+/**
+ * A word as a group's name: an acronym as it is, a name of its own (OneNote, or Excel written with a
+ * capital inside a sentence) as it is, else capitalised and, where it is a noun's singular, made plural.
+ */
+const groupName = (word: string, cased: boolean, first: boolean) => {
   const lower = word.toLowerCase();
   if (
     ACRONYMS.has(lower) ||
@@ -285,6 +288,12 @@ const groupName = (word: string, cased: boolean) => {
       /\p{Lu}/u.test(word))
   ) {
     return word.toUpperCase();
+  }
+  if (
+    cased &&
+    (/\p{Ll}\p{Lu}/u.test(word) || (!first && /^\p{Lu}/u.test(word)))
+  ) {
+    return word;
   }
   let many = IRREGULAR.get(lower) ?? `${lower}s`;
   // Already plural, or ending in s (Settings, Access), or with no plural: as it is.
@@ -349,13 +358,41 @@ const appOf = (tool: AppTool) => {
 };
 
 /**
+ * The part of a suite a tool's id names before its dot ("excel.listRows" → "excel"): a product (Excel,
+ * To Do) or the suite's own area (Mail, Lists), so its name is never made plural. It reads as the
+ * tool's name writes it ("Todo lists" → "Todo"), else as the id writes it, capitalised.
+ */
+const partOf = (tool: AppTool) =>
+  /^(?<area>[^.\s]+)\./u.exec(tool.id)?.groups?.area;
+
+const areaOf = (tool: AppTool) => {
+  const area = partOf(tool);
+  if (area === undefined) {
+    return null;
+  }
+  const words = tool.name.split(/\s+/u);
+  let joined = "";
+  for (const [index, word] of words.entries()) {
+    joined += word.toLowerCase();
+    if (joined === area.toLowerCase()) {
+      return words.slice(0, index + 1).join(" ");
+    }
+    if (!area.toLowerCase().startsWith(joined)) {
+      break;
+    }
+  }
+  return area.charAt(0).toUpperCase() + area.slice(1);
+};
+
+/**
  * What a tool acts on, from its name: after its verbs, the app's own name and the words that only
  * qualify, the first noun ("Batch read companies" → "Companies", "HubSpot create CRM object" → "CRM").
  * Where no word can name it, null: the tool goes to Other, rather than to an invented word.
  */
-export const groupOf = (tool: AppTool) => {
-  if (tool.group !== undefined && tool.group !== "") {
-    return tool.group;
+const readGroup = (tool: AppTool) => {
+  const area = areaOf(tool);
+  if (area !== null) {
+    return area;
   }
   const app = appOf(tool);
   const words = tool.name
@@ -395,9 +432,33 @@ export const groupOf = (tool: AppTool) => {
     !object.toLowerCase().endsWith("s") &&
     !ACRONYMS.has(object.toLowerCase())
   ) {
-    return groupName(next, cased);
+    return groupName(next, cased, false);
   }
-  return groupName(object, cased);
+  return groupName(object, cased, words.indexOf(object) === 0);
+};
+
+/**
+ * A group's key, the same in every language, for the host to name the group by: the suite part
+ * before the id's dot ("todo"), else what the tool's name says it acts on, in lower case
+ * ("contacts", "pull requests"); null where nothing names it (Other).
+ */
+export const groupKeyOf = (tool: AppTool) =>
+  partOf(tool)?.toLowerCase() ?? readGroup(tool)?.toLowerCase() ?? null;
+
+/** The host's name for a group, in the page's language, by its key; undefined where it has none. */
+export type ToolGroupNamer = (key: string) => string | undefined;
+
+/**
+ * A tool's group, as the page shows it: the tool's own `group`, else the host's name for its key,
+ * else the name read from its id or name. Words read from an English name are only the fallback.
+ */
+export const groupOf = (tool: AppTool, named?: ToolGroupNamer) => {
+  if (tool.group !== undefined && tool.group !== "") {
+    return tool.group;
+  }
+  const key = groupKeyOf(tool);
+  const hosted = key === null ? undefined : named?.(key);
+  return hosted !== undefined && hosted !== "" ? hosted : readGroup(tool);
 };
 
 /** One group of tools, with its counts. */
@@ -425,11 +486,14 @@ const counted = (name: string | null, tools: AppTool[]): ToolGroup => ({
  * may use ahead of the rest; groups of one tool go together at the end
  * (null), so a long list does not end in a run of one-tool groups.
  */
-export const groupTools = (tools: readonly AppTool[]): ToolGroup[] => {
+export const groupTools = (
+  tools: readonly AppTool[],
+  named?: ToolGroupNamer
+): ToolGroup[] => {
   const byName = new Map<string, AppTool[]>();
   const loose: AppTool[] = [];
   for (const tool of tools) {
-    const name = groupOf(tool);
+    const name = groupOf(tool, named);
     if (name === null) {
       loose.push(tool);
     } else {

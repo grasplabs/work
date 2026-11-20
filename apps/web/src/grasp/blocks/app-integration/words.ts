@@ -76,6 +76,11 @@ export interface AppIntegrationWords {
   /** A group's disclosure of its tools. */
   showTools: (group: string, count: number) => string;
   other: string;
+  /**
+   * A tool group's name in the page's language, by its key (`groupKeyOf`: "excel", "todo",
+   * "contacts"). Without it, or where it gives undefined, the name is read from the tools' ids.
+   */
+  toolGroup?: (key: string) => string | undefined;
   readsWord: string;
   changesWord: string;
   /** A description cut at its lines: show it whole, then cut it again. */
@@ -86,6 +91,14 @@ export interface AppIntegrationWords {
   offeredOn: string;
   offeredOff: string;
 }
+
+/** The suite parts whose names are a brand's own spelling; every other key reads well as it is read. */
+const BRANDS = new Map([
+  ["onenote", "OneNote"],
+  ["todo", "To Do"],
+  ["sharepoint", "SharePoint"],
+  ["onedrive", "OneDrive"],
+]);
 
 export const appIntegrationWords: AppIntegrationWords = {
   connect: "Connect",
@@ -144,6 +157,7 @@ export const appIntegrationWords: AppIntegrationWords = {
   choiceOf: (name) => `What Grasp may do: ${name}`,
   showTools: (group, count) => `Show the ${count} ${group} tools`,
   other: "Other",
+  toolGroup: (key) => BRANDS.get(key),
   readsWord: "Reads",
   changesWord: "Changes",
   showMore: "Show more",

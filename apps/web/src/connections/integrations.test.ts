@@ -400,7 +400,7 @@ describe(sectionsOf, () => {
     });
   });
 
-  it("calls an app lapsed only when the connection relied on did, not a spare beside one that works", () => {
+  it("calls an app lapsed when any of its connections ran out, a spare beside one that works too", () => {
     const working = connection("notion", "shared", "active");
     const spare = connection("notion", "shared", "needs_reauth");
     const ownOnly = connection("zoom", "personal", "needs_reauth");
@@ -417,8 +417,8 @@ describe(sectionsOf, () => {
     expect(
       ids(sectionsOf(apps, { show: "all" }, undefined, workflows))
     ).toStrictEqual({
-      lapsed: ["zoom", "jira"],
-      connected: ["notion"],
+      lapsed: ["notion", "zoom", "jira"],
+      connected: [],
       unused: [],
       others: [],
     });

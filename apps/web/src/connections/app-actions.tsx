@@ -87,6 +87,9 @@ const ConnectToolkit = ({
     old === undefined
       ? []
       : allowedOf(old).filter(({ name }) => listed.has(name));
+  const resources = new Map(
+    before.map(({ name, resource }) => [name, resource])
+  );
   const connect = async ({
     tools,
     consent,
@@ -94,7 +97,7 @@ const ConnectToolkit = ({
     const allowed = tools
       .filter(({ choice }) => choice !== "never")
       .map(({ id, choice }) => {
-        const resource = before.find(({ name }) => name === id)?.resource;
+        const resource = resources.get(id);
         return {
           name: id,
           read: choice === "read",

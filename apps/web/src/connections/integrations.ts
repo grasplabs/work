@@ -471,15 +471,15 @@ export const workflowsOf = (
 
 /**
  * The page's sections, by where each app stands, as the prototype's
- * (`routes/integrations/index.tsx`): what someone has to sign in to again,
- * what is connected and used, what is connected though no workflow the
+ * (`routes/integrations/index.tsx`): what needs someone, what is connected
+ * and used, what is connected though no workflow the
  * person can open uses it, and then the catalog's other apps. Each in
  * `find`'s order. The prototype's "Still to connect" (an app a workflow
  * names that nobody connected) has no counterpart: Grasp's workflows name
  * connections, never apps that aren't there.
  */
 export interface IntegrationSections {
-  /** The connection the company relies on lapsed: someone has to sign in again. */
+  /** One of its connections lapsed, a spare beside one that works too: it needs someone. */
   lapsed: Integration[];
   /** Connected and used by a workflow; every connected one while that isn't known. */
   connected: Integration[];
@@ -534,7 +534,9 @@ export const sectionsOf = (
     search
   );
   const own = found.filter((integration) => integration.connections.length > 0);
-  const lapsed = own.filter((integration) => reliedOnLapsed(integration, uses));
+  const lapsed = own.filter(
+    (integration) => stateOf(integration) === "needs_reauth"
+  );
   const connected = own.filter((integration) => !lapsed.includes(integration));
   const used = (integration: Integration): boolean =>
     uses === undefined || workflowsOf(integration, uses).length > 0;

@@ -428,7 +428,7 @@ export const GroupRows = ({
 }) => {
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   const searching = query.trim() !== "";
-  const found = groupTools(tools)
+  const found = groupTools(tools, words.toolGroup)
     .map((group) => ({
       group,
       shown: searching
