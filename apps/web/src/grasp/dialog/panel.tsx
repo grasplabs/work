@@ -11,8 +11,7 @@ import {
 import { mergeProps } from "@ui-sdk/react/primitive";
 import type { ComponentProps, ReactNode } from "react";
 
-import { Button } from "../button";
-import { Cross } from "../icons";
+import { BarClose } from "../bar-actions/bar-actions";
 import { useWords, withGiven } from "../words/words";
 import { panelMarker } from "./dialog.stylex";
 import { useSize } from "./size-context";
@@ -62,9 +61,7 @@ export const DialogContent = ({
   );
   const still = useStill();
   const full = useSize() === "full";
-  const cross = (
-    <Button variant="ghost" size="sm" icon={Cross} aria-label={closeLabel} />
-  );
+  const cross = <BarClose label={closeLabel} />;
   if (still) {
     if (still.phase === "closed") {
       return null;
@@ -107,13 +104,7 @@ export const DialogContent = ({
         <span {...stylex.props(styles.close)}>
           <ClosePrimitive
             render={(props: Record<string, unknown>) => (
-              <Button
-                {...props}
-                variant="ghost"
-                size="sm"
-                icon={Cross}
-                aria-label={closeLabel}
-              />
+              <BarClose label={closeLabel} primitive={props} />
             )}
           />
         </span>

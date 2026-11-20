@@ -89,7 +89,7 @@ const Mark = ({
   onPress: () => void;
 }) => (
   <Toggle
-    size="sm"
+    size="xs"
     icon={icon}
     aria-label={label}
     pressed={pressed}

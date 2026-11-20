@@ -55,8 +55,9 @@ interface ToggleOwnProps {
   /** Its name inside a ToggleGroup: the group's value lists the pressed toggles by it. */
   value?: string;
   /**
-   * `md` beside other controls, `sm` in a dense toolbar. In a group, the group's size.
-   * @default "md"
+   * Button's ladder: `xs` 28 alone or in a toolbar; `sm` 32, `md` 36 and `lg` 44 level with a field
+   * of that size in the same row. In a group, the group's size.
+   * @default "xs"
    */
   size?: ToggleSize;
   /**
@@ -109,18 +110,29 @@ const styles = stylex.create({
     transitionTimingFunction: grasp.ease,
     transform: { default: "none", ":active": `scale(${grasp.pressScale})` },
   },
-  md: { height: grasp.toggleHeight, minWidth: grasp.toggleHeight },
-  sm: { height: grasp.toggleHeightSm, minWidth: grasp.toggleHeightSm },
-  // Small: the icon shrinks with the toggle, so it keeps its room.
-  iconSm: { [iconVars.size]: grasp.toggleIconSm },
-  // In a group: a step shorter, inside a track that leaves the same room on every side.
-  groupedMd: {
+  // Button's ladder (Foundations › Controls): xs 28 alone or in a toolbar, sm 32, md 36 and lg 44
+  // level with a field of that size in the same row.
+  xs: { height: grasp.toggleHeight, minWidth: grasp.toggleHeight },
+  sm: { height: grasp.controlSm, minWidth: grasp.controlSm },
+  md: { height: grasp.controlMd, minWidth: grasp.controlMd },
+  lg: { height: grasp.controlLg, minWidth: grasp.controlLg },
+  // In a group: a step shorter, inside a track that leaves the same room on every side, so the
+  // track itself stands at the size's height.
+  groupedXs: {
     height: `calc(${grasp.toggleHeight} - 2 * ${grasp.toggleGap})`,
     minWidth: `calc(${grasp.toggleHeight} - 2 * ${grasp.toggleGap})`,
   },
   groupedSm: {
-    height: `calc(${grasp.toggleHeightSm} - 2 * ${grasp.toggleGap})`,
-    minWidth: `calc(${grasp.toggleHeightSm} - 2 * ${grasp.toggleGap})`,
+    height: `calc(${grasp.controlSm} - 2 * ${grasp.toggleTrackInset})`,
+    minWidth: `calc(${grasp.controlSm} - 2 * ${grasp.toggleTrackInset})`,
+  },
+  groupedMd: {
+    height: `calc(${grasp.controlMd} - 2 * ${grasp.toggleTrackInset})`,
+    minWidth: `calc(${grasp.controlMd} - 2 * ${grasp.toggleTrackInset})`,
+  },
+  groupedLg: {
+    height: `calc(${grasp.controlLg} - 2 * ${grasp.toggleTrackInset})`,
+    minWidth: `calc(${grasp.controlLg} - 2 * ${grasp.toggleTrackInset})`,
   },
   grouped: {
     borderRadius: `calc(${grasp.corner} - ${grasp.toggleTrackInset})`,
@@ -189,7 +201,12 @@ const styles = stylex.create({
 });
 
 // A grouped toggle's height, by the group's size.
-const groupedSize = { sm: styles.groupedSm, md: styles.groupedMd } as const;
+const groupedSize = {
+  xs: styles.groupedXs,
+  sm: styles.groupedSm,
+  md: styles.groupedMd,
+  lg: styles.groupedLg,
+} as const;
 
 /** The name an icon-only toggle shows in a tooltip: its `aria-label`, unless a tooltip already drives it. */
 const shownName = (square: boolean, given: Record<string, unknown>) => {
@@ -207,7 +224,7 @@ export const Toggle = ({
   ...rest
 }: ToggleProps) => {
   const group = useContext(ToggleGroupContext);
-  const scale = group.grouped ? group.size : (size ?? "md");
+  const scale = group.grouped ? group.size : (size ?? "xs");
   const square = children === undefined || children === null;
   const given: Record<string, unknown> = rest;
   const className = (state: ToggleState) =>
@@ -215,7 +232,6 @@ export const Toggle = ({
       styles.toggle,
       group.grouped ? groupedSize[scale] : styles[scale],
       group.grouped && styles.grouped,
-      scale === "sm" && styles.iconSm,
       square && styles.square,
       !state.disabled && !state.pressed && styles.live,
       !state.disabled && !state.pressed && group.grouped && styles.liveGrouped,

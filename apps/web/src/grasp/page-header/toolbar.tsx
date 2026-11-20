@@ -63,11 +63,11 @@ const styles = stylex.create({
     paddingInline: grasp.space1,
     paddingBlock: {
       default: grasp.space1,
-      [media.coarse]: `calc((${grasp.tap} - ${grasp.toggleHeightSm}) / 2)`,
+      [media.coarse]: `calc((${grasp.tap} - ${grasp.toggleHeight}) / 2)`,
     },
     marginBlock: {
       default: 0,
-      [media.coarse]: `calc(${grasp.space1} - (${grasp.tap} - ${grasp.toggleHeightSm}) / 2)`,
+      [media.coarse]: `calc(${grasp.space1} - (${grasp.tap} - ${grasp.toggleHeight}) / 2)`,
     },
   },
   // The narrowing controls: the room the start leaves, beside it, and the row when stacked. Their

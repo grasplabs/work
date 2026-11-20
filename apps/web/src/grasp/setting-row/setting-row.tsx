@@ -168,7 +168,9 @@ const styles = stylex.create({
     borderTopWidth: { default: 0, ":not(:first-child)": grasp.hairline },
     paddingBlockStart: { default: 0, ":not(:first-child)": grasp.space4 },
   },
-  // Each control its own width, beside its words at any width.
+  // Each control its own width, beside its words while the name keeps its floor (name-floor); in a
+  // narrow row whose control would leave the name less, the control goes under the words, so a long
+  // value never breaks the name a letter a line.
   fit: {
     [settingRowVars.columns]: "minmax(0, 1fr) auto",
     [settingRowVars.columnsNarrow]: "minmax(0, 1fr) auto",
@@ -184,7 +186,16 @@ const styles = stylex.create({
   },
   // Inside the row's frame (frame.tsx): the words, and the control on the shared end edge.
   row: {
-    display: "grid",
+    // A narrow fit row is a wrapping line: the control beside the words while the name keeps its
+    // floor, under them once it would not.
+    display: {
+      default: "grid",
+      [stylex.when.ancestor('[data-controls="fit"]')]: {
+        default: "grid",
+        [NARROW]: "flex",
+      },
+    },
+    flexWrap: "wrap",
     gridTemplateColumns: {
       default: settingRowVars.columns,
       [NARROW]: settingRowVars.columnsNarrow,
@@ -193,7 +204,19 @@ const styles = stylex.create({
     columnGap: grasp.space6,
     rowGap: grasp.space2,
   },
-  words: { display: "grid", minWidth: 0 },
+  // The words stand at the top of the row, in a band one small control tall where the name sits
+  // centred: level with a control of one line, and at the top beside a taller one (a list of teams)
+  // instead of floating at its middle. In a narrow fit row (flex) they keep a floor of 8rem.
+  words: {
+    display: "grid",
+    alignSelf: "start",
+    alignContent: "center",
+    minHeight: grasp.controlSm,
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 0,
+    flexBasis: "8rem",
+  },
   name: {
     display: "flex",
     alignItems: "center",
@@ -231,6 +254,7 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "flex-end",
     minWidth: 0,
+    maxWidth: "100%",
   },
   // Where the save is, beside the control and never under the name: a spinner while it saves, a
   // tick once it has, in the room between the words and the control, so no row changes size. In a
@@ -501,7 +525,12 @@ export const SettingsRows = ({
       <div
         data-slot="settings-rows"
         data-controls={controls}
-        {...stylex.props(styles.rows, fit && styles.fit, layout ?? style)}
+        {...stylex.props(
+          stylex.defaultMarker(),
+          styles.rows,
+          fit && styles.fit,
+          layout ?? style
+        )}
       >
         {children}
       </div>
@@ -514,6 +543,7 @@ export const SettingsRows = ({
       data-controls={controls}
       aria-labelledby={labelId}
       {...stylex.props(
+        stylex.defaultMarker(),
         styles.group,
         styles.groupAfter,
         fit && styles.fit,
