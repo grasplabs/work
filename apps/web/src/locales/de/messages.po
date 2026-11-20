@@ -2739,7 +2739,7 @@ msgstr "Ein Admin genehmigt seinen Zugriff erneut, bevor es für Ihr Team funkti
 
 #: src/frame/part-words.tsx
 msgid "An admin connects this"
-msgstr "Das verbindet ein Admin"
+msgstr "Ein Admin verbindet dies"
 
 #: src/connections/integration-facts.ts
 msgid "An admin connects this for everyone."
