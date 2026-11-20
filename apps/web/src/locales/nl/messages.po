@@ -2693,10 +2693,6 @@ msgstr "Alle stappen klaar"
 msgid "Allow at least one method."
 msgstr "Sta minstens één methode toe."
 
-#: src/connections/app-actions.tsx
-msgid "Allow at least one tool to connect {app}."
-msgstr "Sta minstens één tool toe om {app} te koppelen."
-
 #: src/apps/field-editor.tsx
 msgid "Allow decimals"
 msgstr "Decimalen toestaan"
@@ -5285,11 +5281,6 @@ msgstr "Koppelt met een sleutel"
 msgid "Consent"
 msgstr "Toestemming"
 
-#. {provider} keeps the access, such as Composio.
-#: src/frame/part-words.tsx
-msgid "Consent · {provider}"
-msgstr "Toestemming · {provider}"
-
 #: src/connections/connect-dialog.tsx
 msgid "Consent and connect"
 msgstr "Toestemming geven en koppelen"
@@ -7160,10 +7151,6 @@ msgstr "Iedereen in het bedrijf kan vinden wat agents via {label} lezen en wat e
 #: src/connections/sync-places.tsx
 msgid "Everyone in the company will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Iedereen in het bedrijf kan alles lezen in de plekken die je kiest, wat hun rechten in {label} ook zijn."
-
-#: src/frame/part-words.tsx
-msgid "Everyone in the organization"
-msgstr "Iedereen in de organisatie"
 
 #: src/connections/sync-places.tsx
 msgid "Everyone in the team {team} will be able to read everything in the places you pick, whatever their permissions in {label}."
@@ -12319,7 +12306,6 @@ msgstr "Er is niets toegevoegd. Corrigeer deze rijen en probeer het opnieuw."
 
 #: src/agents/agent-page.tsx
 #: src/brain/brain.ts
-#: src/frame/part-words.tsx
 msgid "Nothing yet"
 msgstr "Nog niets"
 
@@ -13944,14 +13930,6 @@ msgstr "Entiteiten uit het Brein gelezen"
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "De aanroepen met onbekende uitkomst van iedereen gelezen"
-
-#: src/frame/part-words.tsx
-msgid "Read everything, ask before changes"
-msgstr "Alles lezen, vragen vóór wijzigingen"
-
-#: src/frame/part-words.tsx
-msgid "Read everything, change nothing"
-msgstr "Alles lezen, niets wijzigen"
 
 #: src/activity/audit-event.tsx
 msgid "Read from"
@@ -15687,10 +15665,6 @@ msgstr "Vermeldingen apart gezet die het auditlogboek niet kon opnemen"
 msgid "Set for each app"
 msgstr "Per app ingesteld"
 
-#: src/frame/part-words.tsx
-msgid "Set group by group"
-msgstr "Per groep ingesteld"
-
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Set in"
@@ -16102,6 +16076,7 @@ msgid "Sign in again to go on."
 msgstr "Meld je opnieuw aan om verder te gaan."
 
 #: src/connections/connect-dialog.tsx
+#: src/frame/part-words.tsx
 msgid "Sign in to {app}"
 msgstr "Aanmelden bij {app}"
 
@@ -21145,6 +21120,11 @@ msgstr "Je hebt je teruggetrokken. Niets van wat je zei wordt nog gebruikt."
 #: src/interview/page.tsx
 msgid "You withdrew. What the Brain kept of it is being removed."
 msgstr "Je hebt je teruggetrokken. Wat het Brein ervan bewaarde, wordt nu verwijderd."
+
+#. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
+#: src/frame/part-words.tsx
+msgid "You’ll sign in at {host}."
+msgstr "Je meldt je aan op {host}."
 
 #: src/frame/part-words.tsx
 msgid "You're offline. Log in when you're back online."

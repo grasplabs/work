@@ -1,4 +1,4 @@
-import { composioConsentText } from "@grasp-os/shared/connect";
+import { oauthProviderSchema } from "@grasp-os/shared/connect";
 import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -22,73 +22,56 @@ import {
   goTo,
   returnToOf,
   signInAgainTarget,
+  signInHostOf,
 } from "./connect-dialog.tsx";
 import { DisconnectDialog } from "./connection-list.tsx";
 import { fixOf } from "./integrations-header.tsx";
 import type { Integration } from "./integrations.ts";
 import { reliedOnLapsed } from "./integrations.ts";
-import { toolRules } from "./tool-choices.ts";
 
 // What can be done to an app from its panel and its page, as the library's
 // app parts offer it (their `AppActions`): connect it, sign in to it again,
 // connect another account, or disconnect it. Core and connect check every
 // one; this offers only what the person's role can do.
 //
-// A Composio toolkit connects in the library's connect dialog (ConnectApp),
-// which grows from the part's Connect: the admin sets what Grasp may do,
-// reads the consent as written, and connecting creates the connection
-// (always for everyone), saves those tools and opens the provider's
-// sign-in, in one call to core. One that stopped working is connected
-// again the same way, its stopped connection disconnected first. Grasp's
-// own connectors (Microsoft, Google) connect, and sign in again, in our
-// own connect dialog, which asks an admin who uses it; it is the fallback
-// for a toolkit whose tools couldn't be read, as it reads them itself and
-// says why not.
+// Grasp's own connectors (Microsoft, Google) connect in the library's
+// connect dialog (ConnectApp), which grows from the part's Connect: who
+// uses it (an admin chooses; anyone else connects it for themselves), where
+// they'll sign in, and Sign in. A Composio toolkit connects in our own
+// connect dialog, which shows the consent word for word and the tools to
+// allow: connect records a hash of the exact text the admin was shown, and
+// the tools as the ones they chose, so neither can be left out or chosen for
+// them. Our dialog also signs in again and connects another account.
 
-/**
- * Connecting a Composio toolkit from the library's dialog. Connecting it
- * again, once it stopped working, disconnects the connections that stopped
- * first: Composio's account can't be signed in to again, and the same
- * account can't be connected twice.
- */
-const ConnectToolkit = ({
+/** Connecting one of Grasp's own connectors from the library's dialog. */
+const ConnectNative = ({
   app: shown,
   integration,
-  replacing,
+  identity,
   size,
 }: {
   app: App;
   integration: Integration;
-  /** The connections that stopped working, which connecting again replaces. */
-  replacing: readonly ListedConnection[];
+  identity: Identity;
   size: "xs" | "sm";
 }) => {
   const core = useCore();
   const { t } = useLingui();
+  const provider = oauthProviderSchema.safeParse(integration.id);
+  if (!provider.success) {
+    return null;
+  }
   const app = integration.name;
-  const connect = ({ tools }: ConnectAppChoice): void => {
-    const allowed = tools
-      .filter(({ choice }) => choice !== "never")
-      .map(({ id, choice }) => ({ name: id, read: choice === "read" }));
-    if (allowed.length === 0) {
-      toast.error(t`Allow at least one tool to connect ${app}.`);
-      return;
-    }
+  const connect = ({ forWhom }: ConnectAppChoice): void => {
     const start = async (): Promise<void> => {
-      const started = await core.withSession(async (session) => {
-        await Promise.all(
-          replacing.map(
-            async ({ id }) => await session.connections.disconnect(id)
-          )
-        );
-        return await session.connections.connectToolkit({
-          toolkit: integration.id,
-          tools: toolRules(allowed),
-          // Word for word what the dialog showed: core records its hash.
-          consent: composioConsentText,
-          returnTo: returnToOf(integration.key),
-        });
-      });
+      const started = await core.withSession(
+        async (session) =>
+          await session.connections.start({
+            provider: provider.data,
+            scope: forWhom === "everyone" ? "shared" : "personal",
+            returnTo: returnToOf(integration.key),
+          })
+      );
       // The browser leaves for the provider's sign-in.
       goTo(started);
     };
@@ -97,14 +80,14 @@ const ConnectToolkit = ({
       error: (error) => failureText(error),
     });
   };
+  const signInAt = signInHostOf(integration);
   return (
     <ConnectApp
-      again={replacing.length > 0}
       app={shown}
-      consent={composioConsentText}
-      forWhom="everyone"
+      // Only an admin connects one for everyone.
+      {...(isAdmin(identity.role) ? {} : { forWhom: "you" as const })}
+      {...(signInAt === undefined ? {} : { signInAt })}
       onConnect={connect}
-      provider="Composio"
       size={size}
     />
   );
@@ -163,7 +146,7 @@ export const useAppActions = ({
   identity: Identity;
   /** The app as the part draws it, for the connect dialog's head and tools. */
   app: App;
-  /** The read of its tools: the connect dialog waits for it. */
+  /** The read of its tools: a toolkit's Connect waits for it. */
   tools: Loaded<CatalogTool[]> | undefined;
   size: "xs" | "sm";
 }): { actions: AppActions; dialogs: ReactNode } => {
@@ -178,28 +161,24 @@ export const useAppActions = ({
   };
   const actions: AppActions = {};
   const stopped = stoppedOf(integration, identity);
-  if (connectable && (none || stopped.length > 0)) {
-    if (
-      integration.source === "composio" &&
-      tools?.state === "ready" &&
-      tools.data.length > 0
-    ) {
-      actions.connect = (
-        <ConnectToolkit
-          app={app}
-          integration={integration}
-          replacing={stopped}
-          size={size}
-        />
-      );
-    } else if (
-      none &&
-      (integration.source === "native" || tools !== undefined)
-    ) {
-      // A toolkit's tools that couldn't be read: our dialog reads them
-      // again, and says why not.
-      actions.onConnect = openNative();
-    }
+  if (connectable && none && integration.source === "native") {
+    actions.connect = (
+      <ConnectNative
+        app={app}
+        identity={identity}
+        integration={integration}
+        size={size}
+      />
+    );
+  } else if (
+    connectable &&
+    integration.source === "composio" &&
+    (none || stopped.length > 0) &&
+    tools !== undefined
+  ) {
+    // A toolkit, once the read of its tools settled: our dialog reads them
+    // again, and says why not where they couldn't be read.
+    actions.onConnect = openNative();
   }
   if (again !== undefined) {
     actions.onSignIn = openNative(again);
@@ -225,6 +204,7 @@ export const useAppActions = ({
           }
         }}
         open={native !== undefined}
+        replacing={stopped}
       />
       {removable === undefined ? null : (
         <DisconnectDialog

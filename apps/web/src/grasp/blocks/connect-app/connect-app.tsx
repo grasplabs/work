@@ -1,50 +1,33 @@
 // Connect app: connecting an app (app-integration's panel and page open it from their Connect), in a
-// dialog of the same family as the panel, growing from the Connect button that opened it:
+// dialog of the same family as the panel, growing from the Connect button that opened it. One screen:
 //
-//   head      the dither in the app's own colour, its mark, "Connect HubSpot" and its description
-//   What Grasp may do   one summary line ("Read everything, ask before changes"); Change opens the
-//             same group rows as the app's page, inline
-//   Who uses it         one Select
-//   Consent   the provider's text as written, word for word (the host records it), small, quiet and
-//             scrolling, the provider named in the section's label
+//   head          the dither in the app's own colour, its mark, "Connect Microsoft 365"
+//   Who uses it   one switch of two: Just you | Everyone (the host's word in its place where it fixes it)
+//   where         one quiet line: "You'll sign in at microsoft.com."
 //
-// The foot is pinned: Cancel, Connect.
+// The foot ends the dialog: Cancel, "Sign in to Microsoft 365", at its end. On a phone the dialog is
+// a bottom sheet and the two share its width.
 //
-//   <ConnectApp app={hubspot} provider="Composio" consent={consentText} onConnect={connect} />
+//   <ConnectApp app={m365} signInAt="microsoft.com" onConnect={signIn} />
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
-import { Button } from "../../button";
 import {
   Dialog,
   DialogAction,
   DialogBody,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogTitle,
   DialogTrigger,
 } from "../../dialog";
-import { PanelSection } from "../../panel-section";
-import { ScrollArea } from "../../scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectTrigger,
-  SelectValue,
-} from "../../select";
 import { Texture } from "../../texture/texture";
+import { Toggle, ToggleGroup } from "../../toggle";
 import { grasp } from "../../tokens/tokens.stylex";
 import { useWords } from "../../words/words";
-import type {
-  App,
-  AppConnection,
-  AppTool,
-  AppToolChoice,
-} from "../app-integration/model";
-import { GroupRows } from "../app-integration/page";
+import type { App, AppConnection } from "../app-integration/model";
 import { AppMark, useAppTint } from "../app-integration/parts";
 import { appIntegrationWords } from "../app-integration/words";
 import type { AppIntegrationWords } from "../app-integration/words";
@@ -53,37 +36,24 @@ import type { AppIntegrationWords } from "../app-integration/words";
 export interface ConnectAppWords {
   title: (app: string) => string;
   titleAgain: (app: string) => string;
-  /** What Grasp may do, in one line, as the tools stand. */
-  summaryAll: string;
-  summaryRead: string;
-  summaryNone: string;
-  summaryMixed: string;
-  change: string;
-  done: string;
   whoUses: string;
-  forEveryone: string;
   forYou: string;
-  /** The consent's section, naming who keeps the access. */
-  consentFrom: (provider: string) => string;
+  forEveryone: string;
+  /** Where the sign-in happens, in one line. */
+  signInAt: (host: string) => string;
   cancel: string;
-  connect: string;
+  signIn: (app: string) => string;
 }
 
 export const connectAppWords: ConnectAppWords = {
   title: (app) => `Connect ${app}`,
   titleAgain: (app) => `Connect ${app} again`,
-  summaryAll: "Read everything, ask before changes",
-  summaryRead: "Read everything, change nothing",
-  summaryNone: "Nothing yet",
-  summaryMixed: "Set group by group",
-  change: "Change",
-  done: "Done",
   whoUses: "Who uses it",
-  forEveryone: "Everyone in the organization",
   forYou: "Just you",
-  consentFrom: (provider) => `Consent · ${provider}`,
+  forEveryone: "Everyone",
+  signInAt: (host) => `You'll sign in at ${host}.`,
   cancel: "Cancel",
-  connect: "Connect",
+  signIn: (app) => `Sign in to ${app}`,
 };
 
 declare module "../../words/words" {
@@ -92,31 +62,25 @@ declare module "../../words/words" {
   }
 }
 
-/** What `onConnect` is handed: what Grasp may do with each tool, and who uses it. */
+/** What `onConnect` is handed: who uses it. */
 export interface ConnectAppChoice {
-  tools: readonly { id: string; choice: AppToolChoice }[];
   forWhom: AppConnection["forWhom"];
 }
 
 /** Every prop a ConnectApp takes. */
 export interface ConnectAppProps {
   app: App;
-  /** Who keeps the access ("Composio", or Grasp's own connector): named over the consent. */
-  provider: string;
-  /**
-   * The consent, as written: shown word for word, never translated (the host records the exact
-   * text consented to).
-   */
-  consent: string;
-  /** Connect: the host opens the app's sign-in. */
+  /** Sign in: the host opens the app's sign-in. */
   onConnect: (choice: ConnectAppChoice) => void;
+  /** Where the sign-in happens ("microsoft.com"), said in one line. Without it, no line. */
+  signInAt?: string;
   /** The trigger's size: `xs` in a panel's bar, `sm` on a page. @default "sm" */
   size?: "xs" | "sm";
   /** The app was connected and stopped working: Connect again. */
   again?: boolean;
   /**
    * Who uses it, where the host fixes it (a Composio toolkit is always for everyone): its word in
-   * place of the Select.
+   * place of the switch.
    */
   forWhom?: AppConnection["forWhom"];
   words?: Partial<ConnectAppWords>;
@@ -125,7 +89,7 @@ export interface ConnectAppProps {
 
 const styles = stylex.create({
   // The dither in the app's colour, from the dialog's top behind its head.
-  texture: { insetBlockEnd: "auto", height: "10rem" },
+  texture: { insetBlockEnd: "auto", height: "8rem" },
   // The mark on the dialog's own inset, over the title.
   mark: {
     position: "relative",
@@ -133,78 +97,43 @@ const styles = stylex.create({
     paddingBlockStart: grasp.space6,
     paddingInline: grasp.space6,
   },
-  description: { whiteSpace: "pre-line" },
-  sections: {
-    display: "grid",
-    gap: grasp.space5,
-    marginInline: `calc(-1 * ${grasp.inspectorInset})`,
-  },
-  summaryRow: {
+  body: { display: "grid", gap: grasp.space4 },
+  // Who uses it: its name, then the switch at its own width.
+  who: {
     display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: grasp.space3,
-    paddingInline: grasp.inspectorInset,
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space2,
   },
-  summary: {
+  label: {
     margin: 0,
     fontFamily: grasp.fontSans,
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightMedium,
     color: grasp.ink,
   },
-  groups: { maxHeight: "16rem" },
-  who: { paddingBlock: grasp.space1, paddingInline: grasp.space1 },
-  consentScroll: { maxHeight: "7rem" },
-  // Who uses it, fixed by the host: its word on the section's inset.
-  fixed: { paddingBlock: grasp.space2, paddingInline: grasp.inspectorInset },
-  consent: {
+  fixed: {
     margin: 0,
-    paddingBlock: grasp.space3,
-    paddingInline: grasp.inspectorInset,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.muted,
+  },
+  where: {
+    margin: 0,
     fontFamily: grasp.fontSans,
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
     color: grasp.muted,
-    whiteSpace: "pre-wrap",
   },
 });
 
-/** Each tool at its default: reads run, changes ask first. */
-const defaultsOf = (tools: readonly AppTool[]): AppTool[] =>
-  tools.map((tool) => ({
-    ...tool,
-    choice: tool.kind === "read" ? "read" : "write",
-  }));
-
-/** What Grasp may do, in one line, from how the tools stand. */
-const summaryOf = (tools: readonly AppTool[], words: ConnectAppWords) => {
-  if (tools.every((tool) => tool.choice === "never")) {
-    return words.summaryNone;
-  }
-  const reads = tools.filter((tool) => tool.kind === "read");
-  const writes = tools.filter((tool) => tool.kind === "write");
-  if (
-    reads.every((tool) => tool.choice === "read") &&
-    writes.every((tool) => tool.choice === "write")
-  ) {
-    return words.summaryAll;
-  }
-  if (
-    reads.every((tool) => tool.choice === "read") &&
-    writes.every((tool) => tool.choice === "never")
-  ) {
-    return words.summaryRead;
-  }
-  return words.summaryMixed;
-};
-
-/** Connect an app: what Grasp may do, who uses it, and the consent, in one dialog from its Connect button. */
+/** Connect an app: who uses it and where you'll sign in, on one screen from its Connect button. */
 export const ConnectApp = ({
   app,
-  provider,
-  consent,
   onConnect,
+  signInAt,
   size = "sm",
   again = false,
   forWhom: fixed,
@@ -214,26 +143,12 @@ export const ConnectApp = ({
   const words = useWords("connectApp", connectAppWords, given);
   const shared = useWords("appIntegration", appIntegrationWords, appWords);
   const tint = useAppTint(app);
-  const [open, setOpen] = useState(false);
-  const [changing, setChanging] = useState(false);
-  const [tools, setTools] = useState<readonly AppTool[]>(() =>
-    defaultsOf(app.tools ?? [])
-  );
   const [forWhom, setForWhom] = useState<AppConnection["forWhom"]>(
-    fixed ?? "everyone"
+    fixed ?? "you"
   );
-  const consentId = useId();
+  const labelId = useId();
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) {
-          setChanging(false);
-          setTools(defaultsOf(app.tools ?? []));
-        }
-      }}
-    >
+    <Dialog>
       <DialogTrigger variant="ink" size={size}>
         {again ? shared.connectAgain : shared.connect}
       </DialogTrigger>
@@ -245,105 +160,35 @@ export const ConnectApp = ({
         <DialogTitle>
           {again ? words.titleAgain(app.name) : words.title(app.name)}
         </DialogTitle>
-        <DialogDescription>
-          <span {...stylex.props(styles.description)}>{app.description}</span>
-        </DialogDescription>
         <DialogBody>
-          <div {...stylex.props(styles.sections)}>
-            {tools.length > 0 ? (
-              <PanelSection label={shared.mayDo} card={changing}>
-                {changing ? (
-                  <ScrollArea aria-label={shared.mayDo} layout={styles.groups}>
-                    <GroupRows
-                      tools={tools}
-                      editable
-                      connected
-                      words={shared}
-                      onChange={(changes) => {
-                        const next = new Map(
-                          changes.map((change) => [change.id, change.choice])
-                        );
-                        setTools(
-                          tools.map((tool) => ({
-                            ...tool,
-                            choice: next.get(tool.id) ?? tool.choice,
-                          }))
-                        );
-                      }}
-                    />
-                  </ScrollArea>
-                ) : null}
-                {/* The summary as a plain line, Change at its end; open, Done there closes the rows. */}
-                <div {...stylex.props(styles.summaryRow)}>
-                  {changing ? (
-                    <span />
-                  ) : (
-                    <p {...stylex.props(styles.summary)}>
-                      {summaryOf(tools, words)}
-                    </p>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    aria-expanded={changing}
-                    onClick={() => {
-                      setChanging(!changing);
-                    }}
-                  >
-                    {changing ? words.done : words.change}
-                  </Button>
-                </div>
-              </PanelSection>
-            ) : null}
-            <PanelSection label={words.whoUses}>
+          <div {...stylex.props(styles.body)}>
+            <div {...stylex.props(styles.who)}>
+              <p id={labelId} {...stylex.props(styles.label)}>
+                {words.whoUses}
+              </p>
               {fixed === undefined ? (
-                <div {...stylex.props(styles.who)}>
-                  <Select
-                    value={forWhom}
-                    items={[
-                      { value: "everyone", label: words.forEveryone },
-                      { value: "you", label: words.forYou },
-                    ]}
-                    onValueChange={(value) => {
-                      if (value === "everyone" || value === "you") {
-                        setForWhom(value);
-                      }
-                    }}
-                  >
-                    <SelectTrigger
-                      variant="text"
-                      size="sm"
-                      aria-label={words.whoUses}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent />
-                  </Select>
-                </div>
-              ) : (
-                <div {...stylex.props(styles.fixed)}>
-                  <p {...stylex.props(styles.summary)}>
-                    {fixed === "everyone" ? words.forEveryone : words.forYou}
-                  </p>
-                </div>
-              )}
-            </PanelSection>
-            <PanelSection label={words.consentFrom(provider)}>
-              {/* As written, word for word: the host records the text consented to. Named, so the keys can scroll it. */}
-              <ScrollArea
-                aria-label={words.consentFrom(provider)}
-                layout={styles.consentScroll}
-              >
-                <p
-                  id={consentId}
-                  lang="en"
-                  dir="ltr"
-                  {...stylex.props(styles.consent)}
+                <ToggleGroup
+                  aria-labelledby={labelId}
+                  value={[forWhom]}
+                  onValueChange={(next) => {
+                    const [chosen] = next;
+                    if (chosen === "you" || chosen === "everyone") {
+                      setForWhom(chosen);
+                    }
+                  }}
                 >
-                  {consent}
+                  <Toggle value="you">{words.forYou}</Toggle>
+                  <Toggle value="everyone">{words.forEveryone}</Toggle>
+                </ToggleGroup>
+              ) : (
+                <p {...stylex.props(styles.fixed)}>
+                  {fixed === "everyone" ? words.forEveryone : words.forYou}
                 </p>
-              </ScrollArea>
-            </PanelSection>
+              )}
+            </div>
+            {signInAt === undefined ? null : (
+              <p {...stylex.props(styles.where)}>{words.signInAt(signInAt)}</p>
+            )}
           </div>
         </DialogBody>
         <DialogFooter>
@@ -352,16 +197,10 @@ export const ConnectApp = ({
           <DialogAction
             variant="ink"
             action={() => {
-              onConnect({
-                tools: tools.map((tool) => ({
-                  id: tool.id,
-                  choice: tool.choice,
-                })),
-                forWhom,
-              });
+              onConnect({ forWhom });
             }}
           >
-            {words.connect}
+            {words.signIn(app.name)}
           </DialogAction>
         </DialogFooter>
       </DialogContent>
