@@ -3315,7 +3315,6 @@ msgstr "Met goedkeuring vervangt hij de eigen skill {name} van het team {team} v
 #: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
-#: src/connections/integrations-skeleton.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
@@ -5150,7 +5149,6 @@ msgstr "Koppel de apps waar je werk op draait"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
-#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Connected"
@@ -10333,6 +10331,10 @@ msgstr "{many} laden"
 msgid "Loading chats"
 msgstr "Chats laden"
 
+#: src/connections/integrations-skeleton.tsx
+msgid "Loading integrations"
+msgstr "Integraties laden"
+
 #: src/frame/part-words.tsx
 msgid "Loading more {many}"
 msgstr "Meer {many} laden"
@@ -10341,6 +10343,7 @@ msgstr "Meer {many} laden"
 msgid "Loading older messages"
 msgstr "Oudere berichten laden"
 
+#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 msgid "Loading the app"
 msgstr "De app laden"

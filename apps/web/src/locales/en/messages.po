@@ -3315,7 +3315,6 @@ msgstr "Approving it replaces the team {team}'s own skill {name} for its members
 #: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
-#: src/connections/integrations-skeleton.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
@@ -5150,7 +5149,6 @@ msgstr "Connect the apps your work runs on"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
-#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Connected"
@@ -10333,6 +10331,10 @@ msgstr "Loading {many}"
 msgid "Loading chats"
 msgstr "Loading chats"
 
+#: src/connections/integrations-skeleton.tsx
+msgid "Loading integrations"
+msgstr "Loading integrations"
+
 #: src/frame/part-words.tsx
 msgid "Loading more {many}"
 msgstr "Loading more {many}"
@@ -10341,6 +10343,7 @@ msgstr "Loading more {many}"
 msgid "Loading older messages"
 msgstr "Loading older messages"
 
+#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 msgid "Loading the app"
 msgstr "Loading the app"

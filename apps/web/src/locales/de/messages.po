@@ -3315,7 +3315,6 @@ msgstr "Mit der Freigabe ersetzt er den eigenen Skill {name} des Teams {team} f√
 #: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
-#: src/connections/integrations-skeleton.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
@@ -5150,7 +5149,6 @@ msgstr "Verbinde die Apps, mit denen du arbeitest"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
-#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Connected"
@@ -10333,6 +10331,10 @@ msgstr "{many} werden geladen"
 msgid "Loading chats"
 msgstr "Chats werden geladen"
 
+#: src/connections/integrations-skeleton.tsx
+msgid "Loading integrations"
+msgstr "Integrationen werden geladen"
+
 #: src/frame/part-words.tsx
 msgid "Loading more {many}"
 msgstr "Weitere {many} werden geladen"
@@ -10341,6 +10343,7 @@ msgstr "Weitere {many} werden geladen"
 msgid "Loading older messages"
 msgstr "√Ñltere Nachrichten werden geladen"
 
+#: src/connections/integrations-skeleton.tsx
 #: src/frame/part-words.tsx
 msgid "Loading the app"
 msgstr "Die App wird geladen"
