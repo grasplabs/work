@@ -1,5 +1,5 @@
 import type { CatalogTool } from "@grasp-os/shared/connect";
-import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { useLingui } from "@lingui/react/macro";
@@ -10,6 +10,7 @@ import { toast } from "../grasp/toast/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useAppActions } from "./app-actions.tsx";
 import { useAppOf } from "./app-of.tsx";
+import { waitsForAdmin } from "./connect-dialog.tsx";
 import { FollowLinks } from "./follow-links.tsx";
 import type { Integration } from "./integrations.ts";
 import {
@@ -90,9 +91,11 @@ export const IntegrationAppPage = ({
     );
   };
   // Whether the app is offered: the organization's own admins choose, never Grasp staff (core refuses them).
-  const offers =
-    integration.listed && isAdmin(identity.role) && !identity.staff;
+  const offers = integration.listed && isMemberAdmin(identity);
   const changeOffered = (offered: boolean): void => {
+    if (busy) {
+      return;
+    }
     void change(
       async (session) => {
         await session.connections.setOffered(
@@ -113,7 +116,7 @@ export const IntegrationAppPage = ({
         editable={changeable !== undefined}
         onToolsChange={changeTools}
         {...actions}
-        member={!isMemberAdmin(identity)}
+        member={waitsForAdmin(integration, identity)}
         {...(offers
           ? { offered: integration.offered, onOfferedChange: changeOffered }
           : {})}

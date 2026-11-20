@@ -12,7 +12,7 @@ import type {
   ToolkitKeyField,
 } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -99,6 +99,12 @@ export const canConnect = (
   }
   return isAdmin(identity.role);
 };
+
+/** Whether an admin connects it for this person: they can't connect it, and they aren't one of the organization's admins. */
+export const waitsForAdmin = (
+  integration: Integration,
+  identity: Identity
+): boolean => !canConnect(integration, identity) && !isMemberAdmin(identity);
 
 /** Whether this person can sign in again to `connection`, as core decides it. */
 export const canReconnect = (
