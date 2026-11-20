@@ -16060,6 +16060,10 @@ msgstr "Vorschau zeigen"
 msgid "Show the time zones"
 msgstr "Zeitzonen anzeigen"
 
+#: src/brain/sources-page.tsx
+msgid "Show the whole text"
+msgstr "Den ganzen Text zeigen"
+
 #: src/frame/part-words.tsx
 msgid "Show them"
 msgstr "Anzeigen"

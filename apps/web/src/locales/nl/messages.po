@@ -16060,6 +16060,10 @@ msgstr "Voorbeeld tonen"
 msgid "Show the time zones"
 msgstr "Tijdzones tonen"
 
+#: src/brain/sources-page.tsx
+msgid "Show the whole text"
+msgstr "De hele tekst tonen"
+
 #: src/frame/part-words.tsx
 msgid "Show them"
 msgstr "Toon ze"

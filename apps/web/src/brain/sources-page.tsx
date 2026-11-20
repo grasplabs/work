@@ -304,6 +304,12 @@ const styles = stylex.create({
     flexShrink: 0,
     width: `min(${grasp.inspectorWidth}, 100%)`,
   },
+  // What a section of the inspector holds, other than its rows and its
+  // text: at the panel's own inset, as the text is.
+  cardBody: {
+    paddingBlock: grasp.space3,
+    paddingInline: grasp.inspectorInset,
+  },
   // The list's sections, one per kind.
   groups: { display: "flex", flexDirection: "column", gap: grasp.space6 },
   // Search's passages, each its source's row with the passage under it.
@@ -827,7 +833,7 @@ const UploadActions = ({
   const { readers, mayAddVersion, deletes } = upload;
   const busy = acting?.state === "loading";
   return (
-    <div {...stylex.props(styles.stack)}>
+    <div {...stylex.props(styles.stack, styles.cardBody)}>
       <Text size="sm" tone="muted">
         <ReadersLine readers={readers} teams={teams} />
       </Text>
@@ -1223,31 +1229,37 @@ const VersionList = ({
           );
         })}
       </ItemGroup>
-      {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
-      {before === null ? null : (
-        <Button
-          disabled={more?.state === "loading"}
-          layout={styles.start}
-          onClick={() => {
-            setMore({ state: "loading" });
-            void (async () => {
-              const answer = await readFrom(
-                core,
-                async (sources) => await sources.versions(source, before)
-              );
-              setMore(answer.state === "refused" ? answer : undefined);
-              if (answer.state === "ready") {
-                onMore(answer.data);
-              }
-            })();
-          }}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <Trans>Older versions</Trans>
-        </Button>
-      )}
+      {more?.state === "refused" || before !== null ? (
+        <div {...stylex.props(styles.versions, styles.cardBody)}>
+          {more?.state === "refused" ? (
+            <ErrorText>{more.message}</ErrorText>
+          ) : null}
+          {before === null ? null : (
+            <Button
+              disabled={more?.state === "loading"}
+              layout={styles.start}
+              onClick={() => {
+                setMore({ state: "loading" });
+                void (async () => {
+                  const answer = await readFrom(
+                    core,
+                    async (sources) => await sources.versions(source, before)
+                  );
+                  setMore(answer.state === "refused" ? answer : undefined);
+                  if (answer.state === "ready") {
+                    onMore(answer.data);
+                  }
+                })();
+              }}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <Trans>Older versions</Trans>
+            </Button>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -1268,13 +1280,31 @@ const saidOf = (
   text: Read<BrainSourceText | null>
 ): Pick<InspectorSection, "text" | "content"> => {
   if (text.state === "refused") {
-    return { content: <ErrorText>{text.message}</ErrorText> };
+    return {
+      content: (
+        <div {...stylex.props(styles.cardBody)}>
+          <ErrorText>{text.message}</ErrorText>
+        </div>
+      ),
+    };
   }
   if (text.state === "loading") {
-    return { content: <Skeleton text="md" /> };
+    return {
+      content: (
+        <div {...stylex.props(styles.cardBody)}>
+          <Skeleton />
+        </div>
+      ),
+    };
   }
   return text.data === null
-    ? { content: <Trans>You can&apos;t read this version.</Trans> }
+    ? {
+        content: (
+          <div {...stylex.props(styles.cardBody)}>
+            <Trans>You can&apos;t read this version.</Trans>
+          </div>
+        ),
+      }
     : {
         text: <span {...stylex.props(styles.plain)}>{text.data.text}</span>,
       };
@@ -1324,7 +1354,11 @@ const useUploadSection = (
       {
         id: "upload",
         label: producerLabel("upload"),
-        content: <ErrorText>{upload.message}</ErrorText>,
+        content: (
+          <div {...stylex.props(styles.cardBody)}>
+            <ErrorText>{upload.message}</ErrorText>
+          </div>
+        ),
       },
     ];
   }
@@ -1514,6 +1548,7 @@ const SourcePanel = ({
       onClose={onClose}
       sections={sections}
       title={title}
+      words={{ showAll: () => t`Show the whole text` }}
     />
   );
 };

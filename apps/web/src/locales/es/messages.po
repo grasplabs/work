@@ -16060,6 +16060,10 @@ msgstr "Mostrar la vista previa"
 msgid "Show the time zones"
 msgstr "Mostrar las zonas horarias"
 
+#: src/brain/sources-page.tsx
+msgid "Show the whole text"
+msgstr "Mostrar todo el texto"
+
 #: src/frame/part-words.tsx
 msgid "Show them"
 msgstr "Mostrarlas"

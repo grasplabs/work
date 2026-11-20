@@ -16060,6 +16060,10 @@ msgstr "Afficher l'aperçu"
 msgid "Show the time zones"
 msgstr "Afficher les fuseaux horaires"
 
+#: src/brain/sources-page.tsx
+msgid "Show the whole text"
+msgstr "Afficher tout le texte"
+
 #: src/frame/part-words.tsx
 msgid "Show them"
 msgstr "Les afficher"
