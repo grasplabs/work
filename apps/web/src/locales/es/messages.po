@@ -2565,6 +2565,7 @@ msgstr "Los agentes leen esto antes de mirar dentro."
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain.ts
 #: src/interview/words.ts
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "AI"
 msgstr "IA"
@@ -4785,6 +4786,7 @@ msgid "Commerce"
 msgstr "Comercio"
 
 #: src/brain/brain.ts
+#: src/onboarding/setup-frame.tsx
 #: src/settings/billing-card.tsx
 msgid "Company"
 msgstr "Empresa"
@@ -6007,6 +6009,7 @@ msgstr "Documento no encontrado"
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/onboarding/document-drop.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Documents"
 msgstr "Documentos"
 
@@ -6430,10 +6433,6 @@ msgstr "Terminar ahora el acceso del personal"
 #: src/workflows/run-detail.tsx
 msgid "Ended"
 msgstr "Terminó"
-
-#: src/workflows/resource-runs.tsx
-msgid "Ended {ended}"
-msgstr "Terminó el {ended}"
 
 #: src/settings/staff-access.tsx
 msgid "Ending access"
@@ -6937,7 +6936,7 @@ msgstr "Menos de cinco de {reach} le preguntaron"
 msgid "Fewer than five people: not shown on its own."
 msgstr "Menos de cinco personas: no se muestra por separado."
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "Fewer than five people: this isn't shown on its own."
 msgstr "Menos de cinco personas: esto no se muestra por separado."
 
@@ -8086,6 +8085,10 @@ msgstr "¿Cuánto debe pensar {name}?"
 msgid "How it went then"
 msgstr "Cómo fue entonces"
 
+#: src/onboarding/setup-frame.tsx
+msgid "How it works"
+msgstr "Cómo funciona"
+
 #: src/onboarding/about-story.tsx
 msgid "How long does one of those take you, {name}?"
 msgstr "¿Cuánto te lleva cada una, {name}?"
@@ -8521,6 +8524,7 @@ msgstr "Entrevista: {role}"
 #: src/brain/brain.ts
 #: src/inbox/interviews-item.tsx
 #: src/inbox/items.ts
+#: src/onboarding/setup-frame.tsx
 msgid "Interviews"
 msgstr "Entrevistas"
 
@@ -9319,6 +9323,10 @@ msgstr "Líder de {name}"
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead talked"
 msgstr "Responsable habló"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Leads"
+msgstr "Responsables"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Leads get their link {when}. Everyone else right after their lead has talked to me."
@@ -10871,11 +10879,11 @@ msgstr "Ningún registro de esta tabla tiene ese ID."
 msgid "No records yet"
 msgstr "Aún no hay registros"
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "No requests in {month}"
 msgstr "Ninguna solicitud en {month}"
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "No requests in the last twelve months"
 msgstr "Ninguna solicitud en los últimos doce meses"
 
@@ -11987,6 +11995,7 @@ msgstr "Solo tú ves esto"
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/uploads.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Open"
 msgstr "Abrir"
 
@@ -11994,12 +12003,6 @@ msgstr "Abrir"
 msgctxt "a need nobody has taken up yet"
 msgid "Open"
 msgstr "Abierta"
-
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgctxt "column: a button that opens a run"
-msgid "Open"
-msgstr "Abrir"
 
 #: src/brain/brain-markdown.ts
 #: src/routes/_shell.brain.$noteId.tsx
@@ -12009,11 +12012,6 @@ msgstr "Pendiente"
 
 #: src/link-confirmation.tsx
 msgctxt "open a link to another site"
-msgid "Open"
-msgstr "Abrir"
-
-#: src/workflows/resource-runs.tsx
-msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Abrir"
 
@@ -12113,10 +12111,6 @@ msgstr "Abrir la conexión"
 #: src/workflows/start-run.tsx
 msgid "Open the run"
 msgstr "Abrir la ejecución"
-
-#: src/workflows/resource-runs.tsx
-msgid "Open the run started {started}"
-msgstr "Abrir la ejecución iniciada el {started}"
 
 #: src/interview/page.tsx
 msgid "Open this link again whenever you like, and carry on where you stopped."
@@ -13964,6 +13958,7 @@ msgstr "Reintentado"
 
 #: src/agents/new-agent.tsx
 #: src/inbox/item-detail.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Review"
 msgstr "Revisar"
 
@@ -14205,6 +14200,11 @@ msgstr "Regla"
 msgid "Rules"
 msgstr "Reglas"
 
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "run"
+msgstr "ejecución"
+
 #: src/activity/audit-event.tsx
 msgid "Run"
 msgstr "Ejecución"
@@ -14262,12 +14262,16 @@ msgstr "Ejecutando un paso de código"
 msgid "Running now"
 msgstr "En curso ahora"
 
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "runs"
+msgstr "ejecuciones"
+
 #: src/inbox/report-view.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "Runs"
 msgstr "Ejecuciones"
 
@@ -14800,7 +14804,6 @@ msgstr "Autoaprobada: nadie más podía aprobarla"
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
-#: src/interview/composer.tsx
 msgid "Send"
 msgstr "Enviar"
 
@@ -15604,6 +15607,7 @@ msgstr "Fuente {number}"
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
 #: src/frame/part-words.tsx
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/settings/event-sources.tsx
 msgid "Sources"
@@ -15734,7 +15738,6 @@ msgstr "Iniciar flujos de trabajo"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 msgid "Started"
 msgstr "Iniciadas"
 
@@ -15746,7 +15749,6 @@ msgstr "Empezó un chat"
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "Started by"
 msgstr "Iniciada por"
 
@@ -15809,7 +15811,6 @@ msgstr "Afirmaciones"
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
 msgid "Status"
 msgstr "Estado"
 
@@ -15825,10 +15826,6 @@ msgstr "Quedarse"
 #: src/interview/words.ts
 msgid "Step"
 msgstr "Paso"
-
-#: src/onboarding/setup-frame.tsx
-msgid "Step {n}"
-msgstr "Paso {n}"
 
 #: src/frame/part-words.tsx
 msgid "Step {step} of {total}"
@@ -16182,6 +16179,7 @@ msgstr "tareas"
 #: src/brain/brain.ts
 #: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Team"
 msgstr "Equipo"
 
@@ -16373,10 +16371,6 @@ msgstr "Esa dirección de correo ya inicia sesión con otra cuenta."
 #: src/projects/file-item-dialog.tsx
 msgid "That is {who}."
 msgstr "Es decir, {who}."
-
-#: src/interview/composer.tsx
-msgid "That is too long to send in one go. Send it in two parts."
-msgstr "Es demasiado largo para enviarlo de una vez. Envíalo en dos partes."
 
 #: src/pages/page-files.ts
 msgid "That isn't a file call."
@@ -17744,6 +17738,7 @@ msgid "Tool"
 msgstr "Herramienta"
 
 #: src/brain/brain.ts
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Tools"
@@ -17762,8 +17757,16 @@ msgid "Tools to allow"
 msgstr "Herramientas que permitir"
 
 #: src/workflows/requests/request-table.tsx
+msgid "topic"
+msgstr "tema"
+
+#: src/workflows/requests/request-table.tsx
 msgid "Topic"
 msgstr "Tema"
+
+#: src/workflows/requests/request-table.tsx
+msgid "topics"
+msgstr "temas"
 
 #: src/brain/brain-transcript.tsx
 msgid "Topics"
@@ -18276,7 +18279,6 @@ msgstr "Verificado hasta {entries}"
 #: src/inbox/items.ts
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "Version"
@@ -18314,11 +18316,6 @@ msgstr "Versión {number}, actual"
 #: src/workflows/workflow-triggers.tsx
 msgid "Version {version}"
 msgstr "Versión {version}"
-
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgid "Version {version} · {by}"
-msgstr "Versión {version} · {by}"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version} declares no binding to approve."
@@ -18696,6 +18693,10 @@ msgstr "Reportero semanal"
 #: src/workflows/requests/request-summary.tsx
 msgid "Weekly summary"
 msgstr "Resumen semanal"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Welcome"
+msgstr "Bienvenida"
 
 #: src/workflows/today-lanes.tsx
 msgid "went to people"
@@ -19925,10 +19926,6 @@ msgstr "Inicias sesión en la propia página de {app}."
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "Te retiraste. Nada de lo que dijiste se usa a partir de ahora."
-
-#: src/interview/transcript.tsx
-msgid "You:"
-msgstr "Tú:"
 
 #: src/frame/part-words.tsx
 msgid "You're offline. Log in when you're back online."

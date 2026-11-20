@@ -164,21 +164,11 @@ const Paths = ({ process }: { process: BusinessProcess }) => {
   }
 };
 
-/**
- * A process's icon alone, at an icon's size: for lines, menus and badges.
- * `className` is for a caller still on the old kit; without it the glyph
- * takes the library's icon size.
- */
-export const ProcessGlyph = ({
-  process,
-  className,
-}: {
-  process: BusinessProcess;
-  className?: string;
-}) => (
+/** A process's icon alone, at the library's icon size: for lines, menus and badges. */
+export const ProcessGlyph = ({ process }: { process: BusinessProcess }) => (
   <svg
     aria-hidden="true"
-    {...(className === undefined ? stylex.props(styles.glyph) : { className })}
+    {...stylex.props(styles.glyph)}
     data-moves={process}
     fill="none"
     stroke="currentColor"

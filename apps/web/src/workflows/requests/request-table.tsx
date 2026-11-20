@@ -10,6 +10,8 @@ import { LoadingLines } from "../../frame/page-states.tsx";
 import { Badge } from "../../grasp/badge/index.ts";
 import { Card } from "../../grasp/card/index.ts";
 import { Collapsible } from "../../grasp/collapsible/index.ts";
+import { DataTable } from "../../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../../grasp/data-table/index.ts";
 import {
   Empty,
   EmptyDescription,
@@ -25,14 +27,6 @@ import {
   ItemTitle,
 } from "../../grasp/item/index.ts";
 import { Sheet, SheetContent, SheetTitle } from "../../grasp/sheet/index.ts";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../../grasp/table/index.ts";
 import {
   Tabs,
   TabsContent,
@@ -215,7 +209,75 @@ const Needs = ({
   );
 };
 
-/** What people ask, by topic. */
+/** One topic of the report, as its row shows it. */
+type TopicRow = RequestsPage["report"]["byTopic"][number] & {
+  name: string;
+  /** How it grew against the span before, or null where that can't be told. */
+  grew: ReturnType<typeof growth> | null;
+  /** Opens its detail; none for the topics folded together. */
+  onOpen: (() => void) | undefined;
+};
+
+/** A topic: its name (opening it), how it grew, and who asked and how helpful the replies were. */
+const TopicName = ({ topic }: { topic: TopicRow }) => {
+  const { t } = useLingui();
+  const { people, onOpen } = topic;
+  const rated = topic.up + topic.down;
+  const helpful = formatPercent(rated === 0 ? 0 : topic.up / rated);
+  return (
+    <span {...stylex.props(styles.topic)}>
+      <span {...stylex.props(styles.named)}>
+        <RowName name={topic.name} onOpen={onOpen} />
+        <Growth grew={topic.grew} />
+      </span>
+      <Text element="span" size="xs" tone="muted">
+        {rated >= 5
+          ? t`${plural(people, { one: "# person", other: "# people" })} · ${helpful} helpful`
+          : t`${plural(people, { one: "# person", other: "# people" })}`}
+      </Text>
+    </span>
+  );
+};
+
+/** The topics table's columns, under their headers' words. */
+const topicColumns = (words: {
+  topic: string;
+  doneWith: string;
+  requests: string;
+  tool: (tool: string) => string;
+}): DataTableColumn<TopicRow>[] => [
+  {
+    key: "topic",
+    header: words.topic,
+    value: (topic) => topic.name,
+    cell: (topic) => <TopicName topic={topic} />,
+  },
+  {
+    key: "tools",
+    header: words.doneWith,
+    value: (topic) => topic.tools.map((tool) => words.tool(tool.key)).join(" "),
+    cell: (topic) => (
+      <span {...stylex.props(styles.tools)}>
+        {topic.tools.map((tool) => (
+          <ToolMark
+            key={tool.key}
+            label={words.tool(tool.key)}
+            tool={tool.key}
+          />
+        ))}
+      </span>
+    ),
+  },
+  {
+    key: "requests",
+    header: words.requests,
+    value: (topic) => topic.billed,
+    cell: (topic) => formatNumber(topic.billed),
+    align: "end",
+  },
+];
+
+/** What people ask, by topic, on the library's Data table. */
 const Topics = ({
   page,
   onOpen,
@@ -226,72 +288,43 @@ const Topics = ({
   const { t } = useLingui();
   const names = useRequestNames(page);
   const { report, before } = page;
+  const rows: TopicRow[] = report.byTopic.map((topic) => {
+    const name = names.topic(topic.key);
+    return {
+      ...topic,
+      name,
+      grew:
+        topic.key === elsewhere || before === null
+          ? null
+          : growth(
+              topic.billed,
+              before.byTopic.find((each) => each.key === topic.key)?.billed ?? 0
+            ),
+      onOpen:
+        topic.key === elsewhere
+          ? undefined
+          : () => {
+              onOpen(topic.key, name);
+            },
+    };
+  });
   return (
-    <Table aria-label={t`What people ask`}>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{t`Topic`}</TableHead>
-          <TableHead>{t`Done with`}</TableHead>
-          <TableHead align="end">
-            {t({ message: "Requests", context: "column: billed requests" })}
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {report.byTopic.map((topic) => {
-          const { people } = topic;
-          const rated = topic.up + topic.down;
-          const helpful = formatPercent(rated === 0 ? 0 : topic.up / rated);
-          const name = names.topic(topic.key);
-          const grew =
-            topic.key === elsewhere || before === null
-              ? null
-              : growth(
-                  topic.billed,
-                  before.byTopic.find((each) => each.key === topic.key)
-                    ?.billed ?? 0
-                );
-          return (
-            <TableRow key={topic.key}>
-              <TableCell lead>
-                <span {...stylex.props(styles.topic)}>
-                  <span {...stylex.props(styles.named)}>
-                    <RowName
-                      name={name}
-                      onOpen={
-                        topic.key === elsewhere
-                          ? undefined
-                          : () => {
-                              onOpen(topic.key, name);
-                            }
-                      }
-                    />
-                    <Growth grew={grew} />
-                  </span>
-                  <Text element="span" size="xs" tone="muted">
-                    {rated >= 5
-                      ? t`${plural(people, { one: "# person", other: "# people" })} · ${helpful} helpful`
-                      : t`${plural(people, { one: "# person", other: "# people" })}`}
-                  </Text>
-                </span>
-              </TableCell>
-              <TableCell>
-                <span {...stylex.props(styles.tools)}>
-                  {topic.tools.map((tool) => (
-                    <ToolMark
-                      key={tool.key}
-                      label={names.tool(tool.key)}
-                      tool={tool.key}
-                    />
-                  ))}
-                </span>
-              </TableCell>
-              <TableCell align="end">{formatNumber(topic.billed)}</TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <DataTable
+      columns={topicColumns({
+        topic: t`Topic`,
+        doneWith: t`Done with`,
+        requests: t({
+          message: "Requests",
+          context: "column: billed requests",
+        }),
+        tool: names.tool,
+      })}
+      density="compact"
+      label={t`What people ask`}
+      rowKey={(topic) => topic.key}
+      rows={rows}
+      unit={{ one: t`topic`, other: t`topics` }}
+    />
   );
 };
 

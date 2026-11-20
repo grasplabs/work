@@ -19,8 +19,8 @@ import type {
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
 import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   Navigate,
@@ -40,7 +40,9 @@ import type { BrainScene } from "../brain/dot-brain.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { PageError } from "../frame/page-states.tsx";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
+import { motion } from "../onboarding/motion.ts";
 import { useReveal } from "../onboarding/reveal-state.ts";
 import { Arriving, SetupFrame } from "../onboarding/setup-frame.tsx";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
@@ -85,59 +87,74 @@ import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
 /** The suites whose directory the company step offers, in order. */
 const directorySuites = directorySuiteSchema.options;
 
-/** How wide the column is by step, and how large the brain: roomier where there is more to read. */
-const layout: Record<SetupStep, { width: string; brain: number }> = {
-  welcome: { width: "max-w-120", brain: 400 },
-  ai: { width: "max-w-110", brain: 260 },
-  about: { width: "max-w-140", brain: 340 },
-  company: { width: "max-w-110", brain: 420 },
-  sources: { width: "max-w-150", brain: 260 },
-  documents: { width: "max-w-150", brain: 260 },
-  pulse: { width: "max-w-140", brain: 240 },
-  leads: { width: "max-w-140", brain: 260 },
-  team: { width: "max-w-130 lg:max-w-240", brain: 270 },
-  listening: { width: "max-w-140 lg:max-w-240", brain: 300 },
-  review: { width: "max-w-110", brain: 330 },
-  open: { width: "max-w-110", brain: 450 },
+/** How large the brain is by step, in pixels: larger where there is less to read. */
+const brainWanted: Record<SetupStep, number> = {
+  welcome: 400,
+  ai: 260,
+  about: 340,
+  company: 420,
+  sources: 260,
+  documents: 260,
+  pulse: 240,
+  leads: 260,
+  team: 270,
+  listening: 300,
+  review: 330,
+  open: 450,
 };
 
-/** The brain's sizes, by ten pixels: a class each, as a class is never built from a number. */
-const brainSizes: Record<number, string> = {
-  120: "size-30",
-  130: "size-32.5",
-  140: "size-35",
-  150: "size-37.5",
-  160: "size-40",
-  170: "size-42.5",
-  180: "size-45",
-  190: "size-47.5",
-  200: "size-50",
-  210: "size-52.5",
-  220: "size-55",
-  230: "size-57.5",
-  240: "size-60",
-  250: "size-62.5",
-  260: "size-65",
-  270: "size-67.5",
-  280: "size-70",
-  290: "size-72.5",
-  300: "size-75",
-  310: "size-77.5",
-  320: "size-80",
-  330: "size-82.5",
-  340: "size-85",
-  350: "size-87.5",
-  360: "size-90",
-  370: "size-92.5",
-  380: "size-95",
-  390: "size-97.5",
-  400: "size-100",
-  410: "size-102.5",
-  420: "size-105",
-  430: "size-107.5",
-  440: "size-110",
-  450: "size-112.5",
-};
+/** Where the team and listening steps' columns open up beside each other. */
+const WIDE = "@media (min-width: 64rem)";
+
+const styles = stylex.create({
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space6,
+    width: "100%",
+    textAlign: "center",
+    transitionProperty: "max-width",
+    transitionDuration: grasp.durationArrive,
+    transitionTimingFunction: grasp.ease,
+  },
+  brain: { display: "flex", flexDirection: "column", alignItems: "center" },
+  // The brain folds up as it makes way.
+  brainBox: { display: "block", overflow: "hidden" },
+  brainSize: (size: number) => ({
+    width: `${size}px`,
+    maxWidth: "100%",
+    transitionProperty: "width",
+    transitionDuration: grasp.durationArrive,
+    transitionTimingFunction: grasp.ease,
+  }),
+  step: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    width: "100%",
+    transitionProperty: "opacity, filter",
+    transitionDuration: grasp.durationArrive,
+    transitionTimingFunction: grasp.ease,
+  },
+  clearing: { opacity: 0, filter: "blur(4px)" },
+});
+
+/** How wide the column is by step: roomier where there is more to read. */
+const widths = stylex.create({
+  welcome: { maxWidth: "30rem" },
+  ai: { maxWidth: "27.5rem" },
+  about: { maxWidth: "35rem" },
+  company: { maxWidth: "27.5rem" },
+  sources: { maxWidth: "37.5rem" },
+  documents: { maxWidth: "37.5rem" },
+  pulse: { maxWidth: "35rem" },
+  leads: { maxWidth: "35rem" },
+  team: { maxWidth: { default: "32.5rem", [WIDE]: "60rem" } },
+  listening: { maxWidth: { default: "35rem", [WIDE]: "60rem" } },
+  review: { maxWidth: "27.5rem" },
+  open: { maxWidth: "27.5rem" },
+});
 
 /** What stands around the brain and a step, in pixels: the frame's top and bottom, its own margins, and the room between the brain and the step. */
 const around = 190;
@@ -334,7 +351,7 @@ const useBrainRoom = (step: SetupStep) => {
   const roomBeside = (height: number) => windowHeight - around - height;
   const room = Math.floor(roomBeside(bodyHeight) / brainStep) * brainStep;
   const measured = bodyHeight > 0;
-  const wanted = layout[step].brain;
+  const wanted = brainWanted[step];
   let brain = wanted;
   if (brainAway === step) {
     brain = 0;
@@ -347,7 +364,7 @@ const useBrainRoom = (step: SetupStep) => {
   return {
     body,
     cramped: phone && measured && roomBeside(bodyHeight) < brainLeast,
-    brainSize: brainSizes[Math.round(brain / 10) * 10],
+    brainSize: brain === 0 ? undefined : Math.round(brain / 10) * 10,
     onMadeWay: (freed: number) => {
       if (roomBeside(bodyHeight - freed) < brainLeast) {
         setBrainAway(step);
@@ -500,37 +517,32 @@ const Setup = () => {
       reached={reached}
       step={step}
     >
-      <div
-        className={cn(
-          "flex w-full flex-col items-center gap-6 text-center transition-all duration-500",
-          layout[step].width
-        )}
-      >
-        <div className="flex flex-col items-center gap-1.5">
+      <div {...stylex.props(styles.column, widths[step])}>
+        <div {...stylex.props(styles.brain)}>
           {/* The brain fades with the step it belongs to, or is there at once on one finished before; making way, it folds up as it fades. */}
           {brainSize === undefined ? null : (
             <Arriving
-              className="block overflow-hidden"
-              motion="animate-in fade-in fill-mode-backwards delay-300 duration-500"
+              layout={styles.brainBox}
+              motion={[motion.fade, motion.late]}
               settled={wasHeard(step)}
             >
-              <DotBrain
-                className={cn("transition-all duration-500", brainSize)}
-                label={t`The company brain: ${percent}% known. Dark dots are what I know, grey dots what I still need to learn.`}
-                scene={scene}
-                voice={voiceLevel}
-              />
+              <span
+                {...stylex.props(styles.brainBox, styles.brainSize(brainSize))}
+              >
+                <DotBrain
+                  label={t`The company brain: ${percent}% known. Dark dots are what I know, grey dots what I still need to learn.`}
+                  scene={scene}
+                  voice={voiceLevel}
+                />
+              </span>
             </Arriving>
           )}
         </div>
         {/* One step fades out, the next fades in, or is there at once if finished before: nothing slides. On the way in, the step fades and only the brain stays. */}
         <div
-          className={cn(
-            "flex w-full flex-col items-center transition-all duration-450",
-            { "opacity-0 blur-sm": clearing }
-          )}
           inert={revealing}
           ref={body}
+          {...stylex.props(styles.step, clearing && styles.clearing)}
         >
           {/* Each step drawn anew, fading in unless it is one finished before (setup-steps.tsx). */}
           <SetupStepBody

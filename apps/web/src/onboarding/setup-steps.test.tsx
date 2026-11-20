@@ -371,7 +371,7 @@ describe("what Stephen says of the company", () => {
 
 /** Whether anything on a step comes in as it arrives: a fade, a slide, a check drawn. */
 const comesIn = (markup: string): boolean =>
-  /animate-in|drawn-check/u.test(markup);
+  /animate-in|data-arrives|drawn-check/u.test(markup);
 
 describe("a step the admin comes back to", () => {
   it("shows its way on at once, rather than after Stephen says it again", () => {

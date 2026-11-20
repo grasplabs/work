@@ -1,18 +1,62 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Stat } from "@grasp-os/ui/components/stat";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
-import { CheckIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
+import { Button } from "../grasp/button/index.ts";
+import { Heading as Title } from "../grasp/heading/index.ts";
+import { Link } from "../grasp/link/index.ts";
+import { Stat } from "../grasp/stats/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { SpokenText } from "../voice/spoken-text.tsx";
 import { narrationOf } from "../voice/timing.ts";
 import { speak, useSay, useVoice } from "../voice/voice.ts";
 import type { Tone } from "../voice/voice.ts";
+import { comeIn, motion } from "./motion.ts";
 import { readingSeconds } from "./setup.ts";
+
+const styles = stylex.create({
+  onward: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space6,
+    width: "100%",
+  },
+  heading: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    outline: "none",
+  },
+  // Two lines kept in every language, so nothing below moves as the answer takes the sentence's place.
+  sentence: {
+    display: "grid",
+    minHeight: "2.5rem",
+    margin: 0,
+    color: grasp.muted,
+    textWrap: "balance",
+  },
+  sentenceAway: { minHeight: 0, overflow: "hidden" },
+  gone: { height: 0, opacity: 0 },
+  layer: { gridColumn: "1", gridRow: "1" },
+  answer: { alignSelf: "center" },
+  hidden: { display: "none" },
+  faded: { opacity: 0 },
+  primary: { width: "100%", maxWidth: "24rem" },
+  asides: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    columnGap: grasp.space5,
+    rowGap: grasp.space2,
+    width: "100%",
+  },
+  callout: { margin: 0 },
+  reduced: { transitionDuration: { default: null, [media.reduced]: "0s" } },
+});
 
 // The parts every step of the client onboarding is made of (prototype
 // `components/onboarding/onboarding-steps.tsx`): one title, one sentence,
@@ -92,20 +136,23 @@ export const Opening = createContext<{ readonly current: boolean }>({
 });
 
 /**
- * The classes that bring something in (`motion`: a fade, a slide), or
- * none for what is there as a step finished before opens: it shows as it
- * was left. `key` is what it shows; once that changes on this visit, it
- * comes in as ever.
+ * Whether something comes in (a fade, a rise), or is there as a step
+ * finished before opens: it shows as it was left. `key` is what it shows;
+ * once that changes on this visit, it comes in as ever.
  */
-export const useEntrance = (key: string, motion: string): string => {
+export const useArrives = (key: string): boolean => {
   const opening = useContext(Opening);
   // What it showed as the step opened, while that has not changed.
   const [asLeft, setAsLeft] = useState(() => (opening.current ? key : null));
   if (asLeft !== null && asLeft !== key) {
     setAsLeft(null);
   }
-  return asLeft === null ? motion : "";
+  return asLeft === null;
 };
+
+/** The same, as the old kit's classes: until every step is on the library. */
+export const useEntrance = (key: string, classes: string): string =>
+  useArrives(key) ? classes : "";
 
 /**
  * Whether, on a phone, the step does not fit beside even the smallest
@@ -212,11 +259,13 @@ export const Onward = ({
   const shown = explained && ready;
   return (
     <div
-      className={cn(
-        "flex w-full flex-col items-center gap-6 transition-all duration-1000 ease-out",
-        !shown && "translate-y-1.5 opacity-0"
-      )}
       inert={!shown}
+      {...stylex.props(
+        styles.onward,
+        motion.change,
+        styles.reduced,
+        !shown && motion.waiting
+      )}
     >
       {children}
     </div>
@@ -312,7 +361,7 @@ export const Heading = ({
   answer?: Answer;
   voice?: StepVoice;
 }) => {
-  const heading = useRef<HTMLHeadingElement>(null);
+  const heading = useRef<HTMLDivElement>(null);
   const paragraph = useRef<HTMLParagraphElement>(null);
   const { line, from, alone } = useHeadingSaid({
     title,
@@ -326,44 +375,42 @@ export const Heading = ({
   }, []);
   useExplainedAfter(line);
   const away = useMadeWay(line, answer === undefined, paragraph);
-  const answerEntrance = useEntrance(
-    answer?.text ?? "",
-    "animate-in fade-in slide-in-from-bottom-1 duration-500"
-  );
+  const answerArrives = useArrives(answer?.text ?? "");
   return (
-    <div className="flex flex-col gap-2">
-      {/* A title that takes two lines breaks them evenly, never leaving one word alone on the second. */}
-      <PageHeaderTitle ref={heading} tabIndex={-1}>
-        {title}
-      </PageHeaderTitle>
+    <div ref={heading} tabIndex={-1} {...stylex.props(styles.heading)}>
+      <Title level={1}>{title}</Title>
       {sentence === undefined ? null : (
         // Two lines kept in every language, and the sentence's own room once answered, so nothing below moves; once it made way, none.
         <p
           aria-live="polite"
-          className={cn(
-            "text-muted-foreground grid text-balance transition-all duration-500",
-            away ? "overflow-hidden" : "min-h-10",
-            away && answer === undefined && "h-0 opacity-0"
-          )}
           ref={paragraph}
+          {...stylex.props(
+            styles.sentence,
+            motion.change,
+            away && styles.sentenceAway,
+            away && answer === undefined && styles.gone
+          )}
         >
           <span
             aria-hidden={answer === undefined ? undefined : true}
-            className={cn(
-              "col-start-1 row-start-1 transition-opacity",
-              answer === undefined ? "duration-400" : "opacity-0 duration-200",
-              away && answer !== undefined && "hidden"
+            {...stylex.props(
+              styles.layer,
+              motion.change,
+              answer !== undefined && styles.faded,
+              away && answer !== undefined && styles.hidden
             )}
           >
             <SpokenText from={from} line={line} text={sentence} />
           </span>
           {answer === undefined ? null : (
             <span
-              className={cn(
-                "col-start-1 row-start-1 self-center",
-                answerEntrance
-              )}
               key={answer.text}
+              {...comeIn(
+                answerArrives,
+                motion.rise,
+                styles.layer,
+                styles.answer
+              )}
             >
               {/* Said on its own, or as the end of the line he arrived with. */}
               <SpokenText
@@ -392,7 +439,7 @@ export const Primary = ({
   ready = true,
   onClick,
 }: {
-  children: ReactNode;
+  children: string;
   busy?: boolean;
   done?: boolean;
   disabled?: boolean;
@@ -400,46 +447,46 @@ export const Primary = ({
   ready?: boolean;
   onClick: () => void;
 }) => {
-  let icon: ReactNode = null;
-  if (busy) {
-    icon = <Spinner data-icon="inline-start" />;
-  } else if (done) {
-    icon = <CheckIcon data-icon="inline-start" />;
-  }
+  // A plain button until it works or is done: only then does it show a spinner or a tick.
+  const life =
+    busy || done
+      ? {
+          status: busy ? ("working" as const) : ("done" as const),
+          doneLabel: children,
+          failedLabel: children,
+        }
+      : {};
   return (
     <Onward ready={ready}>
       <Button
-        className="w-full max-w-sm"
-        disabled={disabled || busy}
+        disabled={disabled}
+        layout={styles.primary}
         onClick={onClick}
-        size="xl"
-        variant="highlight"
+        size="lg"
+        variant="ink"
+        {...life}
       >
-        {icon}
         {children}
       </Button>
     </Onward>
   );
 };
 
-export const laterClass =
-  "text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-3";
-
-/** The small way past a step that can wait: a muted link, never a second button. */
+/** The small way past a step that can wait: a quiet button, never a second main one. */
 export const LaterLink = ({
   children,
   onClick,
 }: {
-  children: ReactNode;
+  children: string;
   onClick: () => void;
 }) => (
-  <button className={laterClass} onClick={onClick} type="button">
+  <Button onClick={onClick} size="sm" variant="ghost">
     {children}
-  </button>
+  </Button>
 );
 
 /** That way past a step, on a line of its own: it waits with the main button. */
-export const Later = (props: { children: ReactNode; onClick: () => void }) => (
+export const Later = (props: { children: string; onClick: () => void }) => (
   <Onward>
     <LaterLink {...props} />
   </Onward>
@@ -477,15 +524,15 @@ export const SupportLink = ({
 }) => {
   const { t } = useLingui();
   return (
-    <a
-      aria-label={t`${label}, on Grasp’s support site, in a new tab`}
-      className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 rounded-sm underline underline-offset-4 outline-none focus-visible:ring-3"
-      href={`${supportUrl}/${connectionPages[page]}`}
-      rel="noopener noreferrer"
-      target="_blank"
-    >
-      {label}
-    </a>
+    <Text element="span" size="sm" tone="muted">
+      <Link
+        aria-label={t`${label}, on Grasp’s support site, in a new tab`}
+        external
+        href={`${supportUrl}/${connectionPages[page]}`}
+      >
+        {label}
+      </Link>
+    </Text>
   );
 };
 
@@ -506,9 +553,7 @@ export const MoreAbout = (props: {
  */
 export const Asides = ({ children }: { children: ReactNode }) => (
   <Onward>
-    <div className="flex w-full flex-wrap items-center justify-center gap-x-5 gap-y-2">
-      {children}
-    </div>
+    <div {...stylex.props(styles.asides)}>{children}</div>
   </Onward>
 );
 
@@ -525,9 +570,9 @@ export const Callout = ({
   const [arrived] = useState(text);
   // On a step seen before, only a line that changed on this visit is said.
   useSay(text, { after: true, tone, when: !seen || text !== arrived });
-  const entrance = useEntrance(text, "animate-in fade-in duration-500");
+  const arrives = useArrives(text);
   return (
-    <p className={entrance}>
+    <p {...comeIn(arrives, motion.fade, styles.callout)}>
       <SpokenText from={0} line={text} text={text} />
     </p>
   );
@@ -572,8 +617,5 @@ export const useSayFollowing = (
 
 /** A number with what it counts. */
 export const Figure = ({ value, label }: { value: string; label: string }) => (
-  <div className="flex flex-col rounded-xl border p-4">
-    <Stat>{value}</Stat>
-    <span className="text-muted-foreground">{label}</span>
-  </div>
+  <Stat title={label} value={value} />
 );

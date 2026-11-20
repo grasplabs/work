@@ -123,13 +123,10 @@ const styles = stylex.create({
     minHeight: 0,
     overflowY: "auto",
   },
+  // As wide as the card, as every page is: the shell gives the side room.
   column: {
     width: "100%",
-    maxWidth: "80rem",
-    marginInline: "auto",
-    paddingInline: grasp.space6,
     paddingBlockStart: grasp.space6,
-    paddingBlockEnd: grasp.space8,
   },
   bar: { marginBlockStart: "auto" },
   waiting: {

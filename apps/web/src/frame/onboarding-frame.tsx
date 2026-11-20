@@ -1,8 +1,8 @@
-// The kit's mark, sized by its own class: Grasp UI has no Grasp mark yet.
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import { iconVars } from "../grasp/icons/icon.stylex.ts";
+import { BrandGrasp, Icon } from "../grasp/icons/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { LanguageButton } from "../language-picker.tsx";
 
@@ -54,6 +54,7 @@ const styles = stylex.create({
     paddingInline: { default: grasp.space10, [media.belowPhone]: grasp.space4 },
     backgroundColor: grasp.paper,
   },
+  mark: { display: "flex", [iconVars.size]: grasp.iconMd },
 });
 
 /**
@@ -76,7 +77,9 @@ export const OnboardingFrame = ({
       </div>
     </main>
     <footer {...stylex.props(styles.foot)}>
-      <GraspMark className="size-5" />
+      <span {...stylex.props(styles.mark)}>
+        <Icon icon={BrandGrasp} label="Grasp" />
+      </span>
       <LanguageButton />
     </footer>
   </div>

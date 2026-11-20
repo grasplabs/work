@@ -203,10 +203,21 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** A label's own words, without the mark a required field shows. */
+const wordsOf = (label: HTMLLabelElement): string =>
+  [...label.childNodes]
+    .filter(
+      (each) =>
+        !(each instanceof HTMLElement && each.dataset.slot === "required-mark")
+    )
+    .map((each) => each.textContent ?? "")
+    .join("")
+    .trim();
+
 /** The control labelled `label`, by its `<label>`. */
 const labelled = (label: string): Element => {
   const found = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent?.trim() === label
+    (each) => wordsOf(each) === label
   );
   const control =
     found === undefined
@@ -235,34 +246,53 @@ const textField = (label: string): HTMLInputElement => {
   return found;
 };
 
-const choice = (label: string): HTMLSelectElement => {
-  const found = labelled(label);
-  if (!(found instanceof HTMLSelectElement)) {
-    throw new TypeError(`${label} is no choice`);
-  }
-  return found;
+/** The list the choice labelled `label` opens, as its options. */
+const opened = async (label: string): Promise<HTMLElement[]> => {
+  await act(async () => {
+    labelledControl(label).click();
+    await Promise.resolve();
+  });
+  await settled();
+  return [...document.querySelectorAll<HTMLElement>('[role="option"]')];
 };
 
-/** What the choice labelled `label` offers, by name. */
-const options = (label: string): string[] =>
-  [...choice(label).options].map((each) => each.textContent ?? "");
+/** What the choice labelled `label` offers, by name; the list closed again. */
+const options = async (label: string): Promise<string[]> => {
+  const list = await opened(label);
+  const names = list.map((each) => (each.textContent ?? "").trim());
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+    );
+    await Promise.resolve();
+  });
+  await settled();
+  return names;
+};
 
-/** Sets `value` on `field`, as React hears a person type or choose it. */
-const enter = async (
-  field: HTMLInputElement | HTMLSelectElement,
-  value: string
-): Promise<void> => {
+/** Chooses the option named `name` of the choice labelled `label`. */
+const choose = async (label: string, name: string): Promise<void> => {
+  const list = await opened(label);
+  const option = list.find((each) => (each.textContent ?? "").trim() === name);
+  if (option === undefined) {
+    throw new TypeError(`${label} offers no ${name}`);
+  }
+  await act(async () => {
+    option.click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+/** Sets `value` on `field`, as React hears a person type it. */
+const enter = async (field: HTMLInputElement, value: string): Promise<void> => {
   await act(async () => {
     const prototype = Reflect.getPrototypeOf(field) ?? {};
     Reflect.getOwnPropertyDescriptor(prototype, "value")?.set?.call(
       field,
       value
     );
-    field.dispatchEvent(
-      new Event(field instanceof HTMLSelectElement ? "change" : "input", {
-        bubbles: true,
-      })
-    );
+    field.dispatchEvent(new Event("input", { bubbles: true }));
     await Promise.resolve();
   });
   await settled();
@@ -334,7 +364,7 @@ describe("the onboarding's AI step", () => {
       offered: text().includes("Use Grasp’s AI"),
       // Nothing to fill in: no key is asked for.
       keyAsked: [...document.querySelectorAll("label")].some(
-        (each) => each.textContent?.trim() === "Key"
+        (each) => wordsOf(each) === "Key"
       ),
     }).toStrictEqual({ offered: true, keyAsked: false });
     await press(button("Continue"));
@@ -395,17 +425,22 @@ describe("the onboarding's AI step", () => {
     const { api, asked } = fakeAiProviders((model) => ({ ok: true, model }));
     await shown(api);
 
-    expect(options("Model")).toStrictEqual([
+    await expect(options("Model")).resolves.toStrictEqual([
       "Claude Sonnet 5.5",
       "Claude Opus 5.5",
       "Claude Haiku 5.5",
     ]);
     await press(button("Use a different model"));
-    expect(options("Model")).toStrictEqual(
+    await expect(options("Model")).resolves.toStrictEqual(
       catalogs.anthropic.map(({ name }) => name)
     );
 
-    await enter(choice("Model"), "anthropic/claude-sonnet-4-6");
+    await choose(
+      "Model",
+      catalogs.anthropic.find(
+        ({ model }) => model === "anthropic/claude-sonnet-4-6"
+      )?.name ?? ""
+    );
     await enter(textField("Key"), pastedKey);
     await press(button("Continue"));
     expect(asked.at(-1)).toStrictEqual([
@@ -418,7 +453,7 @@ describe("the onboarding's AI step", () => {
     const { api, asked } = fakeAiProviders((model) => ({ ok: true, model }));
     await shown(api);
 
-    await enter(choice("Provider"), "openai-compatible");
+    await choose("Provider", aiProviders["openai-compatible"].label);
     await enter(textField("Key"), pastedKey);
     expect(button("Continue").disabled).toBeTruthy();
     await enter(textField("Base URL"), "https://models.example.com/v1");

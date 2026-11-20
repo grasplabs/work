@@ -1,28 +1,13 @@
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 
 import { formatDateTime } from "../format.ts";
-import { Button } from "../grasp/button/index.ts";
+import { DataTable } from "../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemTitle,
-} from "../grasp/item/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../grasp/table/index.ts";
+import { Link as TextLink } from "../grasp/link/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Names } from "./activity-bar.tsx";
@@ -36,51 +21,46 @@ import { WaitingForAiProvider } from "./runs.tsx";
 // run itself under its own rule for who sees it; its steps stay for the
 // workflow's builders, who read its definitions (Traces).
 
-/** The width of the runs' card under which each run is a row of its own, its facts under its time. */
-const narrowRuns = "@container runs (width < 40rem)";
-
 const styles = stylex.create({
-  // The runs measure their own width, whatever the page beside them.
-  runs: { containerName: "runs", containerType: "inline-size" },
-  // Wide: the table; narrow: the rows. One of them shows.
-  wideRuns: { display: { default: "block", [narrowRuns]: "none" } },
-  narrowRuns: { display: { default: "none", [narrowRuns]: "block" } },
-  // Its status over what it waits for.
+  // Its status over what it waits for, at the row's end.
   status: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "flex-start",
+    alignItems: "flex-end",
     gap: grasp.space1,
   },
 });
 
-/** When a run ended, in words. */
-const EndedAt = ({ at }: { at: string }) => {
-  const { t } = useLingui();
-  const ended = formatDateTime(at);
-  return t`Ended ${ended}`;
-};
-
-/** The button on a run's row that opens it beside the list. */
-export const OpenRun = ({
-  started,
-  onOpen,
+/**
+ * When a run started, as a link to it opened beside the list: a run open
+ * there has an address of its own (`?run=`), kept with the project it came
+ * from.
+ */
+const RunLink = ({
+  workflow,
+  run,
 }: {
-  started: string;
-  onOpen: () => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Button
-      aria-label={t`Open the run started ${started}`}
-      onClick={onOpen}
-      size="xs"
-      variant="ghost"
-    >
-      {t({ message: "Open", context: "open one run of a workflow" })}
-    </Button>
-  );
-};
+  workflow: string;
+  run: WorkflowResourceRun;
+}) => (
+  <TextLink
+    render={
+      <Link
+        params={{ workflow }}
+        replace
+        search={(held) => ({
+          project: held.project,
+          view: "runs",
+          run: run.id,
+        })}
+        to="/workflows/$workflow"
+      />
+    }
+    variant="standalone"
+  >
+    {formatDateTime(run.createdAt)}
+  </TextLink>
+);
 
 /** No runs yet, where a list of them would stand. */
 export const NoRuns = () => {
@@ -91,6 +71,100 @@ export const NoRuns = () => {
         <EmptyDescription>{t`No runs yet.`}</EmptyDescription>
       </EmptyHeader>
     </Empty>
+  );
+};
+
+/** How many runs a page of a workflow's runs holds. */
+const runsPageSize = 20;
+
+/** Its status as a Badge, and what it waits for while its AI provider fails. */
+const RunStatus = ({ run }: { run: WorkflowResourceRun }) => (
+  <span {...stylex.props(styles.status)}>
+    <RunStatusBadge status={run.status} />
+    {run.aiProvider === undefined ? null : (
+      <Text element="span" size="xs" tone="muted">
+        <WaitingForAiProvider wait={run.aiProvider} />
+      </Text>
+    )}
+  </span>
+);
+
+/** A workflow's runs' columns, under their headers' words. */
+const runColumns = (words: {
+  workflow: string;
+  startedBy: (principal: WorkflowResourceRun["principal"]) => string;
+  started: string;
+  version: string;
+  by: string;
+  ended: string;
+  status: string;
+}): DataTableColumn<WorkflowResourceRun>[] => [
+  {
+    key: "started",
+    header: words.started,
+    value: (run) => run.createdAt,
+    cell: (run) => <RunLink run={run} workflow={words.workflow} />,
+  },
+  { key: "version", header: words.version, value: (run) => run.version },
+  {
+    key: "by",
+    header: words.by,
+    value: (run) => words.startedBy(run.principal),
+  },
+  {
+    key: "ended",
+    header: words.ended,
+    value: (run) => run.endedAt ?? "",
+    cell: (run) => (run.endedAt === null ? "" : formatDateTime(run.endedAt)),
+  },
+  {
+    key: "status",
+    header: words.status,
+    value: (run) => run.status,
+    cell: (run) => <RunStatus run={run} />,
+    align: "end",
+  },
+];
+
+/**
+ * A workflow's runs, newest first, on the library's Data table as the
+ * tables pattern has it: when it started names the row; its version, who
+ * started it and when it ended; its status at the row's end. When it
+ * started is the link that opens it beside the list.
+ */
+export const WorkflowRunsTable = ({
+  workflow,
+  runs,
+  names,
+}: {
+  workflow: string;
+  runs: WorkflowResourceRun[];
+  names: Names;
+}) => {
+  const { t } = useLingui();
+  const startedBy = useStartedBy(names);
+  if (runs.length === 0) {
+    return <NoRuns />;
+  }
+  const columns = runColumns({
+    workflow,
+    startedBy,
+    started: t`Started`,
+    version: t`Version`,
+    by: t`Started by`,
+    ended: t`Ended`,
+    status: t`Status`,
+  });
+  return (
+    <DataTable
+      columns={columns}
+      density="compact"
+      label={t`Runs`}
+      pageSize={runsPageSize}
+      rowKey={(run) => run.id}
+      rows={runs}
+      unit={{ one: t`run`, other: t`runs` }}
+    />
   );
 };
 
@@ -112,126 +186,19 @@ export const ResourceRuns = ({
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
 }) => {
-  const { t } = useLingui();
-  const startedBy = useStartedBy(names);
-  const [chosen, setChosen] = useState<WorkflowResourceRun | null>(null);
-  // The run the address names (Run's "Open the run"), until one is chosen here.
-  const opened = chosen ?? runs.find((run) => run.id === openRun) ?? null;
-  if (runs.length === 0) {
-    return <NoRuns />;
-  }
+  // The run the address names: one of the table's, or Run's "Open the run".
+  const opened = runs.find((run) => run.id === openRun) ?? null;
   return (
     <RunBeside
       admin={admin}
       names={names}
       onClose={() => {
-        setChosen(null);
         onCloseRun?.();
       }}
       opened={opened}
       workflow={workflow}
     >
-      <SectionCard aria-label={t`Runs`} density="compact" flush>
-        <div {...stylex.props(styles.runs)}>
-          <div {...stylex.props(styles.wideRuns)}>
-            <Table aria-label={t`Runs`}>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t`Started`}</TableHead>
-                  <TableHead>{t`Status`}</TableHead>
-                  <TableHead>{t`Version`}</TableHead>
-                  <TableHead>{t`Started by`}</TableHead>
-                  <TableHead>{t`Ended`}</TableHead>
-                  <TableHead
-                    aria-label={t({
-                      message: "Open",
-                      context: "column: a button that opens a run",
-                    })}
-                  />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {runs.map((run) => {
-                  const started = formatDateTime(run.createdAt);
-                  return (
-                    <TableRow
-                      chosen={opened !== null && opened.id === run.id}
-                      key={run.id}
-                    >
-                      <TableCell lead>{started}</TableCell>
-                      <TableCell wrap>
-                        <span {...stylex.props(styles.status)}>
-                          <RunStatusBadge status={run.status} />
-                          {run.aiProvider === undefined ? null : (
-                            <Text element="span" size="xs" tone="muted">
-                              <WaitingForAiProvider wait={run.aiProvider} />
-                            </Text>
-                          )}
-                        </span>
-                      </TableCell>
-                      <TableCell>{run.version}</TableCell>
-                      <TableCell>{startedBy(run.principal)}</TableCell>
-                      <TableCell>
-                        {run.endedAt === null
-                          ? ""
-                          : formatDateTime(run.endedAt)}
-                      </TableCell>
-                      <TableCell align="end">
-                        <OpenRun
-                          onOpen={() => {
-                            setChosen(run);
-                          }}
-                          started={started}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-          <div {...stylex.props(styles.narrowRuns)}>
-            <ItemGroup aria-label={t`Runs`} separated>
-              {runs.map((run) => {
-                const started = formatDateTime(run.createdAt);
-                const by = startedBy(run.principal);
-                const { version } = run;
-                return (
-                  <Item key={run.id} size="sm">
-                    <ItemContent>
-                      <ItemTitle>{started}</ItemTitle>
-                      <ItemDescription>
-                        {t`Version ${version} · ${by}`}
-                      </ItemDescription>
-                      {run.endedAt === null ? null : (
-                        <ItemDescription>
-                          <EndedAt at={run.endedAt} />
-                        </ItemDescription>
-                      )}
-                      <span {...stylex.props(styles.status)}>
-                        <RunStatusBadge status={run.status} />
-                        {run.aiProvider === undefined ? null : (
-                          <Text element="span" size="xs" tone="muted">
-                            <WaitingForAiProvider wait={run.aiProvider} />
-                          </Text>
-                        )}
-                      </span>
-                    </ItemContent>
-                    <ItemActions>
-                      <OpenRun
-                        onOpen={() => {
-                          setChosen(run);
-                        }}
-                        started={started}
-                      />
-                    </ItemActions>
-                  </Item>
-                );
-              })}
-            </ItemGroup>
-          </div>
-        </div>
-      </SectionCard>
+      <WorkflowRunsTable names={names} runs={runs} workflow={workflow} />
     </RunBeside>
   );
 };
