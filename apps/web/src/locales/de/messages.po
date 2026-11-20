@@ -2804,10 +2804,6 @@ msgstr "Ein Admin verbindet dies für alle."
 msgid "An admin decides. It holds in this chat only."
 msgstr "Ein Admin entscheidet. Es gilt nur in diesem Chat."
 
-#: src/settings/directory-placement.tsx
-msgid "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is."
-msgstr "Ein Admin hat sie von Hand einem Team hinzugefügt oder aus einem entfernt, und der tägliche Abgleich des Verzeichnisses lässt das so."
-
 #: src/workflows/workflow-triggers.tsx
 msgid "An admin refused or took back its reading of these events: it hears nothing."
 msgstr "Ein Admin hat das Lesen dieser Ereignisse abgelehnt oder wieder entzogen: Er hört nichts."
@@ -2819,6 +2815,10 @@ msgstr "Ein Admin hat das Starten abgelehnt oder wieder entzogen: Er startet nic
 #: src/drafts/publish-errors.ts
 msgid "An admin revoked this version, so it can't be shared again."
 msgstr "Ein Admin hat diese Version widerrufen, daher kann sie nicht erneut geteilt werden."
+
+#: src/settings/directory-placement.tsx
+msgid "An admin set these by hand, and the directory leaves them as they are."
+msgstr "Ein Admin hat sie von Hand festgelegt, und das Verzeichnis lässt sie so."
 
 #: src/chat/agent-draft-card.tsx
 msgid "An agent to make: {name}"
@@ -4724,10 +4724,6 @@ msgstr "Eine auswählen"
 #: src/agents/new-agent.tsx
 msgid "Choose or write an answer first"
 msgstr "Wählen oder schreiben Sie zuerst eine Antwort"
-
-#: src/settings/ai-providers.tsx
-msgid "Choose the AI that Grasp's chat, agents and workflows run on."
-msgstr "Wählen Sie die KI, mit der Grasps Chat, Agenten und Workflows arbeiten."
 
 #: src/interview/destination.tsx
 msgid "Choose where each line goes. A line you move counts again once you save."
@@ -12299,6 +12295,10 @@ msgstr "Noch nichts vorgeschlagen"
 msgid "Nothing said yet."
 msgstr "Noch nichts gesagt."
 
+#: src/settings/directory-placement.tsx
+msgid "Nothing shared with a team reaches them yet. Add each to one, and the directory keeps your choice."
+msgstr "Nichts, was mit einem Team geteilt wird, erreicht sie bisher. Fügen Sie jede Person einem Team hinzu, und das Verzeichnis behält Ihre Wahl bei."
+
 #: src/drafts/draft-history.tsx
 msgid "Nothing shared yet: the first time you share it shows here."
 msgstr "Noch nichts geteilt: Sobald Sie es zum ersten Mal teilen, erscheint es hier."
@@ -12744,10 +12744,6 @@ msgstr "Nur Sie"
 msgctxt "a source nobody else may read"
 msgid "Only you"
 msgstr "Nur Sie"
-
-#: src/routes/_shell.settings.instructions.tsx
-msgid "Only you and your own chats read it, never a chat others share."
-msgstr "Nur Sie und Ihre eigenen Chats lesen sie, nie ein Chat, den andere teilen."
 
 #: src/brain/sources-page.tsx
 msgid "Only you can read this upload."
@@ -17647,10 +17643,6 @@ msgstr "Das Unternehmen hat noch keine eigenen Skills."
 msgid "The company's documents and knowledge."
 msgstr "Die Dokumente und das Wissen des Unternehmens."
 
-#: src/routes/_shell.settings.instructions.tsx
-msgid "The company’s rules for every agent."
-msgstr "Die Regeln des Unternehmens für jeden Agenten."
-
 #: src/brain/skills-page.tsx
 msgid "The company's skills"
 msgstr "Skills des Unternehmens"
@@ -17744,10 +17736,6 @@ msgstr "Das Verzeichnis nennt die Abteilung „{department}“, mit der kein Tea
 #: src/settings/directory-reads.tsx
 msgid "The directory holds more people than Grasp can read at once. Ask Grasp’s support to help."
 msgstr "Das Verzeichnis enthält mehr Personen, als Grasp auf einmal lesen kann. Bitten Sie den Support von Grasp um Hilfe."
-
-#: src/settings/directory-placement.tsx
-msgid "The directory put them in a team their department there no longer fills. Its daily read moves someone only into the team their department fills, so they stay until you take them off or add them to the right team."
-msgstr "Das Verzeichnis hat sie einem Team zugeordnet, zu dem ihre Abteilung dort nicht mehr gehört. Der tägliche Abgleich verschiebt jemanden nur in das Team seiner Abteilung, also bleiben sie, bis Sie sie entfernen oder dem richtigen Team hinzufügen."
 
 #: src/settings/directory-reads.tsx
 msgid "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
@@ -18152,6 +18140,10 @@ msgstr "Der Workflow-Lauf, der dies gefragt hat, ist beendet, daher ist diese En
 msgid "The workflows couldn't be read."
 msgstr "Die Workflows konnten nicht gelesen werden."
 
+#: src/settings/directory-placement.tsx
+msgid "Their department in the directory no longer fills this team. They stay until you move them."
+msgstr "Ihre Abteilung im Verzeichnis gehört nicht mehr zu diesem Team. Sie bleiben, bis Sie sie verschieben."
+
 #: src/activity/audit-event.tsx
 msgid "Their events"
 msgstr "Ihre Ereignisse"
@@ -18241,10 +18233,6 @@ msgstr "Die Person wird überall abgemeldet, ihre persönlichen Verbindungen wer
 #: src/settings/staff-access.tsx
 msgid "They can do everything their role allows in the whole workspace, not only the onboarding."
 msgstr "Sie können im ganzen Arbeitsbereich alles tun, was ihre Rolle erlaubt, nicht nur im Onboarding."
-
-#: src/settings/directory-placement.tsx
-msgid "They can use Grasp, but nothing shared with a team reaches them. Add each to a team: the directory’s daily read leaves a team you chose as it is."
-msgstr "Sie können Grasp nutzen, aber nichts, was mit einem Team geteilt wird, erreicht sie. Fügen Sie jede Person einem Team hinzu: Der tägliche Abgleich des Verzeichnisses lässt ein von Ihnen gewähltes Team unverändert."
 
 #: src/drafts/draft-history.tsx
 msgid "They go, for everyone who builds it. Its history in Settings keeps them, so you can bring them back."
@@ -19837,10 +19825,6 @@ msgid "What does the board want to reach?"
 msgstr "Was will die Geschäftsführung erreichen?"
 
 #: src/routes/_shell.settings.instructions.tsx
-msgid "What every agent should know about the company."
-msgstr "Was jeder Agent über das Unternehmen wissen sollte."
-
-#: src/routes/_shell.settings.instructions.tsx
 msgid "What every chat in the company starts with. Only admins change them."
 msgstr "Womit jeder Chat im Unternehmen beginnt. Nur Admins ändern sie."
 
@@ -20257,8 +20241,8 @@ msgid "What you shared"
 msgstr "Was Sie geteilt haben"
 
 #: src/routes/_shell.settings.instructions.tsx
-msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
-msgstr "Womit Ihre Chats mit Grasp beginnen, und nur Ihre: wie Sie gern arbeiten, wofür Sie verantwortlich sind."
+msgid "What your own chats with Grasp start with. Only you read them."
+msgstr "Womit deine eigenen Chats mit Grasp beginnen. Nur du liest sie."
 
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"

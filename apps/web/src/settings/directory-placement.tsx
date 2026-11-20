@@ -231,7 +231,7 @@ const Unplaced = ({
           {plural(count, { one: "# to place", other: "# to place" })}
         </Badge>
       }
-      description={t`They can use Grasp, but nothing shared with a team reaches them. Add each to a team: the directory’s daily read leaves a team you chose as it is.`}
+      description={t`Nothing shared with a team reaches them yet. Add each to one, and the directory keeps your choice.`}
       label={t`Not in a team`}
       title={t`Not in a team`}
     >
@@ -311,7 +311,7 @@ const Movers = ({
           {plural(count, { one: "# to check", other: "# to check" })}
         </Badge>
       }
-      description={t`The directory put them in a team their department there no longer fills. Its daily read moves someone only into the team their department fills, so they stay until you take them off or add them to the right team.`}
+      description={t`Their department in the directory no longer fills this team. They stay until you move them.`}
       label={t`Team doesn’t match the directory`}
       title={t`Team doesn’t match the directory`}
     >
@@ -425,7 +425,7 @@ const Pins = ({
   }
   return (
     <PlacementSection
-      description={t`An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is.`}
+      description={t`An admin set these by hand, and the directory leaves them as they are.`}
       label={t`Placed by hand`}
       title={t`Placed by hand`}
     >

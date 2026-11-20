@@ -1116,7 +1116,7 @@ const FirstProvider = ({
   );
   return (
     <ConnectService
-      lead={t`Choose the AI that Grasp's chat, agents and workflows run on.`}
+      grouped
       onConnect={async ({ service, key, address }) => {
         // The block names an endpoint of your own by its own id, none of the providers'.
         const provider =
