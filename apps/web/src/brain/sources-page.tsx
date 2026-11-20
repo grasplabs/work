@@ -87,6 +87,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../grasp/select/index.ts";
+import { Skeleton } from "../grasp/skeleton/index.ts";
 import {
   SourceItem,
   SourceItemParts,
@@ -302,8 +303,6 @@ const styles = stylex.create({
   inspector: {
     flexShrink: 0,
     width: `min(${grasp.inspectorWidth}, 100%)`,
-    position: "sticky",
-    insetBlockStart: grasp.space4,
   },
   // The list's sections, one per kind.
   groups: { display: "flex", flexDirection: "column", gap: grasp.space6 },
@@ -1264,15 +1263,15 @@ const aboutOf = (versions: Read<BrainSourceVersionPage>): ReactNode => {
   return undefined;
 };
 
-/** The version's text for its section, or why it isn't there: nothing while it is read. */
+/** The version's text for its section, a placeholder while it is read, or why it isn't there. */
 const saidOf = (
   text: Read<BrainSourceText | null>
-): Pick<InspectorSection, "text" | "content"> | undefined => {
+): Pick<InspectorSection, "text" | "content"> => {
   if (text.state === "refused") {
     return { content: <ErrorText>{text.message}</ErrorText> };
   }
   if (text.state === "loading") {
-    return undefined;
+    return { content: <Skeleton text="md" /> };
   }
   return text.data === null
     ? { content: <Trans>You can&apos;t read this version.</Trans> }
@@ -1436,12 +1435,16 @@ const SourcePanel = ({
       : { state: "loading" };
   const read =
     text.state === "ready" && text.data !== null ? text.data : undefined;
+  const version = read?.version;
   const connectionId = connectionOfSource(source);
   const said = saidOf(text);
   const sections: InspectorSection[] = [];
-  if (shown !== undefined && said !== undefined) {
-    const version = shown;
-    sections.push({ id: "text", label: t`Version ${version}`, ...said });
+  if (shown !== undefined) {
+    sections.push({
+      id: "text",
+      label: t({ message: "Text", context: "a version of a source's text" }),
+      ...said,
+    });
   }
   if (versions.state === "ready" && versions.data.versions.length > 0) {
     sections.push({
@@ -1466,7 +1469,10 @@ const SourcePanel = ({
       ),
     });
   }
-  sections.push(...uploadSection);
+  // A source whose versions core refused shows only why.
+  if (versions.state !== "refused") {
+    sections.push(...uploadSection);
+  }
   const title =
     read === undefined
       ? producerLabel(source.producer)
@@ -1489,15 +1495,20 @@ const SourcePanel = ({
         (shown !== undefined && text.state === "loading")
       }
       meta={
-        read === undefined || connectionId === undefined
+        read === undefined
           ? undefined
           : [
-              <ReadFrom
-                connectionId={connectionId}
-                key="read"
-                names={connectedNames}
-                read={read}
-              />,
+              t`Version ${version}`,
+              ...(connectionId === undefined
+                ? []
+                : [
+                    <ReadFrom
+                      connectionId={connectionId}
+                      key="read"
+                      names={connectedNames}
+                      read={read}
+                    />,
+                  ]),
             ]
       }
       onClose={onClose}
@@ -1888,8 +1899,8 @@ export const SourcesPage = ({
     }),
   ];
   // While core has older kept sources to give, the Brain's own sources
-  // older than the last one given wait for them, so "Show more" only adds
-  // at the end.
+  // older than the last one given wait for them, so each kind's section
+  // stays newest first as "Show more" adds older ones.
   const rows: Row[] = dated
     .filter(({ at }) => next === null || at >= next.addedAt)
     .toSorted((a, b) => Number(a.at < b.at) - Number(a.at > b.at))

@@ -17245,6 +17245,11 @@ msgctxt "a kind of field"
 msgid "Text"
 msgstr "Text"
 
+#: src/brain/sources-page.tsx
+msgctxt "a version of a source's text"
+msgid "Text"
+msgstr "Text"
+
 #: src/interview/closed.tsx
 msgid "Thank you for telling me."
 msgstr "Thank you for telling me."
