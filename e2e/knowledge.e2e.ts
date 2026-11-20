@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { pageMaxLimit } from "@grasp-os/shared/knowledge";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, teamMadeBy } from "./people.ts";
@@ -28,20 +28,25 @@ const fixture = (name: string): string =>
 /** How long a Knowledge page may take to read everything it shows. */
 const pageRead = { timeout: 15_000 };
 
-/**
- * A document's details, opened from the foot of its page, where they fold
- * on a window too narrow for the side (the tests' 1280px).
- */
-const details = async (page: Page) => {
-  await page.getByRole("button", { name: "Details", exact: true }).click();
-  return page.getByRole("definition");
-};
+/** The documents that link to the one on the page, each a row that opens it. */
+const usedBy = (page: Page) => page.getByRole("region", { name: "Used by" });
 
-/** The history timeline's entry for `version`. */
+/** A purge's count, by the name it stands under. */
+const count = (dialog: Locator, name: string) =>
+  dialog.locator(
+    `xpath=.//dt[normalize-space()="${name}"]/following-sibling::dd[1]`
+  );
+
+/** The history's row for `version`: the one whose link names it. */
 const versionRow = (page: Page, version: number) =>
   page
     .getByRole("region", { name: "History" })
-    .getByRole("listitem", { name: `Version ${version}`, exact: true });
+    .getByRole("listitem")
+    .filter({
+      has: page.getByRole("link", {
+        name: new RegExp(`^Version ${version}(, current)?$`, "u"),
+      }),
+    });
 
 test("a person searches, edits a document, meets a newer version instead of overwriting it, and restores an earlier one", async ({
   pageOf,
@@ -124,7 +129,7 @@ test("a person searches, edits a document, meets a newer version instead of over
     const results = page.getByRole("region", { name: "Results" });
     const hit = results.getByRole("listitem").filter({ hasText: word });
     await expect(
-      hit.getByText(`${collectionName} › Leave › Parental leave`)
+      hit.getByText(`${collectionName} › Parental leave`)
     ).toBeVisible();
     await hit.getByRole("link", { name: "Leave" }).click();
 
@@ -159,16 +164,16 @@ test("a person searches, edits a document, meets a newer version instead of over
     await expect(
       page.getByRole("heading", { level: 1, name: "Pay" }).first()
     ).toBeVisible();
-    const payDetails = await details(page);
-    await payDetails.getByRole("link", { name: "Leave", exact: true }).click();
+    await usedBy(page)
+      .getByRole("link", { name: "Leave", exact: true })
+      .click();
     await expect(
       page
         .getByRole("heading", { level: 1, name: "Leave", exact: true })
         .first()
     ).toBeVisible();
-    const leaveDetails = await details(page);
     await expect(
-      leaveDetails.getByRole("link", { name: "Pay", exact: true })
+      usedBy(page).getByRole("link", { name: "Pay", exact: true })
     ).toBeVisible();
 
     // An edit is a new version, with what changed.
@@ -317,20 +322,20 @@ test("a person uploads a file and follows it through core failing for a moment u
   });
   expect(dropping).toBe(0);
   await expect(ready.getByText(/past the first/u)).toHaveCount(0);
-  // The file list shows the new document.
+  // The file list shows the new document, by its title.
   await expect(
     page
       .getByRole("region", { name: "Files" })
-      .getByRole("link", { name: "expense-policy.pdf" })
+      .getByRole("link", { name: "expense-policy", exact: true })
   ).toBeVisible();
   // The original comes back as an attachment, never shown in the page.
   const href = await ready
-    .getByRole("link", { name: "Download expense-policy.pdf" })
+    .getByRole("link", { name: "Download", exact: true })
     .getAttribute("href");
   expect(href).toMatch(/^\/api\/knowledge\/uploads\/[\w-]+\/original$/u);
   const original = await page.request.get(href ?? "");
   expect(original.headers()["content-disposition"]).toMatch(/^attachment/u);
-  await ready.getByRole("button", { name: "Open expense-policy.pdf" }).click();
+  await ready.getByRole("button", { name: "Open", exact: true }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "expense-policy" })
   ).toBeVisible();
@@ -360,9 +365,9 @@ test("a person uploads a file and follows it through core failing for a moment u
   await expect(
     page
       .getByRole("region", { name: "Files" })
-      .getByRole("link", { name: "offices.xlsx" })
+      .getByRole("link", { name: "offices", exact: true })
   ).toHaveCount(0);
-  await past.getByRole("button", { name: "Open offices.xlsx" }).click();
+  await past.getByRole("button", { name: "Open", exact: true }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "offices", exact: true })
   ).toBeVisible();
@@ -561,9 +566,9 @@ test("an admin purges a person's name from a collection, seeing what goes first,
   await dialog.getByRole("button", { name: "Preview the purge" }).click();
 
   // The preview says what goes, and nothing has changed yet.
-  await expect(dialog.getByText("1 document rewritten")).toBeVisible();
-  await expect(dialog.getByText("2 versions rewritten")).toBeVisible();
-  await expect(dialog.getByText("2 occurrences removed")).toBeVisible();
+  await expect(count(dialog, "Documents rewritten")).toHaveText("1");
+  await expect(count(dialog, "Versions rewritten")).toHaveText("2");
+  await expect(count(dialog, "Occurrences removed")).toHaveText("2");
   const { core: checking, api: check } = apiOf(admin);
   try {
     const before = await check.knowledge.getDocument(documentId);
@@ -578,8 +583,8 @@ test("an admin purges a person's name from a collection, seeing what goes first,
     .getByRole("alertdialog")
     .getByRole("button", { name: "Purge for good" })
     .click();
-  await expect(dialog.getByText("1 document purged")).toBeVisible();
-  await expect(dialog.getByText("2 versions purged")).toBeVisible();
+  await expect(count(dialog, "Documents purged")).toHaveText("1");
+  await expect(count(dialog, "Versions purged")).toHaveText("2");
   await page.keyboard.press("Escape");
 
   // Every version reads without the name.

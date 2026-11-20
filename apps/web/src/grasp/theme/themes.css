@@ -437,6 +437,122 @@
     var(--grasp-light-paper),
     var(--grasp-light-night)
   );
+  --grasp-agent-figure-evergreen-0: var(--grasp-light-ink);
+  --grasp-agent-figure-evergreen-1: var(--grasp-light-pine);
+  --grasp-agent-figure-evergreen-2: var(--grasp-light-mint);
+  --grasp-agent-figure-evergreen-3: var(--grasp-light-sea);
+  --grasp-agent-figure-evergreen-4: var(--grasp-light-lime);
+  --grasp-agent-figure-evergreen-5: var(--grasp-light-paper);
+  --grasp-agent-figure-meadow-0: color-mix(
+    in oklch,
+    var(--grasp-light-pine) 40%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-meadow-1: var(--grasp-light-pine);
+  --grasp-agent-figure-meadow-2: color-mix(
+    in oklch,
+    var(--grasp-light-mint) 70%,
+    var(--grasp-light-lime)
+  );
+  --grasp-agent-figure-meadow-3: var(--grasp-light-lime);
+  --grasp-agent-figure-meadow-4: color-mix(
+    in oklch,
+    var(--grasp-light-lime) 50%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-meadow-5: var(--grasp-light-paper);
+  --grasp-agent-figure-ember-0: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 22%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ember-1: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 60%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ember-2: var(--grasp-brain-heat);
+  --grasp-agent-figure-ember-3: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 45%,
+    var(--grasp-brain-glow)
+  );
+  --grasp-agent-figure-ember-4: var(--grasp-brain-glow);
+  --grasp-agent-figure-ember-5: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 40%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-amber-0: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 18%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-amber-1: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 45%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-amber-2: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 75%,
+    var(--grasp-brain-heat)
+  );
+  --grasp-agent-figure-amber-3: var(--grasp-brain-glow);
+  --grasp-agent-figure-amber-4: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 55%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-amber-5: var(--grasp-light-paper);
+  --grasp-agent-figure-ocean-0: color-mix(
+    in oklch,
+    var(--grasp-info) 22%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ocean-1: color-mix(
+    in oklch,
+    var(--grasp-info) 55%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ocean-2: var(--grasp-info);
+  --grasp-agent-figure-ocean-3: color-mix(
+    in oklch,
+    var(--grasp-info) 55%,
+    var(--grasp-light-sea)
+  );
+  --grasp-agent-figure-ocean-4: color-mix(
+    in oklch,
+    var(--grasp-info) 30%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-ocean-5: var(--grasp-light-paper);
+  --grasp-agent-figure-moon-0: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 10%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-1: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 30%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-2: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 50%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-3: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 70%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-4: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 86%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-5: var(--grasp-light-paper);
   --grasp-app-card-sea-from: light-dark(
     oklch(0.82 0.032 222),
     oklch(0.33 0.03 222)
@@ -532,6 +648,10 @@
   --grasp-table-fade: var(--grasp-space-12);
   --grasp-table-row-fill-chosen-mint: var(--grasp-grid-range-wash);
   --grasp-table-head-fill-soft: var(--grasp-soft);
+  --grasp-table-head-text: light-dark(
+    var(--grasp-muted),
+    oklch(0.72 0.025 158)
+  );
   --grasp-table-sort-chip: color-mix(
     in oklch,
     var(--grasp-mint) 22%,
@@ -638,6 +758,9 @@
     oklch(0.243 0.028 169.36)
   );
   --grasp-shell-popup-line: var(--grasp-shell-rule);
+  --grasp-shell-panel-composer-corner: calc(
+    var(--grasp-shell-card-corner) * 1.84
+  );
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
   );
@@ -717,6 +840,15 @@
   --grasp-tree-row-touch: var(--grasp-tap);
   --grasp-tree-indent: var(--grasp-space-4);
   --grasp-tree-row-inset: var(--grasp-space-2);
+  --grasp-tree-row-gap: var(--grasp-hairline);
+  --grasp-tree-text: var(--grasp-text);
+  --grasp-tree-icon-gap: var(--grasp-space-2);
+  --grasp-tree-guide: var(--grasp-shell-guide);
+  --grasp-tree-icon: var(--grasp-muted);
+  --grasp-tree-text-hover: var(--grasp-text);
+  --grasp-tree-text-chosen: var(--grasp-ink);
+  --grasp-tree-weight: var(--grasp-weight-regular);
+  --grasp-tree-weight-current: var(--grasp-weight-medium);
   --grasp-tree-fill-hover: light-dark(
     oklch(0.29 0.05 162 / 0.035),
     oklch(0.96 0.02 150 / 0.05)
@@ -837,6 +969,7 @@
     transparent
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
+  --grasp-chat-width: var(--grasp-chat-start-width);
   --grasp-sign-in-night: var(--grasp-light-night);
   --grasp-sign-in-veil: oklch(0.131 0.021 174.91 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);
@@ -1286,6 +1419,122 @@
     var(--grasp-light-paper),
     var(--grasp-light-night)
   );
+  --grasp-agent-figure-evergreen-0: var(--grasp-light-ink);
+  --grasp-agent-figure-evergreen-1: var(--grasp-light-pine);
+  --grasp-agent-figure-evergreen-2: var(--grasp-light-mint);
+  --grasp-agent-figure-evergreen-3: var(--grasp-light-sea);
+  --grasp-agent-figure-evergreen-4: var(--grasp-light-lime);
+  --grasp-agent-figure-evergreen-5: var(--grasp-light-paper);
+  --grasp-agent-figure-meadow-0: color-mix(
+    in oklch,
+    var(--grasp-light-pine) 40%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-meadow-1: var(--grasp-light-pine);
+  --grasp-agent-figure-meadow-2: color-mix(
+    in oklch,
+    var(--grasp-light-mint) 70%,
+    var(--grasp-light-lime)
+  );
+  --grasp-agent-figure-meadow-3: var(--grasp-light-lime);
+  --grasp-agent-figure-meadow-4: color-mix(
+    in oklch,
+    var(--grasp-light-lime) 50%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-meadow-5: var(--grasp-light-paper);
+  --grasp-agent-figure-ember-0: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 22%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ember-1: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 60%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ember-2: var(--grasp-brain-heat);
+  --grasp-agent-figure-ember-3: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 45%,
+    var(--grasp-brain-glow)
+  );
+  --grasp-agent-figure-ember-4: var(--grasp-brain-glow);
+  --grasp-agent-figure-ember-5: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 40%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-amber-0: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 18%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-amber-1: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 45%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-amber-2: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 75%,
+    var(--grasp-brain-heat)
+  );
+  --grasp-agent-figure-amber-3: var(--grasp-brain-glow);
+  --grasp-agent-figure-amber-4: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 55%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-amber-5: var(--grasp-light-paper);
+  --grasp-agent-figure-ocean-0: color-mix(
+    in oklch,
+    var(--grasp-info) 22%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ocean-1: color-mix(
+    in oklch,
+    var(--grasp-info) 55%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ocean-2: var(--grasp-info);
+  --grasp-agent-figure-ocean-3: color-mix(
+    in oklch,
+    var(--grasp-info) 55%,
+    var(--grasp-light-sea)
+  );
+  --grasp-agent-figure-ocean-4: color-mix(
+    in oklch,
+    var(--grasp-info) 30%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-ocean-5: var(--grasp-light-paper);
+  --grasp-agent-figure-moon-0: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 10%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-1: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 30%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-2: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 50%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-3: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 70%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-4: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 86%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-5: var(--grasp-light-paper);
   --grasp-app-card-sea-from: light-dark(
     oklch(0.82 0.032 222),
     oklch(0.33 0.03 222)
@@ -1381,6 +1630,7 @@
   --grasp-table-fade: var(--grasp-space-12);
   --grasp-table-row-fill-chosen-mint: var(--grasp-grid-range-wash);
   --grasp-table-head-fill-soft: var(--grasp-soft);
+  --grasp-table-head-text: light-dark(var(--grasp-muted), oklch(0.72 0.05 178));
   --grasp-table-sort-chip: color-mix(
     in oklch,
     var(--grasp-mint) 22%,
@@ -1484,6 +1734,9 @@
     oklch(0.285 0.058 178)
   );
   --grasp-shell-popup-line: var(--grasp-shell-rule);
+  --grasp-shell-panel-composer-corner: calc(
+    var(--grasp-shell-card-corner) * 1.84
+  );
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
   );
@@ -1563,6 +1816,15 @@
   --grasp-tree-row-touch: var(--grasp-tap);
   --grasp-tree-indent: var(--grasp-space-4);
   --grasp-tree-row-inset: var(--grasp-space-2);
+  --grasp-tree-row-gap: var(--grasp-hairline);
+  --grasp-tree-text: var(--grasp-text);
+  --grasp-tree-icon-gap: var(--grasp-space-2);
+  --grasp-tree-guide: var(--grasp-shell-guide);
+  --grasp-tree-icon: var(--grasp-muted);
+  --grasp-tree-text-hover: var(--grasp-text);
+  --grasp-tree-text-chosen: var(--grasp-ink);
+  --grasp-tree-weight: var(--grasp-weight-regular);
+  --grasp-tree-weight-current: var(--grasp-weight-medium);
   --grasp-tree-fill-hover: light-dark(
     oklch(0.29 0.1 178 / 0.035),
     oklch(0.96 0.04 178 / 0.05)
@@ -1683,6 +1945,7 @@
     transparent
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
+  --grasp-chat-width: var(--grasp-chat-start-width);
   --grasp-sign-in-night: var(--grasp-light-night);
   --grasp-sign-in-veil: oklch(0.131 0.042 178 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);
@@ -2129,6 +2392,122 @@
     var(--grasp-light-paper),
     var(--grasp-light-night)
   );
+  --grasp-agent-figure-evergreen-0: var(--grasp-light-ink);
+  --grasp-agent-figure-evergreen-1: var(--grasp-light-pine);
+  --grasp-agent-figure-evergreen-2: var(--grasp-light-mint);
+  --grasp-agent-figure-evergreen-3: var(--grasp-light-sea);
+  --grasp-agent-figure-evergreen-4: var(--grasp-light-lime);
+  --grasp-agent-figure-evergreen-5: var(--grasp-light-paper);
+  --grasp-agent-figure-meadow-0: color-mix(
+    in oklch,
+    var(--grasp-light-pine) 40%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-meadow-1: var(--grasp-light-pine);
+  --grasp-agent-figure-meadow-2: color-mix(
+    in oklch,
+    var(--grasp-light-mint) 70%,
+    var(--grasp-light-lime)
+  );
+  --grasp-agent-figure-meadow-3: var(--grasp-light-lime);
+  --grasp-agent-figure-meadow-4: color-mix(
+    in oklch,
+    var(--grasp-light-lime) 50%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-meadow-5: var(--grasp-light-paper);
+  --grasp-agent-figure-ember-0: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 22%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ember-1: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 60%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ember-2: var(--grasp-brain-heat);
+  --grasp-agent-figure-ember-3: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 45%,
+    var(--grasp-brain-glow)
+  );
+  --grasp-agent-figure-ember-4: var(--grasp-brain-glow);
+  --grasp-agent-figure-ember-5: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 40%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-amber-0: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 18%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-amber-1: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 45%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-amber-2: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 75%,
+    var(--grasp-brain-heat)
+  );
+  --grasp-agent-figure-amber-3: var(--grasp-brain-glow);
+  --grasp-agent-figure-amber-4: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 55%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-amber-5: var(--grasp-light-paper);
+  --grasp-agent-figure-ocean-0: color-mix(
+    in oklch,
+    var(--grasp-info) 22%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ocean-1: color-mix(
+    in oklch,
+    var(--grasp-info) 55%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-ocean-2: var(--grasp-info);
+  --grasp-agent-figure-ocean-3: color-mix(
+    in oklch,
+    var(--grasp-info) 55%,
+    var(--grasp-light-sea)
+  );
+  --grasp-agent-figure-ocean-4: color-mix(
+    in oklch,
+    var(--grasp-info) 30%,
+    var(--grasp-light-paper)
+  );
+  --grasp-agent-figure-ocean-5: var(--grasp-light-paper);
+  --grasp-agent-figure-moon-0: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 10%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-1: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 30%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-2: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 50%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-3: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 70%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-4: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 86%,
+    var(--grasp-light-night)
+  );
+  --grasp-agent-figure-moon-5: var(--grasp-light-paper);
   --grasp-app-card-sea-from: light-dark(
     oklch(0.82 0.032 222),
     oklch(0.33 0.03 222)
@@ -2224,6 +2603,7 @@
   --grasp-table-fade: var(--grasp-space-12);
   --grasp-table-row-fill-chosen-mint: var(--grasp-grid-range-wash);
   --grasp-table-head-fill-soft: var(--grasp-soft);
+  --grasp-table-head-text: light-dark(var(--grasp-muted), oklch(0.72 0.006 75));
   --grasp-table-sort-chip: color-mix(
     in oklch,
     var(--grasp-mint) 22%,
@@ -2324,6 +2704,9 @@
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.1));
   --grasp-shell-popup: light-dark(oklch(0.982 0.007 85), oklch(0.275 0.006 75));
   --grasp-shell-popup-line: var(--grasp-shell-rule);
+  --grasp-shell-panel-composer-corner: calc(
+    var(--grasp-shell-card-corner) * 1.84
+  );
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
   );
@@ -2400,6 +2783,15 @@
   --grasp-tree-row-touch: var(--grasp-tap);
   --grasp-tree-indent: var(--grasp-space-4);
   --grasp-tree-row-inset: var(--grasp-space-2);
+  --grasp-tree-row-gap: var(--grasp-hairline);
+  --grasp-tree-text: var(--grasp-text);
+  --grasp-tree-icon-gap: var(--grasp-space-2);
+  --grasp-tree-guide: var(--grasp-shell-guide);
+  --grasp-tree-icon: var(--grasp-muted);
+  --grasp-tree-text-hover: var(--grasp-text);
+  --grasp-tree-text-chosen: var(--grasp-ink);
+  --grasp-tree-weight: var(--grasp-weight-regular);
+  --grasp-tree-weight-current: var(--grasp-weight-medium);
   --grasp-tree-fill-hover: light-dark(
     oklch(0.29 0.011 75 / 0.035),
     oklch(0.96 0.004 75 / 0.05)
@@ -2517,6 +2909,7 @@
     transparent
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
+  --grasp-chat-width: var(--grasp-chat-start-width);
   --grasp-sign-in-night: var(--grasp-light-night);
   --grasp-sign-in-veil: oklch(0.131 0.005 75 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);

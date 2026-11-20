@@ -7,10 +7,12 @@ import type { ReactNode } from "react";
 
 import { grantReviewed, reviewedVersion } from "../activity/pending.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { draftOf } from "../chat/held-drafts.ts";
 import {
   confirmHeld,
   declineHeld,
   HeldWriteDetails,
+  HeldWriteDraft,
   useShown,
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
@@ -25,14 +27,20 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { ApprovalRequest } from "../grasp/approval-request/index.ts";
+import {
+  ApprovalRequest,
+  ApprovalRequestApprove,
+} from "../grasp/approval-request/index.ts";
 import type { ApprovalWords } from "../grasp/approval-request/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
 import { External } from "../grasp/icons/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
-import { QuestionTool } from "../grasp/question-tool/index.ts";
+import {
+  QuestionTool,
+  QuestionToolSubmit,
+} from "../grasp/question-tool/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -246,7 +254,7 @@ const ItemFrame = ({
             </div>
           )}
           {failure === undefined ? null : (
-            <Alert variant="danger">{failure}</Alert>
+            <Alert tone="danger">{failure}</Alert>
           )}
           {/* What `extra` shows says these already, in its own words. */}
           {extra === undefined && facts.length > 0 ? (
@@ -381,7 +389,6 @@ const ApprovalFrame = ({
       <ApprovalRequest
         {...(item.asker === undefined ? {} : { agent: item.asker })}
         {...(summary === undefined ? {} : { summary })}
-        {...(approveLabel === undefined ? {} : { approveLabel })}
         {...(approveHeld === undefined ? {} : { approveHeld })}
         askedAt={item.date === "" ? undefined : formatDate(item.date)}
         grave={grave}
@@ -392,6 +399,9 @@ const ApprovalFrame = ({
         variant="ledger"
         words={words}
       >
+        {approveLabel === undefined ? null : (
+          <ApprovalRequestApprove>{approveLabel}</ApprovalRequestApprove>
+        )}
         {details}
       </ApprovalRequest>
     </div>
@@ -401,6 +411,8 @@ const ApprovalFrame = ({
 /**
  * A held write: confirming it is for what the person was shown, all of
  * it. Confirm waits, with why, until every part of what it sends was shown.
+ * One that makes a thing (an email, an event, a task) stands as its draft,
+ * as in the chat.
  */
 const HeldItem = ({
   frame,
@@ -410,8 +422,30 @@ const HeldItem = ({
   source: Extract<InboxSource, { type: "held" }>;
 }) => {
   const { t } = useLingui();
+  const router = useRouter();
   const { action } = source;
   const shown = useShown(action);
+  const draft = draftOf(action);
+  if (draft !== undefined) {
+    const { title } = frame.item;
+    return (
+      <div {...stylex.props(styles.item)}>
+        <HeldWriteDraft
+          action={action}
+          draft={draft}
+          onDecided={async (done, confirmed) => {
+            // A refusal stays on the draft, in core's words, with the item.
+            if (done) {
+              frame.onSaid(
+                confirmed ? t`Approved: ${title}` : t`Declined: ${title}`
+              );
+              await router.invalidate({ sync: true });
+            }
+          }}
+        />
+      </div>
+    );
+  }
   return (
     <ApprovalFrame
       approveHeld={
@@ -708,13 +742,14 @@ const AskedItem = ({
       extra={
         <QuestionTool
           embedded
-          failedLabel={t`Your answer wasn't saved. Try again.`}
+          words={{ failed: t`Your answer wasn't saved. Try again.` }}
           kind="text"
           label={t`Question`}
           onSubmit={answer}
           question={notification.question}
-          submitLabel={t`Answer`}
-        />
+        >
+          <QuestionToolSubmit>{t`Answer`}</QuestionToolSubmit>
+        </QuestionTool>
       }
       failure={undefined}
       frame={{
@@ -774,13 +809,14 @@ const GapItem = ({
       extra={
         <QuestionTool
           embedded
-          failedLabel={t`Your answer wasn't saved. Try again.`}
+          words={{ failed: t`Your answer wasn't saved. Try again.` }}
           kind="text"
           label={t`Question`}
           onSubmit={answer}
           question={question}
-          submitLabel={t`Answer`}
-        />
+        >
+          <QuestionToolSubmit>{t`Answer`}</QuestionToolSubmit>
+        </QuestionTool>
       }
       failure={failure}
       frame={{

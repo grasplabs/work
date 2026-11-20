@@ -24,7 +24,7 @@ import {
   TreeItemLabel as LabelPrimitive,
 } from "@ui-sdk/react/tree";
 import type { TreeItemData } from "@ui-sdk/react/tree";
-import { useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 import { listStyles } from "../combobox/list.styles";
@@ -39,7 +39,9 @@ import {
 } from "../input-group";
 import { Spinner } from "../spinner";
 import { useWords } from "../words/words";
+import { TreeChevronSeated } from "./seat";
 import { treeStyles as styles } from "./styles";
+import { treeRowMarker } from "./tree.stylex";
 import { treeWords } from "./words";
 
 /** One item of a tree. */
@@ -112,6 +114,12 @@ export interface TreeProps {
    * @default true
    */
   expandOnPress?: boolean;
+  /**
+   * The tree guide on nested items, as Sidebar's nested rows: a stem down from each open branch's
+   * chevron and a rounded elbow into each of its items, stopping at the last.
+   * @default false
+   */
+  guides?: boolean;
   /** Nothing can be chosen, opened or run. */
   disabled?: boolean;
   /**
@@ -228,17 +236,30 @@ const RowInside = ({
   node,
   current,
   query,
+  seated,
+  seatless = false,
 }: {
   node: TreeNode;
   current: boolean;
   query: string;
+  seated: boolean;
+  /** Its words stand in the icon's seat (a nested leaf with only leaves beside it, in a sidebar). */
+  seatless?: boolean;
 }) => {
   const inside = (
     <>
-      {node.icon && (
-        <span aria-hidden="true" {...stylex.props(styles.icon)}>
+      {node.icon ? (
+        <span
+          aria-hidden="true"
+          {...stylex.props(styles.icon, seated && styles.iconSeated)}
+        >
           <Icon icon={node.icon} />
         </span>
+      ) : (
+        seated &&
+        !seatless && (
+          <span aria-hidden="true" {...stylex.props(styles.spacer)} />
+        )
       )}
       <span {...stylex.props(styles.words)}>
         <Marked words={node.label} query={query} />
@@ -277,17 +298,75 @@ const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
   }
 };
 
+interface ItemsProps {
+  nodes: TreeNode[];
+  current: string | null | undefined;
+  query: string;
+  /** The chevron stands in the icon's place (seat.ts). */
+  seated: boolean;
+  /** Draw the tree guide on nested items (Tree's `guides`). */
+  guides: boolean;
+  /** These items are a branch's children, under its row. */
+  nested?: boolean;
+}
+
+/**
+ * A nested item's part of the tree guide, as Sidebar's: the stem down from its branch's chevron, a
+ * rounded elbow into its row, and the stem on to the next sibling, which the last one has not.
+ */
+const Guide = ({
+  last,
+  short,
+  toWords,
+}: {
+  last: boolean;
+  short: boolean;
+  toWords: boolean;
+}) => (
+  <>
+    <span
+      aria-hidden="true"
+      data-tree-guide="stem"
+      {...stylex.props(styles.guideStem)}
+    />
+    <span
+      aria-hidden="true"
+      data-tree-guide="elbow"
+      {...stylex.props(
+        styles.guideBranch,
+        short && styles.guideBranchShort,
+        toWords && styles.guideBranchToWords,
+        !last && styles.guideBranchCut
+      )}
+    />
+    {last ? null : (
+      <span
+        aria-hidden="true"
+        data-tree-guide="on"
+        {...stylex.props(styles.guideStemOn)}
+      />
+    )}
+  </>
+);
+
 const Items = ({
   nodes,
   current,
   query,
-}: {
-  nodes: TreeNode[];
-  current: string | null | undefined;
-  query: string;
-}) =>
-  nodes.map((node) => {
+  seated,
+  guides,
+  nested = false,
+}: ItemsProps) =>
+  nodes.map((node, index) => {
     const branch = node.children !== undefined;
+    const guided = guides && nested;
+    // In a sidebar, a nested leaf with no icon and only leaves beside it needs no empty seat to line up
+    // with: its words stand in the seat, under its parent's words, and the elbow stays short.
+    const seatless =
+      seated &&
+      nested &&
+      node.icon === undefined &&
+      !nodes.some((each) => each.children !== undefined);
     return (
       <ItemPrimitive
         key={node.value}
@@ -295,9 +374,23 @@ const Items = ({
         branch={branch || undefined}
         disabled={node.disabled}
         label={node.label}
-        {...stylex.props(styles.item)}
+        {...stylex.props(styles.item, guided && styles.guided)}
       >
-        <LabelPrimitive {...stylex.props(styles.row, focus.row)}>
+        {guided ? (
+          <Guide
+            last={index === nodes.length - 1}
+            short={seated}
+            toWords={seated && node.icon === undefined && !branch && !seatless}
+          />
+        ) : null}
+        <LabelPrimitive
+          {...stylex.props(
+            treeRowMarker,
+            styles.row,
+            seated && styles.rowSeated,
+            focus.row
+          )}
+        >
           {branch ? (
             <IndicatorPrimitive
               render={(
@@ -308,6 +401,7 @@ const Items = ({
                   {...props}
                   {...stylex.props(
                     styles.chevron,
+                    seated && styles.chevronSeated,
                     state.failed === true && styles.failed
                   )}
                 >
@@ -322,12 +416,17 @@ const Items = ({
               )}
             />
           ) : (
-            <span aria-hidden="true" {...stylex.props(styles.spacer)} />
+            <span
+              aria-hidden="true"
+              {...stylex.props(styles.spacer, seated && styles.spacerSeated)}
+            />
           )}
           <RowInside
             node={node}
             current={current === node.value}
             query={query}
+            seated={seated}
+            seatless={seatless}
           />
         </LabelPrimitive>
         {branch && (
@@ -336,6 +435,9 @@ const Items = ({
               nodes={node.children ?? []}
               current={current}
               query={query}
+              seated={seated}
+              guides={guides}
+              nested
             />
           </GroupPrimitive>
         )}
@@ -451,6 +553,7 @@ export const Tree = ({
   onAction,
   current,
   expandOnPress = true,
+  guides = false,
   disabled,
   filterable = false,
   filter,
@@ -458,6 +561,7 @@ export const Tree = ({
   onFilterChange,
 }: TreeProps) => {
   const words = useWords("tree", treeWords);
+  const seated = useContext(TreeChevronSeated) === "icon";
   // Children that loaded are kept here, so the tree knows them from then on.
   const [loaded, setLoaded] = useState<Record<string, TreeNode[]>>({});
   const box = useRef<HTMLDivElement>(null);
@@ -530,7 +634,13 @@ export const Tree = ({
       onKeyDown={handleTreeKeyDown}
       {...stylex.props(styles.tree)}
     >
-      <Items nodes={shown} current={current} query={query} />
+      <Items
+        nodes={shown}
+        current={current}
+        query={query}
+        seated={seated}
+        guides={guides}
+      />
     </TreePrimitive>
   );
   if (!filterable) {

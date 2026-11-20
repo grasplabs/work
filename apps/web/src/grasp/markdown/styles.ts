@@ -64,16 +64,16 @@ export const markdownStyles = stylex.create({
   },
   smallHeading: { fontSize: grasp.textMd, lineHeight: grasp.textMdLine },
   smallMinor: { fontSize: grasp.textSm, lineHeight: grasp.textSmLine },
-  // A step smaller again (`size="xs"`): a note beside an answer, as an agent's thoughts.
+  // A note beside an answer (`size="xs"`), as an agent's thoughts: the chat's size, set apart by the muted ink.
   xsmall: {
     gap: grasp.space2,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
     color: grasp.muted,
   },
-  xsmallHeading: { fontSize: grasp.textXs, lineHeight: grasp.textXsLine },
+  xsmallHeading: { fontSize: grasp.chatText, lineHeight: grasp.chatTextLine },
   // Code in a sentence at the smallest size: a step under the words, as at the other sizes.
-  xsmallCode: { fontSize: `calc(${grasp.textXs} * 0.92)` },
+  xsmallCode: { fontSize: `calc(${grasp.chatText} * 0.92)` },
   strong: { fontWeight: grasp.weightMedium, color: grasp.ink },
   emphasis: { fontStyle: "italic" },
   deleted: { textDecorationLine: "line-through", color: grasp.muted },

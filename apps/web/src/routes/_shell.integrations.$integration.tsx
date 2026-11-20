@@ -23,6 +23,7 @@ import {
   useWhyNoConnect,
 } from "../connections/integration-facts.ts";
 import { loadIntegrations } from "../connections/integrations-data.ts";
+import { IntegrationSkeleton } from "../connections/integrations-skeleton.tsx";
 import {
   integrationsOf,
   parseIntegrationKey,
@@ -44,7 +45,6 @@ import { formatDate, formatDayMonth } from "../format.ts";
 import {
   LoadingLines,
   NotFound,
-  PageLoading,
   PageNotLoaded,
 } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
@@ -52,7 +52,13 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription,
+} from "../grasp/empty/index.ts";
 import { Cable } from "../grasp/icons/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -108,7 +114,7 @@ const HeldNotLoaded = ({
   return (
     <Alert
       title={t`Which Apps and agents hold permissions: ${why}`}
-      variant="danger"
+      tone="danger"
     />
   );
 };
@@ -141,13 +147,23 @@ const ToolList = ({
   const { i18n, t } = useLingui();
   if (tools.state !== "ready") {
     return (
-      <Empty size="inline" tone="danger">
-        {notLoadedText(tools, i18n)}
+      <Empty size="sm" tone="danger">
+        <EmptyHeader>
+          <EmptyMedia />
+          <EmptyTitle />
+          <EmptyDescription>{notLoadedText(tools, i18n)}</EmptyDescription>
+        </EmptyHeader>
       </Empty>
     );
   }
   if (tools.data.length === 0) {
-    return <Empty size="inline">{t`${app} has no tools.`}</Empty>;
+    return (
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`${app} has no tools.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
   if (changeable !== undefined) {
     return (
@@ -195,15 +211,21 @@ const Tools = ({
   const { i18n, t } = useLingui();
   if (tools === undefined && catalog.state !== "ready") {
     return (
-      <Empty size="inline" tone="danger">
-        {notLoadedText(catalog, i18n)}
+      <Empty size="sm" tone="danger">
+        <EmptyHeader>
+          <EmptyMedia />
+          <EmptyTitle />
+          <EmptyDescription>{notLoadedText(catalog, i18n)}</EmptyDescription>
+        </EmptyHeader>
       </Empty>
     );
   }
   if (tools === undefined) {
     return (
-      <Empty size="inline">
-        {t`The catalog doesn't list ${app}, so its tools can't be shown.`}
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`The catalog doesn't list ${app}, so its tools can't be shown.`}</EmptyDescription>
+        </EmptyHeader>
       </Empty>
     );
   }
@@ -544,6 +566,6 @@ export const Route = createFileRoute("/_shell/integrations/$integration")({
   // A tab, or a notice dropped, keeps what was read; a change reads it
   // again (use-change.ts invalidates it).
   shouldReload: false,
-  pendingComponent: PageLoading,
+  pendingComponent: IntegrationSkeleton,
   component: IntegrationRoute,
 });

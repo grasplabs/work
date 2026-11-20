@@ -3,6 +3,8 @@
 export const dropdownMenuWords = {
   /** Said while an item's work is under way. An item's own `failedLabel` is the caller's. */
   working: "Working",
+  /** A "More" button's name (DropdownMenuMore), when it is given none. */
+  more: "More actions",
 };
 
 export type DropdownMenuWords = typeof dropdownMenuWords;

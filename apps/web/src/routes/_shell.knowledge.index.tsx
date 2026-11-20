@@ -10,7 +10,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
-import { PageHeading, SectionTitle } from "../frame/page.tsx";
+import { PageHeading } from "../frame/page.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import {
   Card,
@@ -30,10 +30,13 @@ import { File, Folder, Search } from "../grasp/icons/index.ts";
 import {
   Item,
   ItemContent,
+  ItemDescription,
+  ItemDetail,
   ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { Section, SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import {
@@ -62,30 +65,8 @@ const styles = stylex.create({
     gap: grasp.space10,
     boxSizing: "border-box",
     width: "100%",
-    maxWidth: grasp.pageMeasure,
-    marginInline: "auto",
     paddingBlock: grasp.space8,
     paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
-  },
-  section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
-  sectionHead: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: grasp.space3,
-  },
-  list: {
-    display: "flex",
-    flexDirection: "column",
-    margin: 0,
-    padding: 0,
-    listStyleType: "none",
-  },
-  hit: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space1,
-    paddingBlock: grasp.space2,
   },
   memory: {
     display: "flex",
@@ -155,31 +136,38 @@ const SearchResults = ({
     );
   }
   return (
-    <ol {...stylex.props(styles.list)}>
+    <ItemGroup separated>
       {hits.map((hit) => (
-        <li
+        <Item
           key={`${hit.documentId}:${hit.section}`}
-          {...stylex.props(styles.hit)}
+          render={
+            <Link
+              params={{ collection: hit.collectionId }}
+              search={{ doc: hit.documentId }}
+              to="/knowledge/$collection"
+            />
+          }
+          size="sm"
         >
-          <RouterLink
-            params={{ collection: hit.collectionId }}
-            search={{ doc: hit.documentId }}
-            to="/knowledge/$collection"
-            variant="standalone"
-          >
-            {hit.title}
-          </RouterLink>
-          <Text size="xs" tone="muted">
-            {[collections.get(hit.collectionId) ?? hit.path, ...hit.headings]
-              .filter((part) => part !== "")
-              .join(" › ")}
-          </Text>
-          <Text size="sm" tone="muted">
-            {hit.snippet}
-          </Text>
-        </li>
+          <ItemMedia icon={File} iconLook="inline" />
+          <ItemContent>
+            <ItemTitle>
+              {hit.title}
+              <ItemDetail>
+                {[
+                  collections.get(hit.collectionId) ?? hit.path,
+                  ...hit.headings,
+                ]
+                  // A heading that only repeats the title says nothing.
+                  .filter((part) => part !== "" && part !== hit.title)
+                  .join(" › ")}
+              </ItemDetail>
+            </ItemTitle>
+            <ItemDescription>{hit.snippet}</ItemDescription>
+          </ItemContent>
+        </Item>
       ))}
-    </ol>
+    </ItemGroup>
   );
 };
 
@@ -397,38 +385,27 @@ const Knowledge = () => {
         <div {...stylex.props(styles.column)}>
           <PageHeading title={<Trans>Knowledge</Trans>} />
           {results === undefined ? null : (
-            <section
-              aria-labelledby="results"
-              {...stylex.props(styles.section)}
-            >
-              <SectionTitle id="results">
-                <Trans>Results</Trans>
-              </SectionTitle>
+            <Section aria-labelledby="results">
+              <SectionHeader id="results" title={<Trans>Results</Trans>} />
               <NotLoaded page={results} />
               {results.state === "ready" ? (
                 <SearchResults collections={names} hits={results.data.hits} />
               ) : null}
-            </section>
+            </Section>
           )}
-          <section aria-labelledby="memory" {...stylex.props(styles.section)}>
-            <SectionTitle id="memory">
-              <Trans>Memory</Trans>
-            </SectionTitle>
+          <Section aria-labelledby="memory">
+            <SectionHeader id="memory" title={<Trans>Memory</Trans>} />
             <NotLoaded page={memory} />
             {memory.state === "ready" ? (
               <MemoryBlock memory={memory.data} />
             ) : null}
-          </section>
-          <section
-            aria-labelledby="collections"
-            {...stylex.props(styles.section)}
-          >
-            <div {...stylex.props(styles.sectionHead)}>
-              <SectionTitle id="collections">
-                <Trans>Collections</Trans>
-              </SectionTitle>
-              <NewCollection identity={identity} />
-            </div>
+          </Section>
+          <Section aria-labelledby="collections">
+            <SectionHeader
+              actions={<NewCollection identity={identity} />}
+              id="collections"
+              title={<Trans>Collections</Trans>}
+            />
             <NotLoaded page={collections} />
             {collections.state === "ready" ? (
               <CollectionBlocks
@@ -436,7 +413,7 @@ const Knowledge = () => {
                 firstPages={firstPages}
               />
             ) : null}
-          </section>
+          </Section>
         </div>
       </div>
     </KnowledgeFrame>

@@ -28,3 +28,6 @@ scripts/lab/out/
 # Vitest browser mode's failure screenshots and attachments
 __screenshots__/
 .vitest-attachments/
+
+# Agent sessions' own checkouts: never committed, and too big for Tailwind to scan.
+.claude/worktrees/

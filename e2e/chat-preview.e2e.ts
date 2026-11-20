@@ -137,9 +137,9 @@ test("a chat building an App offers its workspace, whose preview changes none of
     });
     await expect(chatName).toBeVisible();
     // There, the draft this chat builds is the preview, not the live App.
-    // Shared with nobody yet: Share with your team is on.
+    // Shared with nobody yet: Publish is on.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled();
     const preview = page.getByRole("region", { name: `${name}, your version` });
     // Its own store: none of the App's tally, then only what it added,
@@ -158,7 +158,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
     await views.getByRole("link", { name: "App" }).click();
     await expect(chatName).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled();
     await expect(
       page.getByRole("heading", { level: 1, name, exact: true })
@@ -212,10 +212,10 @@ test("an App's own chat writes its page and server code, and its workspace previ
 
     // The page the agent wrote runs in the preview, on a store of its own.
     const preview = page.getByRole("region", { name: `${name}, your version` });
-    // Only its builder sees it: Share with your team is on, once the
+    // Only its builder sees it: Publish is on, once the
     // turn's check of the draft is done.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled(afterTurnCheck);
     const frame = preview.frameLocator("iframe");
     await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
@@ -356,10 +356,10 @@ test("an App's workspace previews the App before its chat changes anything, then
     await expect(live.getByRole("status")).toHaveText("0 in the App", {
       timeout: 30_000,
     });
-    // Shared with nobody yet: Share with your team is on, for the App's
+    // Shared with nobody yet: Publish is on, for the App's
     // live version as it is.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled();
 
     // A version published elsewhere comes into the open preview.
@@ -382,10 +382,10 @@ test("an App's workspace previews the App before its chat changes anything, then
     await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
       timeout: 30_000,
     });
-    // Only its builder sees it: Share with your team is on, once the
+    // Only its builder sees it: Publish is on, once the
     // turn's check of the draft is done.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled(afterTurnCheck);
     const frame = page
       .getByRole("region", { name: `${name}, your version` })

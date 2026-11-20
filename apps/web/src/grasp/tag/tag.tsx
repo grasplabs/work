@@ -20,8 +20,9 @@ import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { useWords } from "../words/words";
+import { useWords, withGiven } from "../words/words";
 import { tagWords } from "./words";
+import type { TagWords } from "./words";
 
 /** What a caller may style: where the tag sits. Never its look. */
 export type TagLayoutStyle = LayoutStyle;
@@ -53,6 +54,12 @@ export interface TagProps {
   onRemove?: () => void;
   /** What the remove button says to a screen reader. When the words are text, "Remove" and them. */
   removeLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ remove: "Remove
+   * Lena" }`). An instance's `remove` is said as it is, even when the words are text; any left out are
+   * the catalogue's, else English. `removeLabel` given beside it still wins until the release's step 5.
+   */
+  words?: Partial<TagWords>;
   /** @deprecated Use `layout`. */
   style?: TagLayoutStyle;
   /** Layout only: margins and alignment. The look belongs to the tag. */
@@ -170,13 +177,19 @@ export const Tag = ({
   icon,
   onRemove,
   removeLabel,
+  words: given,
   style: styleProp,
   layout,
 }: TagProps) => {
   const removable = onRemove !== undefined;
-  const words = useWords("tag", tagWords);
+  const words = withGiven(useWords("tag", tagWords, given), {
+    remove: removeLabel,
+  });
+  // The caller's own name for the button (its prop, or this instance's `remove`) is said as it is; else
+  // the catalogue's, from the tag's words when they are text.
+  const own = removeLabel ?? given?.remove;
   const label =
-    removeLabel ??
+    own ??
     (typeof children === "string" ? words.removeNamed(children) : words.remove);
   return (
     <span

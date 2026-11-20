@@ -28,7 +28,7 @@ import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import {
   Item,
   ItemActions,
@@ -171,7 +171,11 @@ const Holders = ({
     <section>
       <SectionHeader layout={styles.head} size="sm" title={title} />
       {holding.length === 0 ? (
-        <Empty size="inline">{t`None.`}</Empty>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`None.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <ItemGroup aria-label={title} separated>
           {holding.map((permission) => (
@@ -308,9 +312,7 @@ export const Disconnect = ({
         <AlertDialogDescription>
           {t`Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again.`}
         </AlertDialogDescription>
-        {failure === undefined ? null : (
-          <Alert title={failure} variant="danger" />
-        )}
+        {failure === undefined ? null : <Alert title={failure} tone="danger" />}
         <AlertDialogFooter>
           <AlertDialogAction>{t`Close`}</AlertDialogAction>
           <AlertDialogAction

@@ -17,6 +17,7 @@ import { KindContext, useSnaps } from "./kind-context";
 import { useStill } from "./still-context";
 import { drawerStyles as styles } from "./styles";
 import { drawerWords } from "./words";
+import type { DrawerWords } from "./words";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
@@ -33,6 +34,12 @@ export interface DrawerContentProps extends Omit<
    * @default "Resize"
    */
   gripLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ resize: "Resize the filters" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<DrawerWords>;
 }
 
 /** What the still panel says it is: low, tall with snap points, or open. */
@@ -46,11 +53,13 @@ const stateOf = (low: boolean, snaps: boolean) => {
 export const DrawerContent = ({
   children,
   gripLabel: gripLabelGiven,
+  words,
   ...rest
 }: DrawerContentProps) => {
-  const { resize: gripLabel } = withGiven(useWords("drawer", drawerWords), {
-    resize: gripLabelGiven,
-  });
+  const { resize: gripLabel } = withGiven(
+    useWords("drawer", drawerWords, words),
+    { resize: gripLabelGiven }
+  );
   const snaps = useSnaps();
   const still = useStill();
   if (still) {

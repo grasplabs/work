@@ -25,7 +25,8 @@ export interface DataTableColumn<Row> {
   /**
    * Its cell holds a small control (a Select, a Switch, a button): the control stands in a box one
    * line of the table's text tall, as the row's menu does, so the row keeps its height at every
-   * density.
+   * density. In a row that opens (`rowHref`, `onRowOpen`) the control stays its own, over the row's
+   * press area.
    * @default false
    */
   control?: boolean;
@@ -37,6 +38,12 @@ export interface DataTableColumn<Row> {
   wrap?: boolean;
   /** Its name can be pressed to sort the rows by it, and again to turn the order over. @default false */
   sortable?: boolean;
+  /**
+   * Its shape while the table is `loading`: `person` waits as a DataTablePerson does, its picture's
+   * circle and two lines (a name and its email), so the row stands as tall as it will.
+   * @default "line"
+   */
+  placeholder?: "line" | "person";
   /** It starts hidden, with the `view` piece; the View menu shows it. @default false */
   hidden?: boolean;
   /** It starts held at the start or the end, with the `pinning` piece. */
@@ -233,12 +240,47 @@ export interface DataTableProps<Row> {
   actions?: readonly DataTableAction[];
   /** What can be done to one row, in a menu at its end. */
   rowActions?: (row: Row) => readonly DataTableRowAction[];
+  /**
+   * Each row opens a page: its address. The lead column's words become a real link, drawn as the
+   * cell's plain text on its column's line, and the whole row is its press area for a pointer; the
+   * row's other controls (its checkbox, its menu, a Switch in a cell) stay their own. Works with
+   * scripts off, and opens in a new tab as any link does. With `stickyFirst` the held lead cell is
+   * its press area, not the whole row. One of `rowHref` and `onRowOpen`.
+   */
+  rowHref?: (row: Row) => string;
+  /**
+   * Each row opens something on this page (a panel): called with the row. The lead column's words
+   * become a button drawn as plain text, the whole row its press area. One of `rowHref` and
+   * `onRowOpen`.
+   */
+  onRowOpen?: (row: Row) => void;
+  /**
+   * The row open now (its panel shows beside the table): said as current, with a quiet fill of its
+   * own. Not the selection, which `selected` keeps.
+   */
+  rowCurrent?: (row: Row) => boolean;
   /** With the `expanding` piece: a detail that opens under a row. */
   detail?: (row: Row) => ReactNode;
   /** With the `expanding` piece: rows of its own that open under a row. */
   subRows?: (row: Row) => readonly Row[] | undefined;
   /** With the `grouping` piece: the column whose values gather the rows, each group counted. */
   groupBy?: string;
+  /**
+   * With the `grouping` piece: the groups closed, by their value, when you keep them in state.
+   * Every other group is open, a new value too. Pair it with `onClosedGroupsChange`; `location`
+   * keeps the same in a link.
+   */
+  closedGroups?: readonly string[];
+  /** With the `grouping` piece: the groups closed at first, by their value, when you do not keep them in state. */
+  defaultClosedGroups?: readonly string[];
+  /** With the `grouping` piece: called with the groups closed, by their value, each time one opens or closes. */
+  onClosedGroupsChange?: (closed: string[]) => void;
+  /**
+   * A row's state, drawn over the whole row and said in words in its first cell: `pending` (someone
+   * invited, not yet here) fades from the row's start to its end; `removed` greys it, pictures
+   * included. The row's actions stay fully seen and usable in both.
+   */
+  rowStatus?: (row: Row) => "pending" | "removed" | undefined;
   /**
    * With the `grouping` piece: a group that asks for attention, by its value ("Needs you"). It tints
    * the group's count, and nothing else, and is said in words with the group's name.
@@ -283,7 +325,7 @@ export interface DataTableProps<Row> {
   filterWords?: Partial<DataTableFilterWords>;
   /**
    * How chosen rows and the head show, where the system's look (Table's `tableLook`: the Data grid's
-   * mint wash and soft head) is not wanted.
+   * mint wash and a plain head on the table's ground) is not wanted.
    */
   appearance?: { range?: TableRangeLook; head?: TableHeadLook };
   /** @deprecated Use `appearance`. */

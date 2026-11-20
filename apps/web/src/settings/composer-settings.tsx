@@ -42,7 +42,7 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
           accent={look.accent}
           activity="working"
           edge={look.edge}
-          failedLabel={t`Not sent`}
+          words={{ failed: t`Not sent` }}
           onSend={() => {
             // Only to look at.
           }}

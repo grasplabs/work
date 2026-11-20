@@ -3,7 +3,7 @@
 "use client";
 
 import type { RowData } from "@tanstack/react-table";
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef } from "react";
 
 import { isSet } from "./filters";
 import type { DataTableView } from "./location";
@@ -13,39 +13,6 @@ import type { Model } from "./use-data-table";
 
 const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
-
-/** The groups closed now, by value: none while every group is open, or with no grouping. */
-const closedOf = <Row extends RowData>(
-  model: Model<Row>,
-  groupBy: string | undefined
-) => {
-  if (
-    !model.flags.grouping ||
-    groupBy === undefined ||
-    model.own.expanded === true
-  ) {
-    return [];
-  }
-  return model.table
-    .getGroupedRowModel()
-    .rows.filter((row) => !row.getIsExpanded())
-    .map((row) => String(row.getGroupingValue(groupBy)));
-};
-
-/** Every group open but the closed ones, by row id, as TanStack keeps it. */
-const openAllBut = <Row extends RowData>(
-  model: Model<Row>,
-  groupBy: string,
-  closed: readonly string[]
-) =>
-  Object.fromEntries(
-    model.table
-      .getGroupedRowModel()
-      .rows.filter(
-        (row) => !closed.includes(String(row.getGroupingValue(groupBy)))
-      )
-      .map((row) => [row.id, true])
-  );
 
 const viewOf = <Row extends RowData>(
   model: Model<Row>,
@@ -94,9 +61,12 @@ const viewOf = <Row extends RowData>(
   if (flags.pinning && start.length + end.length > 0) {
     view.pinned = { start, end };
   }
-  const closed = closedOf(model, props.groupBy);
-  if (closed.length > 0) {
-    view.closed = closed;
+  if (
+    flags.grouping &&
+    props.groupBy !== undefined &&
+    own.closedGroups.length > 0
+  ) {
+    view.closed = [...own.closedGroups];
   }
   return view;
 };
@@ -140,17 +110,13 @@ export const useView = <Row extends RowData>(
     if (flags.pinning && view.pinned !== undefined) {
       own.setPinned(view.pinned);
     }
-    const { groupBy } = props;
-    if (flags.grouping && groupBy !== undefined) {
-      own.setExpanded(
-        view.closed === undefined || view.closed.length === 0
-          ? true
-          : openAllBut(model, groupBy, view.closed)
-      );
+    if (flags.grouping && props.groupBy !== undefined) {
+      own.setClosedGroups(view.closed ?? []);
     }
   });
 
-  useEffect(() => {
+  // Read before the first paint, so a closed group never shows open for a frame.
+  useLayoutEffect(() => {
     if (location !== undefined) {
       apply(location.read());
       readRef.current = "read";

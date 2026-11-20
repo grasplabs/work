@@ -228,8 +228,7 @@ export const PageFailed = ({
         {reference === undefined ? null : (
           <CopyField
             aria-label={t`Reference for support`}
-            copiedLabel={t`Copied`}
-            failedLabel={t`Not copied`}
+            words={{ copied: t`Copied`, failed: t`Not copied` }}
             layout={styles.reference}
             size="sm"
             value={reference}

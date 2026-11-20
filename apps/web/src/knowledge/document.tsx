@@ -6,26 +6,30 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
+import { formatDay } from "../format.ts";
 import { PageHeading } from "../frame/page.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Alert } from "../grasp/alert/index.ts";
-import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Collapsible } from "../grasp/collapsible/index.ts";
-import { Edit } from "../grasp/icons/index.ts";
+import { Doc, Edit } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import { KeyValueList } from "../grasp/key-value/index.ts";
-import { Separator } from "../grasp/separator/index.ts";
-import { Tag } from "../grasp/tag/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { Section, SectionHeader } from "../grasp/section-header/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
-import { documentTypeLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { DocumentMarkdown } from "./markdown.tsx";
 import { saveOrNewer } from "./save.ts";
@@ -35,8 +39,9 @@ import type { ResolveLink } from "./wiki-links.ts";
 // One document, read like a note in the prototype's brain
 // (grasplabs/prototype `routes/brain/$noteId.tsx`): its kind, title and
 // when to use it, then its text, and its history as a timeline below it.
-// Its details (where it is, what it links to and what links to it, its
-// review date) sit beside it, or fold in at its foot on a narrower window. Where the person may change it: an editor, and
+// Its facts (the collection, the file, the version, its review date) stand
+// in a line under its title; what it links to and what links to it, in a
+// small section each under its text. Where the person may change it: an editor, and
 // restoring from its history. Every save names the version it was edited
 // from, so a save that would overwrite one made since, in another tab or
 // by someone else, shows that version instead.
@@ -46,15 +51,6 @@ const styles = stylex.create({
   newer: { display: "flex", flexDirection: "column", gap: grasp.space2 },
   start: { alignSelf: "flex-start" },
   buttons: { display: "flex", flexWrap: "wrap", gap: grasp.space2 },
-  chips: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: grasp.space2,
-    margin: 0,
-    padding: 0,
-    listStyleType: "none",
-  },
-  chip: { minWidth: 0 },
   earlier: {
     display: "flex",
     flexWrap: "wrap",
@@ -70,31 +66,12 @@ const styles = stylex.create({
     gap: grasp.space8,
     boxSizing: "border-box",
     width: "100%",
-    maxWidth: grasp.pageColumnMeasure,
-    marginInline: "auto",
     paddingBlock: grasp.space8,
     paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
   },
   actions: { display: "flex", alignItems: "center", gap: grasp.space2 },
-  // Too narrow for the side: the details fold in at the foot instead.
-  foot: {
-    display: { default: "flex", [media.fromRail]: "none" },
-    flexDirection: "column",
-    gap: grasp.space4,
-  },
-  aside: {
-    display: { default: "none", [media.fromRail]: "flex" },
-    flexDirection: "column",
-    flexShrink: 0,
-    boxSizing: "border-box",
-    width: grasp.inspectorWidth,
-    overflowY: "auto",
-    paddingBlock: grasp.space4,
-    paddingInline: grasp.space5,
-    borderInlineStartWidth: grasp.hairline,
-    borderInlineStartStyle: "solid",
-    borderInlineStartColor: grasp.line,
-  },
+  // The title, and its facts close under it.
+  head: { display: "flex", flexDirection: "column", gap: grasp.space2 },
 });
 
 const Editor = ({
@@ -226,31 +203,6 @@ const fileNameOf = (doc: DocumentRead): string => {
   return name.endsWith(".md") ? name.slice(0, -3) : name;
 };
 
-/** A document another one links to, or that links to it, as a chip. */
-const DocumentChip = ({
-  collectionId,
-  documentId,
-  title,
-}: {
-  collectionId: string;
-  documentId: string;
-  title: string;
-}) => (
-  <Tag size="sm">
-    <RouterLink
-      params={{ collection: collectionId }}
-      search={{ doc: documentId }}
-      to="/knowledge/$collection"
-      variant="standalone"
-    >
-      {title}
-    </RouterLink>
-  </Tag>
-);
-
-/** What a property shows when it has nothing. */
-const none = "–";
-
 /** A document this one links to, by its ID, named as the link names it. */
 interface Linked {
   documentId: string;
@@ -281,79 +233,82 @@ const linksOf = (text: string, resolve: ResolveLink): Linked[] => {
   return [...found].map(([documentId, title]) => ({ documentId, title }));
 };
 
-/** Documents as a row of chips, or a dash for none. */
-const Chips = ({
+/**
+ * The facts under the title, in one quiet line: the collection, the file,
+ * the version and when to review it.
+ */
+const Facts = ({
+  doc,
+  collection,
+}: {
+  doc: DocumentRead;
+  collection: string;
+}) => {
+  const { t } = useLingui();
+  const version = doc.version.number;
+  const review = doc.reviewDate === null ? null : formatDay(doc.reviewDate);
+  return (
+    <Text size="sm" tone="muted">
+      <RouterLink
+        params={{ collection: doc.collectionId }}
+        search={{}}
+        to="/knowledge/$collection"
+        variant="standalone"
+      >
+        {collection}
+      </RouterLink>
+      {` · ${doc.path.split("/").at(-1) ?? doc.path} · `}
+      {t`Version ${version}`}
+      {review === null ? null : ` · ${t`Review by ${review}`}`}
+    </Text>
+  );
+};
+
+/**
+ * Documents as a small section of links to them: what this one
+ * links to, or what links to it. Nothing where there are none.
+ */
+const Related = ({
+  id,
+  title,
   documents,
 }: {
+  id: string;
+  title: string;
   documents: readonly {
     collectionId: string;
     documentId: string;
     title: string;
   }[];
-}) =>
-  documents.length === 0 ? (
-    none
-  ) : (
-    <ul {...stylex.props(styles.chips)}>
-      {documents.map((document) => (
-        <li key={document.documentId} {...stylex.props(styles.chip)}>
-          <DocumentChip
-            collectionId={document.collectionId}
-            documentId={document.documentId}
-            title={document.title}
-          />
-        </li>
-      ))}
-    </ul>
-  );
-
-/** The document's properties: where it is, its version and review, and what uses it. */
-const Properties = ({
-  doc,
-  collection,
-  links,
-  backlinks,
-}: {
-  doc: DocumentRead;
-  collection: string;
-  links: Linked[];
-  backlinks: Backlink[];
 }) => {
-  const { t } = useLingui();
+  if (documents.length === 0) {
+    return null;
+  }
   return (
-    <KeyValueList
-      items={[
-        {
-          key: t`Collection`,
-          value: (
-            <RouterLink
-              params={{ collection: doc.collectionId }}
-              search={{}}
-              to="/knowledge/$collection"
-              variant="standalone"
-            >
-              {collection}
-            </RouterLink>
-          ),
-        },
-        { key: t`Path`, value: doc.path },
-        { key: t`Version`, value: doc.version.number },
-        { key: t`Review by`, value: doc.reviewDate ?? none },
-        {
-          key: t`Links to`,
-          value: (
-            <Chips
-              documents={links.map((link) => ({
-                ...link,
-                collectionId: doc.collectionId,
-              }))}
-            />
-          ),
-        },
-        { key: t`Used by`, value: <Chips documents={backlinks} /> },
-      ]}
-      variant="stacked"
-    />
+    <Section aria-labelledby={id}>
+      <SectionHeader id={id} size="sm" title={title} />
+      {/* Each one has an address: a link, never a button. */}
+      <ItemGroup aria-label={title}>
+        {documents.map((document) => (
+          <Item
+            key={document.documentId}
+            render={
+              <Link
+                params={{ collection: document.collectionId }}
+                search={{ doc: document.documentId }}
+                to="/knowledge/$collection"
+              />
+            }
+            size="sm"
+          >
+            <ItemMedia icon={Doc} iconLook="inline" />
+            <ItemContent>
+              <ItemTitle>{document.title}</ItemTitle>
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
+    </Section>
   );
 };
 
@@ -412,49 +367,47 @@ export const DocumentView = ({
   const [editing, setEditing] = useState(false);
   // An earlier version, opened from the history: read only.
   const earlier = doc.version.number !== doc.currentVersion;
-  const details = (
-    <Properties
-      backlinks={backlinks}
-      collection={collection}
-      doc={doc}
-      links={linksOf(doc.version.text, resolve)}
-    />
-  );
+  const links = linksOf(doc.version.text, resolve).map((link) => ({
+    ...link,
+    collectionId: doc.collectionId,
+  }));
   return (
     <div {...stylex.props(styles.view)}>
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>
-          <PageHeading
-            action={
-              <span {...stylex.props(styles.actions)}>
-                {writable && !editing && !earlier ? (
-                  <Button
-                    icon={Edit}
-                    onClick={() => {
-                      setEditing(true);
+          <div {...stylex.props(styles.head)}>
+            <PageHeading
+              action={
+                <span {...stylex.props(styles.actions)}>
+                  {writable && !editing && !earlier ? (
+                    <Button
+                      icon={Edit}
+                      onClick={() => {
+                        setEditing(true);
+                      }}
+                      size="sm"
+                      variant="quiet"
+                    >
+                      <Trans>Edit</Trans>
+                    </Button>
+                  ) : null}
+                  {actions}
+                  <ExportMenu
+                    file={{
+                      name: fileNameOf(doc),
+                      title: doc.title,
+                      markdown: () => doc.version.text,
                     }}
-                    size="sm"
-                    variant="quiet"
-                  >
-                    <Trans>Edit</Trans>
-                  </Button>
-                ) : null}
-                {actions}
-                <ExportMenu
-                  file={{
-                    name: fileNameOf(doc),
-                    title: doc.title,
-                    markdown: () => doc.version.text,
-                  }}
-                />
-              </span>
-            }
-            {...(doc.description === ""
-              ? {}
-              : { description: doc.description })}
-            meta={<Badge>{documentTypeLabel(doc.type)}</Badge>}
-            title={doc.title}
-          />
+                  />
+                </span>
+              }
+              {...(doc.description === ""
+                ? {}
+                : { description: doc.description })}
+              title={doc.title}
+            />
+            <Facts collection={collection} doc={doc} />
+          </div>
           {earlier ? <EarlierVersion doc={doc} /> : null}
           {editing ? (
             <Editor
@@ -471,16 +424,11 @@ export const DocumentView = ({
               title={doc.title}
             />
           )}
-          <div {...stylex.props(styles.foot)}>
-            <Separator />
-            <Collapsible title={t`Details`}>{details}</Collapsible>
-          </div>
+          <Related documents={links} id="links-to" title={t`Links to`} />
+          <Related documents={backlinks} id="used-by" title={t`Used by`} />
           <Timeline doc={doc} me={me} versions={versions} writable={writable} />
         </div>
       </div>
-      <aside aria-label={t`Details`} {...stylex.props(styles.aside)}>
-        {details}
-      </aside>
     </div>
   );
 };

@@ -24,6 +24,7 @@ import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { wrap } from "../wrap/wrap";
 import { AlertBanner } from "./banner";
 
 export type AlertVariant = "neutral" | "success" | "attention" | "danger";
@@ -118,8 +119,8 @@ const styles = stylex.create({
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
     color: grasp.text,
+    // Hyphenated only when long (src/wrap); a word longer than the line still breaks.
     overflowWrap: "anywhere",
-    hyphens: "auto",
   },
   noIcon: {
     gridTemplateColumns: "minmax(0, 1fr)",
@@ -245,6 +246,7 @@ export const Alert = ({
       role={said === "none" ? undefined : said}
       {...stylex.props(
         styles.alert,
+        wrap.words,
         !quiet && styles[variant],
         quiet && styles.quiet,
         !mark && styles.noIcon,

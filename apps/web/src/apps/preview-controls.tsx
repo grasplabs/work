@@ -1,27 +1,22 @@
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Button } from "../grasp/button/index.ts";
-import {
-  Desktop,
-  External,
-  Phone,
-  Retry,
-  Tablet,
-} from "../grasp/icons/index.ts";
+import { External, Retry } from "../grasp/icons/index.ts";
 import {
   Select,
   SelectContent,
   SelectTrigger,
   SelectValue,
 } from "../grasp/select/index.ts";
-import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
-import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
-// The preview's own controls, in the bar's middle beside the views while
-// the App's preview shows (app-workspace.tsx): how wide it is drawn, a
+// The preview's own controls while the App's preview shows: how wide it
+// is drawn, at the top of the sidebar's section (app-section.tsx), kept in
+// the address (`?width=`); and in the bar's middle (app-workspace.tsx) a
 // Reload, which of the App's pages it shows, and Open in a new tab. A
 // phone has none of them: its bar has no room, and its preview is as wide
 // as the phone; the bar's "…" opens the App full page.
@@ -38,7 +33,12 @@ import { useCoreRead } from "./use-core-read.ts";
 /** How wide the preview is drawn. */
 export type PreviewWidth = "desktop" | "tablet" | "phone";
 
-const widths: readonly PreviewWidth[] = ["desktop", "tablet", "phone"];
+/** The widths, in their order. */
+export const previewWidthOrder: readonly PreviewWidth[] = [
+  "desktop",
+  "tablet",
+  "phone",
+];
 
 const routeFile = /^src\/routes\/(?<route>.+)\.(?:tsx|ts|jsx|js)$/u;
 
@@ -112,6 +112,25 @@ export const useAppPages = (
   return read?.state === "ready" ? pagesOf(read.data) : [];
 };
 
+const styles = stylex.create({
+  // Drawn inline from a phone's width on; one menu below it.
+  inline: {
+    // Beside Share and Publish they give way first, where the bar (item-shell.tsx) narrows.
+    display: { default: "flex", "@container bar (width < 42rem)": "none" },
+    alignItems: "center",
+    gap: grasp.space1,
+  },
+  page: { minWidth: grasp.space24 },
+});
+
+/** How wide the App's preview is drawn, as its address says. */
+export const usePreviewWidth = (): PreviewWidth =>
+  useSearch({
+    from: "/_shell/apps/$app",
+    shouldThrow: false,
+    select: (search) => search.width,
+  }) ?? "desktop";
+
 /**
  * The preview's controls as the workspace holds them: how wide it is
  * drawn, which page it shows, and each Reload, which starts it afresh
@@ -123,7 +142,7 @@ export const usePreviewControls = (
   theirs: boolean,
   draft: { revision: number } | undefined
 ) => {
-  const [width, setWidth] = useState<PreviewWidth>("desktop");
+  const width = usePreviewWidth();
   const [page, setPage] = useState<string>();
   const [reloads, setReloads] = useState(0);
   const pages = useAppPages(
@@ -136,24 +155,12 @@ export const usePreviewControls = (
     pages,
     page,
     onPage: setPage,
-    width,
-    onWidth: setWidth,
     onReload: () => {
       setReloads((before) => before + 1);
     },
   };
   return { controls, width, page, reloads };
 };
-
-const styles = stylex.create({
-  // Drawn inline from a phone's width on; one menu below it.
-  inline: {
-    display: { default: "flex", [media.belowPhone]: "none" },
-    alignItems: "center",
-    gap: grasp.space1,
-  },
-  page: { minWidth: grasp.space24 },
-});
 
 /** The width a preview is drawn at: the token Grasp UI's App preview uses. */
 export const previewWidths = stylex.create({
@@ -170,8 +177,6 @@ export interface PreviewControlsProps {
   /** The page shown; the first while none was picked. */
   page: string | undefined;
   onPage: (page: string) => void;
-  width: PreviewWidth;
-  onWidth: (width: PreviewWidth) => void;
   onReload: () => void;
 }
 
@@ -181,48 +186,18 @@ export const PreviewControls = ({
   pages,
   page,
   onPage,
-  width,
-  onWidth,
   onReload,
 }: PreviewControlsProps) => {
   const { t } = useLingui();
   const shown = page ?? pages[0] ?? "/";
   const href = `${opens}${shown === "/" ? "" : shown}`;
-  const widthLabels: Record<PreviewWidth, string> = {
-    desktop: t`Desktop`,
-    tablet: t`Tablet`,
-    phone: t`Phone`,
-  };
-  const icons = { desktop: Desktop, tablet: Tablet, phone: Phone };
   return (
     <div {...stylex.props(styles.inline)}>
-      <ToggleGroup
-        aria-label={t`Preview width`}
-        onValueChange={(chosen: unknown[]) => {
-          const picked = widths.find((each) => each === chosen[0]);
-          if (picked !== undefined) {
-            onWidth(picked);
-          }
-        }}
-        size="sm"
-        value={[width]}
-      >
-        {widths.map((each) => (
-          <Toggle
-            aria-label={widthLabels[each]}
-            icon={icons[each]}
-            key={each}
-            title={widthLabels[each]}
-            value={each}
-          />
-        ))}
-      </ToggleGroup>
       <Button
         aria-label={t`Reload`}
         icon={Retry}
         onClick={onReload}
         size="sm"
-        title={t`Reload`}
         variant="ghost"
       />
       {pages.length > 1 ? (
@@ -254,7 +229,6 @@ export const PreviewControls = ({
           />
         }
         size="sm"
-        title={t`Open in a new tab`}
         variant="ghost"
       />
     </div>

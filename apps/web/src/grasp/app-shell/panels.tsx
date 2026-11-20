@@ -147,6 +147,9 @@ const styles = stylex.create({
     // what it holds (card-line.tsx), so a head's ground never covers it; the card is its box.
     position: "relative",
     [cardLine.width]: grasp.hairline,
+    // A Composer at the panels' foot (the chat's box) cuts its corner no deeper than this card's
+    // round it (F29): the one row's 24px squircle cut in 5.4px against the card's 4.97px.
+    "--grasp-composer-corner": grasp.shellPanelComposerCorner,
   },
   headLine: {
     position: "absolute",

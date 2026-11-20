@@ -17,7 +17,7 @@ import { useId } from "react";
 import { formatDateTime, formatList } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { Badge } from "../grasp/badge/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   FactRow,
@@ -179,7 +179,11 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
   if (versions.length === 0) {
     return (
       <SectionCard aria-label={t`Versions`} density="compact" flush>
-        <Empty size="inline">{t`Nothing is published yet.`}</Empty>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`Nothing is published yet.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </SectionCard>
     );
   }

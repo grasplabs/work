@@ -349,14 +349,15 @@ const Toggle = ({
   disabled: boolean;
   onChange: (checked: boolean) => void;
 }) => (
-  <Switch
-    checked={checked}
-    disabled={disabled}
-    label={label}
-    onCheckedChange={(next) => {
-      onChange(next);
-    }}
-  />
+  <Field orientation="horizontal" disabled={disabled}>
+    <FieldLabel>{label}</FieldLabel>
+    <Switch
+      checked={checked}
+      onCheckedChange={(next) => {
+        onChange(next);
+      }}
+    />
+  </Field>
 );
 
 /**

@@ -5,8 +5,9 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { AgentPage, agentTabOf } from "../agents/agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "../agents/agent-page.tsx";
 import type { Session } from "../core.ts";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { Agent as AgentMark } from "../grasp/icons/index.ts";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 import { readManaged } from "./_shell.agents.index.tsx";
@@ -84,8 +85,25 @@ const AgentRoutePage = () => {
   );
 };
 
+/**
+ * An agent's page before it arrives: its crumbs, then the library's
+ * settings skeleton as its Overview stands, the Details card's seven rows
+ * and Recent activity's one.
+ */
+const AgentLoading = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <SiteHeader
+        crumbs={[{ label: t`Agents`, to: "/agents" }, { label: t`Agent` }]}
+      />
+      <PageSkeletonSettings sections={[7, 1]} />
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/agents/$agent")({
-  pendingComponent: PageLoading,
+  pendingComponent: AgentLoading,
   component: AgentRoutePage,
   validateSearch: (
     search: Record<string, unknown>

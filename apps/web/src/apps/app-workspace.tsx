@@ -72,7 +72,7 @@ import type {
   PreviewControlsProps,
   PreviewWidth,
 } from "./preview-controls.tsx";
-import { ChangesLine, ShareWithTeam, showsChangesLine } from "./publish.tsx";
+import { ChangesLine, ShareAndPublish, showsChangesLine } from "./publish.tsx";
 import { hasChanges, useAppDraft } from "./use-app-draft.ts";
 import { readTables, useAppRead } from "./use-app-read.ts";
 import { useCoreRead } from "./use-core-read.ts";
@@ -87,8 +87,8 @@ const AppCode = lazy(async () => {
 // address (/apps/$app): its people get the App itself there. One bar, the
 // App's (frame/item-shell.tsx): back to the Apps, its name and where it
 // stands in plain words ("Only you see this", or who uses it), the
-// preview's own controls, "…" and Share with your team, the page's one
-// main action (publish.tsx). What the main area shows (the App, Code,
+// preview's own controls, "…", Share, and Publish, the page's one main
+// action (publish.tsx). What the main area shows (the App, Code,
 // Data, Settings' sections) are rows of the sidebar's section, the App's
 // while its workspace is open (app-section.tsx). The main area
 // always shows the App: an App with no page yet asks what it should do
@@ -109,10 +109,11 @@ const AppCode = lazy(async () => {
 // about this App (chat/chat-subject.ts): the App's chat, docked open
 // beside the workspace.
 //
-// Sharing is what gives the team the changes: Share with your team asks
-// who gets it and shares the changes with them in one step; once shared,
-// a line under the bar says how many changes only its builders see, with
-// Share changes and Undo (publish.tsx). The chat's agent never shares.
+// Publishing is what gives the team the changes, and sharing is who the
+// team is: Share asks who gets the App, Publish says where it stands and
+// makes the changes live; once shared and live, a line under the bar says
+// how many changes only its builders see, with Undo (publish.tsx). The
+// chat's agent never publishes or shares.
 // History, in Settings, steps the changes back and goes back to an
 // earlier version (app-history.tsx); its Preview opens an undo point or a
 // version here, read-only (`?point=`, `?version=`).
@@ -208,16 +209,20 @@ const styles = stylex.create({
 });
 
 /**
- * The rest, under "…": the App's own link, what its team sees (here, and
- * at full size), and its chat on Chat.
+ * The rest, under "…": the App's own link where Publish doesn't hold it
+ * (`linked`), what its team sees (here, and at full size), and its chat
+ * on Chat.
  */
 const MoreMenu = ({
   app,
   chatId,
   changing,
+  linked,
 }: {
   app: App;
   chatId: string | undefined;
+  /** Whether the link is set from here: not while Publish's popover sets it. */
+  linked: boolean;
   /** Whether there are changes only its builders see, which the workspace shows. */
   changing: boolean;
 }) => {
@@ -230,7 +235,7 @@ const MoreMenu = ({
       <DropdownMenu>
         <DropdownMenuTrigger aria-label={t`More`} icon={More} variant="ghost" />
         <DropdownMenuContent align="end">
-          {app.archived ? null : (
+          {app.archived || !linked ? null : (
             <DropdownMenuItem
               icon={LinkIcon}
               onSelect={() => {
@@ -284,7 +289,7 @@ const MoreMenu = ({
   );
 };
 
-/** The workspace's bar: the App's one bar, with its views and Share with your team. */
+/** The workspace's bar: the App's one bar, with the preview's controls, Share and Publish. */
 const WorkspaceBar = ({
   app,
   back,
@@ -293,7 +298,6 @@ const WorkspaceBar = ({
   draft,
   members,
   running = false,
-  pending = false,
   settingUp = false,
   chatId,
   onShared,
@@ -311,16 +315,15 @@ const WorkspaceBar = ({
   members: readonly AppMember[] | undefined;
   /** Whether the chat's agent is at work on it, or checking it. */
   running?: boolean;
-  /** Whether it is shared and has changes only its builders see. */
-  pending?: boolean;
   /** Whether Grasp sets up a new App still (`SetUp`): its name alone, and Share off. */
   settingUp?: boolean;
   /** The App's chat; none while it is found, or for an archived App. */
   chatId?: string | undefined;
-  /** Told once it was shared from here. */
+  /** Told once it was shared or published from here. */
   onShared?: () => void;
 }) => {
   const { archived } = app;
+  const shares = sharesApp(app, identity);
   if (settingUp) {
     return <SettingUpBar back={back} name={app.name} />;
   }
@@ -328,13 +331,22 @@ const WorkspaceBar = ({
     <ItemBar
       actions={
         <>
-          <MoreMenu app={app} changing={hasChanges(draft)} chatId={chatId} />
-          {sharesApp(app, identity) ? (
-            <ShareWithTeam
+          {/* The preview's own controls stand with the actions, never on a
+              row of their own: they give way first where the bar narrows. */}
+          {view === "preview" && preview !== undefined ? (
+            <PreviewControls {...preview} />
+          ) : null}
+          <MoreMenu
+            app={app}
+            changing={hasChanges(draft)}
+            chatId={chatId}
+            linked={!shares}
+          />
+          {shares ? (
+            <ShareAndPublish
               app={app}
               draft={draft}
               members={members ?? []}
-              pending={pending}
               running={running}
               {...(onShared === undefined ? {} : { onShared })}
             />
@@ -348,14 +360,6 @@ const WorkspaceBar = ({
           <StatusBadge app={app} who={userNames(members ?? [])} />
         )
       }
-      // In the bar's middle, which goes to a row of its own where the bar
-      // is too narrow for it beside the rest; there the views fold to one
-      // button where even that row is too narrow (Grasp UI's TabsNav).
-      // The App's views are rows of the sidebar's section (app-section
-      // .tsx); the bar's middle holds the preview's own controls.
-      {...(view === "preview" && preview !== undefined
-        ? { views: <PreviewControls {...preview} /> }
-        : {})}
     />
   );
 };
@@ -1132,7 +1136,6 @@ const Building = ({
           identity={identity}
           members={members}
           onShared={reread}
-          pending={changesLine}
           preview={controls}
           running={busy}
           settingUp={settingUp}

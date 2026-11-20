@@ -177,6 +177,21 @@ export interface DataTableWords {
    */
   groupAttention: string;
   /**
+   * A date column's cell with no date, said where its dash shows.
+   * @default No date
+   */
+  noDate: string;
+  /**
+   * Said after a pending row's name (`rowStatus`): ", pending".
+   * @default pending
+   */
+  rowPending: string;
+  /**
+   * Said after a removed row's name (`rowStatus`): ", removed".
+   * @default removed
+   */
+  rowRemoved: string;
+  /**
    * No rows yet: "No reports yet."
    * @default No {many} yet.
    */
@@ -259,6 +274,9 @@ export const englishWords: DataTableWords = {
   open: (name) => `Open ${name}`,
   close: (name) => `Close ${name}`,
   groupAttention: "needs attention",
+  noDate: "No date",
+  rowPending: "pending",
+  rowRemoved: "removed",
   noneYet: (many) => `No ${many} yet.`,
   noMatch: (many, query) => `No ${many} match “${query}”.`,
   noneMeet: (many) => `No ${many} meet the filter.`,

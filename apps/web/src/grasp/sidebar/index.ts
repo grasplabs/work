@@ -8,6 +8,7 @@ export type {
   SidebarRow,
   SidebarMore,
   SidebarSection,
+  SidebarSectionViews,
   SidebarSubRow,
   SidebarTab,
 } from "./sidebar";

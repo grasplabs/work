@@ -34,8 +34,7 @@ export const OfferSwitch = ({
             checked={integration.offered}
             disabled={staff}
             failedLabel={t`Couldn't save`}
-            label={t`Offered to your organization`}
-            labelHidden
+            aria-label={t`Offered to your organization`}
             onSave={async (offered) => {
               let saved = false;
               await change(async (session) => {

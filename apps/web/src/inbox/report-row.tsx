@@ -1,13 +1,16 @@
 import type { BoardReport } from "@grasp-os/shared/dashboard";
 import type { Programme } from "@grasp-os/shared/onboarding";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Await, useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 
 import { formatDayMonth } from "../format.ts";
+import { ArtifactViewer } from "../grasp/artifact-viewer/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Download, File, Pdf } from "../grasp/icons/index.ts";
+import { File, Pdf } from "../grasp/icons/index.ts";
 import {
   Item,
   ItemContent,
@@ -18,42 +21,78 @@ import {
 } from "../grasp/item/index.ts";
 import {
   Sheet,
-  SheetBody,
   SheetContent,
   SheetFooter,
   SheetTitle,
 } from "../grasp/sheet/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { ReportView } from "./report-view.tsx";
 
 // The weekly report as an item in the Inbox: it stands at the head of the
-// list on the day the report on the week that closed is ready. Opening it
-// shows the report (report-view.tsx), in a Sheet until the library's
-// artifact viewer is installed, to download as the page itself, its fonts
-// carried in it, or as a PDF through print.
+// list on the day the report on the week that closed is ready, and on every
+// other day as a quiet row at the list's foot, opening the week so far. Opening it
+// shows the report in the library's artifact viewer, as the file it is: the
+// report's page (report-view.tsx) is drawn out of sight, read into one HTML
+// file with its styles and fonts carried in it, and that file is what the
+// viewer shows and downloads. Save as PDF prints the same file.
 
 const styles = stylex.create({
-  sheet: {
-    borderRadius: grasp.corner,
-    overflow: "hidden",
+  // The viewer has what the sheet has between its title and its foot.
+  viewer: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gridTemplateRows: "minmax(0, 1fr)",
+    placeItems: "center",
+    flexGrow: 1,
+    minHeight: 0,
+    paddingBlockStart: grasp.space4,
+    paddingInline: grasp.space6,
+  },
+  // The report's page, drawn only to be read into the file: laid out at its
+  // own width so its charts measure and draw, never seen or reached.
+  source: {
+    position: "fixed",
+    insetBlockStart: 0,
+    insetInlineStart: "-200vw",
+    width: "48rem",
+    visibility: "hidden",
+    pointerEvents: "none",
   },
 });
 
 /** How many bytes go to `String.fromCodePoint` at once: well under any engine's argument limit. */
 const CHUNK = 8192;
 
-/** A font file the page loads, as data, so the file carries it. */
-const asData = async (url: string): Promise<string> => {
-  const response = await fetch(url);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  let binary = "";
-  for (let at = 0; at < bytes.length; at += CHUNK) {
-    binary += String.fromCodePoint(...bytes.subarray(at, at + CHUNK));
+/**
+ * A font file the page loads, as data, so the file carries it; none when it
+ * can't be read, and the file then names the font by its address.
+ */
+const asData = async (url: string): Promise<string | undefined> => {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return undefined;
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    let binary = "";
+    for (let at = 0; at < bytes.length; at += CHUNK) {
+      binary += String.fromCodePoint(...bytes.subarray(at, at + CHUNK));
+    }
+    const type = response.headers.get("content-type") ?? "font/woff2";
+    return `data:${type};base64,${btoa(binary)}`;
+  } catch {
+    return undefined;
   }
-  const type = response.headers.get("content-type") ?? "font/woff2";
-  return `data:${type};base64,${btoa(binary)}`;
+};
+
+/** The next frame the browser draws. */
+const nextFrame = async (): Promise<number> => {
+  const { promise, resolve } = Promise.withResolvers<number>();
+  requestAnimationFrame(resolve);
+  return await promise;
 };
 
 /** Every font file the page's styles name, by its address. */
@@ -202,7 +241,54 @@ const snapshot = async (page: HTMLElement, title: string): Promise<string> => {
   return `<!doctype html><html lang="${root.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>${title}</title><style>${css}\n:root{color-scheme:light dark}</style></head><body>${page.outerHTML}</body></html>`;
 };
 
-/** The report, made of the library's parts, with its downloads. */
+/** The report's file, read from its page once the company's name is in and the charts have drawn. */
+const useReportFile = (
+  week: number
+): {
+  company: string;
+  page: RefObject<HTMLDivElement | null>;
+  html: string | undefined;
+} => {
+  const core = useCore();
+  // Null until read; empty when it can't be: the report then names no company.
+  const [company, setCompany] = useState<string | null>(null);
+  const [html, setHtml] = useState<string>();
+  const page = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const organization = await core.withSession(
+          async (session) => await session.organization.get()
+        );
+        setCompany(organization.name);
+      } catch {
+        setCompany("");
+      }
+    })();
+  }, [core]);
+  useEffect(() => {
+    const drawn = page.current;
+    let stale = false;
+    const read = async (from: HTMLElement, title: string) => {
+      // The charts measure their box in one frame and draw in the next.
+      await nextFrame();
+      await nextFrame();
+      const file = await snapshot(from, title);
+      if (!stale) {
+        setHtml(file);
+      }
+    };
+    if (company !== null && drawn !== null) {
+      void read(drawn, `${company} week ${week}`.trim());
+    }
+    return () => {
+      stale = true;
+    };
+  }, [company, week]);
+  return { company: company ?? "", page, html };
+};
+
+/** The report in the artifact viewer, which downloads it, and Save as PDF. */
 const ReportArtifact = ({
   report,
   programme,
@@ -211,54 +297,45 @@ const ReportArtifact = ({
   programme: Programme;
 }) => {
   const { t } = useLingui();
-  const core = useCore();
-  const [company, setCompany] = useState("");
-  const page = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    void core.withSession(async (session) => {
-      const organization = await session.organization.get();
-      setCompany(organization.name);
-    });
-  }, [core]);
-  const name = `${company} week ${programme.week}`.trim();
-  const file = async (): Promise<string> =>
-    page.current === null ? "" : await snapshot(page.current, name);
+  const { week } = programme;
+  const { company, page, html } = useReportFile(week);
   return (
     <>
-      <SheetBody>
-        {/* The artifact viewer stands round it once it is installed. */}
-        <div {...stylex.props(styles.sheet)}>
-          <ReportView
-            company={company}
-            programme={programme}
-            ref={page}
-            report={report}
+      <div aria-hidden inert {...stylex.props(styles.source)}>
+        <ReportView
+          company={company}
+          programme={programme}
+          ref={page}
+          report={report}
+        />
+      </div>
+      <div {...stylex.props(styles.viewer)}>
+        {html === undefined ? (
+          <Spinner aria-label={t`Loading the report`} size="lg" />
+        ) : (
+          // No scripts: the report is a still page. Its place is not in the
+          // address: the sheet is no place a link leads to.
+          <ArtifactViewer
+            location="none"
+            // Named by the week it is on, the one that closed, as its row and the sheet say.
+            name={`weekly-report-week-${String(programme.nextReport.week).padStart(2, "0")}.html`}
+            text={html}
+            type="text/html"
           />
-        </div>
-      </SheetBody>
+        )}
+      </div>
       <SheetFooter>
         <Button
-          icon={Download}
-          onClick={async () => {
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(
-              new Blob([await file()], { type: "text/html" })
-            );
-            link.download = `${name}.html`;
-            link.click();
-            URL.revokeObjectURL(link.href);
-          }}
-          variant="quiet"
-        >
-          {t`Download page`}
-        </Button>
-        <Button
+          disabled={html === undefined}
           icon={Pdf}
-          onClick={async () => {
+          onClick={() => {
+            if (html === undefined) {
+              return;
+            }
             // Printed from a frame of its own, so only the report is on the paper.
             const frame = document.createElement("iframe");
             frame.hidden = true;
-            frame.srcdoc = await file();
+            frame.srcdoc = html;
             frame.addEventListener("load", () => {
               frame.contentWindow?.print();
               setTimeout(() => {
@@ -288,9 +365,17 @@ export const ReportItem = ({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const { nextReport: next, today } = programme;
-  const { week } = next;
+  const { week, inDays } = next;
   const day = formatDayMonth(today);
-  const title = t`Your report on week ${week} is ready`;
+  // On the day a week closes, its report is ready; on any other day the
+  // row opens the week so far, and says when the report is ready.
+  const ready = inDays === 0;
+  const title = ready
+    ? t`Your report on week ${week} is ready`
+    : t`Week ${week} so far`;
+  const detail = ready
+    ? t`Report · ${day}`
+    : t`Next report ${plural(inDays, { one: "tomorrow", other: "in # days" })}`;
   return (
     <>
       <ItemGroup aria-label={t`Your weekly report`}>
@@ -313,11 +398,11 @@ export const ReportItem = ({
           <ItemMedia icon={File} iconLook="inline" />
           <ItemContent>
             <ItemTitle>{title}</ItemTitle>
-            <ItemDescription>{t`Report · ${day}`}</ItemDescription>
+            <ItemDescription>{detail}</ItemDescription>
           </ItemContent>
         </Item>
       </ItemGroup>
-      <Sheet onOpenChange={setOpen} open={open} size="wide">
+      <Sheet onOpenChange={setOpen} open={open} size="full">
         <SheetContent>
           <SheetTitle>{t`Week ${week}`}</SheetTitle>
           <Await promise={report}>

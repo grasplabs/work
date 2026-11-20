@@ -26,6 +26,7 @@ import { focus } from "../focus/focus";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { wrap } from "../wrap/wrap";
 import { cardLinkMarker, cardVars } from "./markers.stylex";
 
 /** What a caller may style: where the card sits and how wide it is. Never its look. */
@@ -111,7 +112,6 @@ const styles = stylex.create({
     color: grasp.text,
     fontFamily: grasp.fontSans,
     overflowWrap: "anywhere",
-    hyphens: "auto",
   },
   raised: { backgroundColor: grasp.raised },
   // A panel lies in the page: its edge, no lift.
@@ -212,6 +212,7 @@ export const Card = ({
       aria-labelledby={labelledBy}
       {...stylex.props(
         styles.card,
+        wrap.words,
         styles[ground],
         styles[padding],
         fill && styles.fill,
@@ -284,6 +285,7 @@ export const CardLink = ({
       className: stylex.props(
         cardLinkMarker,
         styles.card,
+        wrap.words,
         styles[variant],
         styles[padding],
         styles.link,

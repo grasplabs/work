@@ -43,6 +43,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
 import {
   CalendarIcon,
   Conversation,
@@ -87,7 +88,7 @@ import {
 } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
 import type { Part, Typed } from "./agent-form.tsx";
-import { AgentWakes } from "./agent-wakes.tsx";
+import { AgentWakes, useLast } from "./agent-wakes.tsx";
 
 // One agent's page, for the company's admins, on Grasp UI: its Page
 // header holds the agent (picture, name, what it is for, whether it is
@@ -248,7 +249,7 @@ const Facts = ({
   const next = nextWakeAt(wakes);
   const nextMoment = next === undefined ? "" : moment(next);
   return (
-    <SectionCard density="compact" flush title={t`Details`}>
+    <SectionCard variant="grouped" density="compact" flush title={t`Details`}>
       <SettingsRows>
         <FactRow label={t`What it is for`}>
           {agent.job === "" ? t`No job written yet` : agent.job}
@@ -286,6 +287,7 @@ const RecentActivity = ({
 }) => {
   const { t } = useLingui();
   const moment = useMoment();
+  const lastLine = useLast();
   const ran = wakes
     .flatMap((wake) =>
       wake.lastAt === null ? [] : [{ ...wake, lastAt: wake.lastAt }]
@@ -293,9 +295,18 @@ const RecentActivity = ({
     .toSorted((a, b) => b.lastAt.localeCompare(a.lastAt));
   const asked = usage?.lastAt ?? null;
   return (
-    <SectionCard density="compact" flush title={t`Recent activity`}>
+    <SectionCard
+      variant="grouped"
+      density="compact"
+      flush
+      title={t`Recent activity`}
+    >
       {ran.length === 0 && asked === null ? (
-        <Empty size="inline">{t`Nothing yet. What it does shows here.`}</Empty>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`Nothing yet. What it does shows here.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <ItemGroup separated>
           {asked === null ? null : (
@@ -313,9 +324,7 @@ const RecentActivity = ({
               <ItemContent>
                 <ItemTitle>{wake.opening}</ItemTitle>
                 <ItemDescription>
-                  {wake.lastOutcome === null
-                    ? moment(wake.lastAt)
-                    : `${moment(wake.lastAt)} · ${wake.lastOutcome}`}
+                  {lastLine(wake) ?? moment(wake.lastAt)}
                 </ItemDescription>
               </ItemContent>
             </Item>
@@ -354,7 +363,7 @@ const Access = ({
     // Core didn't say, as it won't for Grasp's staff: said, never left
     // blank or shown as anyone's.
     return (
-      <Empty size="section" tone="danger">
+      <Empty size="md" tone="danger">
         <EmptyHeader>
           <EmptyTitle>{t`Access isn't shown`}</EmptyTitle>
           <EmptyDescription>
@@ -366,11 +375,18 @@ const Access = ({
   }
   return (
     <>
-      <SectionCard density="compact" flush title={t`Who may use it`}>
+      {/* A card per topic, each titled (Damsko's settings pattern); the
+          row doesn't name the agent again under the page's title. */}
+      <SectionCard
+        variant="grouped"
+        density="compact"
+        flush
+        title={t`Who may use it`}
+      >
         <SettingsRows>
           <SettingRow
             info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
-            label={t`${name} answers`}
+            label={t`Answers`}
           >
             {() => (
               <AudienceControl
@@ -395,6 +411,7 @@ const Access = ({
         </SettingsRows>
       </SectionCard>
       <SectionCard
+        variant="grouped"
         density="compact"
         flush
         info={t`Each as the company has it, or for fewer people. Never more.`}
@@ -509,6 +526,7 @@ const DeleteAgent = ({
   const { t } = useLingui();
   return (
     <SectionCard
+      variant="grouped"
       density="compact"
       actions={
         <AlertDialog>
@@ -653,16 +671,17 @@ export const AgentPage = ({
       <PageHeader
         actions={
           <div {...stylex.props(styles.actions)}>
-            <Switch
-              checked={on}
-              disabled={!can}
-              label={t`On`}
-              onCheckedChange={(next) => {
-                void change(async (session) => {
-                  await session.connections.setAgentPaused(agent.id, !next);
-                });
-              }}
-            />
+            <Field orientation="horizontal" disabled={!can}>
+              <FieldLabel>{t`On`}</FieldLabel>
+              <Switch
+                checked={on}
+                onCheckedChange={(next) => {
+                  void change(async (session) => {
+                    await session.connections.setAgentPaused(agent.id, !next);
+                  });
+                }}
+              />
+            </Field>
             <EditAgent
               agent={agent}
               can={can}
@@ -708,6 +727,7 @@ export const AgentPage = ({
       >
         {/* No title: the side nav says "Instructions" already. */}
         <SectionCard
+          variant="grouped"
           aria-label={t`Instructions`}
           density="compact"
           footer={

@@ -3,9 +3,12 @@
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { mergeProps } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import {
+  createContext,
   createElement,
   isValidElement,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -24,10 +27,12 @@ import { layoutOf } from "../layout/layout";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { useWords } from "../words/words";
+import { useWords, withGiven } from "../words/words";
 import { useFoldKeys } from "./fold-keys";
-import { SidebarNav } from "./nav";
-import type { SidebarFilter } from "./nav";
+import { guideVars } from "./guide.stylex";
+import { LoadingNav } from "./loading";
+import { SidebarNav, pathOf } from "./nav";
+import type { GuidePlace, SidebarFilter } from "./nav";
 import { groupsOf } from "./parts";
 import { SidebarProfile } from "./profile";
 import type { SidebarProfileProps } from "./profile";
@@ -44,9 +49,14 @@ import {
   useSwap,
 } from "./section";
 import type { SidebarBack, SidebarTab } from "./section";
-import { useSidebarInShell } from "./shell";
+import {
+  SidebarGivenWords,
+  useSidebarGivenWords,
+  useSidebarInShell,
+} from "./shell";
 import type { SidebarInShell } from "./shell";
 import { sidebarWords } from "./words";
+import type { SidebarWords } from "./words";
 
 /**
  * One of a row's own rows, under its name: a link to a page within it. With `actions` it has three
@@ -143,6 +153,12 @@ export interface SidebarGroupEntry {
   label?: string;
   /** Its rows, in order. */
   rows: readonly SidebarRow[];
+  /**
+   * Its own content in place of the rows, under its label: a Tree of what the section holds, with
+   * branches that open and close. Its rows are then left out (give `rows: []`); it is not filtered,
+   * and stands as it is while the filter holds words.
+   */
+  content?: ReactNode;
   /** What its fold is kept under in `storageKey`. @default its label */
   id?: string;
   /** Its label is a button that folds the rows away and opens them again. Needs a `label`. */
@@ -175,6 +191,19 @@ export interface SidebarSection {
   mark?: ReactNode;
   /** The Back row at the top: a link to the parent or the last main page. */
   back: SidebarBack;
+  /**
+   * The section's own first page, as a router's link (`<Link to="/brain" />`): its name is then
+   * drawn above Back as a press of its own, one raised segment in the main list's tabs' track, so
+   * the section reads apart from what every page shares. Without it, the name is a heading under Back.
+   */
+  home?: RenderProp;
+  /** `home`'s page is the one open: it says so (`aria-current`). */
+  homeCurrent?: boolean;
+  /**
+   * Views of the section's page, under its name, in the same switch as the main list's tabs (an
+   * App's preview: Desktop, Tablet, Phone). They switch what the page shows, not the rows.
+   */
+  views?: SidebarSectionViews;
   /** Its rows, in runs, top to bottom, as the main list's `groups`. */
   groups: readonly SidebarGroupEntry[];
   /** Where its groups' folds are kept in localStorage, apart from the main list's. */
@@ -184,6 +213,21 @@ export interface SidebarSection {
 }
 
 export type { SidebarBack, SidebarTab } from "./section";
+
+/** A section's views (SidebarSection's `views`): what its page shows, chosen in the sidebar. */
+export interface SidebarSectionViews {
+  /** What the views are of ("Preview width"), as a screen reader says it. */
+  label: string;
+  /**
+   * The views, as the main list's tabs. From three, each with an icon, only the icons show: each
+   * view's words are its name and its tooltip.
+   */
+  tabs: readonly SidebarTab[];
+  /** The view shown: one of the tabs' `value`. */
+  value: string;
+  /** Runs with the view chosen. */
+  onChange: (value: string) => void;
+}
 
 /** What a caller may style: where the sidebar sits and how tall it is. Never its look or width. */
 export type SidebarLayoutStyle = LayoutStyle;
@@ -324,8 +368,27 @@ export interface SidebarProps {
    * @default "Views"
    */
   tabsLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ search: "Find a chat" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<SidebarWords>;
   /** One quiet sentence where the rows would be, when the list has none ("Nothing needs you yet"). */
   empty?: string;
+  /**
+   * The rows are not there yet (the first paint of a reload, before the data): the list draws quiet
+   * bars in the rows' own boxes, the same shapes every time, and is said as busy. The head, the
+   * width and the foot stay as they are, so nothing moves when the rows arrive.
+   * @default false
+   */
+  loading?: boolean;
+  /**
+   * The tree guide on nested rows (a row's own rows, and a folding group's): a stem from the head
+   * with a rounded branch into each row. Opt-in: off unless `true` (Ruben, 18 November).
+   * @default false
+   */
+  guides?: boolean;
   /** @deprecated Use `layout`. */
   style?: SidebarLayoutStyle;
   /** Layout only: where it sits and how tall it is. */
@@ -339,6 +402,12 @@ const PEEK_AFTER = 120;
 
 /** How long the pointer may be off the peeking sidebar before it goes, in ms. */
 const LEAVE_AFTER = 240;
+
+// The tree guide's measures: the middle of a row's name line, the room from the stem to a step before
+// the words, and the elbow, no larger than that room.
+const NAME_LINE = `calc(${grasp.shellRowBlock} + ${grasp.textSmLine} / 2)`;
+const RUN = `calc(${guideVars.words} - ${grasp.space1} - ${guideVars.stem})`;
+const ELBOW = `min(${guideVars.radius}, ${RUN})`;
 
 const HOVER = media.hover;
 const COARSE = media.coarse;
@@ -748,6 +817,7 @@ const styles = stylex.create({
     listStyle: "none",
   },
   sub: { marginBlockStart: grasp.shellRowGap },
+  nested: { position: "relative" },
   row: {
     position: "relative",
     display: "flex",
@@ -802,6 +872,78 @@ const styles = stylex.create({
   subRow: {
     paddingInlineStart: `calc(${grasp.shellRowInline} + ${grasp.shellIcon} + ${grasp.shellIconGap})`,
   },
+  guideStem: {
+    position: "absolute",
+    insetInlineStart: guideVars.stem,
+    insetBlockStart: `calc(-1 * ${grasp.shellRowGap})`,
+    height: {
+      default: `calc(${grasp.shellRowGap} + ${NAME_LINE} - ${ELBOW})`,
+      [COARSE]: `calc(${grasp.shellRowGap} + ${grasp.tap} / 2 - ${ELBOW})`,
+    },
+    width: 0,
+    borderInlineStartWidth: guideVars.stroke,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: { default: guideVars.line, [FORCED]: "GrayText" },
+    pointerEvents: "none",
+  },
+  // Below the branch, to the row's foot: the stem carries on to the next row.
+  guideStemOn: {
+    position: "absolute",
+    insetInlineStart: guideVars.stem,
+    insetBlockStart: {
+      default: `calc(${NAME_LINE} - ${ELBOW})`,
+      [COARSE]: `calc(${grasp.tap} / 2 - ${ELBOW})`,
+    },
+    insetBlockEnd: 0,
+    width: 0,
+    borderInlineStartWidth: guideVars.stroke,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: { default: guideVars.line, [FORCED]: "GrayText" },
+    pointerEvents: "none",
+  },
+  guideBranch: {
+    position: "absolute",
+    insetInlineStart: guideVars.stem,
+    insetBlockStart: {
+      default: `calc(${NAME_LINE} - ${ELBOW})`,
+      [COARSE]: `calc(${grasp.tap} / 2 - ${ELBOW})`,
+    },
+    boxSizing: "border-box",
+    height: ELBOW,
+    width: RUN,
+    borderInlineStartWidth: guideVars.stroke,
+    borderBlockEndWidth: guideVars.stroke,
+    borderStyle: "solid",
+    borderColor: { default: guideVars.line, [FORCED]: "GrayText" },
+    borderBlockStartColor: "transparent",
+    borderInlineEndColor: "transparent",
+    borderEndStartRadius: ELBOW,
+    pointerEvents: "none",
+  },
+  // Where the stem carries on past a row, the elbow leaves the stem's own column to the stem: the
+  // guide's colour is see-through, and the curve's first, nearly upright stretch laid over the stem
+  // drew a darker run at every row. Cut out of the elbow, the column is the stem's alone: one layer
+  // everywhere, over the ground and over a hovered or current row alike. The last row has no stem
+  // below its elbow, and keeps its whole curve.
+  guideBranchCut: {
+    clipPath: {
+      default: `inset(0 0 0 ${guideVars.stroke})`,
+      ":dir(rtl)": `inset(0 ${guideVars.stroke} 0 0)`,
+    },
+  },
+  // The path down to the current row, in `path` (the line's colour unless a host sets it).
+  guidePath: {
+    borderInlineStartColor: { default: guideVars.path, [FORCED]: "GrayText" },
+  },
+  guideBranchPath: {
+    borderColor: { default: guideVars.path, [FORCED]: "GrayText" },
+    borderBlockStartColor: "transparent",
+    borderInlineEndColor: "transparent",
+  },
+  // A folding group's rows with icons stand space-3 in from its label: the stem stands at the
+  // label's edge, and the branch runs to the icon.
+  guideInGroup: { [guideVars.stem]: `calc(-1 * ${grasp.space3})` },
+  guideNoIcon: { marginInlineStart: `calc(-1 * ${grasp.space3})` },
   // Where the person is. In forced colours the fill is dropped, so a border marks it.
   current: {
     color: grasp.shellText,
@@ -1182,7 +1324,7 @@ const RowWorking = ({
   label: string | undefined;
   slot: boolean;
 }) => {
-  const words = useWords("sidebar", sidebarWords);
+  const words = useWords("sidebar", sidebarWords, useSidebarGivenWords());
   if (working !== true) {
     return null;
   }
@@ -1277,25 +1419,102 @@ const RowLink = ({
 );
 
 /** A group's last, quiet row, to all of its kind ("All chats"). */
-const MoreRow = ({ more, item }: { more: SidebarMore; item: boolean }) => {
+/** A nested row's part of the tree guide: the stem to its branch, the branch, and the stem on to the next row. */
+const Guide = ({
+  last,
+  path,
+}: {
+  last: boolean;
+  path: "above" | "at" | "off";
+}) => (
+  <>
+    <span
+      aria-hidden="true"
+      data-slot="sidebar-guide"
+      {...stylex.props(styles.guideStem, path !== "off" && styles.guidePath)}
+    />
+    <span
+      aria-hidden="true"
+      data-slot="sidebar-guide-branch"
+      {...stylex.props(
+        styles.guideBranch,
+        !last && styles.guideBranchCut,
+        path === "at" && styles.guideBranchPath
+      )}
+    />
+    {!last && (
+      <span
+        aria-hidden="true"
+        data-slot="sidebar-guide-on"
+        {...stylex.props(
+          styles.guideStemOn,
+          path === "above" && styles.guidePath
+        )}
+      />
+    )}
+  </>
+);
+
+// Whether the Sidebar draws its tree guide (`guides`): off unless asked for.
+const GuidesOn = createContext(false);
+
+/** A folding group's row: its li holds its place in the tree guide, under the group's label. */
+const groupLook = (place: GuidePlace | undefined, icon: boolean) =>
+  stylex.props(
+    place !== undefined && [
+      styles.nested,
+      icon ? styles.guideInGroup : styles.guideNoIcon,
+    ]
+  );
+
+const MoreRow = ({
+  more,
+  item,
+  place,
+}: {
+  more: SidebarMore;
+  item: boolean;
+  place: GuidePlace | undefined;
+}) => {
   const { onClick: handleClick } = more;
+  const guides = useContext(GuidesOn);
+  const placed = guides ? place : undefined;
   return (
-    <li>
+    <li {...groupLook(placed, false)}>
       <Linked
         row={more}
         item={item}
         onClick={handleClick}
-        look={stylex.props(styles.row, styles.more, focus.inside)}
+        look={stylex.props(
+          styles.row,
+          styles.more,
+          placed !== undefined && styles.subRow,
+          focus.inside
+        )}
       >
         <span {...stylex.props(styles.name)}>{more.label}</span>
       </Linked>
+      {placed !== undefined && <Guide last={placed.last} path={placed.path} />}
     </li>
   );
 };
 
-const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
+const Row = ({
+  row,
+  item,
+  place,
+}: {
+  row: SidebarRow;
+  item: boolean;
+  place?: GuidePlace | undefined;
+}) => {
+  const guides = useContext(GuidesOn);
+  const placed = guides ? place : undefined;
+  // In a guided group a row with no icon is a nested row: its words start past the guide's elbow.
+  const nestedWords = placed !== undefined && row.icon === undefined;
   const look = stylex.props(
     styles.row,
+    nestedWords && styles.subRow,
     hasDetail(row) && styles.rowTall,
     row.quiet === true && styles.quiet,
     hasActions(row) && rowActionsRoom,
@@ -1303,17 +1522,27 @@ const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
     focus.inside
   );
   return (
-    <li>
+    <li {...groupLook(placed, row.icon !== undefined)}>
       <RowActions {...row} inList={item}>
         {(extras) => (
           <RowLink row={row} item={item} look={look} extras={extras} />
         )}
       </RowActions>
+      {placed !== undefined && <Guide last={placed.last} path={placed.path} />}
       {row.rows !== undefined && row.rows.length > 0 && (
         <ul {...stylex.props(styles.list, styles.sub)}>
-          {row.rows.map((sub) => (
-            <li key={sub.id ?? `${sub.label}-${sub.href ?? ""}`}>
+          {row.rows.map((sub, index, all) => (
+            <li
+              key={sub.id ?? `${sub.label}-${sub.href ?? ""}`}
+              {...stylex.props(guides && styles.nested)}
+            >
               <SubRow sub={sub} item={item} />
+              {guides && (
+                <Guide
+                  last={index === all.length - 1}
+                  path={pathOf(all, index)}
+                />
+              )}
             </li>
           ))}
         </ul>
@@ -1615,7 +1844,9 @@ const opensFromPeek = (next: boolean, open: boolean, peeking: boolean) =>
 
 /** Whether a list has no rows at all. */
 const isEmpty = (groups: readonly SidebarGroupEntry[]) =>
-  groups.every((group) => group.rows.length === 0);
+  groups.every(
+    (group) => group.rows.length === 0 && group.content === undefined
+  );
 
 /** Back, drawn as one of the sidebar's rows, with the chevron that points back. */
 const BackRow = ({ back }: { back: SidebarBack & { label: string } }) => (
@@ -1649,7 +1880,36 @@ interface ListAreaProps {
   storageKey: string | undefined;
   keys: "tab" | "list" | undefined;
   empty: string | undefined;
+  /** The rows are not there yet: their placeholders, said as "Loading". */
+  loading: string | undefined;
 }
+
+/** What the list says while its rows are not there yet, or nothing when they are. */
+const loadingSaid = (loading: boolean | undefined, said: string) =>
+  loading === true ? said : undefined;
+
+/** A section's views, under its name, in the main list's tabs' switch: no tab panel, as they switch the page. */
+const SectionViews = ({
+  id,
+  section,
+}: {
+  id: string;
+  section: SidebarSection | undefined;
+}) => {
+  const views = section?.views;
+  return views === undefined ? null : (
+    <SidebarTabs
+      id={`${id}-views`}
+      tabs={views.tabs}
+      value={views.value}
+      label={views.label}
+      onChoose={(value) => {
+        views.onChange(value);
+      }}
+      panel={false}
+    />
+  );
+};
 
 /** The list between the head and the foot: the main list (under its tabs), or a section's. */
 const ListArea = ({
@@ -1668,6 +1928,7 @@ const ListArea = ({
   storageKey,
   keys,
   empty,
+  loading,
 }: ListAreaProps) => {
   const [ownTab, setOwnTab] = useState<string>();
   const tabbed = section === undefined && tabs !== undefined && tabs.length > 0;
@@ -1688,22 +1949,30 @@ const ListArea = ({
         filterRef={filterRef}
         storageKey={section === undefined ? storageKey : section.storageKey}
         keys={keys}
-        renderRow={(row, item) => (
+        renderRow={(row, item, place) => (
           <Row
             key={row.id ?? `${row.label}-${row.href ?? ""}`}
             row={row}
             item={item}
+            place={place}
           />
         )}
-        renderMore={(index, item) => {
+        renderMore={(index, item, place) => {
           const more = shown[index]?.more;
           return more === undefined ? null : (
-            <MoreRow key="more" more={more} item={item} />
+            <MoreRow key="more" more={more} item={item} place={place} />
           );
         }}
       />
     </>
   );
+  if (loading !== undefined) {
+    return (
+      <SwapArea key={list} ref={area}>
+        <LoadingNav row={styles.row} label={navLabel} said={loading} />
+      </SwapArea>
+    );
+  }
   return (
     <SwapArea key={list} ref={area}>
       {section !== undefined && (
@@ -1714,8 +1983,11 @@ const ListArea = ({
           back={section.back}
           backLabel={section.back.label}
           renderBack={(back) => <BackRow back={back} />}
+          home={section.home}
+          homeCurrent={section.homeCurrent === true}
         />
       )}
+      <SectionViews id={id} section={section} />
       {tabbed && (
         <SidebarTabs
           id={id}
@@ -1831,19 +2103,29 @@ const SidebarDrawn = ({
   tab,
   onTabChange,
   tabsLabel: tabsGiven,
+  words: ownWords,
   empty,
+  loading,
   style: styleProp,
   layout,
   onOpen,
   onPeek,
   beside,
 }: SidebarProps & ShellExtras & { groups: readonly SidebarGroupEntry[] }) => {
-  const words = useWords("sidebar", sidebarWords);
+  // Its words: the instance's, else the product's by its catalogue, else English; the caller's props still win.
+  const words = withGiven(useWords("sidebar", sidebarWords, ownWords), {
+    search: searchGiven,
+    fold: foldGiven,
+    main: navGiven,
+    views: tabsGiven,
+  });
   const label = nameOf(named, labelDeprecated, words.name);
-  const searchLabel = searchGiven ?? words.search;
-  const foldLabel = foldGiven ?? words.fold;
-  const navLabel = navGiven ?? words.main;
-  const tabsLabel = tabsGiven ?? words.views;
+  const {
+    search: searchLabel,
+    fold: foldLabel,
+    main: navLabel,
+    views: tabsLabel,
+  } = words;
   const [own, setOwn] = useState(defaultOpen);
   const open = given ?? own;
   // Whether the person has folded or opened it on this page: only then does the reopen button fade
@@ -2089,6 +2371,7 @@ const SidebarDrawn = ({
             storageKey={storageKey}
             keys={keys}
             empty={empty}
+            loading={loadingSaid(loading, words.loading)}
           />
           {profile !== undefined && (
             <div data-slot="sidebar-foot" {...stylex.props(styles.foot)}>
@@ -2142,6 +2425,14 @@ export const Sidebar = (props: SidebarProps) => {
   // Its data, or the parts written in it.
   const groups = props.groups ?? groupsOf(props.children);
   return (
-    <SidebarDrawn {...props} groups={groups} {...shellParts(props, shell)} />
+    <GuidesOn.Provider value={props.guides === true}>
+      <SidebarGivenWords value={props.words}>
+        <SidebarDrawn
+          {...props}
+          groups={groups}
+          {...shellParts(props, shell)}
+        />
+      </SidebarGivenWords>
+    </GuidesOn.Provider>
   );
 };

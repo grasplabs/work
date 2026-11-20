@@ -8,7 +8,6 @@ import { isFileGone } from "../error-reports.ts";
 import { ErrorState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Card } from "../grasp/card/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
 import { Skeleton } from "../grasp/skeleton/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -24,8 +23,8 @@ import { useRouteErrorReason } from "../route-error.tsx";
 // - SettingsStack: a section's fields and facts, one under the other.
 // - RowNote: a row's line, or why its action failed.
 // - TitleLine: an Item's title with a quieter detail beside it.
-// - LoadingLines, SettingsLoading, SectionNotLoaded and SettingsError: a
-//   section that is loading, didn't load, or failed as it rendered.
+// - LoadingLines, SectionNotLoaded and SettingsError: a section that is
+//   loading, didn't load, or failed as it rendered.
 
 const styles = stylex.create({
   titleLine: {
@@ -111,13 +110,6 @@ export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
     </output>
   );
 };
-
-/** A section while its read is slow: a card of lines in placeholder, where its title and rows will be. */
-export const SettingsLoading = () => (
-  <Card>
-    <LoadingLines lines={5} />
-  </Card>
-);
 
 /**
  * Why a part of a page did not load, in the section it is part of: core's

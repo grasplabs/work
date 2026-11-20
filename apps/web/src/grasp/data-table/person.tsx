@@ -7,6 +7,7 @@
 import * as stylex from "@stylexjs/stylex";
 
 import { Avatar, AvatarFallback, AvatarImage } from "../avatar";
+import { Skeleton } from "../skeleton";
 import { grasp } from "../tokens/tokens.stylex";
 
 /** Every prop a DataTablePerson takes. */
@@ -74,6 +75,33 @@ export const DataTablePerson = ({
       {detail !== undefined && detail !== "" && (
         <span {...stylex.props(styles.detail)}>{detail}</span>
       )}
+    </span>
+  </span>
+);
+
+const waiting = stylex.create({
+  // The picture's place: an sm avatar's circle.
+  picture: { width: grasp.avatarSm, height: grasp.avatarSm },
+  // Each line a line of the table's text tall, as the name and the detail stand.
+  line: { display: "flex", alignItems: "center", height: grasp.tableTextLine },
+  name: { width: "8rem" },
+  detail: { width: "11rem", maxWidth: "100%" },
+});
+
+/**
+ * A person's cell while the table is loading (a column's `placeholder: "person"`): the picture's
+ * circle and two quiet lines in the name's and the detail's boxes, so the row keeps its height.
+ */
+export const DataTablePersonWaiting = () => (
+  <span aria-hidden="true" {...stylex.props(styles.person)}>
+    <Skeleton variant="circle" layout={waiting.picture} />
+    <span {...stylex.props(styles.words)}>
+      <span {...stylex.props(waiting.line)}>
+        <Skeleton layout={waiting.name} />
+      </span>
+      <span {...stylex.props(waiting.line)}>
+        <Skeleton layout={waiting.detail} />
+      </span>
     </span>
   </span>
 );

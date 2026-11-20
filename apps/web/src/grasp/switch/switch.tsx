@@ -11,6 +11,20 @@
 // with its bevel. Inside it a light rests behind the thumb and follows it a little later, leaning in
 // under a pointer as Approve's does. Only transform and opacity move; with reduced motion, nothing does.
 //
+// Since release step 6 the words are Field's parts, as in shadcn, and the switch draws itself only:
+//
+//   <Field orientation="horizontal">
+//     <FieldContent>
+//       <FieldLabel>Weekly summary</FieldLabel>
+//       <FieldDescription>The week's changes, every Monday morning.</FieldDescription>
+//     </FieldContent>
+//     <Switch onSave={saveSetting} failedLabel="Could not save" />
+//   </Field>
+//
+// A failed save still says its `failedLabel` in the row, under the words. Where something beside it
+// already names it, `<Switch aria-label="Weekly summary" />` alone. The older shape below keeps
+// working until step 9:
+//
 //   <Switch label="Weekly summary" />
 //   <Switch label="Weekly summary" description="The week's changes, every Monday morning." />
 //   <Switch label="Weekly summary" onSave={saveSetting} failedLabel="Could not save" />
@@ -25,7 +39,14 @@ import {
   SwitchThumb,
   createSwitchController,
 } from "@ui-sdk/react/switch";
-import { useEffect, useId, useReducer, useRef, useState } from "react";
+import {
+  useContext,
+  useEffect,
+  useId,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import type {
   ComponentProps,
   MouseEvent as ReactMouseEvent,
@@ -37,6 +58,8 @@ import { announce } from "../announce/announce";
 import { ChoiceRow, reachStyles } from "../choice/choice";
 import type { ChoiceWiring } from "../choice/choice";
 import { choiceMarker } from "../choice/choice.stylex";
+import { ChoiceBox, choiceIds } from "../choice/row";
+import { FieldError } from "../field";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { Icon, Spinner } from "../icons";
@@ -58,20 +81,17 @@ export type SwitchChange = NonNullable<SwitchPrimitiveProps["onCheckedChange"]>;
 
 /** What every switch takes, besides UI SDK's own options. */
 interface SwitchBase {
-  /**
-   * Its name: the setting, in sentence case, the same whether it is on or off ("Weekly
-   * summary"). A screen reader and an agent find it by these words.
-   */
-  label: ReactNode;
-  /**
-   * Draws the switch alone, its label not shown: where something beside it already names it, as a
-   * Setting row does. A screen reader still hears its name once: from the caller's `<label for>`
-   * when an `id` is given (a Setting row's `field`), else from the label, kept as hidden words.
-   * @default false
-   */
+  /** @deprecated Use `FieldLabel`, in a Field with `orientation="horizontal"`. */
+  label?: ReactNode;
+  /** @deprecated Use `aria-label`, where the words around it already name it. */
   labelHidden?: boolean;
-  /** One sentence under the label: what turning it on does. A screen reader says it after the name. */
+  /** @deprecated Use `FieldDescription`, in the same Field. */
   description?: ReactNode;
+  /**
+   * Its name, when no FieldLabel names it: where something beside it already says what it turns
+   * ("Weekly summary"). A screen reader and an agent find it by these words.
+   */
+  "aria-label"?: string;
   /** On now, for a switch your code holds. Pass `onCheckedChange` with it. */
   checked?: boolean;
   /**
@@ -132,12 +152,7 @@ export type SwitchProps = SwitchBase &
   (WithoutSave | WithSave) &
   Omit<
     SwitchPrimitiveProps,
-    | keyof SwitchBase
-    | "className"
-    | "children"
-    | "render"
-    | "aria-label"
-    | "aria-labelledby"
+    keyof SwitchBase | "className" | "children" | "render" | "aria-labelledby"
   >;
 
 // ---- The look --------------------------------------------------------------------------------------
@@ -162,6 +177,12 @@ const breathe = stylex.keyframes({
 });
 
 const styles = stylex.create({
+  // In a horizontal Field: the switch stands beside the words and the failure under them, so the
+  // words' height alone sets where the failure starts, as in the older row.
+  inRow: { gridRow: "span 2" },
+  // A failed save's words, under the row's words (the switch comes after them): in their column,
+  // the words' own gap above.
+  failure: { gridRow: 2, gridColumn: 1, marginTop: grasp.space1, minWidth: 0 },
   // The switch alone (labelHidden): only its control, on the line it stands in.
   // Its own box for the switch's reach to fill, so the reach is the switch's, not the page's.
   alone: {
@@ -416,6 +437,28 @@ const styles = stylex.create({
     animationIterationCount: "infinite",
   },
 });
+
+// Where a switch in a row sits: beside the words and the failure, and the caller's layout. Out here,
+// not inline: the React Compiler cannot lower the chained conditions in the component's body.
+const placedClass = (layout: SwitchLayoutStyle | undefined) =>
+  stylex.props(styles.inRow, layout).className ?? "";
+
+// A switch in the parts shape: its own name when no FieldLabel gives it, and wrong once a save failed.
+const partNaming = (
+  ariaLabel: string | undefined,
+  failed: boolean
+): { "aria-label"?: string; "aria-invalid"?: true } => ({
+  ...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel }),
+  ...(failed ? { "aria-invalid": true as const } : {}),
+});
+
+/** A failed save's words in a horizontal Field, under the row's words, said with the switch. */
+const RowFailure = ({ words }: { words: string | undefined }) =>
+  words === undefined || words === "" ? null : (
+    <div {...stylex.props(styles.failure)}>
+      <FieldError match>{words}</FieldError>
+    </div>
+  );
 
 // ---- The save --------------------------------------------------------------------------------------
 
@@ -744,6 +787,7 @@ export const Switch = (allProps: SwitchProps) => {
     label,
     labelHidden = false,
     description,
+    "aria-label": ariaLabel,
     style: styleProp,
     layout,
     id,
@@ -767,7 +811,10 @@ export const Switch = (allProps: SwitchProps) => {
   // The new name wins over the old one (the breaking release's step 1).
   const state = status ?? stateDeprecated;
   const own = useId();
-  const box = id ?? `switch${own}`;
+  // In a horizontal Field (the parts shape), the row's id, which its FieldLabel names.
+  const rowBox = useContext(ChoiceBox);
+  const inRow = label === undefined && rowBox !== undefined;
+  const box = id ?? (inRow ? rowBox : `switch${own}`);
   const [made] = useReducer(keepController, undefined, createSwitchController);
   const controller = given ?? made;
   const [saving, setSaving] = useState<SaveState>("idle");
@@ -837,7 +884,10 @@ export const Switch = (allProps: SwitchProps) => {
   };
 
   // The control itself: in the choice row with its words, or alone with labelHidden.
-  const control = (wiring: Partial<ChoiceWiring>) => (
+  const control = (
+    wiring: Partial<ChoiceWiring> & { "aria-label"?: string },
+    placed?: string
+  ) => (
     <SwitchPrimitive
       {...rest}
       {...wiring}
@@ -857,7 +907,9 @@ export const Switch = (allProps: SwitchProps) => {
           busy && styles.busy,
           focus.mark
         );
-        return look.className ?? "";
+        return placed === undefined
+          ? (look.className ?? "")
+          : `${look.className ?? ""} ${placed}`;
       }}
     >
       {(on) => (
@@ -878,6 +930,38 @@ export const Switch = (allProps: SwitchProps) => {
       )}
     </SwitchPrimitive>
   );
+
+  const failed = life === "failed";
+
+  // The parts shape in a horizontal Field: the switch only, named by the row's FieldLabel. The row
+  // and its words are the Field's; a failed save says its words under them.
+  if (inRow) {
+    return (
+      <>
+        {control(
+          {
+            "aria-labelledby": choiceIds(rowBox).label,
+            ...partNaming(ariaLabel, failed),
+          },
+          placedClass(layout ?? styleProp)
+        )}
+        {failed && <RowFailure words={failedLabel} />}
+      </>
+    );
+  }
+
+  // The parts shape alone: named by `aria-label`, where the words around it already say what it is.
+  if (label === undefined) {
+    return (
+      <span
+        data-slot="switch"
+        data-label="hidden"
+        {...stylex.props(styles.alone, layout ?? styleProp)}
+      >
+        {control(partNaming(ariaLabel, failed))}
+      </span>
+    );
+  }
 
   if (labelHidden) {
     // Named by the caller's <label for={id}> when it gives the id, else by the label as hidden words.

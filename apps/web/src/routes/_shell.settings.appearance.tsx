@@ -22,9 +22,11 @@ const Theme = () => {
       <ThemeSwitch
         variant="picker"
         label={t`Mode`}
-        iconLabel={(named, current, next) =>
-          t`${named}, ${current}. Switch to ${next}`
-        }
+        words={{
+          icon: (named, current, next) =>
+            t`${named}, ${current}. Switch to ${next}`,
+          themes: t`Colours`,
+        }}
         // No line under a tile: each is drawn as what it is, and its name
         // says the rest (Ruben, 17 Nov: no subtitles unless needed).
         modeWords={{
@@ -38,7 +40,6 @@ const Theme = () => {
           pine: { name: "Pine", line: "" },
           paper: { name: "Paper", line: "" },
         }}
-        themesLabel={t`Colours`}
       />
     </SectionCard>
   );

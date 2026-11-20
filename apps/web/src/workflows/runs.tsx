@@ -193,7 +193,7 @@ export const RunsLog = ({
   const { t } = useLingui();
   if (runs.length === 0) {
     return (
-      <Empty size="section">
+      <Empty size="md">
         <EmptyHeader>
           <EmptyDescription>
             {empty ?? t`Nothing has run yet.`}

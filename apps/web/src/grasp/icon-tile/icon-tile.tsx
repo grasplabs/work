@@ -42,6 +42,12 @@ export interface IconTileProps {
   /** @deprecated Use `variant`. */
   look?: IconTileLook;
   /**
+   * `md`, the 40px tile at the head of an inspector; `sm`, a 24px tile for an object in a table's
+   * row, which keeps the row at its dense height (give the column `control`).
+   * @default "md"
+   */
+  size?: "sm" | "md";
+  /**
    * The object is working now (an agent mid-run): the gradient's light leans down, once, and stays
    * until it stops. Say it in words too; the tile is decoration.
    * @default false
@@ -102,6 +108,18 @@ const styles = stylex.create({
   running: {
     backgroundPosition: grasp.approveLightLean,
   },
+  // The small tile, for a dense row: its square, its icon and its corner a size down.
+  sm: {
+    [iconVars.size]: grasp.inspectorTileSmIcon,
+    width: grasp.inspectorTileSm,
+    height: grasp.inspectorTileSm,
+    borderRadius: grasp.inspectorTileSmCorner,
+  },
+  // A lift for the small tile: the medium lift is drawn for a 40px square and stands too far out
+  // of a row.
+  smRaised: {
+    boxShadow: grasp.liftLow,
+  },
 });
 
 /** The tile for an object's own icon. */
@@ -109,6 +127,7 @@ export const IconTile = ({
   icon,
   look: lookDeprecated,
   variant: look = lookDeprecated ?? "raised",
+  size = "md",
   running = false,
   label: labelDeprecated,
   "aria-label": label = labelDeprecated,
@@ -124,10 +143,13 @@ export const IconTile = ({
       role={named ? "img" : undefined}
       aria-label={named ? label : undefined}
       aria-hidden={named ? undefined : true}
+      data-size={size}
       {...stylex.props(
         styles.tile,
         styles[look],
         look === "gradient" && running && styles.running,
+        size === "sm" && styles.sm,
+        size === "sm" && look === "raised" && styles.smRaised,
         layout ?? styleProp
       )}
     >

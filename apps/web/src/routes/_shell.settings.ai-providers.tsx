@@ -2,15 +2,12 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { AiProvidersSettings } from "../settings/ai-providers.tsx";
 import { SpendCard } from "../settings/ai-spend.tsx";
-import {
-  SectionNotLoaded,
-  SettingsError,
-  SettingsLoading,
-} from "../settings/section.tsx";
+import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 
 // Settings › AI and spend, for admins: the organization's own AI provider
 // keys, the models its calls use (settings/ai-providers.tsx), and what they
@@ -30,19 +27,28 @@ const AiProvidersPage = () => {
       </SectionCard>
     );
   }
+  const { providers, source } = page.data;
+  // Nothing connected and not on Grasp's AI: nothing has been spent, and
+  // the page is only the way to connect a provider.
+  const unanswered = providers.length === 0 && source !== "grasp";
   return (
     <>
       <AiProvidersSettings
         editable={isMemberAdmin(identity)}
         listing={page.data}
       />
-      <SpendCard settings={settings} spend={spend} />
+      {unanswered ? null : <SpendCard settings={settings} spend={spend} />}
     </>
   );
 };
 
+/** The providers, the models (default, fallbacks, add), then the month's spend. */
+const AiProvidersPending = () => (
+  <PageSkeletonSettings header={false} help={false} sections={[1, 3, 8]} />
+);
+
 export const Route = createFileRoute("/_shell/settings/ai-providers")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: AiProvidersPending,
   errorComponent: SettingsError,
   component: AiProvidersPage,
   loader: async ({ context: { core } }) => {

@@ -6,8 +6,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AgentsOverview } from "../agents/agents-overview.tsx";
 import type { ManagedAgents } from "../agents/agents-overview.tsx";
 import type { Session } from "../core.ts";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { PageSkeletonAgents } from "../grasp/blocks/page-skeleton-agents/page-skeleton-agents.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Plus } from "../grasp/icons/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // The Agents page (agents/agents-overview.tsx): the agents the person may
@@ -76,28 +79,47 @@ const AgentsPage = () => {
       <AgentsOverview
         makes={isMemberAdmin(identity)}
         managed={page.data.managed}
-        models={page.data.models}
         usable={page.data.usable}
       />
     </>
   );
 };
 
+/**
+ * The Agents page before its agents arrive: its crumbs, then the library's
+ * agents skeleton, its grid of portrait cards on the page's own paper, with
+ * New agent in its place for whoever may make one.
+ */
+const AgentsLoading = () => {
+  const { t } = useLingui();
+  const { identity } = Route.useRouteContext();
+  return (
+    <>
+      <SiteHeader crumbs={[{ label: t`Agents` }]} />
+      <PageSkeletonAgents
+        actions={
+          isMemberAdmin(identity) ? (
+            <Button icon={Plus} variant="ink">
+              {t`New agent`}
+            </Button>
+          ) : undefined
+        }
+        cards={4}
+      />
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/agents/")({
-  pendingComponent: PageLoading,
+  pendingComponent: AgentsLoading,
   component: AgentsPage,
   loader: async ({ context: { core, identity } }) =>
     await loadFromCore(core, async (session) => {
-      const [usable, managed, models] = await Promise.all([
+      const [usable, managed] = await Promise.all([
         session.chats.agents(),
         // Admins, Grasp's staff among them, who read and change nothing.
         isAdmin(identity.role) ? readManaged(session) : undefined,
-        // The models a new agent can be given, for those who make one:
-        // none when core won't say, and it then asks for none.
-        isMemberAdmin(identity)
-          ? session.chats.models().catch((): string[] => [])
-          : [],
       ]);
-      return { usable, managed, models };
+      return { usable, managed };
     }),
 });

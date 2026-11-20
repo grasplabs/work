@@ -388,7 +388,7 @@ const ActivityList = ({
   }
   if (activity.data.length === 0) {
     return (
-      <Empty size="section">
+      <Empty size="md">
         <EmptyHeader>
           <EmptyDescription>{t`Nothing has happened yet.`}</EmptyDescription>
         </EmptyHeader>

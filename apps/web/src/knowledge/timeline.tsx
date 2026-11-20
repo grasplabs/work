@@ -10,58 +10,29 @@ import { ErrorText } from "../error-text.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { ChevronDown, ChevronRight } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { Section, SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { splitHistory } from "./history.ts";
 
-// A document's history as the prototype's note timeline
-// (grasplabs/prototype `routes/brain/$noteId.tsx`): each version on a line
-// down the side, with when, who saved it and what changed, the latest five
+// A document's history: each version a row of Grasp UI's Item, the one on
+// the page marked current, with when, who saved it and what changed, the latest five
 // shown and older ones folded by month. Each opens for reading; where the
 // person may change the document, an earlier one can be restored, saved
 // again as the next.
 
 const styles = stylex.create({
-  section: { display: "flex", flexDirection: "column", gap: grasp.space4 },
-  heading: {
-    display: "flex",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    gap: grasp.space3,
-    margin: 0,
-  },
-  list: {
-    display: "flex",
-    flexDirection: "column",
-    margin: 0,
-    padding: 0,
-    listStyleType: "none",
-  },
-  version: { display: "flex", gap: grasp.space3 },
-  when: { flexShrink: 0, width: grasp.space24 },
-  // The line down the side, marked where the version shown stands.
-  entry: {
-    display: "flex",
-    flexDirection: "column",
-    flex: 1,
-    gap: grasp.space1,
-    minWidth: 0,
-    paddingBlockEnd: grasp.space3,
-    paddingInlineStart: grasp.space3,
-    borderInlineStartWidth: grasp.tabLineWidth,
-    borderInlineStartStyle: "solid",
-    borderInlineStartColor: grasp.line,
-  },
-  shown: { borderInlineStartColor: grasp.ink },
-  title: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: grasp.space2,
-  },
-  month: { marginBlockEnd: grasp.space2 },
-  unfold: { alignSelf: "flex-start", marginBlockEnd: grasp.space2 },
+  earlier: { display: "flex", flexDirection: "column", gap: grasp.space2 },
 });
 
 /**
@@ -89,14 +60,22 @@ const Saved = ({
     month: "short",
     year: "numeric",
   });
-  const who = version.author === me ? t`You` : version.author;
+  // A person's own saves are "You"; another author can't be named here
+  // yet (core gives an id), and an id is never shown: then only what changed.
+  const who = version.author === me ? t`You` : null;
+  const said = [
+    who,
+    restoredFrom === null
+      ? version.message
+      : t`Restored version ${restoredFrom}`,
+  ]
+    .filter((part) => part !== null && part !== "")
+    .join(" · ");
   return (
-    <li aria-label={t`Version ${number}`} {...stylex.props(styles.version)}>
-      <Text element="span" layout={styles.when} size="xs" tone="muted">
-        <time dateTime={version.createdAt}>{when}</time>
-      </Text>
-      <div {...stylex.props(styles.entry, shown && styles.shown)}>
-        <span {...stylex.props(styles.title)}>
+    // The version shown on the page is the list's current one.
+    <Item current={shown} size="sm">
+      <ItemContent>
+        <ItemTitle>
           <RouterLink
             aria-current={shown ? "page" : undefined}
             params={{ collection: doc.collectionId }}
@@ -108,31 +87,27 @@ const Saved = ({
           >
             {current ? t`Version ${number}, current` : t`Version ${number}`}
           </RouterLink>
-          {restore === undefined || current ? null : (
-            <Button
-              aria-label={t`Restore version ${number}`}
-              onClick={() => {
-                restore(number);
-              }}
-              size="xs"
-              variant="ghost"
-            >
-              <Trans>Restore</Trans>
-            </Button>
-          )}
-        </span>
-        <Text element="span" size="xs" tone="muted">
-          {[
-            who,
-            restoredFrom === null
-              ? version.message
-              : t`Restored version ${restoredFrom}`,
-          ]
-            .filter((part) => part !== null && part !== "")
-            .join(" · ")}
-        </Text>
-      </div>
-    </li>
+          <ItemDetail>
+            <time dateTime={version.createdAt}>{when}</time>
+          </ItemDetail>
+        </ItemTitle>
+        <ItemDescription>{said}</ItemDescription>
+      </ItemContent>
+      {restore === undefined || current ? null : (
+        <ItemActions>
+          <Button
+            aria-label={t`Restore version ${number}`}
+            onClick={() => {
+              restore(number);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            <Trans>Restore</Trans>
+          </Button>
+        </ItemActions>
+      )}
+    </Item>
   );
 };
 
@@ -193,66 +168,72 @@ export const Timeline = ({
       : undefined;
   const count = versions.length;
   return (
-    <section aria-labelledby={headingId} {...stylex.props(styles.section)}>
-      <h2 id={headingId} {...stylex.props(styles.heading)}>
-        <Text element="span" size="sm" tone="muted">
-          <Trans>History</Trans>
-        </Text>
-        <Text element="span" size="sm" tone="muted">
-          {plural(count, { one: "# version", other: "# versions" })}
-        </Text>
-      </h2>
+    <Section aria-labelledby={headingId}>
+      <SectionHeader
+        actions={
+          folded === 0 ? undefined : (
+            <Button
+              aria-expanded={unfolded}
+              icon={unfolded ? ChevronDown : ChevronRight}
+              onClick={() => {
+                setUnfolded(!unfolded);
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {plural(folded, { one: "# earlier", other: "# earlier" })}
+            </Button>
+          )
+        }
+        aside={
+          <Text element="span" size="sm" tone="muted">
+            {plural(count, { one: "# version", other: "# versions" })}
+          </Text>
+        }
+        id={headingId}
+        title={<Trans>History</Trans>}
+      />
       <ErrorText>{failure}</ErrorText>
-      <div>
-        {folded === 0 ? null : (
-          <Button
-            aria-expanded={unfolded}
-            icon={unfolded ? ChevronDown : ChevronRight}
-            layout={styles.unfold}
-            onClick={() => {
-              setUnfolded(!unfolded);
-            }}
-            size="xs"
-            variant="ghost"
-          >
-            {plural(folded, { one: "# earlier", other: "# earlier" })}
-          </Button>
-        )}
-        <ol {...stylex.props(styles.list)}>
-          {unfolded
-            ? earlier.map((month) => (
-                <li key={month.month}>
-                  <Text layout={styles.month} size="xs" tone="muted">
-                    {new Date(`${month.month}-01T00:00:00Z`).toLocaleDateString(
-                      i18n.locale,
-                      { month: "short", year: "numeric", timeZone: "UTC" }
-                    )}
-                  </Text>
-                  <ol {...stylex.props(styles.list)}>
-                    {month.versions.map((version) => (
-                      <Saved
-                        doc={doc}
-                        key={version.number}
-                        me={me}
-                        restore={canRestore}
-                        version={version}
-                      />
-                    ))}
-                  </ol>
-                </li>
-              ))
-            : null}
-          {recent.map((version) => (
-            <Saved
-              doc={doc}
-              key={version.number}
-              me={me}
-              restore={canRestore}
-              version={version}
-            />
-          ))}
-        </ol>
-      </div>
-    </section>
+      {unfolded
+        ? earlier.map((month) => {
+            const label = new Date(
+              `${month.month}-01T00:00:00Z`
+            ).toLocaleDateString(i18n.locale, {
+              month: "short",
+              year: "numeric",
+              timeZone: "UTC",
+            });
+            return (
+              <div key={month.month} {...stylex.props(styles.earlier)}>
+                <Text size="xs" tone="muted">
+                  {label}
+                </Text>
+                <ItemGroup aria-label={label} separated>
+                  {month.versions.map((version) => (
+                    <Saved
+                      doc={doc}
+                      key={version.number}
+                      me={me}
+                      restore={canRestore}
+                      version={version}
+                    />
+                  ))}
+                </ItemGroup>
+              </div>
+            );
+          })
+        : null}
+      <ItemGroup separated>
+        {recent.map((version) => (
+          <Saved
+            doc={doc}
+            key={version.number}
+            me={me}
+            restore={canRestore}
+            version={version}
+          />
+        ))}
+      </ItemGroup>
+    </Section>
   );
 };

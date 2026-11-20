@@ -9,7 +9,10 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { Alert } from "../grasp/alert/index.ts";
-import { ApprovalRequest } from "../grasp/approval-request/index.ts";
+import {
+  ApprovalRequest,
+  ApprovalRequestApprove,
+} from "../grasp/approval-request/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -130,7 +133,6 @@ const ConnectionRequest = ({
         affects={[
           { kind: "system", label: name, detail: request.actions.join(", ") },
         ]}
-        approveLabel={t`Grant`}
         onApprove={async () => {
           await decide(async (session) => {
             await session.chats.grantConnection(chatId, request.id);
@@ -140,6 +142,7 @@ const ConnectionRequest = ({
         title={t`Use ${name} in this chat`}
         words={{ ...words, decline: t`Deny` }}
       >
+        <ApprovalRequestApprove>{t`Grant`}</ApprovalRequestApprove>
         <RequestDetails request={request} />
       </ApprovalRequest>
     );

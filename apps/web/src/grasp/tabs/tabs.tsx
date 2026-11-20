@@ -334,7 +334,10 @@ const styles = stylex.create({
     margin: 0,
     padding: 0,
     borderWidth: 0,
-    borderRadius: grasp.cornerCircle,
+    // Button's own shape at this size: the one corner capped at half, in the system's squircle, as
+    // a ghost icon Button hovers.
+    borderRadius: `min(${grasp.corner}, calc((${grasp.iconSm} + ${grasp.space1}) / 2))`,
+    cornerShape: grasp.cornerShape,
     backgroundColor: {
       default: "transparent",
       ":hover": { default: null, [HOVER]: grasp.ghostFillHover },

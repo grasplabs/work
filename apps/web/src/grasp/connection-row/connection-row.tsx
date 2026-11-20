@@ -14,6 +14,7 @@ import { grasp } from "../tokens/tokens.stylex";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../tooltip";
 import { useWords, withGiven } from "../words/words";
 import { connectionRowWords } from "./words";
+import type { ConnectionRowWords } from "./words";
 
 /** Where the place stands: on (a switch), missing (not connected), or broken (it lost access). */
 export type ConnectionStatus = "on" | "missing" | "broken";
@@ -55,6 +56,12 @@ export interface ConnectionRowProps {
   actionHelpLabel?: string;
   /** Said to a screen reader for a broken row that gives no sentence. @default "Not working" */
   brokenLabel?: string;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ whoCanFix: "Who to ask" }`). Any left out
+   * are the catalogue's, else English. A flat text prop given beside it still wins until the
+   * release's step 5.
+   */
+  words?: Partial<ConnectionRowWords>;
 }
 
 /** A row narrower than this puts its action under its sentence (the row's own width). */
@@ -160,6 +167,7 @@ type ProblemProps = Pick<
   | "actionHelp"
   | "actionHelpLabel"
   | "brokenLabel"
+  | "words"
 > & {
   broken: boolean;
 };
@@ -180,10 +188,11 @@ const Problem = ({
   actionHelpLabel: helpLabelGiven,
   brokenLabel,
   broken,
+  words,
 }: ProblemProps) => {
   const said = useId();
   // The words file gives both in the page's language; the caller's props still win.
-  const words = withGiven(useWords("connectionRow", connectionRowWords), {
+  const text = withGiven(useWords("connectionRow", connectionRowWords, words), {
     whoCanFix: helpLabelGiven,
     notWorking: brokenLabel,
   });
@@ -200,7 +209,7 @@ const Problem = ({
               <Tooltip>
                 <TooltipTrigger
                   icon={Info}
-                  aria-label={words.whoCanFix}
+                  aria-label={text.whoCanFix}
                   variant="ghost"
                   size="xs"
                 />
@@ -225,7 +234,7 @@ const Problem = ({
         )}
         {/* Broken says it is not working even where the sentence does not. */}
         {broken && problem === undefined && (
-          <span {...stylex.props(visuallyHidden)}>{words.notWorking}</span>
+          <span {...stylex.props(visuallyHidden)}>{text.notWorking}</span>
         )}
       </div>
       {actionLabel !== undefined && (
@@ -281,8 +290,6 @@ const On = ({
       >
         <Switch
           id={id}
-          label={label}
-          labelHidden
           aria-describedby={help === undefined ? undefined : helpId}
           {...state}
         />
@@ -305,6 +312,7 @@ export const ConnectionRow = ({
   actionHelp,
   actionHelpLabel,
   brokenLabel,
+  words,
 }: ConnectionRowProps) => {
   const state = switchState({ checked, defaultChecked, onCheckedChange });
   // Broken with nothing to say or do keeps the switch, out of use, as before.
@@ -326,6 +334,7 @@ export const ConnectionRow = ({
             actionHelp={actionHelp}
             actionHelpLabel={actionHelpLabel}
             brokenLabel={brokenLabel}
+            words={words}
             broken={broken}
           />
         ) : (

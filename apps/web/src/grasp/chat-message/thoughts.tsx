@@ -50,8 +50,8 @@ const styles = stylex.create({
     marginBlockStart: grasp.space1,
     marginBlockEnd: grasp.space5,
     color: grasp.muted,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
     whiteSpace: "normal",
   },
   rule: {
@@ -78,8 +78,8 @@ const styles = stylex.create({
   label: {
     margin: 0,
     color: grasp.ink,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
     fontWeight: grasp.weightMedium,
   },
   // The timeline: a small mark beside each label, a hairline joining the marks.
@@ -94,7 +94,7 @@ const styles = stylex.create({
   mark: {
     display: "flex",
     alignItems: "center",
-    height: grasp.textXsLine,
+    height: grasp.chatTextLine,
     color: grasp.muted,
   },
   joint: {

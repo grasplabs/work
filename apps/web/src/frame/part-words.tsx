@@ -26,6 +26,7 @@ import {
   backdropPreviewWords,
 } from "../grasp/backdrop/words.ts";
 import { badgeWords } from "../grasp/badge/words.ts";
+import { connectServiceWords } from "../grasp/blocks/connect-service/connect-service.tsx";
 import { breadcrumbWords } from "../grasp/breadcrumb/words.ts";
 import { buttonWords } from "../grasp/button/words.ts";
 import { calendarWords } from "../grasp/calendar/words.ts";
@@ -38,6 +39,7 @@ import { composerWords } from "../grasp/composer/words.ts";
 import { connectionRowWords } from "../grasp/connection-row/words.ts";
 import { contextMenuWords } from "../grasp/context-menu/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
+import { englishWords as dataGridWords } from "../grasp/data-grid/words.ts";
 import {
   dataTableWords,
   englishFilterWords,
@@ -45,6 +47,10 @@ import {
 import { datePickerWords } from "../grasp/date-picker/words.ts";
 import { dateRangePickerWords } from "../grasp/date-range-picker/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
+import { diffFilesWords } from "../grasp/diff-files/words.ts";
+import { diffWords } from "../grasp/diff/words.ts";
+import { draftWords } from "../grasp/draft/words.ts";
+import type { DraftWords } from "../grasp/draft/words.ts";
 import { drawerWords } from "../grasp/drawer/words.ts";
 import { dropdownMenuWords } from "../grasp/dropdown-menu/words.ts";
 import { emptyWords } from "../grasp/empty/words.ts";
@@ -69,6 +75,7 @@ import { sheetWords } from "../grasp/sheet/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
 import { signInWords } from "../grasp/sign-in/words.ts";
 import { sourcesWords } from "../grasp/sources/words.ts";
+import { stepFootWords } from "../grasp/step-foot/words.ts";
 import { stepperWords } from "../grasp/stepper/words.ts";
 import { tabsWords } from "../grasp/tabs/words.ts";
 import { tagInputWords } from "../grasp/tag-input/words.ts";
@@ -91,6 +98,37 @@ import type { GraspWordsCatalog } from "../grasp/words/words.tsx";
 // Lingui's own, as ever.
 
 const MS_PER_MINUTE = 60_000;
+const MINUTES_PER_HOUR = 60;
+
+/** A day ("Thu 19 Nov") in `locale`, in the zone given. */
+const dayIn = (locale: string, iso: string, timeZone: string | undefined) =>
+  new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone,
+  }).format(new Date(iso));
+
+/** A time of day ("14:00") in `locale`, in the zone given. */
+const clockIn = (locale: string, iso: string, timeZone: string | undefined) =>
+  new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone,
+  }).format(new Date(iso));
+
+/**
+ * The drafts' words in English, the library's own but for a task's due:
+ * the tasks Grasp makes (Microsoft To Do, Planner) are due on a day, never
+ * at a time, so its row says the day alone.
+ */
+const englishDraftWords: DraftWords = {
+  ...draftWords,
+  task: {
+    ...draftWords.task,
+    at: (iso, timeZone) => dayIn("en-GB", iso, timeZone),
+  },
+};
 
 /** Every installed part's words in English: the library's own. */
 export const englishPartWords: GraspWordsCatalog = {
@@ -127,9 +165,14 @@ export const englishPartWords: GraspWordsCatalog = {
   chatMessage: chatMessageWords,
   codeBlock: codeBlockWords,
   copyField: copyFieldWords,
+  dataGrid: dataGridWords,
   dataTable: dataTableWords,
   dataTableFilters: englishFilterWords,
+  diff: diffWords,
+  diffFiles: diffFilesWords,
   dialog: dialogWords,
+  stepFoot: stepFootWords,
+  draft: englishDraftWords,
   drawer: drawerWords,
   dropdownMenu: dropdownMenuWords,
   empty: emptyWords,
@@ -161,6 +204,7 @@ export const englishPartWords: GraspWordsCatalog = {
   toaster: toasterWords,
   carousel: carouselWords,
   connectionRow: connectionRowWords,
+  connectService: connectServiceWords,
   signIn: signInWords,
 };
 
@@ -258,6 +302,15 @@ export const usePartWords = (): GraspWordsCatalog => {
       },
       columnInfo: (header) => t`More about ${header}`,
       groupAttention: t`needs attention`,
+      noDate: t`No date`,
+      rowPending: t({
+        message: "pending",
+        context: "a table row not yet in effect",
+      }),
+      rowRemoved: t({
+        message: "removed",
+        context: "a table row of something taken away",
+      }),
     },
     dataTableFilters: {
       contains: t({ message: "contains", context: "a filter's operator" }),
@@ -316,6 +369,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
     appShell: {
       resize: t`Resize the panel`,
+      pagePanel: t({ message: "Details", context: "a page's side panel" }),
       breadcrumb: t`Breadcrumb`,
       menu: t`Menu`,
       closeMenu: t`Close the menu`,
@@ -450,6 +504,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       collapse: t`Leave full screen`,
       width: t`Resize the panel's width`,
       height: t`Resize the panel's height`,
+      close: t`Close`,
     },
     alert: { dismiss: t`Dismiss` },
     // The viewer shows a page (the weekly report) and nothing else here:
@@ -520,6 +575,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
     button: {
       working: t`Working`,
+      actionFailed: t`Could not finish`,
       // The button's own words as they stand: a language may not start
       // them lower case (German nouns).
       holdTo: (words) => t`Hold to confirm: ${words}`,
@@ -530,6 +586,73 @@ export const usePartWords = (): GraspWordsCatalog => {
       agentPresses: (words) => t`Presses "${words}"`,
       agentStillSays: (shown) =>
         t`It still says "${shown}". Press it again in a moment.`,
+    },
+    diff: {
+      name: t({ message: "Changes", context: "a diff's name" }),
+      accept: t({ message: "Accept", context: "a change in a diff" }),
+      reject: t({ message: "Reject", context: "a change in a diff" }),
+      undo: t`Undo`,
+      accepted: t({ message: "Accepted", context: "a change in a diff" }),
+      rejected: t({ message: "Rejected", context: "a change in a diff" }),
+      added: t({ message: "Added", context: "a line a change adds" }),
+      removed: t({ message: "Removed", context: "a line a change removes" }),
+      before: t({ message: "Before", context: "a diff's old side" }),
+      after: t({ message: "After", context: "a diff's new side" }),
+      lineBefore: t`Line before`,
+      lineAfter: t`Line after`,
+      change: t({ message: "Change", context: "one change in a diff" }),
+      text: t({ message: "Text", context: "a diff's text" }),
+      nothing: t`Nothing changed.`,
+      same: t`Nothing changed: both are the same.`,
+      unchanged: (count) =>
+        plural(count, {
+          one: "Show # unchanged line",
+          other: "Show # unchanged lines",
+        }),
+      changeOf: (at, of, removed, added) =>
+        t`Change ${at} of ${of}: ${removed} removed, ${added} added`,
+      counts: (added, removed) =>
+        t`${plural(added, { 0: "No lines added", one: "# line added", other: "# lines added" })}, ${plural(removed, { 0: "none removed", other: "# removed" })}`,
+      said: (at, decision) => {
+        if (decision === null) {
+          return t`Change ${at} back to undecided`;
+        }
+        return decision === "accepted"
+          ? t`Change ${at} accepted`
+          : t`Change ${at} rejected`;
+      },
+      lines: (name) => t`${name}, lines`,
+      hunk: (oldStart, oldCount, newStart, newCount) => {
+        const oldEnd = oldStart + oldCount - 1;
+        const newEnd = newStart + newCount - 1;
+        // A side starts at 0 only when it has no lines (git's "-0,0").
+        const before = oldStart === 0 ? 0 : oldCount;
+        const after = newStart === 0 ? 0 : newCount;
+        return t`${plural(before, { 0: "No lines before", one: `Line ${oldStart} before`, other: `Lines ${oldStart} to ${oldEnd} before` })}, ${plural(after, { 0: "no lines after", one: `line ${newStart} after`, other: `lines ${newStart} to ${newEnd} after` })}`;
+      },
+    },
+    diffFiles: {
+      name: t({
+        message: "What changes",
+        context: "the files a change touches",
+      }),
+      added: t({ message: "Added", context: "a file a change adds" }),
+      deleted: t({ message: "Deleted", context: "a file a change removes" }),
+      modified: t({ message: "Modified", context: "a file a change changes" }),
+      filesChanged: (files) =>
+        plural(files, {
+          0: "No files changed",
+          one: "# file changed",
+          other: "# files changed",
+        }),
+      counts: (added, removed) =>
+        t`${plural(added, { 0: "No lines added", one: "# line added", other: "# lines added" })}, ${plural(removed, { 0: "none removed", other: "# removed" })}`,
+      nothing: t`No files changed.`,
+    },
+    stepFoot: {
+      back: t`Back`,
+      next: t`Next`,
+      step: (step, total) => t`Step ${step} of ${total}`,
     },
     codeBlock: {
       copy: t`Copy code`,
@@ -579,6 +702,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     input: {
       showPassword: t`Show password`,
       hidePassword: t`Hide password`,
+      replace: t({ message: "Replace", context: "a secret key, typed again" }),
     },
     composer: {
       composer: {
@@ -597,6 +721,14 @@ export const usePartWords = (): GraspWordsCatalog => {
         mentionsLoading: t`Looking`,
         mentionsFound: (count) =>
           t`${plural(count, { one: "# result", other: "# results" })}`,
+        image: (number) => t`Image ${number}`,
+        screenshots: t`Screenshots`,
+        pictureTime: (at) =>
+          at.toLocaleTimeString(i18n.locale, {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        pictureRemoved: (label) => t`${label} removed`,
         count: (length, max) => `${formatNumber(length)}/${formatNumber(max)}`,
         near: (max) => {
           const limit = formatNumber(max);
@@ -639,6 +771,10 @@ export const usePartWords = (): GraspWordsCatalog => {
         model: t`Model`,
         effort: t`How hard it thinks`,
         none: t`This model has one level of effort.`,
+        thinking: t({
+          message: "Thinking",
+          context: "how hard a model thinks",
+        }),
       },
       reasoning: { label: t`How hard it thinks` },
       agent: {
@@ -656,6 +792,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       },
       voice: {
         asking: t`Asking for the microphone`,
+        askingShort: t`Asking…`,
         listening: t`Listening`,
         speaking: t`Speaking`,
         thinking: t`Writing it down`,
@@ -725,6 +862,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       building: t`Being built`,
       failed: t`Didn't start`,
       empty: t`No preview yet`,
+      newApp: t`New app`,
     },
     appPreview: {
       region: t`App preview`,
@@ -831,6 +969,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
     inspectorPanel: {
       add: t({ message: "Add", context: "add to an inspector's list" }),
+      none: t({ message: "Not set", context: "a fact with no value" }),
       addTo: (label) => {
         const what = label.toLowerCase();
         return t`Add ${what}`;
@@ -865,9 +1004,11 @@ export const usePartWords = (): GraspWordsCatalog => {
       back: t`Back`,
       recommended: t`Recommended`,
       step: (step, count) => t`${step} of ${count}`,
+      failed: t`Could not send the answer`,
     },
     datePicker: { choose: t`Choose date` },
     dateRangePicker: {
+      trigger: t`Choose date`,
       presets: t`Presets`,
       today: t`Today`,
       last7: t`Last 7 days`,
@@ -897,8 +1038,106 @@ export const usePartWords = (): GraspWordsCatalog => {
       invalid: t({ message: "not valid", context: "a tag typed" }),
     },
     dialog: { close: t`Close` },
+    // Only a sheet's draft has a grid, which no page shows yet: the
+    // library's own words until one does.
+    dataGrid: dataGridWords,
+    // The kinds a held write stands as (an email, an event, a task) and
+    // their frame. A reply, a sheet and a message aren't shown yet: their
+    // words stay the library's own until a page uses them. Dates and
+    // times are Intl's, in the page's language.
+    draft: {
+      ...draftWords,
+      frame: {
+        dismiss: t({ message: "Discard", context: "a draft" }),
+        dismissed: t`Draft discarded`,
+        restore: t({ message: "Restore", context: "a discarded draft" }),
+        undo: t`Undo`,
+        working: t`Working`,
+        failed: t`Try again`,
+        remove: (name) => t`Remove ${name}`,
+        you: t({ message: "You", context: "the person looking, in a draft" }),
+      },
+      email: {
+        kind: t({ message: "Email", context: "a draft's kind" }),
+        to: t({ message: "To", context: "an email's addressees" }),
+        cc: t({ message: "Cc", context: "an email's copies" }),
+        bcc: t({ message: "Bcc", context: "an email's blind copies" }),
+        subject: t({ message: "Subject", context: "an email's" }),
+        body: t({ message: "Message", context: "an email's body" }),
+        addCc: t({ message: "Cc / Bcc", context: "show an email's copies" }),
+        send: t({ message: "Send", context: "send an email" }),
+        attach: t`Attach a file`,
+        sent: t({ message: "Sent", context: "an email" }),
+        time: (iso, timeZone) => clockIn(i18n.locale, iso, timeZone),
+      },
+      event: {
+        kind: t({ message: "Event", context: "a calendar event" }),
+        title: t`Event name`,
+        create: t`Create event`,
+        open: t`Open in calendar`,
+        created: t`Added to the calendar`,
+        day: t`The day, with everyone's busy time`,
+        conflicts: t({ message: "Conflicts", context: "an event's" }),
+        busy: (name, from, to) => t`${name}: busy ${from} to ${to}`,
+        when: t({ message: "When", context: "an event's time" }),
+        starts: t({ message: "Starts", context: "an event's start" }),
+        ends: t({ message: "Ends", context: "an event's end" }),
+        people: t({ message: "People", context: "an event's guests" }),
+        call: t`Video call`,
+        place: t({ message: "Place", context: "where an event is" }),
+        description: t({ message: "Description", context: "an event's" }),
+        addPlace: t({ message: "Add a place", context: "an event's" }),
+        addDescription: t`Add a description`,
+        time: (iso, timeZone) => clockIn(i18n.locale, iso, timeZone),
+        span: (start, end, timeZone) => {
+          const day = dayIn(i18n.locale, start, timeZone);
+          const from = clockIn(i18n.locale, start, timeZone);
+          const to = clockIn(i18n.locale, end, timeZone);
+          return `${day} · ${from} → ${to}`;
+        },
+        lasts: (start, length, timeZone) => {
+          const from = clockIn(i18n.locale, start, timeZone);
+          const hours = Math.floor(length / MINUTES_PER_HOUR);
+          const minutes = length % MINUTES_PER_HOUR;
+          if (hours === 0) {
+            return `${from} · ${t`${minutes} min`}`;
+          }
+          return minutes === 0
+            ? `${from} · ${t`${hours} h`}`
+            : `${from} · ${t`${hours} h ${minutes} min`}`;
+        },
+      },
+      task: {
+        kind: t({ message: "Task", context: "a draft's kind" }),
+        title: t`Task name`,
+        add: t`Add task`,
+        added: t`Added to your tasks`,
+        due: t({ message: "Due", context: "when a task is due" }),
+        people: t({ message: "Who", context: "who does a task" }),
+        note: t({ message: "Note", context: "a task's" }),
+        addDue: t`Add a due date`,
+        addNote: t`Add a note`,
+        time: (iso, timeZone) => clockIn(i18n.locale, iso, timeZone),
+        // A day alone: the tasks Grasp makes are due on a day (englishDraftWords).
+        at: (iso, timeZone) => dayIn(i18n.locale, iso, timeZone),
+        // A due date alone ("2026-11-20"): that day, wherever it is read.
+        on: (date) => dayIn(i18n.locale, `${date}T00:00:00Z`, "UTC"),
+      },
+      eventChange: {
+        kind: t({ message: "Event change", context: "a draft's kind" }),
+        save: t`Save changes`,
+        saved: t`Event updated`,
+        was: t({ message: "Was", context: "a value before a change" }),
+        added: t({ message: "New", context: "a guest a change adds" }),
+        removed: t({
+          message: "Removed",
+          context: "a guest a change takes off",
+        }),
+      },
+    },
     dropdownMenu: {
       working: t({ message: "Working", context: "a menu item's action" }),
+      more: t`More actions`,
     },
     link: { external: t`opens in a new tab` },
     sectionCard: { info: t`More about this section` },
@@ -942,6 +1181,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       save: t`Save`,
       cancel: t`Cancel`,
       hint: t`Double-click or press F2 to rename`,
+      hintPress: t`Press or press F2 to rename`,
     },
     settingRow: {
       info: t`More about this setting`,
@@ -952,6 +1192,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
     sidebar: {
       name: t`Sidebar`,
+      loading: t`Loading`,
       main: t({ message: "Main", context: "the sidebar's main list" }),
       search: t`Search`,
       fold: t`Show or hide the sidebar`,
@@ -975,6 +1216,31 @@ export const usePartWords = (): GraspWordsCatalog => {
     connectionRow: {
       whoCanFix: t`Who can fix this`,
       notWorking: t`Not working`,
+    },
+    connectService: {
+      change: t`Change`,
+      key: t`Key`,
+      keyNote: t`Only its last four characters are shown again.`,
+      keyMissing: t`Paste the key.`,
+      address: t`Address`,
+      // An address, the same in every language.
+      addressPlaceholder: "https://models.example.com/v1",
+      addressMissing: t`Enter your endpoint's address.`,
+      addressWrong: t`Enter an address that starts with https://.`,
+      connect: t`Connect`,
+      connecting: t`Connecting`,
+      connected: t`Connected`,
+      notConnected: t`Not connected`,
+      replaceKey: t`Replace key`,
+      disconnect: t`Disconnect`,
+      disconnectTitle: (label) => t`Disconnect ${label}?`,
+      disconnectDetail: t`Grasp's chat, agents and workflows stop using it, and its key is removed. Connecting again takes a new key.`,
+      keep: t`Keep it`,
+      disconnecting: t`Disconnecting`,
+      notDisconnected: t`Could not disconnect`,
+      keyLine: (last, region) =>
+        region === undefined ? t`Key …${last}` : t`Key …${last} · ${region}`,
+      connectName: (label) => t`Connect ${label}`,
     },
     signIn: {
       // The product's name: never translated.

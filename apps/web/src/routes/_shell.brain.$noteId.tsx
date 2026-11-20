@@ -48,6 +48,7 @@ import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { formatDay, formatMonth } from "../format.ts";
+import { NotePending } from "../frame/page-skeletons-b.tsx";
 import { NotFoundState } from "../frame/page-states.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
@@ -1129,5 +1130,8 @@ export const Route = createFileRoute("/_shell/brain/$noteId")({
       ),
     };
   },
+  // Going to a note whose transcript is read: its banner and text wait,
+  // under the layout's bar.
+  pendingComponent: NotePending,
   component: NotePage,
 });

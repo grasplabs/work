@@ -3,9 +3,10 @@ import {
   createFileRoute,
   Outlet,
   redirect,
-  useMatchRoute,
+  useRouter,
 } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
+import { useEffect } from "react";
 
 import { ChatBar } from "../chat/chat-bar.tsx";
 import { useChatPanels } from "../chat/chat-panel.tsx";
@@ -14,7 +15,11 @@ import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
 import { readWithin, shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
+import { useMatchLatest } from "../frame/match-latest.ts";
+import { usePageDock } from "../frame/page-fill.ts";
 import { PageError } from "../frame/page-states.tsx";
+import { ShellPending } from "../frame/shell-pending.tsx";
+import { forgetSignedIn, markSignedIn } from "../frame/signed-in-here.ts";
 import {
   landingAfterSignIn,
   onboardingBehind,
@@ -26,6 +31,41 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 // The signed-in product: the app's sidebar beside the page, each page
 // headed by its own site header (frame/site-header.tsx). Everyone else goes
 // to the sign-in page, which sends them back here once they're in.
+
+/**
+ * The sidebar's pages: each is a file of its own (vite.config.ts), fetched
+ * once the frame stands, so the first press on one waits for no file. Only
+ * their code: what a page reads it reads when opened, as each read of a
+ * list is recorded in core's audit trail and a page never opened must not
+ * be.
+ */
+const sidebarPages = [
+  "/_shell/",
+  "/_shell/inbox",
+  "/_shell/brain",
+  "/_shell/brain/",
+  "/_shell/projects/",
+  "/_shell/apps/",
+  "/_shell/workflows/",
+  "/_shell/agents/",
+  "/_shell/integrations/",
+] as const;
+
+const useSidebarPagesFetched = () => {
+  const router = useRouter();
+  useEffect(() => {
+    const fetchCode = async (id: (typeof sidebarPages)[number]) => {
+      try {
+        await router.loadRouteChunk(router.routesById[id]);
+      } catch {
+        // Fetched again as the page opens, which says so if it fails then.
+      }
+    };
+    for (const id of sidebarPages) {
+      void fetchCode(id);
+    }
+  }, [router]);
+};
 
 /**
  * The frame, with Grasp's one chat (chat/global-chat.tsx): its idle bar over
@@ -41,13 +81,16 @@ const ShellFrame = () => {
   const { stage } = useGlobalChat();
   const { failing } = Route.useLoaderData();
   // Chat's start has no bar: its backdrop takes the whole card.
-  const chatStart = useMatchRoute()({ to: "/" }) !== false;
+  const chatStart = useMatchLatest()({ to: "/" }) !== false;
+  // A page that takes someone through a task of its own has no chat box.
+  const docked = usePageDock();
+  useSidebarPagesFetched();
   return (
     <AppFrame
       bar={chatStart ? "none" : "page"}
       core={core}
       dock={<ChatBar />}
-      dockShown={stage.bar}
+      dockShown={stage.bar && docked}
       failing={failing}
       identity={identity}
       panels={panels}
@@ -125,6 +168,7 @@ export const Route = createFileRoute("/_shell")({
       throw new CoreUnreachableError();
     }
     if (identity === undefined) {
+      forgetSignedIn();
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({
         to: "/sign-in",
@@ -139,6 +183,7 @@ export const Route = createFileRoute("/_shell")({
     }
     // Grasp's staff work from the admin dashboard: nothing here is theirs.
     if (identity.staff) {
+      forgetSignedIn();
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/staff", replace: true });
     }
@@ -170,6 +215,8 @@ export const Route = createFileRoute("/_shell")({
           },
         })
       : null;
+    // The next reload paints the frame at once (frame/shell-pending.tsx).
+    markSignedIn();
     if (landing !== null) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: landing, replace: true });
@@ -190,5 +237,10 @@ export const Route = createFileRoute("/_shell")({
         : undefined,
   }),
   component: Shell,
+  // On a reload, the frame at once while core says who is in, the page's
+  // skeleton in its card; moving between pages never shows it, as the
+  // shell stays read.
+  pendingComponent: ShellPending,
+  pendingMs: 0,
   errorComponent: ShellError,
 });

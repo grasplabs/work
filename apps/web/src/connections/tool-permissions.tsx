@@ -2,11 +2,19 @@ import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import { Button } from "../grasp/button/index.ts";
+import { Search as SearchIcon } from "../grasp/icons/index.ts";
+import {
+  InputGroup,
+  InputGroupClear,
+  InputGroupInput,
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
 import {
   Item,
   ItemActions,
@@ -21,9 +29,15 @@ import type { Integration } from "./integrations.ts";
 import { ToolChoice } from "./tool-choice.tsx";
 import { toolRules, withAllowed, withRead } from "./tool-choices.ts";
 import type { AllowedTool } from "./tool-choices.ts";
+import { toolWords } from "./tool-rows.tsx";
 import { useChange } from "./use-change.ts";
 
+/** How many tools show at first, besides every tool it allows. */
+const firstShown = 8;
+
 const styles = stylex.create({
+  search: { marginInline: grasp.space4, marginBlockStart: grasp.space3 },
+  more: { marginInline: grasp.space3, marginBlock: grasp.space2 },
   // A group's name in the card's flush rows, on their inset.
   head: {
     marginInline: grasp.space4,
@@ -130,7 +144,37 @@ export const ToolPermissions = ({
 }) => {
   const { i18n, t } = useLingui();
   const { busy, failure, change } = useChange();
+  const [search, setSearch] = useState("");
+  const [all, setAll] = useState(false);
   const allowed = allowedOf(connection);
+  const allowedNames = new Set(allowed.map(({ name }) => name));
+  const wanted = search.trim().toLowerCase();
+  // What the search finds, by the tool's plain words or its description;
+  // the tools it allows first, then the rest, each in Composio's order.
+  const found = tools
+    .filter(
+      (tool) =>
+        wanted === "" ||
+        toolWords(tool.name, connection.provider)
+          .toLowerCase()
+          .includes(wanted) ||
+        (tool.description ?? "").toLowerCase().includes(wanted)
+    )
+    .toSorted(
+      (one, other) =>
+        Number(allowedNames.has(other.name)) -
+        Number(allowedNames.has(one.name))
+    );
+  // Every tool it allows shows, and a few more, until someone asks for all
+  // or searches: an app can have hundreds.
+  const shown =
+    all || wanted !== ""
+      ? found
+      : found.filter(
+          (tool, index) => allowedNames.has(tool.name) || index < firstShown
+        );
+  const total = found.length;
+  const hidden = total - shown.length;
   const offered = new Set(tools.map(({ name }) => name));
   const gone = allowed.filter(({ name }) => !offered.has(name));
   const save = (next: AllowedTool[]): void => {
@@ -148,14 +192,27 @@ export const ToolPermissions = ({
     <>
       <SettingsRows>
         <RowAlert variant="neutral">
-          {t`A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking.`}
+          {t`Read tools run without asking. Write tools wait for the person to confirm. Mark a tool Read only if it changes nothing.`}
         </RowAlert>
         {failure === undefined ? null : (
           <RowAlert variant="danger">{failure}</RowAlert>
         )}
       </SettingsRows>
+      <div {...stylex.props(styles.search)}>
+        <InputGroup>
+          <InputGroupText icon={SearchIcon} />
+          <InputGroupInput
+            aria-label={t`Search tools`}
+            onValueChange={setSearch}
+            placeholder={t`Search tools`}
+            type="search"
+            value={search}
+          />
+          <InputGroupClear aria-label={t`Clear search`} />
+        </InputGroup>
+      </div>
       {groups.map((group) => {
-        const inGroup = tools.filter(
+        const inGroup = shown.filter(
           ({ readOnly }) => readOnly === group.readOnly
         );
         const title = i18n._(group.title);
@@ -165,6 +222,7 @@ export const ToolPermissions = ({
             <ItemGroup aria-label={title} separated>
               {inGroup.map((tool) => (
                 <ToolChoice
+                  app={connection.provider}
                   choice={allowed.find(({ name }) => name === tool.name)}
                   disabled={busy || staff}
                   key={tool.name}
@@ -182,6 +240,23 @@ export const ToolPermissions = ({
           </section>
         );
       })}
+      {hidden > 0 ? (
+        <Button
+          layout={styles.more}
+          onClick={() => {
+            setAll(true);
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {t`${plural(total, { one: "Show the # tool", other: "Show all # tools" })}`}
+        </Button>
+      ) : null}
+      {wanted !== "" && found.length === 0 ? (
+        <SettingsRows>
+          <RowAlert variant="neutral">{t`No tools match your search.`}</RowAlert>
+        </SettingsRows>
+      ) : null}
       {gone.length === 0 ? null : (
         <section>
           <SectionHeader

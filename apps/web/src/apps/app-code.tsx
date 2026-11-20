@@ -4,12 +4,10 @@ import type { AppFiles, ViewedApp } from "@grasp-os/shared/apps";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
-import type { ReactNode } from "react";
 
-import { useCopy } from "../copy.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
-import { Breadcrumb } from "../grasp/breadcrumb/index.ts";
 import { Button } from "../grasp/button/index.ts";
+import { CodeBlock } from "../grasp/code-block/index.ts";
 import {
   Empty,
   EmptyDescription,
@@ -17,33 +15,22 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
-import {
-  Code,
-  Copy,
-  Download,
-  Folder as FolderIcon,
-  Icon,
-  Search,
-  Tick,
-} from "../grasp/icons/index.ts";
-import {
-  InputGroup,
-  InputGroupInput,
-  InputGroupText,
-} from "../grasp/input-group/index.ts";
+import { Code, Download, Folder as FolderIcon } from "../grasp/icons/index.ts";
+import { ScrollArea } from "../grasp/scroll-area/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { Tree } from "../grasp/tree/index.ts";
 import type { TreeNode } from "../grasp/tree/index.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { CodeFile, CodeScroller, fileIconOf } from "./code-view.tsx";
+import { fileIconOf } from "./file-icon.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
 // An App's code in its workspace, for its builders (app-workspace.tsx's
 // Code view), as a code editor shows a project, read-only: the files of
-// the build the preview beside it shows as a tree of folders, and the one
-// open highlighted, line by line (code-view.tsx). While the App's draft
+// the build the preview beside it shows as a tree of folders (the
+// library's Tree), and the one open in the library's CodeBlock,
+// highlighted, line by line. While the App's draft
 // changes it, that is the draft's files as they are now, read again at
 // each of its writes; otherwise the live version's. The App changes
 // through its chat, which the note says. Everything is read with core's
@@ -88,26 +75,29 @@ const byName = (a: string, b: string): number => a.localeCompare(b);
 const TREE_TALL = "12rem";
 const TREE_WIDE = "15rem";
 
+// The page round the view keeps its own gutter, so the view adds none:
+// the filter stands under the page's title. Each scroller reaches a step
+// past its content (and pads it back), so a focus ring or a field's halo
+// at the content's edge is never cut by it.
+const outset = `calc(-1 * ${grasp.space1})`;
+
 const styles = stylex.create({
+  // The tree and the open file side by side on the page's own ground: the
+  // code block is the one box in it, so nothing is framed twice.
   editor: {
     display: "flex",
     flexDirection: { default: "column", [media.fromTablet]: "row" },
+    gap: grasp.space4,
     flexGrow: 1,
     minHeight: 0,
-    overflow: "hidden",
-    backgroundColor: grasp.raised,
   },
   files: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space2,
     flexShrink: 0,
     maxHeight: { default: TREE_TALL, [media.fromTablet]: "none" },
     width: { default: "auto", [media.fromTablet]: TREE_WIDE },
-    overflowY: "auto",
-    padding: grasp.space2,
-    boxShadow: grasp.edge,
+    margin: outset,
   },
+  tree: { padding: grasp.space1 },
   code: {
     display: "flex",
     flexDirection: "column",
@@ -115,21 +105,22 @@ const styles = stylex.create({
     minHeight: 0,
     minWidth: 0,
   },
-  bar: {
+  scroller: { flexGrow: 1, margin: outset },
+  page: {
     display: "flex",
-    flexShrink: 0,
-    alignItems: "center",
-    gap: grasp.space3,
-    paddingBlock: grasp.space1,
-    paddingInlineStart: grasp.space4,
-    paddingInlineEnd: grasp.space2,
-    boxShadow: grasp.edge,
+    flexDirection: "column",
+    gap: grasp.space2,
+    padding: grasp.space1,
   },
-  crumbs: { flexGrow: 1, minWidth: 0 },
-  lines: { flexShrink: 0, fontVariantNumeric: "tabular-nums" },
-  scroller: { flexGrow: 1, minHeight: 0, overflow: "auto" },
+  // Under the code: that it is read only, in line with the code block's
+  // file name above.
+  foot: {
+    display: "flex",
+    alignItems: "center",
+    paddingInlineStart: `calc(${grasp.space3} + ${grasp.codeBlockBarWidth})`,
+  },
+  lines: { fontVariantNumeric: "tabular-nums" },
   fill: { display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0 },
-  padded: { padding: grasp.space4 },
 });
 
 /**
@@ -160,24 +151,6 @@ const foldersOf = (nodes: readonly TreeNode[]): string[] =>
     node.children === undefined ? [] : [node.value, ...foldersOf(node.children)]
   );
 
-/**
- * The tree's nodes whose path holds `query`, ignoring case, with the
- * folders that lead to them; all of them while nothing is asked.
- */
-const narrowed = (nodes: readonly TreeNode[], query: string): TreeNode[] => {
-  const wanted = query.trim().toLowerCase();
-  if (wanted === "") {
-    return [...nodes];
-  }
-  return nodes.flatMap((node): TreeNode[] => {
-    if (node.children === undefined) {
-      return node.value.toLowerCase().includes(wanted) ? [node] : [];
-    }
-    const children = narrowed(node.children, query);
-    return children.length === 0 ? [] : [{ ...node, children }];
-  });
-};
-
 /** Hands the reader the open file to save, under its own name. */
 const downloadFile = (path: string, text: string): void => {
   const url = URL.createObjectURL(
@@ -190,66 +163,77 @@ const downloadFile = (path: string, text: string): void => {
   URL.revokeObjectURL(url);
 };
 
-/** Where the open file is, folder by folder, as a breadcrumb. */
-const PathCrumbs = ({ path }: { path: string }) => {
-  const { t } = useLingui();
-  return (
-    <Breadcrumb
-      aria-label={t`Open file`}
-      items={path.split("/").map((label) => ({ label }))}
-      layout={styles.crumbs}
-    />
-  );
-};
-
 /** The lines of `text`; its last newline ends a line, not starts one. */
 const lineCount = (text: string): number =>
   text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 
-/** The open file's bar: its path, its length, and a way to copy it. */
-const FileBar = ({ path, text }: { path: string; text: string }) => {
+/**
+ * The code block's language for a file, by its extension: those it
+ * highlights, the rest as text.
+ */
+const languages: Readonly<Record<string, string>> = {
+  ts: "ts",
+  mts: "ts",
+  tsx: "tsx",
+  js: "js",
+  mjs: "js",
+  jsx: "jsx",
+  json: "json",
+  css: "css",
+  html: "html",
+  svg: "svg",
+  md: "markdown",
+  yaml: "yaml",
+  yml: "yaml",
+  sql: "sql",
+};
+
+const languageOf = (path: string): string =>
+  languages[path.slice(path.lastIndexOf(".") + 1)] ?? "text";
+
+/**
+ * The open file: the library's code block, headed by its path with Download
+ * and Copy, whole (an editor never folds a file); under it, that it is read
+ * only.
+ */
+const OpenFileCode = ({ path, text }: { path: string; text: string }) => {
   const { t } = useLingui();
-  const { copied, copy } = useCopy();
+  // Named so the note's message keeps its placeholder, `{lines}`.
   const lines = lineCount(text);
   return (
-    <div {...stylex.props(styles.bar)}>
-      <PathCrumbs path={path} />
-      <span {...stylex.props(styles.lines)}>
-        <Text element="span" size="xs" tone="muted">
-          <Plural
-            one="# line, read only"
-            other="# lines, read only"
-            value={lines}
+    <div {...stylex.props(styles.page)}>
+      <CodeBlock
+        // Save it, beside the head's copy, in the copy button's own form.
+        actions={
+          <Button
+            aria-label={t`Download the file`}
+            icon={Download}
+            onClick={() => {
+              downloadFile(path, text);
+            }}
+            size="sm"
+            variant="ghost"
           />
-        </Text>
-      </span>
-      <Button
-        aria-label={t`Download the file`}
-        icon={Download}
-        onClick={() => {
-          downloadFile(path, text);
-        }}
-        size="sm"
-        title={t`Download the file`}
-        variant="ghost"
+        }
+        code={text}
+        fileName={path}
+        language={languageOf(path)}
+        maxLines={false}
       />
-      <Button
-        icon={copied ? Tick : Copy}
-        aria-label={copied ? t`Copied` : t`Copy code`}
-        onClick={() => {
-          void copy(text);
-        }}
-        size="sm"
-        variant="ghost"
-      />
+      <div {...stylex.props(styles.foot)}>
+        <span {...stylex.props(styles.lines)}>
+          <Text element="span" size="xs" tone="muted">
+            <Plural
+              one="# line, read only"
+              other="# lines, read only"
+              value={lines}
+            />
+          </Text>
+        </span>
+      </div>
     </div>
   );
 };
-
-/** The editor's frame: the tree and the open file. */
-const EditorFrame = ({ children }: { children: ReactNode }) => (
-  <div {...stylex.props(styles.editor)}>{children}</div>
-);
 
 /** The first file of `folder`, as its tree lists them. */
 const firstIn = (folder: Folder): string | undefined => {
@@ -277,13 +261,10 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
     (path) => !isGeneratedServerFile(path)
   );
   const tree = treeOf(paths);
-  const [query, setQuery] = useState("");
-  const nodes = narrowed(nodesOf(tree), query);
-  // Every folder open, a new one too, but those the person folded; all
-  // of them while the tree is narrowed to what was asked.
+  const nodes = nodesOf(tree);
+  // Every folder open, a new one too, but those the person folded.
   const folders = foldersOf(nodes);
   const [folded, setFolded] = useState<string[]>([]);
-  const asking = query.trim() !== "";
   // The one asked for while this version has it, else its config, else
   // the tree's first.
   const file =
@@ -292,81 +273,58 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
       : (paths.find((path) => path === "grasp.config.ts") ?? firstIn(tree));
   if (file === undefined) {
     return (
-      <EditorFrame>
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia icon={Code} />
-            <EmptyTitle>
-              <Trans>No files</Trans>
-            </EmptyTitle>
-          </EmptyHeader>
-        </Empty>
-      </EditorFrame>
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia icon={Code} />
+          <EmptyTitle>
+            <Trans>No files</Trans>
+          </EmptyTitle>
+        </EmptyHeader>
+      </Empty>
     );
   }
   const text = files[file] ?? "";
   return (
-    <EditorFrame>
-      <div {...stylex.props(styles.files)}>
-        <search>
-          <InputGroup>
-            <InputGroupText>
-              <Icon icon={Search} />
-            </InputGroupText>
-            <InputGroupInput
-              aria-label={t`Find a file`}
-              onValueChange={(value: string) => {
-                setQuery(value);
-              }}
-              placeholder={t`Find a file`}
-              type="search"
-              value={query}
-            />
-          </InputGroup>
-        </search>
-        <Tree
-          aria-label={t`Files`}
-          expanded={
-            asking
-              ? folders
-              : folders.filter((folder) => !folded.includes(folder))
-          }
-          items={nodes}
-          mode="single"
-          onExpandedChange={(expanded) => {
-            if (!asking) {
+    <div {...stylex.props(styles.editor)}>
+      <ScrollArea layout={styles.files}>
+        <div {...stylex.props(styles.tree)}>
+          <Tree
+            aria-label={t`Files`}
+            expanded={folders.filter((folder) => !folded.includes(folder))}
+            // The library's own filter over the files: what is typed narrows
+            // the tree to the files that hold it, their folders opened.
+            filterable
+            items={nodes}
+            mode="single"
+            onExpandedChange={(expanded) => {
               setFolded(folders.filter((folder) => !expanded.includes(folder)));
-            }
-          }}
-          onValueChange={(value) => {
-            if (typeof value === "string" && !value.startsWith("folder:")) {
-              onAsk(value);
-            }
-          }}
-          value={file}
-        />
-      </div>
+            }}
+            onValueChange={(value) => {
+              if (typeof value === "string" && !value.startsWith("folder:")) {
+                onAsk(value);
+              }
+            }}
+            value={file}
+          />
+        </div>
+      </ScrollArea>
       <section aria-label={t`Code of ${file}`} {...stylex.props(styles.code)}>
-        <FileBar path={file} text={text} />
         {/* Each file its own scroller: a file opens at its top. */}
-        <CodeScroller key={file} {...stylex.props(styles.scroller)}>
-          <CodeFile path={file} text={text} />
-        </CodeScroller>
+        <ScrollArea key={file} layout={styles.scroller}>
+          <OpenFileCode path={file} text={text} />
+        </ScrollArea>
       </section>
-    </EditorFrame>
+    </div>
   );
 };
 
 /** A read not done: that it is being read, or why it failed. */
-const ReadState = ({ loaded }: { loaded: Loaded<unknown> | undefined }) => (
-  <div {...stylex.props(styles.padded)}>
-    {loaded === undefined ? (
-      <LoadingLines lines={6} />
-    ) : (
-      <NotLoaded page={loaded} />
-    )}
-  </div>
-);
+const ReadState = ({ loaded }: { loaded: Loaded<unknown> | undefined }) =>
+  loaded === undefined ? (
+    <LoadingLines lines={6} />
+  ) : (
+    <NotLoaded page={loaded} />
+  );
 
 /** One version's files, read. */
 const VersionFiles = ({

@@ -33,7 +33,10 @@ export const dayWritten = (day: Date, sameYear: boolean, locale = "en-GB") =>
       : { day: "numeric", month: "long", year: "numeric" }
   ).format(day);
 
-/** The rows for these messages: a date line where the day changes, the unread line before `unreadFrom`. */
+/**
+ * The rows for these messages: a date line where the day changes (none over a thread that starts
+ * today), the unread line before `unreadFrom`.
+ */
 export const rowsOf = <T extends ThreadItemBase>(
   items: T[],
   unreadFrom: string | undefined,
@@ -45,13 +48,18 @@ export const rowsOf = <T extends ThreadItemBase>(
     if (item.at !== undefined) {
       const day = dayOf(item.at);
       if (day.getTime() !== lastDay) {
-        rows.push({
-          kind: "date",
-          key: `date-${day.getTime()}`,
-          day,
-          ago: daysAgo(day, now),
-          sameYear: day.getFullYear() === now.getFullYear(),
-        });
+        const ago = daysAgo(day, now);
+        // A thread that starts today needs no "Today" over it: its first line stands only for an
+        // earlier day, and a line comes wherever the day changes after that.
+        if (lastDay !== null || ago !== 0) {
+          rows.push({
+            kind: "date",
+            key: `date-${day.getTime()}`,
+            day,
+            ago,
+            sameYear: day.getFullYear() === now.getFullYear(),
+          });
+        }
         lastDay = day.getTime();
       }
     }

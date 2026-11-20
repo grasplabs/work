@@ -5,7 +5,12 @@ import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
 import type { CommandEntry, CommandItems } from "../grasp/command/index.ts";
-import { Command } from "../grasp/command/index.ts";
+import {
+  Command,
+  CommandInput,
+  CommandEmpty,
+  CommandList,
+} from "../grasp/command/index.ts";
 import { People, Plus, Tag } from "../grasp/icons/index.ts";
 import {
   Popover,
@@ -211,13 +216,11 @@ export const PeopleTeamsPicker = ({
       </PopoverTrigger>
       <PopoverContent align="end">
         <Command
-          aria-label={search}
           bare
-          empty={t`Nobody else to add.`}
           filter={false}
           items={items}
           loading={candidates === null}
-          loadingLabel={t`Reading people and teams…`}
+          words={{ loading: t`Reading people and teams…` }}
           onAction={(value) => {
             setOpen(false);
             const subject = offered.get(value);
@@ -226,9 +229,12 @@ export const PeopleTeamsPicker = ({
             }
           }}
           onQueryChange={setQuery}
-          placeholder={search}
           query={query}
-        />
+        >
+          <CommandInput aria-label={search} placeholder={search} />
+          <CommandEmpty>{t`Nobody else to add.`}</CommandEmpty>
+          <CommandList />
+        </Command>
       </PopoverContent>
     </Popover>
   );

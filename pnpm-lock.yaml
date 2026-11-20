@@ -121,9 +121,6 @@ catalogs:
     '@oxc-project/types':
       specifier: 0.156.0
       version: 0.156.0
-    '@pierre/diffs':
-      specifier: 1.6.2
-      version: 1.6.2
     '@playwright/test':
       specifier: 1.63.0
       version: 1.63.0
@@ -905,7 +902,7 @@ importers:
         version: 19.3.0
       blume:
         specifier: 'catalog:'
-        version: 2.2.6(@aws-sdk/credential-provider-web-identity@3.972.78)(@cfworker/json-schema@4.1.1)(@emnapi/runtime@1.11.3)(@rolldown/plugin-babel@0.2.4(@babel/core@7.29.7(supports-color@10.2.2))(@babel/runtime@7.29.7)(@voidzero-dev/vite-plus-core@0.3.3(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.1))(rolldown@1.2.16))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@vercel/functions@3.10.6(@aws-sdk/credential-provider-web-identity@3.972.78)(ws@8.21.3))(@voidzero-dev/vite-plus-core@0.3.3(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.1))(aws4fetch@1.0.20)(babel-plugin-react-compiler@1.0.0)(csstype@3.2.3)(esbuild@0.28.2)(prettier@3.9.10)(supports-color@10.2.2)(tsx@4.23.15)(ws@8.21.3)(yaml@2.9.1)
+        version: 2.2.6(@aws-sdk/credential-provider-web-identity@3.972.78)(@cfworker/json-schema@4.1.1)(@emnapi/runtime@1.11.3)(@rolldown/plugin-babel@0.2.4(@babel/core@7.29.7(supports-color@10.2.2))(@babel/runtime@7.29.7)(@voidzero-dev/vite-plus-core@0.3.3(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.1))(rolldown@1.2.16))(@shikijs/themes@4.6.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@vercel/functions@3.10.6(@aws-sdk/credential-provider-web-identity@3.972.78)(ws@8.21.3))(@voidzero-dev/vite-plus-core@0.3.3(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.1))(aws4fetch@1.0.20)(babel-plugin-react-compiler@1.0.0)(csstype@3.2.3)(esbuild@0.28.2)(prettier@3.9.10)(supports-color@10.2.2)(tsx@4.23.15)(ws@8.21.3)(yaml@2.9.1)
       mdast-util-from-markdown:
         specifier: 'catalog:'
         version: 2.1.0(supports-color@10.2.2)
@@ -1001,9 +998,6 @@ importers:
       '@lingui/react':
         specifier: 'catalog:'
         version: 6.8.0(@babel/core@7.29.7(supports-color@10.2.2))(react@19.3.0)
-      '@pierre/diffs':
-        specifier: 'catalog:'
-        version: 1.6.2(@shikijs/themes@4.6.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@stylexjs/stylex':
         specifier: 'catalog:'
         version: 0.19.2
@@ -16057,7 +16051,7 @@ snapshots:
 
   blake3-wasm@2.1.5: {}
 
-  blume@2.2.6(@aws-sdk/credential-provider-web-identity@3.972.78)(@cfworker/json-schema@4.1.1)(@emnapi/runtime@1.11.3)(@rolldown/plugin-babel@0.2.4(@babel/core@7.29.7(supports-color@10.2.2))(@babel/runtime@7.29.7)(@voidzero-dev/vite-plus-core@0.3.3(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.1))(rolldown@1.2.16))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@vercel/functions@3.10.6(@aws-sdk/credential-provider-web-identity@3.972.78)(ws@8.21.3))(@voidzero-dev/vite-plus-core@0.3.3(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.1))(aws4fetch@1.0.20)(babel-plugin-react-compiler@1.0.0)(csstype@3.2.3)(esbuild@0.28.2)(prettier@3.9.10)(supports-color@10.2.2)(tsx@4.23.15)(ws@8.21.3)(yaml@2.9.1):
+  blume@2.2.6(@aws-sdk/credential-provider-web-identity@3.972.78)(@cfworker/json-schema@4.1.1)(@emnapi/runtime@1.11.3)(@rolldown/plugin-babel@0.2.4(@babel/core@7.29.7(supports-color@10.2.2))(@babel/runtime@7.29.7)(@voidzero-dev/vite-plus-core@0.3.3(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.1))(rolldown@1.2.16))(@shikijs/themes@4.6.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@vercel/functions@3.10.6(@aws-sdk/credential-provider-web-identity@3.972.78)(ws@8.21.3))(@voidzero-dev/vite-plus-core@0.3.3(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.1))(aws4fetch@1.0.20)(babel-plugin-react-compiler@1.0.0)(csstype@3.2.3)(esbuild@0.28.2)(prettier@3.9.10)(supports-color@10.2.2)(tsx@4.23.15)(ws@8.21.3)(yaml@2.9.1):
     dependencies:
       '@astrojs/check': 0.9.12(@emnapi/runtime@1.11.3)(prettier@3.9.10)(typescript@6.0.3)
       '@astrojs/markdown-satteri': 0.4.6

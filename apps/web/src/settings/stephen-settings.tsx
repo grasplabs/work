@@ -36,6 +36,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import {
   Sheet,
@@ -48,7 +49,6 @@ import { Switch } from "../grasp/switch/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { placeIcon, placeName } from "../workflows/requests/request-parts.tsx";
-import { SettingsSection } from "./settings-parts.tsx";
 import {
   AudienceControl,
   appAudienceOf,
@@ -244,8 +244,7 @@ const PlacePanel = ({
             <Switch
               checked={on}
               disabled={!can}
-              label={t`On in ${name}`}
-              labelHidden
+              aria-label={t`On in ${name}`}
               onCheckedChange={(next) => {
                 void change(async (session) => {
                   await session.connections.setStephenPlace(
@@ -284,8 +283,7 @@ const PlacePanel = ({
             <Switch
               checked={place.acts}
               disabled={!can}
-              label={t`Does things for people in ${name}`}
-              labelHidden
+              aria-label={t`Does things for people in ${name}`}
               onCheckedChange={(acts) => {
                 void change(async (session) => {
                   await session.connections.setStephenPlace(
@@ -456,8 +454,11 @@ export const StephenSettings = ({
         week={week}
       />
       <ErrorText>{failure}</ErrorText>
-      <SettingsSection
-        action={
+      <SectionCard
+        variant="grouped"
+        density="compact"
+        flush
+        actions={
           editable && toAdd.length > 0 ? (
             <AddPlace change={change} disabled={!can} places={toAdd} />
           ) : undefined
@@ -486,8 +487,11 @@ export const StephenSettings = ({
             />
           ))}
         </ItemGroup>
-      </SettingsSection>
-      <SettingsSection
+      </SectionCard>
+      <SectionCard
+        variant="grouped"
+        density="compact"
+        flush
         info={t`Every tool he has is of one of these kinds. Each is on for whom you choose, in every app.`}
         title={t`What he may do`}
       >
@@ -520,8 +524,11 @@ export const StephenSettings = ({
             );
           })}
         </SettingsRows>
-      </SettingsSection>
-      <SettingsSection
+      </SectionCard>
+      <SectionCard
+        variant="grouped"
+        density="compact"
+        flush
         info={t`What he can do in each system, as one pack, with each person's own sign-in.`}
         title={t`Apps`}
       >
@@ -549,14 +556,17 @@ export const StephenSettings = ({
             );
           })}
         </ItemGroup>
-      </SettingsSection>
+      </SectionCard>
       {workflows === null ? null : (
-        <SettingsSection
+        <SectionCard
+          variant="grouped"
+          density="compact"
+          flush
           info={t`People can start these by asking him. A workflow's owner opens it to asking on its page.`}
           title={t`Workflows`}
         >
           {workflows.length === 0 ? (
-            <Empty size="section">
+            <Empty size="md">
               <EmptyHeader>
                 <EmptyDescription>
                   <Trans>No workflow is open to asking yet.</Trans>
@@ -583,7 +593,7 @@ export const StephenSettings = ({
               ))}
             </ItemGroup>
           )}
-        </SettingsSection>
+        </SectionCard>
       )}
       <Sheet
         onOpenChange={(open) => {

@@ -1,6 +1,7 @@
 // ChatMessageSkeleton: the shape of a message while an old chat loads, made of Skeleton's lines, at
-// the message's own widths. A person's: a bubble at the end, as wide as a short question. The
-// agent's: its name, then lines of words, the last one short. Thread's `loading` draws pairs of them;
+// the message's own widths. A person's: the bubble's own ground at the end (its soft fill, edge and
+// corner, nothing in it), as wide as a short question. The agent's: its name, then lines of words,
+// the last one short. Words wait as quiet lines; a bubble, a surface, waits as itself. Thread's `loading` draws pairs of them;
 // a page that loads one message on its own may draw one.
 //
 //   <ChatMessageSkeleton from="person" />
@@ -35,13 +36,19 @@ const styles = stylex.create({
   person: {
     justifyItems: "end",
   },
-  // A person's bubble: as tall as its lines with the bubble's room round them.
+  // A person's bubble: its own ground (the sent message's soft fill, edge and corner), as tall as
+  // its lines with the bubble's room round them, and empty.
   bubble: (lines: number) => ({
+    boxSizing: "border-box",
     height: `calc(${lines} * ${grasp.textMdLine} + 2 * ${grasp.space3})`,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.soft,
+    boxShadow: grasp.edge,
   }),
-  // A short question is about half the room; a longer one most of it, never past a bubble's width.
-  short: { width: `min(${grasp.chatBubbleWidth}, 55%)` },
-  long: { width: `min(${grasp.chatBubbleWidth}, 80%)` },
+  // A short question is a modest width; a longer one more, never past a bubble's width.
+  short: { width: `min(${grasp.chatBubbleWidth}, 12rem, 45%)` },
+  long: { width: `min(${grasp.chatBubbleWidth}, 20rem, 65%)` },
   // The agent's name, a short word.
   name: { width: grasp.space24 },
   words: { display: "grid", minWidth: 0 },
@@ -64,12 +71,12 @@ export const ChatMessageSkeleton = ({
         data-from="person"
         {...stylex.props(styles.root, styles.person)}
       >
-        <Skeleton
-          variant="block"
-          layout={[
+        <span
+          aria-hidden="true"
+          {...stylex.props(
             styles.bubble(Math.max(1, lines ?? 1)),
-            (lines ?? 1) > 1 ? styles.long : styles.short,
-          ]}
+            (lines ?? 1) > 1 ? styles.long : styles.short
+          )}
         />
       </div>
     );

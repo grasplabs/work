@@ -11,8 +11,10 @@ import type { ComponentProps } from "react";
 
 import { Button } from "../button";
 import type { ActionState, ButtonVariant, ButtonWords } from "../button";
+import { buttonWords } from "../button/words";
 import type { IconData } from "../icons";
 import { ms } from "../tokens/tokens.values";
+import { useWords } from "../words/words";
 import { usePopoverController } from "./popover";
 import { useStill } from "./still-context";
 
@@ -57,8 +59,12 @@ interface WithWork {
   action: () => unknown;
   /** The words while the work runs ("Sending"). Leave it out to keep the button's own words. */
   workingLabel?: string;
-  /** The words when the work failed, said plainly on the button and to a screen reader ("Could not send"). */
-  failedLabel: string;
+  /**
+   * The words when the work failed, said plainly on the button and to a screen reader ("Could not send"). Leave it out for
+   * the neutral one, from Button's catalogue.
+   * @default "Could not finish"
+   */
+  failedLabel?: string;
 }
 
 /** Every prop a PopoverAction takes: these, and the rest of UI SDK's PopoverClose. */
@@ -93,7 +99,7 @@ type Look = Pick<
   "children" | "variant" | "icon" | "agentConfirm"
 > & {
   workingLabel?: string | undefined;
-  failedLabel?: string | undefined;
+  failedLabel: string;
 };
 
 interface ActionButtonProps {
@@ -136,7 +142,7 @@ const ActionButton = ({
         state: currentOf(state, failed),
         workingLabel,
         doneLabel: words ?? "",
-        failedLabel: failedLabel ?? "",
+        failedLabel,
       }
     : {};
   return (
@@ -211,13 +217,14 @@ const WorkAction = ({ rest, action, look }: WorkActionProps) => {
  * closes: a step that keeps the popover open belongs among its fields.
  */
 export const PopoverAction = (props: PopoverActionProps) => {
+  const { actionFailed } = useWords("button", buttonWords);
   const {
     children,
     variant,
     icon,
     action,
     workingLabel,
-    failedLabel,
+    failedLabel = actionFailed,
     agentConfirm,
     ...rest
   } = props;

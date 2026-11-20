@@ -46,21 +46,10 @@ import { useCore } from "../use-core.ts";
 /** Who may read the new collection, as the form offers it. */
 type Audience = Exclude<CollectionAccess, "admins">;
 
-const audienceLabels: Readonly<
-  Record<Audience, { label: MessageDescriptor; description: MessageDescriptor }>
-> = {
-  me: {
-    label: msg`Only me`,
-    description: msg`A private collection: nobody else reads it, nor their agents.`,
-  },
-  teams: {
-    label: msg`Chosen teams`,
-    description: msg`The members of the teams you choose, and their agents.`,
-  },
-  everyone: {
-    label: msg`Everyone`,
-    description: msg`Everyone in the organization, and their agents.`,
-  },
+const audienceLabels: Readonly<Record<Audience, MessageDescriptor>> = {
+  me: msg`Only me`,
+  teams: msg`Chosen teams`,
+  everyone: msg`Everyone`,
 };
 
 const nameMaxLength = 100;
@@ -250,12 +239,7 @@ const CollectionForm = ({ admin }: { admin: boolean }) => {
               {offered.map((one) => (
                 <Field key={one} orientation="horizontal">
                   <RadioGroupItem value={one} />
-                  <FieldContent>
-                    <FieldLabel>{i18n._(audienceLabels[one].label)}</FieldLabel>
-                    <FieldDescription>
-                      {i18n._(audienceLabels[one].description)}
-                    </FieldDescription>
-                  </FieldContent>
+                  <FieldLabel>{i18n._(audienceLabels[one])}</FieldLabel>
                 </Field>
               ))}
             </RadioGroup>
@@ -273,15 +257,18 @@ const CollectionForm = ({ admin }: { admin: boolean }) => {
                 onChange={setTeamIds}
                 teams={teams}
               />
-              <Switch
-                checked={sensitive}
-                description={t`The model gateway treats what agents read from it as sensitive.`}
-                disabled={busy}
-                label={t`Sensitive`}
-                onCheckedChange={(checked) => {
-                  setSensitive(checked);
-                }}
-              />
+              <Field orientation="horizontal" disabled={busy}>
+                <FieldContent>
+                  <FieldLabel>{t`Sensitive`}</FieldLabel>
+                  <FieldDescription>{t`The model gateway treats what agents read from it as sensitive.`}</FieldDescription>
+                </FieldContent>
+                <Switch
+                  checked={sensitive}
+                  onCheckedChange={(checked) => {
+                    setSensitive(checked);
+                  }}
+                />
+              </Field>
             </>
           ) : null}
           <ErrorText>{failure}</ErrorText>

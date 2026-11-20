@@ -1,9 +1,8 @@
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
 import { ComposerAction } from "../grasp/composer/index.ts";
-import { AppWindow, PanelToggle } from "../grasp/icons/index.ts";
+import { PanelToggle } from "../grasp/icons/index.ts";
 import { shortcutLabel } from "../shortcuts.ts";
 import { ChatComposer } from "./chat-composer.tsx";
 import { useOpenChat } from "./chat-presence.ts";
@@ -12,17 +11,11 @@ import { chatKey, useGlobalChat } from "./global-chat.tsx";
 // Grasp's chat while it waits (global-chat.tsx): the chat's one box to ask
 // in (chat-composer.tsx), in one row, at the foot of the page, as one line to ask in. It mentions with
 // `@` as the chat's box does, and its + adds a file or a mention; sending
-// opens the chat where it last was, with the answer coming in, and its
-// last button opens it without asking. What is typed here, mentions and
+// opens the chat where it last was, with the answer coming in; the
+// page's own bar opens it without asking. What is typed here, mentions and
 // files too, is the chat's own box's, so it is all still there once the
 // chat opens. While Grasp answers, its light runs round it and Stop stops
 // the answer. Back, it takes the cursor if the chat had it.
-
-const styles = stylex.create({
-  // As wide as the dock gives (App shell's shell-dock-width): the dock
-  // centres what it holds, so a holder with no width shrinks to the box's least.
-  bar: { width: "100%" },
-});
 
 /** How long the bar offers its box the cursor back as the chat closes: the dock's motion, in ms. */
 const returnWithinMs = 300;
@@ -30,9 +23,9 @@ const returnWithinMs = 300;
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
   const { t } = useLingui();
-  const { placement, stage, composer, words, view } = useGlobalChat();
+  const { presence, stage, composer, words, view } = useGlobalChat();
   const openHere = useOpenChat();
-  const bar = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
   // Back as the chat closes: the chat had the cursor, which it loses as it
   // goes. Only then: a menu or window closing elsewhere leaves the cursor
   // nowhere for a moment too, and it belongs to what opens next. The cursor
@@ -53,17 +46,17 @@ export const ChatBar = () => {
     let frame = 0;
     const until = performance.now() + returnWithinMs;
     const offer = () => {
-      const box = bar.current?.querySelector("textarea");
+      const field = box.current;
       const { activeElement } = document;
       const lost =
         activeElement === null ||
         activeElement === document.body ||
         activeElement.closest("[data-slot=app-shell-panels]") !== null;
-      if (box === null || box === undefined || !lost) {
+      if (field === null || !lost) {
         return;
       }
-      box.focus();
-      if (document.activeElement !== box && performance.now() < until) {
+      field.focus();
+      if (document.activeElement !== field && performance.now() < until) {
         frame = requestAnimationFrame(offer);
       }
     };
@@ -78,21 +71,31 @@ export const ChatBar = () => {
   }
   // Nothing to ask with (no AI provider yet): the chat opens to say so.
   const canSend = (composer.models?.length ?? 0) > 0 && !composer.busy;
+  // The bar ends in Send: sending opens the chat, and the page's own bar has
+  // the button that opens it without asking. Only a page whose chat is part
+  // of it (an App's workspace on a phone) has no such button, so there the
+  // bar keeps one, or the chat's history could not be reached without asking.
+  const ownChat = !presence.placements.includes("floating");
   const shortcut = shortcutLabel(chatKey);
   const { onAttach } = composer;
   return (
-    <div ref={bar} {...stylex.props(styles.bar)}>
+    <div>
       <ChatComposer
         {...composer}
-        footer={
-          <ComposerAction
-            icon={placement === "floating" ? AppWindow : PanelToggle}
-            aria-label={t`Open the chat (${shortcut})`}
-            onClick={() => {
-              openHere();
-            }}
-          />
-        }
+        boxRef={box}
+        {...(ownChat
+          ? {
+              footer: (
+                <ComposerAction
+                  aria-label={t`Open the chat (${shortcut})`}
+                  icon={PanelToggle}
+                  onClick={() => {
+                    openHere();
+                  }}
+                />
+              ),
+            }
+          : {})}
         compact
         label={words.title}
         // Files show in the chat's box, which opens to show them.

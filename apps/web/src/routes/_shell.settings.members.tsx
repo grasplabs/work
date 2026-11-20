@@ -12,7 +12,7 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatDate } from "../format.ts";
@@ -26,6 +26,8 @@ import {
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { PageSkeletonTable } from "../grasp/blocks/page-skeleton-table/page-skeleton-table.tsx";
+import { PageSkeletonToolbar } from "../grasp/blocks/page-skeleton-toolbar/page-skeleton-toolbar.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { DataTable, DataTablePerson } from "../grasp/data-table/index.ts";
 import type { DataTableColumn } from "../grasp/data-table/index.ts";
@@ -77,6 +79,7 @@ import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 import { TeamsPanel } from "../settings/teams.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { useNarrow } from "../use-narrow.ts";
 
 // Settings → Members and roles, on one page as the library's Settings
 // pattern has it: one compact card of people, each with their face, their
@@ -118,9 +121,6 @@ const styles = stylex.create({
   roleName: { margin: 0, fontWeight: grasp.weightMedium, color: grasp.ink },
   roleText: { margin: 0, color: grasp.muted },
 });
-
-/** The table's head: the column names muted on the card's own ground, a hairline under them. */
-const HEAD = "plain" as const;
 
 /** How many people a page of the table holds: the rest are a page further. */
 const pageSize = 20;
@@ -421,6 +421,22 @@ const roleOf = (row: PersonRow): string => {
   return role === undefined ? "" : roleLabel(role);
 };
 
+/** The people's columns' words, in the reader's language. */
+const usePeopleWords = (): PeopleWords => {
+  const { t } = useLingui();
+  return {
+    name: t`Name`,
+    since: t`Since`,
+    role: t`Role`,
+    invited: t`Invited`,
+    yourRole: t`Your role`,
+    roleOf: (name) => t`Role of ${name}`,
+    invitedShort: (date) => t`Invited ${date}`,
+    invitedOn: (date, by) => t`${date} by ${by}`,
+    removedOn: (date) => t`Removed ${date}`,
+  };
+};
+
 /** The people's columns: who, since when, and their role with what can be done. */
 const peopleColumns = ({
   words,
@@ -438,6 +454,8 @@ const peopleColumns = ({
     {
       key: "name",
       header: words.name,
+      // While the people are read, a person's box: their circle, name and email.
+      placeholder: "person",
       value: (row) => `${row.name} ${row.email}`,
       cell: (row) => {
         const date = formatDate(row.at);
@@ -557,22 +575,6 @@ const peopleColumns = ({
   return narrow ? columns.filter((column) => column.key !== "since") : columns;
 };
 
-/** Whether the window is narrower than a phone's: the library's own breakpoint (media.belowPhone). */
-const belowPhone = "(width < 40rem)";
-const onWidth = (changed: () => void): (() => void) => {
-  const query = matchMedia(belowPhone);
-  query.addEventListener("change", changed);
-  return () => {
-    query.removeEventListener("change", changed);
-  };
-};
-const useNarrow = (): boolean =>
-  useSyncExternalStore(
-    onWidth,
-    () => matchMedia(belowPhone).matches,
-    () => false
-  );
-
 /**
  * The people as one table, the library's Members pattern as Ruben chose it
  * (with headers): Name with the face and email, Since with the date each
@@ -597,9 +599,7 @@ const PeopleTable = ({
   const [search, setSearch] = useState("");
   const gone = useRemovedPeople(removed);
   const narrow = useNarrow();
-  // What the head counts: the members, and apart from them who is invited.
-  const people = members.length;
-  const invited = invitations.length;
+  const words = usePeopleWords();
   const rows: PersonRow[] = [
     ...members.map((member) => ({
       key: member.userId,
@@ -667,11 +667,7 @@ const PeopleTable = ({
           </>
         ) : undefined
       }
-      title={
-        invited === 0
-          ? plural(people, { one: "# person", other: "# people" })
-          : t`${plural(people, { one: "# person", other: "# people" })} · ${plural(invited, { one: "# invited", other: "# invited" })}`
-      }
+      title={t`Team members`}
     >
       {notice.failure === undefined && notice.done === undefined ? null : (
         <div {...stylex.props(styles.notice)}>
@@ -684,20 +680,9 @@ const PeopleTable = ({
       )}
       {/* A column's being hidden is read as the table starts: it starts again when the width crosses the phone's. */}
       <DataTable
-        appearance={{ head: HEAD }}
         key={narrow ? "narrow" : "wide"}
         columns={peopleColumns({
-          words: {
-            name: t`Name`,
-            since: t`Since`,
-            role: t`Role`,
-            invited: t`Invited`,
-            yourRole: t`Your role`,
-            roleOf: (name) => t`Role of ${name}`,
-            invitedShort: (date) => t`Invited ${date}`,
-            invitedOn: (date, by) => t`${date} by ${by}`,
-            removedOn: (date) => t`Removed ${date}`,
-          },
+          words,
           me,
           narrow,
           onNotice: setNotice,
@@ -707,6 +692,14 @@ const PeopleTable = ({
         pageSize={pageSize}
         query={search}
         rowKey={(row) => row.key}
+        // Someone invited is not here yet: their row fades toward its end.
+        // Someone removed is greyed, their menu kept clear.
+        rowStatus={(row) => {
+          if (row.kind === "invited") {
+            return "pending";
+          }
+          return row.kind === "removed" ? "removed" : undefined;
+        }}
         rows={rows}
         unit={{ one: t`person`, other: t`people` }}
       />
@@ -752,38 +745,58 @@ const MembersPage = () => {
   );
 };
 
+const ignoreNotice = (): void => undefined;
+
 /**
- * The people while they load, as the Members pattern has it: the table's
- * own placeholder rows under its headers, where the people will stand.
+ * The people's card while they are read: the card as the loaded one
+ * stands (its title waiting, its head's actions in place), holding the library's page-skeleton-table
+ * without its header, the table waiting in its own `loading` with the
+ * columns, label and page size it will have (the name's column a
+ * person's placeholder), so its head and rows stand where they will.
  */
-const MembersLoading = () => {
+const MembersPending = () => {
   const { t } = useLingui();
+  const words = usePeopleWords();
+  const narrow = useNarrow();
   return (
     <SectionCard
+      actions={
+        // Roles and Invite need no data, so they stand as they will; the
+        // search waits as its field's empty frame, in the search's box.
+        <>
+          <RolesButton />
+          <div {...stylex.props(styles.search)}>
+            <PageSkeletonToolbar variant="search" />
+          </div>
+          <InviteButton />
+        </>
+      }
       density="compact"
       flush
       loading
-      title={t`Members`}
+      title=""
       variant="grouped"
     >
-      <DataTable
-        appearance={{ head: HEAD }}
-        columns={[
-          { key: "name", header: t`Name`, value: () => "" },
-          { key: "since", header: t`Since`, value: () => "" },
-          { key: "role", header: t`Role`, align: "end", value: () => "" },
-        ]}
-        label={t`Members`}
-        loading
-        rowKey={() => ""}
-        rows={[]}
+      <PageSkeletonTable<PersonRow>
+        header={false}
+        table={{
+          columns: peopleColumns({
+            words,
+            me: "",
+            narrow,
+            onNotice: ignoreNotice,
+          }),
+          label: t`Members`,
+          pageSize,
+          unit: { one: t`person`, other: t`people` },
+        }}
       />
     </SectionCard>
   );
 };
 
 export const Route = createFileRoute("/_shell/settings/members")({
-  pendingComponent: MembersLoading,
+  pendingComponent: MembersPending,
   errorComponent: SettingsError,
   component: MembersPage,
   loader: async ({ context: { core } }) =>

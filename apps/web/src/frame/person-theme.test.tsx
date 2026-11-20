@@ -29,7 +29,7 @@ const opened = async (userId: string) => {
     root = createRoot(host);
     root.render(
       <PersonTheme userId={userId}>
-        <ThemeSwitch variant="picker" label="Mode" themesLabel="Colours" />
+        <ThemeSwitch variant="picker" label="Mode" />
         <MenuMode userId={userId} />
       </PersonTheme>
     );

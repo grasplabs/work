@@ -42,6 +42,7 @@ import { dayWritten, rowsOf } from "./rows";
 import type { ThreadItemBase, ThreadRow } from "./rows";
 import { threadPlaces as places, threadStyles as styles } from "./styles";
 import { threadWords } from "./words";
+import type { ThreadCatalogueWords } from "./words";
 
 /** The words the thread writes itself: its lines, its status words and the days. */
 export interface ThreadWords {
@@ -116,8 +117,12 @@ export interface ThreadProps<T extends ThreadItemBase> {
    * up, and the thread jumps.
    */
   answerTo?: string;
-  /** The words it writes itself, any of them replaced: the Unread line, the status words, the days. */
-  words?: Partial<ThreadWords>;
+  /**
+   * This instance's own words, over the catalogue's (GraspWords), key by key (`{ jump: "Back to the latest" }`): the
+   * Unread line, the status words, the days. Any left out are the catalogue's, else English. A flat text prop given
+   * beside it (`jumpLabel`) still wins until the release's step 5.
+   */
+  words?: Partial<ThreadWords & ThreadCatalogueWords>;
   /**
    * An old chat is loading: the thread draws the shape of a person's message and the agent's answer,
    * three pairs at its foot where the latest will stand, says once that it is loading, and is busy.
@@ -653,11 +658,10 @@ const afterLoading = async (result: unknown, done: () => void) => {
  * still win. The days in the catalogue's locale, unless someone gave `day`.
  */
 const useThreadWords = (
-  given: Partial<ThreadWords> | undefined,
+  given: Partial<ThreadWords & ThreadCatalogueWords> | undefined,
   jumpLabel: string | undefined
 ) => {
-  const text = withGiven(useWords("thread", threadWords), {
-    ...given,
+  const text = withGiven(useWords("thread", threadWords, given), {
     jump: jumpLabel,
   });
   const locale = useWordsLocale();

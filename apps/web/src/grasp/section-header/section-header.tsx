@@ -66,9 +66,6 @@ export interface SectionHeaderProps {
   layout?: SectionHeaderLayoutStyle;
 }
 
-/** A Section card narrower than this puts the actions on their own line (its head is the container). */
-const NARROW_CARD = "@container section-card-head (width < 30rem)";
-
 const styles = stylex.create({
   header: {
     display: "flex",
@@ -83,9 +80,12 @@ const styles = stylex.create({
     display: "grid",
     rowGap: grasp.space1,
     flexGrow: 1,
-    flexBasis: "16rem",
-    minWidth: 0,
+    // Beside the actions the words take what is left: a title alone down to its longest word (its
+    // own min-content, a flex item's floor), a title with a line under it down to 10rem, so that
+    // line is never squeezed to a word a line. Past that the actions wrap under them.
+    flexBasis: 0,
   },
+  wordsWithLine: { minWidth: "10rem" },
   titleRow: {
     display: "flex",
     flexWrap: "wrap",
@@ -128,25 +128,20 @@ const styles = stylex.create({
     textWrap: "pretty",
     overflowWrap: "break-word",
   },
-  // Never past the header's edge: on a line of their own they may shrink to its width and wrap
-  // (a search and Invite on a phone ran 60px past a card at 320). In a Section card narrower than
-  // 30rem they take the line under the title, its full width: by the card's width, not the window's.
   actions: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
     gap: grasp.space2,
     flexShrink: 1,
-    flexBasis: { default: "auto", [NARROW_CARD]: "100%" },
+    flexBasis: "auto",
     minWidth: 0,
     maxWidth: "100%",
     // On the title's line they may give back room above themselves (a grouped Section card's, so an
-    // xs button's foot meets the line's and its card stands 8px under both); on a line of their own,
-    // none. Never below: what is there stays whole.
-    marginBlockStart: {
-      default: sectionHeaderVars.actionsTrim,
-      [NARROW_CARD]: 0,
-    },
+    // xs button's foot meets the line's and its card stands 8px under both), at every width now that
+    // they stay on that line while they fit. Wrapped under the title, the row's gap less the trim
+    // still parts them. Never below: what is there stays whole.
+    marginBlockStart: sectionHeaderVars.actionsTrim,
     // Above a Section card's drag handle, which lies over the header: they stay pressable.
     position: "relative",
     zIndex: 1,
@@ -161,6 +156,14 @@ const styles = stylex.create({
  * How the words are drawn: small (a dense header's, or a group's sentence, text-sm right under the
  * title), the title's size, and whether a small header with no sentence stands centred on its line.
  */
+/** The text size a title's placeholder stands for, so the head is as tall loading as loaded. */
+const waitOf = (size: SectionHeaderProps["size"], group: boolean) => {
+  if (group) {
+    return "md" as const;
+  }
+  return size === "sm" ? ("sm" as const) : ("lg" as const);
+};
+
 const lookOf = (
   size: SectionHeaderProps["size"],
   variant: SectionHeaderProps["variant"],
@@ -175,7 +178,16 @@ const lookOf = (
       size === "sm" && styles.titleSm,
       group && styles.titleGroup,
     ],
+    // While loading, the placeholders take the lines the words will: a group's title is text-md,
+    // a small one text-sm, else text-lg; a small head's sentence text-sm, else text-md.
+    titleWait: waitOf(size, group),
+    descriptionWait: small ? ("sm" as const) : ("md" as const),
     centred: small && description === undefined,
+    words: [
+      styles.words,
+      description !== undefined && styles.wordsWithLine,
+      small && styles.wordsSm,
+    ],
   };
 };
 
@@ -204,7 +216,10 @@ export const SectionHeader = ({
   const {
     small,
     title: titleLook,
+    titleWait,
+    descriptionWait,
     centred,
+    words,
   } = lookOf(size, variant, description);
   return (
     <div
@@ -216,12 +231,15 @@ export const SectionHeader = ({
         layout ?? styleProp
       )}
     >
-      <div {...stylex.props(styles.words, small && styles.wordsSm)}>
+      <div {...stylex.props(words)}>
         {loading ? (
           <>
-            <Skeleton text="lg" layout={styles.titleWait} />
+            <Skeleton text={titleWait} layout={styles.titleWait} />
             {description !== undefined && (
-              <Skeleton text="md" layout={styles.descriptionWait} />
+              <Skeleton
+                text={descriptionWait}
+                layout={styles.descriptionWait}
+              />
             )}
           </>
         ) : (
