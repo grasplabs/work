@@ -10316,6 +10316,7 @@ msgid "Loaded"
 msgstr "Chargé"
 
 #: src/brain/forget.tsx
+#: src/brain/learned-section.tsx
 #: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Loading"

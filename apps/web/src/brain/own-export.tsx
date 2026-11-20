@@ -1,12 +1,17 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { headingLook } from "../grasp/heading/styles.ts";
+import { Link } from "../grasp/link/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -33,23 +38,36 @@ import type { OwnExport } from "./own-export-route.ts";
 /** How long after a read has landed the page reads again, while it is written. */
 export const followEveryMs = 5000;
 
+const styles = stylex.create({
+  section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  // Focused when the button pressed went (`start`), so it draws no ring.
+  landing: { outline: "none" },
+  files: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  writing: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  start: { alignSelf: "flex-start" },
+});
+
 /** A done export's files, each a download. */
 const Files = ({ shown }: { shown: OwnExport }) => {
   const { t } = useLingui();
   return (
-    <ul aria-label={t`Your export's files`} className="flex flex-col gap-1">
+    <ul aria-label={t`Your export's files`} {...stylex.props(styles.files)}>
       {shown.files.map((file) => (
         <li key={file}>
-          <Button
-            nativeButton={false}
-            render={
-              <a download href={ownExportFileHref(shown.id, file)}>
-                {file}
-              </a>
-            }
-            size="inline"
-            variant="link"
-          />
+          <Link
+            download
+            href={ownExportFileHref(shown.id, file)}
+            variant="standalone"
+          >
+            {file}
+          </Link>
         </li>
       ))}
     </ul>
@@ -69,8 +87,8 @@ const Said = ({
   }
   if (shown?.state === "writing") {
     return (
-      <span className="flex items-center gap-2">
-        <Spinner aria-hidden />
+      <span {...stylex.props(styles.writing)}>
+        <Spinner />
         <Trans>
           Grasp is writing your export. It takes a minute or two; it shows here
           as soon as it is ready, and you can leave this page meanwhile.
@@ -277,17 +295,17 @@ export const OwnExportSection = () => {
     controls = (
       <>
         <ErrorText>{notLoadedText(read, i18n)}</ErrorText>
-        <div>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              void requestRead("person");
-            }}
-            variant="outline"
-          >
-            <Trans>Try again</Trans>
-          </Button>
-        </div>
+        <Button
+          disabled={busy}
+          layout={styles.start}
+          onClick={() => {
+            void requestRead("person");
+          }}
+          size="sm"
+          variant="quiet"
+        >
+          <Trans>Try again</Trans>
+        </Button>
       </>
     );
   } else if (read !== undefined && !writing) {
@@ -295,40 +313,44 @@ export const OwnExportSection = () => {
     controls = (
       <>
         {shown?.state === "done" ? <Files shown={shown} /> : null}
-        <div>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              void start();
-            }}
-            variant="outline"
-          >
-            {again ? <Trans>Export again</Trans> : <Trans>Export</Trans>}
-          </Button>
-        </div>
+        <Button
+          disabled={busy}
+          layout={styles.start}
+          onClick={() => {
+            void start();
+          }}
+          size="sm"
+          variant="quiet"
+        >
+          {again ? <Trans>Export again</Trans> : <Trans>Export</Trans>}
+        </Button>
       </>
     );
   }
 
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      {/* Heading's look on an h2 of its own: the part takes no ref, and a
+          start whose button went moves focus here (`start`). */}
       <h2
-        className="text-sm font-medium"
         id={heading}
         ref={headingRef}
         tabIndex={-1}
+        {...stylex.props(headingLook("ui-sm"), styles.landing)}
       >
         <Trans>Export what only you may read</Trans>
       </h2>
-      <p className="text-muted-foreground text-sm">
+      <Text size="sm" tone="muted">
         <Trans>
           A copy of everything the Brain keeps for you alone: your own sources
           and what it remembers from them. Only you can make it and download it,
           and it is deleted when your data is erased.
         </Trans>
-      </p>
-      <output className="text-sm">
-        <Said read={read} shown={shown} />
+      </Text>
+      <output>
+        <Text element="span" size="sm">
+          <Said read={read} shown={shown} />
+        </Text>
       </output>
       {controls}
       <ErrorText>{failure}</ErrorText>
