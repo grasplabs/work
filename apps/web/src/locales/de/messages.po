@@ -11157,7 +11157,7 @@ msgstr "Braucht Sie"
 #: src/workflows/workflows-table.tsx
 msgctxt "workflow phase"
 msgid "Needs you"
-msgstr "Braucht dich"
+msgstr "Braucht Sie"
 
 #: src/connections/tool-choice.tsx
 #: src/frame/part-words.tsx
