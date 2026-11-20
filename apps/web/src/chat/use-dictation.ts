@@ -62,7 +62,7 @@ const keepTold = (userId: string): void => {
 /**
  * What this dictation says beyond the parts' catalogue (frame/part-words.tsx),
  * which has the rest: who writes it down, the first time, and that this
- * deployment has no transcription, in place of a failure.
+ * deployment has no transcription, in place of a browser that can't.
  */
 const useWords = (
   telling: boolean,
@@ -78,7 +78,7 @@ const useWords = (
       ? {
           problems: {
             ...problems,
-            failed: t`Dictation isn't set up here yet. What you typed is kept.`,
+            unsupported: t`Dictation isn't set up here yet. What you typed is kept.`,
           },
         }
       : {}),
@@ -144,7 +144,13 @@ export const useDictation = (
       muted: false,
       telling,
     });
+    // What a source says once it is no longer the box's (cancelled, or
+    // another dictation begun) is not heard, and it never starts late.
+    const current = (): boolean => source.current === chosen;
     const begin = (): void => {
+      if (!current()) {
+        return;
+      }
       if (telling) {
         keepTold(identity.userId);
         // Told: now it asks for the microphone, as it says.
@@ -153,6 +159,9 @@ export const useDictation = (
       void microphone.start();
       chosen.start({
         ready: () => {
+          if (!current()) {
+            return;
+          }
           setRun((was) =>
             was === undefined
               ? was
@@ -165,26 +174,38 @@ export const useDictation = (
           );
         },
         heard: ({ settled, interim }) => {
+          if (!current()) {
+            return;
+          }
           setRun((was) =>
             was === undefined ? was : { ...was, settled, interim }
           );
         },
         problem: (problem, unavailable = false) => {
+          if (!current()) {
+            return;
+          }
+          if (problem === "unheard") {
+            setRun((was) => (was === undefined ? was : { ...was, problem }));
+            return;
+          }
           // A problem that stops it lets the microphone go at once: the
           // band stands over a box that takes text again, and the browser
           // would otherwise go on showing it recording.
-          if (problem !== "unheard" && source.current === chosen) {
-            chosen.cancel();
-            microphone.stop();
-          }
-          setRun((was) => {
-            if (was === undefined) {
-              return was;
-            }
-            return problem === "unheard"
-              ? { ...was, problem }
-              : { ...was, phase: "problem", problem, unavailable };
-          });
+          chosen.cancel();
+          microphone.stop();
+          setRun((was) =>
+            was === undefined
+              ? was
+              : {
+                  ...was,
+                  phase: "problem",
+                  // Not set up here: no use trying again, as the band says
+                  // for a browser that can't dictate.
+                  problem: unavailable ? "unsupported" : problem,
+                  unavailable,
+                }
+          );
         },
       });
     };

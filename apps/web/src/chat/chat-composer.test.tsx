@@ -562,19 +562,35 @@ describe(ChatComposer, () => {
     }
   });
 
-  it("tells a member, the first time they dictate, that their browser's maker writes it down", async () => {
+  it("tells a member, the first time they dictate, that their browser's maker writes it down, and never listens once they cancel", async () => {
     Recognition.made = undefined;
     window.SpeechRecognition = Recognition;
     localStorage.removeItem("grasp-dictation-told:grace");
     await shown({}, member);
-    await press(button("Dictate"));
-
-    expect({
-      told: document.body.textContent.includes(
+    vi.useFakeTimers();
+    try {
+      await press(button("Dictate"));
+      const told = document.body.textContent.includes(
         "Your browser's maker writes down what you say."
-      ),
-      listening: made()?.listening ?? false,
-    }).toStrictEqual({ told: true, listening: false });
+      );
+      const listeningWhileTold = made()?.listening ?? false;
+      await press(button("Cancel"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect({
+        told,
+        listeningWhileTold,
+        listeningAfter: made()?.listening ?? false,
+      }).toStrictEqual({
+        told: true,
+        listeningWhileTold: false,
+        listeningAfter: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("draws Grasp at work in the look the person chose in Appearance", async () => {
@@ -639,7 +655,13 @@ describe(ChatComposer, () => {
       const said = document.body.textContent.includes(
         "Dictation isn't set up here yet. What you typed is kept."
       );
-      const during = { microphone: offersDictation(), recording: recording() };
+      const during = {
+        microphone: offersDictation(),
+        retry: [...document.querySelectorAll("button")].some(
+          (each) => each.textContent === "Try again"
+        ),
+        recording: recording(),
+      };
       await press(button("Dismiss"));
       const after = offersDictation();
       act(() => {
@@ -657,7 +679,7 @@ describe(ChatComposer, () => {
       }).toStrictEqual({
         before: true,
         said: true,
-        during: { microphone: false, recording: false },
+        during: { microphone: false, retry: false, recording: false },
         after: false,
         another: false,
       });
