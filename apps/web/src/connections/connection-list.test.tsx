@@ -359,22 +359,54 @@ const asAdmin = async (
   return asked;
 };
 
-/** Chooses `value` in the card's Brain audience. */
-const choose = async (value: string): Promise<void> => {
-  const select = document.querySelector("select");
+/**
+ * The card's choice of Brain audience, a library Select: the value it
+ * shows as chosen, and whether it may be changed; null when there is none.
+ */
+const audienceSelect = (): {
+  value: string | undefined;
+  disabled: boolean;
+} | null => {
+  const trigger =
+    document.querySelector<HTMLButtonElement>('[role="combobox"]');
+  if (trigger === null) {
+    return null;
+  }
+  return {
+    value: document.querySelector<HTMLInputElement>(
+      '[data-slot="select-form-input"]'
+    )?.value,
+    disabled: trigger.disabled || Object.hasOwn(trigger.dataset, "disabled"),
+  };
+};
+
+/** Chooses the option named `name` in the card's Brain audience: opens it and picks it. */
+const choose = async (name: string): Promise<void> => {
+  const trigger = document.querySelector<HTMLElement>('[role="combobox"]');
   await act(async () => {
-    if (select !== null) {
-      select.value = value;
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    }
+    trigger?.click();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const option = [
+    ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+  ].find((each) => each.textContent.trim() === name);
+  await act(async () => {
+    option?.click();
     await Promise.resolve();
   });
 };
 
-/** Presses the button whose text is `text`, in the dialog when there is one. */
+/**
+ * Presses the button whose text starts with `text`, in the dialog when
+ * there is one: an alert dialog's answer also holds its working and
+ * failed words, to keep its width.
+ */
 const press = async (text: string): Promise<void> => {
-  const button = [...document.querySelectorAll("button")].findLast(
-    (each) => each.textContent === text
+  const button = [...document.querySelectorAll("button")].findLast((each) =>
+    each.textContent.startsWith(text)
   );
   await act(async () => {
     button?.click();
@@ -395,7 +427,7 @@ const returnToWindow = async (): Promise<void> => {
 
 /** The open dialog's text, or nothing. */
 const dialogText = (): string =>
-  document.querySelector('[role="dialog"]')?.textContent ?? "";
+  document.querySelector('[role="alertdialog"]')?.textContent ?? "";
 
 describe("a shared connection's Brain audience, for an admin", () => {
   afterEach(() => {
@@ -408,11 +440,11 @@ describe("a shared connection's Brain audience, for an admin", () => {
 
   it("asks before it opens to everyone, saying what was kept before is shown too, and changes nothing when cancelled", async () => {
     const asked = await asAdmin(shared);
-    await choose("everyone");
+    await choose("Everyone in the company");
     const asking = dialogText();
     await press("Cancel");
     const afterCancel = [...asked];
-    await choose("everyone");
+    await choose("Everyone in the company");
     await press("Keep it for them");
 
     expect({
@@ -444,8 +476,8 @@ describe("a shared connection's Brain audience, for an admin", () => {
       { kind: "everyone" }
     );
     // Narrowing from everyone to a team shows it to fewer: no question.
-    await choose("t1");
-    await choose("nobody");
+    await choose("Team Sales");
+    await choose("Nobody");
     await press("Erase what the Brain kept");
     const erasing = dialogText();
     await press("Erase for good");
@@ -454,7 +486,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     });
     document.body.replaceChildren();
     const fromNobody = await asAdmin(shared);
-    await choose("t1");
+    await choose("Team Sales");
     const toTeam = dialogText();
 
     expect({
@@ -500,7 +532,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    const select = document.querySelector("select");
+    const select = audienceSelect();
     const whileErasing = {
       shown: select?.value,
       disabled: select?.disabled,
@@ -515,7 +547,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     });
     document.body.replaceChildren();
     const asked = await asAdmin(kept, undefined, held);
-    await choose("t1");
+    await choose("Team Sales");
 
     expect({
       whileErasing,
@@ -553,7 +585,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     await asAdmin(kept, { kind: "everyone" }, undefined, {
       refusing: "change",
     });
-    await choose("nobody");
+    await choose("Nobody");
     await act(async () => {
       await Promise.resolve();
     });
@@ -575,7 +607,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     });
     const opened = { ...reads };
     // The first card's choice: narrowing, so no question.
-    await choose("nobody");
+    await choose("Nobody");
     await act(async () => {
       await Promise.resolve();
     });
@@ -592,7 +624,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
     // Another admin closes it to nobody; this card still shows everyone.
     held.audience = { kind: "nobody" };
     // From everyone, a team narrows: no question, and core refuses it.
-    await choose("t1");
+    await choose("Team Sales");
     await act(async () => {
       await Promise.resolve();
     });
@@ -600,10 +632,10 @@ describe("a shared connection's Brain audience, for an admin", () => {
       says: document.body.textContent.includes(
         "Who may read what agents read through Notes was changed in the meantime. This is who may read it now: choose again if you still want to change it."
       ),
-      shown: document.querySelector("select")?.value,
+      shown: audienceSelect()?.value,
       held: held.audience,
     };
-    await choose("t1");
+    await choose("Team Sales");
 
     expect({
       after,
@@ -619,7 +651,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
   it("reads the audience again when the window comes back, so an erasure that ended frees the choice", async () => {
     const held: Held = { audience: { kind: "nobody" }, erasing: true };
     await asAdmin(shared, undefined, held);
-    const whileErasing = document.querySelector("select")?.disabled;
+    const whileErasing = audienceSelect()?.disabled;
     held.erasing = false;
     await act(async () => {
       window.dispatchEvent(new Event("focus"));
@@ -628,14 +660,14 @@ describe("a shared connection's Brain audience, for an admin", () => {
 
     expect({
       whileErasing,
-      back: document.querySelector("select")?.disabled,
+      back: audienceSelect()?.disabled,
     }).toStrictEqual({ whileErasing: true, back: false });
   });
 
   it("refuses a widening confirmed after another admin changed the audience behind the open question", async () => {
     const held: Held = { audience: { kind: "nobody" }, erasing: false };
     const asked = await asAdmin(shared, undefined, held);
-    await choose("everyone");
+    await choose("Everyone in the company");
     const asking = dialogText() !== "";
     // Another admin opens it to Sales; the window comes back and the
     // card reads it again behind the question.
@@ -676,14 +708,14 @@ describe("a shared connection's Brain audience, for an admin", () => {
     held.refusingReads = true;
     await returnToWindow();
     const refused = {
-      shown: document.querySelector("select")?.value,
+      shown: audienceSelect()?.value,
       says: document.body.textContent.includes(refusal),
     };
     held.refusingReads = false;
     held.audience = { kind: "team", teamId: "t1" };
     await returnToWindow();
     const back = {
-      shown: document.querySelector("select")?.value,
+      shown: audienceSelect()?.value,
       says: document.body.textContent.includes(refusal),
       // After the refusal, a whole read: the teams too.
       teamsRead: reads.teams,
@@ -698,7 +730,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       refusingReads: true,
     };
     await asAdmin(shared, undefined, firstRefused);
-    const opened = document.querySelector("select");
+    const opened = audienceSelect();
     firstRefused.refusingReads = false;
     await returnToWindow();
 
@@ -706,7 +738,7 @@ describe("a shared connection's Brain audience, for an admin", () => {
       refused,
       back,
       opened,
-      later: document.querySelector("select")?.value,
+      later: audienceSelect()?.value,
     }).toStrictEqual({
       refused: { shown: "everyone", says: true },
       back: { shown: "t1", says: false, teamsRead: 2 },
@@ -733,14 +765,14 @@ describe("a shared connection's Brain audience, for an admin", () => {
 
   it("is never shown to someone who isn't an admin, nor on a person's own connection", async () => {
     await asAdmin(connection({}));
-    const own = document.querySelector("select");
+    const own = audienceSelect();
     act(() => {
       root?.unmount();
     });
     document.body.replaceChildren();
     // The person, not an admin, on a shared connection.
     await disconnectDialog(shared);
-    const member = document.querySelector("select");
+    const member = audienceSelect();
 
     expect({ own, member }).toStrictEqual({ own: null, member: null });
   });
