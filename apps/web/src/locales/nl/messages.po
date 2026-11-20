@@ -4365,6 +4365,10 @@ msgstr "Bevestigd door de directie"
 msgid "Confirmed by you"
 msgstr "Door jou bevestigd"
 
+#: src/chat/chat-panel.tsx
+msgid "Confirmed. Carry on."
+msgstr "Bevestigd. Ga verder."
+
 #: src/chat/plan-card.tsx
 #: src/connections/integration-row.tsx
 #: src/connections/request-app-dialog.tsx

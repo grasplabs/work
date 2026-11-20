@@ -4365,6 +4365,10 @@ msgstr "Confirmed by the board"
 msgid "Confirmed by you"
 msgstr "Confirmed by you"
 
+#: src/chat/chat-panel.tsx
+msgid "Confirmed. Carry on."
+msgstr "Confirmed. Carry on."
+
 #: src/chat/plan-card.tsx
 #: src/connections/integration-row.tsx
 #: src/connections/request-app-dialog.tsx
