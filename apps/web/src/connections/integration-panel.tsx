@@ -1,5 +1,5 @@
 import type { CatalogTool } from "@grasp-os/shared/connect";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -97,7 +97,7 @@ export const IntegrationPanel = ({
         {...actions}
         // The library takes no Connect for a member's app; an admin's is only
         // missing while its tools load, or where none can connect it.
-        {...(isAdmin(identity.role) ? { words: { adminConnects: "" } } : {})}
+        {...(isMemberAdmin(identity) ? { words: { adminConnects: "" } } : {})}
       />
       {dialogs}
     </FollowLinks>
