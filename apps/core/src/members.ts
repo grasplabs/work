@@ -72,6 +72,7 @@ import { inList } from "./db/d1.ts";
 import { directoryPlacementOf } from "./directory-placement.ts";
 import { directoryKinds } from "./directory-ties.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
+import { markLeaversQuietly } from "./onboarding/leavers.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
   erasePerson,
@@ -483,6 +484,9 @@ const removeMember = async (
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
+  // Their entry on the onboarding's staff list, tied to them in the
+  // directory, shows they left (GRA-2249).
+  await markLeaversQuietly(env, "removal");
   // What they typed into Apps' previews stays with each App's test data,
   // which its other builders share (app-preview.ts): no preview is theirs
   // alone, and they no longer reach any.

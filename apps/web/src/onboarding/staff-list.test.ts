@@ -501,6 +501,38 @@ describe("the teams and people in a directory", () => {
     expect(fromDirectory.roster).toStrictEqual(fromList.roster);
   });
 
+  it("keeps who each person is in the directory, with core's proof, for core to tie their entry by, their id as a staff list gives it", () => {
+    const proof = "a".repeat(64);
+    const people = [
+      inDirectory("1", { name: "Daan Bakker", email: "daan@acme.test" }),
+      // Core proved nobody under this ID: their entry carries no tie.
+      inDirectory("2", { name: "Lisa Jansen", email: "lisa@acme.test" }),
+    ];
+    const read = directoryListOf(people, "Other", {
+      suite: "microsoft",
+      proofs: { "1": proof },
+    });
+    const plain = directoryListOf(people, "Other");
+    expect({
+      ties: read.roster.people.map(({ name, directory }) => ({
+        name,
+        directory,
+      })),
+      ids: read.roster.people.map(({ id }) => id),
+      taken: rosterSchema.safeParse(read.roster).success,
+    }).toStrictEqual({
+      ties: [
+        {
+          name: "Daan Bakker",
+          directory: { suite: "microsoft", id: "1", proof },
+        },
+        { name: "Lisa Jansen", directory: undefined },
+      ],
+      ids: plain.roster.people.map(({ id }) => id),
+      taken: true,
+    });
+  });
+
   it("is refused with nobody in it, or more people than an onboarding takes", () => {
     const tooMany = Array.from(
       { length: onboardingPeopleMax + 1 },

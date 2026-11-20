@@ -322,6 +322,12 @@ export interface OnboardingDirectory {
 export interface DirectoryPeople {
   suite: DirectorySuite;
   people: DirectoryPerson[];
+  /**
+   * Core's proof of each person it read, by the provider's ID of them: an
+   * entry made of them carries it (`DirectoryTie`), so a save ties the
+   * entry to them only as core read them (GRA-2249).
+   */
+  proofs: Record<string, string>;
 }
 
 /** The onboarding's directory, for the client's admin. */

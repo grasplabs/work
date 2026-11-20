@@ -48,6 +48,7 @@ import {
 import type { DirectoryKind } from "./directory-ties.ts";
 import { subjectHashOf, subjectKeyVersion } from "./erased-people.ts";
 import { connectionOf } from "./onboarding/directory.ts";
+import { markLeaversQuietly } from "./onboarding/leavers.ts";
 
 // The organization's directory, read once a day (GRA-2056, slice 1; the
 // design and its threat model are on the issue): everyone it lists, by
@@ -689,6 +690,9 @@ const readKind = async (
         code: listed.deletedFailure,
       });
     }
+    // Whom the read no longer holds, on the onboarding's staff list
+    // (GRA-2249), from the rows it just wrote: nothing is read again.
+    await markLeaversQuietly(env, "read");
   } catch (error) {
     await failedWith(env, kind, connection, tenant, startedAt, error);
   }

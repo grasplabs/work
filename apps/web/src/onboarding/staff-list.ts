@@ -1,10 +1,14 @@
-import type { DirectoryPerson } from "@grasp-os/shared/directory";
+import type {
+  DirectoryPeople,
+  DirectoryPerson,
+} from "@grasp-os/shared/directory";
 import {
   onboardingPeopleMax,
   onboardingTeamsMax,
   teamNameKey,
 } from "@grasp-os/shared/onboarding";
 import type {
+  DirectoryTie,
   Roster,
   RosterInput,
   RosterPerson,
@@ -305,6 +309,8 @@ interface Entry {
   lead: boolean;
   /** Who they report to, by name or email address, in lower case; empty for nobody. */
   manager: string;
+  /** Who they are in the directory, as core read them; none from a file. */
+  directory?: DirectoryTie;
 }
 
 /**
@@ -348,6 +354,7 @@ const rosterOf = (
       team,
       title: entry.title.slice(0, textMost),
       away: false,
+      ...(entry.directory === undefined ? {} : { directory: entry.directory }),
     };
     if (people.some((each) => each.id === person.id)) {
       continue;
@@ -417,11 +424,14 @@ export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
  * The teams and their people in the organization's directory: teams from
  * departments, leads from who reports to whom (else from jobs), and people
  * in no department in the team named `noTeam`. A manager is named by
- * their ID or email address in the directory, and found by either.
+ * their ID or email address in the directory, and found by either. With
+ * the read core made (`read`), each person keeps who they are in it, with
+ * core's proof of that, for core to tie their entry to them (GRA-2249).
  */
 export const directoryListOf = (
   people: readonly DirectoryPerson[],
-  noTeam: string
+  noTeam: string,
+  read?: Pick<DirectoryPeople, "suite" | "proofs">
 ): StaffList => {
   const byKey = new Map<string, DirectoryPerson>();
   for (const person of people) {
@@ -433,6 +443,7 @@ export const directoryListOf = (
   const entries = people.map((person): Entry => {
     const manager =
       person.manager === null ? undefined : byKey.get(person.manager);
+    const proof = read?.proofs[person.id];
     return {
       name: person.name,
       email: person.email,
@@ -444,6 +455,9 @@ export const directoryListOf = (
         manager === undefined
           ? ""
           : manager.email || manager.name.toLowerCase(),
+      ...(read === undefined || proof === undefined
+        ? {}
+        : { directory: { suite: read.suite, id: person.id, proof } }),
     };
   });
   return { ...rosterOf(entries, noTeam), skipped: 0 };
