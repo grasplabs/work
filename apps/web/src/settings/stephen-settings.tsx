@@ -499,7 +499,7 @@ export const StephenSettings = ({
         info={t`Every tool he has is of one of these kinds. Each is on for whom you choose, in every app.`}
         title={t`What he may do`}
       >
-        <SettingsRows>
+        <SettingsRows controls="fit">
           {classes.map(({ toolClass, audience }) => {
             const name = i18n._(classNames[toolClass]);
             return (
