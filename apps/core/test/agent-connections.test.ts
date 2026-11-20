@@ -930,6 +930,30 @@ describe("a person's own connections in their own chat", setUpTime, () => {
     });
   });
 
+  it("are signed read-only: connect refuses one it takes as a side effect, and searches and holds nothing", async () => {
+    const person = await signedInApi(idp, "user");
+    const mail = await mailConnection([], mailWithSearch, {
+      owner: person.userId,
+    });
+    const chat = await chatOf(
+      person.userId,
+      calling(mail.id, "mail.search", { query: "invoice" }),
+      says("Couldn't.")
+    );
+    // A restricted chat: connect takes every Composio call of it as a side
+    // effect (connect's policy.ts), which a read-only capability refuses.
+    await chat.stub.restrictChat(chat.chat.id);
+    await chat.ask("Find the mail.");
+
+    const [read] = await codeResults(chat.stub, chat.chat.id);
+    const held = await person.api.pendingActions.list();
+    expect({
+      refused: read?.text.includes("connect.read_only"),
+      searched: await mail.searched(),
+      held: held.length,
+    }).toStrictEqual({ refused: true, searched: [], held: 0 });
+  });
+
   it("keep what was read in the chat while the connection is theirs, and withhold it once it is disconnected", async () => {
     const person = await signedInApi(idp, "user");
     const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
