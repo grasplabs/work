@@ -317,6 +317,47 @@ const WidenDialog = ({
   );
 };
 
+/**
+ * The erase dialog's answers, and why an erase was refused. Mounted only
+ * while the dialog is open, so a reason from an earlier try is gone when
+ * it opens again; while the erase runs the dialog stays open.
+ */
+const EraseAnswers = ({
+  connection,
+  onErased,
+}: {
+  connection: ListedConnection;
+  onErased: () => void;
+}) => {
+  const { failure, change } = useChange();
+  const { t } = useLingui();
+  return (
+    <>
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
+      <AlertDialogFooter>
+        <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+        <AlertDialogAction
+          action={async () => {
+            let erased = false;
+            await change(async (session) => {
+              await session.connections.eraseBrainReads(connection.id);
+              erased = true;
+            });
+            onErased();
+            if (!erased) {
+              throw new Error("Not erased");
+            }
+          }}
+          failedLabel={t`Couldn't erase`}
+          variant="danger"
+        >
+          {t`Erase for good`}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </>
+  );
+};
+
 /** Erasing what the Brain kept of the connection, once confirmed: for good. */
 const EraseKept = ({
   connection,
@@ -328,11 +369,10 @@ const EraseKept = ({
   /** The erase was asked for: what the card shows is read again. */
   onErased: () => void;
 }) => {
-  const { busy, failure, change } = useChange();
   const { t } = useLingui();
   return (
     <AlertDialog>
-      <AlertDialogTrigger disabled={busy} size="sm">
+      <AlertDialogTrigger size="sm">
         {t`Erase what the Brain kept`}
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -342,27 +382,7 @@ const EraseKept = ({
         <AlertDialogDescription>
           {t`Everything the Brain kept from it is erased for good, and nobody reads it from now on. This can't be undone. To keep anything from it again, choose who may read it once the erasure is done.`}
         </AlertDialogDescription>
-        {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
-        <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-          <AlertDialogAction
-            action={async () => {
-              let erased = false;
-              await change(async (session) => {
-                await session.connections.eraseBrainReads(connection.id);
-                erased = true;
-              });
-              onErased();
-              if (!erased) {
-                throw new Error("Not erased");
-              }
-            }}
-            failedLabel={t`Couldn't erase`}
-            variant="danger"
-          >
-            {t`Erase for good`}
-          </AlertDialogAction>
-        </AlertDialogFooter>
+        <EraseAnswers connection={connection} onErased={onErased} />
       </AlertDialogContent>
     </AlertDialog>
   );
