@@ -39,7 +39,11 @@ import {
 } from "./bindings.ts";
 import type { ConnectionGrant, UngrantedRead } from "./bindings.ts";
 import { readsMail, textsOf } from "./channels/stephen-rules.ts";
-import { askInChat, askableConnections } from "./chat-connections.ts";
+import {
+  askInChat,
+  askableConnections,
+  waitingConnections,
+} from "./chat-connections.ts";
 import type { AskableConnection, AskedConnection } from "./chat-connections.ts";
 import { captureRead } from "./connection-capture.ts";
 import { connectionOwnersOf } from "./connections.ts";
@@ -170,19 +174,23 @@ export const connectionGrants = async (
  * The connections the agent reads through with no grant in a turn of its
  * person's own chat (ungranted-reads.ts): their own, and the shared ones
  * whose audience holds them, each offered and active, named by its ID,
- * with those of its actions that only read (`readsOnly`). None in any
+ * with those of its actions that only read (`readsOnly`). Beside them,
+ * not active, each such one that needs someone to sign in again, with no
+ * actions (GRA-2227): so the agent can say it needs reconnecting, and a
+ * call of it is refused as such (`ungrantedReadConnection`). None in any
  * other turn.
  */
 const ungrantedReadable = async (
   env: Env,
   scope: Omit<AgentScope, "runId">
-): Promise<AgentConnection[]> => {
+): Promise<{ connection: AgentConnection; active: boolean }[]> => {
   if (scope.ownChat !== true) {
     return [];
   }
-  const [askable, shared] = await Promise.all([
+  const [askable, shared, waiting] = await Promise.all([
     askableConnections(env, scope),
     sharedFor(env, scope.personId),
+    waitingConnections(env, scope),
   ]);
   // What the chat itself calls: never an outside API only Apps use.
   const callable = askable.filter(({ forAppsOnly }) => forAppsOnly !== true);
@@ -191,7 +199,7 @@ const ungrantedReadable = async (
     callable.map(({ connectionId }) => connectionId)
   );
   const owners = new Map(found.map((owner) => [owner.id, owner] as const));
-  return callable.flatMap(({ connectionId, actions }) => {
+  const readable = callable.flatMap(({ connectionId, actions }) => {
     const owner = owners.get(connectionId);
     if (
       owner === undefined ||
@@ -203,8 +211,34 @@ const ungrantedReadable = async (
     const reads = actions.filter((action) => readsOnly(owner, action));
     return reads.length === 0
       ? []
-      : [{ name: connectionId, connectionId, resource: null, actions: reads }];
+      : [
+          {
+            connection: {
+              name: connectionId,
+              connectionId,
+              resource: null,
+              actions: reads,
+            },
+            active: true,
+          },
+        ];
   });
+  const signInAgain = waiting.flatMap((owner) =>
+    readsWithoutGrant(owner, scope.personId, shared)
+      ? [
+          {
+            connection: {
+              name: owner.id,
+              connectionId: owner.id,
+              resource: null,
+              actions: [],
+            },
+            active: false,
+          },
+        ]
+      : []
+  );
+  return [...readable, ...signInAgain];
 };
 
 /**
@@ -255,7 +289,7 @@ export const usableConnections = async (
   // with all its reads (a grant for a write alone hides none).
   const readable = await ungrantedReadable(env, scope);
   const ungranted = readable.filter(
-    ({ connectionId, actions }) =>
+    ({ connection: { connectionId, actions } }) =>
       !granted.some(
         ({ connection }) =>
           connection.connectionId === connectionId &&
@@ -265,10 +299,10 @@ export const usableConnections = async (
   );
   return [
     ...granted,
-    ...ungranted.map((connection) => ({
+    ...ungranted.map(({ connection, active }) => ({
       connection,
-      active: true,
-      reads: true,
+      active,
+      reads: active,
     })),
   ];
 };

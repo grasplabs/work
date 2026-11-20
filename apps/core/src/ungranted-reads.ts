@@ -74,7 +74,9 @@ export const readsWithoutGrant = (
 /**
  * The connection `connectionId`, active, that the person `onBehalfOf`
  * reads with no grant (`readsWithoutGrant`), when the tool `action` of it
- * only reads. Refused as a connection there isn't otherwise
+ * only reads. Refused as one that needs connecting again
+ * (`connect.connection_inactive`) when it waits for someone to sign in
+ * again, and as a connection there isn't otherwise
  * (`connect.connection_not_found`), saying nothing of one they may not
  * read.
  */
@@ -91,10 +93,16 @@ export const ungrantedReadConnection = async (
   if (
     authority.subject.type !== "agent" ||
     owner === undefined ||
-    !readsWithoutGrant(owner, authority.onBehalfOf, shared) ||
-    owner.status !== "active" ||
-    !readsOnly(owner, action)
+    !readsWithoutGrant(owner, authority.onBehalfOf, shared)
   ) {
+    throw connectErrors.create("connect.connection_not_found");
+  }
+  // One they read so that needs someone to sign in again (GRA-2227): said
+  // as such, so the agent can tell them.
+  if (owner.status === "needs_reauth") {
+    throw connectErrors.create("connect.connection_inactive");
+  }
+  if (owner.status !== "active" || !readsOnly(owner, action)) {
     throw connectErrors.create("connect.connection_not_found");
   }
   return owner;
