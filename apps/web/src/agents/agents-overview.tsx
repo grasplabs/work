@@ -529,10 +529,6 @@ const AgentTabs = ({
   const under = (each: AgentsTab) =>
     agents.filter((agent) => tabOf(agent) === each);
   const tabName = { mine: t`My agents`, organization: t`Organization` };
-  const none = {
-    mine: t`Agents only you can use stand here.`,
-    organization: t`Your company has no other agents yet.`,
-  };
   return (
     <Tabs
       onValueChange={(value) => {
@@ -555,11 +551,14 @@ const AgentTabs = ({
       </div>
       {agentsTabs.map((each) => (
         <TabsContent key={each} value={each}>
+          {/* Only My agents can stand empty: the company's first is always the organization's. */}
           {under(each).length === 0 ? (
             <Empty>
               <EmptyHeader>
                 <EmptyMedia picture="nothing" />
-                <EmptyDescription>{none[each]}</EmptyDescription>
+                <EmptyDescription>
+                  {t`Agents only you can use stand here.`}
+                </EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (

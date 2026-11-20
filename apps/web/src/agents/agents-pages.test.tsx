@@ -125,6 +125,15 @@ const managed: ManagedAgents = {
   teams,
 };
 
+/** Every agent answers someone: none is only the admin's. */
+const allShared: ManagedAgents = {
+  ...managed,
+  settings: {
+    ...managed.settings,
+    [milan.id]: settingsOf({ who: "everyone" }, 0),
+  },
+};
+
 /** The first agent's access, as core keeps it for a company that changed nothing. */
 const firstAccess: FirstAgentAccess = {
   reach: {
@@ -404,56 +413,44 @@ describe("the company's agents, on pages of their own", () => {
       });
     });
 
-    it("opens on the tab the address names, and says so where that tab has no agents", async () => {
-      // Every agent answers someone: none is only the admin's.
-      const shared: ManagedAgents = {
-        ...managed,
-        settings: {
-          ...managed.settings,
-          [milan.id]: settingsOf({ who: "everyone" }, 0),
-        },
-      };
+    it("opens an admin with no agent of their own on the organization's, with no tab in the address", async () => {
       await mounted(
-        <Overview makes managed={shared} usable={[chatAgent(stephen)]} />
+        <Overview makes managed={allShared} usable={[chatAgent(stephen)]} />
       );
-      const unnamed = { tabs: tabs(), cards: cards().map(({ name }) => name) };
-      act(() => {
-        root?.unmount();
+      expect({
+        tabs: tabs(),
+        cards: cards().map(({ name }) => name),
+      }).toStrictEqual({
+        tabs: [
+          { name: "My agents", chosen: false },
+          { name: "Organization", chosen: true },
+        ],
+        cards: ["Stephen", "Claire", "Milan"],
       });
-      document.body.replaceChildren();
+    });
+
+    it("opens on the tab the address names, and says so where it has no agents", async () => {
       await mounted(
         <Overview
           at="mine"
           makes
-          managed={shared}
+          managed={allShared}
           usable={[chatAgent(stephen)]}
         />
       );
       expect({
-        unnamed,
-        mine: {
-          tabs: tabs(),
-          cards: cards().map(({ name }) => name),
-          says: document.body.textContent?.includes(
-            "Agents only you can use stand here."
-          ),
-        },
+        tabs: tabs(),
+        cards: cards().map(({ name }) => name),
+        says: document.body.textContent?.includes(
+          "Agents only you can use stand here."
+        ),
       }).toStrictEqual({
-        unnamed: {
-          tabs: [
-            { name: "My agents", chosen: false },
-            { name: "Organization", chosen: true },
-          ],
-          cards: ["Stephen", "Claire", "Milan"],
-        },
-        mine: {
-          tabs: [
-            { name: "My agents", chosen: true },
-            { name: "Organization", chosen: false },
-          ],
-          cards: [],
-          says: true,
-        },
+        tabs: [
+          { name: "My agents", chosen: true },
+          { name: "Organization", chosen: false },
+        ],
+        cards: [],
+        says: true,
       });
     });
 

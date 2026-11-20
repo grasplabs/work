@@ -20131,10 +20131,6 @@ msgstr "Your chats"
 msgid "Your choice"
 msgstr "Your choice"
 
-#: src/agents/agents-overview.tsx
-msgid "Your company has no other agents yet."
-msgstr "Your company has no other agents yet."
-
 #: src/apps/apps-overview.tsx
 msgid "Your company has no other Apps yet."
 msgstr "Your company has no other Apps yet."
