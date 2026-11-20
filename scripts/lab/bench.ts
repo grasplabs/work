@@ -122,7 +122,8 @@ export const replayNotes = async (
       },
       { lineOnly: false }
     );
-    facts = notesAfter(facts, turn);
+    // A bench's turn is always someone's own interview (`labWhoSchema`).
+    facts = notesAfter(facts, turn, "own");
     // The read-back is not a part to be in while the conversation still goes on.
     phase = turn.phase === "readback" ? phase : turn.phase;
   }

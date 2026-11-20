@@ -15,8 +15,10 @@ import { PageSkeletonQuestion } from "../grasp/blocks/page-skeleton-question/pag
 import { PageSkeletonSetup } from "../grasp/blocks/page-skeleton-setup/page-skeleton-setup.tsx";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
-// A new agent, for the company's own admins: anyone else is sent to the
-// Agents page, as core would refuse them the making. It starts by asking
+// A new agent: anyone of the company makes one of their own, while the
+// company lets them, and its own admins one for the company. Grasp's staff
+// are sent to the Agents page, as core would refuse them the making, and
+// so is anyone who may make neither kind. It starts by asking
 // which way (agents/new-agent-start.tsx): set up by hand
 // (agents/manual-agent.tsx), or in a chat
 // (agents/new-agent.tsx).
@@ -32,7 +34,8 @@ const NewAgentPage = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
   const { way } = Route.useSearch();
-  const { taken, models, apps, teams } = Route.useLoaderData();
+  const { taken, models, apps, teams, ownOn } = Route.useLoaderData();
+  const company = isMemberAdmin(identity);
   return (
     <>
       <SiteHeader
@@ -42,7 +45,9 @@ const NewAgentPage = () => {
       {way === "manual" ? (
         <ManualAgent
           apps={apps}
+          company={company}
           models={models}
+          own={ownOn}
           personId={identity.userId}
           taken={taken}
           teams={teams}
@@ -51,7 +56,12 @@ const NewAgentPage = () => {
       {way === "chat" ? (
         // The route has the whole card: the questions keep a page's room.
         <div {...stylex.props(styles.padded)}>
-          <NewAgent personId={identity.userId} taken={taken} />
+          <NewAgent
+            company={company}
+            own={ownOn}
+            personId={identity.userId}
+            taken={taken}
+          />
         </div>
       ) : null}
     </>
@@ -124,7 +134,8 @@ export const Route = createFileRoute("/_shell/agents/new")({
     return way === undefined ? {} : { way };
   },
   beforeLoad: ({ context: { identity } }) => {
-    if (!isMemberAdmin(identity)) {
+    // Grasp's staff are no one of the company: they make neither kind.
+    if (identity.staff) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/agents", replace: true });
     }
@@ -132,19 +143,26 @@ export const Route = createFileRoute("/_shell/agents/new")({
   component: NewAgentPage,
   pendingComponent: NewAgentLoading,
   // What the setup offers, each none when core won't say: the names other
-  // agents have (core still refuses a name in use), the models an agent
-  // can be given, the apps connected and working, and the company's teams.
+  // agents have, the company's and the person's own (core still refuses a
+  // name in use), the models an agent can be given, the apps the company
+  // offers, connected and working ones marked, and the company's teams.
+  // Whether the company lets people have agents of their own: on when core
+  // won't say, as core still refuses what it refuses.
   loader: async ({
-    context: { core },
+    context: { core, identity },
   }): Promise<{
     taken: string[];
     models: string[];
     apps: CatalogApp[];
     teams: { teamId: string; name: string }[];
+    ownOn: boolean;
   }> => {
-    const [agents, models, connections, catalog, reach] =
+    const [agents, own, models, connections, catalog, reach, setting] =
       await Promise.allSettled([
         core.withSession(async (session) => await session.connections.agents()),
+        core.withSession(
+          async (session) => await session.connections.ownAgents()
+        ),
         core.withSession(async (session) => await session.chats.models()),
         core.withSession(async (session) => await session.connections.list()),
         core.withSession(
@@ -153,8 +171,21 @@ export const Route = createFileRoute("/_shell/agents/new")({
         core.withSession(
           async (session) => await session.connections.stephenReach()
         ),
+        core.withSession(
+          async (session) => await session.orgSettings.ownAgents()
+        ),
       ]);
-    const entries = catalog.status === "fulfilled" ? catalog.value.entries : [];
+    const ownOn = setting.status === "fulfilled" ? setting.value.on : true;
+    // Someone who may make neither kind has nothing to make here.
+    if (!ownOn && !isMemberAdmin(identity)) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/agents", replace: true });
+    }
+    // An agent is given only an app the company offers.
+    const entries =
+      catalog.status === "fulfilled"
+        ? catalog.value.entries.filter(({ offered }) => offered)
+        : [];
     const working =
       connections.status === "fulfilled"
         ? connections.value.filter(({ status }) => status === "active")
@@ -164,6 +195,7 @@ export const Route = createFileRoute("/_shell/agents/new")({
       const connection = working.find(({ provider }) => provider === entry.id);
       return {
         id: entry.id,
+        source: entry.source,
         name: entry.name,
         logo: entry.logo,
         description: entry.description,
@@ -173,13 +205,13 @@ export const Route = createFileRoute("/_shell/agents/new")({
       };
     });
     return {
-      taken:
-        agents.status === "fulfilled"
-          ? agents.value.map(({ name }) => name)
-          : [],
+      taken: [agents, own].flatMap((read) =>
+        read.status === "fulfilled" ? read.value.map(({ name }) => name) : []
+      ),
       models: models.status === "fulfilled" ? models.value : [],
       apps,
       teams: reach.status === "fulfilled" ? reach.value.teams : [],
+      ownOn,
     };
   },
 });

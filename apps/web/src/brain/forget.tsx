@@ -132,11 +132,6 @@ const EffectLines = ({
             : t`These notes rest on nothing else and go too: ${named}.`}
         </span>
       ) : null}
-      {effect.workflows.length > 0 ? (
-        <span {...stylex.props(styles.line)}>
-          {t`${plural(effect.workflows.length, { one: "# workflow keeps its numbers, which will say their source was removed.", other: "# workflows keep their numbers, which will say their source was removed." })}`}
-        </span>
-      ) : null}
     </>
   );
 };

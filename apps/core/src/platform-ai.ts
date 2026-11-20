@@ -25,13 +25,11 @@ const voices = {
 } as const satisfies Record<Speaker, string>;
 
 /**
- * Each feature's provider and model: OpenAI's GPT-5.4 mini reads PDFs
- * (text and page images, so scans too), GPT-4o Transcribe writes down
- * speech, live and recorded, and ElevenLabs's Eleven v4 says the lines,
+ * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
+ * down speech, live and recorded, and ElevenLabs's Eleven v4 says the lines,
  * v4 Turbo a line only known as it is said, with the same voices.
  */
 export const platformAi = {
-  conversion: { provider: "openai", model: "gpt-5.4-mini" },
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
   speech: {
     provider: "elevenlabs",

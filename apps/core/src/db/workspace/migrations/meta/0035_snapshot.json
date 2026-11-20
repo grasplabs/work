@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4c453ed9-5f02-45c5-b996-bc21513b678f",
+  "id": "0ffa021e-2df8-4cdd-9989-c623882ed86a",
   "prevId": "df7a38c7-ec10-4b46-a754-591d6bfcaeb0",
   "tables": {
     "audit_outbox": {
@@ -1019,6 +1019,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1392,13 +1399,6 @@
         "make_project": {
           "name": "make_project",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

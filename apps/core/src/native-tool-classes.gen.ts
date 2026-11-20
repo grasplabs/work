@@ -70,3 +70,32 @@ export const nativeToolClasses: Readonly<
     "word.read": "read-company",
   },
 };
+
+/**
+ * Each native connector tool that answers one item's content
+ * (`answersItem`), by its connector's provider, then the tool's name:
+ * `file` when that content is a file's (`answersFile`). Core keeps
+ * what such a tool reads of a person's own things in the Brain
+ * (connection-capture.ts).
+ */
+export const nativeItemReads: Readonly<
+  Record<string, Readonly<Record<string, string>>>
+> = {
+  "google": {
+    "mail.get": "item",
+    "mail.readAttachment": "file",
+  },
+  "microsoft": {
+    "onenote.read": "item",
+  },
+};
+
+/**
+ * Each native connector's syncs, by its provider: the feeds it can list
+ * and follow the changes of. A connection of a provider in none can't
+ * tell Grasp what changed in it (core's brain-rpc.ts shows it as a gap).
+ */
+export const nativeSyncs: Readonly<Record<string, readonly string[]>> = {
+  "google": ["calendar", "drive", "gmail", "shared-drives"],
+  "microsoft": ["calendar", "drive", "libraries", "mail"],
+};

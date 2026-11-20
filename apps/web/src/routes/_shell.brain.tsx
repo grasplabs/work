@@ -125,10 +125,10 @@ const BrainLayout = () => {
   const loaded = Route.useLoaderData();
   const { noteId, sectionId } = useParams({ strict: false });
   const matchRoute = useMatchRoute();
-  // The brain's log, its memory records and its sources, each a page of its own beside the brain.
+  // The brain's log and its sources, each a page of its own beside the brain.
   const activity = Boolean(matchRoute({ to: "/brain/activity" }));
-  const memory = Boolean(matchRoute({ to: "/brain/memory" }));
   const sources = Boolean(matchRoute({ to: "/brain/sources" }));
+  const opportunities = Boolean(matchRoute({ to: "/brain/opportunities" }));
   const brainLabel = t`Brain`;
   if (loaded.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: brainLabel }]} page={loaded} />;
@@ -155,12 +155,20 @@ const BrainLayout = () => {
       { label: brainLabel, to: "/brain" },
       { label: t({ message: "Activity", context: "the brain's log" }) },
     ];
-  } else if (memory) {
-    crumbs = [{ label: brainLabel, to: "/brain" }, { label: t`Memory` }];
   } else if (sources) {
     crumbs = [
       { label: brainLabel, to: "/brain" },
       { label: t({ message: "Sources", context: "the Brain's sources page" }) },
+    ];
+  } else if (opportunities) {
+    crumbs = [
+      { label: brainLabel, to: "/brain" },
+      {
+        label: t({
+          message: "Opportunities",
+          context: "the Brain's opportunities page",
+        }),
+      },
     ];
   }
   return (

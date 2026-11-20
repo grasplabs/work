@@ -2,15 +2,11 @@ import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import type {
-  improvementSignalComputations,
-  knowledgeSignalComputations,
-} from "./db/core/schema.ts";
+import type { improvementSignalComputations } from "./db/core/schema.ts";
 
 // Claiming a UTC day's computation, for what is computed once a day from
-// the 15-minute clock: the improvement signals (signals.ts) and
-// Knowledge's usage signals (knowledge/signals.ts). Each has a table of
-// computations with the same columns (id, day, started_at, finished_at),
+// the 15-minute clock: the improvement signals (signals.ts), whose table
+// of computations has these columns (id, day, started_at, finished_at),
 // one row per attempt.
 //
 // The first clock run of a day claims it: a claim is a row inserted only
@@ -21,7 +17,7 @@ import type {
 //
 // Each attempt has an ID of its own. A computation finishes in one batch
 // that marks its row finished and deletes every computation started before
-// it (Knowledge keeps the finished one before it, for its readers): one
+// it: one
 // that outlived its lease and was finished past has lost its row, or finds
 // a later one of its day finished, so its finishing batch changes nothing
 // (every statement in it goes by `isFinished`). Both write their signals
@@ -38,9 +34,7 @@ export const claimLeaseMs = 20 * 60 * 1000;
 export const claimsPerDay = 3;
 
 /** A table of daily computations. */
-type Computations =
-  | typeof improvementSignalComputations
-  | typeof knowledgeSignalComputations;
+type Computations = typeof improvementSignalComputations;
 
 /** A claimed computation. */
 export interface Computation {

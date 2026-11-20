@@ -56,10 +56,10 @@ const LINK: Record<Locale, LinkWords> = {
     own: "{company} asked Grasp to learn how the work really goes, so the dull parts can be taken off people's hands. Stephen, Grasp's AI interviewer, would like to talk with you for 12 to 15 minutes about one piece of your work.",
     lead: "{company} asked Grasp to learn how the work really goes, so the dull parts can be taken off people's hands. Stephen, Grasp's AI interviewer, would like to talk with you for 12 to 15 minutes about the work of your team.",
     private:
-      "Your company never sees what one person said, only what five or more people said, put together. You can stop at any time, and delete everything for 7 days afterwards.",
+      "What you choose to share is shown as how your team works. Everything else reaches your company only when five or more people said it, put together. You can stop at any time, and delete everything for 7 days afterwards.",
     button: "Talk with Stephen",
     yours:
-      "This link is yours alone, so please don't pass it on. It opens your interview on the first device you open it on.",
+      "This link is yours alone, so please don't pass it on. You sign in with your work account to open it.",
     until: "The interviews run until {closes}.",
     reply:
       "Questions? Reply to this email, and it reaches the person at {company} who runs the interviews.",
@@ -70,10 +70,10 @@ const LINK: Record<Locale, LinkWords> = {
     own: "{company} heeft Grasp gevraagd te leren hoe het werk echt gaat, zodat de saaie delen je uit handen genomen kunnen worden. Stephen, de AI-interviewer van Grasp, praat graag 12 tot 15 minuten met je over een stuk van je werk.",
     lead: "{company} heeft Grasp gevraagd te leren hoe het werk echt gaat, zodat de saaie delen je uit handen genomen kunnen worden. Stephen, de AI-interviewer van Grasp, praat graag 12 tot 15 minuten met je over het werk van je team.",
     private:
-      "Je bedrijf ziet nooit wat één persoon zei, alleen wat vijf of meer mensen samen zeiden. Je kunt altijd stoppen, en daarna nog 7 dagen alles verwijderen.",
+      "Wat je kiest om te delen, wordt getoond als hoe je team werkt. Al het andere komt pas bij je bedrijf als vijf of meer mensen het zeiden, samengenomen. Je kunt altijd stoppen, en daarna nog 7 dagen alles verwijderen.",
     button: "Praat met Stephen",
     yours:
-      "Deze link is alleen van jou, dus geef hem niet door. Hij opent je interview op het eerste apparaat waarop je hem opent.",
+      "Deze link is alleen van jou, dus geef hem niet door. Je logt in met je werkaccount om hem te openen.",
     until: "De interviews lopen tot en met {closes}.",
     reply:
       "Vragen? Beantwoord deze e-mail, dan komt hij bij de persoon bij {company} die de interviews regelt.",
@@ -84,10 +84,10 @@ const LINK: Record<Locale, LinkWords> = {
     own: "{company} hat Grasp gebeten herauszufinden, wie die Arbeit wirklich läuft, damit Ihnen die lästigen Teile abgenommen werden können. Stephen, der KI-Interviewer von Grasp, möchte 12 bis 15 Minuten mit Ihnen über einen Teil Ihrer Arbeit sprechen.",
     lead: "{company} hat Grasp gebeten herauszufinden, wie die Arbeit wirklich läuft, damit Ihnen die lästigen Teile abgenommen werden können. Stephen, der KI-Interviewer von Grasp, möchte 12 bis 15 Minuten mit Ihnen über die Arbeit Ihres Teams sprechen.",
     private:
-      "Ihr Unternehmen sieht nie, was eine einzelne Person gesagt hat, nur, was fünf oder mehr Personen zusammen gesagt haben. Sie können jederzeit aufhören und danach noch 7 Tage lang alles löschen.",
+      "Was Sie teilen möchten, wird als Arbeitsweise Ihres Teams gezeigt. Alles andere erreicht Ihr Unternehmen nur, wenn fünf oder mehr Personen es gesagt haben, zusammengefasst. Sie können jederzeit aufhören und danach noch 7 Tage lang alles löschen.",
     button: "Mit Stephen sprechen",
     yours:
-      "Dieser Link gehört nur Ihnen, bitte geben Sie ihn nicht weiter. Er öffnet Ihr Interview auf dem ersten Gerät, auf dem Sie ihn öffnen.",
+      "Dieser Link gehört nur Ihnen, bitte geben Sie ihn nicht weiter. Sie melden sich mit Ihrem Arbeitskonto an, um ihn zu öffnen.",
     until: "Die Interviews laufen bis zum {closes}.",
     reply:
       "Fragen? Antworten Sie auf diese E-Mail, dann erreicht sie die Person bei {company}, die die Interviews betreut.",
@@ -98,10 +98,10 @@ const LINK: Record<Locale, LinkWords> = {
     own: "{company} a demandé à Grasp de comprendre comment le travail se passe vraiment, afin de vous décharger des tâches les plus fastidieuses. Stephen, l’intervieweur IA de Grasp, aimerait parler avec vous pendant 12 à 15 minutes d’une partie de votre travail.",
     lead: "{company} a demandé à Grasp de comprendre comment le travail se passe vraiment, afin de vous décharger des tâches les plus fastidieuses. Stephen, l’intervieweur IA de Grasp, aimerait parler avec vous pendant 12 à 15 minutes du travail de votre équipe.",
     private:
-      "Votre entreprise ne voit jamais ce qu’une personne a dit, seulement ce que cinq personnes ou plus ont dit, mis ensemble. Vous pouvez arrêter à tout moment, et tout supprimer pendant les 7 jours qui suivent.",
+      "Ce que vous choisissez de partager est montré comme la façon dont votre équipe travaille. Tout le reste n’atteint votre entreprise que lorsque cinq personnes ou plus l’ont dit, mis ensemble. Vous pouvez arrêter à tout moment, et tout supprimer pendant les 7 jours qui suivent.",
     button: "Parler avec Stephen",
     yours:
-      "Ce lien n’est qu’à vous, merci de ne pas le transmettre. Il ouvre votre entretien sur le premier appareil où vous l’ouvrez.",
+      "Ce lien n’est qu’à vous, merci de ne pas le transmettre. Vous vous connectez avec votre compte professionnel pour l’ouvrir.",
     until: "Les entretiens sont ouverts jusqu’au {closes}.",
     reply:
       "Des questions ? Répondez à cet e-mail : il parviendra à la personne de {company} qui organise les entretiens.",
@@ -112,10 +112,10 @@ const LINK: Record<Locale, LinkWords> = {
     own: "{company} ha pedido a Grasp que conozca cómo funciona de verdad el trabajo, para quitarte de encima las partes más pesadas. Stephen, el entrevistador de IA de Grasp, quiere hablar contigo de 12 a 15 minutos sobre una parte de tu trabajo.",
     lead: "{company} ha pedido a Grasp que conozca cómo funciona de verdad el trabajo, para quitarte de encima las partes más pesadas. Stephen, el entrevistador de IA de Grasp, quiere hablar contigo de 12 a 15 minutos sobre el trabajo de tu equipo.",
     private:
-      "Tu empresa nunca ve lo que dijo una sola persona, solo lo que dijeron cinco o más personas, en conjunto. Puedes parar cuando quieras, y borrarlo todo durante los 7 días siguientes.",
+      "Lo que eliges compartir se muestra como la forma de trabajar de tu equipo. Todo lo demás solo llega a tu empresa cuando cinco o más personas lo han dicho, en conjunto. Puedes parar cuando quieras, y borrarlo todo durante los 7 días siguientes.",
     button: "Hablar con Stephen",
     yours:
-      "Este enlace es solo tuyo, así que no lo compartas. Abre tu entrevista en el primer dispositivo en el que lo abras.",
+      "Este enlace es solo tuyo, así que no lo compartas. Inicias sesión con tu cuenta del trabajo para abrirlo.",
     until: "Las entrevistas están abiertas hasta el {closes}.",
     reply:
       "¿Tienes preguntas? Responde a este correo y le llegará a la persona de {company} que organiza las entrevistas.",

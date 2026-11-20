@@ -1,15 +1,10 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
-import {
-  appIdSchema,
-  collectionIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "./ids.ts";
+import { appIdSchema, runIdSchema, workflowIdSchema } from "./ids.ts";
 
 // Improvement signals: where to look to improve the Apps' workflows,
-// read from runs, decisions and the audit log, and computed once a day
+// read from runs, decisions and model usage, and computed once a day
 // (core's src/signals.ts). Each signal names where it was seen (an App's
 // workflow, or the deployment), what it is about, a value to rank it by,
 // and its evidence: IDs and counts, never what a run read, returned or
@@ -110,35 +105,6 @@ const costSchema = z.object({
   }),
 });
 
-/**
- * The same Knowledge search that found nothing, asked again: by an App's
- * code and runs (the App's signal), or by people and agents (the
- * deployment's). Grouped by the search's key, an HMAC of its words, never
- * the words.
- */
-const unansweredSchema = z.object({
-  kind: z.literal("unanswered_question"),
-  /** Times it was searched in the window. */
-  value: z.number(),
-  evidence: z.object({
-    searches: z.int(),
-    /**
-     * How many different people, agents, App parts (pages or server
-     * code) or runs searched it.
-     */
-    askers: z.int(),
-    /** How many words it had. */
-    terms: z.int(),
-    /**
-     * The collections it was searched in, a few at most; a search of every
-     * collection the asker may read adds none.
-     */
-    collections: z.array(collectionIdSchema),
-    /** When the audit log received the latest search (ISO 8601). */
-    lastAt: z.iso.datetime(),
-  }),
-});
-
 /** One improvement signal. */
 export const improvementSignalSchema = z
   .discriminatedUnion("kind", [
@@ -146,7 +112,6 @@ export const improvementSignalSchema = z
     failingStepSchema,
     correctionSchema,
     costSchema,
-    unansweredSchema,
   ])
   .and(
     z.object({
@@ -159,8 +124,8 @@ export const improvementSignalSchema = z
       workflow: workflowIdSchema.nullable(),
       /**
        * What it is about: the deciders (`role:admin`; `person` for one
-       * person, but to admins), the step, the search's key; null when the
-       * workflow itself is.
+       * person, but to admins), the step; null when the workflow itself
+       * is.
        */
       subject: z.string().nullable(),
     })
@@ -174,7 +139,6 @@ export const signalKinds = [
   "failing_step",
   "correction",
   "cost_per_run",
-  "unanswered_question",
 ] as const satisfies readonly SignalKind[];
 
 /** Most signals of each kind one `list` returns, highest value first. */

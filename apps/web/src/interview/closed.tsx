@@ -15,8 +15,10 @@ import { useLingui } from "@lingui/react/macro";
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { SaveTrouble } from "./composer.tsx";
+import { WhereLinesGo } from "./destination.tsx";
 import { Head, headSizes, useHead } from "./head.tsx";
-import { useInterviewer } from "./kept.ts";
+import { useInterviewer, useProgress } from "./kept.ts";
 import { sayingMs } from "./loop.ts";
 import { SpokenText, useSaid } from "./spoken.tsx";
 import { usePromise } from "./words.ts";
@@ -114,6 +116,9 @@ export const Closed = ({
   const interviewer = useInterviewer();
   const who = interviewerNames[interviewer];
   const promise = usePromise();
+  // Lines agreed under what this interview said before can only be moved
+  // once they read what it says now: "Add something" takes them there.
+  const { told } = useProgress();
   const title = t`Thank you, ${name}.`;
   const message = t`What you agreed to is kept. Forgot something? This link works until ${closes}.`;
   const line = `${title} ${message}`;
@@ -156,6 +161,9 @@ export const Closed = ({
           <PlusIcon data-icon="inline-start" />
           {t`Add something`}
         </Button>
+        {told ? <WhereLinesGo /> : null}
+        {/* A change of where a line goes not kept yet, or refused, shows here too once the sheet is closed. */}
+        <SaveTrouble />
         <Rating onRate={onRate} value={rating} />
         <p className="text-muted-foreground text-xs text-balance">{promise}</p>
       </div>

@@ -1,10 +1,3 @@
-import {
-  memoryPackSchema,
-  skillReadSchema,
-  skillSelectionSchema,
-  skillsReadInputSchema,
-  skillsSelectInputSchema,
-} from "@grasp-os/brain/contract";
 import { AppError } from "@grasp-os/runtime/app";
 import type {
   AnyPermission,
@@ -30,6 +23,7 @@ import type {
 import type { RunHandle } from "@grasp-os/runtime/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import type { AuditActor } from "@grasp-os/shared/audit";
+import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
@@ -38,7 +32,6 @@ import {
   appErrorMessageMaxLength,
   invocationMaxReads,
   isAppErrorCode,
-  knowledgeSearchMaxLength,
   functionArgsMaxBytes,
   functionResultMaxBytes,
   stagedReadMaxBytes,
@@ -60,7 +53,6 @@ import type {
 } from "@grasp-os/shared/functions";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { resourceRecallInputSchema } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { peopleAlias } from "@grasp-os/shared/notifications";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -95,6 +87,14 @@ import { z } from "zod";
 import type { PeopleNotifications } from "./app-notifications.ts";
 import { answerPeople } from "./app-people.ts";
 import type { PeopleAccess } from "./app-people.ts";
+import {
+  brainCardSchema,
+  brainEntitiesSchema,
+  brainPackSchema,
+  brainRememberedSchema,
+  brainSkillsSelectedSchema,
+  brainSkillTextSchema,
+} from "./brain-pack.ts";
 import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
 import { CallTree } from "./call-tree.ts";
 import type { RunnerCall } from "./call-tree.ts";
@@ -1684,35 +1684,11 @@ export type ResourceBindings = (
   declaration: AnyPermission
 ) => Promise<BoundResource | undefined>;
 
-/** A knowledge search's request, as the declaration's client sends it. */
-const knowledgeSearchSchema = z.strictObject({
-  text: z.string().min(1).max(knowledgeSearchMaxLength),
-  limit: z.number().int().min(1).max(20).optional(),
-});
-
-/** A knowledge read's request. */
-const knowledgeReadSchema = z.strictObject({ id: z.string().min(1).max(256) });
-
 /** A model request. */
 const modelRequestSchema = z.strictObject({
   prompt: z.string().min(1).max(100_000),
   instructions: z.string().max(20_000).optional(),
 });
-
-/** Each knowledge operation's request. */
-const knowledgeRequests = {
-  search: knowledgeSearchSchema,
-  read: knowledgeReadSchema,
-  recall: resourceRecallInputSchema,
-  skillsSelect: skillsSelectInputSchema,
-  skillsRead: skillsReadInputSchema,
-} as const;
-
-/** Whether `method` is an operation a knowledge resource serves. */
-const isKnowledgeOperation = (
-  method: unknown
-): method is keyof typeof knowledgeRequests =>
-  typeof method === "string" && Object.hasOwn(knowledgeRequests, method);
 
 /** A request a resource's declaration doesn't allow. */
 const notAllowed = () => functionErrors.create("permission.not_allowed");
@@ -1720,26 +1696,6 @@ const notAllowed = () => functionErrors.create("permission.not_allowed");
 /** An answer a resource's contract doesn't allow. */
 const invalidResult = () =>
   functionErrors.create("contract.invalid_permission_result");
-
-/** What a knowledge search answers: hits of exactly a title and an excerpt. */
-const knowledgeHitsSchema = z
-  .array(z.strictObject({ title: z.string(), excerpt: z.string() }))
-  .max(20);
-
-/** What a knowledge read answers. */
-const knowledgeDocumentSchema = z.strictObject({
-  title: z.string(),
-  text: z.string(),
-});
-
-/** What each knowledge operation answers: a recall, a Brain memory pack. */
-const knowledgeResults = {
-  search: knowledgeHitsSchema,
-  read: knowledgeDocumentSchema,
-  recall: memoryPackSchema,
-  skillsSelect: skillSelectionSchema,
-  skillsRead: skillReadSchema,
-} as const;
 
 /**
  * Whether `method` with `args` is one of the operations a guests
@@ -1813,37 +1769,18 @@ const isNamedCall = (
 };
 
 /**
- * Whether `declaration` allows knowledge operation `method` with `args`:
- * one it declares, with one request. A declared operation asked with a
- * request outside its contract (a search text past Knowledge's limit, or
- * a recall naming a collection the declaration doesn't, say) is refused
- * as arguments that don't fit.
+ * Whether `declaration` allows Brain operation `method` with `args`: one
+ * it declares, with one request. What the request holds is the recall's
+ * own to check (brain-recall.ts), so an App's, a workflow's and a chat's
+ * get the same answer to the same request.
  */
-const allowsKnowledge = (
+const allowsBrain = (
   declaration: Extract<AnyPermission, { "~permission": "brain" }>,
   method: unknown,
   args: readonly Json[]
-): boolean => {
-  const [first] = args;
-  const schema = isKnowledgeOperation(method)
-    ? knowledgeRequests[method]
-    : undefined;
-  const allowed =
-    schema !== undefined &&
-    declaration.operations.some((operation) => operation === method) &&
-    args.length === 1;
-  const names = method === "recall" && isRecord(first) ? first.collections : [];
-  const undeclared =
-    Array.isArray(names) &&
-    names.some(
-      (name) =>
-        typeof name !== "string" || !declaration.collections.includes(name)
-    );
-  if (allowed && (!schema?.safeParse(first).success || undeclared)) {
-    throw functionErrors.create("contract.invalid_args");
-  }
-  return allowed;
-};
+): boolean =>
+  declaration.operations.some((operation) => operation === method) &&
+  args.length === 1;
 
 /**
  * Whether `args` is an AI request: the request, and the descriptor of the
@@ -1887,7 +1824,7 @@ const allowedRequest = (
     const { actions } = declaration;
     allowed = isNamedCall(method, args, (name) => actions.includes(name));
   } else if (declaration["~permission"] === "brain") {
-    allowed = allowsKnowledge(declaration, method, args);
+    allowed = allowsBrain(declaration, method, args);
   } else if (declaration["~permission"] === "ai") {
     allowed = method === "generate" && isAiRequest(args);
   } else if (declaration["~permission"] === "guests") {
@@ -1932,6 +1869,17 @@ const returnsDeclared = (
   return shape !== undefined && isNormalized(shape.returns, result);
 };
 
+/** What each of the Brain's operations answers code. */
+const brainResults: Readonly<Record<string, z.ZodType>> = {
+  recall: brainPackSchema,
+  "skills.select": brainSkillsSelectedSchema,
+  "skills.read": brainSkillTextSchema,
+  "entities.get": brainCardSchema.nullable(),
+  "entities.find": brainEntitiesSchema,
+  remember: brainRememberedSchema,
+  forget: z.boolean(),
+};
+
 /**
  * What a permission answered, if its contract allows it: AI's text, or the
  * value the request asked for; the Brain's hits or document; a guest
@@ -1953,11 +1901,9 @@ const checkedResourceResult = (
         ? typeof result === "string"
         : isNormalized(output, result);
   } else if (declaration["~permission"] === "brain") {
-    valid = (
-      isKnowledgeOperation(method)
-        ? knowledgeResults[method]
-        : knowledgeDocumentSchema
-    ).safeParse(result).success;
+    valid =
+      Object.hasOwn(brainResults, method) &&
+      brainResults[method]?.safeParse(result).success === true;
   } else if (declaration["~permission"] === "guests") {
     valid =
       (method === "invite" ||
@@ -2021,6 +1967,35 @@ const isAdapterRefusal = (
 ): code is (typeof adapterRefusals)[number] =>
   adapterRefusals.some((refusal) => refusal === code);
 
+/**
+ * Why an App's code may not write to the Brain (brain-app-writes.ts), and
+ * the details each passes on: who called, the table, or what it reaches.
+ */
+const brainWriteRefusals = {
+  "permission.brain_write_caller": z.strictObject({
+    caller: z.enum(["agent", "code_mode", "workflow"]),
+  }),
+  "permission.brain_write_not_user": z.undefined(),
+  "permission.brain_write_table": z.strictObject({ table: z.string() }),
+  "permission.brain_write_builders_table": z.strictObject({
+    table: z.string(),
+  }),
+  "permission.brain_write_reach": z.strictObject({
+    reach: z.enum(["connection", "team_brain", "app"]),
+  }),
+  "permission.brain_write_unplaced": z.undefined(),
+} as const;
+
+/** Why the Brain refused a write's request, as it says (`issues`). */
+const brainIssuesSchema = z.strictObject({
+  issues: z.array(z.string()),
+});
+
+const isBrainWriteRefusal = (
+  code: string | undefined
+): code is keyof typeof brainWriteRefusals =>
+  code !== undefined && Object.hasOwn(brainWriteRefusals, code);
+
 const providerFailure = (error: unknown, requestId: string): Error => {
   const code = isExpectedError(error) ? error.code : undefined;
   if (code === "effect.outcome_unknown" || code === "connect.outcome_unknown") {
@@ -2038,6 +2013,33 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   // refused or couldn't complete, each in the function host's own words.
   if (isAdapterRefusal(code)) {
     return hostError(functionErrors.create(code));
+  }
+  // Why its code may not write to the Brain, with what names it.
+  if (isBrainWriteRefusal(code)) {
+    const details = brainWriteRefusals[code].safeParse(
+      isExpectedError(error) ? error.details : undefined
+    );
+    return hostError(
+      functionErrors.create(
+        code,
+        details.success && details.data !== undefined ? details.data : undefined
+      )
+    );
+  }
+  // A memory the Brain refused for what its code asked (a credential in an
+  // identifier, or in a name an entity is found by: brain-app-writes.ts),
+  // saying why: the only detail
+  // passed on, each issue naming a field, never its value. Any other
+  // request it refuses comes as `permission.invalid_args`
+  // (`inHostBrainWords`), or, saying no why, as unexpected (below).
+  const why =
+    code === "brain.request_invalid" && isExpectedError(error)
+      ? brainIssuesSchema.safeParse(error.details)
+      : undefined;
+  if (why?.success === true) {
+    return hostError(
+      brainSourceErrors.create("brain.request_invalid", why.data)
+    );
   }
   // Room held by runs under way, a provider's rate: worth trying again,
   // after the wait computed, the only detail passed on.
@@ -3618,10 +3620,9 @@ const runMutation = async (
     if (refusedWrite !== undefined) {
       throw sealed(hostError(refusedWrite));
     }
-    // The gate, then the commit: a revocation, a membership ended or a
-    // grant made between the two (an admin granting for a later version,
-    // which leaves this one unapproved, `allowingPermissionSql`) doesn't
-    // stop this commit; the next protected step is refused. It can't be
+    // The gate, then the commit: a revocation or a membership ended
+    // between the two doesn't stop this commit; the next protected step
+    // is refused. It can't be
     // atomic with it: what the gate reads lives in core's D1 and the write
     // in the store's own Durable Object, with no transaction across the
     // two. The window is bounded to a call already admitted (accepted on

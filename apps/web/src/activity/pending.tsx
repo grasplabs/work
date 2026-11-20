@@ -5,16 +5,15 @@ import type {
 } from "@grasp-os/shared/permissions";
 import { nextScheduledRun } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
-import { msg, ph } from "@lingui/core/macro";
+import { msg, ph, plural } from "@lingui/core/macro";
 
 import type { Session } from "../core.ts";
 import {
   appName,
   appsById,
-  formatTime,
-  listedOrNone,
-  personName,
   readPeople,
+  readTeams,
+  teamName,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
 import { formatList, formatZone } from "../format.ts";
@@ -44,20 +43,12 @@ export const readRequestNames = async (
   session: Session,
   requests: Permission[]
 ): Promise<PendingRequests> => {
-  const [apps, people, collections] = await Promise.all([
+  const [apps, people, teams] = await Promise.all([
     session.apps.list(),
     readPeople(session),
-    // For names only: a request for a collection reads by its name.
-    listedOrNone(session.knowledge.listCollections()),
+    readTeams(session),
   ]);
-  return {
-    requests,
-    directory: {
-      people,
-      apps: appsById(apps),
-      collections: new Map(collections.map(({ id, name }) => [id, name])),
-    },
-  };
+  return { requests, directory: { people, teams, apps: appsById(apps) } };
 };
 
 /** Workflow `id`, by the name core gave it in `names`, else by its ID. */
@@ -111,8 +102,8 @@ export const subjectOf = (
 };
 
 /**
- * What it asks for: a workflow or a collection by its name where it was
- * read, a connection by ID, as it has no name here.
+ * What it asks for: a workflow by its name, a connection by ID, as it has
+ * no name here.
  */
 export const objectOf = (
   { object, actions, workflowNames, functionName }: Permission,
@@ -123,15 +114,6 @@ export const objectOf = (
     return resource === undefined
       ? i18n._(msg`Connection ${connectionId}`)
       : i18n._(msg`Connection ${connectionId}, ${resource}`);
-  }
-  if (object.type === "collection") {
-    // The request carries the collection's ID only, and an admin lists only
-    // the collections they can read: one they can't is "a collection", as
-    // `requestRow` says it, never its ID.
-    const collection = directory.collections?.get(object.collectionId);
-    return collection === undefined
-      ? i18n._(msg`a collection`)
-      : i18n._(msg`Collection ${ph({ collection })}`);
   }
   if (object.type === "app" && object.function !== undefined) {
     // A workflow's permission on one function, by its ID, named by its
@@ -164,9 +146,22 @@ export const objectOf = (
     );
   }
   if (object.type === "platform" && actions.includes("brain")) {
-    // Consent in plain words: what it reads, and whose access bounds it.
+    // Consent in plain words: what it reads, whose access bounds it, and
+    // who it may then be shared with (core's brain-recall.ts). The teams
+    // by name, or by ID for one that no longer exists.
+    const named = object.teams ?? [];
+    if (named.length === 0) {
+      return i18n._(
+        msg`Company Brain, read only. This can recall and look up what everyone in the company may read, its entities and their memories included, never a team's or anyone's own content. It can never write to the Brain. Every read is recorded`
+      );
+    }
+    const count = named.length;
+    const teamNames = formatList(named.map((id) => teamName(directory, id)));
     return i18n._(
-      msg`Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded`
+      msg`${plural(count, {
+        one: `Company Brain, read only. This App can recall what everyone in the company may read and what the team ${teamNames} may read, as far as the person it works for is in that team, and look up the entities and memories everyone in the company may read. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every read is recorded`,
+        other: `Company Brain, read only. This App can recall what everyone in the company may read and what the teams ${teamNames} may read, as far as the person it works for is in them, and look up the entities and memories everyone in the company may read. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every read is recorded`,
+      })}`
     );
   }
   if (object.type === "platform") {
@@ -234,28 +229,6 @@ export const reviewedVersionText = (
     return i18n._(msg`Unknown`);
   }
   return reviewedLabel(request, directory) ?? i18n._(msg`None live`);
-};
-
-/**
- * Why a request is asked for again, if it is: it was granted before, and
- * making another version of its App current asked for it again.
- */
-export const askedAgain = (
-  request: Permission,
-  directory: Directory
-): string | undefined => {
-  const { grantedBy, grantedAt } = request;
-  if (grantedBy === null || grantedAt === null) {
-    return undefined;
-  }
-  const label = reviewedLabel(request, directory);
-  const person = personName(directory, grantedBy);
-  const date = formatTime(grantedAt);
-  return label === null
-    ? i18n._(msg`Asked again (previously granted by ${person} on ${date})`)
-    : i18n._(
-        msg`Asked again after ${label} was published (previously granted by ${person} on ${date})`
-      );
 };
 
 const versionChanged = msg`Another version of this App was published since this list was read. The list now shows it: review that version, then approve again.`;
@@ -373,39 +346,11 @@ export const requestWords = (
 };
 
 /**
- * A request in a list's row: who asks and what, where the request's own
- * fields say it plainly. A collection is named as the directory knows it,
- * else "a collection" (the request carries its ID only, never its name);
- * a schedule as `requestAsker` has it; any other by who asks.
+ * A request in a list's row: who asks, as `requestAsker` has it (a
+ * schedule by what it is), the request's own sentence saying what.
  */
 export const requestRow = (
   request: Permission,
   directory: Directory,
   now: Date = new Date()
-): string => {
-  const asker = requestAsker(request, directory, now);
-  const { object, actions } = request;
-  if (object.type !== "collection") {
-    return asker;
-  }
-  const reads = actions.includes("read");
-  const writes = actions.includes("write");
-  const named = directory.collections?.get(object.collectionId);
-  if (named === undefined) {
-    if (reads && writes) {
-      return i18n._(msg`${ph({ asker })} may read and change a collection`);
-    }
-    return writes
-      ? i18n._(msg`${ph({ asker })} may change a collection`)
-      : i18n._(msg`${ph({ asker })} may read a collection`);
-  }
-  const collection = named;
-  if (reads && writes) {
-    return i18n._(
-      msg`${ph({ asker })} may read and change ${ph({ collection })}`
-    );
-  }
-  return writes
-    ? i18n._(msg`${ph({ asker })} may change ${ph({ collection })}`)
-    : i18n._(msg`${ph({ asker })} may read ${ph({ collection })}`);
-};
+): string => requestAsker(request, directory, now);

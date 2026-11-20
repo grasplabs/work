@@ -232,6 +232,8 @@ const readPage = defineTool({
     text: z.string(),
   }),
   readOnly: true,
+  // One item's content: what the Brain keeps of a person's own (GRA-1730).
+  answersItem: true,
   reach: "own",
   resource: "mailbox",
   routes: [get("/onenote/pages/{page}"), get("/onenote/pages/{page}/content")],

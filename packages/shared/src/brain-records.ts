@@ -71,12 +71,6 @@ export const brainGapTextMaxLength = 2000;
 /** Longest a statement's text may be. */
 export const brainStatementMaxLength = 2000;
 
-/**
- * Longest the vision's ambition, or why now, may be: what the kickoff read
- * and the sponsor's answer beside it.
- */
-export const brainVisionTextMaxLength = 5000;
-
 /** Most teams, tools or other ids one record lists. */
 const listMax = 50;
 
@@ -92,6 +86,16 @@ export const onboardingSourceIds: ReadonlySet<string> = new Set([
 
 /** What the onboarding's own record ids start with: nobody else's do. */
 export const onboardingIdPrefix = "onb-";
+
+/**
+ * What the id of an opinion of the company's starts with on the Brain
+ * page (GRA-1987): what five or more people across the company say, put
+ * together from what they left only counted anonymously, never a team's.
+ */
+export const companyOpinionIdPrefix = `${onboardingIdPrefix}opinion-`;
+
+/** The one source every opinion of the company's names on the Brain page: no team, no count, no one's moment. */
+export const companyOpinionsSourceId = `${onboardingIdPrefix}opinions`;
 
 /** A record's id, chosen by whoever adds it: letters, digits, `-` and `_`. */
 export const brainRecordIdSchema = z
@@ -305,9 +309,13 @@ const workflowRecordSchema = z.strictObject({
 /**
  * One drawing of a workflow, as it runs today: its steps, each with who
  * does it (a role) and where, and the rest of what was said about it.
- * Numbers are estimated, never averaged: a range over everyone who gave
- * one, and how many did. Nothing says who told what. A drawing never
- * changes: drawn again, it is a new version, and the newest counts.
+ * Numbers are estimated, never averaged. Nothing says who told what, nor
+ * how many: a team's work shows from the first person who told it
+ * (GRA-1987), so a count of people would say whose it is. The `people`
+ * counts are written by nothing since, kept optional until a later
+ * release drops them (expand, then contract).
+ * A drawing never changes: drawn again, it is a new version, and the
+ * newest counts.
  */
 const workflowVersionRecordSchema = z.strictObject({
   type: z.literal("workflowVersion"),
@@ -317,8 +325,8 @@ const workflowVersionRecordSchema = z.strictObject({
   date: day,
   /** How far it is known, under the organization's rules. */
   state: z.enum(["mapping", "saturating", "complete", "variants", "blocked"]),
-  /** How many people it was drawn from, never who. */
-  people: z.int().min(0).max(1000),
+  /** Written by nothing since GRA-1987 (see above). */
+  people: z.int().min(0).max(1000).optional(),
   /** What starts one. */
   starts: shortText,
   steps: z
@@ -371,7 +379,7 @@ const workflowVersionRecordSchema = z.strictObject({
         per: z.enum(["week", "month"]),
         low: count,
         high: count,
-        people: z.int().min(1).max(1000),
+        people: z.int().min(1).max(1000).optional(),
         basis: estimated,
       })
     )
@@ -382,7 +390,7 @@ const workflowVersionRecordSchema = z.strictObject({
       unit: z.enum(["minutes", "hours"]),
       quickest: count,
       longest: count,
-      people: z.int().min(1).max(1000),
+      people: z.int().min(1).max(1000).optional(),
       basis: estimated,
     })
     .nullable(),
@@ -391,7 +399,7 @@ const workflowVersionRecordSchema = z.strictObject({
     .strictObject({
       low: outOfTen,
       high: outOfTen,
-      people: z.int().min(1).max(1000),
+      people: z.int().min(1).max(1000).optional(),
       basis: estimated,
     })
     .nullable(),
@@ -441,21 +449,6 @@ const goalLinkRecordSchema = z.strictObject({
 });
 
 /**
- * The company's vision, as the kickoff set it: where it wants to be in one
- * to two years (`ambition`) and why AI now (`whyNow`). Never edited: when
- * it changes, the onboarding adds a new one, and the newest counts.
- */
-const visionText = z.string().trim().max(brainVisionTextMaxLength);
-const visionRecordSchema = z.strictObject({
-  type: z.literal("vision"),
-  id: ownIdSchema,
-  ambition: visionText,
-  whyNow: visionText,
-  sourceId: brainRecordIdSchema,
-  date: day,
-});
-
-/**
  * What a gap may be about: the records that are notes of their own, so
  * each opens its page. A team's count or stakeholder is a value of its
  * team, a source is where it was noticed (`sourceId`), and another gap
@@ -483,7 +476,6 @@ export const brainRecordSchema = z.discriminatedUnion("type", [
   goalRecordSchema,
   goalVersionRecordSchema,
   goalLinkRecordSchema,
-  visionRecordSchema,
 ]);
 export type BrainRecordInput = z.input<typeof brainRecordSchema>;
 export type BrainRecord = z.infer<typeof brainRecordSchema>;
@@ -492,13 +484,11 @@ export type WorkflowVersionRecord = Extract<
   BrainRecord,
   { type: "workflowVersion" }
 >;
-export type VisionRecord = Extract<BrainRecord, { type: "vision" }>;
 
-/** The types only the onboarding adds: it draws the work and reads the kickoff. */
+/** The types only the onboarding adds: it draws the work. */
 const onboardingTypes: ReadonlySet<BrainRecordType> = new Set([
   "workflow",
   "workflowVersion",
-  "vision",
 ]);
 
 /**

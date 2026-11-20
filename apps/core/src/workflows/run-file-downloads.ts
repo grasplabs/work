@@ -36,6 +36,7 @@ import {
 } from "../db/core/schema.ts";
 import { errorResponse } from "../errors.ts";
 import { requireWorkflowRole } from "../workflow-resources.ts";
+import { runEvidenceHolds } from "./resource-reads.ts";
 import { detailsRemoved } from "./retention.ts";
 
 // Downloading a run's finished files from its run sheet (GRA-1306). A
@@ -54,6 +55,10 @@ import { detailsRemoved } from "./retention.ts";
 //   finished file, and none once the run's details are gone, as for
 //   every reader of a run (`detailsRemoved`), whether or not
 //   the sweep has marked them yet.
+// - What the run read, taken since it wrote the file (a source erased or
+//   narrowed, a memory a person's erasure took or its writer retired):
+//   none of its files, listed or downloaded, once the run may no longer
+//   read that, as its result is withheld (resource-reads.ts, GRA-1985).
 // - Access lost partway: core streams the file's chunks from R2 itself,
 //   on its own origin, and hands out no address of R2's, so no link
 //   outlives a revocation. Before each chunk is read from R2, and again
@@ -108,7 +113,8 @@ interface Decided {
 
 /**
  * Whether `by` may download run `runId`'s files: undefined when they may
- * not see the run at all.
+ * not see the run at all; not allowed once the run may no longer read
+ * what it read.
  */
 const mayDownload = async (
   env: Env,
@@ -145,7 +151,17 @@ const mayDownload = async (
   return {
     workflow,
     run: runId,
-    may: allowed && !detailsRemoved(row),
+    may:
+      allowed &&
+      !detailsRemoved(row) &&
+      // Its files can hold what it read, so they go where its result
+      // goes: withheld once it may no longer read that (GRA-1985),
+      // whatever was written before. Decided again before each chunk.
+      (await runEvidenceHolds(env, {
+        runId,
+        workflowId: workflow,
+        principal: row.principalId,
+      })),
     own,
   };
 };

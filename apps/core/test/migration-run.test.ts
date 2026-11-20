@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Release } from "../src/app-releases.ts";
+import { reviewDraft } from "../src/app-review.ts";
 import {
   transformBatch,
   failedOutside,
@@ -12,7 +13,6 @@ import {
 } from "../src/migration-run.ts";
 import type { TransformRow } from "../src/migration-run.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
-import { reviewDraft } from "../src/version-review.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
 import type { TableSpec, TestApp } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
@@ -300,16 +300,14 @@ const sealedMigrating = async (
     env,
     fixture.owner,
     fixture.app,
-    files(fromSchema, placeholder),
-    "Migrate"
+    files(fromSchema, placeholder)
   );
   const refused = await refusalOf(async () => await seal(fixture, 2));
   await commitDefined(
     env,
     fixture.owner,
     fixture.app,
-    files(fromSchema, namedSchema(refused.details)),
-    "Fix"
+    files(fromSchema, namedSchema(refused.details))
   );
   return { fixture, release: await seal(fixture, 3), refused };
 };
@@ -368,8 +366,7 @@ const sealedSource = async (
       env,
       fixture.owner,
       fixture.app,
-      notesFiles({ [name]: source(fromSchema, toSchema) }),
-      "Migrate"
+      notesFiles({ [name]: source(fromSchema, toSchema) })
     );
   await commit(placeholder);
   const named = await refusalOf(async () => await seal(fixture, 2));

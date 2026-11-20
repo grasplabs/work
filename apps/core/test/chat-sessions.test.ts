@@ -1,4 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
+import type { ChatUpdate } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -9,6 +10,7 @@ import { questionDataOf } from "../src/chat-harness.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { personOf } from "../src/connections.ts";
 import { chatSession, workspace } from "../src/durable-objects.ts";
+import { analysisPurpose } from "../src/turn-recall.ts";
 import {
   chatOf,
   model,
@@ -107,9 +109,8 @@ const sessionOf = (
     question: { text, model: asked, files: [] },
     shared: false,
     personal: true,
-    readsBrain: false,
     context: { skills: [] },
-    capture: { model: asked, audience: null },
+    capture: { attended: true },
   }),
 });
 
@@ -257,7 +258,9 @@ describe("a chat's ChatSession", () => {
       }).toStrictEqual({
         first: "cancelled",
         again: "cancelled",
-        kept: ["user", "assistant:aborted"],
+        // The question, the recall before it (its call and result), and the
+        // stopped answer.
+        kept: ["user", "assistant:toolUse", "toolResult", "assistant:aborted"],
       });
     } finally {
       never.resolve(true);
@@ -317,11 +320,13 @@ describe("a chat's ChatSession", () => {
     const calls = await vi.waitFor(
       async () => {
         const all = await allEvents();
+        // Never the recall's analysis of a question, a call of its own.
         const events = all.filter(
-          ({ action, actor }) =>
+          ({ action, actor, detail }) =>
             action === "model.call" &&
             actor.type === "agent" &&
-            actor.onBehalfOf === userId
+            actor.onBehalfOf === userId &&
+            detail.purpose !== analysisPurpose
         );
         expect(events).toHaveLength(provider.requests.length);
         return events;
@@ -357,8 +362,21 @@ describe("a chat's ChatSession", () => {
         pause: { until: thought.promise },
       },
     });
+    // Held from when the chat shows the thought: by then its object timed
+    // the thinking's start. How long the turn took to get there is no part
+    // of it.
+    const shown = Promise.withResolvers<number>();
+    await stub.watch(chat.id, userId, null, async (update: ChatUpdate) => {
+      if ((update.partial?.reasoning.text ?? "") !== "") {
+        shown.resolve(Date.now());
+      }
+      await Promise.resolve();
+    });
     const reply = ask("How many days?");
-    await scheduler.wait(1500);
+    const since = await shown.promise;
+    const heldMs = 1000;
+    await scheduler.wait(heldMs);
+    const held = Date.now() - since;
     thought.resolve(true);
     await reply;
     const [kept] = await runInDurableObject(stub, (_instance, state) =>
@@ -369,8 +387,8 @@ describe("a chat's ChatSession", () => {
         )
         .toArray()
     );
-    // The pause, to the grain of pi's commits of the stream (100 ms).
-    expect(kept?.thinking_ms ?? 0).toBeGreaterThanOrEqual(1000);
+    // At least the hold: the thinking ended only once it was let go.
+    expect(kept?.thinking_ms ?? 0).toBeGreaterThanOrEqual(held);
   });
 
   it("keeps no alarm for an idle chat once a note reaches it, nor once an alarm finds nothing to do", async () => {

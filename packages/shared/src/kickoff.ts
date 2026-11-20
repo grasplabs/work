@@ -30,8 +30,9 @@ export const visionFieldSchema = z.enum(visionFields);
 
 /**
  * The fields the company's vision is made of (core's
- * onboarding/kickoff-records.ts): what the kickoff said about each, and
- * the sponsor's answer, reach every member through the brain.
+ * onboarding/kickoff-company.ts): what the kickoff said about each, and
+ * the sponsor's answer, reach every member, on the Brain page and in the
+ * Brain.
  */
 export const kickoffVisionFields = {
   ambition: "goals",
@@ -141,5 +142,5 @@ export const kickoffErrors = defineErrorFamily({
     "The conversation couldn't be read just now. Try again in a moment.",
   "kickoff.invalid": "That isn't something the kickoff takes.",
   "kickoff.purged":
-    "An admin purged words from the kickoff while this was being read. Bring the transcript in again.",
+    "Something was erased from the onboarding while this was being read, so nothing of it was kept. Bring the transcript in again.",
 });

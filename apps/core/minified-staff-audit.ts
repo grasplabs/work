@@ -10,19 +10,19 @@
  */
 import type { Identity } from "@grasp-os/shared/rpc";
 
+import { BrainSourcesRpc } from "./src/brain-sources-rpc.ts";
 import { currentCall } from "./src/call-context.ts";
-import { KnowledgeRpc } from "./src/knowledge/rpc.ts";
 import { staffViewOf } from "./src/staff-audit.ts";
 import type { StaffView } from "./src/staff-audit.ts";
 
-const documentId = "ent_00000000-0000-4000-8000-000000000001";
+const uploadId = "00000000-0000-4000-8000-000000000001";
 
-/** What a staff member's view of one document's backlinks is audited as. */
+/** What a staff member's view of one of the Brain's uploads is audited as. */
 const expected: StaffView = {
-  surface: "knowledge.backlinks",
-  args: 2,
-  kinds: ["documentId", "options"],
-  ids: [documentId],
+  surface: "brainSources.uploadOf",
+  args: 1,
+  kinds: ["uploadId"],
+  ids: [uploadId],
 };
 
 export default {
@@ -34,9 +34,7 @@ export default {
       viewed = staffViewOf(currentCall());
       return await Promise.reject(new Error("Read as the audit reads it"));
     };
-    await new KnowledgeRpc(env, check)
-      .backlinks(documentId, { limit: 1 })
-      .catch(() => null);
+    await new BrainSourcesRpc(env, check).uploadOf(uploadId).catch(() => null);
     if (JSON.stringify(viewed) !== JSON.stringify(expected)) {
       throw new Error(
         `A staff view of the minified bundle is audited as ${JSON.stringify(viewed)}, not ${JSON.stringify(expected)}`

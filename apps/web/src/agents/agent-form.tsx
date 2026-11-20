@@ -1,19 +1,9 @@
-import {
-  agentInstructionsMax,
-  agentJobMax,
-  agentNameMax,
-} from "@grasp-os/shared/agents";
+import { agentJobMax, agentNameMax } from "@grasp-os/shared/agents";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { modelName } from "../chat/model-names.tsx";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "../grasp/field/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import {
@@ -22,21 +12,19 @@ import {
   SelectValue,
   SelectContent,
 } from "../grasp/select/index.ts";
-import { Textarea } from "../grasp/textarea/index.ts";
 
-// What an admin says of an agent: its name, what it is for, the model its
-// turns use and its instructions. Its face is the Agent mark, drawn from
-// its name, so a new name gives it a new face. A form of Grasp UI's
-// fields, without its own button: the dialog or card it stands in has
-// the submit button, tied to it by `id` (`<Button form={id} type="submit">`). A new agent asks for all at once
-// (new-agent.tsx); an agent's page asks for some of them at a time
-// (agent-page.tsx), and saves only those.
+// What an admin says of an agent: its name, what it is for and the model
+// its turns use. Its face is the Agent mark, drawn from its name, so a new
+// name gives it a new face. A form of Grasp UI's fields, without its own
+// button: the dialog it stands in has the submit button, tied to it by
+// `id` (`<Button form={id} type="submit">`). An agent's page asks for them
+// in its Edit dialog (agent-page.tsx). What it is told is its instruction
+// file (settings/instruction-file.tsx), edited on its own.
 
 /** What an admin says of an agent. */
 export interface Typed {
   name: string;
   job: string;
-  instructions: string;
   /**
    * The figure core keeps for it, passed back unchanged: it is drawn with
    * Grasp UI's Agent mark, from its name, so nobody picks a figure now.
@@ -45,11 +33,6 @@ export interface Typed {
   /** The model its turns use; null for the one its asker picks. */
   model: string | null;
 }
-
-const styles = stylex.create({
-  // One field alone in its card takes the card's whole width.
-  whole: { maxWidth: "none" },
-});
 
 /** No models to give an agent: a form that doesn't ask for one. */
 const noModels: readonly string[] = [];
@@ -81,7 +64,6 @@ export const AgentForm = ({
 }) => {
   const { t } = useLingui();
   const [typed, setTyped] = useState<Typed>(initial);
-  const alone = parts.length === 1;
   // Its own model stays offered while it has one the organization no longer chose.
   const offered = [
     ...models,
@@ -92,7 +74,6 @@ export const AgentForm = ({
   return (
     <Form
       id={id}
-      layout={alone ? styles.whole : undefined}
       onSubmit={(event) => {
         event.preventDefault();
         // Only this form's parts: another form may have saved the rest
@@ -161,39 +142,6 @@ export const AgentForm = ({
             </SelectTrigger>
             <SelectContent />
           </Select>
-        </Field>
-      ) : null}
-      {/* Alone, the card it stands in names it: its label and help are
-          the card's own title and line. */}
-      {parts.includes("instructions") && alone ? (
-        <Field disabled={!can}>
-          <Textarea
-            aria-label={t`Instructions`}
-            maxLength={agentInstructionsMax}
-            onValueChange={(instructions) => {
-              setTyped({ ...typed, instructions });
-            }}
-            placeholder={t`What it should know and how it should work.`}
-            rows={16}
-            value={typed.instructions}
-          />
-        </Field>
-      ) : null}
-      {parts.includes("instructions") && !alone ? (
-        <Field disabled={!can}>
-          <FieldLabel>{t`Instructions`}</FieldLabel>
-          <Textarea
-            maxLength={agentInstructionsMax}
-            onValueChange={(instructions) => {
-              setTyped({ ...typed, instructions });
-            }}
-            placeholder={t`What it should know and how it should work.`}
-            rows={6}
-            value={typed.instructions}
-          />
-          <FieldDescription>
-            {t`Grasp's own rules always hold over these.`}
-          </FieldDescription>
         </Field>
       ) : null}
     </Form>

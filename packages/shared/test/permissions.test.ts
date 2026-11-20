@@ -51,17 +51,24 @@ describe("permission requests", () => {
   });
 
   it("allow only the actions their object has", () => {
-    const collection = { type: "collection", collectionId: "c" };
+    const platform = { type: "platform" };
     const workflow = { type: "workflow", workflowId: "w" };
     // A workflow is a resource of its own, never named through an App.
     const appsWorkflow = { type: "workflow", appId: "a", workflowId: "w" };
-    expect(
-      isValid({ object: collection, actions: ["read", "write"] })
-    ).toBeTruthy();
+    expect(isValid({ object: platform, actions: ["statistics"] })).toBeTruthy();
     expect(isValid({ object: workflow, actions: ["start"] })).toBeTruthy();
-    expect(isValid({ object: collection, actions: ["delete"] })).toBeFalsy();
+    expect(isValid({ object: platform, actions: ["delete"] })).toBeFalsy();
     expect(isValid({ object: workflow, actions: ["write"] })).toBeFalsy();
     expect(isValid({ object: appsWorkflow, actions: ["start"] })).toBeFalsy();
+  });
+
+  // Knowledge is gone (GRA-1735): nothing grants one of its collections.
+  it("are refused for a Knowledge collection, to read or to write", () => {
+    const collection = { type: "collection", collectionId: "c" };
+    expect({
+      read: isValid({ object: collection, actions: ["read"] }),
+      write: isValid({ object: collection, actions: ["read", "write"] }),
+    }).toStrictEqual({ read: false, write: false });
   });
 
   it("allow at least one action, each once, each a name", () => {
@@ -79,23 +86,20 @@ describe("permission requests", () => {
   });
 });
 
-/** Whether a blueprint may declare `actions` on a collection. */
-const declared = (actions: string[]): boolean =>
-  declaredPermissionSchema.safeParse({
-    object: { type: "collection", collectionId: "c" },
-    actions,
-    binding: "NOTES",
-  }).success;
+/** Whether a blueprint may declare a permission on `object`. */
+const declared = (object: object, actions: string[]): boolean =>
+  declaredPermissionSchema.safeParse({ object, actions, binding: "NOTES" })
+    .success;
 
 describe("permissions a blueprint declares", () => {
-  // Every App created from it holds them, and an App only reads a
-  // collection.
-  it("read a collection, and never write it", () => {
+  // Every App created from it holds them: only what the platform offers
+  // names the same thing for whoever creates from it.
+  it("are only what the platform offers, for the company, never a collection", () => {
     expect({
-      read: declared(["read"]),
-      readWrite: declared(["read", "write"]),
-      write: declared(["write"]),
-    }).toStrictEqual({ read: true, readWrite: false, write: false });
+      platform: declared({ type: "platform" }, ["statistics"]),
+      teams: declared({ type: "platform", teams: ["t"] }, ["brain"]),
+      collection: declared({ type: "collection", collectionId: "c" }, ["read"]),
+    }).toStrictEqual({ platform: true, teams: false, collection: false });
   });
 });
 

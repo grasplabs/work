@@ -1,41 +1,24 @@
 // @vitest-environment happy-dom
-import type { ChatCitedDocument } from "@grasp-os/shared/chat";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Outlet,
-  RouterProvider,
-} from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { AnswerWords } from "./answer-words.tsx";
-import { AnswerCited, useCitedDocuments } from "./sources.tsx";
 
-// An answer as the thread draws it, against core's chats as the page
-// reaches them over RPC, faked: its Markdown with nothing of raw HTML or a
-// picture that would load; a link out of Grasp that opens only once the
-// person says so; and, where core says the answer cites documents, each
-// cited span marked with its source's number, the documents listed under
-// it in that order, each opening on its collection's page.
+// An answer as the thread draws it: its Markdown with nothing of raw HTML
+// or a picture that would load; a link out of Grasp that opens only once
+// the person says so; and a link to a note or an unsafe address as its
+// words alone.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 let opened: { url: string; features: string }[] = [];
 
-/** A stored answer's words, with what core says it cites. */
-const Stored = ({ text }: { text: string }) => (
-  <AnswerWords cited={useCitedDocuments()} text={text} writing={false} />
-);
-
-/** Lets the page's work after a core answer run. */
+/** Lets the page's work run. */
 const settled = async (): Promise<void> => {
   await act(async () => {
     const { promise, resolve } = Promise.withResolvers<boolean>();
@@ -46,54 +29,20 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** Answer 7 of a chat, `text`, which core says cites `cited`. */
-const shown = async (text: string, cited: ChatCitedDocument[] = []) => {
-  const asked: string[] = [];
-  const chats = {
-    cited: async (chat: string, message: number) => {
-      asked.push(`${chat}/${message}`);
-      await Promise.resolve();
-      return cited;
-    },
-  };
-  const core = {
-    withSession: async <T,>(
-      action: (session: { chats: typeof chats }) => Promise<T>
-    ): Promise<T> => await action({ chats }),
-  };
-  const rootRoute = createRootRoute({ component: Outlet });
-  const answer = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/",
-    component: () => (
-      <AnswerCited cited={{ chatId: "chat", messageId: 7 }}>
-        <Stored text={text} />
-      </AnswerCited>
-    ),
-  });
-  const collection = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/knowledge/$collection",
-    component: () => null,
-  });
-  const router = createRouter({
-    routeTree: rootRoute.addChildren([answer, collection]),
-    history: createMemoryHistory(),
-    context: { core },
-  });
+/** A stored answer, `text`. */
+const shown = async (text: string): Promise<void> => {
   const host = document.createElement("div");
   document.body.append(host);
   await act(async () => {
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <RouterProvider router={router} />
+        <AnswerWords text={text} writing={false} />
       </I18nProvider>
     );
-    await router.load();
+    await Promise.resolve();
   });
   await settled();
-  return { router, asked };
 };
 
 const press = async (element: HTMLElement | undefined): Promise<void> => {
@@ -115,69 +64,6 @@ const button = (name: string): HTMLElement | undefined =>
       element.textContent.trim() === name
   );
 
-const leave: ChatCitedDocument = {
-  documentId: "leave",
-  collectionId: "handbook",
-  title: "Parental leave",
-  path: "leave.md",
-  snippet: "Parental leave lasts sixteen weeks.",
-  spans: [],
-};
-
-const plan: ChatCitedDocument = {
-  documentId: "plan",
-  collectionId: "plans",
-  title: "Route plan",
-  path: "routes/plan.md",
-  snippet: "Where the route goes, and when.",
-  spans: [],
-};
-
-/** What the hover card of the citation named `name` shows, once it opens. */
-const cardOf = async (name: string): Promise<string> => {
-  const citation = document.querySelector<HTMLElement>(
-    `[aria-label="${name}"]`
-  );
-  if (citation === null) {
-    throw new Error(`No citation ${name}`);
-  }
-  await act(async () => {
-    for (const type of [
-      "pointerenter",
-      "mouseenter",
-      "pointermove",
-      "mousemove",
-    ]) {
-      citation.dispatchEvent(
-        new PointerEvent(type, {
-          bubbles: type.endsWith("move"),
-          pointerType: "mouse",
-        })
-      );
-    }
-    const { promise, resolve } = Promise.withResolvers<boolean>();
-    setTimeout(() => {
-      resolve(true);
-    }, 400);
-    await promise;
-  });
-  // The card this citation opened: the latest, should another still be leaving.
-  const card =
-    [...document.querySelectorAll("[data-slot=source-card]")].at(-1)
-      ?.textContent ?? "";
-  await act(async () => {
-    for (const type of ["pointerleave", "mouseleave"]) {
-      citation.dispatchEvent(new PointerEvent(type, { pointerType: "mouse" }));
-    }
-    const { promise, resolve } = Promise.withResolvers<boolean>();
-    setTimeout(() => {
-      resolve(true);
-    }, 400);
-    await promise;
-  });
-  return card;
-};
-
 describe(AnswerWords, () => {
   beforeEach(() => {
     window.open = (url?: string | URL, _target?: string, features?: string) => {
@@ -193,70 +79,6 @@ describe(AnswerWords, () => {
     root = undefined;
     opened = [];
     document.body.replaceChildren();
-  });
-
-  it("marks each span an answer cites with its source's number, and lists the documents under it, each opening on its collection's page", async () => {
-    const { router, asked } = await shown(
-      "The [route](grasp:note/plan) and [sixteen weeks](grasp:note/leave), not [Travel](grasp:note/travel).",
-      [plan, leave]
-    );
-    const marked = [
-      ...document.querySelectorAll<HTMLElement>("[data-slot=claim]"),
-    ].map((claim) => ({
-      words: claim.textContent,
-      source: claim.dataset.source,
-    }));
-    const citations = [
-      ...document.querySelectorAll("[data-slot=hover-card-trigger]"),
-    ].map((citation) => citation.getAttribute("aria-label"));
-    // A note the answer doesn't cite: its words alone, nothing to follow.
-    const travel = [...document.querySelectorAll("p span")].find(
-      (span) => span.textContent === "Travel"
-    );
-
-    await press(
-      document.querySelector<HTMLElement>("[data-slot=source-pile]") ??
-        undefined
-    );
-    const listed = [...document.querySelectorAll("li")].map(
-      (item) => item.textContent
-    );
-    await press(button("Parental leave"));
-
-    expect({
-      asked,
-      marked,
-      citations,
-      travel: travel?.closest("a, button") ?? null,
-      listed,
-      at: router.state.location.pathname,
-      search: { ...router.state.location.search },
-    }).toStrictEqual({
-      asked: ["chat/7"],
-      marked: [
-        { words: "route", source: "1" },
-        { words: "sixteen weeks", source: "2" },
-      ],
-      citations: ["Source 1: Route plan", "Source 2: Parental leave"],
-      travel: null,
-      listed: ["Route plan1routes/plan.md", "Parental leave2leave.md"],
-      at: "/knowledge/handbook",
-      search: { doc: "leave" },
-    });
-  });
-
-  it("lists nothing under an answer core says cites nothing it may show, and keeps its words", async () => {
-    await shown("Leave lasts [sixteen weeks](grasp:note/leave).");
-
-    expect({
-      words: document.body.textContent,
-      listed: document.querySelector("[data-slot=source-pile], ol") !== null,
-      marked: document.querySelector("[data-slot=claim]") !== null,
-    }).toStrictEqual({
-      words: "Leave lasts sixteen weeks.",
-      listed: false,
-      marked: false,
-    });
   });
 
   it("opens a link out of Grasp only once the person says so", async () => {
@@ -283,6 +105,33 @@ describe(AnswerWords, () => {
     });
   });
 
+  it("shows a link to a note or to an unsafe address as its words alone", async () => {
+    await shown(
+      'Leave is [sixteen weeks](grasp:note/doc-1 "Sixteen weeks"), [this](javascript:alert(1)) runs nothing and [that](data:text/html,hi) opens nothing.'
+    );
+
+    expect({
+      followed: document.querySelector("a, button"),
+      words: document.body.textContent.includes(
+        "Leave is sixteen weeks, this runs nothing and that opens nothing."
+      ),
+    }).toStrictEqual({ followed: null, words: true });
+  });
+
+  it("asks before following a link to another host without a protocol", async () => {
+    await shown("See [the form](//forms.example/leave).");
+    const addressed = document.querySelector("a[href]");
+    await press(button("the form"));
+
+    expect({
+      addressed,
+      opened,
+      asked: (
+        document.querySelector("[role=alertdialog]")?.textContent ?? ""
+      ).includes("//forms.example/leave"),
+    }).toStrictEqual({ addressed: null, opened: [], asked: true });
+  });
+
   it("draws nothing of raw HTML, and no picture that would load", async () => {
     await shown(
       'Before <script>alert(1)</script><img src="https://example.com/t.png"> after\n\n![A chart](https://example.com/chart.png)\n\n<iframe src="https://example.com"></iframe>'
@@ -294,33 +143,5 @@ describe(AnswerWords, () => {
         document.body.textContent.includes(words)
       ),
     }).toStrictEqual({ drawn: null, words: ["Before", "A chart"] });
-  });
-
-  it("shows in a citation's card the passage it rests on, as core checked it, and nothing where core kept no quote", async () => {
-    // As core keeps an answer: its citations without their titles, each
-    // quote it checked given apart, with where its link starts.
-    const text =
-      "Leave lasts [sixteen weeks](grasp:note/leave), and is [unpaid](grasp:note/leave).";
-    const quoted: ChatCitedDocument = {
-      ...leave,
-      spans: [
-        {
-          at: text.indexOf("[sixteen"),
-          text: "sixteen weeks",
-          quote: 'Leave lasts sixteen "paid" weeks.',
-        },
-        { at: text.indexOf("[unpaid"), text: "unpaid", quote: null },
-      ],
-    };
-    await shown(text, [quoted]);
-
-    const first = await cardOf("Source 1, first mention: Parental leave");
-    const second = await cardOf("Source 1, second mention: Parental leave");
-
-    expect({
-      first: first.includes('Leave lasts sixteen "paid" weeks.'),
-      second: second.includes("Leave lasts sixteen"),
-      start: first.includes("Parental leave lasts sixteen weeks."),
-    }).toStrictEqual({ first: true, second: false, start: false });
   });
 });

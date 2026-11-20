@@ -113,10 +113,13 @@ describe("the Workflows page", buildTime, () => {
       personApi("user"),
       personApi("builder"),
     ]);
+    // Called what its owner named it, beside the name that is its key.
     const workflow = await owner.api.workflowResources.create(
-      `intake-${unique()}`
+      `intake-${unique()}`,
+      undefined,
+      "Invoice intake"
     );
-    await owner.api.workflowResources.share(workflow.id, {
+    await owner.api.workflowResources.members.add(workflow.id, {
       type: "person",
       id: user.userId,
       role: "user",
@@ -153,6 +156,7 @@ describe("the Workflows page", buildTime, () => {
     const summary = (change: object) => ({
       workflowId: workflow.id,
       name: workflow.name,
+      title: "Invoice intake",
       version: null,
       owner: owner.userId,
       waiting: 0,

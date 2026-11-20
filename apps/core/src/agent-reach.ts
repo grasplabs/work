@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { organizationId } from "./auth/membership-sql.ts";
-import { agentPlaces, agentReach } from "./db/core/schema.ts";
+import { agentPlaces, agentReach, agents } from "./db/core/schema.ts";
 import { stephenFor } from "./stephen-reach.ts";
 import { audienceOf, off, takesIn } from "./tool-classes.ts";
 
@@ -24,6 +24,11 @@ import { audienceOf, off, takesIn } from "./tool-classes.ts";
 //   the class or fewer. The class gate reads it (tool-classes.ts,
 //   `requireToolClassOn`) after the company's own setting and the app's,
 //   never instead of them.
+//
+// A person's own agent (agents.ts) has none of the three: it reaches its
+// owner, in Grasp's own chat, and nobody anywhere else. Its classes are
+// as the company has each class for that person, with no row to narrow
+// them, so it does at most what the company lets be done for them.
 //
 // An agent without a row is as the layer above it, as Stephen is until an
 // admin changes him. So what makes a new agent start with nothing is
@@ -63,6 +68,17 @@ export const agentFor = async (
       : await stephenFor(env, userId, place);
   }
   const db = drizzle(env.DB);
+  const owned = await db
+    .select({ ownerId: agents.ownerId })
+    .from(agents)
+    .where(eq(agents.id, agentId))
+    .get();
+  if (owned !== undefined && owned.ownerId !== null) {
+    // A person's own agent: theirs alone, in Grasp's own chat alone,
+    // whatever rows of reach or place bear its ID.
+    const reaches = place === undefined && owned.ownerId === userId;
+    return { reaches, acts: reaches };
+  }
   const [whole, row] = await Promise.all([
     db.select().from(agentReach).where(eq(agentReach.agentId, agentId)).get(),
     place === undefined

@@ -7,7 +7,8 @@ import { buildConnectors, connectorEntries } from "../build.ts";
 
 /**
  * Connect's connectors as its tests load them: the release's, as build.ts
- * builds them, the sample connector the tests call through, two apps
+ * builds them, the sample connector the tests call through, one that
+ * syncs (`sample-sync`), two apps
  * that sign in with their own records (OAuth 2.0, an API key), one named
  * `composio`, whose contracts must never be served, and `sample-unreached`
  * (`withUnreachedTool`).
@@ -70,6 +71,7 @@ const setup = async (): Promise<void> => {
     [
       ...connectorEntries(),
       path.join(import.meta.dirname, "fixtures/sample-connector.ts"),
+      path.join(import.meta.dirname, "fixtures/sample-sync-connector.ts"),
       path.join(import.meta.dirname, "fixtures/sample-oauth-connector.ts"),
       path.join(import.meta.dirname, "fixtures/sample-key-connector.ts"),
       path.join(import.meta.dirname, "fixtures/composio-named-connector.ts"),

@@ -1,17 +1,11 @@
-import { runLinking } from "@grasp-os/brain/entities";
-import { runIndexing } from "@grasp-os/brain/indexing";
-import { runConsolidation } from "@grasp-os/brain/lessons";
 import type {
   WorkflowEvent,
   WorkflowStep,
 } from "@grasp-os/workerflow/contracts";
 
-import { runExtraction } from "../knowledge/extraction.ts";
-import { brainOf } from "../knowledge/ports.ts";
 import { runCandidateWorkflow } from "./candidate-runs.ts";
 import { engineCall } from "./engine-asks.ts";
-import { runParamsSchema } from "./engine.ts";
-import type { InternalWorkflow, RunPin } from "./engine.ts";
+import type { RunPin } from "./engine.ts";
 import { runFixtureWorkflow } from "./fixture-runs.ts";
 import type { AiCalls, HostHooks, RunStep } from "./host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
@@ -20,9 +14,8 @@ import type { RunModelCalls, SentCalls } from "./sealed-run.ts";
 // What every run executes (run-object.ts): each time the engine activates
 // a run, at its start and on every wake or recovery, the dispatcher loads
 // it afresh by what it is pinned to (engine.ts): an independent
-// workflow's sealed version, a test run of its draft's checkpoint, a run
-// an App's test started, or one of core's own workflows, which runs
-// core's code with core's env.
+// workflow's sealed version, a test run of its draft at one revision, or
+// a run an App's test started.
 //
 // A run the engine has paused, terminated or taken over (a newer
 // activation) is fenced by the engine: its calls of the step API never
@@ -43,7 +36,7 @@ const testRetryDelayOf = (env: Env): number | undefined => {
     : undefined;
 };
 
-/** The engine's `step`, as the host and core's own workflows take it. */
+/** The engine's `step`, as the host takes it. */
 const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
   const delay = testRetryDelayOf(env);
   // Each call told to the ask a host handles, if any, as it is made
@@ -117,23 +110,6 @@ export interface RunMemory {
   now?: () => number;
 }
 
-/** Each of core's own workflows, by name. */
-const internalRuns: Record<
-  InternalWorkflow,
-  (env: Env, input: unknown, step: RunStep) => Promise<void>
-> = {
-  extraction: runExtraction,
-  indexing: async (env, input, step) => {
-    await runIndexing(brainOf(env), input, step);
-  },
-  linking: async (env, input, step) => {
-    await runLinking(brainOf(env), input, step);
-  },
-  consolidation: async (env, input, step) => {
-    await runConsolidation(brainOf(env), input, step);
-  },
-};
-
 /**
  * Runs (or resumes) one activation of the run `event` names, as it is
  * pinned (engine.ts, `RunPin`).
@@ -141,16 +117,11 @@ const internalRuns: Record<
 export const runPinned = async (
   env: Env,
   pin: RunPin,
-  event: Pick<WorkflowEvent, "instanceId" | "payload">,
+  event: Pick<WorkflowEvent, "instanceId">,
   engineStep: WorkflowStep,
   memory: RunMemory
 ): Promise<unknown> => {
   const step = runStepOf(env, engineStep);
-  const { input } = runParamsSchema.parse(event.payload);
-  if (pin.type === "internal") {
-    await internalRuns[pin.workflow](env, input, step);
-    return null;
-  }
   if (pin.type === "resource") {
     // An independent workflow's sealed build: its input is its receipt's.
     return await runResourceWorkflow(env, pin, event.instanceId, step, memory);

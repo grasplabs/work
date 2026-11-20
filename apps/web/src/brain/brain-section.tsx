@@ -1,3 +1,5 @@
+import { isMemberAdmin } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useLocation, useMatch } from "@tanstack/react-router";
 
@@ -12,6 +14,8 @@ import {
   Note as NoteMark,
   People,
   Rocket,
+  Skill,
+  Sparkles,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import type { SidebarRow, SidebarSection } from "../grasp/sidebar/index.ts";
@@ -65,8 +69,14 @@ const partItems = (region: AtlasRegion, tree: Folder): TreeNode[] => {
   return shown.map((note) => noteItem(note));
 };
 
-/** The Brain's pages and parts, as the sidebar's section; undefined outside the Brain. */
-export const useBrainSection = (): SidebarSection | undefined => {
+/**
+ * The Brain's pages and parts, as the sidebar's section; undefined outside
+ * the Brain. Opportunities are an admin's (GRA-1750): nobody else gets
+ * the row.
+ */
+export const useBrainSection = (
+  identity: Identity
+): SidebarSection | undefined => {
   const { t } = useLingui();
   const { pathname, search } = useLocation();
   const match = useMatch({ from: "/_shell/brain", shouldThrow: false });
@@ -86,7 +96,12 @@ export const useBrainSection = (): SidebarSection | undefined => {
   const page = (
     label: string,
     icon: IconData,
-    to: "/brain/activity" | "/brain/memory" | "/brain/sources"
+    to:
+      | "/brain/activity"
+      | "/brain/memories"
+      | "/brain/opportunities"
+      | "/brain/skills"
+      | "/brain/sources"
   ): SidebarRow => ({
     label,
     icon,
@@ -150,12 +165,33 @@ export const useBrainSection = (): SidebarSection | undefined => {
             Chart,
             "/brain/activity"
           ),
-          page(t`Memory`, NoteMark, "/brain/memory"),
           page(
             t({ message: "Sources", context: "the Brain's sources page" }),
             FolderMark,
             "/brain/sources"
           ),
+          page(
+            t({ message: "Memories", context: "the Brain's memories page" }),
+            NoteMark,
+            "/brain/memories"
+          ),
+          page(
+            t({ message: "Skills", context: "the Brain's skills page" }),
+            Skill,
+            "/brain/skills"
+          ),
+          ...(isMemberAdmin(identity)
+            ? [
+                page(
+                  t({
+                    message: "Opportunities",
+                    context: "the Brain's opportunities page",
+                  }),
+                  Sparkles,
+                  "/brain/opportunities"
+                ),
+              ]
+            : []),
         ],
       },
       {

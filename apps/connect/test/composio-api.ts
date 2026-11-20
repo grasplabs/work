@@ -29,11 +29,43 @@ export interface FakeComposioTool {
   tags?: unknown;
 }
 
+/** One field of a toolkit's key auth, as Composio describes it. */
+export interface FakeKeyField {
+  name: string;
+  displayName?: string;
+  description?: string;
+  /** Whether it is in the required list; by default yes. */
+  required?: boolean;
+  /** Composio's `is_secret`; left out when undefined. */
+  secret?: boolean;
+  /** Composio's `user_visible`; by default yes. */
+  visible?: boolean;
+}
+
+/** How a toolkit takes a key, and which values its provider accepts. */
+export interface FakeKeyAuth {
+  scheme: "API_KEY" | "BEARER_TOKEN" | "BASIC";
+  fields: FakeKeyField[];
+  /**
+   * What the provider checks, by field name: a connected account made with
+   * any other value is refused, as Composio refuses one the provider
+   * rejected.
+   */
+  accepts: Record<string, string>;
+  /**
+   * A field of the list named that connect can't read (its `displayName`
+   * isn't text), described after the others, if any.
+   */
+  unreadable?: "required" | "optional";
+}
+
 export interface FakeToolkit {
   slug: string;
   name: string;
   /** Whether Composio holds an app for it (managed auth); by default yes. */
   managed?: boolean;
+  /** How it takes a key too, if it does. */
+  keyAuth?: FakeKeyAuth;
   categories?: string[];
   /**
    * What its list says it is: `<name> toolkit` by default, `null` for no
@@ -174,6 +206,7 @@ const toolkitItem = ({
   slug,
   name,
   managed,
+  keyAuth,
   categories,
   description = `${name} toolkit`,
   tools,
@@ -182,8 +215,12 @@ const toolkitItem = ({
   slug,
   name,
   type: "native",
-  auth_schemes: ["OAUTH2"],
-  composio_managed_auth_schemes: managed === false ? [] : ["OAUTH2"],
+  // In lower case, as Composio's toolkit list names schemes.
+  auth_schemes:
+    keyAuth === undefined
+      ? ["oauth2"]
+      : ["oauth2", keyAuth.scheme.toLowerCase()],
+  composio_managed_auth_schemes: managed === false ? [] : ["oauth2"],
   no_auth: false,
   meta: {
     ...(description === null ? {} : { description }),
@@ -218,11 +255,90 @@ const page = (
 const notFound = (): Response =>
   Response.json({ error: { message: "Not found" } }, { status: 404 });
 
-/** An auth config connect made: Composio's app for one toolkit. */
+/** One field as Composio's toolkit description lists it. */
+const fieldItem = ({
+  name,
+  displayName = name,
+  description = `Your ${name}`,
+  required = true,
+  secret,
+  visible = true,
+}: FakeKeyField) => ({
+  name,
+  displayName,
+  type: "string",
+  description,
+  required,
+  user_visible: visible,
+  ...(secret === undefined ? {} : { is_secret: secret }),
+});
+
+/** One scheme of a toolkit's auth, as Composio describes it. */
+const authDetail = (
+  mode: string,
+  initiation: { required: unknown[]; optional: unknown[] }
+) => ({
+  mode,
+  name: mode,
+  required_scopes: [],
+  is_connection_revoke_supported: false,
+  fields: {
+    auth_config_creation: { required: [], optional: [] },
+    connected_account_initiation: initiation,
+  },
+});
+
+/** A field connect can't read: its `displayName` isn't text. */
+const unreadableField = {
+  name: "unreadable",
+  displayName: 42,
+  type: "string",
+  description: "Not one connect can read",
+  required: true,
+  user_visible: true,
+};
+
+/** A toolkit, as Composio describes it alone: its auth, scheme by scheme. */
+const toolkitDetail = ({ slug, name, keyAuth }: FakeToolkit) => {
+  const fields = keyAuth?.fields ?? [];
+  const unreadable = (list: "required" | "optional") =>
+    keyAuth?.unreadable === list ? [unreadableField] : [];
+  return {
+    slug,
+    name,
+    auth_config_details: [
+      authDetail("OAUTH2", { required: [], optional: [] }),
+      ...(keyAuth === undefined
+        ? []
+        : [
+            authDetail(keyAuth.scheme, {
+              required: [
+                ...fields
+                  .filter(({ required }) => required !== false)
+                  .map(fieldItem),
+                ...unreadable("required"),
+              ],
+              optional: [
+                ...fields
+                  .filter(({ required }) => required === false)
+                  .map(fieldItem),
+                ...unreadable("optional"),
+              ],
+            }),
+          ]),
+    ],
+  };
+};
+
+/** An auth config connect made: Composio's app for one toolkit, or its own. */
 export interface FakeAuthConfig {
   toolkit: string;
   managed: boolean;
   name: string | null;
+  /** The scheme of one of connect's own (`use_custom_auth`). */
+  scheme: string | null;
+  /** The credentials it was made with. */
+  credentials: unknown;
 }
 
 /** A connected account connect made, and how its auth went. */
@@ -233,6 +349,8 @@ export interface FakeAccount {
   callbackUrl: string;
   redirectUrl: string;
   status: "INITIATED" | "ACTIVE" | "FAILED";
+  /** The scheme and values it was made with, when made with a key. */
+  state?: { authScheme: unknown; val: unknown };
 }
 
 /** An MCP server connect made. */
@@ -324,6 +442,11 @@ export const fakeComposioApi = (
      * send there, or drops it there for good, as a crash would.
      */
     updateGate: ((at: "apply" | "answer") => Promise<void>) | undefined;
+    /**
+     * Awaited as it takes the making of an MCP server, before making it: a
+     * test holds two connects there, past everything before it.
+     */
+    serverGate: (() => Promise<void>) | undefined;
   } = {
     requests: [],
     health: "up",
@@ -339,6 +462,7 @@ export const fakeComposioApi = (
     mcp: mcp.state,
     beforeUpdate: undefined,
     updateGate: undefined,
+    serverGate: undefined,
   };
 
   /** The logo host's answer, as `state.logos` has it. */
@@ -357,83 +481,156 @@ export const fakeComposioApi = (
   };
 
   /** What connect creates at Composio, by route, from the request's body. */
-  const creations: Record<string, (body: Record<string, unknown>) => Response> =
-    {
-      "/auth_configs": (body) => {
-        const toolkit = String(nested(body.toolkit, "slug"));
-        if (!toolkits.some(({ slug }) => slug === toolkit)) {
-          return notFound();
-        }
-        const authConfigId = `ac_${crypto.randomUUID()}`;
-        state.holds.authConfigs.set(authConfigId, {
-          toolkit,
-          managed:
-            nested(body.auth_config, "type") === "use_composio_managed_auth",
-          name:
-            typeof nested(body.auth_config, "name") === "string"
-              ? String(nested(body.auth_config, "name"))
-              : null,
-        });
+  const creations: Record<
+    string,
+    (body: Record<string, unknown>) => Response | Promise<Response>
+  > = {
+    "/auth_configs": (body) => {
+      const toolkit = String(nested(body.toolkit, "slug"));
+      if (!toolkits.some(({ slug }) => slug === toolkit)) {
+        return notFound();
+      }
+      const authConfigId = `ac_${crypto.randomUUID()}`;
+      const type = nested(body.auth_config, "type");
+      const scheme = nested(body.auth_config, "authScheme");
+      if (type === "use_custom_auth" && typeof scheme !== "string") {
         return Response.json(
-          { toolkit: { slug: toolkit }, auth_config: { id: authConfigId } },
-          { status: 201 }
+          { error: { message: "authScheme is required", slug: "Invalid" } },
+          { status: 400 }
         );
-      },
-      "/connected_accounts/link": (body) => {
-        const authConfigId = String(body.auth_config_id);
-        const authConfig = state.holds.authConfigs.get(authConfigId);
-        if (authConfig === undefined) {
-          return notFound();
-        }
-        const accountId = `ca_${crypto.randomUUID()}`;
-        const redirectUrl = `https://connect.composio.dev/link/${accountId}`;
-        state.holds.accounts.set(accountId, {
-          authConfigId,
-          toolkit: authConfig.toolkit,
-          userId: String(body.user_id),
-          callbackUrl: String(body.callback_url),
-          redirectUrl,
-          status: "INITIATED",
-        });
+      }
+      state.holds.authConfigs.set(authConfigId, {
+        toolkit,
+        managed: type === "use_composio_managed_auth",
+        name:
+          typeof nested(body.auth_config, "name") === "string"
+            ? String(nested(body.auth_config, "name"))
+            : null,
+        scheme: typeof scheme === "string" ? scheme : null,
+        credentials: nested(body.auth_config, "credentials"),
+      });
+      return Response.json(
+        { toolkit: { slug: toolkit }, auth_config: { id: authConfigId } },
+        { status: 201 }
+      );
+    },
+    "/connected_accounts/link": (body) => {
+      const authConfigId = String(body.auth_config_id);
+      const authConfig = state.holds.authConfigs.get(authConfigId);
+      if (authConfig === undefined) {
+        return notFound();
+      }
+      const accountId = `ca_${crypto.randomUUID()}`;
+      const redirectUrl = `https://connect.composio.dev/link/${accountId}`;
+      state.holds.accounts.set(accountId, {
+        authConfigId,
+        toolkit: authConfig.toolkit,
+        userId: String(body.user_id),
+        callbackUrl: String(body.callback_url),
+        redirectUrl,
+        status: "INITIATED",
+      });
+      return Response.json(
+        {
+          link_token: "link-token",
+          redirect_url: redirectUrl,
+          expires_at: new Date(Date.now() + 600_000).toISOString(),
+          connected_account_id: accountId,
+        },
+        { status: 201 }
+      );
+    },
+    "/connected_accounts": (body) => {
+      const authConfigId = String(nested(body.auth_config, "id"));
+      const authConfig = state.holds.authConfigs.get(authConfigId);
+      if (authConfig === undefined) {
+        return notFound();
+      }
+      const connection = nested(body, "connection");
+      const given = nested(connection, "state");
+      const authScheme = nested(given, "authScheme");
+      const val = nested(given, "val");
+      const keyAuth = toolkits.find(
+        ({ slug }) => slug === authConfig.toolkit
+      )?.keyAuth;
+      if (
+        authConfig.managed ||
+        authScheme !== authConfig.scheme ||
+        nested(val, "status") !== "ACTIVE"
+      ) {
+        return Response.json(
+          { error: { message: "Invalid state", slug: "Invalid" } },
+          { status: 400 }
+        );
+      }
+      const accepted = Object.entries(keyAuth?.accepts ?? {}).every(
+        ([name, value]) => nested(val, name) === value
+      );
+      if (!accepted) {
+        // As Composio's answer may: what was sent, in its message.
         return Response.json(
           {
-            link_token: "link-token",
-            redirect_url: redirectUrl,
-            expires_at: new Date(Date.now() + 600_000).toISOString(),
-            connected_account_id: accountId,
+            error: {
+              message: `The provider rejected ${JSON.stringify(val)}`,
+              code: 1801,
+              slug: "ConnectedAccount_CredentialValidationRejected",
+              status: 400,
+            },
           },
-          { status: 201 }
+          { status: 400 }
         );
-      },
-      "/mcp/servers": (body) => {
-        const serverId = crypto.randomUUID();
-        state.holds.servers.set(serverId, {
-          name: String(body.name),
-          authConfigIds: stringsOf(body.auth_config_ids),
-          allowedTools: stringsOf(body.allowed_tools),
-        });
-        return Response.json({ id: serverId }, { status: 201 });
-      },
-      "/mcp/servers/generate": (body) => {
-        const serverId = String(body.mcp_server_id);
-        if (!state.holds.servers.has(serverId)) {
-          return notFound();
-        }
-        const base = `${state.serverUrlBase}${serverId}`;
-        return Response.json({
-          mcp_url: base,
-          connected_account_urls: stringsOf(body.connected_account_ids).map(
-            (account) =>
-              ({
-                own: `${base}?connected_account_id=${account}`,
-                other: `${base}?connected_account_id=ca_someone_else`,
-                none: base,
-              })[state.accountInUrl]
-          ),
-          user_ids_url: [],
-        });
-      },
-    };
+      }
+      const accountId = `ca_${crypto.randomUUID()}`;
+      state.holds.accounts.set(accountId, {
+        authConfigId,
+        toolkit: authConfig.toolkit,
+        userId: String(nested(connection, "user_id")),
+        callbackUrl: "",
+        redirectUrl: "",
+        status: "ACTIVE",
+        state: { authScheme, val },
+      });
+      return Response.json(
+        {
+          id: accountId,
+          connectionData: { authScheme, val: { status: "ACTIVE" } },
+          status: "ACTIVE",
+          redirect_url: null,
+          redirect_uri: null,
+        },
+        { status: 201 }
+      );
+    },
+    "/mcp/servers": async (body) => {
+      await state.serverGate?.();
+      const serverId = crypto.randomUUID();
+      state.holds.servers.set(serverId, {
+        name: String(body.name),
+        authConfigIds: stringsOf(body.auth_config_ids),
+        allowedTools: stringsOf(body.allowed_tools),
+      });
+      return Response.json({ id: serverId }, { status: 201 });
+    },
+    "/mcp/servers/generate": (body) => {
+      const serverId = String(body.mcp_server_id);
+      if (!state.holds.servers.has(serverId)) {
+        return notFound();
+      }
+      const base = `${state.serverUrlBase}${serverId}`;
+      return Response.json({
+        mcp_url: base,
+        connected_account_urls: stringsOf(body.connected_account_ids).map(
+          (account) =>
+            ({
+              own: `${base}?connected_account_id=${account}`,
+              other: `${base}?connected_account_id=ca_someone_else`,
+              none: base,
+            })[state.accountInUrl]
+        ),
+        user_ids_url: [],
+      });
+    },
+  };
 
   /** A deletion of something connect made, by route. */
   const deletion = (route: string): Response => {
@@ -524,7 +721,7 @@ export const fakeComposioApi = (
     }
     const create = creations[route];
     if (request.method === "POST" && create !== undefined) {
-      return create(await bodyOf(request));
+      return await create(await bodyOf(request));
     }
     return notFound();
   };
@@ -564,6 +761,14 @@ export const fakeComposioApi = (
         cursor,
         state.endless
       );
+    }
+    if (request.method === "GET" && route.startsWith("/toolkits/")) {
+      const toolkit = toolkits.find(
+        ({ slug }) => route === `/toolkits/${slug}`
+      );
+      return toolkit === undefined
+        ? notFound()
+        : Response.json(toolkitDetail(toolkit));
     }
     if (request.method === "GET" && route === "/tools") {
       if (state.toolsStatus !== undefined) {
@@ -611,6 +816,7 @@ export const fakeComposioApi = (
     state.failing = undefined;
     state.beforeUpdate = undefined;
     state.updateGate = undefined;
+    state.serverGate = undefined;
     state.serverUrlBase = mcpBase;
     state.accountInUrl = "own";
     state.holds = {

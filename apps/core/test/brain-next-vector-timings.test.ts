@@ -107,7 +107,10 @@ describe("the Brain's vector scan, timed", () => {
   it("scans every code a reader may read, at each size", async () => {
     // A reader of exactly the candidates: the scan is next to nothing,
     // so the time is the re-scoring, and the round trip.
+    // Read through a group only they are in: the shared store keeps
+    // nothing for one person alone.
     const few = `person-${crypto.randomUUID()}`;
+    const alone = `team:${crypto.randomUUID()}`;
     const source = `timings:${crypto.randomUUID()}`;
     const { version } = await store().addSource({
       source,
@@ -117,7 +120,7 @@ describe("the Brain's vector scan, timed", () => {
         (_, index) =>
           `Own ${index}. ${"Lorem ipsum dolor sit amet. ".repeat(25)}`
       ).join("\n\n"),
-      access: { kind: "owner", person: few },
+      access: { kind: "audience", group: alone },
     });
     await store().putVectors({
       model,
@@ -128,7 +131,7 @@ describe("the Brain's vector scan, timed", () => {
     });
     const { ms: rescoring, found: rescored } = await timeSearch({
       person: few,
-      groups: [],
+      groups: [alone],
     });
     expect(rescored).toBe(10);
     console.info(

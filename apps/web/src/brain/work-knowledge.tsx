@@ -34,8 +34,8 @@ import { useCore } from "../use-core.ts";
 // (`brain.work`), each ending in a bead that says what it rests on and
 // the week, and who said it only where core says so. Never a face, a
 // name, a day or a person's own words: core serves none. How sure Grasp
-// is says enough or not yet, never how many, with Ask more people for the
-// company's admins while not enough told it.
+// is says whether its team told it or not yet, never how many, with Ask
+// more people for the company's admins.
 
 /** The parts of the story, in the order a reader wants them. */
 const parts: {
@@ -283,7 +283,7 @@ const HowSure = ({
       </dt>
       <dd {...stylex.props(styles.value)}>
         {heard ? (
-          <Badge tone="success">{t`Heard from enough people`}</Badge>
+          <Badge tone="success">{t`Told by the team that does it`}</Badge>
         ) : (
           <Badge tone="attention">{t`Waiting for more voices`}</Badge>
         )}
@@ -378,6 +378,8 @@ const Known = ({
 export const WorkKnowledgeTab = ({ work }: { work: string }) => {
   const core = useCore();
   const [loaded, setLoaded] = useState<Loaded<WorkKnowledge>>();
+  const readWork = async (): Promise<Loaded<WorkKnowledge>> =>
+    await loadFromCore(core, async (session) => await session.brain.work(work));
   useEffect(() => {
     let left = false;
     void (async () => {
@@ -397,7 +399,17 @@ export const WorkKnowledgeTab = ({ work }: { work: string }) => {
     return <LoadingLines />;
   }
   if (loaded.state !== "ready") {
-    return <NotLoadedState page={loaded} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          // What was read stays until the new read lands.
+          void (async () => {
+            setLoaded(await readWork());
+          })();
+        }}
+        page={loaded}
+      />
+    );
   }
   return (
     <Known

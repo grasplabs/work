@@ -7,10 +7,13 @@ import {
 } from "@grasp-os/shared/connect";
 import type {
   ConnectionOwner,
+  PersonalAccount,
   ToolClass,
   ToolReach,
 } from "@grasp-os/shared/connect";
-import { eq, inArray } from "drizzle-orm";
+import { sourceReaderProviders } from "@grasp-os/shared/source-readers";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -312,3 +315,96 @@ export const connectionOwners = async (
     }),
   }));
 };
+
+/** The person `personalAccounts` is asked about: core's user ID. */
+const accountsOwnerSchema = z.string().min(1);
+
+/**
+ * The suite accounts the person `request` names connected as their own
+ * (`ConnectApi.personalAccounts`), disconnected ones too, each saying
+ * whether it still is: connections connect made itself (`native`), pinned
+ * to the company's tenant, whose account it took from the provider's
+ * verified ID token at connecting (oauth.ts). One a token renewal lost
+ * (`needs_reauth`) is still connected. Its address only as the provider
+ * last confirmed it, and when (`verifiedEmail`, providers.ts
+ * `confirmAddress`): Google's; Entra's address is not verified, so none
+ * for Microsoft. Its groups as the last whole read of them said, and when
+ * (reader-groups.ts).
+ */
+export const personalAccounts = async (
+  db: D1Database,
+  request: unknown
+): Promise<PersonalAccount[]> => {
+  const userId = connectErrors.parse(
+    "connect.invalid",
+    accountsOwnerSchema,
+    request
+  );
+  const rows = await drizzle(db)
+    .select({
+      provider: connections.provider,
+      tenant: connections.tenant,
+      accountId: connections.accountId,
+      verifiedEmail: connections.verifiedEmail,
+      verifiedEmailAt: connections.verifiedEmailAt,
+      pastVerifiedEmails: connections.pastVerifiedEmails,
+      readerGroups: connections.readerGroups,
+      readerGroupsAt: connections.readerGroupsAt,
+      status: connections.status,
+    })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.ownerUserId, userId),
+        eq(connections.scope, "personal"),
+        eq(connections.serverKind, "native"),
+        inArray(connections.provider, [...sourceReaderProviders]),
+        isNotNull(connections.tenant),
+        isNotNull(connections.accountId)
+      )
+    );
+  return rows.flatMap(
+    ({
+      provider,
+      tenant,
+      accountId,
+      verifiedEmail,
+      verifiedEmailAt,
+      pastVerifiedEmails,
+      readerGroups,
+      readerGroupsAt,
+      status,
+    }) =>
+      tenant === null || accountId === null
+        ? []
+        : [
+            {
+              provider,
+              tenant,
+              accountId,
+              verifiedEmail,
+              verifiedEmailAt: verifiedEmailAt?.getTime() ?? null,
+              pastVerifiedEmails: pastVerifiedEmails ?? [],
+              groups: readerGroups ?? [],
+              groupsReadAt: readerGroupsAt?.getTime() ?? null,
+              connected: status !== "disconnected",
+            },
+          ]
+  );
+};
+
+/**
+ * A connection's past addresses once its confirmed address becomes
+ * `next`, as SQL for the update that sets it: the address it held is
+ * kept (`past_verified_emails`) when `next` replaces or clears it, once
+ * however often it comes back, so its person's erasure still finds it. Read in the same statement, before the
+ * update changes it.
+ */
+export const pastAddressesAfter = (next: string | null): SQL =>
+  sql`CASE WHEN ${connections.verifiedEmail} IS NOT NULL AND ${connections.verifiedEmail} IS NOT ${next}
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(coalesce(${connections.pastVerifiedEmails}, '[]'))
+        WHERE value = ${connections.verifiedEmail}
+      )
+    THEN json_insert(coalesce(${connections.pastVerifiedEmails}, '[]'), '$[#]', ${connections.verifiedEmail})
+    ELSE ${connections.pastVerifiedEmails} END`;

@@ -1,4 +1,3 @@
-import { collections } from "@grasp-os/brain/schema";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -11,16 +10,7 @@ import type {
   PendingWorkflowBindings,
   WorkflowBindingTarget,
 } from "@grasp-os/shared/workflow-resources";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  inArray,
-  isNotNull,
-  isNull,
-  or,
-} from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import type { Acting } from "./auth/identity.ts";
@@ -28,7 +18,6 @@ import {
   eventSources,
   permissions,
   workflowBindingApprovals,
-  workflowResourceLifecycles,
   workflowResources,
 } from "./db/core/schema.ts";
 import { modelSettings } from "./models.ts";
@@ -45,8 +34,8 @@ import { ingressOf } from "./workflows/run-inboxes.ts";
 
 // The bindings that wait on an admin (`workflowResources.pendingBindings`,
 // the waiting feed's `bindings`): every catalog binding of a workflow's
-// live version, or of the version asked to go live, that no approval
-// serves, so its starts are refused (workflow-starts.ts). What could go
+// live version that no approval serves, so its starts are refused
+// (workflow-starts.ts). What could go
 // wrong, and what stops it:
 //
 // - Someone else learning which workflows reach what: the organization's
@@ -74,11 +63,7 @@ const pendingWorkflowsMax = 50;
 type Offered = PendingWorkflowBindings["bindings"][number]["offered"][number];
 
 /** Workflow `id`'s own active permissions on objects of `type`, oldest first. */
-const heldOf = async (
-  env: Env,
-  id: string,
-  type: "collection" | "connection"
-) =>
+const heldOf = async (env: Env, id: string, type: "platform" | "connection") =>
   await drizzle(env.DB)
     .select({
       id: permissions.id,
@@ -100,9 +85,9 @@ const heldOf = async (
 /**
  * What `target` names, as an offer of it and an approval of it are
  * listed: a connector's by `grant`, the name of the
- * workflow's own grant it goes through (its binding name), a Brain
- * collection by `grant`, the collection's name, a model by its ID; empty
- * where it names nothing, or its grant is gone.
+ * workflow's own grant it goes through (its binding name), the Brain by
+ * the binding name of its grant, a model by its ID; empty where it names
+ * nothing, or its grant is gone.
  */
 const labelOf = (target: WorkflowBindingTarget, grant?: string): string => {
   switch (target.kind) {
@@ -112,7 +97,7 @@ const labelOf = (target: WorkflowBindingTarget, grant?: string): string => {
     case "connector": {
       return grant === undefined ? "" : `${grant}: ${target.contract}`;
     }
-    case "knowledge": {
+    case "brain": {
       return grant ?? "";
     }
     case "decision":
@@ -151,32 +136,23 @@ const sourceTargets = async (env: Env): Promise<Offered[]> => {
   }));
 };
 
-/** The names of the Brain collections `ids`, by ID. */
-const collectionNames = async (
-  env: Env,
-  ids: readonly string[]
-): Promise<Map<string, string>> => {
-  const named =
-    ids.length === 0
-      ? []
-      : await drizzle(env.KNOWLEDGE)
-          .select({ id: collections.id, name: collections.name })
-          .from(collections)
-          .where(inArray(collections.id, [...ids]));
-  return new Map(named.map(({ id, name }) => [id, name]));
+/** The actions a permission row allows, as it keeps them (JSON). */
+const actionsOf = (actions: string): string[] => {
+  const parsed: unknown = JSON.parse(actions);
+  return Array.isArray(parsed)
+    ? parsed.filter((action): action is string => typeof action === "string")
+    : [];
 };
 
-/** The workflow's own active permissions to read a collection, as targets, by the collection's name. */
-const knowledgeTargets = async (env: Env, id: string): Promise<Offered[]> => {
-  const rows = await heldOf(env, id, "collection");
-  const names = await collectionNames(
-    env,
-    rows.map(({ objectId }) => objectId)
-  );
-  return rows.map(({ id: permissionId, objectId }) => {
-    const target = { kind: "knowledge", permissionId } as const;
-    return { target, label: labelOf(target, names.get(objectId)) };
-  });
+/** The workflow's own active permissions to read the Brain, as targets. */
+const brainTargets = async (env: Env, id: string): Promise<Offered[]> => {
+  const rows = await heldOf(env, id, "platform");
+  return rows
+    .filter(({ actions }) => actionsOf(actions).includes("brain"))
+    .map(({ id: permissionId, binding }) => {
+      const target = { kind: "brain", permissionId } as const;
+      return { target, label: labelOf(target, binding) };
+    });
 };
 
 /**
@@ -252,8 +228,8 @@ const candidatesOf = async (
     case "files": {
       return [{ target: { kind: "files" }, label: "" }];
     }
-    case "knowledge": {
-      return await knowledgeTargets(env, id);
+    case "brain": {
+      return await brainTargets(env, id);
     }
     case "connector": {
       return await connectorTargets(env, id);
@@ -324,7 +300,7 @@ const unapprovedOf = async (
   const unapproved: PendingWorkflowBindings["bindings"] = [];
   for (const binding of versions.get(version) ?? []) {
     // oxlint-disable-next-line no-await-in-loop -- one point lookup per binding
-    if ((await approvalServing(env, id, version, binding)) !== undefined) {
+    if ((await approvalServing(env, id, binding)) !== undefined) {
       continue;
     }
     unapproved.push({
@@ -343,48 +319,40 @@ const unapprovedOf = async (
 };
 
 /**
- * Of workflow `workflow`'s `versions`, those with catalog bindings no
- * approval serves, each version once, in the order given: `live` the one
- * a start runs now. Every kind is offered targets when `everyKind`.
+ * Workflow `workflow`'s live `version` (none while it has none), when it
+ * has catalog bindings no approval serves. Every kind is offered targets
+ * when `everyKind`.
  */
 const waitingOf = async (
   env: Env,
   workflow: { id: string; name: string },
-  versions: readonly { version: number | null; live: boolean }[],
+  version: number | null,
   everyKind: boolean
 ): Promise<PendingWorkflowBindings[]> => {
-  const pending: PendingWorkflowBindings[] = [];
-  const seen = new Set<number>();
-  const offers: Offers = new Map();
-  for (const { version, live } of versions) {
-    if (version === null || seen.has(version)) {
-      continue;
-    }
-    seen.add(version);
-    // oxlint-disable-next-line no-await-in-loop -- one workflow version at a time, three at most
-    const bindings = await unapprovedOf(
-      env,
-      workflow.id,
-      version,
-      everyKind,
-      offers
-    );
-    if (bindings.length > 0) {
-      pending.push({
-        workflow: { id: workflow.id, name: workflow.name },
-        version,
-        live,
-        bindings,
-      });
-    }
+  if (version === null) {
+    return [];
   }
-  return pending;
+  const bindings = await unapprovedOf(
+    env,
+    workflow.id,
+    version,
+    everyKind,
+    new Map()
+  );
+  return bindings.length === 0
+    ? []
+    : [
+        {
+          workflow: { id: workflow.id, name: workflow.name },
+          version,
+          bindings,
+        },
+      ];
 };
 
 /**
- * The live versions of workflows, and those asked to go live, whose
- * catalog bindings no approval serves, for `by`, one of the
- * organization's own admins.
+ * The live versions of workflows whose catalog bindings no approval
+ * serves, for `by`, one of the organization's own admins.
  */
 export const pendingWorkflowBindings = async (
   env: Env,
@@ -395,21 +363,13 @@ export const pendingWorkflowBindings = async (
     .select({
       id: workflowResources.id,
       name: workflowResources.name,
-      live: workflowResourceLifecycles.liveVersion,
-      goLive: workflowResourceLifecycles.goLiveVersion,
+      version: workflowResources.currentVersion,
     })
     .from(workflowResources)
-    .innerJoin(
-      workflowResourceLifecycles,
-      eq(workflowResourceLifecycles.workflowResourceId, workflowResources.id)
-    )
     .where(
       and(
         isNull(workflowResources.deletedAt),
-        or(
-          isNotNull(workflowResourceLifecycles.liveVersion),
-          isNotNull(workflowResourceLifecycles.goLiveVersion)
-        )
+        isNotNull(workflowResources.currentVersion)
       )
     )
     .orderBy(desc(workflowResources.createdAt), desc(workflowResources.id))
@@ -418,27 +378,16 @@ export const pendingWorkflowBindings = async (
   for (const row of rows) {
     pending.push(
       // oxlint-disable-next-line no-await-in-loop -- one workflow at a time, bounded
-      ...(await waitingOf(
-        env,
-        row,
-        [
-          { version: row.live, live: true },
-          { version: row.goLive, live: false },
-        ],
-        false
-      ))
+      ...(await waitingOf(env, row, row.version, false))
     );
   }
   return pending;
 };
 
 /**
- * Workflow `id`'s versions whose catalog bindings no approval serves, for
- * `by`, one of the organization's own admins, to approve on its page, each
- * kind offered targets: the version a start runs now (the live one, or
- * before any went live the one published last, as a start from its page
- * takes it), the one asked to go live, and the one published last, which a
- * test run starts.
+ * Workflow `id`'s live version, when its catalog bindings no approval
+ * serves, for `by`, one of the organization's own admins, to approve on
+ * its page, each kind offered targets.
  */
 export const workflowPendingBindings = async (
   env: Env,
@@ -447,54 +396,27 @@ export const workflowPendingBindings = async (
 ): Promise<PendingWorkflowBindings[]> => {
   requireMemberAdmin(by);
   const workflow = await requireWorkflowRole(env, by, id, "user");
-  const lifecycle = await drizzle(env.DB)
-    .select({
-      live: workflowResourceLifecycles.liveVersion,
-      goLive: workflowResourceLifecycles.goLiveVersion,
-    })
-    .from(workflowResourceLifecycles)
-    .where(eq(workflowResourceLifecycles.workflowResourceId, workflow.id))
-    .get();
-  return await waitingOf(
-    env,
-    workflow,
-    [
-      { version: lifecycle?.live ?? workflow.currentVersion, live: true },
-      { version: lifecycle?.goLive ?? null, live: false },
-      { version: workflow.currentVersion, live: false },
-    ],
-    true
-  );
+  return await waitingOf(env, workflow, workflow.currentVersion, true);
 };
 
 /**
  * What the workflow's own active grants of the kinds a target goes
- * through are called, by permission ID: a Brain collection's by the
- * collection's name, a connection's by its binding name.
+ * through are called, by permission ID: each by its binding name.
  */
 const grantNamesOf = async (
   env: Env,
   id: string
 ): Promise<Map<string, string>> => {
-  const [read, connections] = await Promise.all([
-    heldOf(env, id, "collection"),
+  const [platform, connections] = await Promise.all([
+    heldOf(env, id, "platform"),
     heldOf(env, id, "connection"),
   ]);
-  const names = await collectionNames(
-    env,
-    read.map(({ objectId }) => objectId)
+  return new Map(
+    [...platform, ...connections].map(({ id: permissionId, binding }) => [
+      permissionId,
+      binding,
+    ])
   );
-  const grants = new Map<string, string>();
-  for (const { id: permissionId, objectId } of read) {
-    const name = names.get(objectId);
-    if (name !== undefined) {
-      grants.set(permissionId, name);
-    }
-  }
-  for (const { id: permissionId, binding } of connections) {
-    grants.set(permissionId, binding);
-  }
-  return grants;
 };
 
 /**
@@ -515,9 +437,9 @@ export const listWorkflowBindings = async (
         and(
           eq(workflowBindingApprovals.workflowResourceId, workflow.id),
           eq(workflowBindingApprovals.status, "active"),
-          // Of a kind still served: an `operation` approval left from
-          // before each App's store was its own serves nothing, and a
-          // later release removes it with its audit event.
+          // Of a kind still served: migration 0252 removed the rows of
+          // kinds there are no more, and this holds for a row an older
+          // core writes after a roll back.
           inArray(workflowBindingApprovals.kind, [...catalogBindingKinds])
         )
       )

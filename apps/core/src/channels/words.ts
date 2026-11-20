@@ -181,29 +181,6 @@ const lines = {
 
   // An answer.
 
-  /** The heading over an answer's numbered sources. */
-  sources: {
-    en: "Sources",
-    nl: "Bronnen",
-    de: "Quellen",
-    fr: "Sources",
-    es: "Fuentes",
-  },
-  /** An answer cut to fit the platform. */
-  answerTooLong: {
-    en: "This answer is too long for this chat. Open it in Grasp to read all of it.",
-    nl: "Dit antwoord is te lang voor deze chat. Open het in Grasp om alles te lezen.",
-    de: "Diese Antwort ist zu lang für diesen Chat. Öffnen Sie sie in Grasp, um alles zu lesen.",
-    fr: "Cette réponse est trop longue pour cette conversation. Ouvrez-la dans Grasp pour la lire en entier.",
-    es: "Esta respuesta es demasiado larga para este chat. Ábrela en Grasp para leerla entera.",
-  },
-  openInGrasp: {
-    en: "Open in Grasp",
-    nl: "Openen in Grasp",
-    de: "In Grasp öffnen",
-    fr: "Ouvrir dans Grasp",
-    es: "Abrir en Grasp",
-  },
   /** The thumbs under an answer: whether it helped (stephen-requests.ts). */
   helpful: {
     en: "Helpful",
@@ -326,13 +303,62 @@ const lines = {
     fr: "Pour préparer cela, j’ai lu {where}, où d’autres personnes peuvent aussi faire des modifications. Vérifiez chaque valeur avant de confirmer.",
     es: "Para preparar esto, he leído {where}, donde otras personas también pueden hacer cambios. Revisa cada valor antes de confirmar.",
   },
-  /** What would change doesn't fit the card: it is confirmed in Grasp. */
+  /**
+   * A write to an App, held because the chat used something only the
+   * person can read (held-app-calls.ts): what it calls, in which App.
+   */
+  heldAppWrite: {
+    en: "{function} in {app}",
+    nl: "{function} in {app}",
+    de: "{function} in {app}",
+    fr: "{function} dans {app}",
+    es: "{function} en {app}",
+  },
+  /** Why a write to an App waits for them, under its title. */
+  heldPrivate: {
+    en: "This uses something only you can read.",
+    nl: "Dit gebruikt iets wat alleen jij kunt lezen.",
+    de: "Hierfür wird etwas verwendet, das nur Sie lesen können.",
+    fr: "Cela utilise quelque chose que vous seul pouvez lire.",
+    es: "Esto usa algo que solo tú puedes leer.",
+  },
+  /** The label of a write to an App's exact request, as it will be sent. */
+  heldAppRequest: {
+    en: "Exactly what will be sent",
+    nl: "Precies wat er wordt verstuurd",
+    de: "Genau das, was gesendet wird",
+    fr: "Exactement ce qui sera envoyé",
+    es: "Exactamente lo que se enviará",
+  },
+  /** What would change doesn't fit the card, so it can't be confirmed on it. */
   cardTooLong: {
-    en: "This card can't show everything that would change. Open it in Grasp to see every value and confirm it there.",
-    nl: "Deze kaart kan niet alles laten zien wat er zou veranderen. Open hem in Grasp om elke waarde te zien en bevestig het daar.",
-    de: "Diese Karte kann nicht alles zeigen, was sich ändern würde. Öffnen Sie sie in Grasp, um jeden Wert zu sehen, und bestätigen Sie dort.",
-    fr: "Cette carte ne peut pas montrer tout ce qui changerait. Ouvrez-la dans Grasp pour voir chaque valeur et confirmez là-bas.",
-    es: "Esta tarjeta no puede mostrar todo lo que cambiaría. Ábrela en Grasp para ver cada valor y confírmalo allí.",
+    en: "This card can't show everything that would change, so it can't be confirmed. Ask me again with fewer changes at a time.",
+    nl: "Deze kaart kan niet alles laten zien wat er zou veranderen, dus je kunt het niet bevestigen. Vraag het me opnieuw met minder wijzigingen tegelijk.",
+    de: "Diese Karte kann nicht alles zeigen, was sich ändern würde, daher lässt es sich nicht bestätigen. Fragen Sie mich noch einmal mit weniger Änderungen auf einmal.",
+    fr: "Cette carte ne peut pas montrer tout ce qui changerait, donc cela ne peut pas être confirmé. Redemandez-moi avec moins de modifications à la fois.",
+    es: "Esta tarjeta no puede mostrar todo lo que cambiaría, así que no se puede confirmar. Pídemelo de nuevo con menos cambios a la vez.",
+  },
+  /**
+   * A card of changes it shows whole that wait behind the card to confirm
+   * (cards.tsx `heldWritesCards`): they can only be cancelled on it.
+   */
+  heldLater: {
+    en: "These changes can only be cancelled here. Decide the first card, then ask me again for the rest.",
+    nl: "Deze wijzigingen kun je hier alleen annuleren. Beslis eerst over de eerste kaart en vraag me daarna opnieuw om de rest.",
+    de: "Diese Änderungen können Sie hier nur abbrechen. Entscheiden Sie zuerst über die erste Karte und fragen Sie mich dann noch einmal nach dem Rest.",
+    fr: "Ces modifications ne peuvent qu’être annulées ici. Décidez d’abord de la première carte, puis redemandez-moi le reste.",
+    es: "Estos cambios solo se pueden cancelar aquí. Decide primero sobre la primera tarjeta y luego vuelve a pedirme el resto.",
+  },
+  /**
+   * `heldLater`, on a card that also holds a change through a connection,
+   * which is shown only in the turn that held it, never on a later card.
+   */
+  heldLaterConnections: {
+    en: "These changes can only be cancelled here. Decide the first card, then ask me again for the rest. A change through a connection, such as an email, won't come back on a later card, so ask me for it again.",
+    nl: "Deze wijzigingen kun je hier alleen annuleren. Beslis eerst over de eerste kaart en vraag me daarna opnieuw om de rest. Een wijziging via een koppeling, zoals een e-mail, komt niet terug op een latere kaart, dus vraag me er opnieuw om.",
+    de: "Diese Änderungen können Sie hier nur abbrechen. Entscheiden Sie zuerst über die erste Karte und fragen Sie mich dann noch einmal nach dem Rest. Eine Änderung über eine Verbindung, etwa eine E-Mail, erscheint auf keiner späteren Karte wieder, fragen Sie mich also noch einmal danach.",
+    fr: "Ces modifications ne peuvent qu’être annulées ici. Décidez d’abord de la première carte, puis redemandez-moi le reste. Une modification passant par une connexion, comme un e-mail, ne reviendra pas sur une carte suivante : redemandez-la-moi.",
+    es: "Estos cambios solo se pueden cancelar aquí. Decide primero sobre la primera tarjeta y luego vuelve a pedirme el resto. Un cambio a través de una conexión, como un correo, no volverá a aparecer en una tarjeta posterior, así que vuelve a pedírmelo.",
   },
   confirm: {
     en: "Confirm",
@@ -446,6 +472,100 @@ const lines = {
     es: "Algo de esta tarjeta cambió después de que te la mostrara, así que no he cambiado nada. Vuelve a pedírmelo para recibir una tarjeta nueva.",
   },
 
+  // A memory he saved of what the person said in their direct message
+  // (channels/remembered.ts): a notice of it, with Undo, then what Undo
+  // did, as the notice in Grasp's own chat says it. `{statement}`, `{about}`
+  // and `{value}` are as the Brain kept them.
+
+  /** A memory about the person themselves. */
+  remembered: {
+    en: "I'll remember this: {statement}",
+    nl: "Dit onthoud ik: {statement}",
+    de: "Das merke ich mir: {statement}",
+    fr: "Je retiendrai ceci : {statement}",
+    es: "Recordaré esto: {statement}",
+  },
+  /** A memory about the person themselves, with the value it holds. */
+  rememberedValue: {
+    en: "I'll remember this: {statement} (value: {value})",
+    nl: "Dit onthoud ik: {statement} (waarde: {value})",
+    de: "Das merke ich mir: {statement} (Wert: {value})",
+    fr: "Je retiendrai ceci : {statement} (valeur : {value})",
+    es: "Recordaré esto: {statement} (valor: {value})",
+  },
+  /** A memory about someone or something else, by name. */
+  rememberedAbout: {
+    en: "I'll remember this about {about}: {statement}",
+    nl: "Dit onthoud ik over {about}: {statement}",
+    de: "Das merke ich mir über {about}: {statement}",
+    fr: "Je retiendrai ceci à propos de {about} : {statement}",
+    es: "Recordaré esto sobre {about}: {statement}",
+  },
+  /** A memory about someone or something else, with the value it holds. */
+  rememberedAboutValue: {
+    en: "I'll remember this about {about}: {statement} (value: {value})",
+    nl: "Dit onthoud ik over {about}: {statement} (waarde: {value})",
+    de: "Das merke ich mir über {about}: {statement} (Wert: {value})",
+    fr: "Je retiendrai ceci à propos de {about} : {statement} (valeur : {value})",
+    es: "Recordaré esto sobre {about}: {statement} (valor: {value})",
+  },
+  /** Under a memory that replaced earlier ones: what those said, as a list. */
+  rememberedInPlaceOf: {
+    en: "In place of: {replaced}",
+    nl: "In plaats van: {replaced}",
+    de: "Anstelle von: {replaced}",
+    fr: "À la place de : {replaced}",
+    es: "En lugar de: {replaced}",
+  },
+  /** Above a memory that says how he should work for them. */
+  rememberedInstruction: {
+    en: "Instruction",
+    nl: "Instructie",
+    de: "Anweisung",
+    fr: "Instruction",
+    es: "Instrucción",
+  },
+  /** Above a memory that says how they want things. */
+  rememberedPreference: {
+    en: "Preference",
+    nl: "Voorkeur",
+    de: "Präferenz",
+    fr: "Préférence",
+    es: "Preferencia",
+  },
+  /** The notice's button. */
+  undo: {
+    en: "Undo",
+    nl: "Ongedaan maken",
+    de: "Rückgängig machen",
+    fr: "Annuler",
+    es: "Deshacer",
+  },
+  /** Once Undo retired it. */
+  undone: {
+    en: "I no longer remember this.",
+    nl: "Dit onthoud ik niet meer.",
+    de: "Das merke ich mir nicht mehr.",
+    fr: "Je ne retiens plus ceci.",
+    es: "Ya no recuerdo esto.",
+  },
+  /** Undo found nothing of theirs in use to retire. */
+  nothingToUndo: {
+    en: "There was nothing to undo: I no longer use this.",
+    nl: "Er was niets ongedaan te maken: ik gebruik dit niet meer.",
+    de: "Es gab nichts rückgängig zu machen: Ich verwende das nicht mehr.",
+    fr: "Il n’y avait rien à annuler : je n’utilise plus ceci.",
+    es: "No había nada que deshacer: ya no uso esto.",
+  },
+  /** Undo couldn't be done now: the notice stays, to press again. */
+  undoFailed: {
+    en: "Something went wrong, and I couldn't undo it. Press Undo again in a moment.",
+    nl: "Er ging iets mis en ik kon het niet ongedaan maken. Druk zo nog eens op Ongedaan maken.",
+    de: "Etwas ist schiefgegangen, und ich konnte es nicht rückgängig machen. Klicken Sie gleich noch einmal auf Rückgängig machen.",
+    fr: "Un problème est survenu et je n’ai pas pu l’annuler. Appuyez de nouveau sur Annuler dans un instant.",
+    es: "Algo ha fallado y no he podido deshacerlo. Vuelve a pulsar Deshacer en un momento.",
+  },
+
   // A workflow he offers to start: a card with its values and a Start
   // button, then what became of the run, told where it was pressed.
 
@@ -464,6 +584,14 @@ const lines = {
     de: "Starten",
     fr: "Lancer",
     es: "Iniciar",
+  },
+  /** Under an offer whose values its card can't show in full: no Start. */
+  startTooLong: {
+    en: "This card can't show every value in full, so it can't be started here. Ask me again with shorter values, or start it in Grasp.",
+    nl: "Deze kaart kan niet elke waarde volledig laten zien, dus je kunt hem hier niet starten. Vraag het me opnieuw met kortere waarden, of start hem in Grasp.",
+    de: "Diese Karte kann nicht jeden Wert vollständig zeigen, deshalb kann es hier nicht gestartet werden. Fragen Sie mich noch einmal mit kürzeren Werten, oder starten Sie es in Grasp.",
+    fr: "Cette carte ne peut pas montrer chaque valeur en entier, il ne peut donc pas être lancé ici. Redemandez-le-moi avec des valeurs plus courtes, ou lancez-le dans Grasp.",
+    es: "Esta tarjeta no puede mostrar cada valor completo, así que no se puede iniciar aquí. Vuelve a pedírmelo con valores más cortos, o inícialo en Grasp.",
   },
   /** Once the press started the run. */
   started: {

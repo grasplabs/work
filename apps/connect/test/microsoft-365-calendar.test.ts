@@ -354,7 +354,7 @@ describe("the Microsoft 365 connector's calendar writes", () => {
       idempotencyKey: `chat-1:${crypto.randomUUID()}`,
     };
     await callAs(inChat, asked);
-    const [held] = await exports.default.listPendingActions(person);
+    const [held] = await exports.default.listPendingActions(person, "grasp");
     expect({ held: held?.description, sent: graph.sent }).toStrictEqual({
       held: {
         title: "Put an event in your calendar",

@@ -72,7 +72,7 @@ const write = (
 });
 
 describe("the audit log", () => {
-  it("records a call with who made it, for whom, and what it read", async () => {
+  it("records a call with who made it, for whom, in which system, and what it read", async () => {
     const connectionId = await addConnection();
     await callAs(
       anna,
@@ -88,6 +88,8 @@ describe("the audit log", () => {
       provenance: ["message-1"],
       detail: {
         action: "mail.list",
+        // The connector, never which connection: the system it was in.
+        provider: "mail",
         onBehalfOf: "user-anna",
         mode: "workflow",
         sideEffect: true,
@@ -386,6 +388,26 @@ describe("the audit log", () => {
     ]);
     const left = await exports.default.takeAuditEvents();
     expect(left.map(({ id }) => id)).toStrictEqual(ids.slice(1));
+  });
+
+  it("takes the events but those core holds, in order, and refuses held ones that are no event IDs", async () => {
+    const connectionId = await addConnection();
+    await callAs(anna, write(connectionId, "mail.list"));
+    await callAs(anna, write(connectionId, "mail.list"));
+    await callAs(anna, write(connectionId, "mail.list"));
+    const all = await exports.default.takeAuditEvents();
+    const [first, middle, last] = all;
+    const passed = await exports.default.takeAuditEvents([
+      middle?.id ?? crypto.randomUUID(),
+    ]);
+
+    expect({
+      passed: passed.map(({ id }) => id),
+      refused: await outcome(exports.default.takeAuditEvents(["rowid"])),
+    }).toStrictEqual({
+      passed: [first?.id, last?.id],
+      refused: "connect.invalid",
+    });
   });
 
   it("moves events core rejects out of the outbox, with why, as it acknowledges the rest", async () => {

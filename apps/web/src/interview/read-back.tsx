@@ -1,8 +1,9 @@
+import type { InterviewFact } from "@grasp-os/shared/interview-links";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { Button } from "../grasp/button/index.ts";
 import { Cross } from "../grasp/icons/index.ts";
@@ -10,6 +11,7 @@ import { Input } from "../grasp/input/index.ts";
 import { arrive } from "../grasp/motion/arrive.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { Destination, moveLine } from "./destination.tsx";
 import { Head, headSizes, useHead } from "./head.tsx";
 import { voice } from "./interview.stylex.ts";
 import { update, useInterviewer, useProgress } from "./kept.ts";
@@ -46,11 +48,19 @@ const styles = stylex.create({
     borderBlockStartStyle: "solid",
     borderBlockStartColor: grasp.line,
   },
+  // The line, and where it goes under it.
   line: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space1,
+    paddingBlock: grasp.space1,
+  },
+  row: {
     display: "flex",
     alignItems: "center",
     gap: grasp.space3,
-    paddingBlock: grasp.space1,
+    width: "100%",
   },
   field: { flexGrow: 1, minWidth: 0 },
   // The line itself, pressed to put it right where it is.
@@ -125,18 +135,19 @@ const toldOf = (
 /**
  * A line that can be put right where it is: a press turns it into a field
  * with its words; Enter or leaving it keeps the change and Stephen hears of
- * it; Escape lets it be.
+ * it; Escape lets it be. Under it, where it goes (`Destination`).
  */
 const ReadBackLine = ({
   id,
   text,
+  tag,
+  share,
   told,
-}: {
-  id: string;
-  text: string;
+}: Pick<InterviewFact, "id" | "text" | "tag" | "share"> & {
   told: keyof typeof toldLooks | null;
 }) => {
   const { t } = useLingui();
+  const words = useId();
   const [draft, setDraft] = useState<string | null>(null);
   // Escape lets it be, also when leaving the field follows.
   const letBe = useRef(false);
@@ -150,56 +161,71 @@ const ReadBackLine = ({
   };
   return (
     <div {...stylex.props(styles.line)}>
-      <span {...stylex.props(styles.field)}>
-        {draft === null ? (
-          <button
-            aria-label={t`Change: ${text}`}
-            onClick={() => {
-              letBe.current = false;
-              setDraft(text);
-            }}
-            type="button"
-            {...stylex.props(styles.words)}
-          >
-            <span {...stylex.props(told !== null && toldLooks[told])}>
-              {text}
-            </span>
-          </button>
-        ) : (
-          <Input
-            aria-label={t`Change: ${text}`}
-            // The field takes the keys the moment it opens, with the cursor after its words.
-            autoFocus
-            maxLength={300}
-            onBlur={keep}
-            onValueChange={(value: string) => {
-              setDraft(value);
-            }}
-            onFocus={(event) => {
-              const { length } = event.target.value;
-              event.target.setSelectionRange(length, length);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                keep();
-              } else if (event.key === "Escape") {
-                letBe.current = true;
-                setDraft(null);
-              }
-            }}
-            value={draft}
-          />
-        )}
-      </span>
-      <Button
-        aria-label={t`Take out: ${text}`}
-        icon={Cross}
-        onClick={() => {
-          update((progress) => withFactToggled(progress, id));
+      <div {...stylex.props(styles.row)}>
+        <span {...stylex.props(styles.field)}>
+          {draft === null ? (
+            <button
+              aria-label={t`Change: ${text}`}
+              onClick={() => {
+                letBe.current = false;
+                setDraft(text);
+              }}
+              type="button"
+              {...stylex.props(styles.words)}
+            >
+              <span
+                id={words}
+                {...stylex.props(told !== null && toldLooks[told])}
+              >
+                {text}
+              </span>
+            </button>
+          ) : (
+            <Input
+              aria-label={t`Change: ${text}`}
+              // The field takes the keys the moment it opens, with the cursor after its words.
+              autoFocus
+              maxLength={300}
+              onBlur={keep}
+              onValueChange={(value: string) => {
+                setDraft(value);
+              }}
+              onFocus={(event) => {
+                const { length } = event.target.value;
+                event.target.setSelectionRange(length, length);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  keep();
+                } else if (event.key === "Escape") {
+                  letBe.current = true;
+                  setDraft(null);
+                }
+              }}
+              value={draft}
+            />
+          )}
+        </span>
+        <Button
+          aria-label={t`Take out: ${text}`}
+          icon={Cross}
+          onClick={() => {
+            update((progress) => withFactToggled(progress, id));
+          }}
+          size="sm"
+          variant="ghost"
+        />
+      </div>
+      <Destination
+        // The line's words describe it; while they are being put right,
+        // the field holds them, and nothing that isn't there is named.
+        of={draft === null ? words : undefined}
+        onMove={() => {
+          moveLine(id, share);
         }}
-        size="sm"
-        variant="ghost"
+        share={share}
+        tag={tag}
       />
     </div>
   );
@@ -258,10 +284,12 @@ export const ReadBack = ({ room }: { room: number }) => {
           <Text size="xs" tone="muted">{t`Part ${n} of ${count}`}</Text>
         ) : null}
         <ol {...stylex.props(styles.lines)}>
-          {left.map(({ id, text }) => (
+          {left.map(({ id, text, tag, share }) => (
             <li key={id} {...stylex.props(styles.item, arrive.in)}>
               <ReadBackLine
                 id={id}
+                share={share}
+                tag={tag}
                 text={text}
                 told={toldOf(loop.telling, id)}
               />
@@ -300,7 +328,7 @@ export const ReadBack = ({ room }: { room: number }) => {
           <Text
             size="xs"
             tone="muted"
-          >{t`Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts.`}</Text>
+          >{t`Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts.`}</Text>
           {at === parts.length - 1 ? (
             <Text size="xs" tone="muted">
               {promise}

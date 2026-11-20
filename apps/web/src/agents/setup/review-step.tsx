@@ -110,6 +110,7 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
       ? t`The model picked in the chat`
       : modelName(setup.model);
   const effort = words.effortNames[setup.effort];
+  const own = setup.audience === "me";
   return (
     <Question
       line={t`You can change all of this later.`}
@@ -159,25 +160,34 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
                       </span>
                     ),
                 },
-                {
-                  key: t`Can do`,
-                  value: (
-                    <span {...stylex.props(styles.marks)}>
-                      {abilities
-                        .filter((ability) => setup.abilities.has(ability))
-                        .map((ability) => (
-                          <Badge key={ability} size="sm" tone="neutral">
-                            {words.abilityNames[ability].label}
-                          </Badge>
-                        ))}
-                    </span>
-                  ),
-                },
+                // One of their own has no kinds of work or schedule of its own.
+                ...(own
+                  ? []
+                  : [
+                      {
+                        key: t`Can do`,
+                        value: (
+                          <span {...stylex.props(styles.marks)}>
+                            {abilities
+                              .filter((ability) => setup.abilities.has(ability))
+                              .map((ability) => (
+                                <Badge key={ability} size="sm" tone="neutral">
+                                  {words.abilityNames[ability].label}
+                                </Badge>
+                              ))}
+                          </span>
+                        ),
+                      },
+                    ]),
                 { key: t`Thinking`, value: `${thinksWith} · ${effort}` },
-                {
-                  key: t`Works`,
-                  value: scheduleLine(setup.schedule),
-                },
+                ...(own
+                  ? []
+                  : [
+                      {
+                        key: t`Works`,
+                        value: scheduleLine(setup.schedule),
+                      },
+                    ]),
                 {
                   key: t`Who can use it`,
                   value:

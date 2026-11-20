@@ -11,6 +11,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { revocationsOf } from "./access-revocations.ts";
 import { apps, auditOutbox, pagePolicies } from "./db/core/schema.ts";
+import { uuidSql } from "./db/d1.ts";
 
 // What an App's data is to code Grasp didn't serve (@grasp-os/shared/
 // data-policy): calls that carry no lease core signed, which the gate
@@ -88,14 +89,6 @@ const reachingSql = (grantee: Grantee): SQL => {
 ),
 reaching(app_id) AS (SELECT id FROM reached WHERE kind = 'app')`;
 };
-
-/** A random version 4 UUID, as SQL, for each row it is read in. */
-const uuidSql = sql`lower(
-  hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||
-  substr(hex(randomblob(2)), 2) || '-' ||
-  substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) ||
-  '-' || hex(randomblob(6))
-)`;
 
 /**
  * What a grant to `grantee` changes for the data policy of every App whose

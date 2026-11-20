@@ -8,10 +8,8 @@ import { updateApp } from "../src/app-settings.ts";
 import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { deleteStore } from "../src/data-stores.ts";
-import { authorize } from "../src/knowledge/app-entries.ts";
-import { indexApps } from "../src/knowledge/apps-collection.ts";
 import { requestPermission } from "../src/permissions.ts";
-import { published, release } from "./apps.ts";
+import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -312,121 +310,6 @@ describe("removing an App", slow, () => {
       byStaff: "role.forbidden",
       byAdmin: "ok",
     });
-  });
-
-  it("forgets its entry in the Apps collection: nobody, an admin included, finds its name or AGENTS.md", async () => {
-    const [owner, admin] = await Promise.all([
-      personApi("builder"),
-      personApi("admin"),
-    ]);
-    const word = `v${crypto.randomUUID().replaceAll("-", "")}`;
-    const { id: app } = await owner.api.apps.create({
-      name: `Leave ${word}`,
-    });
-    await release(owner, app, {
-      "AGENTS.md": `# How we approve leave\n\nEvery ${word} request goes to the team lead.\n`,
-    });
-    await indexApps(env);
-    const found = async () => {
-      const { hits } = await admin.api.knowledge.search(word);
-      return hits.filter(({ collectionId }) => collectionId === "apps").length;
-    };
-    const before = await found();
-    await owner.api.apps.archive(app);
-    await owner.api.apps.remove(app);
-    // The cron's indexing never writes it back.
-    await indexApps(env);
-    const entry = await env.KNOWLEDGE.prepare(
-      "SELECT count(*) AS n FROM documents WHERE collection_id = 'apps' AND path = ?"
-    )
-      .bind(`${app}/AGENTS.md`)
-      .first<{ n: number }>();
-    const readable = await authorize(env, {
-      type: "person",
-      person: acting(admin, "admin"),
-    });
-
-    expect({
-      before,
-      after: await found(),
-      kept: entry?.n,
-      listedToAdmin: readable.only?.apps?.includes(`${app}/AGENTS.md`) ?? true,
-    }).toStrictEqual({
-      before: 1,
-      after: 0,
-      // A tombstone stays, read by nobody.
-      kept: 1,
-      listedToAdmin: false,
-    });
-  });
-
-  it("has its entry forgotten by the cron's indexing when forgetting it failed at removal", async () => {
-    const owner = await personApi("builder");
-    const word = `v${crypto.randomUUID().replaceAll("-", "")}`;
-    const { id: app } = await owner.api.apps.create({
-      name: `Leave ${word}`,
-    });
-    await release(owner, app, { "AGENTS.md": `# Leave\n\n${word}\n` });
-    await indexApps(env);
-    // Removed, as if its entry's forgetting had failed: its note is left.
-    await env.DB.prepare(
-      "UPDATE apps SET archived_at = ?1, removed_at = ?1, removed_by = ?2, current_version = NULL WHERE id = ?3"
-    )
-      .bind(Date.now(), owner.userId, app)
-      .run();
-    await indexApps(env);
-    const note = await rowCount(
-      "SELECT count(*) AS n FROM app_entries WHERE app_id = ?",
-      app
-    );
-    const text = await env.KNOWLEDGE.prepare(
-      "SELECT count(*) AS n FROM documents WHERE collection_id = 'apps' AND path = ? AND current_version > 1"
-    )
-      .bind(`${app}/AGENTS.md`)
-      .first<{ n: number }>();
-
-    // Its note gone only once its entry is the tombstone, a version later.
-    expect({ note, tombstoned: text?.n }).toStrictEqual({
-      note: 0,
-      tombstoned: 1,
-    });
-  });
-
-  it("has its entry forgotten by the cron's indexing when neither its note nor its forgetting was written", async () => {
-    const owner = await personApi("builder");
-    const word = `v${crypto.randomUUID().replaceAll("-", "")}`;
-    const { id: app } = await owner.api.apps.create({
-      name: `Leave ${word}`,
-    });
-    await release(owner, app, { "AGENTS.md": `# Leave\n\n${word}\n` });
-    await indexApps(env);
-    const versionOf = async () => {
-      const row = await env.KNOWLEDGE.prepare(
-        "SELECT current_version AS v FROM documents WHERE collection_id = 'apps' AND path = ?"
-      )
-        .bind(`${app}/AGENTS.md`)
-        .first<{ v: number }>();
-      return row?.v ?? 0;
-    };
-    const indexed = await versionOf();
-    // Its entry saved but never noted, then removed with its forgetting
-    // failed: nothing in core names the entry.
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM app_entries WHERE app_id = ?").bind(app),
-      env.DB.prepare(
-        "UPDATE apps SET archived_at = ?1, removed_at = ?1, removed_by = ?2, current_version = NULL WHERE id = ?3"
-      ).bind(Date.now(), owner.userId, app),
-    ]);
-    await indexApps(env);
-    const tombstoned = await versionOf();
-    // Forgotten once: later runs write no further version of it.
-    await indexApps(env);
-
-    expect({
-      indexed,
-      tombstoned: tombstoned - indexed,
-      again: (await versionOf()) - indexed,
-    }).toStrictEqual({ indexed: 1, tombstoned: 1, again: 1 });
   });
 
   it("is never undone by a restore racing it: one of the two wins, and a removed App stays removed", async () => {

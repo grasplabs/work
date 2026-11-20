@@ -16,12 +16,16 @@ import { activeMember } from "../auth/auth.ts";
 import type { ToolCall } from "../chat-tool-events.ts";
 import {
   stephenRequestCards,
+  stephenRequestNeeds,
+  stephenRequestProposals,
   stephenRequestQuestions,
+  stephenRequestTopics,
   stephenRequests,
   stephenSummaries,
   teamMembers,
   teams,
 } from "../db/core/schema.ts";
+import { statementsWithin } from "../db/d1.ts";
 import { readOrganization } from "../organization.ts";
 import type { Sorted } from "./request-sorting.ts";
 
@@ -125,10 +129,7 @@ const heardCall = (
       work: Partial<Record<ToolCall["outcome"], RequestKind>>;
     }
   | undefined => {
-  if (
-    call.method.startsWith("brain.") ||
-    call.method.startsWith("knowledge.")
-  ) {
+  if (call.method.startsWith("brain.")) {
     return { id: brainTool, work: {} };
   }
   if (call.method === "connections.call") {
@@ -173,13 +174,9 @@ export interface Heard {
  * what was off or missing, and the request's kind, the first that
  * applies (a workflow offered, a change held, a look-up, an answer). The
  * agent's own looking around (listing connections or workflows) is no
- * tool of the request's. An answer that cites the company's documents
- * read the brain, whether or not its code searched it.
+ * tool of the request's.
  */
-export const heardFrom = (
-  calls: readonly ToolCall[],
-  cited: boolean
-): Heard => {
+export const heardFrom = (calls: readonly ToolCall[]): Heard => {
   const tools: RequestToolCall[] = [];
   const missing: MissingTool[] = [];
   const did = new Set<RequestKind>();
@@ -202,9 +199,6 @@ export const heardFrom = (
       did.add(kind);
     }
   }
-  if (cited && !tools.some(({ id }) => id === brainTool)) {
-    tools.unshift({ id: brainTool, ok: true });
-  }
   const kind =
     (["workflow", "changed", "lookedUp"] as const).find((each) =>
       did.has(each)
@@ -213,12 +207,22 @@ export const heardFrom = (
 };
 
 /**
+ * Whether a request's outcome rests on whether his answer answered it: a
+ * turn that answered, did nothing for them and lacked nothing. Any other
+ * turn's own outcome says it (`outcomeOf`), with no model asked.
+ */
+export const answerDecides = (
+  ended: "answered" | "stopped" | "failed",
+  { worked, missing }: Pick<Heard, "worked" | "missing">
+): boolean => ended === "answered" && !worked && missing.length === 0;
+
+/**
  * How a request ended, from how its turn ended and what it did: a turn
  * that answered is `done`, unless all it came to was what he could not do
  * (`notPossible`), or he said he didn't know or asked something back
- * (`unanswered`, as its sorting read it). An answer and nothing else that
- * couldn't be sorted (no model may, or the call failed) is `unanswered`
- * too: billed only once it is known he answered.
+ * (`unanswered`, as its sorting judged it). An answer and nothing else
+ * that couldn't be judged (no model may, or the call failed) is
+ * `unanswered` too: billed only once it is known he answered.
  */
 export const outcomeOf = (
   ended: "answered" | "stopped" | "failed",
@@ -231,7 +235,7 @@ export const outcomeOf = (
   if (heard.missing.length > 0 && !heard.worked) {
     return "notPossible";
   }
-  if (!heard.worked && sorted?.answered !== true) {
+  if (answerDecides(ended, heard) && sorted?.answered !== true) {
     return "unanswered";
   }
   return "done";
@@ -301,7 +305,6 @@ export interface Settled {
   chatId: string | null;
   ended: "answered" | "stopped" | "failed";
   calls: readonly ToolCall[];
-  cited: boolean;
   sorted: Sorted | null;
 }
 
@@ -315,9 +318,9 @@ export interface Settled {
 export const heardRequest = async (
   env: Env,
   id: string,
-  { calls, cited }: Pick<Settled, "calls" | "cited">
+  { calls }: Pick<Settled, "calls">
 ): Promise<void> => {
-  const heard = heardFrom(calls, cited);
+  const heard = heardFrom(calls);
   try {
     await drizzle(env.DB)
       .update(stephenRequests)
@@ -336,9 +339,9 @@ export const heardRequest = async (
 export const settleRequest = async (
   env: Env,
   id: string,
-  { chatId, ended, calls, cited, sorted }: Settled
+  { chatId, ended, calls, sorted }: Settled
 ): Promise<void> => {
-  const heard = heardFrom(calls, cited);
+  const heard = heardFrom(calls);
   try {
     const db = drizzle(env.DB);
     // A press on one of its cards may have come first: what it said of a
@@ -392,10 +395,15 @@ export const keepCardsOf = async (
   try {
     const db = drizzle(env.DB);
     const now = new Date();
-    await db
-      .insert(stephenRequestCards)
-      .values(keys.map((key) => ({ key, requestId, createdAt: now })))
-      .onConflictDoNothing();
+    const [first, ...rest] = statementsWithin(keys, (part) =>
+      db
+        .insert(stephenRequestCards)
+        .values(part.map((key) => ({ key, requestId, createdAt: now })))
+        .onConflictDoNothing()
+    );
+    if (first !== undefined) {
+      await db.batch([first, ...rest]);
+    }
   } catch (error) {
     log.warn("stephen_requests.cards_unkept", errorFields(error));
   }
@@ -523,9 +531,10 @@ export const rateRequest = async (
 };
 
 /**
- * Deletes requests past their thirteen months, and the questions no
- * request points at any more that are older than a day (a question just
- * named waits for the request that named it).
+ * Deletes requests past their thirteen months, the questions and topics
+ * nothing points at any more that are older than a day (a name just made
+ * waits for the request that made it), and Grasp's proposals for, and
+ * owners' statuses of, a question that is gone.
  */
 export const sweepStephenRequests = async (
   env: Env,
@@ -541,6 +550,36 @@ export const sweepStephenRequests = async (
         AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
           WHERE ${stephenRequests.questionId} = ${stephenRequestQuestions.id})`
   );
+  // The topics, likewise, once no question points at them either: a name
+  // rests on one person's message, so it goes with the last request that
+  // points at it, swept or erased (GRA-1923). An older topic that just lost
+  // its last request and is sorted into again within the same quarter
+  // hour can go before the new request is kept with its id: that one
+  // request then points at a topic that is gone, which no page names, so
+  // it is counted under "Other topics". Harmless, and never a name shown.
+  await db.delete(stephenRequestTopics).where(
+    sql`${stephenRequestTopics.createdAt} < ${now.getTime() - 86_400_000}
+        AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
+          WHERE ${stephenRequests.topicId} = ${stephenRequestTopics.id})
+        AND NOT EXISTS (SELECT 1 FROM ${stephenRequestQuestions}
+          WHERE ${stephenRequestQuestions.topicId} = ${stephenRequestTopics.id})`
+  );
+  // Grasp's proposals for a question that is gone: what the model wrote
+  // from its wording (and its topic's name) goes with it; and what an
+  // owner set about it, which would otherwise keep Needs you reading
+  // requests back to its day. A quiet team's rests on no one's words. A
+  // need under five whose question is still kept keeps its status.
+  for (const [table, key] of [
+    [stephenRequestProposals, stephenRequestProposals.key],
+    [stephenRequestNeeds, stephenRequestNeeds.key],
+  ] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- one table after the other
+    await db.delete(table).where(
+      sql`${key} NOT LIKE 'quietTeam:%'
+          AND NOT EXISTS (SELECT 1 FROM ${stephenRequestQuestions}
+            WHERE ${stephenRequestQuestions.id} = substr(${key}, instr(${key}, ':') + 1))`
+    );
+  }
   // Cards whose request is gone (swept or erased), a day on.
   await db.delete(stephenRequestCards).where(
     sql`${stephenRequestCards.createdAt} < ${now.getTime() - 86_400_000}

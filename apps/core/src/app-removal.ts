@@ -22,7 +22,6 @@ import {
   permissions,
 } from "./db/core/schema.ts";
 import { appPreview } from "./durable-objects.ts";
-import { forgetAppEntry } from "./knowledge/apps-collection.ts";
 import { withdrawnWith } from "./packages/approvals.ts";
 import { requireNotStaff } from "./sharing.ts";
 import {
@@ -83,9 +82,6 @@ import {
 //   (`app.conflict`). A restore that read it archived before the removal
 //   writes only over an App not removed (app-status.ts), so it is refused
 //   in turn, never undoing the removal.
-// - What it was, kept where people search: its Apps-collection entry
-//   (its name, description and AGENTS.md) is replaced by a tombstone and
-//   read by nobody, admins included (app-entries.ts).
 // - Its default store's records stuck: a removed App has no builders, so
 //   the organization's own admins, never Grasp staff, read, export and
 //   delete its default store (data-stores.ts, `managedBy`); the store's
@@ -179,13 +175,8 @@ const endedWith = (
   ] as const;
 };
 
-/**
- * What follows a removal, best effort: its entry, its held actions, its
- * preview.
- */
+/** What follows a removal, best effort: its held actions, its preview. */
 const afterRemoval = async (env: Env, appId: AppId): Promise<void> => {
-  // Its Apps-collection entry: its name, description and AGENTS.md go.
-  await forgetAppEntry(env, appId);
   // Its preview's test data, which nobody builds any more, and what the
   // preview kept (app-preview.ts).
   try {
@@ -213,7 +204,8 @@ export const removeApp = async (
   input: unknown
 ): Promise<void> => {
   requireNotStaff(by);
-  const found = await appFor(env, by, input, "builder");
+  // Removing it reads none of its data.
+  const found = await appFor(env, by, input, "builder", { managing: true });
   if (found.owner !== by.userId && !isAdmin(by.role)) {
     throw appErrors.create("app.remove_forbidden");
   }

@@ -30,6 +30,12 @@ export interface Provider {
     schema: Schema,
     init?: RequestInit
   ) => Promise<z.output<Schema>>;
+  /**
+   * The ToolError an answer that isn't a success stands for, to a GET: for
+   * code that looks at the answer itself first (a sync, whose cursor a
+   * 404 or 410 says is gone).
+   */
+  failure: (response: Response) => Promise<ToolError>;
 }
 
 /** One segment of a path, encoded. */
@@ -192,6 +198,7 @@ export const providerFetch = (definition: ProviderDefinition): Provider => {
   };
   return {
     fetch: send,
+    failure: async (response) => await failureOf(definition, response, "GET"),
     json: async (url, schema, init) => {
       const response = await send(url, init);
       let body: unknown;

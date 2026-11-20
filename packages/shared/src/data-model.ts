@@ -179,6 +179,11 @@ export type DataModelChange =
       ok: true;
       /** What this change alone does: from the draft before it to after it. */
       change: DefinitionPlan;
+      /**
+       * The draft's revision after it, which the next change goes over:
+       * the one it was previewed over, for a preview.
+       */
+      revision: number;
     } & Omit<DraftDataModel, "uses">);
 
 /** A value as code writes it: JSON is a JavaScript literal. */

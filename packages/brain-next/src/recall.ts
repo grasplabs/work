@@ -1,4 +1,5 @@
 import { packAcross } from "./across.ts";
+import { blocksSql } from "./chunk-blocks.ts";
 import {
   exactCandidatesMax,
   recallLimit,
@@ -11,24 +12,33 @@ import type {
   Reader,
   RecallRequest,
 } from "./contract.ts";
+import { monthDayOf } from "./dates.ts";
 import { exactsOf } from "./exact.ts";
 import type { Exact } from "./exact.ts";
+import { readMoment, usedAtOf } from "./memories.ts";
+import { readAtOf } from "./read-at.ts";
 import { readableSql } from "./reader-sets.ts";
 import type { WayRunner } from "./recall-counts.ts";
+import { findMemories, memoriesByTheirWords } from "./recall-memories.ts";
+import type { Reached } from "./recall-memories.ts";
 import { nearChunks } from "./vectors.ts";
 import { termsOf } from "./words.ts";
 import type { Terms } from "./words.ts";
 
-// Recall: two ways at once, fused by rank into a pack (pack.ts). Words,
+// Recall: several ways at once, fused by rank into a pack (pack.ts). Words,
 // in one statement that finds, checks and ranks, and a second for the
 // stop words alone when the first finds little; exact, in one statement
 // that finds the chunks holding every word of an exact part, whose order
-// is then checked in code (exact.ts). And a third when the host gives the
+// is then checked in code (exact.ts), or mentioning one of a date's days
+// (`chunk_days`, dates.ts). And a third when the host gives the
 // question's vector: meaning, the vector way's scan (vectors.ts), with
 // the access check inside it. The host embeds the question before it
 // calls, so what a store finds is one synchronous read of one snapshot
-// (`find`). Each way's lists are then merged, checked and fused across
-// every store recalled from, one or several (across.ts `packAcross`).
+// (`find`). In the same read, the memories the reader may read: by their
+// own words (with the words way), and along the entities the question
+// names (recall-memories.ts). Each way's lists are then merged, checked
+// and fused across every store recalled from, one or several (across.ts
+// `packAcross`).
 //
 // It searches the chunks of each source's current version (a version is
 // current once `current_versions` points at it, set in the transaction
@@ -125,15 +135,18 @@ const foundBy = (
 ): string => `
   SELECT chunks.row AS row, asked.key AS term, ${exact} AS exact
   FROM json_each(?1) AS asked
+  CROSS JOIN blocks
   CROSS JOIN ${index}
   JOIN chunks ON chunks.row = ${index}.rowid${searched(asOf)}
-    AND ${index} MATCH asked.value ->> '${query}'`;
+    AND ${index} MATCH asked.value ->> '${query}'
+    AND ${index}.rowid BETWEEN blocks.first AND blocks.last`;
 
 /** What a statement returns of a chunk it found. */
 const chunkColumns = `chunks.row AS row, source_versions.source AS source,
   source_versions.version AS version, chunks.position AS position,
   chunks.text AS text, length(chunks.text) AS length,
-  source_versions.added_at AS added_at`;
+  source_versions.added_at AS added_at,
+  ${readAtOf("chunks.version_row")} AS read_at`;
 
 /**
  * `?1` the question's telling terms (JSON, words.ts `Term`), `?2` the
@@ -147,6 +160,7 @@ const chunkColumns = `chunks.row AS row, source_versions.source AS source,
  */
 const recallSql = (asOf: number | undefined): string => `
 WITH ${readableSql},
+${blocksSql},
 found AS MATERIALIZED (${foundBy("chunk_words", "$.exact", 1, asOf)}
   UNION ALL${foundBy("chunk_words", "$.forms", 0, asOf)}
   UNION ALL${foundBy("chunk_stems", "$.forms", 0, asOf)}
@@ -159,8 +173,10 @@ matched AS (
 stopped AS (
   SELECT chunk_words.rowid AS row, count(*) AS stops
   FROM json_each(?5) AS stop
+  CROSS JOIN blocks
   CROSS JOIN chunk_words
   WHERE chunk_words MATCH stop.value
+    AND chunk_words.rowid BETWEEN blocks.first AND blocks.last
     AND +chunk_words.rowid IN (SELECT row FROM matched)
   GROUP BY chunk_words.rowid
 ),
@@ -189,12 +205,15 @@ LIMIT ?4`;
  */
 const stopsOnlySql = (asOf: number | undefined): string => `
 WITH ${readableSql},
+${blocksSql},
 found AS (
   SELECT chunks.row AS row, asked.key AS term
   FROM json_each(?1) AS asked
+  CROSS JOIN blocks
   CROSS JOIN chunk_words
   JOIN chunks ON chunks.row = chunk_words.rowid${searched(asOf)}
     AND chunk_words MATCH asked.value
+    AND chunk_words.rowid BETWEEN blocks.first AND blocks.last
     AND chunks.row NOT IN (SELECT value FROM json_each(?5))
 ),
 matched AS (
@@ -209,34 +228,57 @@ ORDER BY matched.stops DESC, length(chunks.text),
 LIMIT ?4`;
 
 /**
- * `?1` the exact parts (JSON: each its index as `part`, its `query` and
- * `near`, exact.ts), `?2`
+ * `?1` the exact parts (JSON: each its index as `part`, and a phrase's or
+ * an ID's `query` and `near`, or a date's `days`, each its `monthDay` and
+ * `year`, exact.ts), `?2`
  * the reader's person, `?3` their groups (JSON), `?4` the most to check of
  * each part: the chunks the reader may read that may hold one of them,
  * each with the parts (by index) within whose most it is (`parts`), and
  * those whose most it is the first past (`past`), which are capped. The
  * cap counts only what the reader may read, in the one statement that
- * checks access: `near` only orders what `found` holds.
+ * checks access: `near` only orders what `found` holds. A date's
+ * candidates are the chunks that mention one of its days (`chunk_days`):
+ * the same day, of the same year or of none written on either side.
  */
 const exactSql = (asOf: number | undefined): string => `
 WITH ${readableSql},
+${blocksSql},
 asked AS (
   SELECT value ->> '$.part' AS key, value ->> '$.query' AS query,
     value ->> '$.near' AS near
   FROM json_each(?1)
+  WHERE value ->> '$.query' IS NOT NULL
+),
+dated AS (
+  SELECT part.value ->> '$.part' AS key,
+    day.value ->> '$.monthDay' AS month_day, day.value ->> '$.year' AS year
+  FROM json_each(?1) AS part, json_each(part.value -> '$.days') AS day
 ),
 found AS (
   SELECT chunks.row AS row, asked.key AS part
   FROM asked
+  CROSS JOIN blocks
   CROSS JOIN chunk_words
   JOIN chunks ON chunks.row = chunk_words.rowid${searched(asOf)}
     AND chunk_words MATCH asked.query
+    AND chunk_words.rowid BETWEEN blocks.first AND blocks.last
+  UNION
+  SELECT chunks.row AS row, dated.key AS part
+  FROM dated
+  CROSS JOIN blocks
+  CROSS JOIN chunk_days INDEXED BY chunk_days_day_chunk_idx
+  JOIN chunks ON chunks.row = +chunk_days.chunk${searched(asOf)}
+    AND chunk_days.month_day = dated.month_day
+    AND chunk_days.chunk BETWEEN blocks.first AND blocks.last
+    AND (dated.year = 0 OR chunk_days.year IN (dated.year, 0))
 ),
 near AS (
   SELECT asked.key AS part, chunk_words.rowid AS row
   FROM asked
+  CROSS JOIN blocks
   CROSS JOIN chunk_words
   WHERE chunk_words MATCH asked.near
+    AND chunk_words.rowid BETWEEN blocks.first AND blocks.last
 ),
 ranked AS (
   SELECT found.row AS row, found.part AS part,
@@ -247,9 +289,9 @@ ranked AS (
         source_versions.added_at DESC, source_versions.source, chunks.position
     ) AS rank
   FROM found
+  CROSS JOIN chunks ON chunks.row = found.row
+  CROSS JOIN source_versions ON source_versions.row = chunks.version_row
   LEFT JOIN near ON near.part = found.part AND near.row = found.row
-  JOIN chunks ON chunks.row = found.row
-  JOIN source_versions ON source_versions.row = chunks.version_row
 )
 SELECT ${chunkColumns},
   json_group_array(ranked.part) FILTER (WHERE ranked.rank <= ?4) AS parts,
@@ -257,8 +299,8 @@ SELECT ${chunkColumns},
     AS near_parts,
   json_group_array(ranked.part) FILTER (WHERE ranked.rank > ?4) AS past
 FROM ranked
-JOIN chunks ON chunks.row = ranked.row
-JOIN source_versions ON source_versions.row = chunks.version_row
+CROSS JOIN chunks ON chunks.row = ranked.row
+CROSS JOIN source_versions ON source_versions.row = chunks.version_row
 WHERE ranked.rank <= ?4 + 1
 GROUP BY chunks.row
 ORDER BY length(chunks.text), source_versions.added_at DESC,
@@ -273,6 +315,7 @@ interface Row extends Record<string, SqlStorageValue> {
   text: string;
   length: number;
   added_at: number;
+  read_at: number | null;
 }
 
 /** The indexes in a statement's JSON array. */
@@ -295,6 +338,7 @@ const passageOf = ({
   text,
   length,
   added_at: addedAt,
+  read_at: readAt,
 }: Row): OrderedPassage => ({
   row,
   source,
@@ -303,6 +347,7 @@ const passageOf = ({
   text,
   length,
   addedAt,
+  ...(readAt === null ? {} : { readAt }),
 });
 
 /**
@@ -374,7 +419,17 @@ const byExact = (
     .exec<Row & { parts: string; near_parts: string; past: string }>(
       exactSql(asOf.length > 0 ? 5 : undefined),
       JSON.stringify(
-        exacts.map(({ query, near }, part) => ({ part, query, near }))
+        exacts.map((exact, part) =>
+          exact.kind === "date"
+            ? {
+                part,
+                days: exact.days.map((day) => ({
+                  monthDay: monthDayOf(day),
+                  year: day.year,
+                })),
+              }
+            : { part, query: exact.query, near: exact.near }
+        )
       ),
       reader.person,
       JSON.stringify(reader.groups),
@@ -428,19 +483,45 @@ const byMeaning = (
  * by meaning never as of a moment: vectors are kept for current versions
  * only, so the scan can't tell which were current then, and nearer chunks
  * added since would take every place. A way that throws fails the recall.
+ * Of `passages` alone (`findPassages`), no memory is read at all: none
+ * of the memory ways runs, nor counts.
  */
-export const find = (
+const findOf = (
   sql: SqlStorage,
-  { question, reader, asOf, meaning }: RecallRequest,
-  way: WayRunner
+  { question, reader, asOf, meaning, used }: RecallRequest,
+  way: WayRunner,
+  of: "passages" | "passages and memories"
 ): Finding => {
+  const withMemories = of === "passages and memories";
   const exacts = exactsOf(question);
   const terms = termsOf(question);
   const at: AsOf = asOf === undefined ? [] : [asOf.getTime()];
-  const words =
+  // Memories are read as of the moment asked, or the store's read moment
+  // (memories.ts `readMoment`), never the caller's clock: a memory written
+  // in the same millisecond is seen. Their two clocks say what was
+  // believed and true then, one moment for both (recall-memories.ts).
+  // Read only when memories are: passages alone need no moment of theirs.
+  const memoriesAt = withMemories ? (asOf?.getTime() ?? readMoment(sql)) : 0;
+  const usedAt = usedAtOf(used);
+  const {
+    memoryWords,
+    ...words
+  }: Pick<Finding, "words" | "stopWords" | "terms"> & {
+    memoryWords: Reached[];
+  } =
     terms.telling.length === 0
-      ? { words: [], stopWords: [], terms: [] }
-      : way("words", () => byWords(sql, terms, reader, at));
+      ? { words: [], stopWords: [], terms: [], memoryWords: [] }
+      : way("words", () => ({
+          ...byWords(sql, terms, reader, at),
+          memoryWords: withMemories
+            ? memoriesByTheirWords(sql, {
+                question,
+                reader,
+                at: memoriesAt,
+                used: usedAt,
+              })
+            : [],
+        }));
   const exact =
     exacts.length === 0
       ? { exact: [], capped: [] }
@@ -451,8 +532,32 @@ export const find = (
     asOf !== undefined
       ? []
       : way("meaning", () => byMeaning(sql, meaning, reader));
-  return { ...words, ...exact, meaning: meant };
+  const memories = withMemories
+    ? findMemories(
+        sql,
+        { question, reader, at: memoriesAt, used: usedAt, words: memoryWords },
+        way
+      )
+    : { words: [], entities: [], rivals: [] };
+  return { ...words, ...exact, meaning: meant, memories };
 };
+
+/** What the reader may read for the question, passages and memories (`findOf`). */
+export const find = (
+  sql: SqlStorage,
+  request: RecallRequest,
+  way: WayRunner
+): Finding => findOf(sql, request, way, "passages and memories");
+
+/**
+ * The passages alone the reader may read for the question (`findOf`):
+ * what core hands where memories don't reach yet (its `recallPassagesAs`).
+ */
+export const findPassages = (
+  sql: SqlStorage,
+  request: RecallRequest,
+  way: WayRunner
+): Finding => findOf(sql, request, way, "passages");
 
 /**
  * What the reader may read for the question, as a pack within its budget

@@ -1,7 +1,6 @@
 import { addDays } from "@grasp-os/shared/admin/org-record";
 import type {
   BrainApi,
-  BrainChangePage,
   BrainForgetPreview,
   Company,
   Connection,
@@ -9,23 +8,27 @@ import type {
   Goal,
   Source,
   Stakeholder,
+  Statement,
   Team,
   TeamGroup,
   ThinkingGround,
   Tool,
-  Transcript,
   Vision,
+  Workflow,
   Workspace,
 } from "@grasp-os/shared/brain";
-import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
+import {
+  companyOpinionIdPrefix,
+  companyOpinionsSourceId,
+  onboardingIdPrefix,
+} from "@grasp-os/shared/brain-records";
 import type {
   BrainRecordInput,
   BrainRecordsAdded,
 } from "@grasp-os/shared/brain-records";
 import type { ConnectionSource } from "@grasp-os/shared/connect";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
-import { purgedMarker } from "@grasp-os/shared/knowledge";
-import { minTeamShown } from "@grasp-os/shared/onboarding";
+import { minTeamShown, teamNameKey } from "@grasp-os/shared/onboarding";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -36,8 +39,6 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { organizationId } from "./auth/auth.ts";
-import { brainChanges } from "./brain-changes.ts";
-import type { SourceChange } from "./brain-changes.ts";
 import { forget, forgetPreview } from "./brain-forget.ts";
 import {
   answerGap,
@@ -51,29 +52,26 @@ import {
   addBrainRecords,
   datedInOrder,
   readBrainRecords,
+  stepsOf,
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
-import {
-  proposeTeamGroups,
-  saveTeamGroups,
-  teamGroupsOf,
-} from "./brain-team-groups.ts";
-import {
-  brainTranscript,
-  knowledgeTranscriptSources,
-} from "./brain-transcripts.ts";
+import { saveTeamGroups, teamGroupsOf } from "./brain-team-groups.ts";
 import { askMorePeople, workKnowledge } from "./brain-work.ts";
+import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
-import { brainOf } from "./knowledge/ports.ts";
-import { intakeIds } from "./onboarding/brain-intake.ts";
-import {
-  isKickoffTeam,
-  kickoffSaid,
-  kickoffSourceId,
-} from "./onboarding/kickoff-records.ts";
+import { nativeSyncs } from "./native-tool-classes.gen.ts";
+import { intakeIds, ownId } from "./onboarding/brain-intake.ts";
+import type { CompanyTeam } from "./onboarding/company-teams.ts";
+import { kickoffSaid } from "./onboarding/kickoff-company.ts";
+import type { CompanyKickoff } from "./onboarding/kickoff-company.ts";
 import { mondayOf } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
+import type {
+  StandingClaim,
+  StandingDrawing,
+  StandingOpinion,
+} from "./onboarding/store.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -87,18 +85,19 @@ import { listWorkflowResources } from "./workflow-resources.ts";
 // | ------------------ | -------------------------------------------------------- |
 // | company            | the organization's name; the kickoff's `business` and    |
 // |                    | the roster's head count for admins                       |
-// | vision             | the brain's newest vision record, as the kickoff set it  |
-// |                    | (onboarding/kickoff-records.ts), for everyone signed in; |
-// |                    | the roster's teams taking part, for admins               |
-// | teams              | the roster (admins), then the brain's team records; a    |
-// |                    | team the kickoff named joins the team of its name        |
+// | vision             | the kickoff's vision (onboarding/kickoff-company.ts),    |
+// |                    | for everyone signed in; the roster's teams taking part,  |
+// |                    | for admins                                               |
+// | teams              | the roster (admins), the teams the kickoff named (with   |
+// |                    | their sizes, for everyone signed in), the confirmed      |
+// |                    | roster's teams taking part (everyone else), then the     |
+// |                    | brain's team records; a team the kickoff named joins the |
+// |                    | team of its name                                         |
 // | sources            | the kickoff, the roster, each team lead's finished       |
 // |                    | interview and the documents shared in the onboarding     |
-// |                    | (admins); each team's interviews, once the brain holds   |
-// |                    | what they learned, for whoever reads records naming them |
-// |                    | (never with a transcript); Knowledge documents saved     |
-// |                    | with a transcript, for whoever may read them, by turn    |
-// |                    | count (brain-transcripts.ts)                             |
+// |                    | (admins); each team's interviews, while its results may  |
+// |                    | show, for whoever reads what names them (never with a    |
+// |                    | transcript)                                              |
 // | tools              | the tools those documents name (admins)                  |
 // | connections        | the catalog's offered entries and the person's           |
 // |                    | connections                                              |
@@ -148,13 +147,17 @@ import { listWorkflowResources } from "./workflow-resources.ts";
 /** Who works where, as the admin gave it: the source of the teams' sizes. */
 const rosterSourceId = "src-roster";
 
+/** The kickoff, as the source of the vision and of the teams it named. */
+const kickoffSourceId = "src-kickoff";
+
 /**
- * Ids by where they come from. A roster team keeps its own id (letters,
- * digits, - and _), so the others take a `.` it can't have, and never
- * meet one of its.
+ * Ids by where they come from. A roster team is the members' team it is,
+ * by its id (letters, digits, - and _: `intakeIds.team`), so the others
+ * take a `.` it can't have, or the onboarding's `onb-` (kickoff teams),
+ * and never meet one of its.
  */
 const ids = {
-  rosterTeam: (id: string) => `team-${id}`,
+  rosterTeam: intakeIds.team,
   leadInterview: (rosterTeamId: string) => `src.lead-${rosterTeamId}`,
   document: (id: string) => `src.document-${id}`,
   documentTool: (slug: string) => `tool.document-${slug}`,
@@ -164,15 +167,7 @@ const ids = {
 const dayOf = (iso: string): string => iso.slice(0, 10);
 
 /** A team's name as two sources can both mean it: trimmed, any case. */
-const nameKey = (name: string): string => name.trim().toLowerCase();
-
-/**
- * Whether teams of `name` may be joined by it: not one a purge rewrote
- * (its terms replaced by `purgedMarker`), which could name an unrelated
- * team the same way.
- */
-const joinable = (name: string): boolean =>
-  !name.toLowerCase().includes(purgedMarker.toLowerCase());
+const nameKey = teamNameKey;
 
 /** A tool's name as an id part: its letters and digits, any case, joined by `-`; empty when it has none. */
 const slugOf = (name: string): string =>
@@ -185,7 +180,7 @@ const slugOf = (name: string): string =>
 interface OnboardingFacts {
   view: OnboardingView;
   kickoff: KickoffView;
-  /** When the kickoff the brain names came in, a forgotten one's too (the store's `kickoffSourceAt`). */
+  /** When the kickoff the brain names came in (the store's `kickoffSourceAt`). */
   kickoffSourceAt: string | null;
   rosterSavedAt: string | null;
   sentLinks: { person: string; sentAt: string }[];
@@ -193,31 +188,31 @@ interface OnboardingFacts {
   leadsTalked: { team: string; person: string; day: string }[];
   /** The documents shared in the onboarding, newest first. */
   documents: OnboardingDocument[];
-  /** Each team's interviews the brain holds what they learned of. */
+  /** Each team's interviews, while its results may show. */
   interviews: CameIn[];
 }
 
-/** A source the onboarding gives the brain, and when it came in (ISO 8601): when `brain.changes` shows it. */
+/** A source the onboarding gives the brain, and when it came in (ISO 8601). */
 interface CameIn {
   source: Source;
   at: string;
 }
 
 /**
- * Each team's interviews the brain holds what they learned of, as the one
- * source its statements and drawings name (onboarding/brain-intake.ts):
- * how many of its people agreed, and the week the first did, never who.
+ * Each team's interviews while its results may show, as the one source
+ * its claims and drawings name (onboarding/brain-intake.ts): the week the
+ * first agreed, never who, nor how many: a team's work shows from the
+ * first person who told it (GRA-1987), so a count would say whose it is.
  */
 const teamInterviews = async (env: Env): Promise<CameIn[]> => {
   const teams = await onboardingStore(env).interviewSources();
   return await Promise.all(
-    teams.map(async ({ team, name, people, since }) => ({
+    teams.map(async ({ team, name, since }) => ({
       source: {
         id: await intakeIds.interviews(team),
         kind: "interview",
         title: `Interviews with ${name}`,
         date: mondayOf(since),
-        how: people === 1 ? "1 person" : `${people} people`,
         step: 2,
         interviewee: "employee",
         teamIds: [ids.rosterTeam(team)],
@@ -275,12 +270,7 @@ type TeamsByName = ReadonlyMap<string, string>;
 
 /** The first of `teams` of each name: the roster's before the records'. */
 const teamsByName = (teams: readonly Team[]): TeamsByName =>
-  new Map(
-    teams
-      .filter(({ name }) => joinable(name))
-      .toReversed()
-      .map(({ id, name }) => [nameKey(name), id])
-  );
+  new Map(teams.toReversed().map(({ id, name }) => [nameKey(name), id]));
 
 /** The ids of the brain's teams `names` name, once each; names it has no team for are left out. */
 const teamIdsNamed = (
@@ -448,9 +438,8 @@ const toolsOf = (
  * The onboarding's sources, each with when it came in: the kickoff when
  * its transcript came in, the staff list when it was last saved, the team
  * leads' interviews and the documents shared. The one definition of which
- * sources there are and what they are called, for `brain.read` and
- * `brain.changes` alike; none for anyone but an admin, who alone has
- * `facts`.
+ * sources there are and what they are called, for `brain.read`; none
+ * for anyone but an admin, who alone has `facts`.
  */
 const onboardingSources = (
   facts: OnboardingFacts | null,
@@ -541,12 +530,23 @@ const sourcesForRecords = async (
   );
 };
 
-/** The onboarding's sources as changes (brain-changes.ts), with the ids and titles `brain.read` gives them. */
-const sourceChanges = (facts: OnboardingFacts | null): SourceChange[] =>
-  onboardingSources(facts).map(({ source: { id, title }, at }) => ({
-    id,
-    title,
-    at,
+/**
+ * The roster's teams as every member reads them (onboarding/company-teams.ts):
+ * each confirmed team taking part, the admin's own description, and its head
+ * count on the roster, never who is in it, their titles or its lead.
+ */
+const confirmedTeams = (
+  confirmed: { at: string; teams: readonly CompanyTeam[] } | null
+): Team[] =>
+  (confirmed?.teams ?? []).map(({ id, name, does, people }) => ({
+    id: ids.rosterTeam(id),
+    name,
+    ...(does === "" ? {} : { does }),
+    sourceId: rosterSourceId,
+    counts: [
+      { sourceId: rosterSourceId, date: dayOf(confirmed?.at ?? ""), people },
+    ],
+    stakeholders: [],
   }));
 
 /**
@@ -591,6 +591,7 @@ const onboardingTeams = (facts: OnboardingFacts | null): Team[] => {
     return {
       id: ids.rosterTeam(team.id),
       name: team.name,
+      ...(team.does === "" ? {} : { does: team.does }),
       sourceId: rosterSourceId,
       counts:
         rosterDay === null
@@ -612,33 +613,61 @@ const onboardingTeams = (facts: OnboardingFacts | null): Team[] => {
 };
 
 /**
- * The vision page: the brain's newest vision, as the kickoff set it, with
- * every version before it counted; empty, but for its teams, until one is
- * in.
+ * The vision page: the kickoff's vision, as every member reads it
+ * (onboarding/kickoff-company.ts); empty, but for its teams, until the
+ * kickoff is in. Its history is the new Brain's, as versions of the
+ * kickoff's source.
  */
 const visionOf = (
-  records: HeldRecords,
+  kickoff: CompanyKickoff | null,
   facts: OnboardingFacts | null
-): Vision => {
-  const newest = records.visions.at(-1);
-  return {
-    // The kickoff's goals are "the goals for the next one to two years,
-    // and why AI now"; its pain, "the work the sponsor already suspects
-    // costs too much time", is why now.
-    ambition: newest?.ambition ?? "",
-    whyNow: newest?.whyNow ?? "",
-    // The teams the interviews go to: every roster team taking part.
-    inviteTeamIds: (facts?.view.roster?.teams ?? [])
-      .filter(({ off }) => !off)
-      .map(({ id }) => ids.rosterTeam(id)),
-    // Nothing asks the board for a budget or who approves tools yet.
-    budget: [],
-    toolApproval: [],
-    sourceId: newest?.sourceId ?? "",
-    // Nobody confirms a vision page yet: each change the kickoff brought
-    // is a version.
-    version: records.visions.length,
-  };
+): Vision => ({
+  // The kickoff's goals are "the goals for the next one to two years,
+  // and why AI now"; its pain, "the work the sponsor already suspects
+  // costs too much time", is why now.
+  ambition: kickoff?.ambition ?? "",
+  whyNow: kickoff?.whyNow ?? "",
+  // The teams the interviews go to: every roster team taking part.
+  inviteTeamIds: (facts?.view.roster?.teams ?? [])
+    .filter(({ off }) => !off)
+    .map(({ id }) => ids.rosterTeam(id)),
+  // Nothing asks the board for a budget or who approves tools yet.
+  budget: [],
+  toolApproval: [],
+  sourceId: kickoff === null ? "" : kickoffSourceId,
+  // Nobody confirms a vision page yet.
+  version: kickoff === null ? 0 : 1,
+});
+
+/** What starts the id of each team the kickoff names (`kickoffTeamsOf`). */
+const kickoffTeamIdPrefix = `${onboardingIdPrefix}kt-`;
+
+/**
+ * The teams the kickoff named, each with the size the sponsor gave it,
+ * as every member reads them (onboarding/kickoff-company.ts). Each one's
+ * id follows from its name alone, as people mean it (`teamNameKey`), so a
+ * transcript brought in again that names it, in any case, keeps it, with
+ * what an admin's records added for it.
+ */
+const kickoffTeamsOf = async (
+  kickoff: CompanyKickoff | null
+): Promise<Team[]> => {
+  if (kickoff === null) {
+    return [];
+  }
+  const date = dayOf(kickoff.at);
+  return await Promise.all(
+    kickoff.teams.map(async ({ name, people }): Promise<Team> => ({
+      id: await ownId("kt", teamNameKey(name)),
+      name,
+      sourceId: kickoffSourceId,
+      counts:
+        people === undefined
+          ? []
+          : [{ sourceId: kickoffSourceId, date, people }],
+      stakeholders: [],
+    }))
+  );
 };
 
 /** The organization's name, as its row has it. */
@@ -664,23 +693,51 @@ const viaOf = (source: string): Connection["via"] =>
  * active connection to it (their own, or a shared one), and the active
  * connections to entries an admin hid or the catalog doesn't list (a toolkit it no longer
  * lists, say). A native provider is connected directly; a toolkit through
- * Composio. A connection matches the tool names that are its name.
+ * Composio. A connection matches the tool names that are its name. One
+ * the Brain may keep some of the person's reads from says so
+ * (`keepsReads`).
  */
 const connectionsOf = async (
   env: Env,
   person: Identity
 ): Promise<Connection[]> => {
-  const [entries, listed] = await Promise.all([
+  const [entries, connecting] = await Promise.all([
     catalogEntries(env),
-    personOf(env, person).then(
-      async (connecting) => await env.CONNECT.listConnections(connecting)
-    ),
+    personOf(env, person),
   ]);
+  const listed = await env.CONNECT.listConnections(connecting);
+  const activeListed = listed.filter(({ status }) => status === "active");
   const active = new Set(
-    listed
-      .filter(({ status }) => status === "active")
+    activeListed.map(({ source, provider }) => entryKey(source, provider))
+  );
+  // What capture keeps by and disconnecting erases by
+  // (connection-capture-key.ts `mayHoldCapturesOf`): the person's own
+  // connection of a kind capture keeps reads from. The same rule, so the
+  // page never says nothing is kept from a connection that may hold some.
+  const keeping = new Set(
+    activeListed
+      .filter((connection) => mayHoldCapturesOf(connection, connecting.userId))
       .map(({ source, provider }) => entryKey(source, provider))
   );
+  const keepsReads = (key: string): { keepsReads?: true } =>
+    keeping.has(key) ? { keepsReads: true } : {};
+  // What can tell Grasp what changed in it, beside what is done through
+  // Grasp (GRA-1763): the person's own connection of a native connector
+  // with a sync. Connect syncs a shared one only in places someone
+  // picked, which none can be yet. Any other connected entry is a gap.
+  const observing = new Set(
+    activeListed
+      .filter(
+        ({ source, scope, ownerUserId, provider }) =>
+          source === "native" &&
+          scope === "personal" &&
+          ownerUserId === connecting.userId &&
+          Object.hasOwn(nativeSyncs, provider)
+      )
+      .map(({ source, provider }) => entryKey(source, provider))
+  );
+  const activityGap = (key: string): { activityGap?: true } =>
+    active.has(key) && !observing.has(key) ? { activityGap: true } : {};
   // A hidden entry isn't offered, but a connection to it still runs:
   // it stays, by its catalog name.
   const shown = entries.filter(
@@ -691,6 +748,8 @@ const connectionsOf = async (
     status: active.has(entryKey(source, id)) ? "connected" : "available",
     via: viaOf(source),
     matches: [name],
+    ...keepsReads(entryKey(source, id)),
+    ...activityGap(entryKey(source, id)),
   }));
   const listedKeys = new Set(
     entries.map(({ source, id }) => entryKey(source, id))
@@ -704,32 +763,35 @@ const connectionsOf = async (
         status: "connected",
         via: viaOf(source),
         matches: [provider],
+        ...keepsReads(each),
+        ...activityGap(each),
       };
     });
   return [...offered, ...unlisted];
 };
 
 /**
- * `teams` with each team the kickoff named joined to the team of its name
- * (any case): a roster team, or its record, found first in the kickoff,
- * with the size the sponsor gave beside the others. A kickoff team no
- * other team is named as stays a team of its own.
+ * The roster's teams and the records' own (`own`), with each team the
+ * kickoff named (`kickoff`) joined to the first of them of its name (any
+ * case), found first in the kickoff, with the size the sponsor gave
+ * beside the others. A kickoff team no other team is named as stays a
+ * team of its own, after the roster's.
  */
-const withKickoffTeams = (teams: Team[]): Team[] => {
+const withKickoffTeams = (
+  roster: Team[],
+  kickoff: Team[],
+  own: Team[]
+): Team[] => {
   const byName = new Map<string, Team>();
-  for (const team of teams) {
+  for (const team of [...roster, ...own]) {
     const key = nameKey(team.name);
-    if (!isKickoffTeam(team.id) && joinable(team.name) && !byName.has(key)) {
+    if (!byName.has(key)) {
       byName.set(key, team);
     }
   }
-  const joined = teams.filter((team) => {
-    if (!isKickoffTeam(team.id) || !joinable(team.name)) {
-      return true;
-    }
+  const alone = kickoff.filter((team) => {
     const into = byName.get(nameKey(team.name));
     if (into === undefined) {
-      byName.set(nameKey(team.name), team);
       return true;
     }
     // Found first in the kickoff: its values go before the others of
@@ -739,94 +801,66 @@ const withKickoffTeams = (teams: Team[]): Team[] => {
     into.stakeholders = [...team.stakeholders, ...into.stakeholders];
     return false;
   });
-  for (const team of joined) {
+  const teams = [...roster, ...alone, ...own];
+  for (const team of teams) {
     datedInOrder(team);
   }
-  return joined;
+  return teams;
 };
 
 /**
- * The onboarding's teams, with what the records added for each, then the
- * records' own. A value for a team the person can't see is left out. A
- * roster team's record (onboarding/brain-intake.ts) is that team, for
- * whoever can't read the roster: for an admin, the roster's team, which
- * is newer, with what was added for it.
+ * The onboarding's teams (the roster's, and the kickoff's), with what the
+ * records added for each, then the records' own. A value for a team the
+ * person can't see is left out.
  */
-const teamsOf = (onboarding: Team[], records: HeldRecords): Team[] => {
-  const byId = new Map(onboarding.map((team) => [team.id, team]));
-  const own = records.teams.filter((team) => {
-    const roster = byId.get(team.id);
-    roster?.counts.push(...team.counts);
-    roster?.stakeholders.push(...team.stakeholders);
-    return roster === undefined;
-  });
-  // Values for a team record were joined to it already; these are for the
-  // onboarding's teams, or (`withSuccessors`) moved to a record from a
-  // retired team.
-  for (const team of own) {
-    byId.set(team.id, team);
-  }
+const teamsOf = (
+  roster: Team[],
+  kickoff: Team[],
+  records: HeldRecords
+): Team[] => {
+  // A team record never takes an onboarding team's id (`team-<id>`, an
+  // `onb-` one): `brain.addRecords` refuses both.
+  const byId = new Map(
+    [...roster, ...kickoff, ...records.teams].map((team) => [team.id, team])
+  );
   for (const { teamId, value } of records.teamCounts) {
     byId.get(teamId)?.counts.push(value);
   }
   for (const { teamId, value } of records.stakeholders) {
     byId.get(teamId)?.stakeholders.push(value);
   }
-  return withKickoffTeams([...onboarding, ...own]);
+  return withKickoffTeams(roster, kickoff, records.teams);
 };
 
 /**
- * `records` with whatever names a team nobody reads as itself naming the
- * team that reads in its place: a retired team (a replaced kickoff's), the
- * first team of its name (any case), the roster's before the records';
- * and a kickoff team joined to a team of its name (`withKickoffTeams`),
- * that team. What admins added for it (a stakeholder, a count, a
+ * `records` with whatever names a kickoff team joined to a team of its
+ * name (`withKickoffTeams`) naming that team: what admins added for it (a
  * statement's team, a tool's, a source's, a gap's or a workflow's) is
- * never left behind on a team nobody reads. A retired team no team is
- * named as yet keeps them. A joined kickoff team's counts and
- * stakeholders stay its own: the join takes them, ordered as the kickoff
- * found them.
+ * never left behind on a team nobody reads. A joined kickoff team's counts
+ * and stakeholders stay its own: the join takes them, ordered as the
+ * kickoff found them.
  */
 const withSuccessors = (
-  onboarding: Team[],
+  roster: Team[],
+  kickoff: Team[],
   records: HeldRecords
 ): HeldRecords => {
-  const byName = teamsByName([...onboarding, ...records.teams]);
-  const successor = new Map(
-    records.retiredTeams.flatMap(({ id, name }) => {
-      const to = byName.get(nameKey(name));
+  // A kickoff team joins the first other team of its name, as
+  // `withKickoffTeams` joins them.
+  const others = teamsByName([...roster, ...records.teams]);
+  const joined = new Map(
+    kickoff.flatMap(({ id, name }) => {
+      const to = others.get(nameKey(name));
       return to === undefined || to === id ? [] : [[id, to] as const];
     })
   );
-  // A live kickoff team joins the first other team of its name, as
-  // `withKickoffTeams` joins them.
-  const others = teamsByName(
-    [...onboarding, ...records.teams].filter(({ id }) => !isKickoffTeam(id))
-  );
-  const joined = new Map(
-    records.teams.flatMap(({ id, name }) => {
-      const to = others.get(nameKey(name));
-      return isKickoffTeam(id) && to !== undefined && to !== id
-        ? [[id, to] as const]
-        : [];
-    })
-  );
-  if (successor.size === 0 && joined.size === 0) {
+  if (joined.size === 0) {
     return records;
   }
-  const one = (id: string): string => successor.get(id) ?? id;
-  const read = (id: string): string => joined.get(one(id)) ?? one(id);
+  const read = (id: string): string => joined.get(id) ?? id;
   const all = (named: string[]): string[] => [...new Set(named.map(read))];
   return {
     ...records,
-    teamCounts: records.teamCounts.map((each) => ({
-      ...each,
-      teamId: one(each.teamId),
-    })),
-    stakeholders: records.stakeholders.map((each) => ({
-      ...each,
-      teamId: one(each.teamId),
-    })),
     sources: records.sources.map((source) =>
       source.teamIds === undefined
         ? source
@@ -876,25 +910,29 @@ export const brainGaps = async (
 /**
  * What the onboarding gives the brain now, that a record may name: its
  * sources, the kickoff once brought in and the staff list once saved, and
- * the roster's teams, by the ids the admin gave them. The kickoff's teams
- * are records of their own.
+ * its teams: the roster's, by the ids the admin gave them, and the
+ * kickoff's (`kickoffTeamsOf`).
  */
 const onboardingHeld = async (env: Env): Promise<OnboardingHeld> => {
   const store = onboardingStore(env);
-  const [kickoffSourceAt, view, rosterSavedAt] = await Promise.all([
-    store.kickoffSourceAt(),
+  const [kickoff, view, rosterSavedAt] = await Promise.all([
+    store.companyKickoff(),
     store.view(),
     store.rosterSavedAt(),
   ]);
   const rosterTeams = view.roster?.teams ?? [];
+  const kickoffTeams = await kickoffTeamsOf(kickoff);
   return {
     sources: new Set([
-      ...(kickoffSourceAt === null ? [] : [kickoffSourceId]),
+      ...(kickoff === null ? [] : [kickoffSourceId]),
       ...(view.roster === null || rosterSavedAt === null
         ? []
         : [rosterSourceId]),
     ]),
-    teams: new Set(rosterTeams.map(({ id }) => ids.rosterTeam(id))),
+    teams: new Set([
+      ...rosterTeams.map(({ id }) => ids.rosterTeam(id)),
+      ...kickoffTeams.map(({ id }) => id),
+    ]),
   };
 };
 
@@ -940,33 +978,188 @@ const witnessed = (teams: readonly Team[], source: Source): Source => {
 };
 
 /**
+ * `records` without the kickoff's teams it no longer names: one a
+ * replaced kickoff named, or an earlier release's (its record removed by
+ * migration 0259), named by an admin's source, tool or statement. Such a
+ * team is no one's to read, so it is left out, never shown by its bare
+ * id, as its counts and stakeholders already are (`teamsOf`).
+ */
+const withoutGoneKickoffTeams = (
+  records: HeldRecords,
+  kickoff: readonly Team[]
+): HeldRecords => {
+  const named = new Set(kickoff.map(({ id }) => id));
+  const kept = (teamIds: readonly string[]): string[] =>
+    teamIds.filter(
+      (id) => !id.startsWith(kickoffTeamIdPrefix) || named.has(id)
+    );
+  return {
+    ...records,
+    sources: records.sources.map((source) =>
+      source.teamIds === undefined
+        ? source
+        : { ...source, teamIds: kept(source.teamIds) }
+    ),
+    tools: records.tools.map((tool) => ({
+      ...tool,
+      teamIds: kept(tool.teamIds),
+    })),
+    statements: records.statements.map((statement) => ({
+      ...statement,
+      teamIds: kept(statement.teamIds),
+    })),
+  };
+};
+
+/**
+ * The team claims standing now (onboarding/store.ts `standingClaims`) as
+ * the page's statements, for every member (GRA-1748): each in its team,
+ * citing the team's interviews, never who backs it. Its id starts with the
+ * onboarding's prefix, which no record an admin adds may take, and by
+ * which the page knows a team's claim (apps/web `isTeamClaim`).
+ */
+const claimStatements = async (
+  claims: readonly StandingClaim[]
+): Promise<Statement[]> =>
+  await Promise.all(
+    claims.map(async ({ source, team, kind, text }) => ({
+      id: `${onboardingIdPrefix}claim-${source}`,
+      kind,
+      text,
+      sourceId: await intakeIds.interviews(team),
+      teamIds: [intakeIds.team(team)],
+      toolIds: [],
+    }))
+  );
+
+/**
+ * The company's opinions standing now (onboarding/store.ts
+ * `standingOpinions`, GRA-1987) as the page's statements, for every
+ * member: each of no team, citing the one source of them all
+ * (`opinionsSource`), never who or how many back it. Its id starts with
+ * the onboarding's prefix, so the page never quotes it as someone's words.
+ */
+const opinionStatements = (opinions: readonly StandingOpinion[]): Statement[] =>
+  opinions.map(({ source, kind, text }) => ({
+    id: `${companyOpinionIdPrefix}${source}`,
+    kind,
+    text,
+    sourceId: companyOpinionsSourceId,
+    teamIds: [],
+    toolIds: [],
+  }));
+
+/**
+ * The one source the company's opinions name on the page, while any
+ * stands: no team, no count of anyone, and the day of the earliest one
+ * standing, which a run of five people's changes put together, never one
+ * person's moment. The page words its title in the reader's language.
+ */
+const opinionsSource = (opinions: readonly StandingOpinion[]): Source[] => {
+  const [first] = opinions.map(({ at }) => at).toSorted();
+  return first === undefined
+    ? []
+    : [
+        {
+          id: companyOpinionsSourceId,
+          kind: "interview",
+          title: "What people across the company say",
+          date: first,
+          step: 2,
+        },
+      ];
+};
+
+/**
+ * The drawings standing now (onboarding/store.ts `standingDrawings`) as
+ * the page's workflows, for every member (GRA-1748): each piece of work in
+ * its team with its one drawing, the drawing its baseline, citing the
+ * team's interviews; never who told what. Its id is the one the
+ * onboarding gives the piece of work, so what names it keeps naming it
+ * through every drawing.
+ */
+const drawingWorkflows = (drawings: readonly StandingDrawing[]): Workflow[] =>
+  drawings.map(({ workflow, team, name, local, drawing }) => {
+    const { type: _type, workflowId: _workflow, ...value } = drawing;
+    return {
+      id: workflow,
+      name,
+      ...(local === undefined ? {} : { local }),
+      teamId: intakeIds.team(team),
+      status: "drawn",
+      baseline: { steps: stepsOf(value) },
+      drawings: [value],
+    };
+  });
+
+/**
  * What every read of the brain starts from, as `person` may read it: the
  * onboarding (an admin's alone), the brain's records, and its teams.
  */
 interface BrainCore {
   facts: OnboardingFacts | null;
+  /** What every member reads of the kickoff; null before it is in. */
+  kickoff: CompanyKickoff | null;
   records: ReturnType<typeof withSuccessors>;
   teams: Workspace["teams"];
+  /** The one source the company's opinions name, while any stands (`opinionsSource`). */
+  opinions: Source[];
 }
 
 const readBrainCore = async (
   env: Env,
   person: Pick<Identity, "role">
 ): Promise<BrainCore> => {
-  const [facts, held] = await Promise.all([
-    onboardingFacts(env, person),
-    readBrainRecords(env),
-  ]);
-  const onboarding = onboardingTeams(facts);
-  const records = withSuccessors(onboarding, held);
-  return { facts, records, teams: teamsOf(onboarding, records) };
+  const store = onboardingStore(env);
+  const [facts, kickoff, companyTeams, held, claims, drawings, opinions] =
+    await Promise.all([
+      onboardingFacts(env, person),
+      store.companyKickoff(),
+      store.companyTeams(),
+      readBrainRecords(env),
+      store.standingClaims(),
+      store.standingDrawings(),
+      store.standingOpinions(),
+    ]);
+  // An admin reads the roster whole: every team, roles counted and its
+  // leads' roles. Everyone else reads the teams as the admin confirmed
+  // them, which are the company's (GRA-1748, the owner on 17 November).
+  const roster =
+    facts === null ? confirmedTeams(companyTeams) : onboardingTeams(facts);
+  const kickoffTeams = await kickoffTeamsOf(kickoff);
+  const records = withSuccessors(roster, kickoffTeams, {
+    ...held,
+    statements: [
+      ...held.statements,
+      ...(await claimStatements(claims)),
+      ...opinionStatements(opinions),
+    ],
+    workflows: [...held.workflows, ...drawingWorkflows(drawings)],
+  });
+  return {
+    facts,
+    kickoff,
+    records: withoutGoneKickoffTeams(records, kickoffTeams),
+    teams: teamsOf(roster, kickoffTeams, records),
+    opinions: opinionsSource(opinions),
+  };
+};
+
+/**
+ * The brain's teams, every one, as an admin reads them: the ones its
+ * regions may name (brain-team-groups.ts). The one place that says which
+ * teams the Brain has, for regrouping them and for arranging them.
+ */
+export const brainTeams = async (env: Env): Promise<Team[]> => {
+  const { teams } = await readBrainCore(env, { role: "admin" });
+  return teams;
 };
 
 /**
  * The brain's teams, what they said and its workflows, as `person` may
  * read them, as `readBrain` reads them: what a step of a chat's thinking
- * may name (agent-thinking.ts). What a team said is a claim five or more
- * of its people made, or none.
+ * may name (agent-thinking.ts). What a team said is a claim of how it
+ * works, from what its people shared as how it works (GRA-1987), or none.
  */
 export const readThinkingBrain = async (
   env: Env,
@@ -987,7 +1180,7 @@ export const readThinkingBrain = async (
  */
 const recordSources = async (
   env: Env,
-  { facts, records, teams }: BrainCore
+  { facts, kickoff, records, teams, opinions }: BrainCore
 ): Promise<Source[]> => {
   const named = new Set(
     [
@@ -1001,7 +1194,7 @@ const recordSources = async (
         versions.map(({ sourceId }) => sourceId)
       ),
       ...teams.flatMap(teamSources),
-      ...records.visions.map(({ sourceId }) => sourceId),
+      ...(kickoff === null ? [] : [kickoffSourceId]),
     ].filter(
       (id) =>
         id === kickoffSourceId || id === rosterSourceId || isTeamInterviews(id)
@@ -1011,7 +1204,7 @@ const recordSources = async (
     facts === null
       ? await sourcesForRecords(env, named)
       : onboardingSources(facts).map(({ source }) => source);
-  return [...sources, ...records.sources];
+  return [...sources, ...opinions, ...records.sources];
 };
 
 /** The brain's workspace, as `person` may read it. */
@@ -1019,16 +1212,14 @@ export const readBrain = async (
   env: Env,
   person: Identity
 ): Promise<Workspace> => {
-  const [core, name, connections, transcribed, groups, weeks] =
-    await Promise.all([
-      readBrainCore(env, person),
-      organizationName(env),
-      connectionsOf(env, person),
-      knowledgeTranscriptSources(env, person),
-      teamGroupsOf(env),
-      onboardingStore(env).interviewWeeks(),
-    ]);
-  const { facts, records, teams } = core;
+  const [core, name, connections, groups, weeks] = await Promise.all([
+    readBrainCore(env, person),
+    organizationName(env),
+    connectionsOf(env, person),
+    teamGroupsOf(env),
+    onboardingStore(env).interviewWeeks(),
+  ]);
+  const { facts, kickoff, records, teams } = core;
   const sources = await recordSources(env, core);
 
   const company: Company = {
@@ -1039,7 +1230,7 @@ export const readBrain = async (
 
   return {
     company,
-    vision: visionOf(records, facts),
+    vision: visionOf(kickoff, facts),
     goals: await goalsFor(env, person, records.goals),
     teams,
     // A group names only the teams this reader has; one left with none is
@@ -1052,9 +1243,7 @@ export const readBrain = async (
     }),
     interviewWeeks: weeks,
     tools: toolsOf(documentTools(facts, teamsByName(teams)), records.tools),
-    sources: [...sources, ...transcribed].map((source) =>
-      witnessed(teams, source)
-    ),
+    sources: sources.map((source) => witnessed(teams, source)),
     statements: records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
@@ -1101,12 +1290,8 @@ export const readThinkingGround = async (
 };
 
 /**
- * The company brain over `/rpc`: for anyone signed in. Of its workspace,
- * only the Knowledge documents it lists as transcript sources are audited,
- * as the Knowledge read that listing is; the rest reads nothing from
- * Knowledge. Opening a source's transcript is audited as that one read
- * (brain-transcripts.ts). Its changes are, as the Knowledge read they are
- * (brain-changes.ts). Adding records is, with the records it added;
+ * The company brain over `/rpc`: for anyone signed in. It reads nothing
+ * from Knowledge. Adding records is audited, with the records it added;
  * taking them out is, by each record's key (brain-forget.ts).
  */
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
@@ -1166,26 +1351,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     });
   }
 
-  async transcript(sourceId: unknown): Promise<Transcript | null> {
-    return await withPerson(
-      this.#check,
-      async (person) => await brainTranscript(this.#env, person, sourceId)
-    );
-  }
-
-  async changes(options: unknown): Promise<BrainChangePage> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await brainChanges(
-          brainOf(this.#env),
-          person,
-          options,
-          sourceChanges(await onboardingFacts(this.#env, person))
-        )
-    );
-  }
-
   async addRecords(records: BrainRecordInput[]): Promise<BrainRecordsAdded> {
     return await withPerson(
       this.#check,
@@ -1213,24 +1378,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     );
   }
 
-  /** The brain's teams as `person` reads them. */
-  async #teams(person: Identity): Promise<Team[]> {
-    const { teams } = await readBrain(this.#env, person);
-    return teams;
-  }
-
-  async proposeTeamGroups(): Promise<TeamGroup[]> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await proposeTeamGroups(
-          this.#env,
-          person,
-          async () => await this.#teams(person)
-        )
-    );
-  }
-
   async saveTeamGroups(groups: unknown): Promise<TeamGroup[]> {
     return await withPerson(
       this.#check,
@@ -1239,7 +1386,7 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
           this.#env,
           person,
           groups,
-          async () => await this.#teams(person)
+          async () => await brainTeams(this.#env)
         )
     );
   }

@@ -1,6 +1,9 @@
 import type { ToolClass } from "@grasp-os/shared/connect";
 
-import { composioClasses as shipped } from "../../src/composio-classes.ts";
+import {
+  composioClasses as shipped,
+  toolkitsWithoutCopies as shippedWithoutCopies,
+} from "../../src/composio-classes.ts";
 import type { ComposioClasses } from "../../src/composio-classes.ts";
 
 // The release's table (src/composio-classes.ts), with the classes of the
@@ -13,6 +16,11 @@ import type { ComposioClasses } from "../../src/composio-classes.ts";
 
 export const composioClasses: Record<string, Record<string, ToolClass>> = {
   ...shipped,
+  // The fake's toolkit that takes a key.
+  pipedesk: {
+    PIPEDESK_LIST_DEALS: "read-company",
+    PIPEDESK_ADD_NOTE: "change-company",
+  },
   hubspot: {
     HUBSPOT_LIST_CONTACTS: "read-company",
     HUBSPOT_GET_CONTACT: "read-company",
@@ -82,4 +90,22 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
   // A toolkit slugged as a native provider (pending.test.ts): classed, so
   // what keeps it apart from the native connector is that it's Composio's.
   microsoft: { "mail.send": "reach-others" },
+  // The tests' mail server under a toolkit whose terms forbid copies
+  // (`toolkitsWithoutCopies`): core's connection-capture.test.ts.
+  mail_private: { "mail.search": "read-company", "mail.send": "reach-others" },
+  // The tests' mail server as a toolkit reaching its person's own mail:
+  // what core keeps of a person's own reads (connection-capture.test.ts).
+  mail_own: {
+    "mail.search": "read-own",
+    "mail.read": "read-own",
+    // Reads someone else's mail: never kept (GRA-1845).
+    "mail.others": "read-others",
+    "mail.send": "reach-others",
+  },
 } satisfies ComposioClasses;
+
+/** The release's, and the tests' mail server under `mail_private`. */
+export const toolkitsWithoutCopies: ReadonlySet<string> = new Set([
+  ...shippedWithoutCopies,
+  "mail_private",
+]);

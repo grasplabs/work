@@ -7,6 +7,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import {
+  outsideApiInsideOrigin,
+  outsideApiOrigin,
+} from "../../connect/test/outside-api-fake.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
@@ -15,14 +19,10 @@ import {
   httpReadCatalogContract,
 } from "../src/release-contracts.ts";
 import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
-import { commitApp, testApp } from "./app-definitions.ts";
+import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { requestGranted } from "./apps.ts";
-import {
-  httpApiInsideOrigin,
-  httpApiOrigin,
-  httpApiReceivedUrl,
-} from "./connect-providers.ts";
+import { commitApp, requestGranted } from "./apps.ts";
+import { httpApiReceivedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   definitionOf,
@@ -145,14 +145,14 @@ const invoicesApp = async () => {
   const builder = await signedInApi(idp, "builder");
   const { connectionId } = await admin.api.connections.createHttp({
     name: "Billing API",
-    origin: httpApiOrigin,
+    origin: outsideApiOrigin,
     pathPrefixes: ["/v1"],
     methods: ["GET", "POST"],
     credential: { kind: "bearer", token: secret },
   });
   const created = await builder.api.apps.create({ name: "Invoices" });
-  await commitApp(builder.api.apps.files, created.id, billingFiles(), "First");
-  await builder.api.apps.versions.publish(created.id, 1);
+  await commitApp(builder.api, created.id, billingFiles());
+  await builder.api.versions.rollback({ kind: "app", id: created.id }, 1);
   const requested = await builder.api.permissions.request({
     subject: { type: "app", appId: created.id },
     object: { type: "connection", connectionId },
@@ -200,7 +200,7 @@ describe("an App calling an outside API", () => {
     const builder = await signedInApi(idp, "builder");
     const connection = {
       name: "Billing API",
-      origin: httpApiOrigin,
+      origin: outsideApiOrigin,
       methods: ["GET" as const],
       credential: { kind: "bearer" as const, token: secret },
     };
@@ -212,7 +212,7 @@ describe("an App calling an outside API", () => {
         async () =>
           await admin.api.connections.createHttp({
             ...connection,
-            origin: httpApiInsideOrigin,
+            origin: outsideApiInsideOrigin,
           })
       ),
       await failure(
@@ -233,7 +233,7 @@ describe("an App calling an outside API", () => {
     ]);
     expect(listed.find(({ id }) => id === connectionId)).toMatchObject({
       source: "http",
-      http: { origin: httpApiOrigin, credentialHeader: "authorization" },
+      http: { origin: outsideApiOrigin, credentialHeader: "authorization" },
     });
     expect(JSON.stringify(listed)).not.toContain(secret);
   });
@@ -296,17 +296,17 @@ describe("an App calling an outside API", () => {
     }).toStrictEqual({
       reached: [
         {
-          sent: `GET ${httpApiOrigin}/v1/invoices?status=open`,
+          sent: `GET ${outsideApiOrigin}/v1/invoices?status=open`,
           authorization: `Bearer ${secret}`,
           body: "",
         },
         {
-          sent: `POST ${httpApiOrigin}/v1/invoices`,
+          sent: `POST ${outsideApiOrigin}/v1/invoices`,
           authorization: `Bearer ${secret}`,
           body: '{"amount":10}',
         },
         {
-          sent: `GET ${httpApiOrigin}/v1/moved`,
+          sent: `GET ${outsideApiOrigin}/v1/moved`,
           authorization: `Bearer ${secret}`,
           body: "",
         },
@@ -323,7 +323,7 @@ describe("the chat and an outside API", () => {
     const person = await signedInApi(idp, "user");
     const { connectionId } = await admin.api.connections.createHttp({
       name: "Billing API",
-      origin: httpApiOrigin,
+      origin: outsideApiOrigin,
       pathPrefixes: ["/v1"],
       methods: ["GET"],
       credential: { kind: "bearer", token: secret },
@@ -363,7 +363,7 @@ describe("the chat and an outside API", () => {
           {
             connectionId,
             provider: "http",
-            account: `Billing API (${httpApiOrigin})`,
+            account: `Billing API (${outsideApiOrigin})`,
             scope: "shared",
             actions: ["get"],
             decidedBy: "admin",
@@ -407,7 +407,7 @@ describe("a JSON workflow calling an outside API", () => {
     await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
     const { connectionId } = await admin.api.connections.createHttp({
       name: "Billing API",
-      origin: httpApiOrigin,
+      origin: outsideApiOrigin,
       pathPrefixes: ["/v1/invoices"],
       methods: ["GET", "POST"],
       credential: { kind: "header", header: "x-api-key", secret },
@@ -456,7 +456,7 @@ describe("a JSON workflow calling an outside API", () => {
     ).toStrictEqual([
       {
         method: "POST",
-        url: `${httpApiOrigin}/v1/invoices`,
+        url: `${outsideApiOrigin}/v1/invoices`,
         key: secret,
         body: '{"who":"Ada"}',
       },
@@ -483,7 +483,7 @@ describe("a JSON workflow's HTTP contract", () => {
     await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
     const { connectionId } = await admin.api.connections.createHttp({
       name: "Billing API",
-      origin: httpApiOrigin,
+      origin: outsideApiOrigin,
       pathPrefixes: ["/v1/invoices"],
       methods: ["GET"],
       credential: { kind: "header", header: "x-api-key", secret },

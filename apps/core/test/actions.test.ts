@@ -30,9 +30,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { keepsReceipt } from "../src/action-invocation.ts";
 import { functionRoles } from "../src/app-access.ts";
 import { invocationFor } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
-import { createApp } from "../src/apps.ts";
+import { appKind, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { callMaxNested } from "../src/call-limits.ts";
 import { openStore } from "../src/data-stores.ts";
@@ -52,6 +51,7 @@ import type {
   Runner,
   UseRefusal,
 } from "../src/function-host.ts";
+import { rollback } from "../src/publish.ts";
 import { hostedRelease } from "../src/release-runner.ts";
 import { testApp } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
@@ -86,10 +86,7 @@ const mailTo = (to: string) => ({
   to: [to],
 });
 const ai = permission.ai({ maxOutputTokens: 200 });
-const brain = permission.brain({
-  operations: ["search"],
-  collections: ["handbook"],
-});
+const brain = permission.brain({ operations: ["recall"] });
 // Guest chats it lists and reads, and never invites.
 const guests = permission.guests({ operations: ["list", "read"] });
 // The platform's functions, which serve only the paths they declare.
@@ -245,13 +242,16 @@ const summarize = action({
     }),
 });
 
-const searchHelp = action({
+const recallHelp = action({
   args: { text: v.string().min(1) },
-  returns: v
-    .array(v.object({ title: v.string(), excerpt: v.string() }))
-    .max(20),
-  handler: async (ctx, args) =>
-    await ctx.brain.search({ text: args.text, limit: 5 }),
+  returns: v.array(v.string()),
+  handler: async (ctx, args) => {
+    const pack = await ctx.brain.recall({
+      question: args.text,
+      budget: { tokens: 500 },
+    });
+    return pack.items.map(({ text }) => text);
+  },
 });
 
 const listGuests = action({
@@ -571,7 +571,7 @@ const notesApp = registerApp({
       recover,
       sendMail,
       summarize,
-      searchHelp,
+      recallHelp,
       streaming,
       nestsStreaming,
       emitsAnyway,
@@ -1264,7 +1264,46 @@ describe("resources", () => {
         }
       )
     );
+    // A Brain declared for `recall` alone, asked for its skills past the
+    // client, which has no member for them: refused before the binding
+    // hears of it.
+    let recalled = false;
+    const skillsOf = async (operation: string, request: unknown) =>
+      codeOf(
+        await call(
+          fixture,
+          "action",
+          "actions.recallHelp",
+          { text: "leave" },
+          {
+            resources: bindingsOf({
+              brain: bound("brain", null, async () => {
+                recalled = true;
+                return await Promise.resolve(null);
+              }),
+            }),
+            run: misusing(
+              "actions.recallHelp",
+              async (channel) =>
+                await channel.permission("brain", operation, [request])
+            ),
+          }
+        )
+      );
+    const skills = {
+      select: await skillsOf("skills.select", { task: "leave" }),
+      read: await skillsOf("skills.read", {
+        skill: { scope: "grasp", name: "draw-a-workflow", version: 1 },
+      }),
+      // Nor, declared for `recall` alone, may it read entities.
+      card: await skillsOf("entities.get", {
+        entity: "00000000-0000-4000-8000-000000000000",
+      }),
+      found: await skillsOf("entities.find", { kind: "customer" }),
+      recalled,
+    };
     expect({
+      skills,
       undeclaredAction: await attempt(
         async (channel) =>
           await channel.permission("mail", "call", ["delete", {}])
@@ -1288,6 +1327,13 @@ describe("resources", () => {
       invite,
       invited,
     }).toStrictEqual({
+      skills: {
+        select: "permission.not_allowed",
+        read: "permission.not_allowed",
+        card: "permission.not_allowed",
+        found: "permission.not_allowed",
+        recalled: false,
+      },
       undeclaredAction: "permission.not_allowed",
       undeclaredAlias: "permission.not_allowed",
       workflowAsResource: "permission.not_allowed",
@@ -1336,6 +1382,15 @@ describe("resources", () => {
 
   it("check what AI and the Brain answer against their contracts", async () => {
     const fixture = await notes();
+    const item = {
+      source: { producer: "upload", id: "handbook" },
+      version: 1,
+      position: 0,
+      text: "Ask your lead before you take leave.",
+      whole: true,
+      found: "words",
+    };
+    const pack = { items: [item], notFound: [], truncated: false };
     const summarizeWith = async (answer: unknown) =>
       await call(
         fixture,
@@ -1348,11 +1403,11 @@ describe("resources", () => {
           }),
         }
       );
-    const searchWith = async (answer: unknown) =>
+    const recallWith = async (answer: unknown) =>
       await call(
         fixture,
         "action",
-        "actions.searchHelp",
+        "actions.recallHelp",
         { text: "leave" },
         {
           resources: bindingsOf({
@@ -1367,17 +1422,17 @@ describe("resources", () => {
     expect({
       summary: valueOf(await summarizeWith({ summary: "Short" })),
       summaryWrong: codeOf(await summarizeWith({ summary: 1 })),
-      hits: valueOf(
-        await searchWith([{ title: "Leave", excerpt: "Days off" }])
-      ),
-      hitsWithMore: codeOf(
-        await searchWith([{ title: "Leave", excerpt: "Days off", secret: "x" }])
+      pack: valueOf(await recallWith(pack)),
+      packWithMore: codeOf(await recallWith({ ...pack, secret: "x" })),
+      itemWithMore: codeOf(
+        await recallWith({ ...pack, items: [{ ...item, secret: "x" }] })
       ),
     }).toStrictEqual({
       summary: { summary: "Short" },
       summaryWrong: "contract.invalid_permission_result",
-      hits: [{ title: "Leave", excerpt: "Days off" }],
-      hitsWithMore: "contract.invalid_permission_result",
+      pack: ["Ask your lead before you take leave."],
+      packWithMore: "contract.invalid_permission_result",
+      itemWithMore: "contract.invalid_permission_result",
     });
   });
 });
@@ -2525,6 +2580,7 @@ export const stamp = mutation({
         { manifest: release.app, run: hostedRelease(env, release).run },
         await invocationFor(env, release, {
           by: fixture.owner,
+          origin: "page",
           requestId,
           deadline: Date.now() + 30_000,
         }),
@@ -2697,7 +2753,7 @@ export const both = action({
         }
       )
     );
-    await publishVersion(env, fixture.owner, fixture.app, 1);
+    await rollback(env, appKind, fixture.owner, fixture.app, 1);
     const release = await loadRelease(env, fixture.app, 1);
     const appId = appIdSchema.parse(fixture.app);
     // A member of the App in no team, who isn't one of its builders.
@@ -2721,6 +2777,7 @@ export const both = action({
         { manifest: release.app, run: hostedRelease(env, release).run },
         await invocationFor(env, release, {
           by,
+          origin: "page",
           requestId,
           deadline: Date.now() + 30_000,
         }),
@@ -2852,6 +2909,7 @@ export const probe = action({ args: {}, returns: v.null(), handler: async () => 
       { manifest: release.app, run },
       await invocationFor(env, release, {
         by: fixture.owner,
+        origin: "page",
         requestId: personRequest,
         deadline: Date.now() + 30_000,
       }),

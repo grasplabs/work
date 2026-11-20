@@ -270,7 +270,6 @@ describe("a person erased", { timeout: 120_000 }, () => {
     const erased = await leftOf(marks);
     await restoreStore(copy);
     const restored = await leftOf(marks);
-    const entries = await ledgerOf(person.userId);
 
     expect({
       before: before.items.length,
@@ -288,8 +287,6 @@ describe("a person erased", { timeout: 120_000 }, () => {
             await recalled({ person: person.userId, groups: [] }, mark)
         )
       ),
-      // A retry writes the erasure the failed call recorded, then its own.
-      inLedger: entries.length > 0,
       erased,
       restored,
     }).toStrictEqual({
@@ -303,7 +300,6 @@ describe("a person erased", { timeout: 120_000 }, () => {
         brain: { area: "brain_sources", state: "complete" },
       },
       recalled: [0, 0],
-      inLedger: true,
       erased: nothingLeft,
       restored: nothingLeft,
     });

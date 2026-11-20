@@ -34,8 +34,14 @@ import { onboardingStore } from "./store.ts";
 // - Someone in the company reaching the platform before Grasp's go: while
 //   the gate is closed, a sign-in through the company's IdP is refused
 //   (`not_open_yet`) unless its email is one of the admins named in
-//   `SIGN_IN`; no user, no membership and no session is made for them.
-//   Grasp's staff sign in as ever.
+//   `SIGN_IN`, or one an interview link went to (GRA-1790); no user, no
+//   membership and no session is made for anyone else. Grasp's staff sign
+//   in as ever.
+// - Someone signing in for their interview reaching anything else: their
+//   session is marked as an interview's (`sessions.interview`), no
+//   membership is made, every route but the interview's finds nobody
+//   behind it (identity.ts `sessionIdentity`), and opening the gate ends
+//   it, so they sign in again as a member.
 // - A session from before the gate closed: closing it ends every session
 //   but staff's and those admins', in the same batch.
 // - Opening or closing it without a trace, or by anyone else: only staff
@@ -338,7 +344,9 @@ export type GateOpening = "go" | "finished" | "no_onboarding";
 
 /**
  * Opens the gate to everyone in the company: on Grasp's go, unless
- * `reason` says the company's flow opened it. On record with why.
+ * `reason` says the company's flow opened it. On record with why. Every
+ * session for an interview alone ends in the same batch: whoever had one
+ * signs in again, and joins as a member.
  */
 export const openGate = async (
   env: Env,
@@ -364,6 +372,7 @@ export const openGate = async (
       target: { type: "deployment", id: gateRow },
       detail: { reason },
     }),
+    db.delete(sessions).where(eq(sessions.interview, true)),
   ]);
 };
 

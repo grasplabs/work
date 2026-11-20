@@ -65,7 +65,6 @@ export const interviewTurnMaxBytes = 768 * 1024;
  */
 export const interviewTurnRequestSchema = z.strictObject({
   secret: interviewSecretSchema,
-  key: interviewSecretSchema,
   event: z.enum(interviewEvents),
   locale: interviewLocaleSchema,
   /** Who holds the interview: the one they chose on the way in. */

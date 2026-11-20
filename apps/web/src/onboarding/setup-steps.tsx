@@ -83,6 +83,8 @@ import {
 } from "./connect-steps.tsx";
 import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
+import { ForgetKickoff } from "./forget-kickoff.tsx";
+import { ForgetTeams } from "./forget-teams.tsx";
 import { HrLeads } from "./hr-leads.tsx";
 import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
@@ -476,6 +478,7 @@ const Welcome = (props: StepProps) => {
   const chosen = localeNames[isLocale(i18n.locale) ? i18n.locale : "en"];
   const minutes = onboardingMinutes;
   const asked = useAsked(lines, picked);
+  const refresh = useRefresh();
   return (
     <>
       {/* The question is the end of what Stephen says, not a line after it; answered, he says so in the new language. */}
@@ -513,6 +516,7 @@ const Welcome = (props: StepProps) => {
       >
         {t`Let’s start`}
       </Primary>
+      <ForgetKickoff kickoff={props.data.view.kickoff} onForgotten={refresh} />
     </>
   );
 };
@@ -612,6 +616,26 @@ const companyStep = "/setup?step=company";
 type DirectoryProblem = "large" | "empty" | "inactive" | "failed";
 
 /**
+ * What core's refusal of a directory read means for the company step: too
+ * large, a connection an admin's account must make again ("inactive",
+ * whose sentence asks for one), or a failure of the moment.
+ */
+export const directoryProblemOf = (
+  error: unknown
+): Exclude<DirectoryProblem, "empty"> => {
+  const code = directoryErrors.codeOf(error);
+  if (code === "directory.too_large") {
+    return "large";
+  }
+  // Each asks for the directory connected again by an admin's account.
+  return code === "directory.inactive" ||
+    code === "directory.not_admin" ||
+    code === "directory.not_connected"
+    ? "inactive"
+    : "failed";
+};
+
+/**
  * Who works where, from the connected directory, as a roster with what the
  * admin set on the one saved before kept: the same path a staff list
  * takes, so everyone keeps their id and their link. Or why it could not be.
@@ -635,13 +659,7 @@ const readDirectoryRoster = async (
     if (error instanceof StaffListError) {
       return error.reason === "empty" ? "empty" : "large";
     }
-    const code = directoryErrors.codeOf(error);
-    if (code === "directory.too_large") {
-      return "large";
-    }
-    return code === "directory.inactive" || code === "directory.not_connected"
-      ? "inactive"
-      : "failed";
+    return directoryProblemOf(error);
   }
 };
 
@@ -1164,6 +1182,8 @@ const Documents = (props: StepProps) => {
   const saidProblemOf = useSaidProblemOf();
   const [pending, setPending] = useState<Pending[]>([]);
   const [fresh, setFresh] = useState(false);
+  // Why a document that was read could not be removed.
+  const [removeProblem, setRemoveProblem] = useState<string>();
   // Whether the step is still on screen: a reading that ends after it is left is kept, but not said.
   const here = useRef(true);
   useEffect(() => {
@@ -1220,7 +1240,7 @@ const Documents = (props: StepProps) => {
     }
     told.current += 1;
   };
-  // Core keeps two documents of the same name as two: each row is its own upload, by an id of its own.
+  // Core keeps two documents of the same name as two: each is its own upload in the Brain, by an id of its own.
   const take = (from: (File | PickedFile)[]) => {
     const added = from.map((each, at): Pending => ({
       key: crypto.randomUUID(),
@@ -1329,6 +1349,19 @@ const Documents = (props: StepProps) => {
       await refresh();
     }
   };
+  // A document that was read, removed in core: its reading forgotten, its file erased when theirs.
+  const removeKept = async (id: string): Promise<boolean> => {
+    setRemoveProblem(undefined);
+    const removed = await run(async (session) => {
+      await session.onboarding.removeDocument(id);
+      return true;
+    }, setRemoveProblem);
+    if (removed !== true) {
+      return false;
+    }
+    await refresh();
+    return true;
+  };
   const reading = pending.filter((each) => each.state === "reading");
   const count = kept.length;
   const rows: DocumentRow[] = [
@@ -1361,11 +1394,17 @@ const Documents = (props: StepProps) => {
       <Onward>
         <DocumentDrop
           onAdd={take}
-          onRemove={(row) => {
+          onRemove={async (row) => {
+            if (row.state === "read") {
+              return await removeKept(row.key);
+            }
             setPending((now) => now.filter((each) => each.key !== row.key));
+            return true;
           }}
           rows={rows}
         />
+        <p className="text-muted-foreground text-xs">{t`I keep each file in your Brain, for you alone. What I read in it, never the file itself, helps me in the interviews with the teams it is about, or with every team when it names none.`}</p>
+        <ErrorText>{removeProblem}</ErrorText>
         {suites.length === 0 ? null : (
           <div className="flex flex-col items-center gap-2">
             <div className="flex flex-wrap justify-center gap-2">
@@ -1634,6 +1673,10 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
           redraft(roster);
         }}
         roster={draft}
+      />
+      <ForgetTeams
+        onErased={refresh}
+        teamsInBrain={props.data.view.teamsInBrain}
       />
     </>
   );

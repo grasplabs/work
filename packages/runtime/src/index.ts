@@ -30,9 +30,21 @@ export type {
 export type { HttpContract } from "@grasp-os/shared/http-contract";
 export type { GraspFunctions } from "./grasp-functions.ts";
 export type {
+  BrainFound,
+  BrainPack,
+  BrainPackItem,
+  BrainRecall,
+  BrainRemember,
+  BrainSkill,
+  BrainSkillText,
+  BrainCard,
+  BrainEntity,
+  BrainEntityKind,
+  BrainMemory,
+} from "./brain-recall.ts";
+export type {
   AiClient,
   BrainClient,
-  BrainHit,
   ConnectionClient,
   GuestsClient,
   HttpClient,

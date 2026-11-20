@@ -30,8 +30,8 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Any published version of an independent workflow, as its builders read
-// it (GRA-1329): its definition exactly as published
-// (`workflowResources.definition`), and its portable source, the
+// it (GRA-1329), by its label: its definition exactly as published
+// (`versions.files`, its one file `workflow.json`), and its portable source, the
 // definition and the code generated from it read back from what was
 // sealed (`workflowResources.source`), each file to download. Core gives
 // both to the workflow's builders alone; nothing here changes a version.
@@ -71,24 +71,29 @@ export const VersionSource = ({
   const { busy, failure, run } = useCoreAction();
   const published =
     versions.state === "ready"
-      ? versions.data.map(({ version }) => version).toSorted((a, b) => a - b)
+      ? versions.data.toSorted((a, b) => a.version - b.version)
       : [];
-  const [chosen, setChosen] = useState(published.at(-1));
+  const [chosen, setChosen] = useState(published.at(-1)?.version);
   const [shown, setShown] = useState<{ version: number; text: string }>();
   const [source, setSource] = useState<{
     version: number;
     files: WorkflowVersionSource["files"];
   }>();
+  /** What people call version `version`: its label, once it went live. */
+  const nameOf = (version: number): string =>
+    published.find((each) => each.version === version)?.label ??
+    t`Version ${version}`;
 
   if (!builder || chosen === undefined) {
     return null;
   }
 
   const show = async (): Promise<void> => {
-    const text = await run(
+    const files = await run(
       async (session) =>
-        await session.workflowResources.definition(workflow, chosen)
+        await session.versions.files({ kind: "workflow", id: workflow }, chosen)
     );
+    const text = files?.["workflow.json"];
     if (text !== undefined) {
       setShown({ version: chosen, text });
     }
@@ -104,16 +109,16 @@ export const VersionSource = ({
     }
   };
 
-  const shownVersion = shown?.version;
-  const sourceVersion = source?.version;
+  const shownVersion = shown === undefined ? "" : nameOf(shown.version);
+  const sourceVersion = source === undefined ? "" : nameOf(source.version);
   return (
     <SectionCard density="compact" title={t`A version's definition and source`}>
       <div {...stylex.props(styles.body)}>
         <div {...stylex.props(styles.pick)}>
           <Select
-            items={published.map((version) => ({
+            items={published.map(({ version }) => ({
               value: String(version),
-              label: t`Version ${version}`,
+              label: nameOf(version),
             }))}
             onValueChange={(value) => {
               if (value !== null) {

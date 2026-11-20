@@ -189,7 +189,16 @@ const principal = (kind: string) => `${kind}-${crypto.randomUUID()}`;
 
 const audience = (group: string): Access => ({ kind: "audience", group });
 
-const owner = (person: string): Access => ({ kind: "owner", person });
+/**
+ * A group only `person` is in, what they alone read here by, and them as
+ * a reader: the shared store keeps nothing for one person alone.
+ */
+const soleGroupOf = (person: string): string => `alone:${person}`;
+const readBy = (person: string): Access => audience(soleGroupOf(person));
+const readerOf = (person: string): Reader & { person: string } => ({
+  person,
+  groups: [soleGroupOf(person)],
+});
 
 /** The company's readers. */
 const readers = {
@@ -388,14 +397,14 @@ const withRemoved = async () => {
   const model = newModel();
   const question = randomSigns();
   const person = principal("person");
-  const reader = { person, groups: [] };
-  const first = randomly(await sourceOf(owner(person), 600));
-  const second = randomly(await sourceOf(owner(person), 600));
+  const reader = readerOf(person);
+  const first = randomly(await sourceOf(readBy(person), 600));
+  const second = randomly(await sourceOf(readBy(person), 600));
   await put(model, first);
   await put(model, second);
   const source = first[0]?.chunk.source ?? "";
   const removed = await rowsOf(source, 1);
-  await newVersionOf(source, owner(person), 1);
+  await newVersionOf(source, readBy(person), 1);
   const expected = rounded(bruteForce(question, second, 50));
   expect(rounded(await search(model, question, reader, 50))).toStrictEqual(
     expected
@@ -410,18 +419,15 @@ describe("the Brain's vector way", () => {
       ...(await sourceOf(audience(readers.group), 1100)),
       ...(await sourceOf(audience(readers.group), 1100)),
     ];
-    company.own = await sourceOf(owner(readers.few), 5);
-    company.others = await sourceOf(owner(readers.other), block + 76);
+    company.own = await sourceOf(readBy(readers.few), 5);
+    company.others = await sourceOf(readBy(readers.other), block + 76);
     company.otherGroups = await sourceOf(audience(readers.otherGroup), 40);
     company.nobodys = await sourceOf({ kind: "none" }, 40);
   }, setUpMs);
 
   it("finds exactly the nearest chunks a reader may read, as brute force does, when they may read few", async () => {
     const { model, question, own } = await plant();
-    const found = await search(model, question, {
-      person: readers.few,
-      groups: [],
-    });
+    const found = await search(model, question, readerOf(readers.few));
     expect(found).toHaveLength(own.length);
     expect(rounded(found)).toStrictEqual(rounded(bruteForce(question, own)));
   });
@@ -437,7 +443,10 @@ describe("the Brain's vector way", () => {
     const both = await search(
       model,
       question,
-      { person: readers.few, groups: [readers.group] },
+      {
+        person: readers.few,
+        groups: [soleGroupOf(readers.few), readers.group],
+      },
       50
     );
     expect(rounded(both)).toStrictEqual(
@@ -463,7 +472,7 @@ describe("the Brain's vector way", () => {
     // They are there for those who may read them.
     const theirs = await search(model, question, {
       person: readers.other,
-      groups: [readers.otherGroup],
+      groups: [soleGroupOf(readers.other), readers.otherGroup],
     });
     expect(theirs).toHaveLength(20);
     for (const { source, score } of theirs) {
@@ -479,7 +488,13 @@ describe("the Brain's vector way", () => {
     const { model, question } = await plant();
     const everyone = {
       person: readers.other,
-      groups: [readers.group, readers.otherGroup, readers.few, "none"],
+      groups: [
+        readers.group,
+        readers.otherGroup,
+        soleGroupOf(readers.few),
+        readers.few,
+        "none",
+      ],
     };
     const found = await search(model, question, everyone, 50);
     const nobodys = new Set(company.nobodys.map(({ source }) => source));
@@ -516,8 +531,8 @@ describe("the Brain's vector way", () => {
     const model = newModel();
     const question = randomSigns();
     const person = principal("person");
-    const access: Access = { kind: "owner", person };
-    const reader = { person, groups: [] };
+    const access: Access = readBy(person);
+    const reader = readerOf(person);
     const first = randomly(await sourceOf(access, block + 76));
     await put(model, first);
     expect(rounded(await search(model, question, reader, 50))).toStrictEqual(
@@ -570,10 +585,8 @@ describe("the Brain's vector way", () => {
     const model = newModel();
     const question = randomSigns();
     const person = principal("person");
-    const reader = { person, groups: [] };
-    const coded = randomly(
-      await sourceOf({ kind: "owner", person }, block + 76)
-    );
+    const reader = readerOf(person);
+    const coded = randomly(await sourceOf(readBy(person), block + 76));
     const before = coded.slice(0, 1000);
     await put(model, before);
     const undo = await breakWith(
@@ -601,7 +614,7 @@ describe("the Brain's vector way", () => {
       ...first,
       name: `${first.name.replace("@build-1", "")}@build-2`,
     };
-    const reader = { person: readers.few, groups: [] };
+    const reader = readerOf(readers.few);
     const ofFirst = randomly(company.own);
     const ofBuild = randomly(company.own);
     await put(first, ofFirst);
@@ -633,7 +646,7 @@ describe("the Brain's vector way", () => {
   it("drops a code a fault left in a reader's own group before ranking it, when its chunk is hidden or superseded", async () => {
     const model = newModel();
     const question = randomSigns();
-    const reader = { person: readers.few, groups: [] };
+    const reader = readerOf(readers.few);
     const own = randomly(company.own);
     const [first] = own;
     if (first === undefined) {
@@ -644,9 +657,9 @@ describe("the Brain's vector way", () => {
     // A chunk the reader may not read, and one of a superseded version
     // they could read.
     const [hidden] = await rowsOf(company.others[0]?.source ?? "", 1);
-    const superseded = await sourceOf(owner(readers.few), 1);
+    const superseded = await sourceOf(readBy(readers.few), 1);
     const supersededSource = superseded[0]?.source ?? "";
-    await newVersionOf(supersededSource, owner(readers.few), 1);
+    await newVersionOf(supersededSource, readBy(readers.few), 1);
     const [stale] = await rowsOf(supersededSource, 1);
     const [ownRow] = await rowsOf(first.chunk.source, first.chunk.version);
     // The fault: codes for both in the reader's own tail, at the question.
@@ -670,7 +683,7 @@ describe("the Brain's vector way", () => {
 
   it("scores a vector of unequal components 1 against itself, and one direction alike at every magnitude, ties to the older chunk", async () => {
     const model = newModel();
-    const reader = { person: readers.few, groups: [] };
+    const reader = readerOf(readers.few);
     // Components that don't round evenly to 8 bits: 1, 0.5 and the rest.
     const direction = randomReals().map((value, index) => {
       if (index === 0) {
@@ -703,16 +716,16 @@ describe("the Brain's vector way", () => {
     const replaced: string[] = [];
     for (let made = 0; made < 3; made += 1) {
       // oxlint-disable-next-line no-await-in-loop -- in order: one block each
-      const gone = randomly(await sourceOf(owner(person), 600));
+      const gone = randomly(await sourceOf(readBy(person), 600));
       // oxlint-disable-next-line no-await-in-loop -- in order: one block each
-      const kept = randomly(await sourceOf(owner(person), 424));
+      const kept = randomly(await sourceOf(readBy(person), 424));
       // oxlint-disable-next-line no-await-in-loop -- in order: one block each
       await put(model, [...gone, ...kept]);
       replaced.push(gone[0]?.chunk.source ?? "");
     }
     for (const source of replaced) {
       // oxlint-disable-next-line no-await-in-loop -- one version at a time
-      await newVersionOf(source, owner(person), 1);
+      await newVersionOf(source, readBy(person), 1);
     }
     const marked = await runInDurableObject(
       store(),
@@ -735,16 +748,16 @@ describe("the Brain's vector way", () => {
     const replaced: string[] = [];
     for (let made = 0; made <= repackPerTick; made += 1) {
       // oxlint-disable-next-line no-await-in-loop -- in order: one block each
-      const gone = randomly(await sourceOf(owner(person), 600));
+      const gone = randomly(await sourceOf(readBy(person), 600));
       // oxlint-disable-next-line no-await-in-loop -- in order: one block each
-      const kept = randomly(await sourceOf(owner(person), 424));
+      const kept = randomly(await sourceOf(readBy(person), 424));
       // oxlint-disable-next-line no-await-in-loop -- in order: one block each
       await put(model, [...gone, ...kept]);
       replaced.push(gone[0]?.chunk.source ?? "");
     }
     for (const source of replaced) {
       // oxlint-disable-next-line no-await-in-loop -- one version at a time
-      await newVersionOf(source, owner(person), 1);
+      await newVersionOf(source, readBy(person), 1);
     }
     const before = await markedBlocks();
     await runInDurableObject(store(), (_store, state) => {
@@ -779,10 +792,10 @@ describe("the Brain's vector way", () => {
     const model = newModel();
     const person = principal("person");
     // A marked block of the test's own.
-    const gone = randomly(await sourceOf(owner(person), 600));
-    const kept = randomly(await sourceOf(owner(person), 424));
+    const gone = randomly(await sourceOf(readBy(person), 600));
+    const kept = randomly(await sourceOf(readBy(person), 424));
     await put(model, [...gone, ...kept]);
-    await newVersionOf(gone[0]?.chunk.source ?? "", owner(person), 1);
+    await newVersionOf(gone[0]?.chunk.source ?? "", readBy(person), 1);
     const before = await markedBlocks();
     await runInDurableObject(store(), (_store, state) => {
       enqueueWork(state.storage, tickWork, {
@@ -824,7 +837,7 @@ describe("the Brain's vector way", () => {
 
   it("takes a centre of -0 as the same centre as one of 0", async () => {
     const model = newModel();
-    const reader = { person: readers.few, groups: [] };
+    const reader = readerOf(readers.few);
     const coded = randomly(company.own);
     const [first, ...rest] = coded;
     await put(model, first === undefined ? [] : [first]);
@@ -838,7 +851,7 @@ describe("the Brain's vector way", () => {
   it("keeps one code per chunk and model however often it is put", async () => {
     const model = newModel();
     const question = randomSigns();
-    const reader = { person: readers.few, groups: [] };
+    const reader = readerOf(readers.few);
     const coded = randomly(company.own);
     await put(model, coded);
     await put(model, coded);
@@ -868,7 +881,7 @@ describe("the Brain's vector way", () => {
 
   it("scores vectors of any finite size, stored and asked, as their direction alone", async () => {
     const model = newModel();
-    const reader = { person: readers.few, groups: [] };
+    const reader = readerOf(readers.few);
     const directions = randomly(company.own);
     // Tiny, smallest, huge and plain magnitudes of the same directions.
     const sizes = [1e-200, Number.MIN_VALUE, 1e200, 1e300, 1];
@@ -949,15 +962,17 @@ describe("the Brain's vector way", () => {
   it("finds a new version with other readers for its readers alone, once its codes are put", async () => {
     const model = newModel();
     const question = randomSigns();
-    const before = { person: principal("person"), groups: [] };
-    const after = { person: principal("person"), groups: [] };
-    const first = randomly(await sourceOf(owner(before.person), 3));
+    const before = readerOf(principal("person"));
+    const after = readerOf(principal("person"));
+    const first = randomly(await sourceOf(readBy(before.person), 3));
     await put(model, first);
     expect(rounded(await search(model, question, before))).toStrictEqual(
       rounded(bruteForce(question, first))
     );
     const source = first[0]?.chunk.source ?? "";
-    const second = randomly(await newVersionOf(source, owner(after.person), 3));
+    const second = randomly(
+      await newVersionOf(source, readBy(after.person), 3)
+    );
     await expect(search(model, question, before)).resolves.toStrictEqual([]);
     await expect(search(model, question, after)).resolves.toStrictEqual([]);
     await put(model, second);
@@ -971,13 +986,13 @@ describe("the Brain's vector way", () => {
     const model = newModel();
     const person = principal("person");
     // Exactly one block, and no tail.
-    const coded = randomly(await sourceOf(owner(person), block));
+    const coded = randomly(await sourceOf(readBy(person), block));
     await put(model, coded);
     const source = coded[0]?.chunk.source ?? "";
     const removed = await rowsOf(source, 1);
     const packed = await codedRows();
     expect(removed.filter((row) => !packed.has(row))).toStrictEqual([]);
-    await newVersionOf(source, owner(person), 1);
+    await newVersionOf(source, readBy(person), 1);
     const left = await codedRows();
     expect(removed.filter((row) => left.has(row))).toStrictEqual([]);
   });

@@ -14,34 +14,30 @@ import type { SourceName } from "./sources.tsx";
 
 /** Where answers came from, by ID. */
 export interface ChatNames {
-  /** The collections' and connections' names, by ID, for provenance. */
+  /** The connections' names, by ID, for provenance. */
   sourceNames: ReadonlyMap<string, SourceName>;
 }
 
 /**
- * The names of the collections and connections the person can see, by
- * ID: a list refused only leaves those IDs unnamed.
+ * The names of the connections the person can see, by ID: a list refused
+ * only leaves those IDs unnamed.
  */
 const readSourceNames = async (
   session: Session
 ): Promise<ReadonlyMap<string, SourceName>> => {
-  const [collections, connections] = await Promise.allSettled([
-    session.knowledge.listCollections(),
-    session.connections.list(),
-  ]);
   const names = new Map<string, SourceName>();
-  if (collections.status === "fulfilled") {
-    for (const { id, name } of collections.value) {
-      names.set(id, { name, kind: "collection" });
-    }
-  }
-  if (connections.status === "fulfilled") {
-    for (const { id, provider, accountName } of connections.value) {
+  try {
+    for (const {
+      id,
+      provider,
+      accountName,
+    } of await session.connections.list()) {
       names.set(id, {
         name: accountName === null ? provider : `${provider} (${accountName})`,
-        kind: "connection",
       });
     }
+  } catch {
+    // Refused: the IDs stay unnamed.
   }
   return names;
 };

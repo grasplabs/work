@@ -43,8 +43,11 @@ const StateBadge = ({ integration }: { integration: Integration }) => {
   if (integration.listed && !integration.offered) {
     return <Badge>{t`Not offered`}</Badge>;
   }
+  if (integration.auth === "key") {
+    return <Badge>{t`Connects with a key`}</Badge>;
+  }
   if (integration.auth === "own") {
-    return <Badge>{t`Needs its own sign-in app`}</Badge>;
+    return <Badge>{t`Needs an app Grasp hasn't registered`}</Badge>;
   }
   return null;
 };

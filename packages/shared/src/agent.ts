@@ -1,4 +1,4 @@
-import { agentDocumentsMax } from "./agents.ts";
+import { agentDocumentsTextMaxBytes, ownAgentsMax } from "./agents.ts";
 import {
   chatFileMaxBytes,
   chatFilesMax,
@@ -9,26 +9,42 @@ import { defineErrorFamily } from "./errors.ts";
 /** Why a chat's agent refused a question. */
 export const agentErrors = defineErrorFamily({
   "agent.chat_not_found": "There's no such chat.",
+  "agent.held_call_not_found":
+    "Nothing like this waits for you in this chat: it was decided already, or waited past its day.",
+  "agent.held_call_in_chat_app":
+    "This chat used something only its person can read, so a write to an App waits for them to confirm it, which they can do only in a chat in Grasp or in their direct message with you. Nothing was written: tell them they can do it there.",
+  "agent.held_call_failed":
+    "The App refused or failed this write, so it may not have been done. It no longer waits for you.",
+  "agent.private_shared_request":
+    "This chat used something only its person can read, and admins read why a shared connection is asked for, so it wasn't asked for. Ask the person to ask for it in a new chat, or an admin to grant it.",
   "agent.paused":
     "This agent is paused, so it doesn't answer now. An admin can turn it back on.",
   "agent.not_for_you":
     "This agent isn't set up to answer you here. An admin decides who may use it, and where.",
   // Making and changing the company's agents (agents.ts).
-  "agent.record_invalid": "That isn't an agent's name, job or instructions.",
+  "agent.record_invalid": "That isn't an agent's name, job or picture.",
   "agent.unknown": "The company has no such agent.",
   "agent.name_taken": "Another agent already has that name.",
+  "agent.too_many_own": `You have ${ownAgentsMax} agents of your own, the most a person keeps. Delete one to make another.`,
+  "agent.not_offered":
+    "This agent isn't offered to the company, or its owner took the offer back.",
+  "agent.own_off":
+    "Your company has turned off agents of people's own. An admin can turn them back on.",
+  "agent.app_unknown": "That isn't an app your company offers.",
+  "agent.apps_unread":
+    "The apps it needs couldn't be worked out just now: no AI model answered. Add them by hand, or try again.",
   "agent.first_stays":
     "The company's first agent can't be deleted. Pause it to stop it answering.",
   "agent.model_unknown":
     "That isn't a model your organization has chosen. Pick one in Settings › Models.",
   // An agent's documents (core's agent-documents.ts).
-  "agent.too_many_documents": `An agent keeps at most ${agentDocumentsMax} documents. Remove one to add another.`,
   "agent.document_unsupported":
     "A document is a PDF, Word (.docx), Excel (.xlsx), Markdown, text, CSV or JSON file, with a name that ends in .pdf, .docx, .xlsx, .md, .txt, .csv or .json.",
   "agent.document_too_large": `A document is at most ${chatFileMaxBytes / 1024 / 1024} MB, and its text at most 1 MB.`,
   "agent.document_busy":
     "The document's text couldn't be read just now. Add it again in a moment.",
   "agent.document_unknown": "The agent has no such document.",
+  "agent.documents_full": `The agent's documents together hold as much text as an agent keeps (${agentDocumentsTextMaxBytes / 1024 / 1024} MB). Remove one first.`,
   "agent.document_named":
     "The agent already has another document with that name. Remove it first, or rename the file.",
   // An agent's wake-ups (core's agent-wakes.ts).
@@ -41,6 +57,10 @@ export const agentErrors = defineErrorFamily({
     "Nobody asked for this just now, so the agent can only read. What it wants to change waits for its person.",
   "agent.busy":
     "The agent is still working in this chat. Wait for it, or stop it.",
+  "agent.conversation_answering":
+    "One of your conversations in a chat app is still being answered. Try again in a moment.",
+  "agent.delete_under_way":
+    "Your conversations in chat apps are being deleted. If any remain, try again in a moment.",
   "agent.invalid_question": "That isn't a question the agent can take.",
   "agent.invalid_request": "That isn't a valid request for a chat.",
   "agent.invalid_title": "A chat's title is 1 to 200 characters.",
@@ -62,6 +82,10 @@ export const agentErrors = defineErrorFamily({
     "The file's text couldn't be read just now. Attach it again in a moment.",
   "agent.plan_not_found":
     "There's no such plan in this chat, or it was built already.",
+  "agent.draft_stale":
+    "This agent changed after the chat drafted the change. Ask again to draft it on the agent as it is now.",
+  "agent.draft_not_found":
+    "There's no such agent drafted in this chat, or it was made already.",
   "agent.plan_needs_connection":
     "This plan needs a connection that isn't there yet. Connect it, then build it.",
   "agent.file_not_found":

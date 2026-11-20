@@ -18,8 +18,11 @@ import {
   AlertDialogFooter,
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
+import { Info, Spinner as Working } from "../grasp/icons/index.ts";
+import { arrive } from "../grasp/motion/arrive.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -57,14 +60,20 @@ const styles = stylex.create({
     borderBlockEndStyle: "solid",
     borderBlockEndColor: grasp.line,
   },
-  bare: {
-    flexShrink: 0,
-    paddingBlock: grasp.space1,
-    paddingInline: grasp.space3,
+  // What a bare frame is doing, over its corner: nothing to press, so
+  // clicks go through it to the page.
+  notice: {
+    display: { default: "block", [PRINT]: "none" },
+    position: "absolute",
+    top: grasp.space3,
+    insetInlineEnd: grasp.space3,
+    maxWidth: "24rem",
+    pointerEvents: "none",
   },
   chrome: { gap: grasp.space2, padding: grasp.space3 },
   barEnd: { display: "flex", flexGrow: 1, justifyContent: "flex-end" },
   page: {
+    position: "relative",
     display: "flex",
     flexDirection: "column",
     flexGrow: 1,
@@ -100,35 +109,38 @@ const pausedFor = (question: FrameQuestion): Error => {
 };
 
 /**
- * What the frame's bar says of a page that runs: that
- * its preview is fixing a problem, or that a new version waits for its
- * unsaved edits.
+ * What a frame says of a page that runs: that its preview is fixing a
+ * problem, or that a new version waits for its unsaved edits; nothing
+ * while it does neither.
  */
-const RunningStatus = ({ state }: { state: PageState }) => {
+const useStatusWords = (state: PageState): string | undefined => {
   const { t } = useLingui();
   if (state.status === "fixing") {
     // Calm, and never what went wrong: the agent hears that.
-    return (
-      <output {...stylex.props(styles.status)}>
-        <Spinner />
-        <Text element="span" size="xs" tone="muted">
-          {t`Fixing a problem…`}
-        </Text>
-      </output>
-    );
+    return t`Fixing a problem…`;
   }
   if (state.status === "updated") {
     // Only a page holding unsaved edits shows this: one with nothing
     // to lose switches at once.
-    return (
-      <output>
-        <Text element="span" size="xs" tone="muted">
-          {t`A new version is ready: it opens once your changes are saved.`}
-        </Text>
-      </output>
-    );
+    return t`A new version is ready: it opens once your changes are saved.`;
   }
-  return null;
+  return undefined;
+};
+
+/** What the page's own bar says of a page that runs (`useStatusWords`). */
+const RunningStatus = ({ state }: { state: PageState }) => {
+  const words = useStatusWords(state);
+  if (words === undefined) {
+    return null;
+  }
+  return (
+    <output {...stylex.props(styles.status)}>
+      {state.status === "fixing" ? <Spinner /> : null}
+      <Text element="span" size="xs" tone="muted">
+        {words}
+      </Text>
+    </output>
+  );
 };
 
 /**
@@ -139,7 +151,7 @@ const RunningStatus = ({ state }: { state: PageState }) => {
 interface FrameSource {
   app: string;
   preview?: true;
-  /** With `preview`: the draft's undo point to preview, read-only. */
+  /** With `preview`: the draft's checkpoint to preview, read-only. */
   point?: number;
   /** With `preview`: the App's version to preview, read-only. */
   version?: number;
@@ -386,13 +398,10 @@ type Update = "none" | "asking" | "saving";
  * The bar over a frame: the page's own chrome, `label` and the App's
  * name, which say an App drew what's below (`chrome`); or none, in the
  * App's workspace, whose own bar names the App already (`bare`): there
- * only what the page is doing shows, while it does (`RunningStatus`).
+ * only what the page is doing shows, while it does, over the frame's
+ * corner (`FrameNotice`).
  */
 export type FrameBar = { kind: "chrome"; label?: string } | { kind: "bare" };
-
-/** Whether `RunningStatus` has anything to say of `state`. */
-const saysSomething = (state: PageState): boolean =>
-  state.status === "fixing" || state.status === "updated";
 
 /** Fix with Grasp for the frame `ended` at `path`, when it is offered. */
 const fixOf = (
@@ -419,11 +428,7 @@ const FrameTop = ({
   state: PageState;
 }) => {
   if (bar.kind === "bare") {
-    return saysSomething(state) ? (
-      <div {...stylex.props(styles.bar, styles.bare)}>
-        <RunningStatus state={state} />
-      </div>
-    ) : null;
+    return null;
   }
   return (
     <header {...stylex.props(styles.bar, styles.chrome)}>
@@ -435,6 +440,28 @@ const FrameTop = ({
         <RunningStatus state={state} />
       </span>
     </header>
+  );
+};
+
+/**
+ * What a frame with no bar of its own (`bare`) is doing, while it does:
+ * over its corner, never in a row above it, which would come and go as
+ * the page works and move the page under the person's pointer while they
+ * use it. It has nothing to press, so clicks go through it to the page.
+ */
+const FrameNotice = ({ state }: { state: PageState }) => {
+  const words = useStatusWords(state);
+  if (words === undefined) {
+    return null;
+  }
+  return (
+    <div {...stylex.props(styles.notice, arrive.in)}>
+      <Alert
+        icon={state.status === "fixing" ? Working : Info}
+        live="polite"
+        title={words}
+      />
+    </div>
   );
 };
 
@@ -694,6 +721,7 @@ const FramedPage = ({
         {...(revision === undefined ? {} : { revision })}
         {...(onTestDataStale === undefined ? {} : { onTestDataStale })}
       />
+      {bar.kind === "bare" ? <FrameNotice state={state} /> : null}
     </div>
   );
 };
@@ -767,7 +795,7 @@ export const PageFrame = ({
 /**
  * The pages of the draft of `app`, running in a sandboxed frame as a
  * preview: its server code changes nothing and reads no real data, and
- * what goes wrong goes to the agent. With `point`, of that undo point of
+ * what goes wrong goes to the agent. With `point`, of that checkpoint of
  * the draft, or with `version`, of that version of the App, read-only.
  * `onEnded` is told once it failed (`FrameProps`). Without either, `revision`, the draft's
  * newest, comes into the open frame as it changes: each write shows

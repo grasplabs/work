@@ -8,9 +8,8 @@
  */
 import type { Interviewer } from "@grasp-os/shared/onboarding";
 
-import { adminCommand } from "../seed/admin-command.ts";
 import { inTurns, linkOn, linksOf } from "./core.ts";
-import type { Core } from "./core.ts";
+import type { Core, Link } from "./core.ts";
 import { mixesFor, mixLine, tempersOf } from "./drift.ts";
 import { timetableFor } from "./events.ts";
 import type { AnswerKey } from "./keys/types.ts";
@@ -19,8 +18,8 @@ import type { PeopleVersion } from "./people-v2.ts";
 import { realPlayer, realSystem, tempersFor } from "./people.ts";
 import { employeeSystem, modelPlayer } from "./person.ts";
 import { playInterview } from "./play.ts";
-import { askerOf, keepPractice } from "./practice.ts";
-import type { Practice, PracticePerson } from "./practice.ts";
+import { askerOf, keepPractice, practiceEmail } from "./practice.ts";
+import type { Practice } from "./practice.ts";
 import { protectedOf, surfaceFor } from "./surface.ts";
 
 export interface SimulateOptions {
@@ -38,31 +37,10 @@ export interface SimulateOptions {
   log: (line: string) => void;
 }
 
-/**
- * The device key to play `person` with: the one the lab opened their link
- * with before, or a new start when it was opened on another device
- * meanwhile. `null` when they talked already.
- */
-const deviceKey = async (
-  core: Core,
-  person: PracticePerson,
-  link: ReturnType<typeof linkOn>
-): Promise<string | null | undefined> => {
-  let session = await link.open(person.key);
-  if (session.state === "elsewhere") {
-    await adminCommand({
-      type: "onboarding.new_start",
-      payload: { person: person.id },
-    });
-    session = await link.open();
-  }
-  if (session.state === "elsewhere") {
-    throw new Error(`${person.name}'s link opens on another device.`);
-  }
-  if (session.progress?.person === "completed") {
-    return null;
-  }
-  return session.key ?? person.key;
+/** Whether `link`'s person talked already: the lab plays nobody twice. */
+const talkedAlready = async (link: Link): Promise<boolean> => {
+  const session = await link.open();
+  return session.progress?.person === "completed";
 };
 
 /** Who played them, as the lab keeps it. */
@@ -102,9 +80,8 @@ export const simulate = async (
     if (employee === undefined || link === undefined) {
       return false;
     }
-    const onLink = linkOn(link);
-    const deviced = await deviceKey(core, person, onLink);
-    if (deviced === null) {
+    const onLink = linkOn(link, practiceEmail(person.id));
+    if (await talkedAlready(onLink)) {
       return false;
     }
     const place = practice.people.indexOf(person);
@@ -167,10 +144,8 @@ export const simulate = async (
       interviewer,
       ...(ideal ? {} : { clock: "talk" as const }),
       ...(v2 ? { events: timetableFor(place, mark) } : {}),
-      ...(deviced === undefined ? {} : { key: deviced }),
     });
-    const { key: device, answers: _answers, ...kept } = interview;
-    person.key = device;
+    const { answers: _answers, ...kept } = interview;
     person.played = {
       ...kept,
       interviewer,

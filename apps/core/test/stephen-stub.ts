@@ -59,8 +59,8 @@ export const verdictLine =
 const isRead = (action: string) =>
   /\.(?:list|get|listRows|thread)$/u.test(action);
 
-/** Sections a Knowledge search reads. */
-const searched = 5;
+/** The tokens a recall of the Brain hands over at most. */
+const recallTokens = 4000;
 
 /** The code a turn's step runs: its calls in order, then its search. */
 const stepCode = (
@@ -81,16 +81,11 @@ const stepCode = (
     }
     done.push({ action, result });
   }
-  const knowledge = [];
   const search = ${JSON.stringify(search ?? null)};
-  if (search !== null) {
-    const { hits } = await env.knowledge.search(search, { limit: ${searched} });
-    for (const hit of hits) {
-      const read = await env.knowledge.read(hit.documentId, { section: hit.section });
-      knowledge.push({ documentId: hit.documentId, path: read.path, text: read.text });
-    }
-  }
-  return { done, knowledge };
+  const recalled = search === null
+    ? []
+    : (await env.brain.recall({ question: search, budget: { tokens: ${recallTokens} } })).items.map(({ source, text }) => ({ source, text }));
+  return { done, recalled };
 };`;
 
 const tokensOf = (text: string): number => Math.ceil(text.length / 4);
@@ -114,43 +109,6 @@ const says = (text: string, input: string): ProviderReply => ({
   outputTokens: tokensOf(text),
 });
 
-const returned = "Returned:\n";
-
-/** The Knowledge sections a step's result handed the model. */
-const knowledgeOf = (
-  results: readonly string[]
-): { documentId: string; path: string; text: string }[] =>
-  results.flatMap((result) => {
-    if (!result.startsWith(returned)) {
-      return [];
-    }
-    try {
-      const value: unknown = JSON.parse(result.slice(returned.length));
-      return typeof value === "object" &&
-        value !== null &&
-        "knowledge" in value &&
-        Array.isArray(value.knowledge)
-        ? value.knowledge.flatMap((unit: unknown) =>
-            typeof unit === "object" &&
-            unit !== null &&
-            "documentId" in unit &&
-            "path" in unit &&
-            "text" in unit
-              ? [
-                  {
-                    documentId: String(unit.documentId),
-                    path: String(unit.path),
-                    text: String(unit.text),
-                  },
-                ]
-              : []
-          )
-        : [];
-    } catch {
-      return [];
-    }
-  });
-
 const couldNot = {
   en: "Sorry, I couldn't find that just now.",
   nl: "Sorry, dat kon ik nu niet vinden.",
@@ -158,7 +116,7 @@ const couldNot = {
 
 /**
  * The answer to a case given what reached the model, `results`: the plan's
- * answer once its evidence is there, citing the section that holds it.
+ * answer once its evidence is there.
  */
 const answerOf = (
   item: StephenCase,
@@ -171,15 +129,7 @@ const answerOf = (
   if (!evidence.every((marker) => seen.includes(normalized(marker)))) {
     return couldNot[item.lang];
   }
-  const [first] = evidence;
-  const source = knowledgeOf(results).find(
-    ({ text }) =>
-      first !== undefined && normalized(text).includes(normalized(first))
-  );
-  const answer = plan.answer(context);
-  return source === undefined
-    ? answer
-    : `${answer} [${source.path}](grasp:note/${source.documentId})`;
+  return plan.answer(context);
 };
 
 /** The stub provider: answers each request for the turn `current` says. */

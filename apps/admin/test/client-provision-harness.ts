@@ -576,7 +576,7 @@ export const once = (clientId: string) => ({
   claims: [],
   route: { clientId, generation: 1 },
   coreMigrations: 1,
-  applied: [1, 1, 1],
+  applied: [1, 1],
   missingSecrets: [],
 });
 
@@ -664,7 +664,7 @@ export const probeFailures: ProbeFailure[] = [
   },
   {
     name: "a database that doesn't answer",
-    probe: { down: ["KNOWLEDGE"] },
+    probe: { down: ["DB"] },
     code: "probe_binding_unanswered",
   },
   {

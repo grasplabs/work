@@ -415,7 +415,7 @@ describe("publishing a release", () => {
     expect(bucket.puts).toStrictEqual([]);
   });
 
-  it("publishes a release that names no model, while none ships, to a bucket without any", async () => {
+  it("publishes a release built before a model shipped, which names no model files, to a bucket without any", async () => {
     await serve(emptyBucket());
     writeRelease(
       dir,

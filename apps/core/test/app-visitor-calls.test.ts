@@ -19,9 +19,9 @@ import { appHost } from "../src/durable-objects.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { leasedBuild, leaseFor } from "../src/page-delivery.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
-import { published } from "./apps.ts";
+import { commitApp, published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
 import type { CapturedMail } from "./mail-capture.ts";
@@ -211,13 +211,8 @@ const released = async (
   app: string,
   files: TestSource
 ): Promise<number> => {
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    app,
-    files,
-    "Next"
-  );
-  await builder.api.apps.versions.publish(app, version);
+  const { version } = await commitApp(builder.api, app, files);
+  await builder.api.versions.rollback({ kind: "app", id: app }, version);
   return version;
 };
 
@@ -406,6 +401,31 @@ const visitorIdOf = (answer: unknown): string | null => {
 /** Whether a call was refused, by any code, or answered. */
 const refusal = (answer: unknown): string =>
   typeof answer === "string" ? "refused" : "answered";
+
+/** A permission row, granted, as an admin's grant writes it. */
+const grantedRow = (
+  subjectType: "app" | "workflow",
+  subject: string,
+  objectType: "platform" | "app" | "workflow",
+  object: string,
+  actions: string[]
+) =>
+  env.DB.prepare(
+    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+      actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'test', 0, 'test', 0)`
+  ).bind(
+    crypto.randomUUID(),
+    subjectType,
+    subject,
+    objectType,
+    object,
+    JSON.stringify(actions),
+    `GRANT_${unique().toUpperCase().replaceAll(/\W/gu, "_")}`
+  );
+
+/** A workflow's ID no other test has. */
+const workflowId = (): string => `workflow_${unique().replaceAll("-", "")}`;
 
 /** A domain no other test has. */
 const newDomain = (): string => `visitors-${unique()}.test`;
@@ -1048,7 +1068,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     // The builder's preview of a draft of the App, and the lease it opened
     // with; and a draft's lease signed for ana's own session, as core
     // never signs one, should a bug of its ever do so.
-    const preview = await builder.api.apps.drafts.preview(app);
+    const preview = await builder.api.apps.preview.open(app);
     const sessions = await env.DB.prepare(
       "SELECT id FROM app_visitor_sessions WHERE app_id = ?"
     )
@@ -1121,5 +1141,137 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       "role.forbidden",
       expect.any(String),
     ]);
+  });
+
+  it("are refused once the App may hold what the Brain recalled, though they were let in first, and no visitor is let in again", async () => {
+    const domain = newDomain();
+    const [direct, viaWorkflow] = [await portal(domain), await portal(domain)];
+    const mail = await mailbox();
+    for (const { builder, app } of [direct, viaWorkflow]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
+    }
+    const ana = await visitor(mail, direct.link, `ana@${domain}`);
+    const bo = await visitor(mail, viaWorkflow.link, `bo@${domain}`);
+    const before = [
+      await call(direct.app, direct.version, ana, "portal.mine"),
+      await call(viaWorkflow.app, viaWorkflow.version, bo, "portal.mine"),
+    ];
+    // Then the Brain reaches one App by its own grant, and the other
+    // through a workflow granted to call its functions, as an admin's
+    // grants write them.
+    const workflow = `workflow_${unique().replaceAll("-", "")}`;
+    await env.DB.batch([
+      grantedRow("app", direct.app, "platform", "platform", ["brain"]),
+      grantedRow("workflow", workflow, "platform", "platform", ["brain"]),
+      grantedRow("workflow", workflow, "app", viaWorkflow.app, ["call"]),
+    ]);
+    expect({
+      before,
+      after: [
+        await call(direct.app, direct.version, ana, "portal.mine"),
+        await call(viaWorkflow.app, viaWorkflow.version, bo, "portal.mine"),
+      ],
+      listAgain: await outcome(
+        direct.builder.api.apps.setVisitors(direct.app, [
+          { kind: "domain", value: domain },
+        ])
+      ),
+      grantAgain: await outcome(
+        direct.builder.api.apps.setVisitorGrants(direct.app, ["portal.mine"])
+      ),
+      // Taking every visitor and grant off stays possible.
+      listNone: await outcome(
+        direct.builder.api.apps.setVisitors(direct.app, [])
+      ),
+      grantNone: await outcome(
+        direct.builder.api.apps.setVisitorGrants(direct.app, [])
+      ),
+    }).toStrictEqual({
+      before: [[], []],
+      after: ["visitor.not_granted", "visitor.not_granted"],
+      listAgain: "visitor.not_granted",
+      grantAgain: "visitor.not_granted",
+      listNone: "ok",
+      grantNone: "ok",
+    });
+  });
+
+  it("are refused once the Brain reaches the App however many grants away, and the walk ends on a cycle", async () => {
+    const domain = newDomain();
+    const [twoHops, threeHops] = [await portal(domain), await portal(domain)];
+    const mail = await mailbox();
+    for (const { builder, app } of [twoHops, threeHops]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
+    }
+    const ana = await visitor(mail, twoHops.link, `ana@${domain}`);
+    const bo = await visitor(mail, threeHops.link, `bo@${domain}`);
+    // Two grants away: App A holds the Brain and starts workflow W, which
+    // holds no Brain and calls the visited App.
+    const [a, w] = [crypto.randomUUID(), workflowId()];
+    // Three away: A2 holds the Brain and starts W1, W1 calls App C, C
+    // starts W2, and W2 calls the visited App, which starts W1 back: a
+    // cycle the walk must end on.
+    const [a2, c, w1, w2] = [
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      workflowId(),
+      workflowId(),
+    ];
+    await env.DB.batch([
+      grantedRow("app", a, "platform", "platform", ["brain"]),
+      grantedRow("app", a, "workflow", w, ["start"]),
+      grantedRow("workflow", w, "app", twoHops.app, ["call"]),
+      grantedRow("app", a2, "platform", "platform", ["brain"]),
+      grantedRow("app", a2, "workflow", w1, ["start"]),
+      grantedRow("workflow", w1, "app", c, ["call"]),
+      grantedRow("app", c, "workflow", w2, ["start"]),
+      grantedRow("workflow", w2, "app", threeHops.app, ["call"]),
+      grantedRow("app", threeHops.app, "workflow", w1, ["start"]),
+    ]);
+    expect([
+      await call(twoHops.app, twoHops.version, ana, "portal.mine"),
+      await call(threeHops.app, threeHops.version, bo, "portal.mine"),
+    ]).toStrictEqual(["visitor.not_granted", "visitor.not_granted"]);
+  });
+
+  it("are refused when what the Brain recalled comes back to a workflow as an answer, and answered where no Brain is in the graph", async () => {
+    const domain = newDomain();
+    const [writtenTo, following, ordinary] = [
+      await portal(domain),
+      await portal(domain),
+      await portal(domain),
+    ];
+    const mail = await mailbox();
+    for (const { builder, app } of [writtenTo, following, ordinary]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
+    }
+    const ana = await visitor(mail, writtenTo.link, `ana@${domain}`);
+    const bo = await visitor(mail, following.link, `bo@${domain}`);
+    const cy = await visitor(mail, ordinary.link, `cy@${domain}`);
+    // App A holds the Brain. W1 calls A (its answer comes back to W1) and
+    // calls the first visited App (writes there). The second visited App
+    // follows the runs of W2, which calls A.
+    const [a, w1, w2] = [crypto.randomUUID(), workflowId(), workflowId()];
+    // And a graph with no Brain in it: W3 calls App B and the third visited
+    // App, which starts W3.
+    const [b, w3] = [crypto.randomUUID(), workflowId()];
+    await env.DB.batch([
+      grantedRow("app", a, "platform", "platform", ["brain"]),
+      grantedRow("workflow", w1, "app", a, ["call"]),
+      grantedRow("workflow", w1, "app", writtenTo.app, ["call"]),
+      grantedRow("workflow", w2, "app", a, ["call"]),
+      grantedRow("app", following.app, "workflow", w2, ["read"]),
+      grantedRow("workflow", w3, "app", b, ["call"]),
+      grantedRow("workflow", w3, "app", ordinary.app, ["call"]),
+      grantedRow("app", ordinary.app, "workflow", w3, ["start"]),
+    ]);
+    expect([
+      await call(writtenTo.app, writtenTo.version, ana, "portal.mine"),
+      await call(following.app, following.version, bo, "portal.mine"),
+      await call(ordinary.app, ordinary.version, cy, "portal.mine"),
+    ]).toStrictEqual(["visitor.not_granted", "visitor.not_granted", []]);
   });
 });

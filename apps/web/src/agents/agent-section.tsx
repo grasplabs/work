@@ -14,8 +14,9 @@ import type { AgentTab } from "./agent-page.tsx";
 // `home`, as the Brain has it); Back to the Agents page; then a row per
 // other part of its page. The parts
 // are its page's tabs, kept in the address (`?tab=`), so a row is a link
-// the page reads. What it shows is what the agent's route read: no read
-// of its own.
+// the page reads. A person's own agent has no access or schedule to set,
+// so no row for either. What it shows is what the agent's route read: no
+// read of its own.
 
 /** The agent's page, as the sidebar's section; undefined anywhere else. */
 export const useAgentSection = (): SidebarSection | undefined => {
@@ -29,17 +30,18 @@ export const useAgentSection = (): SidebarSection | undefined => {
   }
   const page = match.loaderData;
   const agentId = match.params.agent;
+  const read = page?.state === "ready" ? page.data : null;
   const agent =
-    page?.state === "ready"
-      ? page.data.managed.agents.find(({ id }) => id === agentId)
-      : undefined;
+    read?.own.find(({ id }) => id === agentId) ??
+    read?.managed?.agents.find(({ id }) => id === agentId);
   // Until the agent is read, and for one that isn't there: the page says so.
-  if (page?.state !== "ready" || agent === undefined) {
+  if (read === null || read === undefined || agent === undefined) {
     return undefined;
   }
   const { name } = agent;
+  const own = agent.ownerId !== null;
   const tab = agentTabOf(match.search.tab);
-  const scheduled = wakesOn(page.data.managed.wakes[agent.id] ?? []).length;
+  const scheduled = wakesOn(read.managed?.wakes[agent.id] ?? []).length;
   const row = (value: AgentTab, label: string, icon: typeof Note) => ({
     label,
     icon,
@@ -69,17 +71,22 @@ export const useAgentSection = (): SidebarSection | undefined => {
         to="/agents/$agent"
       />
     ),
-    homeCurrent: tab === "overview",
+    // A tab its own agent hasn't is its overview, as its page shows it.
+    homeCurrent: tab === "overview" || (own && tab !== "instructions"),
     back: { label: t`Back`, render: <Link to="/agents" /> },
     groups: [
       {
         rows: [
           row("instructions", t`Instructions`, Note),
-          row("access", t`Access`, Lock),
-          {
-            ...row("schedule", t`Schedule`, CalendarIcon),
-            ...(scheduled === 0 ? {} : { count: scheduled }),
-          },
+          ...(own
+            ? []
+            : [
+                row("access", t`Access`, Lock),
+                {
+                  ...row("schedule", t`Schedule`, CalendarIcon),
+                  ...(scheduled === 0 ? {} : { count: scheduled }),
+                },
+              ]),
         ],
       },
     ],

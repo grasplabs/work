@@ -1,5 +1,6 @@
 import { definitionToolNames } from "@grasp-os/shared/chat";
 import type {
+  ChatAgent,
   ChatCode,
   ChatMessage,
   ChatOutput,
@@ -35,6 +36,8 @@ import { Text } from "../grasp/text/index.ts";
 import { Thread } from "../grasp/thread/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
+import { ThreadAgentChange } from "./agent-change-card.tsx";
+import { ThreadAgentDraft } from "./agent-draft-card.tsx";
 import {
   SeeInBrain,
   useAnswerThinking,
@@ -44,17 +47,17 @@ import { useAnswerTo } from "./answer-to.ts";
 import { AnswerWords } from "./answer-words.tsx";
 import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
-import { pendingPlan, ThreadPlan } from "./build-progress.tsx";
+import { ThreadPlan } from "./build-progress.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
 import { FileCards } from "./chat-files.tsx";
 import { timeOfDay } from "./chat-history.ts";
 import { failureMessage } from "./failure.ts";
+import { pendingCard } from "./make-card.tsx";
 import { reading } from "./reading.stylex.ts";
 import { recoveredSteps } from "./recovered.ts";
 import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
-import { AnswerCited, useCitedDocuments } from "./sources.tsx";
 import { turnsOf, workedFor } from "./turns.ts";
 import { widgetLinesOf } from "./widget-lines.ts";
 
@@ -454,47 +457,25 @@ const KeyFailed = () => (
   </Text>
 );
 
-/**
- * A stored reply's words that cite documents: each cited span marked, and
- * the documents (read by AnswerCited around it) listed under them.
- */
-const CitedWords = ({ text, cut }: { text: string; cut: boolean }) => {
-  const sources = useCitedDocuments();
-  return <AnswerWords cited={sources} cut={cut} text={text} writing={false} />;
-};
-
-/** One reply's words, its citations inline where it cites documents. */
+/** One reply's words. */
 const ReplyWords = ({
   reply,
-  chatId,
   writing,
 }: {
-  reply: {
-    id?: number;
-    text: string;
-    citations?: Answer["citations"];
-    end?: Answer["end"];
-  };
-  chatId: string;
+  reply: { text: string; end?: Answer["end"] };
   writing: boolean;
 }) => {
   const { text } = reply;
-  // Stopped part way: Markdown tidies what it was still writing.
-  const cut = reply.end === "cancelled";
   if (text.trim() === "") {
     return null;
   }
-  if (
-    reply.id === undefined ||
-    reply.citations === undefined ||
-    reply.citations.length === 0
-  ) {
-    return <AnswerWords cut={cut} text={text} writing={writing} />;
-  }
+  // Stopped part way: Markdown tidies what it was still writing.
   return (
-    <AnswerCited cited={{ chatId, messageId: reply.id }}>
-      <CitedWords cut={cut} text={text} />
-    </AnswerCited>
+    <AnswerWords
+      cut={reply.end === "cancelled"}
+      text={text}
+      writing={writing}
+    />
   );
 };
 
@@ -546,7 +527,20 @@ type Row =
   | AnswerTurn
   | { kind: "after"; id: string; at?: undefined; children: ReactNode };
 
-/** The thread's rows: each question, then its replies as one answer, the reply being written joined to it. */
+/**
+ * Whether a reply by `agentId` goes on `answer`: given by the same agent as
+ * its last reply. A question that mentions several agents (`@`) is answered
+ * by each in turn, each its own answer.
+ */
+const sameAgent = (
+  answer: AnswerTurn,
+  agentId: string | undefined
+): boolean => {
+  const before = answer.replies.at(-1)?.agentId;
+  return before === undefined || agentId === undefined || before === agentId;
+};
+
+/** The thread's rows: each question, then its replies as one answer per agent, the reply being written joined to it. */
 const rowsOf = (
   messages: readonly ChatMessage[],
   partial: ChatPartial | null,
@@ -566,7 +560,7 @@ const rowsOf = (
       });
     } else if (message.role === "assistant") {
       const last = rows.at(-1);
-      if (last?.kind === "answer") {
+      if (last?.kind === "answer" && sameAgent(last, message.agentId)) {
         last.replies.push(message);
       } else {
         rows.push({
@@ -585,7 +579,7 @@ const rowsOf = (
   }
   // Grasp works on the last question: its answer goes on, or begins.
   const last = rows.at(-1);
-  if (last?.kind === "answer") {
+  if (last?.kind === "answer" && sameAgent(last, partial?.agentId)) {
     last.partial = partial;
     last.live = true;
   } else {
@@ -737,11 +731,13 @@ interface AnswerContext extends Omit<StepContext, "writing"> {
   /** The way to see its thinking again in the brain, on the brain's own page. */
   again: ThinkingOf | undefined;
   build: ThreadBuild | undefined;
-  /** The plan waiting for the person, by its call. */
-  waitingPlan: string | undefined;
+  /** The card waiting for the person (a plan, or an agent's draft or change), by its call. */
+  waiting: string | undefined;
+  /** Who gave it, named where the chat has answers from more than one agent. */
+  agentName: string | undefined;
 }
 
-/** What follows a stored reply: the questions it asked, and the plan it made. */
+/** What follows a stored reply: the questions it asked, and the plan or agent it drafted. */
 const AnswerAfter = ({
   reply,
   context,
@@ -756,7 +752,23 @@ const AnswerAfter = ({
         build={context.build}
         chatId={context.chatId}
         plan={reply.planned}
-        waiting={context.waitingPlan === reply.planned.callId}
+        waiting={context.waiting === reply.planned.callId}
+      />
+    )}
+    {reply.agentDraft === undefined ? null : (
+      <ThreadAgentDraft
+        build={context.build}
+        chatId={context.chatId}
+        draft={reply.agentDraft}
+        waiting={context.waiting === reply.agentDraft.callId}
+      />
+    )}
+    {reply.agentChange === undefined ? null : (
+      <ThreadAgentChange
+        build={context.build}
+        change={reply.agentChange}
+        chatId={context.chatId}
+        waiting={context.waiting === reply.agentChange.callId}
       />
     )}
   </>
@@ -897,16 +909,9 @@ const AnswerBody = ({
         <SeeInBrain chatId={context.chatId} thinking={context.again} />
       )}
       {replies.map((reply) => (
-        <ReplyWords
-          chatId={context.chatId}
-          key={reply.id}
-          reply={reply}
-          writing={false}
-        />
+        <ReplyWords key={reply.id} reply={reply} writing={false} />
       ))}
-      {partial === null ? null : (
-        <ReplyWords chatId={context.chatId} reply={partial} writing />
-      )}
+      {partial === null ? null : <ReplyWords reply={partial} writing />}
       <AnswerEnding ending={ending} retry={context.onRetry} />
       {replies.map((reply) => (
         <AnswerAfter context={context} key={reply.id} reply={reply} />
@@ -1009,8 +1014,8 @@ const AnswerRow = ({
         }}
         copyText={copyText === "" ? undefined : copyText}
         from="agent"
-        name="Grasp"
-        nameHidden
+        name={context.agentName ?? "Grasp"}
+        nameHidden={context.agentName === undefined}
         // When it was given, under its actions: from its first stored reply.
         {...(last?.at === undefined
           ? {}
@@ -1047,8 +1052,37 @@ const AnswerRow = ({
 /** Where the page passes no calls of the chat's code. */
 const noTools: readonly ChatToolEvent[] = [];
 
+/** Where the page passes no agents. */
+const noAgents: readonly ChatAgent[] = [];
+
+/**
+ * The answers that name their agent, by ID: in a chat more than one agent
+ * answered in, each answer whose agent isn't the one before it. A chat one
+ * agent answers in names none, as it always did.
+ */
+export const answerAgentsOf = (
+  messages: readonly ChatMessage[]
+): ReadonlyMap<number, string> => {
+  const answers = messages.filter(
+    (message): message is Answer => message.role === "assistant"
+  );
+  const named = new Map<number, string>();
+  if (new Set(answers.flatMap(({ agentId }) => agentId ?? [])).size < 2) {
+    return named;
+  }
+  let before: string | undefined;
+  for (const { id, agentId } of answers) {
+    if (agentId !== undefined && agentId !== before) {
+      named.set(id, agentId);
+    }
+    before = agentId ?? before;
+  }
+  return named;
+};
+
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
+  agents = noAgents,
   chatId,
   loaded,
   messages,
@@ -1062,6 +1096,12 @@ export const ChatThread = ({
   build,
   children,
 }: {
+  /**
+   * The agents the person may ask, which name each answer that another
+   * agent gave than the one before it; none, and no names, where the page
+   * hasn't them.
+   */
+  agents?: readonly ChatAgent[] | undefined;
   /** The chat, whose answers' sources core is asked for. */
   chatId: string;
   /** Whether core has sent the chat yet: until then, it is loading. */
@@ -1126,7 +1166,27 @@ export const ChatThread = ({
   const workingLabel =
     checking || liveThinking === undefined ? fallback : thinkingStep;
   const recovered = recoveredSteps(messages);
-  const waitingPlan = pendingPlan(messages, running)?.callId;
+  // The one card that waits for the person, whichever it is.
+  const waiting = pendingCard(messages, running)?.callId;
+  const answerAgents = answerAgentsOf(messages);
+  // Who gave an answer, where the chat has answers from more than one
+  // agent: each that isn't the one before it, the one writing now too.
+  const agentNameOf = (turn: AnswerTurn): string | undefined => {
+    const [first] = turn.replies;
+    const writer =
+      first === undefined ? turn.partial?.agentId : answerAgents.get(first.id);
+    if (
+      writer === undefined ||
+      (first === undefined &&
+        (lastAnswer?.agentId === undefined || writer === lastAnswer.agentId))
+    ) {
+      return undefined;
+    }
+    return (
+      agents.find(({ id }) => id === writer)?.name ??
+      t`An agent you can no longer ask`
+    );
+  };
   const cardOf = (turn: AnswerTurn): ReactNode => {
     const id = turn.replies[0]?.id;
     const thinking =
@@ -1175,7 +1235,8 @@ export const ChatThread = ({
       card: cardOf(turn),
       again: inBrain && !turn.live ? thinking : undefined,
       build,
-      waitingPlan,
+      waiting,
+      agentName: agentNameOf(turn),
     };
   };
   const items: Row[] =

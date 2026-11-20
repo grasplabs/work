@@ -522,7 +522,7 @@ export interface RealHappened {
   /** The AI the Worker counted as it was used there: by day, what it was for and which model did it. Empty while nothing was counted. */
   metered: {
     day: string;
-    purpose: "reading" | "interviews" | "drawing";
+    purpose: "reading" | "interviews" | "drawing" | "opinions";
     /** `other` for a model the admin has no price for: its spend counts as nothing. */
     model: "opus" | "sonnet" | "haiku" | "voice" | "ears" | "other";
     use: {

@@ -1,13 +1,11 @@
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
 import { CardLink, CardMedia, CardTitle } from "../grasp/card/index.ts";
-import { Link as TextLink } from "../grasp/link/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
-import { Separator } from "../grasp/separator/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { brainSections, findFolder, shownCount } from "./brain-sections.ts";
@@ -238,7 +236,6 @@ const styles = stylex.create({
     paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
   },
   header: { display: "flex", flexDirection: "column", gap: grasp.space3 },
-  footer: { display: "flex", flexDirection: "column", gap: grasp.space4 },
 });
 
 /** The grid of blocks, a block's name row, and the page's column, for a part's own page. */
@@ -639,9 +636,7 @@ export const BrainHome = ({ brain }: { brain: Brain }) => {
 
 /**
  * The brain's home as a page, as the prototype shows the company note: the company's name, how the
- * brain works in a few sentences, then a block for each part of it, to go on from. Under them, the
- * way to Knowledge, where the memory, skills and uploads are: the brain's own navigation has no
- * place for it.
+ * brain works in a few sentences, then a block for each part of it, to go on from.
  */
 export const HomePage = ({
   brain,
@@ -666,16 +661,6 @@ export const HomePage = ({
             ))}
           </header>
           <BrainHome brain={brain} />
-          <footer {...stylex.props(styles.footer)}>
-            <Separator />
-            <Text size="sm" tone="muted">
-              <Trans>
-                The memory files, skills and uploads your agents read are in{" "}
-                <TextLink render={<Link to="/knowledge" />}>Knowledge</TextLink>
-                .
-              </Trans>
-            </Text>
-          </footer>
         </div>
       </article>
     </div>

@@ -1,6 +1,9 @@
-/** What a listing keeps of a skill version: when to use it. */
+import type { SkillNeeds } from "./skill-needs.ts";
+
+/** What a listing keeps of a skill version: when to use it, and what it needs. */
 export interface SkillCardText {
   description: string;
+  needs: SkillNeeds;
 }
 
 /**

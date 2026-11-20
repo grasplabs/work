@@ -172,7 +172,12 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             integration={integration}
           />
         ) : (
-          <ConnectionAccess connection={only} held={held} identity={identity} />
+          <ConnectionAccess
+            connection={only}
+            held={held}
+            identity={identity}
+            integration={integration}
+          />
         )}
       </Page>
     </>

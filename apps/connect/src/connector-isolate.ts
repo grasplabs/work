@@ -1,3 +1,4 @@
+import { connectorIsolateRequests } from "@grasp-os/connector-kit/manifest";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { isolateBase } from "@grasp-os/shared/runtime";
 
@@ -22,7 +23,7 @@ import { isolateBase } from "@grasp-os/shared/runtime";
 const isolate = {
   ...isolateBase,
   // Unlike App code, it calls a provider's API, a bounded number of times.
-  limits: { cpuMs: 10_000, subRequests: 50 },
+  limits: { cpuMs: 10_000, subRequests: connectorIsolateRequests },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
 /**

@@ -1,12 +1,14 @@
 import { v } from "@grasp-os/runtime/app";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appOf, commitApp } from "./app-definitions.ts";
-import { racingDb, release } from "./apps.ts";
+import { appOf, boundIn, publishApp } from "./app-definitions.ts";
+import type { TestApp } from "./app-definitions.ts";
+import { publishDefined, racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  contractOf,
   greetingOf,
   jobEventsContract,
   jobEventsDeclared,
@@ -22,114 +24,89 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { publishDefinition, publishOverRpc } from "./workflow-publishing.ts";
 
-// Reading which workflow versions an App binds (`workflowResources.
-// appBindings`), over the session's RPC as the domain page reads it, next
-// to binding and removing one. A binding is the App's configuration, set by
-// its builders, so it is read as it is set: by the App's builders, never
-// by someone who only uses the App, nor by anyone it isn't shared with
-// (who is told there is no such App), nor by Grasp staff, who never decide
-// what a client's App runs.
+// Which workflows an App binds, and how an App and the workflows it binds
+// change without either waiting on the other (app-workflow-bindings.ts).
+// A binding is part of the App's version: what the version published
+// binds is what its starts run, and the bindings are read
+// (`workflowResources.appBindings`) by the App's builders alone, never by
+// someone who only uses the App, nor by anyone it isn't shared with (who
+// is told there is no such App), nor by Grasp staff, who never decide what
+// a client's App runs. What could go wrong: a workflow version that drops
+// what an App's pages name going live, or an App version declaring what
+// its workflow doesn't have; an App and its workflow each blocking the
+// other's change for good; an App's and a workflow's new version landing
+// at once, each checked against what the other replaced.
 
 const idp = mockIdp();
 
-/** An App and a workflow with two published versions, both the builder's. */
+/** A builder, an App of theirs, and a workflow of theirs with a live version. */
 const setUp = async () => {
   const builder = await signedInApi(idp, "builder");
   const { id: app } = await builder.api.apps.create({ name: "Ledger" });
   const flow = await builder.api.workflowResources.create(`bound-${unique()}`);
-  const started = await builder.api.workflowResources.draft(flow.id);
-  await builder.api.workflowResources.editDraft(flow.id, {
-    expectedRevision: started.revision,
-    source: greetingOf(undefined, "Version 1"),
-  });
-  await builder.api.workflowResources.publishDraft(flow.id, {
-    revision: 1,
-    basedOn: null,
-  });
-  await builder.api.workflowResources.editDraft(flow.id, {
-    expectedRevision: 1,
-    source: greetingOf(undefined, "Version 1.1"),
-  });
-  await builder.api.workflowResources.publishDraft(flow.id, {
-    revision: 2,
-    basedOn: 1,
-  });
+  await publishOverRpc(
+    builder.api,
+    flow.id,
+    greetingOf(undefined, "Version 1")
+  );
   return { builder, app, flow };
 };
 
 describe("an App's workflow bindings, as its builders read them", () => {
-  it("lists what each alias binds now, by alias, without what was replaced or removed", async () => {
+  it("lists what each alias the live version binds, and ends a binding the next version no longer makes", async () => {
     const { builder, app, flow } = await setUp();
-    const api = builder.api.workflowResources;
-    await api.bindToApp(flow.id, { app, alias: "summary", version: 1 });
-    // A rebind replaces the alias's binding.
-    const summary = await api.bindToApp(flow.id, {
+    await publishApp(
+      builder.api,
       app,
-      alias: "summary",
-      version: 2,
-    });
-    const archive = await api.bindToApp(flow.id, {
+      boundIn(requestsApp("summary"), { summary: flow.id })
+    );
+    const first = await builder.api.workflowResources.appBindings(app);
+    await publishApp(
+      builder.api,
       app,
-      alias: "archive",
-      version: 1,
-    });
-    const removed = await api.bindToApp(flow.id, {
-      app,
-      alias: "draft",
-      version: 1,
-    });
-    await api.unbindFromApp(removed.id);
+      boundIn(requestsApp("archive"), { archive: flow.id })
+    );
+    const second = await builder.api.workflowResources.appBindings(app);
 
-    const listed = await api.appBindings(app);
-
-    expect(
-      listed.map(({ id, alias, workflowId, version, boundBy }) => ({
-        id,
+    expect({
+      first: first.map(({ alias, workflowId, boundBy }) => ({
         alias,
         workflowId,
-        version,
         boundBy,
-      }))
-    ).toStrictEqual([
-      {
-        id: archive.id,
-        alias: "archive",
-        workflowId: flow.id,
-        version: 1,
-        boundBy: builder.userId,
-      },
-      {
-        id: summary.id,
-        alias: "summary",
-        workflowId: flow.id,
-        version: 2,
-        boundBy: builder.userId,
-      },
-    ]);
+      })),
+      second: second.map(({ alias, workflowId }) => ({ alias, workflowId })),
+    }).toStrictEqual({
+      first: [
+        { alias: "summary", workflowId: flow.id, boundBy: builder.userId },
+      ],
+      second: [{ alias: "archive", workflowId: flow.id }],
+    });
   });
 
   it("keeps an archived App's bindings readable for when it is restored", async () => {
     const { builder, app, flow } = await setUp();
-    const bound = await builder.api.workflowResources.bindToApp(flow.id, {
+    await publishApp(
+      builder.api,
       app,
-      alias: "summary",
-      version: 1,
-    });
+      boundIn(requestsApp("summary"), { summary: flow.id })
+    );
+    const [bound] = await builder.api.workflowResources.appBindings(app);
     await builder.api.apps.archive(app);
 
     const listed = await builder.api.workflowResources.appBindings(app);
 
-    expect(listed.map(({ id }) => id)).toStrictEqual([bound.id]);
+    expect(listed.map(({ id }) => id)).toStrictEqual([bound?.id]);
   });
 
   it("is read by its builders, and by nobody else, never Grasp staff", async () => {
     const { builder, app, flow } = await setUp();
-    await builder.api.workflowResources.bindToApp(flow.id, {
+    await publishApp(
+      builder.api,
       app,
-      alias: "summary",
-      version: 1,
-    });
+      boundIn(requestsApp("summary"), { summary: flow.id })
+    );
     const [sharedBuilder, user, stranger] = await Promise.all([
       signedInApi(idp, "builder"),
       signedInApi(idp, "user"),
@@ -154,8 +131,8 @@ describe("an App's workflow bindings, as its builders read them", () => {
       sharedBuilder: await outcome(
         sharedBuilder.api.workflowResources.appBindings(app)
       ),
-      // A draft is open to its builders only: to whoever only uses it,
-      // it isn't there.
+      // Bindings are open to its builders only: whoever only uses it is
+      // refused.
       user: await outcome(user.api.workflowResources.appBindings(app)),
       stranger: await outcome(stranger.api.workflowResources.appBindings(app)),
       staff: await outcome(staff.workflowResources.appBindings(app)),
@@ -164,7 +141,7 @@ describe("an App's workflow bindings, as its builders read them", () => {
 
     expect(outcomes).toStrictEqual({
       sharedBuilder: "ok",
-      user: "app.not_found",
+      user: "role.forbidden",
       stranger: "app.not_found",
       staff: "role.forbidden",
       invalid: "app.not_found",
@@ -172,90 +149,41 @@ describe("an App's workflow bindings, as its builders read them", () => {
   });
 });
 
-describe("binding a workflow its App's current version declares", () => {
-  it("refuses a version whose events, listen tasks or decisions aren't what that version declares, keeping the binding, and binds one that has them, or any version under an alias it doesn't declare or to an App with no current version", async () => {
-    const [admin, builder] = await Promise.all([
-      signedInApi(idp, "admin"),
-      signedInApi(idp, "builder"),
-    ]);
-    const events = await jobEventsContract(admin);
-    const decision = `approval-${unique()}`;
-    await admin.api.workflowResources.publishContract({
-      key: decision,
-      kind: "decision",
-      input: JSON.stringify(v.object({ who: v.string() }).descriptor),
-      response: JSON.stringify(v.object({ comment: v.string() }).descriptor),
-    });
-    const flow = await builder.api.workflowResources.create(
-      `bound-${unique()}`
-    );
-    // Version 1 as the App declares it; 2 with another event, 3 with its
-    // task renamed, 4 with a decision; 5 as 1, but for its greeting.
-    const versions = [
-      jobWaitingOf(events),
-      jobWaitingOf(events, { more: ["laterEvents"] }),
-      jobWaitingOf(events, { task: "awaitJob" }),
-      jobWaitingOf(events, { decision }),
-      jobWaitingOf(events, { label: "Version 5" }),
-    ];
-    for (const [index, definition] of versions.entries()) {
-      // oxlint-disable-next-line no-await-in-loop -- each version on the last
-      await builder.api.workflowResources.publish(flow.id, {
-        definition,
-        basedOn: index === 0 ? null : index,
-      });
-    }
-    const { id: app } = await builder.api.apps.create({ name: "Requests" });
-    const api = builder.api.workflowResources;
-    const bind = async (version: number, alias = "review", to = app) =>
-      await outcome(api.bindToApp(flow.id, { app: to, alias, version }));
-    const bound = async () => {
-      const listed = await api.appBindings(app);
-      return listed.map(({ alias, version }) => ({ alias, version }));
+/** What refusing a change named: its code, words and Apps; or "ok". */
+const refusedOf = async (
+  work: Promise<unknown>
+): Promise<"ok" | { code: string; message: string; details: unknown }> => {
+  try {
+    await work;
+    return "ok";
+  } catch (error) {
+    return {
+      code: workflowResourceErrors.codeOf(error) ?? String(error),
+      message: error instanceof Error ? error.message : "",
+      details:
+        typeof error === "object" && error !== null
+          ? Reflect.get(error, "details")
+          : undefined,
     };
-    // No version current yet: what it declares is the one it makes current.
-    const beforeCurrent = await bind(2);
-    await bind(1);
-    await release(builder, app, requestsApp("review", jobEventsDeclared));
+  }
+};
 
-    const refused = {
-      events: await bind(2),
-      listens: await bind(3),
-      decisions: await bind(4),
-    };
-    const kept = await bound();
-    const sameContract = await bind(5);
-    const undeclaredAlias = await bind(2, "other");
-    const { id: newApp } = await builder.api.apps.create({ name: "Fresh" });
-    const noCurrentVersion = await bind(4, "review", newApp);
+/** `refused` without its words, and whether they say `said`. */
+const saying = (
+  refused: Awaited<ReturnType<typeof refusedOf>>,
+  said: string
+) =>
+  refused === "ok"
+    ? "ok"
+    : {
+        code: refused.code,
+        details: refused.details,
+        says: refused.message.includes(said),
+      };
 
-    expect({
-      beforeCurrent,
-      refused,
-      kept,
-      sameContract,
-      undeclaredAlias,
-      noCurrentVersion,
-      after: await bound(),
-    }).toStrictEqual({
-      beforeCurrent: "ok",
-      refused: {
-        events: "workflow.app_binding_contract_changed",
-        listens: "workflow.app_binding_contract_changed",
-        decisions: "workflow.app_binding_contract_changed",
-      },
-      kept: [{ alias: "review", version: 1 }],
-      sameContract: "ok",
-      undeclaredAlias: "ok",
-      noCurrentVersion: "ok",
-      after: [
-        { alias: "other", version: 2 },
-        { alias: "review", version: 5 },
-      ],
-    });
-  });
-
-  it("refuses a binding checked against the current version once another version is made current before it lands, keeping the binding", async () => {
+describe("an App and the workflow it binds, changing", () => {
+  /** An admin, a builder, the events contract and an empty workflow of theirs. */
+  const contractSetUp = async () => {
     const { signedIn: signedInPerson } = jsonWorkflowAppsOf(idp);
     const [admin, builder] = await Promise.all([
       signedInApi(idp, "admin"),
@@ -264,58 +192,360 @@ describe("binding a workflow its App's current version declares", () => {
     const events = await jobEventsContract(admin);
     const api = builder.api.workflowResources;
     const flow = await api.create(`bound-${unique()}`);
-    // Two versions of the contract the App's current version declares.
-    for (const [index, label] of ["Version 1", "Version 2"].entries()) {
-      // oxlint-disable-next-line no-await-in-loop -- each version on the last
-      await api.publish(flow.id, {
-        definition: jobWaitingOf(events, { label }),
-        basedOn: index === 0 ? null : index,
-      });
-    }
     const { id: app } = await builder.api.apps.create({ name: "Requests" });
-    await api.bindToApp(flow.id, { app, alias: "review", version: 1 });
-    const declaring = requestsApp("review", jobEventsDeclared);
-    await release(builder, app, declaring);
-    // Another version of the App, declaring the same of the workflow: made
-    // current by a builder while the binding is on its way.
-    const { version: another } = await commitApp(
-      builder.api.apps.files,
-      app,
-      appOf(declaring.definition, {
-        ...declaring.files,
-        "src/routes/index.tsx": (
-          declaring.files["src/routes/index.tsx"] ?? ""
-        ).replace("Requests", "Open requests"),
-      }),
-      "Rename the page"
-    );
-    const racing = {
-      ...env,
-      DB: racingDb(async () => {
-        await builder.api.apps.versions.publish(app, another);
-      }, /insert into "app_workflow_bindings"/iu),
-    };
-
-    const raced = await outcome(
-      bindWorkflowToApp(racing, builder.acting, flow.id, {
-        app,
+    const publish = async (definition: string) =>
+      await refusedOf(publishOverRpc(builder.api, flow.id, definition));
+    /**
+     * Binds the workflow again in the App's draft, declaring what `chosen`
+     * names of its live version (all of it without), and publishes it.
+     */
+    const rebound = async (chosen: Record<string, string[]> = {}) => {
+      const subject = { kind: "app", id: app } as const;
+      const { revision } = await builder.api.drafts.get(subject);
+      const changed = await builder.api.apps.define(app, revision, {
+        op: "bindWorkflow",
         alias: "review",
-        version: 2,
-      })
+        workflow: flow.id,
+        ...chosen,
+      });
+      if (!changed.ok) {
+        return changed.problem;
+      }
+      return await refusedOf(builder.api.drafts.publish(subject, revision + 1));
+    };
+    /** The workflows the App binds now. */
+    const bound = async () => {
+      const listed = await api.appBindings(app);
+      return listed.map(({ workflowId }) => workflowId);
+    };
+    /** Whether the App's live version's config declares `name`. */
+    const declares = async (name: string) => {
+      const files = await builder.api.drafts.files({ kind: "app", id: app });
+      return files["grasp.config.ts"]?.includes(name) === true;
+    };
+    return {
+      admin,
+      builder,
+      events,
+      api,
+      flow,
+      app,
+      publish,
+      rebound,
+      bound,
+      declares,
+    };
+  };
+
+  it("lets a workflow add events at once, which the App declares once bound again", async () => {
+    const { builder, events, flow, app, publish, rebound, bound, declares } =
+      await contractSetUp();
+    await publish(jobWaitingOf(events));
+    await publishApp(
+      builder.api,
+      app,
+      boundIn(requestsApp("review", jobEventsDeclared), { review: flow.id })
     );
-    const listed = await api.appBindings(app);
+
+    // Its version 2 waits for another event too: no App relies on it yet.
+    const added = await publish(
+      jobWaitingOf(events, { more: ["laterEvents"] })
+    );
+    const before = await declares("laterEvents");
+    const declared = await rebound();
 
     expect({
-      raced,
-      kept: listed.map(({ alias, version }) => ({ alias, version })),
-      // Checked against the version current now, it binds.
-      again: await outcome(
-        api.bindToApp(flow.id, { app, alias: "review", version: 2 })
-      ),
+      added,
+      before,
+      declared,
+      after: await declares("laterEvents"),
+      bound: await bound(),
     }).toStrictEqual({
-      raced: "workflow.binding_conflict",
-      kept: [{ alias: "review", version: 1 }],
-      again: "ok",
+      added: "ok",
+      before: false,
+      declared: "ok",
+      after: true,
+      bound: [flow.id],
+    });
+  });
+
+  it("drops what an App relies on only once it no longer declares it, naming the App and what it uses until then", async () => {
+    const { builder, events, flow, app, publish, rebound } =
+      await contractSetUp();
+    await publish(jobWaitingOf(events, { more: ["laterEvents"] }));
+    await publishApp(
+      builder.api,
+      app,
+      boundIn(requestsApp("review"), { review: flow.id })
+    );
+    // Bound from its draft, the App declares all the live version has.
+    await rebound();
+
+    const whileDeclared = await publish(jobWaitingOf(events));
+    // Its draft leaves the event and its task out, and goes live.
+    const undeclared = await rebound({
+      events: ["jobEvents"],
+      listens: ["job"],
+    });
+    const dropped = await publish(jobWaitingOf(events));
+
+    expect({
+      whileDeclared: saying(
+        whileDeclared,
+        "Requests uses event `laterEvents`, listen task `laterEvents`"
+      ),
+      undeclared,
+      dropped,
+    }).toStrictEqual({
+      whileDeclared: {
+        code: "workflow.app_binding_contract_changed",
+        details: {
+          apps: [
+            {
+              id: app,
+              name: "Requests",
+              uses: ["event `laterEvents`", "listen task `laterEvents`"],
+            },
+          ],
+        },
+        says: true,
+      },
+      undeclared: "ok",
+      dropped: "ok",
+    });
+  });
+
+  it("holds a workflow back by what its bindings keep, never an App's release: one revoked blocks no publish or roll back, yet what it uses stays", async () => {
+    const { admin, builder, events, flow, app, publish } =
+      await contractSetUp();
+    await publish(jobWaitingOf(events, { more: ["laterEvents"] }));
+    const { version } = await publishApp(
+      builder.api,
+      app,
+      boundIn(requestsApp("review", jobEventsDeclared), { review: flow.id })
+    );
+    // Its live release can't load any more.
+    await admin.api.apps.releases.revoke(app, version, { reason: "Leaks" });
+
+    // Drops the event the App doesn't declare.
+    const published = await publish(jobWaitingOf(events));
+    const rolledBack = await refusedOf(
+      builder.api.versions.rollback({ kind: "workflow", id: flow.id }, 1)
+    );
+    // Drops the event and the task the App does.
+    const dropped = await publish(greetingOf(undefined, "No events"));
+
+    expect({
+      published,
+      rolledBack,
+      dropped: saying(dropped, "Requests uses event `jobEvents`"),
+    }).toStrictEqual({
+      published: "ok",
+      rolledBack: "ok",
+      dropped: {
+        code: "workflow.app_binding_contract_changed",
+        details: {
+          apps: [
+            {
+              id: app,
+              name: "Requests",
+              uses: ["event `jobEvents`", "listen task `job`"],
+            },
+          ],
+        },
+        says: true,
+      },
+    });
+  });
+
+  it("lets an archived App hold no workflow back, nor once restored, and checks it again as its next version goes live", async () => {
+    const { builder, events, flow, app, publish } = await contractSetUp();
+    await publish(jobWaitingOf(events));
+    const declaring = boundIn(requestsApp("review", jobEventsDeclared), {
+      review: flow.id,
+    });
+    await publishApp(builder.api, app, declaring);
+    await builder.api.apps.archive(app);
+
+    const whileArchived = await publish(greetingOf(undefined, "No events"));
+    await builder.api.apps.restore(app);
+    // What it declares was checked against nothing live since: it holds
+    // the workflow back no more until its next version goes live.
+    const onceRestored = await publish(greetingOf(undefined, "Still none"));
+    const next = appOf(declaring.definition, {
+      ...declaring.files,
+      "src/routes/index.tsx": (
+        declaring.files["src/routes/index.tsx"] ?? ""
+      ).replace("Requests", "Open requests"),
+    });
+    const restored = await refusedOf(publishApp(builder.api, app, next));
+
+    expect({
+      whileArchived,
+      onceRestored,
+      restored: saying(restored, "Requests uses event `jobEvents`"),
+    }).toStrictEqual({
+      whileArchived: "ok",
+      onceRestored: "ok",
+      restored: {
+        code: "workflow.app_binding_contract_changed",
+        details: {
+          apps: [
+            {
+              id: app,
+              name: "Requests",
+              uses: [
+                expect.stringContaining("event `jobEvents`"),
+                expect.stringContaining("listen task `job`"),
+              ],
+            },
+          ],
+        },
+        says: true,
+      },
+    });
+  });
+
+  it("refuses an App version declaring what its workflow's live version doesn't have, or has in another shape, naming it", async () => {
+    const { admin, builder, events, flow, app, publish } =
+      await contractSetUp();
+    await publish(jobWaitingOf(events));
+    const decision = `approval-${unique()}`;
+    await admin.api.workflowResources.publishContract({
+      key: decision,
+      kind: "decision",
+      input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+      response: JSON.stringify(v.object({ comment: v.string() }).descriptor),
+    });
+    const { name } = await builder.api.workflowResources.get(flow.id);
+    const declaring = (declares: Parameters<typeof requestsApp>[1]): TestApp =>
+      boundIn(requestsApp("review", declares), { review: flow.id });
+    const published = async (
+      declares: Parameters<typeof requestsApp>[1],
+      gap: string
+    ) =>
+      saying(
+        await refusedOf(publishApp(builder.api, app, declaring(declares))),
+        `Requests uses ${gap} of ${name}`
+      );
+    const refusal = (gap: string) => ({
+      code: "workflow.app_binding_contract_changed",
+      details: {
+        apps: [{ id: app, name: "Requests", uses: [`${gap} of ${name}`] }],
+      },
+      says: true,
+    });
+    const { jobEvents } = jobEventsDeclared.events;
+    if (jobEvents === undefined) {
+      throw new Error("No jobEvents declared");
+    }
+
+    expect({
+      missing: await published(
+        contractOf({
+          ...jobEventsDeclared,
+          decisions: {
+            approval: {
+              value: v.object({ comment: v.string() }).descriptor,
+              context: v.object({ who: v.string() }).descriptor,
+            },
+          },
+        }),
+        "decision `approval`"
+      ),
+      otherShape: await published(
+        contractOf({
+          ...jobEventsDeclared,
+          events: { jobEvents: { ...jobEvents, type: "grasp.job.other" } },
+        }),
+        "event `jobEvents`"
+      ),
+      fits: await published(jobEventsDeclared, ""),
+    }).toStrictEqual({
+      missing: refusal("decision `approval`"),
+      otherShape: refusal("event `jobEvents`"),
+      fits: "ok",
+    });
+  });
+
+  it("refuses whichever of an App's and its workflow's new version lands second over what the other checked", async () => {
+    const { builder, events, api, flow, app, publish } = await contractSetUp();
+    await publish(jobWaitingOf(events));
+    const declaring = boundIn(requestsApp("review", jobEventsDeclared), {
+      review: flow.id,
+    });
+    await publishApp(builder.api, app, declaring);
+    /** Another version of the App, binding the same, declaring `declares`. */
+    const anotherApp = (
+      title: string,
+      declares = jobEventsDeclared
+    ): TestApp => {
+      const declared = boundIn(requestsApp("review", declares), {
+        review: flow.id,
+      });
+      return appOf(declared.definition, {
+        ...declared.files,
+        "src/routes/index.tsx": (
+          declared.files["src/routes/index.tsx"] ?? ""
+        ).replace("Requests", title),
+      });
+    };
+    // The workflow's version 2, of what the App declares, goes live as
+    // the App's next version, checked against version 1, is about to.
+    const appRaced = await outcome(
+      publishDefined(
+        {
+          ...env,
+          DB: racingDb(async () => {
+            await publishOverRpc(
+              builder.api,
+              flow.id,
+              jobWaitingOf(events, { label: "Version 2" })
+            );
+          }, /^update "apps" set "current_version"/iu),
+        },
+        builder.acting,
+        app,
+        anotherApp("Open requests")
+      )
+    );
+    let appLive: number | undefined;
+    // The App's next version, declaring less, goes live as the workflow's
+    // version 3, checked against what the App declared before, is about
+    // to.
+    const workflowRaced = await outcome(
+      publishDefinition(
+        {
+          ...env,
+          DB: racingDb(async () => {
+            ({ version: appLive } = await publishApp(
+              builder.api,
+              app,
+              anotherApp(
+                "All requests",
+                contractOf({ events: jobEventsDeclared.events })
+              )
+            ));
+          }, /^update "workflow_resources" set "current_version"/iu),
+        },
+        builder.acting,
+        flow.id,
+        jobWaitingOf(events, { label: "Version 3" })
+      )
+    );
+    const { currentVersion } = await builder.api.apps.get(app);
+    const workflow = await api.get(flow.id);
+
+    expect({
+      appRaced,
+      workflowRaced,
+      appLive: currentVersion === appLive,
+      workflowLive: workflow.currentVersion,
+    }).toStrictEqual({
+      appRaced: "draft.conflict",
+      workflowRaced: "draft.conflict",
+      appLive: true,
+      workflowLive: 2,
     });
   });
 });

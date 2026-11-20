@@ -22,7 +22,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { currentMembership, notRemoved, organizationId } from "./auth/auth.ts";
+import { currentMembership, mayAct, organizationId } from "./auth/auth.ts";
 import { realEmail } from "./auth/directory-members.ts";
 import { members, teamMembers, teams, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -170,7 +170,7 @@ export const isPeoplePath = (name: string): boolean =>
 /** The organization's current members: a membership, and no removal. */
 const currentMember = and(
   eq(members.organizationId, organizationId),
-  notRemoved(members.userId)
+  mayAct(members.userId)
 );
 
 /** Each person's teams in the organization, by name, for `ids`. */

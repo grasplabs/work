@@ -34,8 +34,12 @@ import m0031 from './0031_drop_chat_attachments.sql';
 import m0032 from './0032_chat_turn_versions.sql';
 import m0033 from './0033_draft_definitions.sql';
 import m0034 from './0034_chat_make.sql';
-import m0035 from './0035_chat_archived.sql';
-import m0036 from './0036_chat_project.sql';
+import m0035 from './0035_answer_agent.sql';
+import m0036 from './0036_greedy_rafael_vega.sql';
+import m0037 from './0037_mature_tinkerer.sql';
+import m0038 from './0038_chat_answer_rating.sql';
+import m0039 from './0039_chat_request_keys.sql';
+import m0040 from './0040_chat_archived_project.sql';
 
   export default {
     journal,
@@ -76,7 +80,11 @@ m0032,
 m0033,
 m0034,
 m0035,
-m0036
+m0036,
+m0037,
+m0038,
+m0039,
+m0040
     }
   }
   

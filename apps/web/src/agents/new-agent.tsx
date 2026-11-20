@@ -1,3 +1,8 @@
+import {
+  instructionFileErrors,
+  instructionsMaxLength,
+  instructionsTooLong,
+} from "@grasp-os/shared/instruction-files";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
@@ -55,6 +60,7 @@ import { AgentFailure } from "./agent-facts.tsx";
 import { agentTemplates } from "./agent-templates.ts";
 import { cronOf } from "./agent-wakes.tsx";
 import { faceOf, lookFromName } from "./figure/look.ts";
+import { saveFirstInstructions } from "./unsaved-instructions.ts";
 
 /** The shapes the shape question offers: the library's lit bodies a person can tell apart. */
 const offeredShapes = [
@@ -67,15 +73,20 @@ const offeredShapes = [
   "planet",
 ] as const satisfies readonly AgentFigureShape[];
 
-// A new agent, for the company's admins: Grasp asks what it should be, one question at a time,
+// A new agent: one of the company's, for its own admins, or one of the person's own, for anyone
+// (core's agents.ts). Grasp asks what it should be, one question at a time,
 // on Damsko's Question tool, the way a chat asks: what it should do (a starting point or the
 // person's own words), what to call it, its shape and its colours, who may ask it, whether it
 // works on its own and what it should always know. Above the questions the agent itself takes
 // form as they are answered: its figure on its own night (figure/), changing shape and colour as
 // a choice is pointed at, and its name and job under it. The answers so far stand under it, each
 // a line. Once the last is answered, the whole agent waits in a Drawer, each answer with Change,
-// and Make agent makes it. Core makes it on, reaching nobody and with nothing it may do
-// (agent-builder.ts); the answers then set who may ask it and its schedule, and its page opens.
+// and Make agent makes it. Core makes one of the company's on, reaching nobody and with nothing it
+// may do (agent-builder.ts); the answers then set who may ask it and its schedule, and its page
+// opens. One of the person's own ("Just for me") is theirs to ask at once, and is never asked who
+// may ask it or when it works. Its instructions are saved as its instruction file once it is made;
+// should that fail, its page opens on Instructions with them as an unsaved draft
+// (unsaved-instructions.ts).
 
 /** The questions, in the order they are asked. */
 const steps = [
@@ -103,7 +114,8 @@ interface Draft {
   job: string;
   name: string;
   look: AgentFigureLook;
-  audience: "everyone" | "nobody";
+  /** `me`: one of the person's own. */
+  audience: "everyone" | "nobody" | "me";
   schedule: Schedule;
   instructions: string;
 }
@@ -178,6 +190,7 @@ const useWording = () => {
   const audienceNames: Record<Draft["audience"], string> = {
     everyone: t`Everyone in the company`,
     nobody: t`Nobody yet`,
+    me: t`Just for me`,
   };
   const short: Record<Step, string> = {
     job: t`What it does`,
@@ -244,26 +257,41 @@ const Forming = ({ draft }: { draft: Draft }) => {
 export const NewAgent = ({
   personId,
   taken,
+  company,
+  own,
 }: {
   /** The person making it: a schedule chosen here works for them. */
   personId: string;
   /** The names other agents have: core keeps each name to one agent, in any case or accent. */
   taken: readonly string[];
+  /** Whether they may make one for the company: its own admins. */
+  company: boolean;
+  /** Whether the company lets people have agents of their own. */
+  own: boolean;
 }) => {
   const { t, i18n } = useLingui();
   const words = useWording();
   const navigate = useNavigate();
   const { failure, run } = useCoreAction();
-  const [draft, setDraft] = useState<Draft>(blank);
+  const [draft, setDraft] = useState<Draft>({
+    ...blank,
+    audience: company ? "nobody" : "me",
+  });
   const [at, setAt] = useState(0);
   const [answers, setAnswers] = useState<Partial<Record<Step, QuestionAnswer>>>(
     {}
   );
   const [reviewing, setReviewing] = useState(false);
-  const step: Step = steps[at] ?? "instructions";
+  // Only one of the company's is asked who may ask it and when it works.
+  const asked = steps.filter(
+    (each) =>
+      (each !== "audience" || company) &&
+      (each !== "schedule" || draft.audience !== "me")
+  );
+  const step: Step = asked[at] ?? "instructions";
   const answer = answers[step];
   const template = agentTemplates.find(({ key }) => key === draft.template);
-  const last = at === steps.length - 1;
+  const last = at === asked.length - 1;
   const isTaken = (name: string): boolean =>
     taken.some(
       (other) =>
@@ -301,12 +329,12 @@ export const NewAgent = ({
   /** What this step's answer makes of the agent. */
   const take = (given: QuestionAnswer): Draft => {
     const [value] = given.values;
-    const own = given.words.trim();
+    const typed = given.words.trim();
     const byStep: Record<Step, () => Draft> = {
       job: () => {
         const chosen = agentTemplates.find(({ key }) => key === value);
         if (chosen === undefined || given.other) {
-          return { ...draft, template: undefined, job: own };
+          return { ...draft, template: undefined, job: typed };
         }
         // Another starting point brings its own name, unless this one's was kept.
         const name =
@@ -328,11 +356,11 @@ export const NewAgent = ({
       },
       name: () => ({
         ...draft,
-        name: given.other || value === undefined ? own : value,
+        name: given.other || value === undefined ? typed : value,
       }),
       audience: () => ({
         ...draft,
-        audience: value === "everyone" ? "everyone" : "nobody",
+        audience: value === "everyone" || value === "me" ? value : "nobody",
       }),
       schedule: () => ({
         ...draft,
@@ -416,6 +444,15 @@ export const NewAgent = ({
             label: words.audienceNames.everyone,
             description: t`It does nothing yet until you allow it`,
           },
+          ...(own
+            ? [
+                {
+                  value: "me",
+                  label: words.audienceNames.me,
+                  description: t`Only you see and ask it. It does at most what Grasp may do for you.`,
+                },
+              ]
+            : []),
         ],
         other: false,
       }),
@@ -494,15 +531,31 @@ export const NewAgent = ({
   const ready = !nameTaken && (step === "instructions" || given);
 
   const make = async (): Promise<void> => {
+    const { instructions } = draft;
+    const mine = draft.audience === "me";
     const made = await run(async (session) => {
-      const agent = await session.connections.makeAgent({
+      // Refused before anything is made, as their save would be.
+      if (instructionsTooLong(instructions)) {
+        throw instructionFileErrors.create("instructions.too_large", {
+          maxLength: instructionsMaxLength,
+        });
+      }
+      const input = {
         name: draft.name,
         job: draft.job,
-        instructions: draft.instructions,
         face: faceOf(draft.look),
         model: null,
         modelRole: null,
-      });
+      };
+      const agent = mine
+        ? await session.connections.makeOwnAgent(input)
+        : await session.connections.makeAgent(input);
+      const told =
+        instructions.trim() === "" ||
+        (await saveFirstInstructions(session, agent.id, instructions));
+      if (mine) {
+        return { agent, told };
+      }
       if (draft.audience === "everyone") {
         await session.connections.setAgentReach(agent.id, true, {
           who: "everyone",
@@ -519,21 +572,28 @@ export const NewAgent = ({
           opening: draft.job === "" ? draft.name : draft.job,
         });
       }
-      return agent;
+      return { agent, told };
     });
     if (made === undefined) {
       // The button says it failed; why stands in the Drawer, from core.
       throw new Error("The agent wasn't made.");
     }
+    let tab: "instructions" | "access" | undefined;
+    if (!made.told) {
+      // Its instructions didn't save: its page opens where they wait.
+      tab = "instructions";
+    } else if (draft.audience === "nobody") {
+      // Nobody may ask it yet: its page opens where that is chosen.
+      tab = "access";
+    }
     await navigate({
       to: "/agents/$agent",
-      params: { agent: made.id },
-      // Nobody may ask it yet: its page opens where that is chosen.
-      search: draft.audience === "nobody" ? { tab: "access" } : {},
+      params: { agent: made.agent.id },
+      search: tab === undefined ? {} : { tab },
     });
   };
 
-  const answered = steps.slice(0, reviewing ? steps.length : at);
+  const answered = asked.slice(0, reviewing ? asked.length : at);
   return (
     <Page>
       <PageHeading title={t`New agent`} />
@@ -572,7 +632,7 @@ export const NewAgent = ({
                   },
                 }
               : {})}
-            step={{ index: at, count: steps.length }}
+            step={{ index: at, count: asked.length }}
             submitDisabled={!ready}
             submitDisabledReason={
               nameTaken
@@ -600,7 +660,7 @@ export const NewAgent = ({
             {/* Why it wasn't made, from core, above what to change. */}
             <AgentFailure>{failure}</AgentFailure>
             <ItemGroup aria-label={t`The new agent`} separated>
-              {steps.map((each, index) => (
+              {asked.map((each, index) => (
                 <Item key={each} size="sm">
                   <ItemContent>
                     <ItemTitle>{words.short[each]}</ItemTitle>

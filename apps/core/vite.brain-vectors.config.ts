@@ -12,6 +12,8 @@ import { coreProject } from "./vite.config.ts";
 /** Minutes the run may take before Vitest stops it. */
 const maxMinutes = 60;
 
+// No meaning hit of the test model reaches it: it scans codes it puts in the
+// store itself, never through core's recall.
 export default coreProject({
   name: "@grasp-os/core:brain-vectors",
   include: ["test/brain-next-vector-timings.test.ts"],

@@ -29,14 +29,15 @@ import type { WorkflowStarts } from "./function-host.ts";
 import { defaultMaxAttempts } from "./outbox-delivery.ts";
 import type { OutboxEntry } from "./outbox-delivery.ts";
 import { allowingPermissionSql, grantedPermissions } from "./permissions.ts";
-import { isStaleRefusal, receiptOf } from "./workflow-starts.ts";
+import { isStaleRefusal, receiptOf, refusedForNow } from "./workflow-starts.ts";
 
 // Starting workflows from an App's server functions (spec 7.4, 9.5): an
 // action's `ctx.workflows.<alias>.start`, made as it runs, and a
 // mutation's, the same call, staged in its store's outbox with its commit
 // and made from there by this dispatch. Both are App starts of the
-// workflow version the App binds under an alias (app-workflow-bindings.ts),
-// decided and admitted as every start is (workflow-starts.ts). Threat
+// workflow the App binds under an alias (app-workflow-bindings.ts), at
+// its version live as each is admitted, decided and admitted as every
+// start is (workflow-starts.ts). Threat
 // model, and how each is closed:
 //
 // - An implicit App-owner or admin start: the run acts for the person the
@@ -131,10 +132,8 @@ const agentAllowedSql = (
   }
   const allowing = allowingPermissionSql(
     subject,
-    undefined,
     { type: "app", appId: app },
     "write",
-    true,
     { context: chatContext(agent), onBehalfOf: principal }
   );
   return sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;
@@ -329,7 +328,8 @@ const audited = async (
 /** Whether a refusal is one a later attempt may not repeat. */
 const isTransient = (error: unknown): boolean =>
   !isExpectedError(error) ||
-  workflowResourceErrors.codeOf(error) === "workflow.run_limit";
+  workflowResourceErrors.codeOf(error) === "workflow.run_limit" ||
+  refusedForNow(error);
 
 /**
  * Makes the start a committed mutation staged (see the header): delivered

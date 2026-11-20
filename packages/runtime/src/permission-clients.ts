@@ -1,19 +1,22 @@
 import type {
-  MemoryPack,
-  SkillRead,
-  SkillSelection,
-  SkillsReadInput,
-  SkillsSelectInput,
-} from "@grasp-os/brain/contract";
-import type {
   GuestChat,
   GuestInvitation,
   GuestInvite,
   GuestTranscript,
 } from "@grasp-os/shared/guests";
 import type { HttpContract } from "@grasp-os/shared/http-contract";
-import type { ResourceRecallInput } from "@grasp-os/shared/knowledge";
 
+import type {
+  BrainCard,
+  BrainEntitiesFind,
+  BrainEntity,
+  BrainMembersOf,
+  BrainPack,
+  BrainRecall,
+  BrainRemember,
+  BrainSkill,
+  BrainSkillText,
+} from "./brain-recall.ts";
 import type { ContractAction, HttpRequestInit } from "./connector-contracts.ts";
 import type { GraspFunctions } from "./grasp-functions.ts";
 import type { MemberName } from "./member-names.ts";
@@ -27,18 +30,6 @@ import type {
 import type { ValueSchema } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer, ObjectInput } from "./value-types.ts";
-
-/** One search result from the Brain: a title and an excerpt of it. */
-export interface BrainHit {
-  title: string;
-  excerpt: string;
-}
-
-/** A document read from the Brain. */
-export interface BrainDocument {
-  title: string;
-  text: string;
-}
 
 /** What `ctx.ai` is. */
 export interface AiClient {
@@ -105,65 +96,72 @@ export interface HttpClient<Actions extends readonly string[]> {
       ) => Promise<Response>;
 }
 
-/** What `ctx.brain` is, by its operations. */
+/** Each of the Brain's operations, as a member of `ctx.brain` calls it. */
+interface BrainCalls {
+  /**
+   * What the person the call acts for may read that answers
+   * `request.question`, within its budget: the same pack a workflow's
+   * step and a chat's code get.
+   */
+  readonly recall: (request: BrainRecall) => Promise<BrainPack>;
+  /**
+   * The skills that apply to `request.task`, best first, a few at most,
+   * each at its version: the same a chat's code selects.
+   */
+  readonly "skills.select": (request: {
+    /** The task, in your words: at most 2,000 characters. */
+    readonly task: string;
+  }) => Promise<{ readonly skills: readonly BrainSkill[] }>;
+  /** A skill at exactly the version a selection gave, whole. */
+  readonly "skills.read": (request: {
+    /** As a selection gave it: its scope, name and version. */
+    readonly skill: Pick<BrainSkill, "scope" | "name" | "version">;
+  }) => Promise<BrainSkillText>;
+  /**
+   * Remembers a fact in the App's own name, read only through the App's
+   * own code (`entities.get`, `entities.find`) by whoever uses the App
+   * when it reads: its new word on the same entity and attribute
+   * replaces its earlier one. Only from a call a person makes on the
+   * App's own page (never an agent's, Code Mode's or a workflow's), and
+   * only while every table of the version that runs is read by everyone
+   * who uses the App and everything it can reach is everyone's in the
+   * company: otherwise refused, saying why. The memory and the entity it
+   * is about.
+   */
+  readonly remember: (
+    memory: BrainRemember
+  ) => Promise<{ readonly memory: string; readonly entity: string }>;
+  /**
+   * Forgets one of the App's own memories, under the same rules as
+   * `remember`: true once it is forgotten (again for one forgotten
+   * before), false for none of the App's.
+   */
+  readonly forget: (request: { readonly memory: string }) => Promise<boolean>;
+  /**
+   * A page of an entity's card, as everyone in the company may read it,
+   * with what the App's own code remembered for someone who uses it, now
+   * or as of `asOf` (ISO 8601, with its offset): null for no entity they
+   * may see.
+   */
+  readonly "entities.get": (request: {
+    readonly entity: string;
+    readonly asOf?: string;
+    /** A page's `next`, for the page after it. */
+    readonly after?: string;
+  }) => Promise<BrainCard | null>;
+  /**
+   * A page of the entities that match, as everyone in the company may see
+   * them, with what the App's own code remembered for someone who uses it.
+   */
+  readonly "entities.find": (request: BrainEntitiesFind) => Promise<{
+    readonly entities: readonly BrainEntity[];
+    readonly next: string | null;
+  }>;
+}
+
+/** What `ctx.brain` is, by its operations: `entities.get` as `ctx.brain.entities.get`. */
 export type BrainClient<Operations extends readonly BrainOperation[]> =
-  ("search" extends Operations[number]
-    ? {
-        /**
-         * The best matches for `text` in the declared collections: 1 to
-         * `knowledgeSearchMaxLength` (500) code units, the Brain's own
-         * limit; a longer text is refused as `contract.invalid_args`.
-         */
-        readonly search: (request: {
-          readonly text: string;
-          readonly limit?: number;
-        }) => Promise<BrainHit[]>;
-      }
-    : unknown) &
-    ("read" extends Operations[number]
-      ? {
-          /** One document of the declared collections, by its ID. */
-          readonly read: (request: {
-            readonly id: string;
-          }) => Promise<BrainDocument>;
-        }
-      : unknown) &
-    ("recall" extends Operations[number]
-      ? {
-          /**
-           * The Brain's evidence for `query` from the declared collections,
-           * or those `collections` names of them, as far as the person may
-           * read each: a bounded memory pack, each item cited at its exact
-           * version. Needs the Brain's permission too.
-           */
-          readonly recall: (
-            request: ResourceRecallInput
-          ) => Promise<MemoryPack>;
-        }
-      : unknown) &
-    ("skillsSelect" extends Operations[number]
-      ? {
-          /**
-           * The skill of the declared collections the person may read
-           * that applies to `request.task`, pinned at the version read,
-           * or an explicit no-skill result. Keep the pin for the task.
-           * Needs the Brain's permission too.
-           */
-          readonly skillsSelect: (
-            request: SkillsSelectInput
-          ) => Promise<SkillSelection>;
-        }
-      : unknown) &
-    ("skillsRead" extends Operations[number]
-      ? {
-          /**
-           * A skill of the declared collections at exactly the version a
-           * selection pinned, while the person may read it: its text is
-           * data. Needs the Brain's permission too.
-           */
-          readonly skillsRead: (request: SkillsReadInput) => Promise<SkillRead>;
-        }
-      : unknown);
+  BrainMembersOf<BrainCalls, Operations[number]>;
 
 /** What `ctx.guests` is, by its operations. */
 export type GuestsClient<Operations extends readonly GuestsOperation[]> =

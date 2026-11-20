@@ -17,11 +17,11 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { readDraft, saveDraft } from "../src/app-drafts.ts";
-import type { Draft } from "../src/app-drafts.ts";
 import { sealDraftRelease } from "../src/app-releases.ts";
-import { draftDefinition, draftFiles } from "../src/apps.ts";
+import { appKind, draftDefinition } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { filesOf, readDraft, saveDraft } from "../src/drafts.ts";
+import type { DraftState } from "../src/drafts.ts";
 import {
   appPreview,
   inJurisdiction,
@@ -66,9 +66,11 @@ export const chatWithDraft = async (
     revision: number
   ): Promise<number> => {
     const { files, definition } = sourceParts(written);
-    const now = await readDraft(env, app);
+    const now = await readDraft(env, { kind: "app", id: app });
     await saveDraft(
       env,
+      appKind,
+
       app,
       { ...now, base: 1, revision },
       {
@@ -82,7 +84,7 @@ export const chatWithDraft = async (
     );
     return revision + 1;
   };
-  const before = await readDraft(env, app);
+  const before = await readDraft(env, { kind: "app", id: app });
   return { chatId, revision: await write(changes, before.revision), write };
 };
 
@@ -111,7 +113,7 @@ const answerSchema = z.object({
 /** The contracts of `draft`, a draft of `app`, sealed as its preview seals it. */
 const draftContracts = async (
   app: AppId,
-  draft: Pick<Draft, "base" | "changes" | "definition">
+  draft: Pick<DraftState, "base" | "changes" | "definition">
 ): Promise<string | undefined> => {
   const definition = await draftDefinition(env, app, draft);
   if (definition === null) {
@@ -120,7 +122,7 @@ const draftContracts = async (
   const sealed = await sealDraftRelease(
     env,
     { app, version: (draft.base ?? 0) + 1 },
-    await draftFiles(env, app, draft),
+    await filesOf(env, appKind, app, draft),
     definition.definition
   );
   const manifest = keptManifestSchema.parse(JSON.parse(sealed.manifest));
@@ -171,7 +173,7 @@ export const previewLease = async (
   const kept =
     leases.get(key) ??
     (async () => {
-      const { lease } = await person.api.apps.drafts.preview(app);
+      const { lease } = await person.api.apps.preview.open(app);
       if (lease === undefined) {
         throw new Error("The preview opened with no lease.");
       }

@@ -35,8 +35,8 @@ import { latestComputation, peopleSubject } from "./signals.ts";
 // literals of the App's own code, added up; but no run's or decision's ID
 // and no person a decision waits for (`forBuilders`, and `waitsFor`,
 // which gives them each workflow's waits for people added up instead of
-// each person's). Independent workflows' signals, of no App, and the
-// deployment's own (people's unanswered questions) stay with admins. No
+// each person's). Independent workflows' signals, of no App, stay with
+// admins. No
 // evidence holds what a run read, returned or failed with. Every read is
 // audited, never refused for it (the outbox keeps the event).
 
@@ -73,9 +73,6 @@ const forBuilders = (signal: ImprovementSignal): ImprovementSignal => {
     case "cost_per_run": {
       const { costliest: _costliest, ...evidence } = signal.evidence;
       return { ...signal, evidence };
-    }
-    case "unanswered_question": {
-      return signal;
     }
     default: {
       return signal;

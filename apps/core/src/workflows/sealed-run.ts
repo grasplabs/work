@@ -97,6 +97,7 @@ import {
   retryable,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
+import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { inboxOf } from "./run-inboxes.ts";
 import { sealedMainModules } from "./sealed-isolate.ts";
 import type { Settled, StepError } from "./sealed-isolate.ts";
@@ -221,8 +222,8 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   run's as its workflow's (`workflow-resource:<id>`) in its account's
 //   lineage, a test run's as its own, a run an App's test started against
 //   its test's own admission, which counts nothing of the organization's.
-// - A test's run reaching the organization. A test run of a draft's
-//   checkpoint calls nothing: every call is answered from its start's
+// - A test's run reaching the organization. A test run of a draft at
+//   one revision calls nothing: every call is answered from its start's
 //   fixtures (resource-calls.ts, `makeCall`, `calling.candidate`). A run
 //   an App's test started makes only the calls its test serves
 //   (fixture-calls.ts, `fixtureCalls`), refused otherwise before its
@@ -412,14 +413,10 @@ import { engineStepOf } from "./sealed-steps.ts";
 //   writes under the step's key, so an attempt, a round or a replay that
 //   writes again answers the file the first wrote, never a second one.
 // - The Brain reached past what the build seals (`grasp.brain`,
-//   `ctx.brain.<alias>.<action>`). The permission's one collection and
-//   the action (search, read, recall) are sealed; what the run reads is
-//   what Knowledge's access rules let the run read as a delegate, under
-//   the permission, for its person: a document outside the collection, or
-//   one the person may not read, is refused as one that isn't there, and
-//   restricted data never reaches an unrestricted run (resource-reads.ts).
-//   What it read is pinned to the run (run-evidence.ts), so nothing it
-//   read leaves the run once the person may no longer read it.
+//   `ctx.brain.<alias>.recall`, `.skills.select`, `.skills.read`). The
+//   permission and the action are sealed; a call reads, under the
+//   workflow's own permission to read the Brain, checked as it is made,
+//   what the run's person may read, never more (brain-calls.ts).
 // - A connection call keeping a file, or attaching run files, where it
 //   mustn't. Where a read's file goes (`into`) and where a write's
 //   attachments come from (`from`) are the sealed call's, each a files
@@ -2070,6 +2067,25 @@ class SealedRun implements SealedRunKind {
       ]);
       return undefined;
     }
+    // What it keeps, the workflow's builders and admins read, and every
+    // later run of it: never once the run may no longer read what it read
+    // (resource-reads.ts: a version erased or narrowed, a memory a
+    // person's erasure took or its writer retired), checked as it writes,
+    // as anything leaving the run is (GRA-1985). A step on the Brain or
+    // the run's files is checked here alone; a model's or a connector's
+    // was checked before its call, and is again, as the run may have lost
+    // read since. A refusal fails the step, after its call's effect as
+    // `workflow.failed_after_effect`, and writes nothing.
+    try {
+      await requireResourceRunEvidenceReadable(this.#env, calling);
+    } catch (error) {
+      if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
+        throw error;
+      }
+      return this.#effected.has(attempt)
+        ? failedAfterEffect
+        : forIsolate(error);
+    }
     try {
       await writeWorkflowState(
         this.#env,
@@ -2625,7 +2641,7 @@ class SealedRun implements SealedRunKind {
         input: asks.input,
         ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
       };
-      // A test run of a draft's checkpoint reaches no person: its decision
+      // A test run of a draft at one revision reaches no person: its decision
       // is the answer its start gave the binding (`candidateDecision`,
       // checked here), opened nowhere (`decisionsKeptOf`).
       if (calling.candidate !== undefined) {
@@ -3035,7 +3051,7 @@ class SealedRun implements SealedRunKind {
           calling,
           task.id,
           {
-            name: "grasp.knowledge",
+            name: "grasp.brain",
             binding: call.binding,
             operation: call.operation,
             arguments: value,
@@ -3111,7 +3127,7 @@ export interface SealedRunKind extends RunKind {
 
 /**
  * Run `run`, as its activation loaded it (resource-runs.ts: an independent
- * workflow's run, or a test run of its draft's checkpoint), as the run
+ * workflow's run, or a test run of its draft at one revision), as the run
  * host serves a sealed build's: its lineage, its authority and its share
  * from what its calls go by, which its row and its root's pin.
  */

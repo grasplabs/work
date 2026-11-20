@@ -1,23 +1,11 @@
-import { normalized } from "./brain-scoring.ts";
 import type { BrainTask } from "./fixtures/brain-tasks.ts";
 /**
- * The model provider of the Brain baseline's CI run (GRA-295): a stand-in
- * behind connect, the one outside system the run mocks. It reads like a
- * careful model that can't reason past its context: it answers a task when
- * every piece of the task's evidence reached it, citing that evidence, and
- * abstains otherwise. In the agent arm it first runs code that searches
- * Knowledge, as a model would. It never follows instructions it reads in
- * a document, such as the supplier note's injection: whether a real model
- * does is what a real run's security gate measures.
- *
- * What it measures is therefore whether each arm got the right context to
- * the model, within the platform's permissions, and what that cost: not
- * how well a model answers. A real model's run replaces it.
+ * How a stand-in model reads what reached it: the turn a harness asks for
+ * (`StubTurn`), a request's strings and transcript, and what came back
+ * since the question, for Stephen's stub and experiment E02. The Brain
+ * baseline's stand-in model, which searched Knowledge, went with that
+ * reach (GRA-1735).
  */
-import type { ProviderReply, SentRequest } from "./model-provider.ts";
-
-/** Identifies the stub in a run's identity, as a model ID would. */
-export const brainStubModel = "brain-stub-reader/2026-10-15";
 
 /** What the harness is asking the agent for right now. */
 export type StubTurn =
@@ -158,7 +146,7 @@ const callsText = (calls: unknown): string =>
  * The request's system prompt: Anthropic's `system`, or the system
  * messages of chat completions.
  */
-export const systemTextOf = (body: unknown): string =>
+const systemTextOf = (body: unknown): string =>
   [
     ...modelStrings(
       typeof body === "object" && body !== null && "system" in body
@@ -257,87 +245,3 @@ export const resultsSinceQuestion = (body: unknown): string[] => {
     )
     .flatMap((content) => modelStrings(content));
 };
-
-const tokensOf = (text: string): number => Math.ceil(text.length / 4);
-
-/**
- * The stub's calls so far. A call's ID is sent back to the model with its
- * result, so it's part of what the leak gate reads: counted, it can never
- * spell a restricted value. A random UUID could, about once in 500,000
- * calls: `…b-7781-…` holds a badge number the gate looks for.
- */
-let calls = 0;
-
-export const codeStep = (code: string, input: string): ProviderReply => ({
-  text: "",
-  toolCalls: [
-    {
-      id: `call_${(calls += 1)}`,
-      name: "executeCode",
-      arguments: { code },
-    },
-  ],
-  inputTokens: tokensOf(input),
-  outputTokens: tokensOf(code),
-});
-
-export const says = (text: string, input: string): ProviderReply => ({
-  text,
-  inputTokens: tokensOf(input),
-  outputTokens: tokensOf(text),
-});
-
-/** The agent arm's search: the best sections for `query`, read whole. */
-const searchCode = (
-  query: string
-): string => `export default async (self, env) => {
-  const { hits } = await env.knowledge.search(${JSON.stringify(query)}, { limit: ${searchedSections} });
-  const units = [];
-  for (const hit of hits) {
-    const read = await env.knowledge.read(hit.documentId, { section: hit.section });
-    units.push("[source: " + read.path + "#" + (read.section?.headings.at(-1) ?? "") + "]\\n" + read.text);
-  }
-  return units.join("\\n\\n");
-};`;
-
-const abstention = "ABSTAIN: the sources I can read don't answer this.";
-
-/** The answer to `task` given what reached the model, `input`. */
-const answerOf = (task: BrainTask, input: string): string => {
-  const { expect } = task;
-  if (expect.kind === "abstain") {
-    return abstention;
-  }
-  const seen = normalized(input);
-  const found = expect.evidence.every(({ marker }) =>
-    seen.includes(normalized(marker))
-  );
-  if (!found) {
-    return abstention;
-  }
-  const facts = expect.facts.map(([first = ""]) => first).join("; ");
-  const cited = expect.evidence.map(({ source }) => `[${source}]`).join(" ");
-  return `ANSWER: ${facts}\nFrom ${cited}`;
-};
-
-/**
- * The stub provider: answers each request for the turn `current`
- * says the harness is in.
- */
-export const stubReader =
-  (current: () => StubTurn) =>
-  (requests: readonly SentRequest[]): ProviderReply => {
-    const body = requests.at(-1)?.body;
-    const input = modelStrings(body).join("\n");
-    const turn = current();
-    const results = resultsSinceQuestion(body);
-    if (turn.phase === "prior") {
-      return turn.reads !== undefined && results.length === 0
-        ? codeStep(searchCode(turn.reads), input)
-        : says("Noted.", input);
-    }
-    if (turn.searches && results.length === 0) {
-      return codeStep(searchCode(turn.task.query), input);
-    }
-    return says(answerOf(turn.task, input), input);
-  };

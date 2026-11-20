@@ -34,6 +34,20 @@ import m0031 from './0031_remarkable_korath.sql';
 import m0032 from './0032_silky_leper_queen.sql';
 import m0033 from './0033_nervous_karma.sql';
 import m0034 from './0034_superb_viper.sql';
+import m0035 from './0035_fine_adam_destine.sql';
+import m0036 from './0036_cuddly_leopardon.sql';
+import m0037 from './0037_late_mongu.sql';
+import m0038 from './0038_lush_eternity.sql';
+import m0039 from './0039_salty_prodigy.sql';
+import m0040 from './0040_zippy_fabian_cortez.sql';
+import m0041 from './0041_plain_franklin_storm.sql';
+import m0042 from './0042_team_results_from_shared_lines.sql';
+import m0043 from './0043_team_work_from_the_first_teller.sql';
+import m0044 from './0044_drawings_by_work.sql';
+import m0045 from './0045_cooing_fabian_cortez.sql';
+import m0046 from './0046_team_minted.sql';
+import m0047 from './0047_spicy_typhoid_mary.sql';
+import m0048 from './0048_married_havok.sql';
 
   export default {
     journal,
@@ -72,7 +86,21 @@ m0030,
 m0031,
 m0032,
 m0033,
-m0034
+m0034,
+m0035,
+m0036,
+m0037,
+m0038,
+m0039,
+m0040,
+m0041,
+m0042,
+m0043,
+m0044,
+m0045,
+m0046,
+m0047,
+m0048
     }
   }
   

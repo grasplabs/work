@@ -35,9 +35,10 @@ import { modelSettings, modelForRole, models } from "../models.ts";
 import type { ModelCall } from "../models.ts";
 import { readOrganization } from "../organization.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
+import { interviewCaller } from "./interview-caller.ts";
 import { interviewerText } from "./interviewer-text.ts";
 import { stephenVersion } from "./lab-marks.ts";
-import { linkHeaders, linkRefusal } from "./links.ts";
+import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took, TurnContext } from "./store.ts";
 
@@ -53,7 +54,8 @@ import type { Took, TurnContext } from "./store.ts";
 // What it must not do, from the threat model (GRA-307), and what stops it:
 //
 // - Let the page say who it is or what Stephen knows: the link's secret
-//   and the device's key are checked by the store, and who they are, their
+//   and the session of the account it belongs to are checked
+//   (interview-caller.ts, the store), and who they are, their
 //   team, their lead and what Stephen knows come from it (`turnContext`).
 //   The page sends only the conversation, which it holds.
 // - Tell the company who talked, and when: every gateway call is made by
@@ -76,7 +78,7 @@ const lineTokens = 400;
 const notesTokens = 4000;
 
 /** A turn as Stephen is asked for it: the page's request, without the link it came on. */
-export type TurnAsked = Omit<InterviewTurnRequest, "secret" | "key">;
+export type TurnAsked = Omit<InterviewTurnRequest, "secret">;
 
 /** What happened, as Stephen is told it, for someone called `name`. */
 const happenedOf = (
@@ -546,6 +548,11 @@ export const interviewTurnResponse = async (
       requestId
     );
   }
+  // Who asks, before anything they sent is read (interview-caller.ts).
+  const caller = await interviewCaller(env, request.headers);
+  if (typeof caller === "string") {
+    return noCallerRefusal(caller, requestId);
+  }
   const length = Number(request.headers.get("content-length") ?? 0);
   const raw =
     length > interviewTurnMaxBytes
@@ -561,7 +568,7 @@ export const interviewTurnResponse = async (
   const secretMark = await sha256Hex(turn.secret);
   const found = await onboardingStore(env).turnContext(
     secretMark,
-    await sha256Hex(turn.key)
+    caller.account
   );
   if (!found.ok) {
     if (found.code === "interview.link_invalid") {

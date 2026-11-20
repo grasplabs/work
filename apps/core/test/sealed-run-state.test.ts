@@ -12,11 +12,12 @@ import {
 } from "vite-plus/test";
 import { z } from "zod";
 
-import { resetWorkflowState, workflowStateOf } from "../src/workflow-state.ts";
+import { resetWorkflowState } from "../src/workflow-state.ts";
 import type { CallingRun } from "../src/workflows/resource-authority.ts";
 import type { HostedSealedRun } from "../src/workflows/sealed-run.ts";
 import { allEvents } from "./audit-events.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
+import { workflowStateOf } from "./kept-state.ts";
 import { connectModels } from "./model-provider.ts";
 import {
   allowedModel,

@@ -18,8 +18,8 @@ const keepAgent = async (
 ): Promise<void> => {
   await env.DB.prepare(
     `INSERT INTO agents
-       (id, name, face, job, instructions, model_role, state, made_by, made_at, changed_by, changed_at)
-     VALUES (?, ?, 'claire', 'Chases unpaid invoices.', 'Answer only about invoices.', 'careful', ?, 'admin-1', ?, 'admin-2', ?)`
+       (id, name, face, job, model_role, state, made_by, made_at, changed_by, changed_at)
+     VALUES (?, ?, 'claire', 'Chases unpaid invoices.', 'careful', ?, 'admin-1', ?, 'admin-2', ?)`
   )
     .bind(id, name, state, Date.UTC(2026, 10, 1), Date.UTC(2026, 10, 2))
     .run();
@@ -39,7 +39,6 @@ describe("the company's agents", () => {
       id: chatAgentId,
       name: "Stephen",
       state: "on",
-      instructions: "",
       modelRole: null,
       changedBy: null,
       changedAt: null,
@@ -53,10 +52,12 @@ describe("the company's agents", () => {
       name: "Ada",
       face: "claire",
       job: "Chases unpaid invoices.",
-      instructions: "Answer only about invoices.",
       modelRole: "careful",
       model: null,
       state: "paused",
+      // One of the company's: nobody's own.
+      ownerId: null,
+      offeredAt: null,
       changedBy: "admin-2",
       changedAt: "2026-11-02T00:00:00.000Z",
     });

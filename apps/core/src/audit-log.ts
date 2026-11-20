@@ -48,10 +48,6 @@ import migrations from "./db/audit-log/migrations/migrations.js";
 import { archives, events } from "./db/audit-log/schema.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import { inJurisdiction } from "./durable-objects.ts";
-import { KnowledgeTallier } from "./knowledge/usage-tally.ts";
-import type { KnowledgeTally } from "./knowledge/usage-tally.ts";
-import { SignalTallier } from "./signal-tally.ts";
-import type { SignalTally } from "./signal-tally.ts";
 
 /** How many entries one read returns at most. */
 const pageSize = 500;
@@ -222,22 +218,6 @@ export interface ArchiveQuery {
 export type ArchivePage =
   | AuditPage
   | { unreadable: { from: number; through: number } };
-
-/** What the daily signals want tallied of a stretch (`tallyStretch`). */
-export interface TallyWanted {
-  /** The improvement signals': of the entries received from `from` on. */
-  signals?: { from: string };
-  /** Knowledge's usage signals': reads and questions, each from its time. */
-  knowledge?: { readsFrom: string; questionsFrom: string };
-}
-
-/** A stretch's partial totals, for those that wanted them. */
-export interface StretchTally {
-  signals?: SignalTally;
-  knowledge?: KnowledgeTally;
-  /** Where to carry on, or `null` once the range is read. */
-  next: number | null;
-}
 
 /** A search: which events, in which order, from which position on. */
 export interface SearchQuery {
@@ -537,84 +517,6 @@ export class AuditLog extends DurableObject<Env> {
     return low === undefined || high === undefined
       ? { low: 1, high: 0 }
       : { low, high };
-  }
-
-  /**
-   * What the daily signals (src/daily-signals.ts) need of the entries in
-   * `range` after position `after`, tallied in one pass over at most
-   * {@link searchScanMax} entries, so only partial totals leave the
-   * object: for the improvement signals, model calls' cost per workflow
-   * run and searches that found nothing (src/signal-tally.ts); for
-   * Knowledge's usage signals, the documents read and the searches that
-   * found nothing by collection (src/knowledge/usage-tally.ts). Each only
-   * while `wanted` asks for it. `next` says where to carry on, or is
-   * `null` once the range is read. `null` instead when retention has
-   * archived where it would read.
-   */
-  tallyStretch(
-    range: SearchRange,
-    wanted: TallyWanted,
-    after?: number
-  ): StretchTally | null {
-    const low =
-      after === undefined ? range.low : Math.max(range.low, after + 1);
-    const signals =
-      wanted.signals === undefined
-        ? undefined
-        : new SignalTallier(wanted.signals.from);
-    const knowledge =
-      wanted.knowledge === undefined
-        ? undefined
-        : new KnowledgeTallier(
-            wanted.knowledge.readsFrom,
-            wanted.knowledge.questionsFrom
-          );
-    const totals = (next: number | null): StretchTally => ({
-      signals: signals?.totals(),
-      knowledge: knowledge?.totals(),
-      next,
-    });
-    if (low > range.high) {
-      return totals(null);
-    }
-    const [oldest] = this.#page(0, 1);
-    if (oldest === undefined || low < oldest.seq) {
-      return null;
-    }
-    let last: number | undefined;
-    // Read as a cursor, one row at a time, with nothing awaited inside.
-    for (const entry of this.ctx.storage.sql.exec<{
-      seq: number;
-      receivedAt: string;
-      event: string;
-    }>(
-      "SELECT seq, received_at AS receivedAt, event FROM events WHERE seq BETWEEN ? AND ? ORDER BY seq LIMIT ?",
-      low,
-      range.high,
-      searchScanMax
-    )) {
-      last = entry.seq;
-      const event = parseStored(entry.event);
-      if (event !== null) {
-        signals?.add(event, entry.receivedAt);
-        knowledge?.add(event, entry.receivedAt);
-      }
-    }
-    return totals(last === undefined || last >= range.high ? null : last);
-  }
-
-  /**
-   * Whether the log still holds every entry it received from `from` (ISO
-   * 8601) on: retention has archived none of them.
-   */
-  holdsSince(from: string): boolean {
-    const [archived] = this.#db
-      .select({ lastReceivedAt: archives.lastReceivedAt })
-      .from(archives)
-      .orderBy(desc(archives.lastSeq))
-      .limit(1)
-      .all();
-    return archived === undefined || archived.lastReceivedAt < from;
   }
 
   /**

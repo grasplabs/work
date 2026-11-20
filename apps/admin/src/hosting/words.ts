@@ -26,8 +26,10 @@ export const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
     "A resource is recorded differently from what the release needs of it.",
   resource_missing:
     "A binding needs a resource the client's inventory doesn't have, or hasn't observed yet.",
+  // One code for a database a person deleted and one that isn't the one
+  // recorded (src/hosting/operation.ts): the words hold for both.
   foreign_resource:
-    "A binding would reach a resource that isn't this client's own.",
+    "A database or other resource the release needs is missing from the client's account, or isn't the one recorded as its own (made again under its name, or another client's): look in the account before releasing again.",
   unsupported_binding: "The release has a binding the admin doesn't map.",
   resource_unnamed:
     "The release has a resource the client naming scheme doesn't name: add it to the names module first.",

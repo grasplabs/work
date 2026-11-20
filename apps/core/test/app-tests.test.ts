@@ -8,17 +8,17 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { sweepTestFixtures } from "../src/app-tests.ts";
-import { createApp, findApp } from "../src/apps.ts";
+import { appKind, createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import {
   discardFixtureStore,
   openFixtureStore,
   openStore,
 } from "../src/data-stores.ts";
+import { rollback } from "../src/publish.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
@@ -49,9 +49,7 @@ const appFiles: TestApp = testApp(
         access: { read: "appMembers", write: "appBuilders" },
       },
     },
-    permissions: [
-      'permission.brain({\n  operations: ["search"],\n  collections: ["handbook"],\n})',
-    ],
+    permissions: ['permission.brain({ operations: ["recall"] })'],
   },
   {
     "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
@@ -94,8 +92,11 @@ export const help = permissions.brain;
 
 export const searchHelp = action({
   args: { text: v.string().min(1) },
-  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  handler: async (ctx, args) => await ctx.brain.search({ text: args.text, limit: 5 }),
+  returns: v.array(v.string()),
+  handler: async (ctx, args) => {
+    const pack = await ctx.brain.recall({ question: args.text, budget: { tokens: 500 } });
+    return pack.items.map((item) => item.text);
+  },
 });
 
 export const count = internalQuery({
@@ -217,7 +218,7 @@ interface Built {
 const appWith = async (files: TestSource): Promise<Built> => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
-  await commitDefined(env, owner, id, files, "First version");
+  await commitDefined(env, owner, id, files);
   return { owner, app: id };
 };
 
@@ -239,7 +240,7 @@ const refusal = async (
   on: Env = env
 ): Promise<{ code: unknown; failures: unknown }> => {
   try {
-    await publishVersion(on, owner, app, 1);
+    await rollback(on, appKind, owner, app, 1);
   } catch (error) {
     if (!isExpectedError(error)) {
       throw error;
@@ -285,7 +286,7 @@ describe("an App's tests", { timeout: 180_000 }, () => {
         "tests/notes.test.ts": passingSuite,
       })
     );
-    await publishVersion(env, built.owner, built.app, 1);
+    await rollback(env, appKind, built.owner, built.app, 1);
     await expect(findApp(env, built.app)).resolves.toMatchObject({
       currentVersion: 1,
     });
@@ -369,7 +370,7 @@ export default appTest(schema, {
         }
       )
     );
-    await publishVersion(env, built.owner, built.app, 1);
+    await rollback(env, appKind, built.owner, built.app, 1);
     await expect(findApp(env, built.app)).resolves.toMatchObject({
       currentVersion: 1,
     });
@@ -487,7 +488,7 @@ export default appTest(schema, {
 `,
       })
     );
-    await publishVersion(env, built.owner, built.app, 1);
+    await rollback(env, appKind, built.owner, built.app, 1);
     await expect(findApp(env, built.app)).resolves.toMatchObject({
       currentVersion: 1,
     });
@@ -587,8 +588,9 @@ export default appTest(schema, {
       },
     });
     const started = Date.now();
-    await publishVersion(
+    await rollback(
       envWith({ DATA_STORES: stalling, APP_TEST_LIMITS_MS: "///1000" }),
+      appKind,
       built.owner,
       built.app,
       1
@@ -688,7 +690,7 @@ export default appTest(schema, {
     // Sealed where App code may run; made current where it may not.
     await sealRelease(env, { app: built.app, version: 1, by: built.owner });
     await expect(
-      publishVersion(unbounded, built.owner, built.app, 1)
+      rollback(unbounded, appKind, built.owner, built.app, 1)
     ).rejects.toMatchObject({ code: "version.tests_unavailable" });
   });
 
@@ -706,8 +708,8 @@ export default appTest(schema, {
       })
     );
     await expect(
-      publishVersion(unbounded, helpers.owner, helpers.app, 1)
-    ).resolves.toMatchObject({ currentVersion: 1 });
+      rollback(unbounded, appKind, helpers.owner, helpers.app, 1)
+    ).resolves.toMatchObject({ version: 1 });
 
     const stray = await sealedWith(
       withFiles(appFiles, {
@@ -715,7 +717,7 @@ export default appTest(schema, {
       })
     );
     await expect(
-      publishVersion(unbounded, stray.owner, stray.app, 1)
+      rollback(unbounded, appKind, stray.owner, stray.app, 1)
     ).rejects.toMatchObject({
       code: "version.tests_failed",
       details: {
@@ -732,19 +734,19 @@ export default appTest(schema, {
         "tests/notes.test.ts": passingSuite,
       })
     );
-    await publishVersion(env, built.owner, built.app, 1);
+    await rollback(env, appKind, built.owner, built.app, 1);
     // Where the tests can't run at all, the current version is still
     // made current again: nothing ran them.
     await expect(
-      publishVersion(unbounded, built.owner, built.app, 1)
-    ).resolves.toMatchObject({ currentVersion: 1 });
+      rollback(unbounded, appKind, built.owner, built.app, 1)
+    ).resolves.toMatchObject({ version: 1 });
   });
 });
 
 /** A sealed App's release, for fixture stores with its schema. */
 const sealed = async (): Promise<{ built: Built; release: Release }> => {
   const built = await appWith(appFiles);
-  await publishVersion(env, built.owner, built.app, 1);
+  await rollback(env, appKind, built.owner, built.app, 1);
   return { built, release: await loadRelease(env, built.app, 1) };
 };
 

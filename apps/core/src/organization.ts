@@ -36,9 +36,11 @@ import type { SessionCheck } from "./session-check.ts";
 // the deployment decides. Grasp staff are admins, but what the client is
 // called and when its day starts are the client's to say.
 
-/** The organization as stored, with what the deployment says about it. */
-export const readOrganization = async (env: Env): Promise<Organization> => {
-  const [row] = await drizzle(env.DB)
+/** The organization's name, time zone and logo, as stored. */
+const storedOrganization = async (
+  db: D1Database
+): Promise<{ name: string; timeZone: string; logo: string | null }> => {
+  const [row] = await drizzle(db)
     .select({
       name: organizations.name,
       timeZone: organizations.timeZone,
@@ -49,9 +51,25 @@ export const readOrganization = async (env: Env): Promise<Organization> => {
   return {
     name: row?.name ?? "",
     timeZone: row?.timeZone ?? defaultTimeZone,
+    logo: row?.logo ?? null,
+  };
+};
+
+/** The time zone the organization works in, as stored. */
+export const organizationTimeZone = async (db: D1Database): Promise<string> => {
+  const { timeZone } = await storedOrganization(db);
+  return timeZone;
+};
+
+/** The organization as stored, with what the deployment says about it. */
+export const readOrganization = async (env: Env): Promise<Organization> => {
+  const { name, timeZone, logo } = await storedOrganization(env.DB);
+  return {
+    name,
+    timeZone,
     dataRegion: "eu",
     signInDomains: signInConfig(env)?.domains ?? [],
-    logo: logoPathOf(row?.logo ?? null),
+    logo: logoPathOf(logo),
   };
 };
 

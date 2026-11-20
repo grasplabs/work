@@ -24,6 +24,46 @@ describe("audit event types", () => {
     expect(typeOf("audit.purged")).toBe("action");
   });
 
+  it("files a chat's question noted for the Brain, and how its hand-over ended, as actions", () => {
+    expect(
+      [
+        "chat.turn_noted",
+        "brain.source.handover_started",
+        "brain.source.handed_over",
+        "brain.source.handover_refused",
+        "brain.source.handover_skipped",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["action", "action", "action", "action", "action"]);
+  });
+
+  it("files what is done to an upload into the Brain as actions, and an admin's listing of shared uploads as a read", () => {
+    expect(
+      [
+        "brain.upload.added",
+        "brain.upload.refused",
+        "brain.upload.failed",
+        "brain.upload.deleted",
+        "brain.upload.delete_failed",
+        "brain.upload.listed",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["action", "action", "action", "action", "action", "read"]);
+  });
+
+  it("files a person's run results taken out of use in the Brain, once they lost the workflow, as an action", () => {
+    expect(typeOf("brain.run_sources.removed")).toBe("action");
+  });
+
+  it("files what was captured from a connection, and its erasure when it is disconnected, as actions", () => {
+    expect(
+      [
+        "brain.capture.kept",
+        "brain.capture.skipped",
+        "brain.capture.failed",
+        "brain.capture.erased",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["action", "action", "action", "action"]);
+  });
+
   it("gives an audit action no rule names no type, rather than filing it as a read", () => {
     expect(typeOf("audit.something_new")).toBeNull();
   });
@@ -38,6 +78,18 @@ describe("audit event types", () => {
         "app.version.current",
       ].map((action) => typeOf(action))
     ).toStrictEqual(["decision", "decision", "action", "config", "config"]);
+  });
+
+  it("files an App's or workflow's draft saved, restored or discarded, and a version published or rolled back to, as configuration", () => {
+    expect(
+      [
+        "draft.saved",
+        "draft.restored",
+        "draft.discarded",
+        "version.published",
+        "version.rolled_back",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["config", "config", "config", "config", "config"]);
   });
 
   it("files past template reads as reads, and template publications as configuration", () => {
@@ -98,6 +150,24 @@ describe("audit event types", () => {
       // The rest of the family is still configuration.
       typeOf("app.created"),
     ]).toStrictEqual(["read", "action", "action", "read", "action", "config"]);
+  });
+
+  it("files code selecting and reading the Brain's skills as reads, and leaves a release's install of skills unfiled", () => {
+    expect(
+      [
+        "brain.skills.select",
+        "brain.skills.read",
+        "brain.skills.installed",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["read", "read", null]);
+  });
+
+  it("files code reading the Brain's entities as reads", () => {
+    expect(
+      ["brain.entities.get", "brain.entities.find"].map((action) =>
+        typeOf(action)
+      )
+    ).toStrictEqual(["read", "read"]);
   });
 
   it("files computing improvement signals as an action, and reading them as a read", () => {
@@ -229,5 +299,44 @@ describe("audit event types", () => {
         "app.visitor_called",
       ].map((action) => typeOf(action))
     ).toStrictEqual(["permission", "permission", "action"]);
+  });
+
+  it("files a staff member's lookup of an erasure as a read, whatever it answered", () => {
+    expect(
+      [
+        "erased",
+        "erasing",
+        "not_erased",
+        "skipped",
+        "unavailable",
+        "failed",
+      ].map((outcome) =>
+        typeOf("admin.brain.erasure.looked_up", { kind: "person", outcome })
+      )
+    ).toStrictEqual(["read", "read", "read", "read", "read", "read"]);
+  });
+
+  it("files a skill share's decisions as decisions and each outcome so a search finds it, and a retirement with its outcome", () => {
+    expect(
+      [
+        "skill.share.requested",
+        "skill.share.approved",
+        "skill.share.declined",
+        "skill.share.added",
+        "skill.share.superseded",
+        "skill.retired",
+        "skill.retire_done",
+        "skill.retire_superseded",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual([
+      "action",
+      "decision",
+      "decision",
+      "action",
+      "action",
+      "config",
+      "config",
+      "action",
+    ]);
   });
 });

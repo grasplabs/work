@@ -51,7 +51,7 @@ describe("a response's tool calls", () => {
         { name: "writeFile", arguments: { app: "a", files: { "x.md": "x" } } },
         code("return 2;"),
         code("return 3;"),
-        { name: "searchBrain", arguments: { query: "expenses" } }
+        { name: "searchBrain", arguments: { question: "expenses" } }
       ),
       new Date(0)
     );

@@ -1,5 +1,6 @@
 import type { Goal } from "@grasp-os/shared/brain";
 import { brainGoalNoticeMaxLength } from "@grasp-os/shared/brain-records";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -275,7 +276,7 @@ const WorkflowsDialog = ({
                         setChosen(toggled(chosen, key, checked === true));
                       }}
                     />
-                    <FieldLabel>{each.name}</FieldLabel>
+                    <FieldLabel>{workflowLabel(each)}</FieldLabel>
                   </Field>
                 );
               })}

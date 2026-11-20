@@ -5,6 +5,7 @@ import type {
   ChatPlan,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
+import type { Subject } from "@grasp-os/shared/subject";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -76,6 +77,10 @@ const pagePlan = {
   parts: [{ kind: "app", name: "Desk", does: "A list of open questions." }],
   who: "Just me",
 } as const satisfies ChatPlan;
+
+/** A person's own skill named `name`, for building a close: its name is in every line of it. */
+const skillOf = (name: string): string =>
+  `---\nname: ${name}\ndescription: How I build a close, ${name}.\n---\n\nThe steps of ${name}.\n`;
 
 const toolsSchema = z.object({
   tools: z.array(z.object({ name: z.string(), description: z.string() })),
@@ -191,8 +196,11 @@ describe("Make something", { timeout: 120_000 }, () => {
     await make(builder, chat.id, "Make me an app for the month-end close.");
     const messages = await messagesOf(stub, chat.id, builder.userId);
     const last = messages.findLast(({ role }) => role === "assistant");
+    // The code step's result, never the recall's before the question.
     const results = messages.flatMap((message) =>
-      message.role === "result" ? [message] : []
+      message.role === "result" && !message.callId.startsWith("recall_")
+        ? [message]
+        : []
     );
     const { title } = await builder.api.chats.summary(chat.id);
 
@@ -284,7 +292,14 @@ describe("Make something", { timeout: 120_000 }, () => {
       // What the person was left to answer: the questions the tool took,
       // in the reply after the refused one.
       waiting: (() => {
-        const reply = messages.filter(({ role }) => role === "assistant").at(1);
+        // The replies' words, never the recall before each question.
+        const reply = messages
+          .filter(
+            (message) =>
+              message.role === "assistant" &&
+              !message.tools.some(({ callId }) => callId.startsWith("recall_"))
+          )
+          .at(1);
         return reply?.role === "assistant"
           ? reply.asked?.questions.length
           : undefined;
@@ -312,7 +327,7 @@ describe("Make something", { timeout: 120_000 }, () => {
     });
   });
 
-  it("builds exactly what the plan lists, once, says it in the person's words and tells the agent what was made", async () => {
+  it("builds exactly what the plan lists, once, says it in the person's words, tells the agent what was made, and is the chat of each", async () => {
     const builder = await signedInApi(idp, "builder");
     const before = await madeBy(builder);
     const { chat, callId, stub, provider } = await plannedChat(
@@ -336,6 +351,13 @@ describe("Make something", { timeout: 120_000 }, () => {
     const after = await madeBy(builder);
     const messages = await messagesOf(stub, chat.id, builder.userId);
     const told = JSON.stringify(provider.requests.at(-1)?.body);
+    const built = await builder.api.workflowResources.get(
+      made.workflow?.id ?? ""
+    );
+    const chatOf = async (subject: Subject) => {
+      const found = await builder.api.chats.forSubject(subject);
+      return found?.id;
+    };
 
     expect({
       made: {
@@ -344,6 +366,8 @@ describe("Make something", { timeout: 120_000 }, () => {
       },
       apps: after.apps.filter((id) => !before.apps.includes(id)),
       workflows: after.workflows.filter((id) => !before.workflows.includes(id)),
+      // Called what the plan named it, beside the name core gave it.
+      titled: built.title,
       said: messages.flatMap((message) =>
         message.role === "user"
           ? [{ text: message.text, built: message.built }]
@@ -353,16 +377,79 @@ describe("Make something", { timeout: 120_000 }, () => {
         (id) => id !== undefined && told.includes(id)
       ),
       again,
+      // Its agent wrote neither yet: Build it made them in this chat.
+      chats: [
+        await chatOf({ kind: "app", id: made.app?.id ?? "" }),
+        await chatOf({ kind: "workflow", id: made.workflow?.id ?? "" }),
+      ],
     }).toStrictEqual({
       made: { app: "Month-end close", workflow: "Late reminder" },
       apps: [made.app?.id],
       workflows: [made.workflow?.id],
+      titled: "Late reminder",
       said: [
         { text: "Keep track of the month-end close.", built: undefined },
         { text: "Build it", built: { plan: callId, ...made } },
       ],
       told: true,
       again: "agent.plan_not_found",
+      chats: [chat.id, chat.id],
+    });
+  });
+
+  // GRA-1868: the build Build it asks is a turn of its person's own chat,
+  // which their own skills steer, and nobody else's, whoever it is for (the
+  // plan's for the Finance team). What it makes carries nothing of the
+  // skill: no copy of its text, nor its name. That a colleague's run of
+  // what a builder made loads none of the builder's skills is
+  // brain-skills-code.test.ts's (Uma running Ada's App and workflow).
+  it("steers the build Build it asks with its person's own skills, never another builder's, and puts nothing of the skill in what it makes", async () => {
+    const [builder, other] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "builder"),
+    ]);
+    const theirs = `close-the-month-${unique()}`;
+    const others = `close-the-month-${unique()}`;
+    await builder.api.skills.save(skillOf(theirs));
+    await other.api.skills.save(skillOf(others));
+    const { chat, callId, provider } = await plannedChat(builder, closePlan);
+    const made = await builder.api.chats.build(chat.id, {
+      plan: callId,
+      text: "Build it",
+      model,
+    });
+    await idle(builder, chat.id);
+    const build = JSON.stringify(provider.requests.at(-1)?.body);
+    const appId = made.app?.id ?? "";
+    const workflowId = made.workflow?.id ?? "";
+    // Everything the build made, as its builders and users read it.
+    const [appFiles, workflowFiles, appFile, apps, workflows] =
+      await Promise.all([
+        builder.api.drafts.files({ kind: "app", id: appId }),
+        builder.api.drafts.files({ kind: "workflow", id: workflowId }),
+        builder.api.instructions.read({ scope: "app", appId }),
+        builder.api.apps.list(),
+        builder.api.workflowResources.list(),
+      ]);
+    const madeText = JSON.stringify([
+      appFiles,
+      workflowFiles,
+      appFile,
+      apps.filter(({ id }) => id === appId),
+      workflows.filter(({ id }) => id === workflowId),
+    ]);
+    expect({
+      built: build.includes("Build it"),
+      theirs: build.includes(`- ${theirs} (person`),
+      others: build.includes(others),
+      madeBoth: appId !== "" && workflowId !== "",
+      inMade: madeText.includes(theirs),
+    }).toStrictEqual({
+      built: true,
+      theirs: true,
+      others: false,
+      madeBoth: true,
+      inMade: false,
     });
   });
 
@@ -516,7 +603,10 @@ describe("Make something", { timeout: 120_000 }, () => {
     const again = await outcome(build());
     const after = await madeBy(builder);
     const updates = await watched(stub, chat.id, builder.userId);
-    const { id: appChat } = await builder.api.chats.forApp(made.app?.id ?? "");
+    const appChat = await builder.api.chats.forSubject({
+      kind: "app",
+      id: made.app?.id ?? "",
+    });
 
     expect({
       made,
@@ -526,7 +616,7 @@ describe("Make something", { timeout: 120_000 }, () => {
         .flatMap(({ messages }) => messages)
         .findLast(({ role }) => role === "user"),
       stopped: updates.at(-1)?.stopped,
-      appChat,
+      appChat: appChat?.id,
       again,
     }).toMatchObject({
       made: { app: { name: "Month-end close" } },
@@ -540,7 +630,44 @@ describe("Make something", { timeout: 120_000 }, () => {
     expect(made.workflow).toBeUndefined();
   });
 
-  it("keeps an App it made whose filing in the project fails, and never makes it twice", async () => {
+  it("builds all it lists, its turn going on, when keeping what it made as the chat's work fails", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { chat, callId, stub } = await plannedChat(builder, closePlan);
+
+    // The database refuses the chat's checkpoints of what it makes.
+    const refusing = `refuse_kept_${unique().replaceAll("-", "_")}`;
+    await env.DB.prepare(
+      `CREATE TRIGGER ${refusing} BEFORE INSERT ON draft_checkpoints WHEN NEW.chat_id = '${chat.id}' BEGIN SELECT RAISE(ABORT, 'refused'); END`
+    ).run();
+    let made: Awaited<ReturnType<typeof builder.api.chats.build>>;
+    try {
+      made = await builder.api.chats.build(chat.id, {
+        plan: callId,
+        text: "Build it",
+        model,
+      });
+    } finally {
+      await env.DB.prepare(`DROP TRIGGER ${refusing}`).run();
+    }
+    // Build it goes on in a turn, which keeps it once under way, after
+    // `build` answered: read the chat once that turn ended.
+    await idle(builder, chat.id);
+    const updates = await watched(stub, chat.id, builder.userId);
+
+    expect({
+      made: { app: made.app?.name, workflow: made.workflow?.name },
+      said: updates
+        .flatMap(({ messages }) => messages)
+        .findLast(({ role }) => role === "user"),
+      stopped: updates.at(-1)?.stopped,
+    }).toMatchObject({
+      made: { app: "Month-end close", workflow: "Late reminder" },
+      said: { text: "Build it", built: { plan: callId, ...made } },
+      stopped: null,
+    });
+  });
+
+  it("keeps a workflow it made whose filing in the project fails, the chat the App's and the workflow's, and never makes either twice", async () => {
     const owner = await signedInApi(idp, "builder");
     const { id: project } = await owner.api.projects.create({
       name: `Close ${unique()}`,
@@ -548,7 +675,7 @@ describe("Make something", { timeout: 120_000 }, () => {
       icon: "coins",
     });
     const started = { kind: "app", project } as const;
-    const { chat, callId, stub } = await plannedChat(owner, pagePlan, started);
+    const { chat, callId, stub } = await plannedChat(owner, closePlan, started);
     const before = await madeBy(owner);
     const build = async () =>
       await owner.api.chats.build(chat.id, {
@@ -557,11 +684,11 @@ describe("Make something", { timeout: 120_000 }, () => {
         model,
       });
 
-    // The database refuses filing anything in the project, as one removed
-    // or no longer theirs midway would.
+    // The database refuses filing the workflow in the project, as a
+    // project removed or no longer theirs midway would, after the App.
     const refusing = `refuse_filing_${unique().replaceAll("-", "_")}`;
     await env.DB.prepare(
-      `CREATE TRIGGER ${refusing} BEFORE INSERT ON project_items WHEN NEW.project_id = '${project}' BEGIN SELECT RAISE(ABORT, 'refused'); END`
+      `CREATE TRIGGER ${refusing} BEFORE INSERT ON project_items WHEN NEW.project_id = '${project}' AND NEW.item_type = 'workflow' BEGIN SELECT RAISE(ABORT, 'refused'); END`
     ).run();
     let made: Awaited<ReturnType<typeof build>>;
     try {
@@ -572,14 +699,28 @@ describe("Make something", { timeout: 120_000 }, () => {
     const again = await outcome(build());
     const after = await madeBy(owner);
     const messages = await messagesOf(stub, chat.id, owner.userId);
+    const chatOf = async (subject: Subject) => {
+      const found = await owner.api.chats.forSubject(subject);
+      return found?.id;
+    };
 
     expect({
       apps: after.apps.filter((id) => !before.apps.includes(id)),
+      workflows: after.workflows.filter((id) => !before.workflows.includes(id)),
       said: messages.findLast(({ role }) => role === "user"),
+      chats: [
+        await chatOf({ kind: "app", id: made.app?.id ?? "" }),
+        await chatOf({ kind: "workflow", id: made.workflow?.id ?? "" }),
+      ],
       again,
     }).toMatchObject({
       apps: [made.app?.id],
-      said: { text: "Build it", built: { plan: callId, app: made.app } },
+      workflows: [made.workflow?.id],
+      said: {
+        text: "Build it",
+        built: { plan: callId, app: made.app, workflow: made.workflow },
+      },
+      chats: [chat.id, chat.id],
       again: "agent.plan_not_found",
     });
   });
@@ -613,5 +754,17 @@ describe("Make something", { timeout: 120_000 }, () => {
       user: "role.forbidden",
       made: before,
     });
+  });
+
+  it("never offers a plan in a turn nobody asked for", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { stub, provider, newChat } = await personalChatsOf(
+      builder.userId,
+      says("Done.")
+    );
+    const { chat } = await newChat();
+    await stub.askUnattended(chat.id, { text: "Weekly check.", model });
+
+    expect(offered(provider, 0).has("proposePlan")).toBeFalsy();
   });
 });

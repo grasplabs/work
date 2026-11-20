@@ -47,6 +47,7 @@ import {
   defaultModelEffort,
   modelEfforts,
   modelErrors,
+  modelPurposeMaxLength,
 } from "@grasp-os/shared/models";
 import type {
   ModelEffort,
@@ -73,8 +74,6 @@ import {
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { catalogWindowOf, parseModelRef } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
-import { takesDocuments, withDocument } from "./model-documents.ts";
-import type { ModelDocument } from "./model-documents.ts";
 import { usageCost } from "./model-prices.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Refusal } from "./model-rules.ts";
@@ -112,9 +111,9 @@ import type { HearingRef, VoiceRef } from "./voice-models.ts";
 // (ai-model-choice.ts), and may use only the models its admins chose: its
 // default, then its fallbacks, tried in turn when a provider refuses a
 // call before anything could be billed. Until it connected one, and chose
-// a model of it, every call fails as `model.no_provider`. Platform
-// features go the same way with Grasp's own key
-// (`models(env).platformCall`). Core holds no provider key. Every request
+// a model of it, every call fails as `model.no_provider`. Grasp's own
+// voice features go the same way with Grasp's own key (`models(env).speak`,
+// `listen`). Core holds no provider key. Every request
 // is audited as metadata only: who or what asked, why, the model, tokens
 // and cost, never the prompt or the answer. The event goes through the
 // audit outbox, so a request that was answered (and paid for) is recorded
@@ -287,7 +286,7 @@ const sessionShape = {
    */
   effort: z.enum(modelEfforts).optional(),
   /** Why the call is made, for the audit log. */
-  purpose: z.string().max(64).regex(purposePattern),
+  purpose: z.string().max(modelPurposeMaxLength).regex(purposePattern),
   /** Who or what asked: a person, an agent, an App or a workflow run. */
   trigger: auditActorSchema,
   /**
@@ -314,8 +313,8 @@ const sessionShape = {
        */
       z.strictObject({ onboarding: z.literal(true) }),
       /**
-       * Core's own upkeep of the Brain (knowledge/entities.ts): reading a
-       * source's text for the entities it names, for no one in particular,
+       * Core's own upkeep of the Brain (brain-next.ts `brainModel`): its
+       * background work reading a source's text, for no one in particular,
        * kept apart from onboarding in spend and audit (`platform` in its
        * events). Only core's own code makes such a call.
        */
@@ -327,14 +326,6 @@ const sessionShape = {
        * makes such a call.
        */
       z.strictObject({ platform: z.literal("dashboard_widgets") }),
-      /**
-       * Core's own reranking of a person's recall (knowledge/rerank.ts),
-       * only when the recall asks for it: it carries the company's own
-       * words, and is made for them, counted as theirs, by the trigger that names them. A delegate's recall reranks
-       * under its own authority and context instead. Only core's own code
-       * makes such a call.
-       */
-      z.strictObject({ platform: z.literal("brain_recall") }),
       /**
        * Core's own sorting of a request someone made of Stephen in a chat
        * app (channels/request-sorting.ts), from their words and his
@@ -350,12 +341,26 @@ const sessionShape = {
        */
       z.strictObject({ platform: z.literal("provider_test") }),
       /**
-       * Core's own conversion of a PDF uploaded to the Brain into its text
-       * (files/extract.ts), on Grasp's key: the company's own words,
-       * made for the person who uploaded it,
-       * counted as theirs. Only core's own code makes such a call.
+       * Core's own reading of an agent's instructions for the apps it
+       * needs (agent-apps.ts), on the organization's models: the words of
+       * whoever manages the agent, made for them, counted as theirs. Only
+       * core's own code makes such a call.
        */
-      z.strictObject({ platform: z.literal("document_conversion") }),
+      z.strictObject({ platform: z.literal("agent_builder") }),
+      /**
+       * Core's own proposal for a team's routine (opportunities.ts): from
+       * the routine every member reads and the names of the company's
+       * Apps, asked by the onboarding's alarm for no one in particular, as
+       * a system call. Only core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("opportunities") }),
+      /**
+       * A member's dictation, written down as they talk
+       * (onboarding/transcription.ts): their own voice, on Grasp's key,
+       * made for them, counted as theirs, and never the onboarding's.
+       * Only core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("dictation") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
@@ -451,12 +456,6 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    */
   onText?: (text: string) => void;
   /**
-   * A document the model reads as it is, beside `input`: a PDF, sent as
-   * its provider's own document part (model-documents.ts). Only for a
-   * platform feature (`platformCall`): Grasp's own conversion of uploads.
-   */
-  document?: ModelDocument;
-  /**
    * Whether a request the provider refused for its rate (429) is sent
    * again, after the wait it asked for (the default, `maxRetries`). False
    * where one call must be one request: a workflow run's model call, which
@@ -469,6 +468,11 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
 export interface ModelAnswer<Output> {
   /** The answer's text. */
   text: string;
+  /**
+   * The model that answered, `<provider>/<model>`: the call's, or the one
+   * it fell back to.
+   */
+  model: string;
   /** The answer parsed with the call's schema; `undefined` without one. */
   output: Output;
   /** The model hit its output limit, so the text may stop short. */
@@ -581,7 +585,8 @@ const hasFailed = ({ stopReason }: AssistantMessage): boolean =>
  */
 const estimatedCharsPerToken = 4;
 
-const estimatedTokens = (chars: number): number =>
+/** Tokens `chars` characters of text take, by the rule of thumb above: for sizing a request before it is sent. */
+export const estimatedTokens = (chars: number): number =>
   Math.ceil(chars / estimatedCharsPerToken);
 
 /** The answer as far as it came: its text, reasoning and tool calls. */
@@ -1233,31 +1238,6 @@ const workflowRunOf = ({
 const platformOf = ({ work }: Session): { platform: string } | object =>
   work !== undefined && "platform" in work ? { platform: work.platform } : {};
 
-/**
- * Which of Grasp's own features a text call on Grasp's key is for, as its
- * usage records it, so what each costs Grasp is told apart: converting a
- * document is the only one today.
- */
-const platformFeatureOf = ({
-  work,
-}: Session): { feature: PlatformAiFeature } | object =>
-  work !== undefined &&
-  "platform" in work &&
-  work.platform === "document_conversion"
-    ? { feature: "conversion" }
-    : {};
-
-/**
- * What a call on Grasp's key is recorded as: one of Grasp's own features
- * (`platformFeatureOf`), or, let through as the organization's own call
- * (`chosen`), its own AI on Grasp's AI, which it pays Grasp for.
- */
-const keyFeatureOf = (
-  call: Session,
-  via: Via
-): { feature: PlatformAiFeature } | object =>
-  via.kind === "chosen" ? { feature: "organization" } : platformFeatureOf(call);
-
 /** Whether `entry` makes an event the audit log takes. */
 const fitsAuditLog = (entry: AuditEntry): boolean => {
   try {
@@ -1610,13 +1590,10 @@ const parseCall = <Schema extends z.ZodType>(
  *   admins chose, of an AI provider it connected, with its key.
  * - `test`: an admin's test of a provider the organization connected
  *   (ai-providers.ts): any of that provider's models, with its key.
- * - `platform`: a platform feature of core's own: any model of a provider
- *   Grasp has a key for, with Grasp's key (`models(env).platformCall`).
  */
 type Via =
   | { kind: "chosen" }
-  | { kind: "test"; provider: ConnectTarget["provider"] }
-  | { kind: "platform" };
+  | { kind: "test"; provider: ConnectTarget["provider"] };
 
 const chosenVia: Via = { kind: "chosen" };
 
@@ -1637,8 +1614,7 @@ const connectRouting = async (
   call: Session,
   ref: ModelRef,
   target: ConnectTarget,
-  fallbacks: readonly string[],
-  via: Via
+  fallbacks: readonly string[]
 ): Promise<Routing> => {
   const endpoint = connectRoute(env, target, ref);
   if (endpoint === undefined) {
@@ -1651,7 +1627,9 @@ const connectRouting = async (
       provider: target.provider,
       region: target.platform?.region ?? aiProviders[target.provider].region,
       credential: target.credential,
-      ...(target.credential === "platform" ? keyFeatureOf(call, via) : {}),
+      // A text call on Grasp's key is only ever the organization's own, on
+      // Grasp's AI (`graspRouting`), which it pays Grasp for.
+      ...(target.credential === "platform" ? { feature: "organization" } : {}),
     },
     fallbacks,
   };
@@ -1690,8 +1668,7 @@ const routesOrFailed = async (env: Env): Promise<AiProviderRoutes> => {
 const graspRouting = async (
   env: Env,
   call: Session,
-  ref: ModelRef | undefined,
-  via: Via
+  ref: ModelRef | undefined
 ): Promise<{ ref: ModelRef; routing: Routing }> => {
   // Grasp's AI: its one model, on Grasp's key, and nothing else. The
   // organization's own key is never used in its place, nor Grasp's for
@@ -1718,7 +1695,7 @@ const graspRouting = async (
   } as const;
   return {
     ref,
-    routing: await connectRouting(env, call, ref, target, [], via),
+    routing: await connectRouting(env, call, ref, target, []),
   };
 };
 
@@ -1734,32 +1711,6 @@ const routingOf = async (
   const routes = await routesOrFailed(env);
   const ref = parseModelRef(call.model);
   const provider = aiProviderIdSchema.safeParse(ref?.provider).data;
-  if (via.kind === "platform") {
-    if (
-      ref === undefined ||
-      provider === undefined ||
-      !routes.platform.includes(provider)
-    ) {
-      return await refuse(env, call, {
-        code: "model.not_allowed",
-        because: "platform",
-      });
-    }
-    const platform = platformRouteOf(provider, usualHostsOf(env));
-    if (platform === undefined) {
-      throw modelErrors.create("model.unconfigured");
-    }
-    const target = {
-      credential: "platform",
-      provider,
-      baseUrl: null,
-      platform,
-    } as const;
-    return {
-      ref,
-      routing: await connectRouting(env, call, ref, target, [], via),
-    };
-  }
   const connected = routes.organization.find(
     (route) => route.provider === provider
   );
@@ -1774,7 +1725,7 @@ const routingOf = async (
     const target = { credential: "organization" as const, ...connected };
     return {
       ref,
-      routing: await connectRouting(env, call, ref, target, [], via),
+      routing: await connectRouting(env, call, ref, target, []),
     };
   }
   const [choice, source] = await Promise.all([
@@ -1789,7 +1740,7 @@ const routingOf = async (
     });
   }
   if (source === "grasp") {
-    return await graspRouting(env, call, ref, via);
+    return await graspRouting(env, call, ref);
   }
   const at = chosen.indexOf(call.model);
   if (at === -1 || ref === undefined || connected === undefined) {
@@ -1803,8 +1754,7 @@ const routingOf = async (
       call,
       ref,
       target,
-      mayFallBack(call) ? chosen.slice(at + 1) : [],
-      via
+      mayFallBack(call) ? chosen.slice(at + 1) : []
     ),
   };
 };
@@ -2146,7 +2096,16 @@ const answerCall = async <Output>(
       // SAFETY: without a schema `Output` can't be inferred, so it is its
       // default, `undefined`.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      return { text, output: undefined as Output, truncated, usage, cost };
+      const output = undefined as Output;
+      // A fallback puts its route in place of the request's (`sendFallingBack`).
+      return {
+        text,
+        model: request.call.model,
+        output,
+        truncated,
+        usage,
+        cost,
+      };
     }
     // An answer cut short is judged like any other: JSON that stops short
     // doesn't parse, so the model is asked again.
@@ -2160,7 +2119,14 @@ const answerCall = async <Output>(
       result.ok ? "answered" : "invalid_output"
     );
     if (result.ok) {
-      return { text, output: result.output, truncated, usage, cost };
+      return {
+        text,
+        model: request.call.model,
+        output: result.output,
+        truncated,
+        usage,
+        cost,
+      };
     }
     request.messages.push(answer, {
       role: "user",
@@ -2169,39 +2135,6 @@ const answerCall = async <Output>(
     });
   }
   throw modelErrors.create("model.invalid_output");
-};
-
-/**
- * A platform call's route with its document (model-documents.ts): added
- * to each request's body as its API takes one. Refused, and audited, for
- * a model whose API takes none.
- */
-const withDocumentRoute = async (
-  route: Route,
-  document: ModelDocument
-): Promise<Pick<Route, "endpoint">> => {
-  const { endpoint, env, call } = route;
-  const { api } = endpoint;
-  if (!takesDocuments(api)) {
-    return await refuse(env, call, {
-      code: "model.not_allowed",
-      because: "document",
-    });
-  }
-  return {
-    endpoint: {
-      ...endpoint,
-      onPayload: (payload) => {
-        const shaped = endpoint.onPayload?.(payload) ?? payload;
-        const attached = withDocument(api, shaped, document);
-        if (attached === undefined) {
-          // Never expected: pi's body always has the user's message.
-          throw new Error("The document couldn't be added to the request");
-        }
-        return attached;
-      },
-    },
-  };
 };
 
 const callModel = async <Output>(
@@ -2214,28 +2147,14 @@ const callModel = async <Output>(
     onText,
     signal,
     providerRetries = true,
-    document,
     ...fields
   }: ModelCall<Output>,
   via: Via = chosenVia
 ): Promise<ModelAnswer<Output>> => {
   const call = parseCall(callSchema, fields);
-  // Grasp's own key only for core's own platform features, never for work
-  // of an App's, a person's or an agent's; and a document only for one.
-  if (
-    (via.kind === "platform" || document !== undefined) &&
-    (via.kind !== "platform" ||
-      call.work === undefined ||
-      !("platform" in call.work))
-  ) {
-    throw modelErrors.create("model.invalid_call");
-  }
   const admitted = await admit(env, call, via);
   const route: Route = {
     ...admitted,
-    ...(document === undefined
-      ? {}
-      : await withDocumentRoute(admitted, document)),
     ...(beforeSend === undefined ? {} : { beforeSend }),
     ...(reauthorize === undefined ? {} : { reauthorize }),
     ...(onText === undefined ? {} : { onText }),
@@ -3044,6 +2963,7 @@ const listeningEntry = (
       provenanceDropped: dropped,
       chat: chatOf(call),
       ...workflowRunOf(call),
+      ...platformOf(call),
     },
   }));
 
@@ -3277,18 +3197,6 @@ export const models = (env: Env) => ({
   call: async <Output = undefined>(
     call: ModelCall<Output>
   ): Promise<ModelAnswer<Output>> => await callModel(env, call),
-  /**
-   * A call of one of core's own platform features (its `work` names the
-   * feature), to `<provider>/<model>` with Grasp's own key for the
-   * provider, which connect holds (`OPENAI_API_KEY` and the like): judged
-   * by the rules, metered and audited like any call,
-   * never falling back. Refused as `model.not_allowed` when Grasp has no
-   * key for the provider. Only a platform call may carry a `document`.
-   */
-  platformCall: async <Output = undefined>(
-    call: ModelCall<Output>
-  ): Promise<ModelAnswer<Output>> =>
-    await callModel(env, call, { kind: "platform" }),
   /**
    * An admin's test of a provider the organization connected: a call to
    * any of its models with the organization's key, whether or not chosen,

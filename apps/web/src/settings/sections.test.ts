@@ -13,6 +13,7 @@ describe("Settings sections", () => {
     expect(ids({ role: "user", staff: false })).toStrictEqual([
       "profile",
       "appearance",
+      "instructions",
       "security",
     ]);
     expect(
@@ -43,10 +44,12 @@ describe("Settings sections", () => {
     expect({
       members: staff.includes("members"),
       webhooks: staff.includes("webhooks"),
+      instructions: staff.includes("instructions"),
       workspace: staff.includes("workspace"),
     }).toStrictEqual({
       members: false,
       webhooks: false,
+      instructions: false,
       workspace: true,
     });
   });

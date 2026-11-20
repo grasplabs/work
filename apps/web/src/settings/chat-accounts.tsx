@@ -1,13 +1,26 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import type {
   ChannelAccount,
   ChannelLinkPreview,
   ChannelLinkRefusal,
 } from "@grasp-os/shared/channel-accounts";
 import { chatPlatformName } from "@grasp-os/shared/chat";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import type { Session } from "../core.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
 import { BrandIcon, brands } from "../grasp/brand-icon/index.ts";
 import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -22,7 +35,7 @@ import {
   ItemMedia,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { SettingsRows } from "../grasp/setting-row/index.ts";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -35,7 +48,10 @@ import { RowNote, SectionNotLoaded } from "./section.tsx";
 // waiting for them to confirm it, in a card of its own. Confirming is a
 // press here, never opening the link (chat apps open links to preview
 // them), and the card says whose account it is, by the platform's own
-// name for it, so a link someone forwarded doesn't pass for theirs.
+// name for it, so a link someone forwarded doesn't pass for theirs. And
+// deleting what Grasp keeps of their conversations with Stephen there,
+// which no page of Grasp shows as a chat (GRA-1919): this is where the
+// person erases them.
 
 /** The linked accounts, and the link waiting in this tab, if any. */
 export interface ChatAccounts {
@@ -235,6 +251,82 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
 };
 
 /**
+ * How many of the person's conversations in chat apps were deleted, or
+ * why none could go yet: one is still being answered, or an earlier
+ * delete is under way. Outside the component, as the React Compiler
+ * can't compile `try`.
+ */
+const forgotten = async (
+  session: Session
+): Promise<number | "answering" | "under_way"> => {
+  try {
+    return await session.channelAccounts.forgetConversations();
+  } catch (error) {
+    const code = agentErrors.codeOf(error);
+    if (code === "agent.conversation_answering") {
+      return "answering";
+    }
+    if (code === "agent.delete_under_way") {
+      return "under_way";
+    }
+    throw error;
+  }
+};
+
+/**
+ * Deleting what Grasp keeps of every conversation the person had with
+ * Stephen in a chat app (`channelAccounts.forgetConversations`), and how
+ * many it deleted, said under the row once it went.
+ */
+const ForgetConversations = () => {
+  const { t } = useLingui();
+  const { busy, failure, run } = useCoreAction();
+  const [deleted, setDeleted] = useState<number | "answering" | "under_way">();
+  const refusals = {
+    answering: t`Stephen is still answering one of your conversations. Try again in a moment.`,
+    under_way: t`Your conversations are being deleted. If any remain, try again in a moment.`,
+  };
+  const went =
+    typeof deleted === "number"
+      ? t`${plural(deleted, { 0: "No conversations to delete.", one: "# conversation deleted.", other: "# conversations deleted." })}`
+      : undefined;
+  return (
+    <SettingRow
+      error={typeof deleted === "string" ? refusals[deleted] : failure}
+      help={went}
+      info={t`Grasp keeps what you say to Stephen in a chat app, so he can follow the conversation and learn from it.`}
+      infoLabel={t`More about your conversations in chat apps`}
+      label={t`Your conversations in chat apps`}
+    >
+      <AlertDialog>
+        <AlertDialogTrigger disabled={busy} size="sm" variant="ghost">
+          {t`Delete`}
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogTitle>{t`Delete your conversations in chat apps?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`Grasp deletes what it keeps of every conversation you had with Stephen in a chat app, and what your Brain kept from them. He starts afresh the next time you write. The messages stay in the chat app itself. This can't be undone.`}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogAction
+              action={async () => {
+                setDeleted(undefined);
+                setDeleted(await run(forgotten));
+              }}
+              variant="danger"
+              workingLabel={t`Deleting`}
+            >
+              {t`Delete for good`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </SettingRow>
+  );
+};
+
+/**
  * The chat accounts linked to the person, one quiet row each, in the
  * Sign-in card under how they sign in; nothing when none are.
  */
@@ -262,32 +354,45 @@ export const LinkedChatAccounts = ({
  * A link a chat app sent, waiting in this tab for the person to confirm or
  * turn down; or why the accounts could not be read to show it.
  */
-export const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
-  const { t } = useLingui();
+const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
   if (chat.state !== "ready") {
-    return (
-      <SectionCard variant="grouped" density="compact" title={t`Chat apps`}>
-        <SectionNotLoaded page={chat} />
-      </SectionCard>
-    );
+    return <SectionNotLoaded page={chat} />;
   }
   const { pending } = chat.data;
   if (pending === undefined) {
     return null;
   }
   const { preview, secret } = pending;
+  return preview.state === "refused" ? (
+    <RefusedLink reason={preview.reason} />
+  ) : (
+    <OpenLink
+      name={preview.offer.name}
+      platform={preview.offer.platform}
+      platformUserId={preview.offer.platformUserId}
+      secret={secret}
+    />
+  );
+};
+
+/**
+ * Chat apps: the link a chat app sent, while one waits in this tab, and
+ * deleting the person's conversations with Stephen there.
+ */
+export const ChatAppsSection = ({
+  chat,
+  waiting,
+}: {
+  chat: Loaded<ChatAccounts>;
+  waiting: boolean;
+}) => {
+  const { t } = useLingui();
   return (
     <SectionCard variant="grouped" density="compact" title={t`Chat apps`}>
-      {preview.state === "refused" ? (
-        <RefusedLink reason={preview.reason} />
-      ) : (
-        <OpenLink
-          name={preview.offer.name}
-          platform={preview.offer.platform}
-          platformUserId={preview.offer.platformUserId}
-          secret={secret}
-        />
-      )}
+      {waiting ? <PendingChatLink chat={chat} /> : null}
+      <SettingsRows>
+        <ForgetConversations />
+      </SettingsRows>
     </SectionCard>
   );
 };

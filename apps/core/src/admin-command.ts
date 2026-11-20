@@ -29,6 +29,7 @@ import {
   openGate,
   setGateThreshold,
 } from "./onboarding/gate.ts";
+import { eraseOwedOfPersonQuietly } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 
 // Commands from Grasp's admin (`@grasp-os/shared/admin-command`, which
@@ -114,16 +115,22 @@ const applyChange = async (
     }
     case "onboarding.send_mail_again": {
       const sent = await store.sendAgain(command.payload.person, by);
+      // A send-again to a second address ended their link to an account:
+      // the interview it read leaves the new Brain now, or on the clock.
+      await eraseOwedOfPersonQuietly(env, command.payload.person);
       refuseUnless(sent !== "none_failed", "onboarding.no_failed_mail");
       refuseUnless(sent !== "no_address", "onboarding.no_address");
       refuseUnless(sent !== "not_owed", "onboarding.reminder_not_owed");
       return;
     }
     case "onboarding.new_start": {
+      const backed = await store.claimTeamsOf(command.payload.person);
       refuseUnless(
         await store.newStart(command.payload.person, by),
         "onboarding.no_link"
       );
+      // What they said leaves the new Brain now, or on the clock.
+      await eraseOwedOfPersonQuietly(env, command.payload.person, backed);
       return;
     }
     case "onboarding.gate.open": {

@@ -201,8 +201,16 @@ const main = async (): Promise<void> => {
     // What the admin did in their setup: the staff list, confirmed with
     // its leads; the documents in SharePoint and Teams, Pulse wanted, AFAS
     // for HR; the plan.
-    const company = roster();
-    await onboarding.confirmRoster(company);
+    const given = roster();
+    const { roster: company } = await onboarding.confirmRoster(given);
+    if (company === null) {
+      throw new Error("The staff list wasn't kept");
+    }
+    // The list names the members' teams (GRA-2055): core gave each team
+    // its id, in the list's order.
+    const heardIn = new Map(
+      given.teams.map(({ id }, index) => [company.teams[index]?.id, heard[id]])
+    );
     await onboarding.saveChoices({
       sources: ["sharepoint", "teams"],
       sourcesWanted: [],
@@ -278,7 +286,7 @@ const main = async (): Promise<void> => {
       );
       let turn = 0;
       for (const [teamId, lead] of team) {
-        const { talked, lead: leadTalked } = heard[teamId] ?? {
+        const { talked, lead: leadTalked } = heardIn.get(teamId) ?? {
           talked: 0,
           lead: false,
         };

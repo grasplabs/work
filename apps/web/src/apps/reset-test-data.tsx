@@ -35,7 +35,7 @@ export const ResetTestData = ({
   // Refused, it says so in the dialog, which stays open to try again.
   const reset = async (): Promise<void> => {
     const done = await run(async (session) => {
-      await session.apps.drafts.resetTestData(app);
+      await session.apps.preview.resetData(app);
       return true;
     });
     if (done === undefined) {

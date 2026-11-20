@@ -1,4 +1,4 @@
-import { agentInstructionsMax } from "@grasp-os/shared/agents";
+import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
@@ -33,7 +33,7 @@ export const InstructionsStep = ({ setup, change, name }: StepProps) => {
         <Textarea
           aria-label={t`Instructions`}
           layout={styles.document}
-          maxLength={agentInstructionsMax}
+          maxLength={instructionsMaxLength}
           onValueChange={(value) => {
             change({ instructions: value, instructionsTouched: true });
           }}

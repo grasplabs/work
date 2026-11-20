@@ -1,11 +1,10 @@
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
-import { purgedMarker } from "@grasp-os/shared/knowledge";
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
+import { teamsMade } from "./members-teams.ts";
 import {
   auditedDuring,
   openRpc,
@@ -44,19 +43,21 @@ const rosterWith = async (
   role: string,
   ...holders: Signed[]
 ): Promise<void> => {
-  await admin.api.onboarding.saveRoster({
-    teams: roster.teams,
-    people: [
-      ...roster.people,
-      ...holders.map(({ userId, person }, index) => ({
-        id: `p-${userId}`.replaceAll(/[^A-Za-z0-9_-]/gu, "").slice(0, 60),
-        name: `Holder ${index + 1}`,
-        email: String(person.email),
-        team: "finance",
-        title: role,
-      })),
-    ],
-  });
+  await admin.api.onboarding.saveRoster(
+    await teamsMade({
+      teams: roster.teams,
+      people: [
+        ...roster.people,
+        ...holders.map(({ userId, person }, index) => ({
+          id: `p-${userId}`.replaceAll(/[^A-Za-z0-9_-]/gu, "").slice(0, 60),
+          name: `Holder ${index + 1}`,
+          email: String(person.email),
+          team: "finance",
+          title: role,
+        })),
+      ],
+    })
+  );
 };
 
 /** The questions `person` was asked, as their notifications list them. */
@@ -74,20 +75,6 @@ const staff = async () => {
   const session = await signedIn(idp, "grasp-staff", staffPerson());
   const { core } = await openRpc(session);
   return await core.authenticate();
-};
-
-/** Saves `text` as a note in `person`'s Personal collection. */
-const noteOf = async (
-  person: Awaited<ReturnType<typeof signedInApi>>,
-  text: string
-) => {
-  const { personal } = await person.api.memory.collections();
-  return await person.api.knowledge.saveDocument({
-    collectionId: personal,
-    path: `notes/${unique()}.md`,
-    text,
-    ifVersion: 0,
-  });
 };
 
 /** A source, and a gap noticed in it, about a candidate. */
@@ -119,10 +106,10 @@ const gapRecords = (tag: string) => {
 };
 
 describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
-  it("add a team's sizes and stakeholders as dated values, joining the onboarding's team for admins alone", async () => {
+  it("add a team's sizes and stakeholders as dated values, joining the onboarding's team for whoever reads it: every member once the admin confirmed it", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.confirmRoster(await teamsMade(roster));
     const tag = unique();
     const team = `sales-${tag}`;
     await admin.api.brain.addRecords([
@@ -132,7 +119,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         kind: "interview",
         title: "Sales interview",
         date: "2026-10-20",
-        teamIds: ["team-finance"],
+        teamIds: ["finance"],
       },
       { type: "team", id: team, name: "Sales", sourceId: `src-${tag}` },
       {
@@ -156,7 +143,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       {
         type: "teamCount",
         id: `count-${tag}-2`,
-        teamId: "team-finance",
+        teamId: "finance",
         sourceId: `src-${tag}`,
         date: "2026-10-01",
         people: 2,
@@ -169,14 +156,14 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     expect({
       sales: asAdmin.teams.find(({ id }) => id === team),
       financeCounts: asAdmin.teams
-        .find(({ id }) => id === "team-finance")
+        .find(({ id }) => id === "finance")
         ?.counts.map(({ sourceId, people }) => ({ sourceId, people })),
       memberTeams: asMember.teams.map(({ id }) => id),
       roster: await outcome(
         admin.api.brain.addRecords([
           {
             type: "team",
-            id: "team-finance",
+            id: "finance",
             name: "Finance",
             sourceId: `src-${tag}`,
           },
@@ -205,8 +192,10 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         { sourceId: `src-${tag}`, people: 2 },
         { sourceId: "src-roster", people: 1 },
       ],
-      // The onboarding's team is the admin's to see; the records' isn't.
-      memberTeams: [team],
+      // The confirmed roster's teams are every member's (GRA-1748), with
+      // the records' own; its roles and counts from the records stay the
+      // admin's.
+      memberTeams: ["finance", team],
       // A roster team's id, now or later, is never a team record's.
       roster: "brain.record_invalid",
     });
@@ -214,7 +203,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
 
   it("refuse a team, workflow or record that doesn't exist", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const { ids, records } = gapRecords(unique());
     await admin.api.brain.addRecords(records.slice(0, 2));
 
@@ -231,7 +220,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
           {
             type: "teamCount",
             id: `${ids.source}-count`,
-            teamId: "team-nowhere",
+            teamId: "nowhere",
             sourceId: ids.source,
             date: "2026-10-20",
             people: 3,
@@ -246,7 +235,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
             kind: "goal",
             text: "Close the books in three days.",
             sourceId: ids.source,
-            teamIds: ["team-nowhere"],
+            teamIds: ["nowhere"],
           },
         ])
       ),
@@ -276,7 +265,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
 
   it("refuse the onboarding's source ids as any record's own id, and a gap about what isn't a note", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const tag = unique();
     const team = `team${tag}`;
     await admin.api.brain.addRecords([
@@ -365,7 +354,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
   it("show members the onboarding source a gap or team names, and each team's values in date order", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.confirmRoster(await teamsMade(roster));
     const tag = unique();
     const team = `team${tag}`;
     const source = `src-${tag}`;
@@ -435,7 +424,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       {
         type: "teamCount",
         id: `count-${tag}-finance`,
-        teamId: "team-finance",
+        teamId: "finance",
         sourceId: source,
         date: "2020-01-01",
         people: 2,
@@ -451,11 +440,13 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       counts: sales?.counts.map(({ date, people }) => ({ date, people })),
       stakeholders: sales?.stakeholders.map(({ role }) => role),
       finance: asAdmin.teams
-        .find(({ id }) => id === "team-finance")
+        .find(({ id }) => id === "finance")
         ?.counts.map(({ sourceId }) => sourceId)
         .filter((id) => id === source || id === "src-roster"),
     }).toStrictEqual({
-      before: [],
+      // The confirmed roster's teams name it for every member already
+      // (GRA-1748).
+      before: ["src-roster"],
       withGap: ["src-roster"],
       counts: [
         { date: "2026-10-20", people: 4 },
@@ -824,98 +815,29 @@ describe("the brain's gap answers", { timeout: 120_000 }, () => {
     });
   });
 
-  it("lose a purged term, and who gave them once that person is purged", async () => {
+  it("keep their answer, said by no one, once the person who gave it is erased", async () => {
     const admin = await signedInApi(idp, "admin");
     const leaver = await signedInApi(idp, "user");
     const tag = unique();
-    const name = `Visser${tag}`;
     const { ids, records } = gapRecords(tag);
     await admin.api.brain.addRecords(records);
-    await leaver.api.brain.answerGap(ids.gap, `Ask ${name}, she knows.`);
-    // In the admin's own collection: another person's is the owner's alone.
-    const note = await noteOf(admin, `# Leaving\n${name} hands over.`);
+    await leaver.api.brain.answerGap(ids.gap, `Ask the office, ${tag}.`);
+    const readBefore = await admin.api.brain.read();
+    const before = readBefore.gaps.find(({ id }) => id === ids.gap);
 
-    const content: PurgeInput = {
-      type: "content",
-      documentIds: [note.id],
-      terms: [name],
-      reason: "erasure_request",
-    };
-    const contentPlan = await admin.api.knowledge.preparePurge(content);
-    await admin.api.knowledge.purge(content, contentPlan.token);
-    const readAfterContent = await admin.api.brain.read();
-    const afterContent = readAfterContent.gaps.find(({ id }) => id === ids.gap);
-    const personal: PurgeInput = {
-      type: "personal",
-      userId: leaver.userId,
-      reason: "offboarding",
-    };
-    const personalPlan = await admin.api.knowledge.preparePurge(personal);
-    await admin.api.knowledge.purge(personal, personalPlan.token);
-    const readAfterPersonal = await admin.api.brain.read();
-    const afterPersonal = readAfterPersonal.gaps.find(
-      ({ id }) => id === ids.gap
-    );
+    await admin.api.members.remove(leaver.userId);
+    await admin.api.members.erase(leaver.userId, String(leaver.person.name));
+    const readAfter = await admin.api.brain.read();
+    const after = readAfter.gaps.find(({ id }) => id === ids.gap);
 
     expect({
-      contentAnswer: afterContent?.answer,
-      answeredBy: afterPersonal?.answeredBy,
-      answer: afterPersonal?.answer,
+      before: typeof before?.answeredBy,
+      answeredBy: after?.answeredBy,
+      answer: after?.answer,
     }).toStrictEqual({
-      contentAnswer: `Ask ${purgedMarker}, she knows.`,
+      before: "string",
       answeredBy: undefined,
-      answer: `Ask ${purgedMarker}, she knows.`,
-    });
-  });
-
-  it("lose a purged term though a document's purge fails", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const tag = unique();
-    const name = `Visser${tag}`;
-    const { ids, records } = gapRecords(tag);
-    await admin.api.brain.addRecords(records);
-    await admin.api.brain.answerGap(ids.gap, `Ask ${name}, she knows.`);
-    const note = await noteOf(admin, `# Handover\n${name} hands over.`);
-    const input: PurgeInput = {
-      type: "content",
-      documentIds: [note.id],
-      terms: [name],
-      reason: "erasure_request",
-    };
-    const plan = await admin.api.knowledge.preparePurge(input);
-    // The Knowledge database records the purge, then refuses the batch
-    // that rewrites the document's versions.
-    const real = env.KNOWLEDGE;
-    let rewriting = false;
-    const knowledge: D1Database = {
-      prepare: (query) => {
-        rewriting ||= query.startsWith('update "versions"');
-        return real.prepare(query);
-      },
-      batch: async <T>(statements: D1PreparedStatement[]) => {
-        if (rewriting) {
-          throw new Error("D1 is unavailable");
-        }
-        return await real.batch<T>(statements);
-      },
-      exec: async (query) => await real.exec(query),
-      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
-      dump: async () => await real.dump(),
-      withSession: (constraint) => real.withSession(constraint),
-    };
-    const { core } = await openRpc(admin.session, {
-      coreEnv: { ...env, KNOWLEDGE: knowledge },
-    });
-    const failing = await core.authenticate();
-    const purged = await outcome(failing.knowledge.purge(input, plan.token));
-    const read = await admin.api.brain.read();
-
-    expect({
-      purged: purged === "ok",
-      answer: read.gaps.find(({ id }) => id === ids.gap)?.answer,
-    }).toStrictEqual({
-      purged: false,
-      answer: `Ask ${purgedMarker}, she knows.`,
+      answer: `Ask the office, ${tag}.`,
     });
   });
 });

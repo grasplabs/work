@@ -2,13 +2,15 @@ import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { auditedBatch } from "../audit-outbox.ts";
 import { eraseSources, runSource } from "../brain-next-origins.ts";
 import {
   workflowResourceParams,
   workflowStartReceipts,
-  runBrainEvidence,
+  runBrainMemories,
+  runBrainVersions,
   runChatSources,
   resourceRunMailCalls,
   runMailStampClaims,
@@ -17,7 +19,10 @@ import {
   runLineages,
   workflowDecisions,
   workflowResourceRuns,
+  workflowState,
   workflowStateWrites,
+  keptRunEvidence,
+  runStateWriters,
 } from "../db/core/schema.ts";
 import { runRetentionDays } from "./engine.ts";
 import { runFilesRemoved } from "./run-files.ts";
@@ -61,6 +66,11 @@ import { orphanedSnapshotsRemoved } from "./state-snapshots.ts";
 // - The engine's records of core's own runs (Knowledge's extractions):
 //   the engine keeps those as long as the account's plan lets it, 30 days
 //   at most.
+// - What a run read, by identifiers (its evidence), while a key of its
+//   workflow's state names the run: that key is read only while what the
+//   run read holds (workflow-state.ts, GRA-1996), which a check without
+//   the evidence would always find. Released once no key names it
+//   (`keptEvidenceReleased`).
 //
 // What can go wrong, and why it doesn't:
 // - A live run swept. Only a start whose run has ended, by the time it
@@ -207,6 +217,60 @@ const dueStarts = async (
   }));
 };
 
+/** That run `runId` (a column) keeps no evidence past its details, as SQL. */
+const notKept = (runId: SQLiteColumn): SQL =>
+  sql`${runId} NOT IN (SELECT ${keptRunEvidence.runId} FROM ${keptRunEvidence})`;
+
+/** The most runs whose kept evidence one sweep releases. */
+const releasedPerSweep = 500;
+
+/**
+ * That run `runId` (a column) is named by no key of a workflow's state,
+ * nor by a run that started from its keys (`runStateWriters`), as SQL.
+ */
+const unnamedSql = (runId: SQLiteColumn): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${workflowState}
+      WHERE ${workflowState.runId} = ${runId})
+    AND NOT EXISTS (SELECT 1 FROM ${runStateWriters}
+      WHERE ${runStateWriters.writerRunId} = ${runId})`;
+
+/**
+ * Releases the evidence retention kept of runs no key of their workflow's
+ * state names any more (overwritten, reset, or gone with the workflow),
+ * and no run started from (`runStateWriters`: those rows go with their
+ * run's details, or with its release here), at most `releasedPerSweep` of
+ * them: picked first, then in one batch their evidence, the runs they
+ * started from and their mark, each statement checking again that the
+ * run is still unnamed. Picked once, so a release that lets a writer of
+ * one of them go never takes that writer's mark and leaves its evidence:
+ * it is freed whole at the next sweep. A run past its details has ended:
+ * a key is set only by a run that hasn't (workflow-state.ts), and a start
+ * that froze its key is admitted only while it keeps its evidence
+ * (workflow-starts.ts), so none of them is named again meanwhile.
+ */
+const keptEvidenceReleased = async (env: Env): Promise<void> => {
+  const db = drizzle(env.DB);
+  const picked = await db
+    .select({ runId: keptRunEvidence.runId })
+    .from(keptRunEvidence)
+    .where(unnamedSql(keptRunEvidence.runId))
+    .orderBy(asc(keptRunEvidence.runId))
+    .limit(releasedPerSweep);
+  if (picked.length === 0) {
+    return;
+  }
+  const ids = JSON.stringify(picked.map(({ runId }) => runId));
+  const released = (runId: SQLiteColumn): SQL =>
+    sql`${runId} IN (SELECT value FROM json_each(${ids})) AND ${unnamedSql(runId)}`;
+  await db.batch([
+    db.delete(runBrainVersions).where(released(runBrainVersions.runId)),
+    db.delete(runBrainMemories).where(released(runBrainMemories.runId)),
+    db.delete(runChatSources).where(released(runChatSources.runId)),
+    db.delete(runStateWriters).where(released(runStateWriters.runId)),
+    db.delete(keptRunEvidence).where(released(keptRunEvidence.runId)),
+  ]);
+};
+
 /**
  * Removes the details of `dueRows` (`sweepWorkflowStartDetails`), read
  * once, so what connect is asked to drop and what is marked are the same
@@ -281,10 +345,58 @@ const startDetailsRemoved = async (
     // Its own files go with its details (GRA-724): marked here, their
     // chunks deleted by `sweepRunFiles`.
     runFilesRemoved(db, due),
-    // What its recalls cited (resource-reads.ts): no new call of its to gate.
-    db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, due)),
-    // And what the chat that had it started had read (workflow-starts.ts).
-    db.delete(runChatSources).where(inArray(runChatSources.runId, due)),
+    // What its recalls cited, what its entity reads rested on (GRA-1985)
+    // and what the chat that had it started had read (workflow-starts.ts)
+    // gate no new call of its, so they go, unless a key of its workflow's
+    // state names it: that key is read only while they hold
+    // (workflow-state.ts, GRA-1996), so they are kept until no key does
+    // (`keptEvidenceReleased`); and so are those of a run another run
+    // started from, while that run's own keeps (`runStateWriters`: its
+    // checks cover them). Marked first, in this batch, so the keys and
+    // runs read here are the ones that keep it.
+    db
+      .insert(keptRunEvidence)
+      .select(
+        sql`SELECT DISTINCT kept.run_id, ${now.getTime()} FROM (
+            SELECT ${workflowState.runId} AS run_id FROM ${workflowState}
+              WHERE ${workflowState.runId} IN ${due}
+            UNION SELECT ${runStateWriters.writerRunId} FROM ${runStateWriters}
+              WHERE ${runStateWriters.writerRunId} IN ${due}
+          ) AS kept WHERE true`
+      )
+      .onConflictDoNothing(),
+    db
+      .delete(runBrainVersions)
+      .where(
+        and(
+          inArray(runBrainVersions.runId, due),
+          notKept(runBrainVersions.runId)
+        )
+      ),
+    db
+      .delete(runBrainMemories)
+      .where(
+        and(
+          inArray(runBrainMemories.runId, due),
+          notKept(runBrainMemories.runId)
+        )
+      ),
+    db
+      .delete(runChatSources)
+      .where(
+        and(inArray(runChatSources.runId, due), notKept(runChatSources.runId))
+      ),
+    // And the runs whose keys it started from, unless a key names it
+    // itself: only that key's check reads them (one hop). Kept only as a
+    // writer of a later run, it keeps no writer of its own, so no chain of
+    // runs is kept behind the last.
+    db.delete(runStateWriters).where(
+      and(
+        inArray(runStateWriters.runId, due),
+        sql`NOT EXISTS (SELECT 1 FROM ${workflowState}
+            WHERE ${workflowState.runId} = ${runStateWriters.runId})`
+      )
+    ),
     // And its inboxes (run-inboxes.ts): a reply from now on is to an
     // address nobody has.
     db.delete(runInboxes).where(inArray(runInboxes.runId, due)),
@@ -386,6 +498,8 @@ export const sweepWorkflowStartDetails = async (
     await paramValuesRemoved(db, before, now);
     // The snapshots no start or test run names any more.
     await orphanedSnapshotsRemoved(db);
+    // And the evidence kept of runs no key of what workflows keep names.
+    await keptEvidenceReleased(env);
   }
 };
 

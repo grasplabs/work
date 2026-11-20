@@ -120,6 +120,7 @@ const interviewOf = (facts: AdminInterviewFacts): AdminInterview => {
     facts: facts.facts,
     out: facts.out,
     confirmed: facts.confirmed,
+    shared: facts.shared,
     rating: facts.rating,
     typed: facts.typed,
     interviewer: facts.interviewer,
@@ -254,6 +255,7 @@ export const snapshotOf = async (
     place,
     failedMails,
     letIn,
+    roster,
   ] = await Promise.all([
     store.adminFacts(),
     store.agreements(),
@@ -271,6 +273,9 @@ export const snapshotOf = async (
     store.place(),
     store.failedMails(),
     staffLetIn(env),
+    // With what each team does as its lead's map drew it: staff's to read
+    // (GRA-1748), never a member's.
+    store.rosterAsMapped(),
   ]);
   const config = signInConfig(env);
   const sent = new Map(facts.links.map((link) => [link.person, link]));
@@ -300,7 +305,7 @@ export const snapshotOf = async (
       admins: config?.admins ?? [],
     },
     contacts: null,
-    roster: view.roster,
+    roster,
     plan: view.plan,
     agreements,
     agreed: view.agreed,

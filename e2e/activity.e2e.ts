@@ -11,28 +11,13 @@ import { apiOf, peopleIn, release } from "./people.ts";
 // and exports what the log's filters match. Search, export and the grant
 // themselves are core's tests.
 
-/** A collection everyone reads, made by `admin`, for an App to ask for. */
-const collectionOf = async (
-  admin: Parameters<typeof apiOf>[0]
-): Promise<string> => {
-  const { core, api } = apiOf(admin);
-  try {
-    const { id } = await api.knowledge.createCollection({
-      name: `Board pack ${crypto.randomUUID()}`,
-      access: "everyone",
-    });
-    return id;
-  } finally {
-    core[Symbol.dispose]();
-  }
-};
-
 test("an admin approves a permission request, finds it in the audit log, and exports it", async ({
   pageOf,
 }) => {
   const { admin, builder } = peopleIn("activity");
   const appName = `Board pack ${crypto.randomUUID()}`;
-  const collectionId = await collectionOf(admin);
+  // Another App asks to invite guests: each row names one request.
+  const guestApp = `Guest list ${crypto.randomUUID()}`;
   const { core, api } = apiOf(builder);
   let approved: string;
   try {
@@ -42,12 +27,16 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     });
     ({ id: approved } = await api.permissions.request({
       subject: { type: "app", appId },
-      object: { type: "collection", collectionId },
-      actions: ["read"],
+      object: { type: "platform" },
+      actions: ["statistics"],
       binding: "BOARD_PACK",
     }));
+    const { id: guestAppId } = await api.apps.create({
+      name: guestApp,
+      description: "Invites guests to the board meeting",
+    });
     await api.permissions.request({
-      subject: { type: "app", appId },
+      subject: { type: "app", appId: guestAppId },
       object: { type: "platform" },
       actions: ["guests"],
       binding: "GUESTS",
@@ -60,25 +49,27 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await page.goto("/inbox");
   const reading = await toItem(
     page,
-    new RegExp(`^${appName} may read`, "u"),
-    new RegExp(`^Grant ${appName}: read on `, "u")
+    new RegExp(`^${appName}$`, "u"),
+    new RegExp(`^Grant ${appName}: statistics on Platform statistics\\.`, "u")
   );
   await reading.getByRole("button", { name: "Details" }).click();
   await expect(reading).toContainText("Version to review: None live");
   await reading.getByRole("button", { name: "Grant it" }).click();
   await expect(
-    saidOf(page).filter({ hasText: `Approved: Grant ${appName}: read on ` })
+    saidOf(page).filter({
+      hasText: `Approved: Grant ${appName}: statistics on Platform statistics.`,
+    })
   ).toHaveCount(1);
   await expect(reading).toHaveCount(0);
 
   const inviting = await toItem(
     page,
-    new RegExp(`^${appName}$`, "u"),
-    new RegExp(`^Grant ${appName}: guests on Guest chats\\.`, "u")
+    new RegExp(`^${guestApp}$`, "u"),
+    new RegExp(`^Grant ${guestApp}: guests on Guest chats\\.`, "u")
   );
   await inviting.getByRole("button", { name: "Decline" }).click();
   await expect(
-    saidOf(page).filter({ hasText: `Declined: Grant ${appName}` })
+    saidOf(page).filter({ hasText: `Declined: Grant ${guestApp}` })
   ).toHaveCount(1);
   await expect(inviting).toHaveCount(0);
 
@@ -158,34 +149,25 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("an admin sees a grant asked for again after a new version, and approves only the version the list shows", async ({
+test("an admin approves an App's request only for the version the list shows", async ({
   pageOf,
 }) => {
   const { admin, builder } = peopleIn("activityAgain");
   const appName = `Minutes ${crypto.randomUUID()}`;
   const builds = apiOf(builder);
-  const decides = apiOf(admin);
-  let appId: string;
   try {
-    ({ id: appId } = await builds.api.apps.create({
+    const { id: appId } = await builds.api.apps.create({
       name: appName,
       description: "Invites guests to the minutes",
-    }));
-    await release(builds.api, appId, { "README.md": "One" }, "First");
-    const { id } = await builds.api.permissions.request({
+    });
+    await release(builds.api, appId, { "README.md": "One" });
+    await builds.api.permissions.request({
       subject: { type: "app", appId },
       object: { type: "platform" },
       actions: ["guests"],
       binding: "GUESTS",
     });
-    await decides.api.permissions.grant(id, { version: 1 });
-    // The builder can't grant it, so a new version asks for it again.
-    await release(builds.api, appId, { "README.md": "Two" }, "Second");
-  } finally {
-    decides.core[Symbol.dispose]();
-  }
 
-  try {
     const page = await pageOf(admin);
     await page.goto("/inbox");
     const card = await toItem(
@@ -194,19 +176,15 @@ test("an admin sees a grant asked for again after a new version, and approves on
       new RegExp(`^Grant ${appName}: guests on Guest chats\\.`, "u")
     );
     await card.getByRole("button", { name: "Details" }).click();
-    await expect(card).toContainText(
-      /Asked again after \d{2}\.\d{2}\.2 was published \(previously granted by .+ on .+\)/u
-    );
-    // Versions as people know them: YY.MM.N, the second this month.
-    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.2/u);
+    // Versions as people know them: YY.MM.N, the first this month.
+    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.1/u);
 
-    // Another version is published while the admin looks at version 2: the
+    // Another version is published while the admin looks at version 1: the
     // grant is refused, and the card shows the version there is now.
-    await release(builds.api, appId, { "README.md": "Three" }, "Third");
+    await release(builds.api, appId, { "README.md": "Two" });
     await card.getByRole("button", { name: "Grant it" }).click();
     await expect(saidOf(page).filter({ hasText: "Approved:" })).toHaveCount(0);
-    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.3/u);
-    await expect(card).toContainText(/Asked again after \d{2}\.\d{2}\.3/u);
+    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.2/u);
 
     await card.getByRole("button", { name: "Grant it" }).click();
     await expect(

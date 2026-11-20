@@ -29,6 +29,7 @@ import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { connectionIn } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -76,19 +77,17 @@ const answering = async (
 /** Keeps every chat's agent as an admin would have changed it. */
 const keepAgent = async ({
   name,
-  instructions,
   state,
 }: {
   name: string;
-  instructions: string;
   state: "on" | "paused";
 }): Promise<void> => {
   await env.DB.prepare(
     `INSERT INTO agents
-       (id, name, face, job, instructions, model_role, state, made_by, made_at, changed_by, changed_at)
-     VALUES (?, ?, 'stephen', 'Helps.', ?, NULL, ?, 'admin', ?, 'admin', ?)`
+       (id, name, face, job, model_role, state, made_by, made_at, changed_by, changed_at)
+     VALUES (?, ?, 'stephen', 'Helps.', NULL, ?, 'admin', ?, 'admin', ?)`
   )
-    .bind(chatAgentId, name, instructions, state, Date.now(), Date.now())
+    .bind(chatAgentId, name, state, Date.now(), Date.now())
     .run();
 };
 
@@ -131,6 +130,19 @@ const pageOf = async (cookie: string) => {
 };
 
 /** Follows a chat, keeping every update. */
+/**
+ * Whether `message` is the recall before a question (turn-recall.ts names
+ * its calls `recall_…`): a step of its own every turn shows, which these
+ * tests of how a chat streams leave aside (turn-recall.test.ts holds it).
+ */
+const ofRecall = (message: ChatMessage): boolean =>
+  (message.role === "result" && message.callId.startsWith("recall_")) ||
+  (message.role === "assistant" &&
+    message.text === "" &&
+    message.code.length === 0 &&
+    message.tools.length > 0 &&
+    message.tools.every(({ callId }) => callId.startsWith("recall_")));
+
 const follow = async (
   chats: Person["chats"],
   chatId: string,
@@ -148,8 +160,11 @@ const follow = async (
   return {
     updates,
     subscription,
-    /** Every message it was sent, in the order they came. */
-    messages: () => updates.flatMap(({ messages }) => messages),
+    /** Every message it was sent, in the order they came, but the recall's. */
+    messages: () =>
+      updates.flatMap(({ messages }) =>
+        messages.filter((message) => !ofRecall(message))
+      ),
     /** The chat as the updates so far show it. */
     now: () => {
       const last = updates.at(-1);
@@ -1138,7 +1153,8 @@ describe("chats", () => {
     await settled(first);
     // The next question is under way, its answer streaming, when the
     // object restarts.
-    await ann.chats.send(chat.id, { text: "And this?", model });
+    const again = { key: crypto.randomUUID(), text: "And this?", model };
+    await ann.chats.send(chat.id, again);
     await vi.waitFor(
       () => {
         expect(first.now()?.partial).not.toBeNull();
@@ -1157,6 +1173,9 @@ describe("chats", () => {
     };
     await restart();
     await restart();
+    // Sent again with its key, as a page that never heard it was taken:
+    // the same question, still being answered, not a second one.
+    await ann.chats.send(chat.id, again);
     const after = await follow(ann.chats, chat.id);
     await vi.waitFor(
       () => {
@@ -1186,6 +1205,173 @@ describe("chats", () => {
       running: true,
       listed: [{ id: chat.id, title: "Durable", running: true }],
     });
+  });
+
+  it("take a question sent again with its key once, and one refused before it started again", async () => {
+    const ann = await person();
+    await answering(ann, says("Noted."), says("Again."), says("Here."));
+    const chat = await ann.chats.create("Repeated");
+    const follower = await follow(ann.chats, chat.id);
+    const key = crypto.randomUUID();
+    const refusedKey = crypto.randomUUID();
+
+    // A model the company doesn't offer refuses it before it starts, and
+    // its key stays free for the same question sent right.
+    await expect(
+      outcome(
+        ann.chats.send(chat.id, {
+          key: refusedKey,
+          text: "Any news?",
+          model: "openai/not-a-model",
+        })
+      )
+    ).resolves.not.toBe("resolved");
+
+    // Twice at once, as a page that retries early, and once more after
+    // the answer: one question, one answer.
+    const question = { key, text: "Any news?", model };
+    await Promise.all([
+      ann.chats.send(chat.id, question),
+      ann.chats.send(chat.id, question),
+    ]);
+    await settled(follower);
+    // What a repeat names is not looked up again: it may be gone since.
+    await ann.chats.send(chat.id, {
+      ...question,
+      mentions: [{ kind: "agent", id: crypto.randomUUID() }],
+    });
+    expect(
+      follower.messages().map(({ role, text }) => ({ role, text }))
+    ).toStrictEqual([
+      { role: "user", text: "Any news?" },
+      { role: "assistant", text: "Noted." },
+    ]);
+
+    await ann.chats.send(chat.id, { ...question, key: refusedKey });
+    await vi.waitFor(() => {
+      expect(follower.messages().at(-1)?.text).toBe("Again.");
+    });
+    // Another chat's key says nothing of a question here.
+    const other = await ann.chats.create("Elsewhere");
+    await expect(outcome(ann.chats.send(other.id, question))).resolves.toBe(
+      "agent.invalid_question"
+    );
+    // A key kept for a question a restart then lost, before anything of
+    // it was kept: sent again, it is asked, not answered for.
+    const lost = crypto.randomUUID();
+    await runInDurableObject(objectOf(ann), (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_request_keys (kind, key, chat_id, at) VALUES ('send', ?, ?, ?)",
+        lost,
+        other.id,
+        Date.now()
+      );
+    });
+    const elsewhere = await follow(ann.chats, other.id);
+    await ann.chats.send(other.id, { key: lost, text: "Still there?", model });
+    await settled(elsewhere);
+    expect(elsewhere.messages().at(-1)?.text).toBe("Here.");
+    // A malformed key is no key.
+    await expect(
+      outcome(ann.chats.send(chat.id, { ...question, key: "again" }))
+    ).resolves.toBe("agent.invalid_question");
+  });
+
+  it("are made once for a key, however often the page asks", async () => {
+    const ann = await person();
+    const ben = await person();
+    const key = crypto.randomUUID();
+    const made = await ann.chats.create("Travel", undefined, undefined, key);
+    // Nor is the agent a repeat names looked up again: gone since, it
+    // would refuse only a new chat.
+    await expect(
+      ann.chats.create("Travel", crypto.randomUUID(), undefined, key)
+    ).resolves.toStrictEqual(made);
+    await expect(ann.chats.list()).resolves.toHaveLength(1);
+    // Someone else's same key is their own chat.
+    const other = await ben.chats.create("Travel", undefined, undefined, key);
+    expect(other.id).not.toBe(made.id);
+    // Deleted, its key is free again.
+    await ann.chats.remove(made.id);
+    const next = await ann.chats.create("Travel", undefined, undefined, key);
+    expect(next.id).not.toBe(made.id);
+    await expect(
+      outcome(ann.chats.create("Travel", undefined, undefined, "again"))
+    ).resolves.toBe("agent.invalid_request");
+  });
+
+  it("keep what their person thought of an answer, for that person alone", async () => {
+    const ann = await person();
+    const ben = await person();
+    await answering(ann, says("Noted."));
+    const chat = await ann.chats.create("Rated");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Any news?", model });
+    await settled(follower);
+    const [question, answer] = follower.messages();
+    if (question === undefined || answer === undefined) {
+      throw new Error("No question and answer");
+    }
+    const ratingOf = async () => {
+      const read = await follow(ann.chats, chat.id);
+      const kept = await vi.waitFor(() => {
+        const found = read.messages().find(({ id }) => id === answer.id);
+        if (found?.role !== "assistant") {
+          throw new Error("The answer isn't read yet");
+        }
+        return found;
+      });
+      return kept.rating ?? null;
+    };
+
+    await ann.chats.rate(chat.id, answer.id, {
+      value: "down",
+      reason: "It left out the invoice.",
+    });
+    await expect(ratingOf()).resolves.toStrictEqual({
+      value: "down",
+      reason: "It left out the invoice.",
+    });
+    // Rated again, the new one stands; taken back, none does.
+    await ann.chats.rate(chat.id, answer.id, { value: "up" });
+    await expect(ratingOf()).resolves.toStrictEqual({ value: "up" });
+    await ann.chats.rate(chat.id, answer.id, null);
+
+    // Only an answer, only of that chat, only by its person.
+    const elsewhere = await ann.chats.create("Elsewhere");
+    await expect(
+      Promise.all([
+        outcome(ann.chats.rate(chat.id, question.id, { value: "up" })),
+        outcome(ann.chats.rate(elsewhere.id, answer.id, { value: "up" })),
+        outcome(ben.chats.rate(chat.id, answer.id, { value: "up" })),
+        outcome(
+          ann.chats.rate(chat.id, answer.id, {
+            value: "up",
+            reason: "x".repeat(2001),
+          })
+        ),
+      ])
+    ).resolves.toStrictEqual([
+      "agent.invalid_request",
+      "agent.invalid_request",
+      "agent.chat_not_found",
+      "agent.invalid_request",
+    ]);
+    // Taken back, and nothing refused left one.
+    await expect(ratingOf()).resolves.toBeNull();
+    // Each rating is recorded, never which way or why.
+    const events = await allEvents();
+    expect(
+      events
+        .filter(({ action }) => action === "chat.answer_rated")
+        .map(({ actor, target, detail }) => ({ actor, target, detail }))
+    ).toStrictEqual(
+      Array.from({ length: 3 }, () => ({
+        actor: { type: "person", userId: ann.userId },
+        target: { type: "chat", id: chat.id },
+        detail: { workspace: personalWorkspaceId(ann.userId) },
+      }))
+    );
   });
 
   it("take one question at a time, and aren't deleted under their agent", async () => {
@@ -1249,7 +1435,7 @@ describe("chats", () => {
     const ann = await person();
     const gateway = await answering(ann, says("Back."));
     const chat = await ann.chats.create("Paused");
-    await keepAgent({ name: "Stephen", instructions: "", state: "paused" });
+    await keepAgent({ name: "Stephen", state: "paused" });
     try {
       await expect(
         outcome(ann.chats.send(chat.id, { text: "Hi.", model }))
@@ -1266,31 +1452,52 @@ describe("chats", () => {
     }
   });
 
-  it("tell an agent its name and what an admin told it, between Grasp's own rules, and the first agent as shipped nothing more", async () => {
+  it("tell an agent its name and what its instruction file says, between Grasp's own rules, an edit on its page from its next turn, and the first agent as shipped nothing more", async () => {
     const ann = await person();
-    const gateway = await answering(ann, says("Hello."), says("Hello."));
+    const admin = await signedInApi(idp, "admin");
+    const gateway = await answering(
+      ann,
+      says("Hello."),
+      says("Hello."),
+      says("Hello.")
+    );
     const shipped = await ann.chats.create("As shipped");
     const first = await follow(ann.chats, shipped.id);
     await ann.chats.send(shipped.id, { text: "Hi.", model });
     await settled(first);
     expect(JSON.stringify(gateway.requests[0]?.body)).not.toContain("<agent>");
 
-    await keepAgent({
-      name: "Claire",
-      instructions: "Answer only about unpaid invoices.",
-      state: "on",
-    });
+    await keepAgent({ name: "Claire", state: "on" });
+    const told = { scope: "agent", agentId: chatAgentId } as const;
+    /** What the model was asked in a new chat's first turn. */
+    const askedInNewChat = async (index: number): Promise<string> => {
+      const chat = await ann.chats.create("As changed");
+      const follower = await follow(ann.chats, chat.id);
+      await ann.chats.send(chat.id, { text: "Hi.", model });
+      await settled(follower);
+      return JSON.stringify(gateway.requests[index]?.body);
+    };
     try {
-      const changed = await ann.chats.create("As changed");
-      const second = await follow(ann.chats, changed.id);
-      await ann.chats.send(changed.id, { text: "Hi.", model });
-      await settled(second);
-      const asked = JSON.stringify(gateway.requests[1]?.body);
+      // What an admin saves on its page, its instruction file.
+      await saveInstructions(
+        admin.api,
+        told,
+        "Answer only about unpaid invoices."
+      );
+      const asked = await askedInNewChat(1);
       expect(asked).toContain("You answer here as Claire");
       expect(asked).toContain("Answer only about unpaid invoices.");
       // Told that Grasp's rules hold over it.
       expect(asked).toContain("lifts none of them");
+      await saveInstructions(admin.api, told, "Answer only about payroll.");
+      const edited = await askedInNewChat(2);
+      expect({
+        now: edited.includes("Answer only about payroll."),
+        before: edited.includes("unpaid invoices"),
+      }).toStrictEqual({ now: true, before: false });
     } finally {
+      // Emptied, it loads nowhere: the other tests' first agent says nothing.
+      await saveInstructions(admin.api, told, "");
       await env.DB.prepare("DELETE FROM agents").run();
     }
   });

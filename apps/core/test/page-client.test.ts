@@ -11,12 +11,14 @@ import { actionInvocation, invocationName } from "../src/action-invocation.ts";
 import { readFunctionRequest } from "../src/app-functions.ts";
 import { versionFiles } from "../src/apps.ts";
 import { actionInvocations } from "../src/db/core/schema.ts";
+import { withDraftReferences } from "../src/draft-references.ts";
 import { withPageReferences } from "../src/page-references.ts";
 import { buildPages } from "../src/pages.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { StoreHost } from "../src/store-host.ts";
-import { commitApp, testApp, withFiles } from "./app-definitions.ts";
+import { publishApp, testApp, withFiles, writeApp } from "./app-definitions.ts";
 import type { TestSource } from "./app-definitions.ts";
+import { commitApp } from "./apps.ts";
 import { apiOf, notesFiles as files } from "./notes-client-app.ts";
 import {
   personApi,
@@ -26,6 +28,7 @@ import {
   mockSessionIdp,
 } from "./page-client.ts";
 import { person as sealedPerson } from "./sealed-apps.ts";
+import { outcome } from "./sign-in.ts";
 
 // The session client a page's queries, mutations and actions go through
 // (spec 10.1, 10.7.1), against core's real function route, as an approved
@@ -510,14 +513,16 @@ describe("the session client", { timeout: 120_000 }, () => {
       .toStrictEqual(["Ran"]);
     // Version 2 published, and version 1 revoked, while it runs.
     const { version } = await commitApp(
-      opened.builder.api.apps.files,
+      opened.builder.api,
       opened.app,
       withFiles(files, {
         "server/notes.ts": `${files.files["server/notes.ts"] ?? ""}\n// The second version.\n`,
-      }),
-      "Second"
+      })
     );
-    await opened.builder.api.apps.versions.publish(opened.app, version);
+    await opened.builder.api.versions.rollback(
+      { kind: "app", id: opened.app },
+      version
+    );
     await revokeRelease(
       env,
       await sealedPerson("admin"),
@@ -641,55 +646,46 @@ const inspections = async (): Promise<number> => {
   const { objects } = await env.FILES.list({ prefix: "build-cache/" });
   return objects.filter(({ key }) => key.includes("/inspection/")).length;
 };
-/** The diagnostics of version 1 of an App holding `files`, as core builds its pages. */
+/**
+ * The diagnostics of the pages of a new App's draft holding `appFiles`,
+ * as its check builds them: with the references its own code generates.
+ */
 const diagnosticsOf = async (appFiles: TestSource): Promise<string[]> => {
   const builder = await personApi("builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await commitApp(
-    builder.api.apps.files,
-    id,
-    appFiles,
-    "First"
-  );
-  const build = await buildPages(
+  await writeApp(builder.api, id, appFiles);
+  const drafted = await withDraftReferences(
     env,
-    await withPageReferences(
-      env,
-      appIdSchema.parse(id),
-      version,
-      await versionFiles(env, appIdSchema.parse(id), version)
-    ),
-    "app-test"
+    appIdSchema.parse(id),
+    await builder.api.drafts.files({ kind: "app", id })
   );
+  const build = await buildPages(env, drafted.files, "app-test");
   return build.diagnostics
     .filter(({ severity }) => severity === "error")
     .map(({ message }) => message);
 };
 
 describe("a page's build", { timeout: 120_000 }, () => {
-  it("builds a saved or drafted version's pages with the references its own code generates", async () => {
-    // A save and a draft's check build alike (save-builds.ts): nothing of
-    // either is sealed yet, so the references come from the files.
+  it("checks a draft's pages with the references its own code generates, publishing none that doesn't build", async () => {
+    // Nothing of a draft is sealed yet: the references come from its files.
     const builder = await personApi("builder");
     const { id } = await builder.api.apps.create({ name: "Notes" });
-    const { builds } = await commitApp(
-      builder.api.apps.files,
-      id,
-      files,
-      "First"
+    const built = await outcome(publishApp(builder.api, id, files));
+    const broken = await outcome(
+      publishApp(
+        builder.api,
+        id,
+        withFiles(files, {
+          "src/routes/index.tsx": page(
+            '  useQuery(api.notes.get, { noteId: "x" });'
+          ),
+        })
+      )
     );
-    expect(builds.pages).toMatchObject({ status: "ok", diagnostics: [] });
-    const broken = await commitApp(
-      builder.api.apps.files,
-      id,
-      withFiles(files, {
-        "src/routes/index.tsx": page(
-          '  useQuery(api.notes.get, { noteId: "x" });'
-        ),
-      }),
-      "Second"
-    );
-    expect(broken.builds.pages.status).toBe("failed");
+    expect({ built, broken }).toStrictEqual({
+      built: "ok",
+      broken: "app.draft_failed",
+    });
   });
 
   it("inspects the same server code once, however often a save brings it", async () => {
@@ -701,28 +697,26 @@ describe("a page's build", { timeout: 120_000 }, () => {
     });
     const before = await inspections();
     const { id } = await builder.api.apps.create({ name: "Notes" });
-    await commitApp(builder.api.apps.files, id, own, "First");
+    await publishApp(builder.api, id, own);
     // A page changed, the server code not: what was inspected is kept.
-    await commitApp(
-      builder.api.apps.files,
+    await publishApp(
+      builder.api,
       id,
       withFiles(own, {
-        "src/routes/index.tsx": page(""),
-      }),
-      "Second"
+        "src/routes/index.tsx": `${own.files["src/routes/index.tsx"] ?? ""}// A page changed.\n`,
+      })
     );
     await expect(inspections()).resolves.toBe(before + 1);
     // Other server code is inspected for itself.
-    await commitApp(
-      builder.api.apps.files,
+    await publishApp(
+      builder.api,
       id,
       withFiles(own, {
         "server/notes.ts": serverCode.replace(
           '.default("hello")',
           '.default("hi")'
         ),
-      }),
-      "Third"
+      })
     );
     await expect(inspections()).resolves.toBe(before + 2);
   });

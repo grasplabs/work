@@ -7,6 +7,7 @@ import { readAgent } from "../src/agents.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { model, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
+import { saveInstructions } from "./instruction-saves.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import {
   auditedDuring,
@@ -39,7 +40,6 @@ const said = (over: Record<string, unknown> = {}) => ({
   name: "Claire",
   face: "claire",
   job: "Chases unpaid invoices.",
-  instructions: "Answer only about invoices.",
   modelRole: null,
   ...over,
 });
@@ -190,9 +190,6 @@ describe("the agent builder", setUpTime, () => {
       keptName: await outcome(changeAgent(claire.id, said({ job: "More." }))),
       noName: await outcome(makeAgent(said({ name: "  " }))),
       longName: await outcome(makeAgent(said({ name: "x".repeat(61) }))),
-      longInstructions: await outcome(
-        makeAgent(said({ name: "Pat", instructions: "x".repeat(8001) }))
-      ),
       // A field an agent doesn't have, as a page could send it.
       extra: await outcome(makeAgent(said({ name: "Pat", state: "paused" }))),
       noSuchAgent: await outcome(changeAgent("payroll", said({ name: "Pat" }))),
@@ -204,7 +201,6 @@ describe("the agent builder", setUpTime, () => {
       keptName: "ok",
       noName: "agent.record_invalid",
       longName: "agent.record_invalid",
-      longInstructions: "agent.record_invalid",
       extra: "agent.record_invalid",
       noSuchAgent: "agent.unknown",
     });
@@ -254,7 +250,6 @@ describe("the agent builder", setUpTime, () => {
         name: shipped.name,
         face: shipped.face,
         job: shipped.job,
-        instructions: shipped.instructions,
         modelRole: shipped.modelRole,
       });
     });
@@ -272,13 +267,13 @@ describe("the agent builder", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     await admin.api.connections.changeAgent(
       chatAgentId,
-      said({ name: "Ada", instructions: "Be brief." })
+      said({ name: "Ada", job: "Be brief." })
     );
     await admin.api.connections.setAgentPaused(chatAgentId, true);
     await expect(readAgent(env, chatAgentId)).resolves.toMatchObject({
       id: chatAgentId,
       name: "Ada",
-      instructions: "Be brief.",
+      job: "Be brief.",
       state: "paused",
       changedBy: admin.userId,
     });
@@ -363,10 +358,14 @@ describe("the agent builder", setUpTime, () => {
     const secret = `instructions-${crypto.randomUUID()}`;
     let id = "";
     const events = await auditedDuring(async () => {
-      const made = await admin.api.connections.makeAgent(
-        said({ instructions: secret })
-      );
+      const made = await admin.api.connections.makeAgent(said());
       ({ id } = made);
+      // What it is told is its instruction file's, saved on its page.
+      await saveInstructions(
+        admin.api,
+        { scope: "agent", agentId: id },
+        secret
+      );
       await admin.api.connections.changeAgent(id, said({ job: "More." }));
       // The same again changes nothing.
       await admin.api.connections.changeAgent(id, said({ job: "More." }));
@@ -395,10 +394,7 @@ describe("the agent builder", setUpTime, () => {
         target,
       }))
     );
-    expect(ours[0]?.detail).toMatchObject({
-      name: "Claire",
-      instructionsLength: String(secret.length),
-    });
+    expect(ours[0]?.detail).toMatchObject({ name: "Claire" });
     expect(JSON.stringify(events)).not.toContain(secret);
   });
 

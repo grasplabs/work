@@ -52,16 +52,10 @@ import {
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import {
-  allChosen,
-  firstChoice,
-  formKey,
-  noChoice,
-  targetOf,
-} from "./binding-form.ts";
+import { firstChoice, formKey, noChoice, targetOf } from "./binding-form.ts";
 
 // What an App's actions reach through its declared resources (core's
-// resource-bindings.ts): the models, integrations and knowledge
+// resource-bindings.ts): the models, integrations and the Brain
 // its current version declares, whether a binding serves each now and,
 // when it doesn't, why. An admin binds each one to something that may
 // serve it, and replaces or revokes a binding. Core decides who may (the organization's own admins, never
@@ -80,7 +74,7 @@ const kindLabels: Readonly<
 > = {
   model: msg`AI`,
   connector: msg`Integration`,
-  knowledge: msg`Brain`,
+  brain: msg`Brain`,
   grasp: msg`The platform's statistics`,
   guests: msg`Guests`,
 };
@@ -121,10 +115,6 @@ const useBoundTo = () => {
     if (target.kind === "model") {
       return target.model;
     }
-    if (target.kind === "guests" || target.kind === "grasp") {
-      const { permissionId: permission } = target;
-      return t`Permission ${permission}`;
-    }
     if (target.kind === "connector") {
       // Core names the bound connection for everyone who reads the review,
       // while they can see it; its permission otherwise.
@@ -136,12 +126,10 @@ const useBoundTo = () => {
       const account = label.connection.account ?? provider;
       return t`${account} on ${provider}`;
     }
-    return formatList(
-      Object.entries(target.collections).map(([collection, permission]) => {
-        const name = label.collections[collection] ?? permission;
-        return t`${collection}: ${name}`;
-      })
-    );
+    // The platform's statistics, guests or the Brain: one of the App's
+    // platform permissions.
+    const { permissionId: permission } = target;
+    return t`Permission ${permission}`;
   };
 };
 
@@ -200,7 +188,7 @@ const NothingToChoose = ({
   const reasons: Readonly<Record<DeclaredResource["kind"], string>> = {
     model: t`This deployment allows no model.`,
     connector: t`None of the App's integration permissions serves ${contract} with every action it declares. Grant one first.`,
-    knowledge: t`The App has no permission to read a collection. Grant one first.`,
+    brain: t`The App has no permission to read the Brain. Grant one first.`,
     grasp: t`The App has no permission to read the platform's statistics. Grant one first.`,
     guests: t`The App has no permission to invite guests. Grant one first.`,
   };
@@ -242,27 +230,13 @@ const BindForm = ({
   const { t } = useLingui();
   const { alias, binding } = resource;
   const [picked, setPicked] = useState(() => firstChoice(choices));
-  const [collections, setCollections] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      resource.collections.map((collection) => [
-        collection,
-        // Nothing chosen yet: each collection is chosen on purpose.
-        "",
-      ])
-    )
-  );
   if (noChoice(choices)) {
     return (
       <NothingToChoose resource={resource} truncated={choices.truncated} />
     );
   }
-  // Every collection declared now needs its own choice before binding;
-  // what is sent names those, and only those.
-  const chosen =
-    choices.kind !== "knowledge" ||
-    allChosen(resource.collections, collections);
   const submit = () => {
-    const target = targetOf(resource, choices, picked, collections);
+    const target = targetOf(choices, picked);
     if (target === undefined) {
       return;
     }
@@ -325,33 +299,21 @@ const BindForm = ({
           value={picked}
         />
       ) : null}
-      {choices.kind === "knowledge"
-        ? resource.collections.map((collection) => {
-            const permission = collections[collection] ?? "";
-            return (
-              <Choice
-                items={choices.permissions.map(({ permissionId, name }) => ({
-                  value: permissionId,
-                  label: name ?? permissionId,
-                }))}
-                key={collection}
-                label={t`Collection for ${collection}`}
-                onChange={(next) => {
-                  setCollections({ ...collections, [collection]: next });
-                }}
-                placeholder={t`Choose a collection`}
-                value={permission === "" ? null : permission}
-              />
-            );
-          })
-        : null}
+      {choices.kind === "brain" ? (
+        <Choice
+          items={permissionItems(choices.permissions, named)}
+          label={t`Permission to read the Brain`}
+          onChange={setPicked}
+          value={picked}
+        />
+      ) : null}
       {choices.truncated ? (
         <Text size="sm" tone="muted">
           {t`Not every choice could be checked: some may be missing from the list.`}
         </Text>
       ) : null}
       <div>
-        <Button disabled={busy || !chosen} size="sm" type="submit">
+        <Button disabled={busy} size="sm" type="submit">
           {binding === null
             ? t`Bind ${alias}`
             : t`Replace the binding of ${alias}`}
@@ -412,7 +374,7 @@ const useFacts = () => {
   const { t } = useLingui();
   const boundTo = useBoundTo();
   return (resource: DeclaredResource): KeyValueItem[] => {
-    const { contract, actions, operations, collections, binding } = resource;
+    const { contract, actions, operations, binding } = resource;
     const tokens = resource.maxOutputTokens;
     const facts: (KeyValueItem | null)[] = [
       contract === null
@@ -424,9 +386,6 @@ const useFacts = () => {
       operations.length === 0
         ? null
         : { key: t`Operations`, value: formatList(operations) },
-      collections.length === 0
-        ? null
-        : { key: t`Collections`, value: formatList(collections) },
       tokens === null
         ? null
         : { key: t`Output`, value: t`At most ${tokens} tokens an answer` },
@@ -458,7 +417,7 @@ const ResourcePart = ({
   busy: boolean;
   decide: Decide;
 }) => {
-  const { i18n } = useLingui();
+  const { t, i18n } = useLingui();
   const facts = useFacts();
   const { alias, kind, state, binding, choices } = resource;
   const reason = stateReasons[state];
@@ -488,6 +447,16 @@ const ResourcePart = ({
         title={alias}
       />
       <KeyValueList items={facts(resource)} variant="inline" />
+      {kind === "brain" &&
+      resource.operations.some(
+        (operation) => operation === "remember" || operation === "forget"
+      ) ? (
+        // What approving the App's writes means, in plain words (core's
+        // brain-app-writes.ts): who reads what it saves, and through what.
+        <Text size="sm" tone="muted">
+          {t`This App can save memories in the Brain in its own name, which everyone who uses the App reads through it, and only through it, and it can take its own back.`}
+        </Text>
+      ) : null}
       {reason === undefined ? null : (
         <Alert live="off" tone="attention">
           {i18n._(reason)}

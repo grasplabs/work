@@ -9,6 +9,9 @@ import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
+  DirectoryAccount,
+  DirectoryPlacement,
+  DirectoryRead,
   Erasure,
   ErasurePreview,
   Invitation,
@@ -41,8 +44,8 @@ import {
 import {
   activeAdminExists,
   activeMember,
-  currentMembership,
   isRemoved,
+  memberNotRemoved,
   notRemoved,
   openInvitationAt,
   organizationId,
@@ -52,16 +55,22 @@ import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
   channelAccounts,
+  directoryPeople,
+  directoryReads,
   invitations,
   memberRemovals,
   members,
   notifications,
   personErasures,
   sessions,
+  skillShares,
   teamMembers,
+  teamPins,
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { directoryPlacementOf } from "./directory-placement.ts";
+import { directoryKinds } from "./directory-ties.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
@@ -125,7 +134,11 @@ const targetOf = (by: Identity, userId: unknown): string => {
   return parsed.data;
 };
 
-/** The current membership of `userId`, read now. */
+/**
+ * The membership of `userId` an admin hasn't removed, read now: whether or
+ * not they may act, so an admin can still remove or change someone the
+ * directory suspended.
+ */
 const membershipOf = async (
   env: Env,
   userId: string
@@ -133,7 +146,13 @@ const membershipOf = async (
   const [membership] = await drizzle(env.DB)
     .select({ id: members.id, role: members.role })
     .from(members)
-    .where(currentMembership(userId));
+    .where(
+      and(
+        eq(members.organizationId, organizationId),
+        eq(members.userId, userId),
+        notRemoved(userId)
+      )
+    );
   return membership;
 };
 
@@ -192,6 +211,26 @@ export const membersOf = async (env: Pick<Env, "DB">): Promise<Member[]> => {
       email: users.email,
       role: members.role,
       joinedAt: members.createdAt,
+      suspendedAt: members.suspendedAt,
+      // Their account as the directory read holds it now: none for one it
+      // no longer holds. One account each (accounts are never linked);
+      // ordered all the same, so the answer never depends on the scan.
+      directory: sql<Exclude<DirectoryAccount, "unlisted"> | null>`(
+        SELECT CASE
+          WHEN ${directoryPeople.deleted} THEN 'deleted'
+          WHEN ${directoryPeople.enabled} THEN 'enabled'
+          ELSE 'disabled'
+        END
+        FROM ${directoryPeople}
+        WHERE ${directoryPeople.userId} = ${members.userId}
+          AND ${inList(
+            directoryPeople.provider,
+            directoryKinds.map(({ provider }) => provider)
+          )}
+        ORDER BY ${directoryPeople.provider}, ${directoryPeople.tenant},
+          ${directoryPeople.accountId}
+        LIMIT 1
+      )`,
     })
     .from(members)
     .innerJoin(users, eq(users.id, members.userId))
@@ -202,13 +241,28 @@ export const membersOf = async (env: Pick<Env, "DB">): Promise<Member[]> => {
       )
     )
     .orderBy(asc(users.name), asc(users.id));
-  return rows.flatMap(({ role, joinedAt, ...member }) => {
-    // A role that isn't ours gives no access, so it isn't listed as one.
-    const parsed = roleSchema.safeParse(role);
-    return parsed.success
-      ? [{ ...member, role: parsed.data, joinedAt: joinedAt.toISOString() }]
-      : [];
-  });
+  return rows.flatMap(
+    ({ role, joinedAt, suspendedAt, directory, ...member }) => {
+      // A role that isn't ours gives no access, so it isn't listed as one.
+      const parsed = roleSchema.safeParse(role);
+      return parsed.success
+        ? [
+            {
+              ...member,
+              role: parsed.data,
+              joinedAt: joinedAt.toISOString(),
+              suspension:
+                suspendedAt === null
+                  ? null
+                  : {
+                      since: suspendedAt.toISOString(),
+                      reason: directory ?? "unlisted",
+                    },
+            },
+          ]
+        : [];
+    }
+  );
 };
 
 /** The organization's members, by name. For admins. */
@@ -224,6 +278,33 @@ const listTeams = async (
 ): ReturnType<MembersApi["teams"]> => {
   requireMemberAdmin(by);
   return await teamsWithMembers(env);
+};
+
+/**
+ * Where the daily read of each directory stands (directory-people.ts), for
+ * admins: what an admin can act on when it fails, or goes without the
+ * deleted accounts. Nothing about any person.
+ */
+const listDirectoryReads = async (
+  env: Env,
+  by: Identity
+): Promise<DirectoryRead[]> => {
+  requireMemberAdmin(by);
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(directoryReads)
+    .orderBy(asc(directoryReads.provider));
+  return rows.map((row) => ({
+    provider: row.provider,
+    readAt: row.readAt?.toISOString() ?? null,
+    people: row.people,
+    disabled: row.disabled,
+    failure:
+      row.failure === null || row.failedAt === null
+        ? null
+        : { code: row.failure, at: row.failedAt.toISOString() },
+    deletedFailure: row.deletedFailure,
+  }));
 };
 
 /**
@@ -247,7 +328,8 @@ const recordRemoval = async (
 ): Promise<{ removed: boolean; kept: KeptRevocation[] }> => {
   const db = drizzle(env.DB);
   const removed = sql`NOT ${notRemoved(userId)}`;
-  const removing = sql`${activeMember(userId)} AND ${isActiveAdmin(by.userId)}`;
+  // Whether or not they may act now: a suspended member is removed too.
+  const removing = sql`${memberNotRemoved(userId)} AND ${isActiveAdmin(by.userId)}`;
   const [keptForAll, keptForSome, inserted] = await auditedBatch(env, db, [
     // First, under the marker's own condition, while their membership and
     // teams are still there to say what they reached, in the role they
@@ -277,6 +359,8 @@ const recordRemoval = async (
       .returning({ userId: memberRemovals.userId }),
     outboxedIfChanged(db, memberEntry(by, "member.removed", memberId, userId)),
     db.delete(teamMembers).where(and(eq(teamMembers.userId, userId), removed)),
+    // What an admin pinned of their teams: no use for someone removed.
+    db.delete(teamPins).where(and(eq(teamPins.userId, userId), removed)),
     db
       .delete(members)
       .where(
@@ -294,6 +378,16 @@ const recordRemoval = async (
     db
       .delete(notifications)
       .where(and(eq(notifications.personId, userId), removed)),
+    // The asks of theirs that wait: nobody decides a removed person's ask.
+    db
+      .delete(skillShares)
+      .where(
+        and(
+          eq(skillShares.requestedBy, userId),
+          eq(skillShares.status, "pending"),
+          removed
+        )
+      ),
   ]);
   return {
     removed: inserted.length > 0,
@@ -432,6 +526,62 @@ const revokeMemberSessions = async (
 };
 
 /**
+ * Lets the directory's read decide whether `userId` is in team `teamId`
+ * again (GRA-2056, directory-teams.ts): takes away the pin an admin's hand
+ * add or removal put on the pair. The membership stays as it is until the
+ * next read. Only while the admin still is one, in the same statement;
+ * audited when a pin went.
+ */
+const releaseTeamPin = async (
+  env: Env,
+  by: Identity,
+  userId: unknown,
+  teamId: unknown
+): Promise<{ released: boolean }> => {
+  requireMemberAdmin(by);
+  const person = identifierSchema.safeParse(userId);
+  const team = identifierSchema.safeParse(teamId);
+  if (!(person.success && team.success)) {
+    throw refusal(by, memberErrors.create("member.not_found"));
+  }
+  const db = drizzle(env.DB);
+  const [released] = await auditedBatch(env, db, [
+    db
+      .delete(teamPins)
+      .where(
+        and(
+          eq(teamPins.userId, person.data),
+          eq(teamPins.teamId, team.data),
+          isActiveAdmin(by.userId)
+        )
+      )
+      .returning({ userId: teamPins.userId }),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "team.member.pin_released",
+      target: { type: "team", id: team.data },
+      detail: { userId: person.data },
+    }),
+  ]);
+  if (released.length === 0 && !(await stillAdmin(env, by.userId))) {
+    throw refusal(by, roleErrors.create("role.forbidden"));
+  }
+  return { released: released.length > 0 };
+};
+
+/**
+ * Who the directory leaves for an admin to place, and the hand pins
+ * (directory-placement.ts). For admins.
+ */
+const directoryPlacement = async (
+  env: Env,
+  by: Identity
+): Promise<DirectoryPlacement> => {
+  requireMemberAdmin(by);
+  return await directoryPlacementOf(env);
+};
+
+/**
  * Gives the member `userId` `role`, the admin themselves included. One
  * conditional update: it changes the role only while it still is the one
  * read here, so the event records the role it replaced, while the admin
@@ -492,7 +642,9 @@ const setMemberRole = async (
       .set({ role: newRole })
       .where(
         and(
-          currentMembership(target.data),
+          eq(members.organizationId, organizationId),
+          eq(members.userId, target.data),
+          notRemoved(target.data),
           eq(members.role, membership.role),
           isActiveAdmin(by.userId),
           keepsAnAdmin
@@ -869,6 +1021,13 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     );
   }
 
+  async directoryReads(): Promise<DirectoryRead[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listDirectoryReads(this.#env, person)
+    );
+  }
+
   async remove(userId: string): Promise<{ connectionsDisconnected: number }> {
     return await withPerson(
       this.#check,
@@ -926,6 +1085,23 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await erasePerson(this.#env, person, userId, name)
+    );
+  }
+
+  async releaseTeamPin(
+    userId: string,
+    teamId: string
+  ): Promise<{ released: boolean }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await releaseTeamPin(this.#env, person, userId, teamId)
+    );
+  }
+
+  async directoryPlacement(): Promise<DirectoryPlacement> {
+    return await withPerson(
+      this.#check,
+      async (person) => await directoryPlacement(this.#env, person)
     );
   }
 

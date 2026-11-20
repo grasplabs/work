@@ -101,7 +101,8 @@ export interface AppSeed {
   owner: PersonKey;
   /** The teams it is shared with, and their role in it. */
   teams: { team: TeamName; role: "user" | "builder" }[];
-  agents: string;
+  /** Its instruction file: what a builder's chat about it starts with. */
+  instructions: string;
   workflows: WorkflowSeed[];
 }
 
@@ -138,7 +139,7 @@ ${body
 
 /** A test's check that its run failed with the error its workflow raises, `code`. */
 const failsWith = (code: string): string =>
-  `expect(await t.runs.untilTerminal(run)).toMatchObject({ status: "failed", code: ${JSON.stringify(code)} });`;
+  `await expect(t.runs.untilTerminal(run)).resolves.toMatchObject({ status: "failed", code: ${JSON.stringify(code)} });`;
 
 // Opportunity-to-Cash
 
@@ -217,9 +218,9 @@ const clientOnboarding: WorkflowSeed = {
   },
   tests: suite({
     "opens a complete file when nothing is missing": `const run = await desk.start(workflows.clientOnboarding, { client: "Fam. Willems", town: "Utrecht", documents: ${JSON.stringify(requiredDocuments)} });
-expect(await t.runs.untilTerminal(run)).toEqual({ status: "completed", result: { client: "Fam. Willems", town: "Utrecht", complete: true, chase: [] } });`,
+await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({ status: "completed", result: { client: "Fam. Willems", town: "Utrecht", complete: true, chase: [] } });`,
     "lists the documents to chase": `const run = await desk.start(workflows.clientOnboarding, { client: "D. Mulder", town: "Zeist", documents: ["identity"] });
-expect(await t.runs.untilTerminal(run)).toEqual({
+await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({
   status: "completed",
   result: { client: "D. Mulder", town: "Zeist", complete: false, chase: ["payslip", "employer statement", "bank statements"] },
 });`,
@@ -257,7 +258,7 @@ const opportunityToCash: AppSeed = {
     { team: "Client onboarding", role: "builder" },
     { team: "Mortgage advice", role: "builder" },
   ],
-  agents: `# Opportunity-to-Cash
+  instructions: `# Opportunity-to-Cash
 
 From a mortgage application to a complete client file in an adviser's hands.
 
@@ -348,9 +349,9 @@ const emailTriage: WorkflowSeed = {
   },
   tests: suite({
     "sends a complaint to the complaints queue, urgently": `const run = await desk.start(workflows.emailTriage, { from: "M. Hendriks", subject: "Complaint", body: "I'm not happy with the valuation." });
-expect(await t.runs.untilTerminal(run)).toEqual({ status: "completed", result: { from: "M. Hendriks", queue: "complaints", urgent: true } });`,
+await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({ status: "completed", result: { from: "M. Hendriks", queue: "complaints", urgent: true } });`,
     "sends a question about a file to file status": `const run = await desk.start(workflows.emailTriage, { from: "S. Peeters", subject: "Where is my file?", body: "Has it gone to the lender?" });
-expect(await t.runs.untilTerminal(run)).toEqual({ status: "completed", result: { from: "S. Peeters", queue: "file status", urgent: false } });`,
+await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({ status: "completed", result: { from: "S. Peeters", queue: "file status", urgent: false } });`,
     "refuses an empty email": `const run = await desk.start(workflows.emailTriage, { from: "R. Bos", subject: "Question", body: "" });
 ${failsWith("triage.empty_email")}`,
   }),
@@ -384,7 +385,7 @@ const issueToResolution: AppSeed = {
     { team: "Customer service", role: "builder" },
     { team: "Compliance", role: "user" },
   ],
-  agents: `# Issue-to-Resolution
+  instructions: `# Issue-to-Resolution
 
 Every question and complaint that reaches customer service.
 
@@ -406,7 +407,7 @@ const purchaseToPay: AppSeed = {
     { team: "Finance", role: "builder" },
     { team: "Operations", role: "user" },
   ],
-  agents: `# Purchase-to-Pay
+  instructions: `# Purchase-to-Pay
 
 Supplier invoices, from the inbox to the books.
 
@@ -471,7 +472,7 @@ const weeklyReport: WorkflowSeed = {
   },
   tests: suite({
     "plans the week's board pack": `const run = await desk.start(workflows.weeklyReport, { week: "2026-10-05" });
-expect(await t.runs.untilTerminal(run)).toEqual({
+await expect(t.runs.untilTerminal(run)).resolves.toStrictEqual({
   status: "completed",
   result: {
     week: "2026-10-05",
@@ -499,7 +500,7 @@ const recordToReport: AppSeed = {
     "Closing the books and producing the numbers leadership looks at.",
   owner: "eva",
   teams: [{ team: "Finance", role: "builder" }],
-  agents: `# Record-to-Report
+  instructions: `# Record-to-Report
 
 The numbers the board reads.
 
@@ -520,7 +521,7 @@ const riskToCompliance: AppSeed = {
     { team: "Compliance", role: "builder" },
     { team: "Client onboarding", role: "user" },
   ],
-  agents: `# Risk-to-Compliance
+  instructions: `# Risk-to-Compliance
 
 Know-your-customer checks for every new client.
 
@@ -539,7 +540,7 @@ const hireToRetire: AppSeed = {
   description: "Everything around employees, from hiring to leaving.",
   owner: "sanne",
   teams: [],
-  agents: `# Hire-to-Retire
+  instructions: `# Hire-to-Retire
 
 Everything around employees, from hiring to leaving. Nothing runs here yet.
 `,

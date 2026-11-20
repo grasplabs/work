@@ -6,6 +6,7 @@ import type {
   AgentWake,
 } from "@grasp-os/shared/agents";
 import type { ToolClassSetting } from "@grasp-os/shared/connect";
+import type { InstructionFileText } from "@grasp-os/shared/instruction-files";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
@@ -66,8 +67,8 @@ import {
   SettingsRows,
 } from "../grasp/setting-row/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
-import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { InstructionFileEditor } from "../settings/instruction-file.tsx";
 import { dollars } from "../settings/money.ts";
 import {
   AudienceControl,
@@ -78,6 +79,8 @@ import {
 import { classNames, StephenSettings } from "../settings/stephen-settings.tsx";
 import type { AskableWorkflow } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { AgentAppsPanel, workOutQuietly } from "./agent-apps-card.tsx";
+import type { AgentAppsShown } from "./agent-apps-card.tsx";
 import { AgentDocuments } from "./agent-documents.tsx";
 import {
   AgentFailure,
@@ -88,9 +91,12 @@ import {
 } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
 import type { Part, Typed } from "./agent-form.tsx";
+import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes, useLast } from "./agent-wakes.tsx";
+import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
-// One agent's page, for the company's admins, on Grasp UI: its Page
+// One agent's page, for the company's admins, or a person's own agent's,
+// for them alone, on Grasp UI: its Page
 // header holds the agent (picture, name, what it is for, whether it is
 // on) and the things done most: turning it off and on, Chat, and Edit,
 // which changes its name, job, picture and model in a dialog. Its parts
@@ -101,10 +107,16 @@ import { AgentWakes, useLast } from "./agent-wakes.tsx";
 // - Overview: its facts as a rail (whom it answers, what it may do, when
 //   it works on its own, its model, this month's use) and what it did
 //   lately (its scheduled runs, and when it was last asked); Delete.
-// - Instructions: what it is told, and the documents it answers from.
+// - Instructions: what it is told (its instruction file, as every
+//   instruction file is edited: settings/instruction-file.tsx), the apps
+//   it may use (agent-apps-card.tsx) and the documents it answers from.
 // - Access: whom it answers and what it may do, each kind of work a row.
 //   The first agent's is the company's own, Settings › Stephen's whole.
 // - Schedule: when it works on its own (agent-wakes.tsx).
+//
+// A person's own agent has no audience, class or schedule to set, so no
+// Access or Schedule; its Overview offers it to the company
+// (agent-share.tsx).
 //
 // Each layer only narrows the one above it: an agent has a class of
 // tools for at most the people the company has it for. Core keeps it all
@@ -129,13 +141,6 @@ export const agentTabOf = (value: unknown): AgentTab =>
   agentTabs.find((tab) => tab === value) ?? "overview";
 
 const styles = stylex.create({
-  // A card's foot: a quiet line at the start, its button at the end.
-  foot: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: grasp.space3,
-  },
   actions: {
     display: "flex",
     flexWrap: "wrap",
@@ -179,10 +184,15 @@ const useMonthName = () => {
 const useAccessWords = (
   first: boolean,
   settings: AgentSettings | undefined,
-  teams: StephenReach["teams"]
+  teams: StephenReach["teams"],
+  own: boolean
 ): { who: string; may: string } => {
   const { t } = useLingui();
   const audienceLine = useAudienceLine(teams);
+  if (own) {
+    // A person's own agent has no settings of either: core holds both.
+    return { who: t`Only you`, may: t`What Grasp may do for you` };
+  }
   if (first) {
     return { who: t`Everyone with Grasp`, may: t`Set for each app` };
   }
@@ -244,7 +254,8 @@ const Facts = ({
 }) => {
   const { t } = useLingui();
   const moment = useMoment();
-  const { who, may } = useAccessWords(first, settings, teams);
+  const own = agent.ownerId !== null;
+  const { who, may } = useAccessWords(first, settings, teams, own);
   const scheduled = wakesOn(wakes).length;
   const next = nextWakeAt(wakes);
   const nextMoment = next === undefined ? "" : moment(next);
@@ -254,8 +265,18 @@ const Facts = ({
         <FactRow label={t`What it is for`}>
           {agent.job === "" ? t`No job written yet` : agent.job}
         </FactRow>
-        <FactRow label={t`Answers`}>{who}</FactRow>
-        <FactRow label={t`May do`}>{may}</FactRow>
+        <FactRow
+          label={t`Answers`}
+          {...(own ? { info: t`In Grasp's chat` } : {})}
+        >
+          {who}
+        </FactRow>
+        <FactRow
+          label={t`May do`}
+          {...(own ? { info: t`As your company has set it, never more` } : {})}
+        >
+          {may}
+        </FactRow>
         <FactRow label={t`On its own`}>
           {scheduled === 0
             ? t`Only when asked`
@@ -451,6 +472,49 @@ const Access = ({
   );
 };
 
+/**
+ * What the agent is told: its instruction file, edited as every
+ * instruction file is (core's instruction-files.ts). Saving works out the
+ * apps it calls for, but for the first agent, which has none of its own.
+ */
+const AgentInstructions = ({
+  agentId,
+  first,
+  saved,
+  unsaved,
+}: {
+  agentId: string;
+  first: boolean;
+  /** Its file as it is now, null while never written; undefined where core didn't say. */
+  saved: InstructionFileText | null | undefined;
+  /** What was typed as it was made and couldn't be saved (unsaved-instructions.ts). */
+  unsaved: UnsavedInstructions | undefined;
+}) => {
+  const { t } = useLingui();
+  if (saved === undefined) {
+    return (
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`Not shown`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+  const workOut = async (session: Session): Promise<void> => {
+    await workOutQuietly(session, agentId);
+  };
+  return (
+    <InstructionFileEditor
+      description={t`What it should know and how it should work. Grasp's own rules always hold over these.`}
+      file={{ scope: "agent", agentId }}
+      label={t`Instructions`}
+      onSaved={first ? undefined : workOut}
+      saved={saved}
+      unsaved={unsaved}
+    />
+  );
+};
+
 /** Edit: the agent's name, job, picture and model, in a dialog. */
 const EditAgent = ({
   agent,
@@ -573,7 +637,10 @@ export const AgentPage = ({
   settings,
   teams,
   wakes,
+  instructions,
+  unsaved,
   documents,
+  apps,
   people,
   editable,
   usable,
@@ -588,6 +655,18 @@ export const AgentPage = ({
   settings: AgentSettings | undefined;
   teams: StephenReach["teams"];
   wakes: readonly AgentWake[];
+  /**
+   * Its instruction file as it is now, null while never written;
+   * undefined where core didn't say it.
+   */
+  instructions: InstructionFileText | null | undefined;
+  /** What was typed as it was made and couldn't be saved (unsaved-instructions.ts). */
+  unsaved?: UnsavedInstructions | undefined;
+  /**
+   * Its apps and the apps the company offers; undefined where core didn't
+   * say them, and for the first agent, which has none of its own.
+   */
+  apps?: AgentAppsShown | undefined;
   /** The documents it answers from; undefined where core didn't say. */
   documents: readonly AgentDocument[] | undefined;
   /** The company's people, whom a wake-up can work for. */
@@ -611,7 +690,6 @@ export const AgentPage = ({
   const { t } = useLingui();
   const router = useRouter();
   const navigate = useNavigate();
-  const instructionsId = useId();
   const { busy, failure, run } = useCoreAction();
   const change: Change = async (action) => {
     await run(async (session) => {
@@ -631,7 +709,6 @@ export const AgentPage = ({
   const typed: Typed = {
     name: agent.name,
     job: agent.job,
-    instructions: agent.instructions,
     face: agent.face,
     model: agent.model,
   };
@@ -666,6 +743,11 @@ export const AgentPage = ({
     }
     await navigate({ to: "/agents", replace: true });
   };
+  // A person's own agent: theirs alone, with no audience, class or
+  // schedule to set, so no Access or Schedule.
+  const own = agent.ownerId !== null;
+  const shownTab =
+    own && (tab === "access" || tab === "schedule") ? "overview" : tab;
   return (
     <Page>
       <PageHeader
@@ -700,6 +782,9 @@ export const AgentPage = ({
             ) : null}
           </div>
         }
+        {...(own
+          ? { description: t`Yours alone: nobody else sees or asks it` }
+          : {})}
         // The agent's name on every part: the side nav marks which part.
         title={name}
       />
@@ -707,8 +792,11 @@ export const AgentPage = ({
       {/* Every tab stays mounted, the others hidden: what is typed and
           not yet saved on one stays while another is looked at. */}
       <div
-        hidden={tab !== "overview"}
-        {...stylex.props(styles.stack, tab !== "overview" && styles.hidden)}
+        hidden={shownTab !== "overview"}
+        {...stylex.props(
+          styles.stack,
+          shownTab !== "overview" && styles.hidden
+        )}
       >
         <Facts
           agent={agent}
@@ -719,45 +807,39 @@ export const AgentPage = ({
           wakes={wakes}
         />
         <RecentActivity usage={usage} wakes={wakes} />
+        <ShareAgent agent={agent} can={can} change={change} />
         {first ? null : <DeleteAgent can={can} name={name} remove={remove} />}
       </div>
       <div
-        hidden={tab !== "instructions"}
-        {...stylex.props(styles.stack, tab !== "instructions" && styles.hidden)}
+        hidden={shownTab !== "instructions"}
+        {...stylex.props(
+          styles.stack,
+          shownTab !== "instructions" && styles.hidden
+        )}
       >
         {/* No title: the side nav says "Instructions" already. */}
         <SectionCard
           variant="grouped"
           aria-label={t`Instructions`}
           density="compact"
-          footer={
-            <div {...stylex.props(styles.foot)}>
-              <Text size="sm" tone="muted">
-                {t`Grasp's own rules always hold over these.`}
-              </Text>
-              <Button
-                disabled={!can}
-                form={instructionsId}
-                size="sm"
-                type="submit"
-                variant="ink"
-              >
-                {t`Save`}
-              </Button>
-            </div>
-          }
         >
-          <AgentForm
-            can={can}
-            id={instructionsId}
-            initial={typed}
-            key={`${agent.id}:${agent.instructions}`}
-            onSave={async (said) => {
-              await save(said);
-            }}
-            parts={["instructions"]}
+          <AgentInstructions
+            agentId={agent.id}
+            first={first}
+            saved={instructions}
+            unsaved={unsaved}
           />
         </SectionCard>
+        <AgentAppsPanel
+          agent={agent}
+          apps={apps}
+          can={can}
+          change={change}
+          editable={editable}
+          first={first}
+          people={people}
+          wakes={wakes}
+        />
         <AgentDocuments
           agent={agent}
           can={can}
@@ -767,8 +849,8 @@ export const AgentPage = ({
         />
       </div>
       <div
-        hidden={tab !== "access"}
-        {...stylex.props(styles.stack, tab !== "access" && styles.hidden)}
+        hidden={shownTab !== "access"}
+        {...stylex.props(styles.stack, shownTab !== "access" && styles.hidden)}
       >
         {firstAccess === undefined ? (
           <Access
@@ -792,8 +874,11 @@ export const AgentPage = ({
         )}
       </div>
       <div
-        hidden={tab !== "schedule"}
-        {...stylex.props(styles.stack, tab !== "schedule" && styles.hidden)}
+        hidden={shownTab !== "schedule"}
+        {...stylex.props(
+          styles.stack,
+          shownTab !== "schedule" && styles.hidden
+        )}
       >
         <AgentWakes
           agent={agent}

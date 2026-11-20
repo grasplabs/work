@@ -10,9 +10,11 @@ import { z } from "zod";
 import {
   actOnBrain,
   brainActionInputSchema,
+  brainErasureInputSchema,
+  lookUpBrainErasure,
   readBrainReport,
 } from "./brain.ts";
-import type { BrainActionResult } from "./brain.ts";
+import type { BrainActionResult, BrainErasureResult } from "./brain.ts";
 
 export const fetchBrainReport = createServerFn({ method: "GET" })
   .validator(z.object({ clientId: z.string().min(1).max(63) }))
@@ -26,4 +28,11 @@ export const brainActionFn = createServerFn({ method: "POST" })
   .handler(
     async ({ data, context }): Promise<BrainActionResult> =>
       await actOnBrain(env, context.staff, data)
+  );
+
+export const brainErasureFn = createServerFn({ method: "POST" })
+  .validator(brainErasureInputSchema)
+  .handler(
+    async ({ data, context }): Promise<BrainErasureResult> =>
+      await lookUpBrainErasure(env, context.staff, data)
   );

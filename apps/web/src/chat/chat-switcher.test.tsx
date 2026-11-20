@@ -35,8 +35,6 @@ const chat = (id: string, title: string): ChatSummary => ({
   createdAt: today,
   lastAt: today,
   running: false,
-  appId: null,
-  via: "web",
   make: null,
   archived: false,
 });
@@ -222,19 +220,6 @@ describe("the chats window", () => {
       )?.textContent
     ).toBe("lease");
   }, 20_000);
-
-  it("says which chat app a chat came through, and nothing for one started in Grasp", async () => {
-    await shown(
-      async () => await Promise.resolve([]),
-      [board, { ...lease, via: "slack" }, { ...travel, via: "teams" }]
-    );
-    await openWindow({ key: "k", metaKey: true });
-    expect(chatRows()).toStrictEqual([
-      "Board report",
-      "Lease of the officevia Slack",
-      "Trip to Lyonvia Microsoft Teams",
-    ]);
-  });
 
   it("shows a chat found as core lists it now, renamed since", async () => {
     const renamed = { ...lease, title: "Office lease 2027" };

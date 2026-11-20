@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { newTeam } from "./admin-teams.ts";
 import { allEvents } from "./audit-events.ts";
 import { confirmedAnswer } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
@@ -13,7 +14,6 @@ import {
   startedBy,
 } from "./json-workflow-apps.ts";
 import type { Person } from "./json-workflow-apps.ts";
-import { newTeam } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { aroundEngine, resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -151,7 +151,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       `person:${decider.userId}`
     );
     const unshared = await decider.api.decisions.get(decision);
-    await people.builder.api.workflowResources.share(workflow.id, {
+    await people.builder.api.workflowResources.members.add(workflow.id, {
       type: "person",
       id: decider.userId,
       role: "user",

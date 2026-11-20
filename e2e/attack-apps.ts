@@ -36,7 +36,7 @@ import { useQuery } from "@grasp-os/sdk/react";
 import { useEffect } from "react";
 import { api } from "@server/_generated/api";
 
-function Leaving() {
+const Leaving = () => {
   const secret = useQuery(api.attacks.secret, {});
   useEffect(() => {
     if (secret !== undefined) {
@@ -44,7 +44,7 @@ function Leaving() {
     }
   }, [secret]);
   return <main><h1>Leaving</h1></main>;
-}
+};
 export const Route = createFileRoute("/")({ component: Leaving });
 `;
 
@@ -56,12 +56,12 @@ export const Route = createFileRoute("/")({ component: Leaving });
 const wanderingPage = `import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-function Wandering() {
+const Wandering = () => {
   useEffect(() => {
     location.href = "/page-frame?load=a-load-of-its-own";
   }, []);
   return <main><h1>Wandering</h1></main>;
-}
+};
 export const Route = createFileRoute("/")({ component: Wandering });
 `;
 
@@ -74,13 +74,13 @@ export const Route = createFileRoute("/")({ component: Wandering });
 const oversizedPage = `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-function Oversized() {
+const Oversized = () => {
   const navigate = useNavigate();
   useEffect(() => {
     void navigate({ to: "/oversized", hash: "x".repeat(300_000) });
   }, [navigate]);
   return <main><h1>Oversized</h1></main>;
-}
+};
 export const Route = createFileRoute("/")({ component: Oversized });
 `;
 
@@ -108,9 +108,9 @@ for (const message of forged) {
 }
 document.body.dataset.forged = String(forged.length);
 
-function Stuck() {
+const Stuck = () => {
   return <main><h1>Stuck</h1></main>;
-}
+};
 export const Route = createFileRoute("/")({
   loader: async () => await new Promise<never>(() => undefined),
   component: Stuck,
@@ -375,7 +375,7 @@ const routes = (): Record<string, string> => {
   return results;
 };
 
-function Turn() {
+const Turn = () => {
   const [outcome, setOutcome] = useState("");
   useEffect(() => {
     setOutcome(JSON.stringify(routes()));
@@ -386,7 +386,7 @@ function Turn() {
       <output aria-label="Nested documents">{outcome}</output>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Turn });
 `;
 
@@ -451,7 +451,7 @@ const inject = async (html: string): Promise<Record<string, string>> => {
   };
 };
 
-function Injecting() {
+const Injecting = () => {
   const html = useQuery(api.attacks.html, {});
   const [tried, setTried] = useState("");
   useEffect(() => {
@@ -467,7 +467,7 @@ function Injecting() {
       <output aria-label="Injected">{tried}</output>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Injecting });
 `;
 
@@ -491,7 +491,7 @@ const shadowField = (host: HTMLElement, mode: "open" | "closed"): HTMLElement =>
   return field;
 };
 
-function Pasting() {
+const Pasting = () => {
   const open = useRef<HTMLDivElement>(null);
   const closed = useRef<HTMLDivElement>(null);
   const [closedText, setClosedText] = useState("");
@@ -546,7 +546,7 @@ function Pasting() {
       <output aria-label="Tags">{tags}</output>
     </main>
   );
-}
+};
 export const Route = createFileRoute("/")({ component: Pasting });
 `;
 

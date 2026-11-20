@@ -1,5 +1,4 @@
 import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
-import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
   InterviewProgress,
@@ -13,15 +12,17 @@ import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands, adminSnapshot } from "./admin-command.ts";
-import { answering, approveAgreed, holdAlarm } from "./interview-link.ts";
-import type { ProviderReply } from "./model-provider.ts";
 import {
-  auditedDuring,
-  outcome,
-  routed,
-  unique,
-  withSignIn,
-} from "./sign-in.ts";
+  aloneInTheStore,
+  answering,
+  approveAgreed,
+  onLink,
+  openLinkAs,
+  participate,
+  signedInAs,
+} from "./interview-link.ts";
+import type { ProviderReply } from "./model-provider.ts";
+import { auditedDuring, outcome, unique, withSignIn } from "./sign-in.ts";
 
 // Every piece of work for Grasp's staff (GRA-377), as Grasp's admin reads
 // it in the snapshot and steers it with commands: as drawn from what its
@@ -37,7 +38,6 @@ import {
 // - Drawing again a piece of work nobody agreed to anything about.
 
 const dayMs = 24 * 60 * 60 * 1000;
-const sessionKey = z.object({ key: z.string().optional() });
 
 const fact = (id: string, record: string): InterviewFact => ({
   id,
@@ -45,6 +45,7 @@ const fact = (id: string, record: string): InterviewFact => ({
   text: record,
   record,
   agreed: true,
+  share: "team",
 });
 
 /** Opens `person`'s link and saves their interview as agreed to, with `facts`. */
@@ -54,12 +55,10 @@ const agreeAs = async (
 ): Promise<void> => {
   const link = await onboardingStore(env).linkOf(person);
   const secret = link?.split("#")[1] ?? "";
-  const session = await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "session", secret }),
-  });
-  const { key = "" } = sessionKey.parse(await session.json());
+  const { link: device } = await openLinkAs(
+    secret,
+    await signedInAs(`${person}@acme.test`)
+  );
   const progress: InterviewProgress = {
     person: "completed",
     told: true,
@@ -73,12 +72,10 @@ const agreeAs = async (
     adding: false,
     addedAt: 0,
   };
-  await routed(interviewApiPath, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "save", secret, key, version: 0, progress }),
-  });
-  await approveAgreed({ secret, key }, facts);
+  // They take part before anything they say is kept, as their page has them.
+  await participate(device);
+  await onLink({ action: "save", ...device, version: 0, progress });
+  await approveAgreed(device, facts);
 };
 
 const reply = (value: object): ProviderReply => ({
@@ -106,7 +103,7 @@ const drawn = async () => {
     id: ids[key],
     name,
     team: ids.team,
-    email: "",
+    email: `${ids[key]}@acme.test`,
     title: "",
     away: false,
   });
@@ -190,7 +187,7 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
   // Every test draws its team's work itself (`drawn`), with the provider's
   // replies faked around each `drawNext`; the alarm each agreement sets
   // would draw outside them (`holdAlarm`).
-  beforeEach(holdAlarm);
+  beforeEach(aloneInTheStore);
 
   it("shows staff each piece of work with each person's numbers apart and its open questions, and every read is on record", async () => {
     const { ids, booking, filing } = await drawn();

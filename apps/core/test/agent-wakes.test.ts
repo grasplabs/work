@@ -254,7 +254,6 @@ describe("an agent's wake-ups", setUpTime, () => {
       name: "Claire",
       face: "claire",
       job: "Chases unpaid invoices.",
-      instructions: "",
       modelRole: null,
     });
     const made = await wakes.makeAgentWake(claire.id, said(person.userId));
@@ -276,7 +275,7 @@ describe("an agent's wake-ups", setUpTime, () => {
     const { person, wakes } = await setUp();
     await fakeProvider(
       codeStep(
-        "export default async (self, env) => { try { await env.memory.saveUser({ text: 'Prefers short answers.', ifVersion: 0 }); return 'saved'; } catch (error) { return error.message; } };"
+        'export default async (self, env) => { try { await env.workflows.offer("workflow-1", {}); return "offered"; } catch (error) { return error.message; } };'
       ),
       says("I couldn't keep that.")
     );

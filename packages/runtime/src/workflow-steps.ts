@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+import type {
+  BrainCard,
+  BrainEntitiesFind,
+  BrainEntity,
+  BrainMembersOf,
+  BrainPack,
+  BrainRecall,
+  BrainSkill,
+  BrainSkillText,
+} from "./brain-recall.ts";
+
 // What a workflow's `ctx` calls take and answer: their options and
 // results, as generated code and its types see them.
 
@@ -109,36 +120,51 @@ export interface FilesActions {
   ) => Promise<null>;
 }
 
-/** A document a Brain search found: its ID, its title, a snippet. */
-export interface BrainHit {
-  readonly id: string;
-  readonly title: string;
-  readonly excerpt: string;
-}
-
 /**
- * What each action on a Brain collection takes and answers: what the run's
- * person may read of it, as the Brain answers it. A recall answers the
- * Brain's memory pack: its `items` the evidence that applies, each with
- * what it cites.
+ * What a brain permission's steps do, by action, with the same requests
+ * and answers as an App's action (`brain-recall.ts`): recall what everyone
+ * in the company may read, whoever the run acts for; select and read its
+ * skills (`skills.select`, `skills.read`); and read entities
+ * (`entities.get`, `entities.find`). A dotted action is a member of its group:
+ * `ctx.brain.<alias>.entities.get`.
  */
 export interface BrainActions {
-  readonly search: (
-    args: { readonly text: string; readonly limit?: number },
-    options: CallOptions
-  ) => Promise<readonly BrainHit[]>;
-  readonly read: (
-    args: { readonly id: string },
-    options: CallOptions
-  ) => Promise<{ readonly title: string; readonly text: string }>;
   readonly recall: (
-    args: { readonly query: string; readonly [field: string]: unknown },
+    request: BrainRecall,
+    options: CallOptions
+  ) => Promise<BrainPack>;
+  readonly "skills.select": (
+    request: { readonly task: string },
+    options: CallOptions
+  ) => Promise<{ readonly skills: readonly BrainSkill[] }>;
+  readonly "skills.read": (
+    request: {
+      readonly skill: Pick<BrainSkill, "scope" | "name" | "version">;
+    },
+    options: CallOptions
+  ) => Promise<BrainSkillText>;
+  readonly "entities.get": (
+    request: {
+      readonly entity: string;
+      readonly asOf?: string;
+      readonly after?: string;
+    },
+    options: CallOptions
+  ) => Promise<BrainCard | null>;
+  readonly "entities.find": (
+    request: BrainEntitiesFind,
     options: CallOptions
   ) => Promise<{
-    readonly items: readonly Readonly<Record<string, Read>>[];
-    readonly [field: string]: Read;
+    readonly entities: readonly BrainEntity[];
+    readonly next: string | null;
   }>;
 }
+
+/** `ctx.brain.<alias>` for the brain actions `Listed` (`BrainMembersOf`). */
+export type BrainMembers<Listed extends keyof BrainActions> = BrainMembersOf<
+  BrainActions,
+  Listed
+>;
 
 /**
  * How a decision ended: answered, by whom (their user ID) and with what

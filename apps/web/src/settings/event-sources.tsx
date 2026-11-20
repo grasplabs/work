@@ -79,6 +79,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { RefusedBadge, SourceActivity } from "./event-source-activity.tsx";
 import { SectionNotLoaded, SettingsStack } from "./section.tsx";
 
 // Settings › Incoming events, for the organization's own admins: the event
@@ -88,9 +89,10 @@ import { SectionNotLoaded, SettingsStack } from "./section.tsx";
 // workflows start on it, its URL to copy and a menu to rotate, revoke or
 // delete its secret, each asking first. A source opens beside the list with
 // what it takes to set the sender up, the workflows it starts and the runs
-// it started. A new source is made in two steps of one dialog: its name,
-// then what to give the sender, the secret shown that once. Core keeps no
-// record of deliveries, so nothing here speaks of them.
+// it started, and what it received lately (event-source-activity.tsx): a
+// row says only how many it refused in the last day. A new source is made
+// in two steps of one dialog: its name, then what to give the sender, the
+// secret shown that once.
 
 /**
  * The mark of a source named after a brand Grasp has one for ("Stripe"),
@@ -423,6 +425,7 @@ const SourceRow = ({
           {changes.revoked ? (
             <Badge size="sm" tone="attention">{t`Secret revoked`}</Badge>
           ) : null}
+          <RefusedBadge source={source} />
         </ItemTitle>
         {line === undefined ? null : <ItemDescription>{line}</ItemDescription>}
         {changes.failure === undefined ? null : (
@@ -695,7 +698,21 @@ const SourceInspector = ({
         framed={framed}
         icon={Link}
         onClose={onClose}
-        sections={[setup, workflows, recent]}
+        sections={[
+          setup,
+          // What it received, while core keeps a record of it.
+          ...(source.activity === null
+            ? []
+            : [
+                {
+                  id: "events",
+                  label: t`Events`,
+                  content: <SourceActivity source={source} />,
+                },
+              ]),
+          workflows,
+          recent,
+        ]}
         title={name}
         words={{ close: t`Close` }}
       />

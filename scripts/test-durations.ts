@@ -1,20 +1,24 @@
 // Records how long each test file takes, for the split between CI's
 // shards (scripts/test-shards.ts), from the shards' test-progress
-// artifacts (scripts/stall-reporter.ts writes them):
+// artifacts (scripts/stall-reporter.ts writes them), of the merge
+// queue's last passing runs, which run every shard:
 //
-//   gh run download <run> -n test-progress-1-of-6 -D runs/<run>-1
-//   ...
-//   vp run test:durations runs/*/test-progress.log
+//   gh run list --workflow ci.yml --event merge_group --status success \
+//     --limit 5 --json databaseId -q '.[].databaseId' |
+//     xargs -I{} gh run download {} -p 'test-progress-*' -D runs/{}
+//   vp run test:durations runs/*/*/test-progress.log
 //
 // Several runs make it steadier: each file takes the median of the runs
-// it ran in. Files the logs don't name keep the time they had. Rewrites
+// it passed in. A run where a file failed a test gives it no time: a test
+// cut at its timeout, and again on its retry, is two timeouts, not the
+// file's time. Files the logs don't name keep the time they had. Rewrites
 // scripts/test-durations.json.
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
-import { byKey } from "./test-shards.ts";
+import { aloneSeconds, byKey } from "./test-shards.ts";
 
 /**
  * A project's name in a progress log: Vitest names a browser project's
@@ -25,7 +29,7 @@ const projectPattern = String.raw`(?<project>\S+(?: \([^)\s]+\))?)`;
 
 /** A finished test in a progress log: when, how it ended, how long it took, and its file and name. */
 const progressLine = new RegExp(
-  String.raw`^(?<at>\S+) \S+(?: (?<ms>\d+)ms)? ${projectPattern} (?<file>\S+) > `,
+  String.raw`^(?<at>\S+) (?<state>\S+)(?: (?<ms>\d+)ms)? ${projectPattern} (?<file>\S+) > `,
   "u"
 );
 
@@ -43,10 +47,13 @@ const fileLine = new RegExp(
  * own time when it has one, whichever is most. Only the file's own time
  * counts its `beforeAll` and `afterAll`: the compiler's build tests spend
  * half their time there, which the rest put at about half what they took.
+ * A file that failed a test in the log is left out: what it took there is
+ * no measure of what it takes.
  */
 export const fileSecondsIn = (log: string): Map<string, number> => {
   const files = new Map<string, { sum: number; from: number; to: number }>();
   const fileMs = new Map<string, number>();
+  const failed = new Set<string>();
   for (const line of log.split("\n")) {
     const own = fileLine.exec(line)?.groups;
     if (own !== undefined) {
@@ -58,8 +65,11 @@ export const fileSecondsIn = (log: string): Map<string, number> => {
     if (match?.groups === undefined) {
       continue;
     }
-    const { at, ms, project, file } = match.groups;
+    const { at, state, ms, project, file } = match.groups;
     const key = `${project} ${file}`;
+    if (state === "failed") {
+      failed.add(key);
+    }
     const took = Number(ms ?? 0);
     const finished = Date.parse(at ?? "");
     const seen = files.get(key) ?? {
@@ -74,7 +84,9 @@ export const fileSecondsIn = (log: string): Map<string, number> => {
     }
     files.set(key, seen);
   }
-  const keys = new Set([...files.keys(), ...fileMs.keys()]);
+  const keys = new Set(
+    [...files.keys(), ...fileMs.keys()].filter((key) => !failed.has(key))
+  );
   return new Map(
     [...keys].map((key) => {
       const { sum = 0, from = 0, to = 0 } = files.get(key) ?? {};
@@ -105,6 +117,11 @@ const median = (values: readonly number[]): number => {
 /**
  * `known` updated from `logs`: each file the logs name takes the median of
  * its times in them, rounded to a tenth of a second; the rest keep theirs.
+ * A file the split runs on a shard of its own (`aloneSeconds`) keeps its
+ * time from a log of it alone: alone it runs faster than beside others,
+ * and that time would put it back beside them, where it slows again. The
+ * new Brain's leak test by meaning took 95 s alone and 261 s once the next
+ * split put it beside 76 other files (November 2026).
  */
 export const updatedDurations = (
   known: Readonly<Record<string, number>>,
@@ -112,7 +129,12 @@ export const updatedDurations = (
 ): Record<string, number> => {
   const runs = new Map<string, number[]>();
   for (const log of logs) {
-    for (const [key, seconds] of fileSecondsIn(log)) {
+    const files = fileSecondsIn(log);
+    const [only] = files.keys();
+    if (files.size === 1 && (known[only ?? ""] ?? 0) >= aloneSeconds) {
+      continue;
+    }
+    for (const [key, seconds] of files) {
       runs.set(key, [...(runs.get(key) ?? []), seconds]);
     }
   }

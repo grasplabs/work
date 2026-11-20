@@ -18,6 +18,10 @@ import type {
   ConnectionSummary,
   OrganizationConnection,
 } from "@grasp-os/shared/connect";
+import {
+  directoryErrors,
+  directoryProviderSchema,
+} from "@grasp-os/shared/directory";
 import { randomToken, sha256Hex, toBase64Url } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -25,7 +29,7 @@ import {
   relayedClientOf,
 } from "@grasp-os/shared/oauth-relay";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, desc, eq, isNull, like, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, like, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -48,6 +52,7 @@ import {
 import {
   allowedToolNames,
   offeredToolNames,
+  pastAddressesAfter,
   readToolNames,
   toolResourcesOf,
 } from "./connections.ts";
@@ -58,6 +63,7 @@ import {
   oauthFlows,
   pendingActions,
 } from "./db/schema.ts";
+import { readDirectory } from "./directory.ts";
 import { erasureBegan, ownerErased } from "./erased-people.ts";
 import { httpSummaries } from "./http-connections.ts";
 import { exchangeCode } from "./oauth-client.ts";
@@ -65,7 +71,7 @@ import type { TokenSet } from "./oauth-client.ts";
 import { oweRevoke } from "./owed-revokes.ts";
 import { dropPendingActions } from "./pending.ts";
 import { rightsFor } from "./provider-rights.ts";
-import { grantedAsAsked, providerFor } from "./providers.ts";
+import { grantedAsAsked, providerFor, renewedAsGranted } from "./providers.ts";
 import type {
   ApiKeyProviderConfig,
   OAuthClientCredentials,
@@ -74,7 +80,12 @@ import type {
   ProviderConfig,
 } from "./providers.ts";
 import { revokeAtProvider } from "./revocations.ts";
-import { apiKeyExpiresAt, discardMint, firstTokens } from "./tokens.ts";
+import {
+  apiKeyExpiresAt,
+  discardMint,
+  firstTokens,
+  grantedScopesOf,
+} from "./tokens.ts";
 import { resealBatchSize, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
 
@@ -160,6 +171,28 @@ const reconnects = (
   held.status === "needs_reauth" &&
   held.scope === flow.scope &&
   (held.scope === "shared" || held.ownerUserId === person.userId);
+
+/**
+ * Whether finishing `flow` renews `held` in place: the organization's
+ * directory connection, still active, of the account the flow came back
+ * with (GRA-2171), which the provider vouched for in the flow's own
+ * tenant before this (`keepTokens`, `connection.wrong_account`). Connecting the directory
+ * again with the account it has is how an admin mends a read, and how a
+ * connection made before a scope was asked for (`Group.ReadBasic.All`)
+ * gains it; it keeps its ID, so nothing that names it changes. Any other
+ * connection of an account already held stays refused. The caller checked
+ * the role (an admin's, for a shared one) and the grant.
+ */
+const renewsInPlace = (
+  held: ConnectionRow,
+  flow: Pick<Target, "scope">,
+  provider: ProviderConfig
+): boolean =>
+  held.status === "active" &&
+  held.scope === "shared" &&
+  flow.scope === "shared" &&
+  provider.kind === "oauth" &&
+  directoryProviderSchema.safeParse(provider.id).success;
 
 /** Only admins connect or disconnect what the organization shares. */
 const mayManage = (person: ConnectionPerson, scope: ConnectionScope): boolean =>
@@ -412,6 +445,20 @@ const isDuplicate = (error: unknown): boolean =>
 /** What a connection keeps of its sign-in: tokens or a key, sealed. */
 type Kept = Parameters<typeof firstTokens>[2];
 
+/**
+ * The address a connection counts as confirmed when it is connected: the
+ * account's, as its provider's checked ID token gave it, for a provider
+ * that confirms addresses at each renewal (`confirmAddress`); none for any
+ * other.
+ */
+const confirmedAddressOf = (
+  provider: ProviderConfig,
+  account: ProviderAccount
+): string | null =>
+  provider.kind === "oauth" && provider.confirmAddress !== undefined
+    ? (account.email?.toLowerCase() ?? null)
+    : null;
+
 /** What a connection is connected for: its scope, and its tenant if pinned. */
 type Target = Pick<FlowRow, "scope" | "tenant">;
 
@@ -455,6 +502,9 @@ const storeConnection = async (
       accountId: account.id,
       accountName: account.name,
       accountEmail: account.email?.toLowerCase() ?? null,
+      verifiedEmail: confirmedAddressOf(provider, account),
+      verifiedEmailAt:
+        confirmedAddressOf(provider, account) === null ? null : new Date(),
       accountAddresses: addresses?.receives ?? null,
       accountSenders: addresses?.sends ?? null,
       connectedBy: person.userId,
@@ -478,6 +528,30 @@ const storeConnection = async (
   );
   return connectionId;
 };
+
+/** What a connection signed in to again takes of the sign-in. */
+const signedInAgain = (
+  provider: ProviderConfig,
+  flow: Target,
+  account: ProviderAccount,
+  addresses: AccountAddresses | undefined,
+  now: Date
+) => ({
+  tenant: tenantOf(flow),
+  accountName: account.name,
+  accountEmail: account.email?.toLowerCase() ?? null,
+  pastVerifiedEmails: pastAddressesAfter(confirmedAddressOf(provider, account)),
+  verifiedEmail: confirmedAddressOf(provider, account),
+  verifiedEmailAt: confirmedAddressOf(provider, account) === null ? null : now,
+  // A lookup that failed keeps what was read before.
+  ...(addresses === undefined
+    ? {}
+    : {
+        accountAddresses: addresses.receives,
+        accountSenders: addresses.sends,
+      }),
+  updatedAt: now,
+});
 
 /**
  * Gives `held`, whose grant ran out, the tokens of a new one and makes it
@@ -535,22 +609,68 @@ const reconnect = async (
         .update(connections)
         .set({
           status: "active",
-          tenant: tenantOf(flow),
-          accountName: account.name,
-          accountEmail: account.email?.toLowerCase() ?? null,
-          // A lookup that failed keeps what was read before.
-          ...(addresses === undefined
-            ? {}
-            : {
-                accountAddresses: addresses.receives,
-                accountSenders: addresses.sends,
-              }),
-          updatedAt: now,
+          ...signedInAgain(provider, flow, account, addresses, now),
         })
         .where(stillWaiting),
     ]
   );
   return reconnected ? held.id : undefined;
+};
+
+/**
+ * Gives `held`, an active connection `renewsInPlace` names, the tokens of
+ * the sign-in just made, in one write with its event, only while it is
+ * still active. The tokens' generation starts at the time, past any the
+ * old ones reached, so a refresh of the old ones still under way can't
+ * write over them (`firstTokens`). Its ID if this call did, `undefined`
+ * if it was disconnected or marked for reconnecting meanwhile.
+ */
+const renewInPlace = async (
+  env: Env,
+  { provider, vault }: Keeping,
+  flow: Target,
+  person: ConnectionPerson,
+  held: ConnectionRow | undefined,
+  account: ProviderAccount,
+  tokens: Kept,
+  addresses: AccountAddresses | undefined
+): Promise<string | undefined> => {
+  if (held === undefined || !renewsInPlace(held, flow, provider)) {
+    return undefined;
+  }
+  const now = new Date();
+  const db = drizzle(env.DB);
+  const row = await firstTokens(vault, held.id, tokens, now);
+  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)}`;
+  const renewed = await recordEventIf(
+    env,
+    connectionEvent(person, "connection.reconnected", held.id, {
+      provider: provider.id,
+      scope: held.scope,
+      outcome: "ok",
+    }),
+    { from: connections, where: stillActive },
+    [
+      db
+        .update(connectionTokens)
+        .set({
+          sealed: row.sealed,
+          accessExpiresAt: row.accessExpiresAt,
+          generation: row.generation,
+          refreshUntil: null,
+          grantedScopes: row.grantedScopes,
+          updatedAt: now,
+        })
+        .where(
+          sql`${connectionTokens.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
+        ),
+      db
+        .update(connections)
+        .set(signedInAgain(provider, flow, account, addresses, now))
+        .where(stillActive),
+    ]
+  );
+  return renewed ? held.id : undefined;
 };
 
 /**
@@ -569,6 +689,34 @@ type RefusalReason =
   | "connection.already_connected"
   | "connection.provider_refused"
   | "connection.flow_invalid";
+
+/**
+ * Why a flow that came back with an account `held` holds is refused; none
+ * when it may have it: reconnected after its grant ran out (`reconnects`),
+ * or renewed in place (`renewsInPlace`) with a grant that holds all it
+ * held before. A narrower one is refused, and the working connection
+ * keeps its tokens (`drop` revokes nothing an active one holds).
+ */
+const heldRefusal = async (
+  env: Env,
+  provider: ProviderConfig,
+  flow: Target,
+  person: ConnectionPerson,
+  held: ConnectionRow | undefined,
+  kept: Kept
+): Promise<RefusalReason | undefined> => {
+  if (held === undefined || reconnects(held, flow, person)) {
+    return undefined;
+  }
+  if (!renewsInPlace(held, flow, provider)) {
+    return "connection.already_connected";
+  }
+  const asHeld =
+    provider.kind === "oauth" &&
+    "accessToken" in kept &&
+    renewedAsGranted(provider, kept, await grantedScopesOf(env, held.id));
+  return asHeld ? undefined : "connection.scopes_refused";
+};
 
 /**
  * Keeps what a sign-in got (tokens, or a key) for `account`, once it is
@@ -602,8 +750,9 @@ const keepAccount = async (
   ) {
     return await refusal("connection.not_own_account");
   }
-  if (held !== undefined && !reconnects(held, flow, person)) {
-    return await refusal("connection.already_connected");
+  const refused = await heldRefusal(env, provider, flow, person, held, kept);
+  if (refused !== undefined) {
+    return await refusal(refused);
   }
   // A suite's account's own addresses, read with the token just issued:
   // core counts mail to and from them as the account's
@@ -619,6 +768,16 @@ const keepAccount = async (
     // reconnected by another flow, it is a duplicate.
     return (
       (await reconnect(
+        env,
+        setUp,
+        flow,
+        person,
+        held,
+        account,
+        kept,
+        addresses
+      )) ??
+      (await renewInPlace(
         env,
         setUp,
         flow,
@@ -727,6 +886,245 @@ const keepTokens = async (
   );
 };
 
+/**
+ * Stops `connection`: revokes the grant where the provider can, then
+ * marks it disconnected and deletes the tokens, in one write with its
+ * event, then drops the actions held for it, which can no longer run. A
+ * revoke the provider wouldn't take is owed: a sealed copy of the tokens
+ * stays with it, for the cron trigger to revoke with (src/revocations.ts).
+ * Returns whether the provider revoked the grant, and whether this call
+ * stopped it (a concurrent one may have first).
+ *
+ * One read while it needed connecting again had no grant to revoke, so it
+ * is stopped only while it still needs that: if it was reconnected
+ * meanwhile, it is read again and stopped as the active connection it is
+ * now, with the new grant revoked, not only deleted.
+ */
+const stop = async (
+  env: Env,
+  person: ConnectionPerson | null,
+  connection: ConnectionRow,
+  detail: Record<string, AuditDetailValue> = {}
+): Promise<{ revoked: boolean; stopped: boolean }> => {
+  const db = drizzle(env.DB);
+  // A Composio connection is stopped first, with its cleanup recorded in
+  // the same transaction, and deleted at Composio only after: calls stop
+  // whatever becomes of that deletion, and the clock retries it
+  // (src/composio-connections.ts). An OAuth grant is revoked first, as ever.
+  const composio = connection.serverKind === "composio";
+  // An HTTP connection's credential is the API's own: nothing to revoke
+  // at a provider, it is only deleted, below.
+  const http = connection.serverKind === "http";
+  const cleanupId = crypto.randomUUID();
+  const revokeOutcome =
+    composio || http ? "nothing" : await revokeAtProvider(env, connection);
+  const revokedGrant = revokeOutcome === "revoked";
+  const owed = revokeOutcome === "failed";
+  // Recorded only by the disconnect that stops it, if two run at once.
+  const waiting = connection.status === "needs_reauth";
+  const stillConnected = waiting
+    ? sql`${connections.id} = ${connection.id} AND ${connections.status} = 'needs_reauth'`
+    : sql`${connections.id} = ${connection.id} AND ${connections.status} <> 'disconnected'`;
+  const stopped = await recordEventIf(
+    env,
+    connectionEvent(person, "connection.disconnect", connection.id, {
+      ...detail,
+      provider: connection.provider,
+      scope: connection.scope,
+      outcome: "ok",
+      ...(composio
+        ? { tokenHolder: "composio" }
+        : { revoked: revokedGrant, ...(owed ? { revokePending: true } : {}) }),
+    }),
+    { from: connections, where: stillConnected },
+    [
+      ...(composio ? [disconnectCleanup(db, cleanupId, stillConnected)] : []),
+      db
+        .update(connections)
+        .set({
+          status: "disconnected",
+          // The groups its account is in: nothing counts a disconnected
+          // connection's, so none are kept (reader-groups.ts).
+          readerGroups: null,
+          readerGroupsAt: null,
+          readerGroupsTriedAt: null,
+          readerGroupsReading: null,
+          updatedAt: new Date(),
+        })
+        .where(stillConnected),
+      // After the status, by the call that stopped it: the revoke it owes,
+      // with a copy of the tokens to revoke with, before they go.
+      ...(owed
+        ? [
+            oweRevoke(
+              db,
+              connection.id,
+              "disconnected",
+              sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+            ),
+          ]
+        : []),
+      // After the status: only a stopped connection's credential goes.
+      ...(http
+        ? [
+            db
+              .update(httpConnections)
+              .set({ sealed: null })
+              .where(
+                sql`${httpConnections.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+              ),
+          ]
+        : []),
+      // After the status: only a stopped connection's tokens go.
+      db
+        .delete(connectionTokens)
+        .where(
+          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+        ),
+    ]
+  );
+  const reconnected =
+    waiting && !stopped
+      ? await db
+          .select()
+          .from(connections)
+          .where(
+            and(
+              eq(connections.id, connection.id),
+              eq(connections.status, "active")
+            )
+          )
+          .get()
+      : undefined;
+  if (reconnected !== undefined) {
+    return await stop(env, person, reconnected, detail);
+  }
+  await dropPendingActions(
+    env,
+    eq(pendingActions.connectionId, connection.id),
+    "connection.disconnected",
+    person
+  );
+  const revoked =
+    composio && stopped
+      ? await revokeAtComposio(env, cleanupId, connection)
+      : revokedGrant;
+  return { revoked, stopped };
+};
+
+/** Why a new directory connection's first read failed: `undefined` when it read. */
+type ProbeFailure =
+  | "connection.directory_unreadable"
+  | "connection.directory_unchecked";
+
+/**
+ * Reads the first page of people through `connectionId`, as the daily read
+ * does: whether its account can read the directory. A refusal (Google's
+ * answer to an account that isn't its admin, `directory.not_admin`;
+ * Entra's 401 or 403, `directory.inactive`, on tokens just issued) is
+ * `connection.directory_unreadable`; anything else that failed (throttled,
+ * a server error, no answer) is `connection.directory_unchecked`.
+ */
+const probeFailure = async (
+  env: Env,
+  connectionId: string
+): Promise<ProbeFailure | undefined> => {
+  try {
+    await readDirectory(env, { connectionId, cursor: null });
+    return undefined;
+  } catch (error) {
+    const code = directoryErrors.codeOf(error);
+    return code === "directory.not_admin" || code === "directory.inactive"
+      ? "connection.directory_unreadable"
+      : "connection.directory_unchecked";
+  }
+};
+
+/** The IDs of `provider`'s connections not disconnected, now. */
+const liveConnectionIds = async (
+  env: Env,
+  provider: string
+): Promise<Set<string>> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: connections.id })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.provider, provider),
+        ne(connections.status, "disconnected")
+      )
+    );
+  return new Set(rows.map(({ id }) => id));
+};
+
+/**
+ * Stops the connections of a directory made before `connectionId`, just
+ * made (GRA-2171). The directory is read through one connection, and an
+ * admin who connects it again with another account (an administrator's
+ * instead of one that can't read it) must not leave the one it replaces
+ * holding live tokens that no screen shows and nobody can disconnect.
+ *
+ * Only once the new one has shown it reads: an admin who signs in with an
+ * account that can't (their own, not the directory's admin) would
+ * otherwise stop a working directory. A new connection whose first read
+ * is refused, or failed for the moment, is stopped itself (its own grant,
+ * another account's than any earlier connection's, is the one revoked),
+ * the earlier ones stay as they are, and the flow is refused with why.
+ *
+ * Only earlier ones: of two admins connecting at once, the later
+ * connection stands. A stop of an earlier one that fails is logged, not
+ * answered: the new connection is made, and the next one made stops what
+ * this one left.
+ */
+const replaceEarlierDirectories = async (
+  env: Env,
+  person: ConnectionPerson,
+  connectionId: string,
+  refuse: Refuse
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const made = await db
+    .select()
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  if (made === undefined) {
+    return;
+  }
+  const earlier = await db
+    .select()
+    .from(connections)
+    .where(
+      and(
+        eq(connections.provider, made.provider),
+        ne(connections.id, connectionId),
+        ne(connections.status, "disconnected"),
+        lt(connections.createdAt, made.createdAt)
+      )
+    )
+    .all();
+  if (earlier.length === 0) {
+    return;
+  }
+  const failed = await probeFailure(env, connectionId);
+  if (failed !== undefined) {
+    await stop(env, person, made);
+    await refuse(failed, { connectionId });
+    throw connectionErrors.create(failed);
+  }
+  for (const connection of earlier) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one stop at a time, each with its revoke
+      await stop(env, person, connection, { replacedBy: connectionId });
+    } catch (error) {
+      log.warn("connection.replace_failed", {
+        connectionId: connection.id,
+        ...errorFields(error),
+      });
+    }
+  }
+};
+
 /** Finishes `flow`, taken, as `finishConnection` says. */
 const finishFlow = async (
   env: Env,
@@ -792,6 +1190,12 @@ const finishFlow = async (
     throw connectionErrors.create("connection.provider_refused");
   }
 
+  // A directory's connections before: one this flow makes new replaces
+  // the earlier ones; one it reconnects or renews in place replaces none.
+  const directory = directoryProviderSchema.safeParse(provider.id).success;
+  const before = directory
+    ? await liveConnectionIds(env, provider.id)
+    : new Set<string>();
   const connectionId = await keepTokens(
     env,
     setUp,
@@ -800,6 +1204,9 @@ const finishFlow = async (
     tokens,
     refuse
   );
+  if (directory && !before.has(connectionId)) {
+    await replaceEarlierDirectories(env, person, connectionId, refuse);
+  }
   return { connectionId, returnTo: flow.returnTo };
 };
 
@@ -894,6 +1301,12 @@ const replaceKey = async (
         .set({
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
+          pastVerifiedEmails: pastAddressesAfter(
+            confirmedAddressOf(provider, account)
+          ),
+          verifiedEmail: confirmedAddressOf(provider, account),
+          verifiedEmailAt:
+            confirmedAddressOf(provider, account) === null ? null : new Date(),
           updatedAt: now,
         })
         .where(stillActive),
@@ -1025,6 +1438,7 @@ export const listConnections = async (
     accountName: row.accountName,
     createdAt: row.createdAt.toISOString(),
     ...(row.serverKind === "composio" && {
+      ...(row.composioAuth !== null && { composioAuth: row.composioAuth }),
       tools: allowedToolNames(row),
       offeredTools: offeredToolNames(row),
       readTools: readToolNames(row),
@@ -1076,123 +1490,6 @@ export const organizationConnections = async (
       },
     ];
   });
-};
-
-/**
- * Stops `connection`: revokes the grant where the provider can, then
- * marks it disconnected and deletes the tokens, in one write with its
- * event, then drops the actions held for it, which can no longer run. A
- * revoke the provider wouldn't take is owed: a sealed copy of the tokens
- * stays with it, for the cron trigger to revoke with (src/revocations.ts).
- * Returns whether the provider revoked the grant, and whether this call
- * stopped it (a concurrent one may have first).
- *
- * One read while it needed connecting again had no grant to revoke, so it
- * is stopped only while it still needs that: if it was reconnected
- * meanwhile, it is read again and stopped as the active connection it is
- * now, with the new grant revoked, not only deleted.
- */
-const stop = async (
-  env: Env,
-  person: ConnectionPerson | null,
-  connection: ConnectionRow,
-  detail: Record<string, AuditDetailValue> = {}
-): Promise<{ revoked: boolean; stopped: boolean }> => {
-  const db = drizzle(env.DB);
-  // A Composio connection is stopped first, with its cleanup recorded in
-  // the same transaction, and deleted at Composio only after: calls stop
-  // whatever becomes of that deletion, and the clock retries it
-  // (src/composio-connections.ts). An OAuth grant is revoked first, as ever.
-  const composio = connection.serverKind === "composio";
-  // An HTTP connection's credential is the API's own: nothing to revoke
-  // at a provider, it is only deleted, below.
-  const http = connection.serverKind === "http";
-  const cleanupId = crypto.randomUUID();
-  const revokeOutcome =
-    composio || http ? "nothing" : await revokeAtProvider(env, connection);
-  const revokedGrant = revokeOutcome === "revoked";
-  const owed = revokeOutcome === "failed";
-  // Recorded only by the disconnect that stops it, if two run at once.
-  const waiting = connection.status === "needs_reauth";
-  const stillConnected = waiting
-    ? sql`${connections.id} = ${connection.id} AND ${connections.status} = 'needs_reauth'`
-    : sql`${connections.id} = ${connection.id} AND ${connections.status} <> 'disconnected'`;
-  const stopped = await recordEventIf(
-    env,
-    connectionEvent(person, "connection.disconnect", connection.id, {
-      ...detail,
-      provider: connection.provider,
-      scope: connection.scope,
-      outcome: "ok",
-      ...(composio
-        ? { tokenHolder: "composio" }
-        : { revoked: revokedGrant, ...(owed ? { revokePending: true } : {}) }),
-    }),
-    { from: connections, where: stillConnected },
-    [
-      ...(composio ? [disconnectCleanup(db, cleanupId, stillConnected)] : []),
-      db
-        .update(connections)
-        .set({ status: "disconnected", updatedAt: new Date() })
-        .where(stillConnected),
-      // After the status, by the call that stopped it: the revoke it owes,
-      // with a copy of the tokens to revoke with, before they go.
-      ...(owed
-        ? [
-            oweRevoke(
-              db,
-              connection.id,
-              "disconnected",
-              sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
-            ),
-          ]
-        : []),
-      // After the status: only a stopped connection's credential goes.
-      ...(http
-        ? [
-            db
-              .update(httpConnections)
-              .set({ sealed: null })
-              .where(
-                sql`${httpConnections.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
-              ),
-          ]
-        : []),
-      // After the status: only a stopped connection's tokens go.
-      db
-        .delete(connectionTokens)
-        .where(
-          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
-        ),
-    ]
-  );
-  const reconnected =
-    waiting && !stopped
-      ? await db
-          .select()
-          .from(connections)
-          .where(
-            and(
-              eq(connections.id, connection.id),
-              eq(connections.status, "active")
-            )
-          )
-          .get()
-      : undefined;
-  if (reconnected !== undefined) {
-    return await stop(env, person, reconnected, detail);
-  }
-  await dropPendingActions(
-    env,
-    eq(pendingActions.connectionId, connection.id),
-    "connection.disconnected",
-    person
-  );
-  const revoked =
-    composio && stopped
-      ? await revokeAtComposio(env, cleanupId, connection)
-      : revokedGrant;
-  return { revoked, stopped };
 };
 
 /**

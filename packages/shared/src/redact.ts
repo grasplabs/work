@@ -1,3 +1,13 @@
+import { decodeHTMLAttribute } from "entities/decode";
+
+declare global {
+  // JSON.parse source text access (TC39, shipped in V8 and so in workerd):
+  // not in TypeScript's lib yet, nor the reviver's third argument.
+  interface JSON {
+    rawJSON: (text: string) => unknown;
+  }
+}
+
 // Credentials in text an outside system or code wrote, redacted before it
 // reaches a chat, a model or a log.
 
@@ -10,17 +20,22 @@
  * Google API keys (`AIza`); JSON Web Tokens; PEM private keys, an
  * unfinished block to the end of the text; AWS access key IDs; and the
  * whole value of an `api_key`, `apikey`, `token`, `secret`, `password`,
- * `passwd` or `authorization`, or of a name ending in one
- * (`access_token`, `client_secret`), written as `name=value` or
+ * `passwd`, `authorization`, `session` (`sessionId`, `JSESSIONID`) or
+ * `cookie`, or of a name ending in one (`access_token`, `client_secret`), written as `name=value` or
  * `name: value`: quoted, to its closing quote (or the end of the line),
- * spaces included; unquoted, to the next space or separator, with a
+ * spaces included; unquoted, to the next whitespace or quote (a `&`, `,`
+ * or `;` taken with it: what follows in a query string, a cookie or a list
+ * is lost, the value never kept in part), with a
  * `Bearer` or `Basic` scheme of any length taken with it. JSON quoted
  * once more, as a string inside JSON (`{\"password\":\"…\"}`), is
- * caught the same way, to the escaped closing quote. Anything else
+ * caught the same way, to the escaped closing quote (a text that is JSON
+ * is read by its values instead, below). And in every link,
+ * its parameters that sign or grant it (`redactLinks`, below). Anything else
  * shaped like a secret is not caught: this is a net for what an outside
  * system's data may carry, not a guarantee (a run holds no secret of its
- * own). Applied to what streams to the chat, to what the model reads and
- * to a tool's error connect logs, over the whole text, so a credential
+ * own). Applied to what streams to the chat, to what the model reads, to
+ * what the Brain keeps of a connection's reads and to a tool's error
+ * connect logs, over the whole text, so a credential
  * split across lines is caught.
  */
 /**
@@ -61,6 +76,23 @@ const credentialFormats: readonly RegExp[] = [
   /\bAKIA[0-9A-Z]{16}\b/gu,
 ];
 
+/**
+ * The names whose value {@link credentials} redacts whole, alone or ending
+ * a longer name (`access_token`, `set-cookie`): one source for the
+ * named-value rule over text and for a JSON member's name
+ * ({@link credentialName}).
+ */
+const credentialNames = String.raw`api[_-]?key|apikey|token|secret|passwd|password|authorization|session(?:[_-]?id)?|sessid|cookie`;
+
+/**
+ * A JSON member's name that names a credential: one the named-value rule
+ * would take, ending at the name's end, as it would before the `:`.
+ */
+const credentialName = new RegExp(
+  String.raw`\b\w*?(?:${credentialNames})$`,
+  "iu"
+);
+
 const credentials: readonly (readonly [
   RegExp,
   string | ((...args: unknown[]) => string),
@@ -72,14 +104,194 @@ const credentials: readonly (readonly [
   // linear. A name's prefix (`access_`) is word characters only, so a
   // match starts once per word, not at every "-" of a flood.
   [
-    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
+    new RegExp(
+      String.raw`\b(?<name>\w*?(?:${credentialNames}))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"']+)`,
+      "giu"
+    ),
     redactedAssignment,
   ],
 ];
 
-/** `text` with every credential in it ({@link credentials}) redacted. */
-export const redact = (text: string): string => {
-  let redacted = text;
+// Signed and granting links. A link's query parameter that signs or grants
+// it is redacted by its name: any name ending in `signature` (S3's
+// `X-Amz-Signature`, Google Cloud Storage's `X-Goog-Signature` and V2
+// `Signature`, CloudFront's), an Azure SAS's `sig`, SharePoint's
+// `tempauth`, a meeting link's `pwd`, and an OAuth redirect's `code`. Each
+// link is parsed, never matched by pattern: its HTML character references
+// are decoded as a browser reads an `href` (`entities`, so `&amp;`,
+// `&#38;`, `&#x26;`, `&#038;` and `&AMP;` all separate parameters), it is
+// parsed by `URL`, and its query read by `URL`'s own `searchParams`; a
+// parameter whose value is itself a URL (a redirect's target) is read the
+// same way, once. Where a link ends is GitHub Flavored Markdown's rule as
+// written (`linkEndOf`). Only the values of those parameters change: a
+// link with none comes back byte for byte as it was, one with some comes
+// back as the URL standard serializes it (percent-encoded, so no character
+// a reference stood for breaks out of what held the link), and a word
+// outside a link (`R&D`, `code=42`) is never one. JSON escapes are not
+// decoded: what is redacted (a tool's output as JSON text, a chat's text)
+// holds `&` as itself.
+// Its user name and password (`https://u:p@h`) are redacted too.
+// Not caught: a credential in a URL's path; an opaque download URL that
+// grants by its whole self; a grant in a fragment other than what the
+// named-value rule above catches (`#access_token=…` is; `#sig=…` and
+// `#code=…` are not); a link `URL` can't parse; a link with no scheme
+// (`www.…`, `//host/…`); and an AWS secret key written as
+// `aws_secret_access_key = …` or bare (only its key ID, `AKIA…`, has a
+// shape of its own). What is left is bounded: such text
+// reaches only the person who read it (the Brain keeps a connection's
+// reads for their reader alone), and connectors select the fields they
+// return.
+
+/**
+ * A link: a scheme, `://`, and what may follow in a URL, up to a space or
+ * a character no URL holds. `[` and `]` hold only an IP-literal host
+ * (RFC 3986 §3.2.2: `https://[2001:db8::1]:8443/`, after any user name and
+ * password), and end a link anywhere else: a Markdown link's text,
+ * `[https://…](target)`, ends at its `]`. Neither `URL` nor GFM decides
+ * this end: `URL` parses a path holding `](target)`, and GFM's autolink
+ * ends only at a space or `<`, leaving `]` to the link text around it. A
+ * scheme is short (`https`, `ms-excel`): held to 32 characters, so a flood
+ * of word characters and dashes (`sk-sk-…`), tried from every word in it,
+ * never scans to its end each time, which would be quadratic; a user name
+ * and password stop at the first `/`, `?` or `#`, as an authority does.
+ */
+const linkPattern =
+  /\b[a-z][a-z\d+.-]{0,31}:\/\/(?:[^\s"'<>\\^`{|}[\]/?#]*@)?(?:\[[\da-z.:%~-]{2,64}\])?[^\s"'<>\\^`{|}[\]]*/giu;
+
+/** The query parameters that sign or grant a link, by name. */
+const grantingName = /^(?:[\w-]*signature|sig|code|tempauth|pwd)$/iu;
+
+/** Characters that end no link when they end what was found (GFM §6.9). */
+const trailingPunctuation = new Set(["?", "!", ".", ",", ":", "*", "_", "~"]);
+
+/** A letter or a digit: an entity reference's name (GFM §6.9). */
+const entityNameChar = /^[a-z\d]$/iu;
+
+/**
+ * Where `found` (a link as `linkPattern` found it) ends, by GitHub
+ * Flavored Markdown's extended autolink path validation (GFM spec §6.9),
+ * from its end, until none applies: a trailing `?`, `!`, `.`, `,`, `:`,
+ * `*`, `_` or `~` is not part of the link; a trailing `)` is not when the
+ * link holds more `)` than `(`; and a trailing `;` is not, nor, when it
+ * ends an entity reference (`&amp;`), is that whole reference. So the `)`
+ * of `[t](https://…)` and the `.` ending a sentence stay outside the
+ * link, while an `&amp;` inside its query is part of it. Quotes and `<`
+ * `>` already end a link (`linkPattern`). Linear: the parentheses are
+ * counted once, and each step moves the end back.
+ */
+const linkEndOf = (found: string): number => {
+  let open = 0;
+  let close = 0;
+  for (const char of found) {
+    if (char === "(") {
+      open += 1;
+    } else if (char === ")") {
+      close += 1;
+    }
+  }
+  let end = found.length;
+  while (end > 0) {
+    const last = found[end - 1] ?? "";
+    if (trailingPunctuation.has(last)) {
+      end -= 1;
+    } else if (last === ")" && close > open) {
+      end -= 1;
+      close -= 1;
+    } else if (last === ";") {
+      let name = end - 1;
+      while (name > 0 && entityNameChar.test(found[name - 1] ?? "")) {
+        name -= 1;
+      }
+      end =
+        name > 0 && name < end - 1 && found[name - 1] === "&"
+          ? name - 1
+          : end - 1;
+    } else {
+      break;
+    }
+  }
+  return end;
+};
+
+/** A character no link holds as written: what ends one (`linkPattern`). */
+const outsideLink = /[\s"'<>\\^`{|}]/gu;
+
+/**
+ * `url` (its granting values replaced) as the URL standard writes it: its
+ * query by the `application/x-www-form-urlencoded`
+ * serializer (every character but letters, digits and `*-._`
+ * percent-encoded, so `[redacted]` reads `%5Bredacted%5D`), the whole by
+ * `URL`'s `href` (its host lower-cased, an IDN as punycode, a path
+ * normalised: fine for a link whose secret was just removed). What the
+ * path's and the fragment's rules leave raw that no link holds (a `\` or
+ * a `'`) is percent-encoded too. So a character a reference stood for
+ * (`&quot;`, `&lt;`, `&#32;`, `&#92;`) never comes back raw: nothing
+ * outside the link (an HTML attribute, a JSON string, a Markdown link) is
+ * broken out of.
+ */
+const serialized = (url: URL): string =>
+  // `encodeURIComponent` leaves `'` as it is, one of its unreserved marks.
+  url.href.replace(outsideLink, (char) =>
+    char === "'" ? "%27" : encodeURIComponent(char)
+  );
+
+/**
+ * Sets `url`'s granting parameters to `[redacted]`, and, with `nested`, a
+ * parameter whose value is itself a URL read the same way once: the
+ * query as `URL`'s `searchParams` reads it (each name and value decoded,
+ * every pair in order, a name given twice twice), written back by its
+ * serializer only when something changed. Whether anything did.
+ */
+const redactParams = (url: URL, nested: boolean): boolean => {
+  let changed = false;
+  // A user name and password in the link itself (`https://u:p@h`).
+  if (url.username !== "" || url.password !== "") {
+    url.username = url.username === "" ? "" : "[redacted]";
+    url.password = url.password === "" ? "" : "[redacted]";
+    changed = true;
+  }
+  const pairs = [...url.searchParams].map(([name, value]): [string, string] => {
+    if (grantingName.test(name)) {
+      changed = true;
+      return [name, "[redacted]"];
+    }
+    if (nested && URL.canParse(value)) {
+      const inner = new URL(value);
+      if (redactParams(inner, false)) {
+        changed = true;
+        return [name, inner.href];
+      }
+    }
+    return [name, value];
+  });
+  if (changed) {
+    url.search = new URLSearchParams(pairs).toString();
+  }
+  return changed;
+};
+
+/**
+ * `text` with the granting parameters of every link in it redacted: each
+ * link's character references decoded as a browser reads an `href`, the
+ * result parsed and only those values replaced, and written back as the
+ * URL standard serializes it (`serialized`). A link with nothing to redact
+ * is left exactly as it was written.
+ */
+const redactLinks = (text: string): string =>
+  text.replace(linkPattern, (found) => {
+    // What ends no link stays outside it, byte for byte (`linkEndOf`).
+    const end = linkEndOf(found);
+    const link = decodeHTMLAttribute(found.slice(0, end));
+    if (!URL.canParse(link)) {
+      return found;
+    }
+    const url = new URL(link);
+    return redactParams(url, true) ? serialized(url) + found.slice(end) : found;
+  });
+
+/** `text` with every credential in it redacted by the rules above. */
+const redactText = (text: string): string => {
+  let redacted = redactLinks(text);
   for (const [pattern, replacement] of credentials) {
     redacted =
       typeof replacement === "string"
@@ -88,6 +300,170 @@ export const redact = (text: string): string => {
   }
   return redacted;
 };
+
+// JSON text (GRA-1880). The rules above read text as written, and in JSON
+// a line break is the two characters `\n`: `password: x\nCookie: sid=…`
+// took `x\nCookie:` for the password and left the session ID. So a text
+// that is JSON is redacted by its values, read by the platform's own
+// parser (`JSON.parse`), never by rules of ours:
+//
+// - every string, a member's name as well as a value, decoded and redacted
+//   by `redact` itself, so JSON held in a string as text is read the same
+//   way in turn, however deep (each level doubles its escapes, so the
+//   text bounds how many there are);
+// - a member whose name names a credential (`credentialName`, the
+//   named-value rule's own names) has its whole value redacted, whatever
+//   it is (a string, a number, a list, an object, `null`);
+// - written back by `JSON.stringify`, its numbers as they were written
+//   (JSON.parse source text access and `JSON.rawJSON`, so no long ID is
+//   rounded), compact; a text with nothing to redact comes back byte for
+//   byte.
+//
+// JSON is the whole text, by JSON's grammar (RFC 8259), after a byte order
+// mark and whitespace: text around it, a second document after it, or a
+// document cut off, is not, and gets the rules above over the text as
+// written. So does JSON that holds a member's name twice: `JSON.parse`
+// keeps only the last, so writing it back would drop the others unread.
+// And so does JSON in which nothing is redacted by its values, so what is
+// redacted is never less than the rules over text remove. A text that is
+// JSON but too deep for the platform's stack to revive or write back is
+// redacted whole, never passed on.
+//
+// Not caught: a credential split across values (`["password:",
+// "hunter2"]`) or named by a sibling's value (`{"type":"bearer",
+// "value":"…"}`, GRA-1881); and the rest of a value after whitespace an
+// escape stands for (`password: ab\thunter2` keeps `hunter2`, as the
+// same text written with a tab does; GRA-2040).
+
+/** What a redacted JSON value, or a text too deep to read, becomes. */
+const redactedValue = "[redacted]";
+
+/**
+ * Where a JSON text may hold a string: one opening with `{`, `[` or `"`,
+ * after a byte order mark and JSON's whitespace.
+ */
+const mayHoldJsonString = /^\uFEFF?[\t\n\r ]*[[{"]/u;
+
+/**
+ * How many members the objects of `json` (a text `JSON.parse` accepted)
+ * hold as written: outside its strings, a `:` only ever separates a
+ * member's name from its value (RFC 8259 §4), and inside one a `"` ends it
+ * unless a `\\` escapes it (§7). One pass, never a pattern: a pattern over
+ * a string of megabytes of escapes overflows the stack.
+ */
+const membersWritten = (json: string): number => {
+  let members = 0;
+  let inString = false;
+  let escaped = false;
+  for (const char of json) {
+    if (escaped) {
+      escaped = false;
+    } else if (inString) {
+      escaped = char === "\\";
+      inString = char !== '"';
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === ":") {
+      members += 1;
+    }
+  }
+  return members;
+};
+
+/**
+ * `value` (an object JSON.parse revived) with each member's name passed
+ * through `redactName`; `value` itself when none changes.
+ */
+const withNamesRedacted = (
+  value: object,
+  redactName: (name: string) => string
+): object => {
+  const members: [string, unknown][] = Object.entries(value);
+  const renamed = members.map(([name, member]): [string, unknown] => [
+    redactName(name),
+    member,
+  ]);
+  if (renamed.every(([name], index) => name === members[index]?.[0])) {
+    return value;
+  }
+  return Object.fromEntries(renamed);
+};
+
+/**
+ * `text` redacted by its values when it is JSON (above), or undefined when
+ * the rules over text are to redact it.
+ */
+const redactedJson = (text: string): string | undefined => {
+  if (!mayHoldJsonString.test(text)) {
+    return undefined;
+  }
+  // `JSON.parse` refuses a byte order mark: read past it, and keep it.
+  const mark = text.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const json = text.slice(mark.length);
+  /** A string in it, JSON held as text in it read the same way in turn. */
+  const redactString = (each: string): string =>
+    redactedJson(each) ?? redactText(each);
+  let changed = false;
+  // The members revived: fewer than written when a name came twice.
+  let membersRead = 0;
+  const revived = (
+    name: string,
+    value: unknown,
+    { source }: { source?: string } = {}
+  ): unknown => {
+    const isObject =
+      typeof value === "object" &&
+      value !== null &&
+      // A list's names are its indexes: nothing to redact, nor to read.
+      !Array.isArray(value);
+    if (isObject) {
+      membersRead += Object.keys(value).length;
+    }
+    let kept = value;
+    if (credentialName.test(name)) {
+      kept = redactedValue;
+    } else if (typeof value === "string") {
+      kept = redactString(value);
+    } else if (typeof value === "number" && source !== undefined) {
+      // Written back as it came; never a change.
+      return JSON.rawJSON(source);
+    } else if (isObject) {
+      kept = withNamesRedacted(value, redactString);
+    }
+    changed ||= kept !== value;
+    return kept;
+  };
+  try {
+    const value: unknown = JSON.parse(json, revived);
+    if (!changed || membersRead !== membersWritten(json)) {
+      return undefined;
+    }
+    return `${mark}${JSON.stringify(value)}`;
+  } catch (error) {
+    // What JSON's grammar refused: text.
+    if (error instanceof SyntaxError) {
+      return undefined;
+    }
+    // Anything else, such as JSON too deep for the platform's stack to
+    // revive or write back: redacted whole, never passed on.
+    return redactedValue;
+  }
+};
+
+/**
+ * `text` with every credential in it redacted: by its values when it is
+ * JSON, else by the rules over text ({@link credentials}, `redactLinks`).
+ */
+export const redact = (text: string): string =>
+  redactedJson(text) ?? redactText(text);
+
+/**
+ * `text` redacted by its values when it is JSON (above), and as it was
+ * otherwise: for a text joined with others before `redact` reads the
+ * whole, so a credential's name at the end of one and its value at the
+ * start of the next still meet, as text.
+ */
+export const redactJson = (text: string): string => redactedJson(text) ?? text;
 
 /**
  * Whether `text` holds a credential in one of the known formats

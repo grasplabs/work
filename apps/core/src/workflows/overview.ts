@@ -273,6 +273,7 @@ export const workflowOverview = async (
   return workflows.map((workflow) => ({
     workflowId: workflowResourceIdSchema.parse(workflow.id),
     name: workflow.name,
+    title: workflow.title,
     version: workflow.currentVersion,
     owner: {
       userId: workflow.owner,

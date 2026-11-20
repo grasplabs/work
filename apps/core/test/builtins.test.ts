@@ -8,6 +8,11 @@ import {
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import {
+  installShippedSkills,
+  readSkillFor,
+  skillsFor,
+} from "../src/brain-skills.ts";
 import { blueprintsDigestText } from "../src/builtin-digest.ts";
 import {
   builtins,
@@ -19,15 +24,13 @@ import {
   thisRelease,
 } from "../src/builtins.ts";
 import worker from "../src/index.ts";
-import {
-  graspSkillsCollectionId,
-  syncGraspSkills,
-} from "../src/knowledge/grasp-skills.ts";
 import { releaseContracts } from "../src/release-contracts.ts";
 import { shippedSkills } from "../src/shipped-skills.ts";
 import type { ShippedSkill } from "../src/shipped-skills.ts";
-import { storedCurrentTexts } from "./knowledge.ts";
-import { auditedDuring } from "./sign-in.ts";
+import { actingFor } from "./contexts.ts";
+import { mockIdp } from "./idp.ts";
+import { auditedDuring, signedInWithRole, unique } from "./sign-in.ts";
+import { holdsNothing } from "./stored-skills.ts";
 
 // What ships with the release, installed once per release on the first
 // request (src/builtins.ts). These tests start from the ways that can
@@ -37,51 +40,68 @@ import { auditedDuring } from "./sign-in.ts";
 // release writes again; callers arriving together each install, and write
 // twice or refuse each other; and a partial install is recorded as done,
 // stranding what failed. That the first request starts it, every file's
-// setup checks (builtins-first.ts).
+// setup checks (builtins-first.ts). What an install writes is watched
+// through Grasp's skills in the Brain (src/brain-skills.ts).
 //
 // The tests of a file share their storage, the singleton's included, so
 // each test that needs an install forgets the last one first.
+
+const idp = mockIdp();
 
 /** This release's fingerprint, as an isolate of it works it out. */
 const thisFingerprint = async (): Promise<string> =>
   await fingerprintOf(thisRelease);
 
-/** Each Grasp skill's current text, by path. */
-const storedSkills = async (): Promise<Record<string, string>> =>
-  await storedCurrentTexts(graspSkillsCollectionId);
-
-/** Where Knowledge keeps the Grasp skill `name`. */
-const pathOf = (name: string): string => `${name}/SKILL.md`;
-
-/** This release's skills, by their path in Knowledge. */
-const releaseSkills = (skills: readonly ShippedSkill[] = shippedSkills) =>
-  Object.fromEntries(skills.map(({ name, text }) => [pathOf(name), text]));
-
-/** This release's skills, with those at `paths` changed: another release. */
-const otherRelease = (...paths: string[]): ShippedSkill[] =>
-  shippedSkills.map(({ name, text }) => ({
-    name,
-    text: paths.includes(pathOf(name))
-      ? `${text}\nFrom another release.\n`
-      : text,
-  }));
-
-/** The first `count` Grasp skills' paths in Knowledge. */
-const firstPaths = (count: number): string[] => {
-  const paths = shippedSkills.slice(0, count).map(({ name }) => pathOf(name));
-  if (paths.length < count) {
-    throw new Error(`This release ships fewer than ${count} Grasp skills`);
-  }
-  return paths;
+/** A chat's agent acting for a member, who reads Grasp's skills. */
+const reader = async () => {
+  const { userId } = await signedInWithRole(idp, "user");
+  return actingFor({ type: "agent", agentId: `agent-${unique()}` }, userId);
 };
 
-/** What the singleton stored as installed. */
+/** Each of Grasp's skills' current text in the Brain, by name. */
+const storedSkills = async (): Promise<Record<string, string>> => {
+  const agent = await reader();
+  const listed = await skillsFor(env, agent, "teams", holdsNothing);
+  const grasp = listed.filter(({ scope }) => scope === "grasp");
+  return Object.fromEntries(
+    await Promise.all(
+      grasp.map(async (skill) => {
+        const { text } = await readSkillFor(env, agent, "teams", holdsNothing, {
+          skill,
+        });
+        return [skill.name, text] as const;
+      })
+    )
+  );
+};
+
+/** This release's skills, by name. */
+const releaseSkills = (skills: readonly ShippedSkill[] = shippedSkills) =>
+  Object.fromEntries(skills.map(({ name, text }) => [name, text]));
+
+/** This release's skills, with those named `names` changed: another release. */
+const otherRelease = (...names: string[]): ShippedSkill[] =>
+  shippedSkills.map(({ name, text }) => ({
+    name,
+    text: names.includes(name) ? `${text}\nFrom another release.\n` : text,
+  }));
+
+/** The first `count` Grasp skills' names. */
+const firstNames = (count: number): string[] => {
+  const names = shippedSkills.slice(0, count).map(({ name }) => name);
+  if (names.length < count) {
+    throw new Error(`This release ships fewer than ${count} Grasp skills`);
+  }
+  return names;
+};
+
 /**
  * The singleton, reached without `getByName`, which the first test
  * counts the calls of.
  */
 const singleton = () => env.BUILTINS.get(env.BUILTINS.idFromName("builtins"));
 
+/** What the singleton stored as installed. */
 const installed = async (): Promise<unknown> =>
   await runInDurableObject(
     singleton(),
@@ -89,52 +109,59 @@ const installed = async (): Promise<unknown> =>
   );
 
 /**
- * Makes the singleton forget what it installed, and the skills at `paths`
- * another release's text, so the next install has them to write.
+ * Makes the singleton forget what it installed, and the skills named
+ * `names` another release's text, so the next install has them to write.
  */
-const forgetInstall = async (...paths: string[]): Promise<void> => {
-  await syncGraspSkills(
-    env,
-    otherRelease(...paths).map(({ name, text }) => ({
-      path: pathOf(name),
-      text,
-    }))
-  );
+const forgetInstall = async (...names: string[]): Promise<void> => {
+  await installShippedSkills(env, otherRelease(...names));
   await runInDurableObject(singleton(), async (_instance, state) => {
     await state.storage.delete("installed");
   });
 };
 
-const skillSaves = (events: { action: string }[]) =>
-  events.filter(({ action }) => action === "knowledge.document.saved");
-
-const insertsVersion = /^insert into "versions"/iu;
+/** How many skills the installs of `events` wrote. */
+const skillsWritten = (
+  events: { action: string; detail: Record<string, unknown> }[]
+): number[] =>
+  events
+    .filter(({ action }) => action === "brain.skills.installed")
+    .map(({ detail }) => Number(detail.changed));
 
 /**
- * The Knowledge database, but the first batch that writes a version
- * fails: an outage in the middle of an install.
+ * `run` with the Brain failing the first write of Grasp's skill `name`,
+ * as when it is out of reach for a moment.
  */
-const knowledgeFailingOnce = (): D1Database => {
-  const real = env.KNOWLEDGE;
-  let writing = false;
+const withBrainFailingOnce = async <T>(
+  name: string,
+  run: () => Promise<T>
+): Promise<T> => {
+  const source = `skill:grasp:${name}`;
+  const store = env.BRAIN_STORE;
+  const real = store.getByName.bind(store);
   let failed = false;
-  return {
-    prepare: (query) => {
-      writing ||= insertsVersion.test(query);
-      return real.prepare(query);
-    },
-    batch: async <T>(statements: D1PreparedStatement[]) => {
-      if (writing && !failed) {
+  const spied = vi.spyOn(store, "getByName").mockImplementation((id) => {
+    const stub = real(id);
+    const addInstructions = async (
+      added: Parameters<typeof stub.addInstructions>[0]
+    ) => {
+      if (added.source === source && !failed) {
         failed = true;
-        throw new Error("D1 unavailable");
+        throw new Error("The Brain is out of reach");
       }
-      return await real.batch<T>(statements);
-    },
-    exec: async (query) => await real.exec(query),
-    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
-    dump: async () => await real.dump(),
-    withSession: (constraint) => real.withSession(constraint),
-  };
+      return await stub.addInstructions(added);
+    };
+    return new Proxy(stub, {
+      get: (target, property): unknown =>
+        property === "addInstructions"
+          ? addInstructions
+          : Reflect.get(target, property),
+    });
+  });
+  try {
+    return await run();
+  } finally {
+    spied.mockRestore();
+  }
 };
 
 /** A request that passed the router's check, handled to the end. */
@@ -162,8 +189,8 @@ const started = async (
 
 describe("the built-ins", () => {
   it("are installed after a failed start by the first request a minute later, not before, and then asked for no more", async () => {
-    const changed = otherRelease(...firstPaths(1));
-    await forgetInstall(...firstPaths(1));
+    const changed = otherRelease(...firstNames(1));
+    await forgetInstall(...firstNames(1));
     const install = builtinsInstaller();
     const calls = vi
       .spyOn(env.BUILTINS, "getByName")
@@ -198,10 +225,10 @@ describe("the built-ins", () => {
   });
 
   it("aren't done for an isolate of another release, which asks again a minute later", async () => {
-    await forgetInstall(...firstPaths(1));
+    await forgetInstall(...firstNames(1));
     const install = builtinsInstaller({
       ...thisRelease,
-      skills: otherRelease(...firstPaths(1)),
+      skills: otherRelease(...firstNames(1)),
     });
     const calls = vi.spyOn(env.BUILTINS, "getByName");
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -241,7 +268,7 @@ describe("the built-ins", () => {
   });
 
   it("write nothing when the release is installed already", async () => {
-    await forgetInstall(...firstPaths(1));
+    await forgetInstall(...firstNames(1));
     await expect(
       builtins(env).ensureInstalled(await thisFingerprint())
     ).resolves.toBeTruthy();
@@ -251,12 +278,12 @@ describe("the built-ins", () => {
         builtins(env).ensureInstalled(await thisFingerprint())
       ).resolves.toBeTruthy();
     });
-    expect(skillSaves(events)).toStrictEqual([]);
+    expect(skillsWritten(events)).toStrictEqual([]);
     await expect(storedSkills()).resolves.toStrictEqual(releaseSkills());
   });
 
   it("are installed once for callers arriving together, who all see it done", async () => {
-    await forgetInstall(...firstPaths(1));
+    await forgetInstall(...firstNames(1));
 
     const events = await auditedDuring(async () => {
       await expect(
@@ -267,24 +294,27 @@ describe("the built-ins", () => {
         ])
       ).resolves.toStrictEqual([true, true, true]);
     });
-    // Two installs would both write the skill from the same version, and
-    // the second would be refused: one of them would resolve false.
-    expect(skillSaves(events)).toHaveLength(1);
+    // One install, writing the one skill another release had changed.
+    expect(skillsWritten(events)).toStrictEqual([1]);
     await expect(storedSkills()).resolves.toStrictEqual(releaseSkills());
   });
 
   it("aren't recorded as installed after a partial install, and the next install writes only what's missing", async () => {
-    const paths = firstPaths(2);
-    await forgetInstall(...paths);
+    const names = firstNames(2);
+    await forgetInstall(...names);
 
-    const failing: Env = { ...env, KNOWLEDGE: knowledgeFailingOnce() };
-    const partial = await runInDurableObject(
-      builtins(env),
-      async (_instance, state) =>
-        await installBuiltins(
-          failing,
-          state.storage,
-          await loadBuiltinRelease()
+    const [first = ""] = names;
+    const partial = await withBrainFailingOnce(
+      first,
+      async () =>
+        await runInDurableObject(
+          builtins(env),
+          async (_instance, state) =>
+            await installBuiltins(
+              env,
+              state.storage,
+              await loadBuiltinRelease()
+            )
         )
     );
     // The first skill failed and the second was written, but nothing is
@@ -293,7 +323,7 @@ describe("the built-ins", () => {
     expect([
       partial,
       await installed(),
-      ...paths.map((path) => afterPartial[path] === releaseSkills()[path]),
+      ...names.map((name) => afterPartial[name] === releaseSkills()[name]),
     ]).toStrictEqual([false, undefined, false, true]);
 
     const events = await auditedDuring(async () => {
@@ -301,7 +331,7 @@ describe("the built-ins", () => {
         builtins(env).ensureInstalled(await thisFingerprint())
       ).resolves.toBeTruthy();
     });
-    expect(skillSaves(events)).toHaveLength(1);
+    expect(skillsWritten(events)).toStrictEqual([1]);
     await expect(storedSkills()).resolves.toStrictEqual(releaseSkills());
     await expect(installed()).resolves.toStrictEqual(expect.any(String));
   });

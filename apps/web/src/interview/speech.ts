@@ -12,7 +12,7 @@ import { scheduleOf, wordsOf } from "./spoken.tsx";
 
 // The interviewer's voice on the link (prototype `data/voice.ts`): lines
 // said through core's `POST /api/speech` with the link's secret and the
-// device's key, in Stephen's voice or Claire's, their words lighting up as
+// session, in Stephen's voice or Claire's, their words lighting up as
 // they are said. A line of the interview is said a sentence at a time,
 // each its own clip (`sayInPieces`): a short clip is ready much sooner
 // than a whole line, so he is heard sooner, and the rest is made while
@@ -178,7 +178,7 @@ const fetchClip = async (text: string, voicing: Voicing): Promise<Clip> => {
         language: languageNow(),
         speaker: voicing.speaker,
         ...(voicing.tone === null ? {} : { tone: voicing.tone }),
-        link: { secret: link.secret, key: link.key },
+        link: { secret: link.secret },
       }),
       signal: AbortSignal.timeout(fetchTimeoutMs),
     });

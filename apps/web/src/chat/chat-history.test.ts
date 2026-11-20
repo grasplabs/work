@@ -20,8 +20,6 @@ const chat = (title: string, lastAt: string): ChatSummary => ({
   createdAt: daysBack(400),
   lastAt,
   running: false,
-  appId: null,
-  via: "web",
   make: null,
   archived: false,
 });

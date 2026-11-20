@@ -1,14 +1,26 @@
+import { randomBytes } from "node:crypto";
+import { once } from "node:events";
 import { readFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { text } from "node:stream/consumers";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { mapConcurrently } from "@grasp-os/shared/release";
 import type { Role } from "@grasp-os/shared/roles";
 import type { CoreApi } from "@grasp-os/shared/rpc";
 import { test } from "@playwright/test";
 import type { BrowserContext } from "@playwright/test";
-import { newWebSocketRpcSession } from "capnweb";
+import { RpcSession, WebSocketTransport } from "capnweb";
+import type { RpcTransport } from "capnweb";
 import { z } from "zod";
 
-import { commitApp } from "../apps/core/test/app-definitions.ts";
+import {
+  appOf,
+  changesOf,
+  publishApp,
+  sourceParts,
+  writeApp,
+} from "../apps/core/test/app-definitions.ts";
 import type { TestSource } from "../apps/core/test/app-definitions.ts";
 /**
  * Signed-in people for end-to-end tests. They sign in through the product,
@@ -46,7 +58,8 @@ export const testCapabilityKey =
  */
 export const testTokenKey = btoa("e2e-only-token-key-of-32-bytes!!");
 
-const sessionCookie = "__Host-grasp.session_token";
+/** The name of core's session cookie. */
+export const sessionCookie = "__Host-grasp.session_token";
 
 /** The `name=value` pairs a response sets, as a `Cookie` header. */
 const cookiesOf = (response: Response): string =>
@@ -72,8 +85,65 @@ const locationOf = (response: Response, step: string): string => {
  */
 const droppedByDevServer = /Network[ +]connection[ +]lost/u;
 
-/** How many times a sign-in the dev server dropped is tried in all. */
-const signInAttempts = 3;
+/**
+ * How many times a sign-in, or a connection to `/rpc`, that got no answer
+ * is tried in all. Each try after the first waits until core answers
+ * again (`coreAnswering`).
+ */
+const attemptsWhenDropped = 3;
+
+/**
+ * How long a retry waits for core to answer again: miniflare restarts a
+ * crashed runtime on the same ports in a few seconds. Tried again at once,
+ * every try fell in the same outage, and so did the test's next attempt
+ * (merge queue, November 2026).
+ */
+const coreBackWithinMs = 30_000;
+
+/** How often core's health check is asked while it doesn't answer. */
+const coreAskedEveryMs = 250;
+
+/**
+ * Resolves once core answers its health check (`/health`, which the stack
+ * serves without the router's secret) through the dev server again; throws,
+ * with what it last met and `why` the retry was needed, when it hasn't
+ * within `coreBackWithinMs`. A dropped request is tried again only after
+ * this, so the retry doesn't fall in the same outage.
+ */
+const coreAnswering = async (
+  why: unknown,
+  deadline: AbortSignal = AbortSignal.timeout(coreBackWithinMs),
+  lastMet = "no answer yet"
+): Promise<void> => {
+  let met = lastMet;
+  try {
+    const response = await fetch(new URL("/health", origin), {
+      signal: deadline,
+    });
+    if (response.ok) {
+      return;
+    }
+    const said = await response.text();
+    met = `${response.status}: ${said.trim()}`;
+  } catch (error) {
+    // The deadline's own abort says nothing of core: what came before does.
+    if (!deadline.aborted) {
+      met = String(error);
+    }
+  }
+  if (deadline.aborted) {
+    throw new Error(
+      `Core did not answer /health within ${coreBackWithinMs / 1000} s (last: ${met})`,
+      { cause: why }
+    );
+  }
+  try {
+    await sleep(coreAskedEveryMs, undefined, { signal: deadline });
+  } catch {
+    // The deadline passed while waiting: asked once more, which fails.
+  }
+  await coreAnswering(why, deadline, met);
+};
 
 /**
  * `response`, unless the dev server dropped the request it answers: then
@@ -139,7 +209,29 @@ const signInOnce = async (
   return decodeURIComponent(session.slice(sessionCookie.length + 1));
 };
 
-/** `signInOnce`, tried again while the dev server drops it, `attemptsLeft` times in all. */
+/**
+ * What Node's fetch (undici) throws when a request got no answer: no
+ * response at all (a connection refused or reset), or a response whose
+ * body was cut off. Other `TypeError`s it throws, such as a URL it can't
+ * parse, are not.
+ */
+const fetchNetworkErrors = new Set(["fetch failed", "terminated"]);
+
+/**
+ * Whether a sign-in failed for want of an answer: the dev server dropped a
+ * request (`droppedByDevServer`), or fetch met a network error
+ * (`fetchNetworkErrors`). Whatever core answers, a refusal among them, is
+ * not.
+ */
+const unanswered = (error: unknown): boolean =>
+  (error instanceof Error && droppedByDevServer.test(error.message)) ||
+  (error instanceof TypeError && fetchNetworkErrors.has(error.message));
+
+/**
+ * `signInOnce`, tried again while it gets no answer (`unanswered`),
+ * `attemptsLeft` times in all, each time once core answers again. A
+ * sign-in core refuses fails at once.
+ */
 const signInTrying = async (
   email: string,
   providerId: "microsoft" | "grasp-staff",
@@ -148,11 +240,10 @@ const signInTrying = async (
   try {
     return await signInOnce(email, providerId);
   } catch (error) {
-    const dropped =
-      error instanceof Error && droppedByDevServer.test(error.message);
-    if (!dropped || attemptsLeft <= 1) {
+    if (!unanswered(error) || attemptsLeft <= 1) {
       throw error;
     }
+    await coreAnswering(error);
     return await signInTrying(email, providerId, attemptsLeft - 1);
   }
 };
@@ -161,15 +252,16 @@ const signInTrying = async (
  * Signs in as `email` the way a browser does: core starts the sign-in, the
  * IdP (told who by `loginHint`) sends the browser back, and core's callback
  * sets the session cookie. Returns that cookie's value; throws, with where
- * core sent the browser, when core refuses the sign-in. A sign-in the dev
- * server dropped (`droppedByDevServer`) is tried again: the serial journeys
- * start on a fresh stack with no retries of their own, and there a single
- * dropped request failed the whole part.
+ * core sent the browser, when core refuses the sign-in. A sign-in that got
+ * no answer (`unanswered`) is tried again once core answers: the serial
+ * journeys start on a fresh stack with no retries of their own, and there a
+ * single dropped request failed the whole part.
  */
 export const signInAs = async (
   email: string,
   providerId: "microsoft" | "grasp-staff" = "microsoft"
-): Promise<string> => await signInTrying(email, providerId, signInAttempts);
+): Promise<string> =>
+  await signInTrying(email, providerId, attemptsWhenDropped);
 
 export interface Person {
   userId: string;
@@ -247,9 +339,133 @@ export const teamMemberAddedBy = async (
   }
 };
 
+/**
+ * What `/rpc` answers an upgrade with, asked again by hand after a socket
+ * failed before it opened: Node's WebSocket (undici) tells nothing of why,
+ * the same empty error and close 1006 for a refused upgrade (403), an
+ * error page, a dropped connection or nobody listening. A 101 means the
+ * failure has passed; the upgrade it made is closed at once.
+ */
+const upgradeAnswer = async (
+  person: Pick<Person, "cookie">
+): Promise<{ status: number; said: string }> => {
+  const asked = httpRequest(new URL("/rpc", origin), {
+    headers: {
+      origin,
+      cookie: `${sessionCookie}=${encodeURIComponent(person.cookie)}`,
+      connection: "Upgrade",
+      upgrade: "websocket",
+      "sec-websocket-version": "13",
+      "sec-websocket-key": randomBytes(16).toString("base64"),
+    },
+  });
+  const answer = Promise.withResolvers<{ status: number; said: string }>();
+  asked.on("upgrade", (_response, socket) => {
+    socket.destroy();
+    answer.resolve({ status: 101, said: "" });
+  });
+  asked.on("response", (response) => {
+    const status = response.statusCode ?? 0;
+    answer.resolve(
+      (async () => {
+        const said = await text(response);
+        return { status, said };
+      })()
+    );
+  });
+  asked.on("error", answer.reject);
+  asked.end();
+  return await answer.promise;
+};
+
+/**
+ * A connection to `/rpc` that has opened. One that fails before it opens is
+ * tried again, `attemptsLeft` times in all, once core answers again, while
+ * that's the dev server dropping it or nobody answering for a moment:
+ * nothing has been sent on it yet. An upgrade core refuses (403) fails at once, with core's answer;
+ * the last attempt fails with what it met.
+ */
+const openRpcSocket = async (
+  person: Pick<Person, "cookie">,
+  attemptsLeft: number = attemptsWhenDropped
+): Promise<WebSocket> => {
+  const socket = rpcSocket(person);
+  const settled = async (event: string, opened: boolean) => {
+    await once(socket, event);
+    return opened;
+  };
+  const opened = await Promise.race([
+    settled("open", true),
+    settled("error", false),
+    settled("close", false),
+  ]);
+  if (opened) {
+    return socket;
+  }
+  const failed = "The connection to /rpc failed before it opened";
+  let answer: { status: number; said: string };
+  try {
+    answer = await upgradeAnswer(person);
+  } catch (error) {
+    // Nobody listening, or the connection reset: core down, or the
+    // moment it restarts. Tried again; the last attempt says which.
+    if (attemptsLeft <= 1) {
+      // Node tries each of localhost's addresses: one error for each.
+      const why =
+        error instanceof AggregateError
+          ? error.errors.map(String).join("; ")
+          : String(error);
+      throw new Error(`${failed}: ${why}`, { cause: error });
+    }
+    await coreAnswering(error);
+    return await openRpcSocket(person, attemptsLeft - 1);
+  }
+  const passed = answer.status === 101;
+  const dropped = droppedByDevServer.test(answer.said);
+  const said = `${failed}; asked again, it answers ${answer.status}: ${answer.said.trim()}`;
+  if ((!passed && !dropped) || attemptsLeft <= 1) {
+    throw new Error(said);
+  }
+  await coreAnswering(said);
+  return await openRpcSocket(person, attemptsLeft - 1);
+};
+
+/**
+ * Cap'n Web's WebSocket transport over a socket still opening
+ * (`openRpcSocket`): calls wait for it, and fail with why it never opened.
+ */
+const openingTransport = (opening: Promise<WebSocket>): RpcTransport => {
+  const transport = (async () => new WebSocketTransport(await opening))();
+  /** Aborts the session's socket, once there is one. */
+  const aborted = async (reason: unknown): Promise<void> => {
+    let opened: WebSocketTransport;
+    try {
+      opened = await transport;
+    } catch {
+      return;
+    }
+    opened.abort(reason);
+  };
+  return {
+    send: async (message) => {
+      const opened = await transport;
+      opened.send(message);
+    },
+    receive: async () => {
+      const opened = await transport;
+      return await opened.receive();
+    },
+    abort: (reason: unknown) => {
+      void aborted(reason);
+    },
+  };
+};
+
 /** The person's API over `/rpc`, from Node, as their browser would open it. */
 export const apiOf = (person: Pick<Person, "cookie">) => {
-  const core = newWebSocketRpcSession<CoreApi>(rpcSocket(person));
+  const core = new RpcSession<CoreApi>(
+    openingTransport(openRpcSocket(person))
+  ).getRemoteMain();
   return { core, api: core.authenticate() };
 };
 
@@ -359,7 +575,6 @@ const cast = {
   notFound: { member: "user" },
   errorReports: { member: "user" },
   connections: { admin: "admin", user: "user" },
-  knowledge: { one: "user", two: "user" },
   chatAsk: { user: "user" },
   chatStop: { user: "user" },
   chatReload: { user: "user" },
@@ -368,11 +583,6 @@ const cast = {
   chatPanel: { user: "user" },
   chatRename: { user: "user" },
   chatPhone: { user: "user" },
-  knowledgeUploads: { one: "user" },
-  knowledgeReader: { admin: "admin", reader: "user" },
-  knowledgeCreate: { admin: "admin", member: "user" },
-  knowledgePurge: { admin: "admin", member: "user" },
-  knowledgeSkills: { admin: "admin", member: "user" },
   workflowMap: { admin: "admin", reader: "user" },
   boardPage: { admin: "admin" },
   intake: { admin: "admin" },
@@ -396,9 +606,7 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
-  brainChanges: { member: "user" },
-  brainTranscript: { member: "user" },
-  brainMemoryShare: { admin: "admin", one: "user", two: "user" },
+  brainMeaning: { member: "user" },
   brainQuestions: { admin: "admin", member: "user" },
   boardGoals: { admin: "admin", member: "user" },
   setupVoice: { admin: "admin" },
@@ -701,11 +909,11 @@ export const revokeNewestRelease = async (app: string): Promise<void> => {
   }
   const { core, api } = apiOf({ cookie });
   try {
-    const [newest] = await api.apps.versions.releases(app);
+    const [newest] = await api.apps.releases.list(app);
     if (newest === undefined) {
       throw new Error(`The App ${app} has no release to revoke`);
     }
-    await api.apps.versions.revoke(app, newest.version, {
+    await api.apps.releases.revoke(app, newest.version, {
       reason: "An end-to-end test revokes it",
     });
   } finally {
@@ -734,17 +942,75 @@ export const ordinaryData = async (app: string): Promise<void> => {
 };
 
 /**
- * Writes `files` to the App (null deletes one), commits them and publishes
- * that version.
+ * The App lint's rules test Apps break, for brevity or on purpose (an
+ * attack's page), which a publish checks: named in a disable comment, as
+ * the lint takes one only with its rules, and a builder's own code may.
+ */
+const fixtureRules = [
+  "arrow-body-style",
+  "func-names",
+  "jsx-a11y/prefer-tag-over-role",
+  "no-await-in-loop",
+  "no-eval",
+  "no-extend-native",
+  "no-nested-ternary",
+  "no-new-func",
+  "no-plusplus",
+  "no-promise-executor-return",
+  "no-useless-concat",
+  "no-void",
+  "prefer-template",
+  "promise/avoid-new",
+  "promise/prefer-await-to-callbacks",
+  "promise/prefer-await-to-then",
+  "promise/prefer-catch",
+  "react-hooks/exhaustive-deps",
+  "react/exhaustive-effect-dependencies",
+  "react/set-state-in-effect",
+  "unicorn/consistent-function-scoping",
+  "unicorn/no-await-expression-member",
+  "unicorn/no-useless-undefined",
+  "unicorn/prefer-dom-node-append",
+];
+
+const typeScript = /\.tsx?$/u;
+
+/** `source` with each of its TypeScript files past `fixtureRules`. */
+const pastFixtureRules = (source: TestSource): TestSource => {
+  const { files, definition } = sourceParts(source);
+  const marked = Object.fromEntries(
+    Object.entries(files).map(([path, content]) => [
+      path,
+      content !== null && typeScript.test(path)
+        ? `/* oxlint-disable ${fixtureRules.join(", ")} -- a test's App */\n${content}`
+        : content,
+    ])
+  );
+  return definition === undefined
+    ? marked
+    : changesOf(appOf(definition), marked);
+};
+
+/**
+ * Writes `files` into the App's draft (null deletes one) and publishes it:
+ * live, for the people it is shared with (until then, its builders'
+ * alone).
  */
 export const release = async (
   api: ReturnType<typeof apiOf>["api"],
   app: string,
-  files: TestSource,
-  message: string
+  files: TestSource
+): Promise<{ version: number }> =>
+  await publishApp(api, app, pastFixtureRules(files));
+
+/**
+ * Writes `files` into the App's draft and leaves it unpublished: only its
+ * builders see it.
+ */
+export const drafted = async (
+  api: ReturnType<typeof apiOf>["api"],
+  app: string,
+  files: TestSource
 ): Promise<void> => {
-  const { version } = await commitApp(api.apps.files, app, files, message);
-  // Live, for the people it is shared with (until then, its
-  // builders' alone).
-  await api.apps.versions.publish(app, version);
+  await writeApp(api, app, files);
 };

@@ -3,7 +3,6 @@ import { Trans } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
 import {
-  askedAgain,
   requestNextRun,
   reviewedVersionText,
   noVersion,
@@ -40,7 +39,6 @@ export const RequestDetails = ({
 }) => {
   const nextRun = requestNextRun(request);
   const version = reviewedVersionText(request, directory);
-  const again = askedAgain(request, directory);
   const requester = personName(directory, request.requestedBy);
   const date = formatTime(request.requestedAt);
   return (
@@ -69,11 +67,6 @@ export const RequestDetails = ({
       {request.requestedVia === null ? null : (
         <Text size="sm" tone="muted">
           <Trans>asked for by the agent, in their chat</Trans>
-        </Text>
-      )}
-      {again === undefined ? null : (
-        <Text size="sm" tone="muted">
-          {again}
         </Text>
       )}
     </div>

@@ -7,25 +7,17 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { publishVersion } from "../src/app-publish.ts";
-import { findApp } from "../src/apps.ts";
+import { appKind } from "../src/apps.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { reviewDraft } from "../src/version-review.ts";
+import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { appCallKey } from "../src/workflows/app-calls.ts";
 import type { CallingRun } from "../src/workflows/resource-authority.ts";
 import { makeCall } from "../src/workflows/resource-calls.ts";
-import {
-  appOf,
-  commitApp,
-  testApp,
-  withFiles,
-  withSensitive,
-} from "./app-definitions.ts";
+import { appOf, testApp, withFiles, withSensitive } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
-import { commitDefined, racingDb, requestGranted } from "./apps.ts";
+import { commitApp, racingDb, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { holdingBuilds } from "./build-holds.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, refusal, signedInApi, unique } from "./sign-in.ts";
 
@@ -119,30 +111,29 @@ const redefined = async (
 type Builder = Awaited<ReturnType<typeof signedInApi>>;
 
 /**
- * Commits `app` over App `id` and makes it current: the App it answers,
- * or what refused it.
+ * Commits `app` over App `id` and makes it current: the version it
+ * answers, or what refused it.
  */
 const published = async (
   builder: Builder,
   id: string,
-  app: TestApp,
-  /** Who makes it current: the builder, or an admin. */
-  by: Builder = builder
+  app: TestApp
 ): Promise<unknown> => {
-  const { version } = await commitApp(builder.api.apps.files, id, app, "Next");
-  return await by.api.apps.versions.publish(id, version).then(
-    (current) => current,
-    (error: unknown) => error
-  );
+  try {
+    const { version } = await commitApp(builder.api, id, app);
+    return await builder.api.versions.rollback({ kind: "app", id }, version);
+  } catch (error) {
+    return error;
+  }
 };
 
 /** A builder's App of `app`, current, and an independent workflow of theirs. */
 const setUp = async (app: TestApp = notes()) => {
   const builder = await signedInApi(idp, "builder");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  await expect(published(builder, id, app)).resolves.toStrictEqual(
-    expect.objectContaining({ id })
-  );
+  await expect(published(builder, id, app)).resolves.toMatchObject({
+    subject: { kind: "app", id },
+  });
   const workflow = await createWorkflowResource(
     env,
     { userId: builder.userId, role: "builder", teams: [], staff: false },
@@ -229,9 +220,9 @@ describe("a workflow calling an App's functions", () => {
     const source = notes();
     const { builder, app, workflow } = await setUp(source);
     const other = await builder.api.apps.create({ name: "Other notes" });
-    await expect(published(builder, other.id, source)).resolves.toStrictEqual(
-      expect.objectContaining({ id: other.id })
-    );
+    await expect(published(builder, other.id, source)).resolves.toMatchObject({
+      subject: { kind: "app", id: other.id },
+    });
     const create = await idOf(app, "notes.create");
     const titles = await idOf(app, "notes.titles");
     await requestGranted(idp, builder, callRequest(workflow.id, app, create));
@@ -352,11 +343,11 @@ export const create = mutation({
       },
       { op: "renameFunction", function: "notes.create", name: "notes.add" }
     );
-    // Made current by an admin, the grants stand (see "asks again").
+    // Made current, the grants stand: they are of the access.
     const admin = await signedInApi(idp, "admin");
-    await expect(
-      published(builder, app, renamed, admin)
-    ).resolves.toStrictEqual(expect.objectContaining({ id: app }));
+    await expect(published(builder, app, renamed)).resolves.toMatchObject({
+      subject: { kind: "app", id: app },
+    });
     const ids = await idsOf(app);
     expect(ids.get("notes.add")).toBe(create);
     expect(ids.get("notes.create")).not.toBe(create);
@@ -365,10 +356,12 @@ export const create = mutation({
     await called(run, app, create, { title: "Still mine" });
     // Rolled back past the rename, the ID is `create` at its old path
     // again: the function it always was.
-    const rolledBack = await admin.api.apps.versions.publish(app, 1).then(
-      ({ currentVersion }) => currentVersion,
-      (error: unknown) => error
-    );
+    const rolledBack = await admin.api.versions
+      .rollback({ kind: "app", id: app }, 1)
+      .then(
+        ({ version }) => version,
+        (error: unknown) => error
+      );
     await called(run, app, create, { title: "Mine again" });
 
     expect({
@@ -446,9 +439,9 @@ import { query } from "@server/_generated/server";
         ),
     });
     const { builder, app, workflow } = await setUp(bare);
-    await expect(published(builder, app, second)).resolves.toStrictEqual(
-      expect.objectContaining({ currentVersion: 2 })
-    );
+    await expect(published(builder, app, second)).resolves.toMatchObject({
+      version: 2,
+    });
     const create = await idOf(app, "notes.create");
     const grant = await requestGranted(
       idp,
@@ -473,7 +466,9 @@ import { query } from "@server/_generated/server";
         "args: { title: v.string().min(1).max(200), due: v.string() },"
       )
     );
-    const rollback = await refusal(builder.api.apps.versions.publish(app, 1));
+    const rolledBackTo = await refusal(
+      builder.api.versions.rollback({ kind: "app", id: app }, 1)
+    );
 
     // A new optional argument serves every call the workflow makes.
     const optional = await published(
@@ -488,7 +483,7 @@ import { query } from "@server/_generated/server";
     await admin.api.permissions.revoke(grant);
     const unbound = await published(builder, app, removed);
 
-    expect({ removal, required, rollback }).toMatchObject({
+    expect({ removal, required, rolledBackTo }).toMatchObject({
       removal: {
         code: "version.functions_in_use",
         details: {
@@ -503,11 +498,11 @@ import { query } from "@server/_generated/server";
           issues: [expect.stringContaining("no longer takes the arguments")],
         },
       },
-      rollback: { code: "version.functions_in_use" },
+      rolledBackTo: { code: "version.functions_in_use" },
     });
     expect({ optional, unbound }).toMatchObject({
-      optional: { id: app, currentVersion: 5 },
-      unbound: { id: app, currentVersion: 6 },
+      optional: { subject: { kind: "app", id: app }, version: 5 },
+      unbound: { subject: { kind: "app", id: app }, version: 6 },
     });
   });
 
@@ -524,9 +519,9 @@ import { query } from "@server/_generated/server";
     const removed = withFiles(source, {
       "server/notes.ts": notesCode("write"),
     });
-    await expect(published(builder, app, removed)).resolves.toStrictEqual(
-      expect.objectContaining({ id: app })
-    );
+    await expect(published(builder, app, removed)).resolves.toMatchObject({
+      subject: { kind: "app", id: app },
+    });
     const ids = await idsOf(app);
     expect([...ids.values()]).not.toContain(create);
     expect(ids.has("notes.write")).toBeTruthy();
@@ -565,7 +560,7 @@ import { query } from "@server/_generated/server";
       { "server/notes.ts": notesCode("add") },
       { op: "renameFunction", function: "notes.create", name: "notes.add" }
     );
-    await published(builder, app, renamed, await signedInApi(idp, "admin"));
+    await published(builder, app, renamed);
 
     const again = await called(run, app, create, { title: "Once" }, key);
 
@@ -628,12 +623,7 @@ export const stamp = action({
       const { id: asked } = await builder.api.permissions.request(
         callRequest(workflow.id, app, await idOf(app, "notes.create"))
       );
-      const { version } = await commitApp(
-        builder.api.apps.files,
-        app,
-        nextOf(source),
-        "Next"
-      );
+      const { version } = await commitApp(builder.api, app, nextOf(source));
       const racing = racingDb(
         async () =>
           await env.DB.prepare(
@@ -644,8 +634,9 @@ export const stamp = action({
         /update "apps" set "current_version"/u
       );
       const refused = await refusal(
-        publishVersion(
+        rollback(
           { ...env, DB: racing },
+          appKind,
           await builder.api.whoami(),
           app,
           version
@@ -737,7 +728,7 @@ export const stamp = action({
     const source = notes();
     const { builder, app } = await setUp(source);
     const commitOf = async (next: TestApp) =>
-      await commitApp(builder.api.apps.files, app, next, "Next").then(
+      await commitApp(builder.api, app, next).then(
         () => "ok",
         (error: unknown) => error
       );
@@ -800,7 +791,7 @@ export const list = query({
     };
     expect({ swapped, away, onto }).toMatchObject({
       swapped: taken,
-      away: { code: "app.nothing_to_commit" },
+      away: { code: "draft.empty" },
       onto: taken,
     });
   });
@@ -937,63 +928,7 @@ export const fail = mutation({
     });
   });
 
-  it("seals no version that left a new function without an ID, and gives it one on the next commit", async () => {
-    const source = notes();
-    const { builder, app } = await setUp(source);
-    const by = await builder.api.whoami();
-    const held = Promise.withResolvers<boolean>();
-    // Its build doesn't answer within the build wait: the commit stands,
-    // `archive` without an ID.
-    const added = withFiles(source, {
-      "server/archive.ts": `import { v } from "@grasp-os/sdk";
-import { mutation } from "@server/_generated/server";
-
-export const archive = mutation({ args: {}, returns: v.null(), handler: async () => null });
-`,
-    });
-    const { version } = await commitDefined(
-      {
-        ...env,
-        FILES: holdingBuilds(env.FILES, held.promise),
-        BUILD_WAIT_MS: "50",
-      },
-      by,
-      app,
-      added,
-      "Archive"
-    );
-    held.resolve(true);
-    const before = await idsOf(app);
-    const sealed = await builder.api.apps.versions.publish(app, version).then(
-      () => "ok",
-      (error: unknown) => error
-    );
-    const again = await published(
-      builder,
-      app,
-      withFiles(added, { "AGENTS.md": "# Notes\n" })
-    );
-    const after = await idsOf(app);
-
-    expect({
-      unnamed: before.has("archive.archive"),
-      sealed,
-      again,
-      named: after.has("archive.archive"),
-    }).toMatchObject({
-      unnamed: false,
-      sealed: {
-        code: "app.definition_invalid",
-        details: {
-          issues: [expect.stringContaining("`archive.archive` has no ID yet")],
-        },
-      },
-      again: { id: app },
-      named: true,
-    });
-  });
-
-  it("asks for a workflow's grant again when someone who can't grant makes another version current, as for the App's own", async () => {
+  it("keeps a workflow's grant whoever makes another version current, and refuses a version taking its function away", async () => {
     const source = notes();
     const { builder, app, workflow } = await setUp(source);
     const create = await idOf(app, "notes.create");
@@ -1008,56 +943,27 @@ export const archive = mutation({ args: {}, returns: v.null(), handler: async ()
       const listed = await admin.api.permissions.list();
       return listed.find(({ id }) => id === grant)?.status;
     };
-    const withAgents = (agents: string) =>
-      withFiles(source, { "AGENTS.md": agents });
 
-    // An admin makes a new version current: the grant stands.
-    await published(builder, app, withAgents("# One\n"), admin);
-    const byAdmin = {
+    // A builder who can't grant publishes another version: the grant
+    // stands, as an admin gave it for the access, not a version.
+    await published(
+      builder,
+      app,
+      withFiles(source, { "AGENTS.md": "# Two\n" })
+    );
+    const kept = {
       status: await statusOf(),
       call: await outcome(called(run, app, create, { title: "a" })),
     };
-    // The builder's review of a draft of the next version says so; then
-    // the builder makes it current: it is asked for again, and the call refused
-    // until an admin grants it over that version.
-    const { version: two } = await commitApp(
-      builder.api.apps.files,
-      app,
-      withAgents("# Two\n"),
-      "Two"
-    );
-    const review = await reviewDraft(
-      env,
-      { userId: builder.userId, role: "builder", teams: [], staff: false },
-      await findApp(env, app),
-      { base: two, changes: {}, definition: null, revision: 0 }
-    );
-    const reviewed = review.callers.find(
-      ({ permission }) => permission.id === grant
-    )?.askedAgain;
-    await builder.api.apps.versions.publish(app, two);
-    const byBuilder = {
-      status: await statusOf(),
-      call: await outcome(called(run, app, create, { title: "b" })),
-    };
-    const { currentVersion } = await admin.api.apps.get(app);
-    await admin.api.permissions.grant(grant, { version: currentVersion });
-    const regranted = await outcome(called(run, app, create, { title: "c" }));
-
-    // Asked for again, it still binds the workflow: a builder's version
-    // taking `create` away is refused.
-    await published(builder, app, withAgents("# Three\n"));
+    // A version taking `create` away is refused: it binds the workflow.
     const removal = await published(
       builder,
       app,
       withFiles(source, { "server/notes.ts": notesCode("write") })
     );
 
-    expect({ reviewed, byAdmin, byBuilder, regranted, removal }).toMatchObject({
-      reviewed: true,
-      byAdmin: { status: "active", call: "ok" },
-      byBuilder: { status: "requested", call: "workflow.call_denied" },
-      regranted: "ok",
+    expect({ kept, removal }).toMatchObject({
+      kept: { status: "active", call: "ok" },
       removal: { code: "version.functions_in_use" },
     });
   });

@@ -11,11 +11,8 @@ import { z } from "zod";
 import { appFor } from "../src/apps.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-  shareWorkflowResource,
-} from "../src/workflow-resources.ts";
+import { shareWorkflowResource } from "../src/workflow-members.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import type { StartInvoker } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
@@ -33,6 +30,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Downloading a run's finished files from its run sheet (GRA-1306), from
 // its threat model (workflows/run-file-downloads.ts): through core's own route only, for the run's person
@@ -83,10 +81,7 @@ const filesWorkflow = async (builder: Member) => {
     builder.identity,
     `files-${unique()}`
   );
-  await publishWorkflowVersion(env, builder.identity, workflow.id, {
-    definition,
-    basedOn: null,
-  });
+  await publishDefinition(env, builder.identity, workflow.id, definition);
   return workflow.id;
 };
 
@@ -115,7 +110,7 @@ const ranOnce = async (
     env,
     invoker ?? { type: "person", person: by.identity },
     id,
-    { version: 1, args: { doc: { id: handed.id } }, key: unique() },
+    { expected: 1, args: { doc: { id: handed.id } }, key: unique() },
     undefined,
     undefined,
     undefined,

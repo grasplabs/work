@@ -7,7 +7,6 @@ import {
 import type {
   BoundWorkflow,
   WorkflowMutationName,
-  WorkflowPin,
 } from "@grasp-os/runtime/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { AuditEntry } from "@grasp-os/shared/audit";
@@ -44,7 +43,7 @@ import { z } from "zod";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { appStartFiles } from "./app-start-files.ts";
-import { bindingPinnedSql, startAppBinding } from "./app-workflow-bindings.ts";
+import { bindingNamesSql, startAppBinding } from "./app-workflow-bindings.ts";
 import { usableApp } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import {
@@ -106,18 +105,20 @@ import { runWaits, withRespond } from "./workflows/run-waits.ts";
 //   workflow that release declares under the alias it names
 //   (`function.not_found` otherwise), its arguments checked by the
 //   descriptors generated from that declaration. Only an alias the seal
-//   pinned to a workflow version has anything to start or read. As with
+//   binds to a workflow has anything to start or read. As with
 //   the App's own functions, a page of an older release open across a
 //   publish is answered by the current one's contract: it never names its
 //   own, so nothing is refused as stale, and
 //   the page's types may lag until it loads the new release.
-// - A rebind since the seal running a version the reference's contract
+// - A rebind since the seal running a workflow the reference's contract
 //   wasn't made for: a start requires, in its admitting statement, that the
-//   App's active binding still names exactly the pinned version; a run is
-//   seen only while it does.
+//   App's active binding still names the sealed workflow, whose live
+//   version it starts; a run is seen only while it does. A version whose
+//   contract differs from what an App binding it declares never goes live
+//   (workflow-publish.ts).
 // - Another person's run, or another App's: a run is seen only when its
 //   start receipt says this App started it for the caller, and it acts for
-//   them, of exactly the pinned version, started by an App version that
+//   them, of the sealed workflow, started by an App version that
 //   declared the same contract; anything else, one that doesn't exist
 //   included, is `workflow.run_unavailable`, which the `run` query answers
 //   as null. No App role, owner or admin sees past that.
@@ -227,8 +228,8 @@ interface Asking {
 export interface Resolved {
   readonly alias: string;
   readonly declared: BoundWorkflow;
-  /** The workflow version the seal pinned the alias to, if any. */
-  readonly pinned: WorkflowPin | undefined;
+  /** The workflow the seal binds the alias to, if any. */
+  readonly workflowId: string | undefined;
   readonly fingerprint: string;
 }
 
@@ -284,7 +285,7 @@ export const resolvedIn = async (
   if (found === undefined) {
     throw functionErrors.create("function.not_found");
   }
-  return { alias, ...found, pinned: found.declared.pinned };
+  return { alias, ...found, workflowId: found.declared.workflowId };
 };
 
 /**
@@ -315,20 +316,24 @@ export const checkedValue = (
   return normalized;
 };
 
-/** The pin of `resolved`: refused when the seal pinned nothing. */
-export const pinOf = (resolved: Resolved): WorkflowPin => {
-  if (resolved.pinned === undefined) {
+/** The workflow `resolved` binds: refused when the seal binds none. */
+export const boundWorkflowOf = (resolved: Resolved): string => {
+  if (resolved.workflowId === undefined) {
     throw workflowResourceErrors.create("workflow.app_binding_unavailable");
   }
-  return resolved.pinned;
+  return resolved.workflowId;
 };
 
 /**
- * That the asking person may start `pin` through the App's binding of
+ * That the asking person may start workflow `workflowId` through the App's binding of
  * `alias` now, as SQL: an App's start's own rule, and the binding in force.
  */
-const mayStartSql = (asking: Asking, alias: string, pin: WorkflowPin): SQL => {
-  const workflow = workflowResourceIdSchema.safeParse(pin.workflowId);
+const mayStartSql = (
+  asking: Asking,
+  alias: string,
+  workflowId: string
+): SQL => {
+  const workflow = workflowResourceIdSchema.safeParse(workflowId);
   if (!workflow.success) {
     return sql`0`;
   }
@@ -337,16 +342,16 @@ const mayStartSql = (asking: Asking, alias: string, pin: WorkflowPin): SQL => {
     asking.version,
     asking.by.userId,
     workflow.data
-  )} AND ${bindingPinnedSql(asking.app, alias, pin)})`;
+  )} AND ${bindingNamesSql(asking.app, alias, workflowId)})`;
 };
 
 /**
- * That the asking person may send events to their runs of `pin` through
+ * That the asking person may send events to their runs of `workflowId` through
  * the App's binding of `alias` now, as SQL: the App's `send` grant, by
  * `mayStartSql`'s rule otherwise.
  */
-const maySendSql = (asking: Asking, alias: string, pin: WorkflowPin): SQL => {
-  const workflow = workflowResourceIdSchema.safeParse(pin.workflowId);
+const maySendSql = (asking: Asking, alias: string, workflowId: string): SQL => {
+  const workflow = workflowResourceIdSchema.safeParse(workflowId);
   if (!workflow.success) {
     return sql`0`;
   }
@@ -355,7 +360,7 @@ const maySendSql = (asking: Asking, alias: string, pin: WorkflowPin): SQL => {
     asking.version,
     asking.by.userId,
     workflow.data
-  )} AND ${bindingPinnedSql(asking.app, alias, pin)})`;
+  )} AND ${bindingNamesSql(asking.app, alias, workflowId)})`;
 };
 
 /** Whether `condition` holds now. */
@@ -413,7 +418,8 @@ const askedNowSql = (env: Env, asking: Asking, appRestricted: boolean): SQL => {
 
 /**
  * Run `runId`, if the asking App started it for the asking person and it
- * acts for them, of exactly `pin`, while the App's binding names `pin`:
+ * acts for them, of workflow `workflowId`, whichever version it runs, while
+ * the App's binding names that workflow:
  * `workflow.run_unavailable` for any other, one that doesn't exist alike.
  * With `watching`, for a snapshot alone, also a run of the App's that one
  * of its decisions asks the person to answer now (`askedNowSql`): never
@@ -423,7 +429,7 @@ const seenRun = async (
   env: Env,
   asking: Asking,
   alias: string,
-  pin: WorkflowPin,
+  workflowId: string,
   runId: string,
   watching?: { readonly appRestricted: boolean }
 ): Promise<SeenRun> => {
@@ -449,9 +455,8 @@ const seenRun = async (
         watching === undefined
           ? own
           : or(own, askedNowSql(env, asking, watching.appRestricted)),
-        eq(workflowResourceRuns.workflowResourceId, pin.workflowId),
-        eq(workflowResourceRuns.version, pin.version),
-        bindingPinnedSql(asking.app, alias, pin)
+        eq(workflowResourceRuns.workflowResourceId, workflowId),
+        bindingNamesSql(asking.app, alias, workflowId)
       )
     )
     .get();
@@ -783,7 +788,10 @@ const snapshotWaits = async (
     own &&
     !isEnded(row.status) &&
     !(appRestricted && !row.restricted) &&
-    (await holds(env, maySendSql(asking, resolved.alias, pinOf(resolved))));
+    (await holds(
+      env,
+      maySendSql(asking, resolved.alias, boundWorkflowOf(resolved))
+    ));
   const waits = await withRespond(
     env,
     row.id,
@@ -884,9 +892,9 @@ const runSnapshot = async (
   resolved: Resolved,
   runId: string
 ): Promise<Json> => {
-  const pin = pinOf(resolved);
+  const workflowId = boundWorkflowOf(resolved);
   const appRestricted = await appHost(env, asking.app).isRestricted();
-  const seen = await seenRun(env, asking, resolved.alias, pin, runId, {
+  const seen = await seenRun(env, asking, resolved.alias, workflowId, runId, {
     appRestricted,
   });
   await requireSameContract(env, asking, resolved, seen.originAppVersion);
@@ -903,7 +911,10 @@ const runSnapshot = async (
   if (row.principalId !== asking.by.userId) {
     return watchedSnapshot(row, waits, pending);
   }
-  const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
+  const mayStart = await holds(
+    env,
+    mayStartSql(asking, resolved.alias, workflowId)
+  );
   const returned =
     row.status === "completed" ||
     row.status === "failed" ||
@@ -948,15 +959,15 @@ const started = async (
   args: Json,
   key: string
 ): Promise<Json> => {
-  const pin = pinOf(resolved);
+  const workflowId = boundWorkflowOf(resolved);
   const start = await startAppBinding(
     env,
     authorityOf(asking),
     resolved.alias,
     { args, key: coreStartKey("page", key) },
     undefined,
-    // The binding still names the version the release's seal pinned.
-    bindingPinnedSql(asking.app, resolved.alias, pin),
+    // The binding still names the workflow the release's seal binds.
+    bindingNamesSql(asking.app, resolved.alias, workflowId),
     undefined,
     null,
     // The App's files the person may read now, which its run gets copies of.
@@ -1393,16 +1404,16 @@ const controlled = async (
   resolved: Resolved,
   command: Control
 ): Promise<Json> => {
-  const pin = pinOf(resolved);
+  const workflowId = boundWorkflowOf(resolved);
   const { row } = await seenRun(
     env,
     asking,
     resolved.alias,
-    pin,
+    workflowId,
     command.runId
   );
   const { kind } = command;
-  const may = mayStartSql(asking, resolved.alias, pin);
+  const may = mayStartSql(asking, resolved.alias, workflowId);
   let receipt: ResourceControlRow | undefined;
   // A cancel that lost its write to a control admitted at once is decided
   // again, once, against the run as it is then: a cancel always wins.
@@ -1481,7 +1492,7 @@ const sent = async (
     readonly key: string;
   }
 ): Promise<Json> => {
-  const pin = pinOf(resolved);
+  const workflowId = boundWorkflowOf(resolved);
   const alias = send.event;
   const declared = Object.hasOwn(resolved.declared.events, alias)
     ? resolved.declared.events[alias]
@@ -1490,9 +1501,15 @@ const sent = async (
     throw functionErrors.create("contract.invalid_args");
   }
   const { type } = declared;
-  const { row } = await seenRun(env, asking, resolved.alias, pin, send.runId);
+  const { row } = await seenRun(
+    env,
+    asking,
+    resolved.alias,
+    workflowId,
+    send.runId
+  );
   const delivery = {
-    workflowId: pin.workflowId,
+    workflowId,
     runId: row.id,
     binding: alias,
     type,
@@ -1510,8 +1527,9 @@ const sent = async (
   const db = drizzle(env.DB);
   /** What a send names of the run, the workflow and the event, audited. */
   const detail = {
-    workflow: pin.workflowId,
-    version: pin.version,
+    workflow: workflowId,
+    // The run's own: a binding follows the live version, a run keeps its.
+    version: row.version,
     binding: alias,
     type,
     app: asking.app,
@@ -1520,7 +1538,7 @@ const sent = async (
   };
   let admitted: AdmittedEvent;
   try {
-    if (!(await holds(env, maySendSql(asking, resolved.alias, pin)))) {
+    if (!(await holds(env, maySendSql(asking, resolved.alias, workflowId)))) {
       admitted = await refuse(
         workflowResourceErrors.create("workflow.event_denied")
       );
@@ -1769,7 +1787,7 @@ export const readRun = async (
 /**
  * Whether `caller` may start a run of `alias` through the App's binding
  * now, for the reference's `canStart` query: an App's start's own rule,
- * and the binding in force naming the version the seal pinned.
+ * and the binding in force naming the workflow the seal binds.
  */
 export const mayStartNow = async (
   env: Env,
@@ -1777,9 +1795,12 @@ export const mayStartNow = async (
   release: Release,
   alias: string
 ): Promise<boolean> => {
-  const { pinned } = await resolvedIn(release, alias);
+  const { workflowId } = await resolvedIn(release, alias);
   return (
-    pinned !== undefined &&
-    (await holds(env, mayStartSql(askingFor(caller, release), alias, pinned)))
+    workflowId !== undefined &&
+    (await holds(
+      env,
+      mayStartSql(askingFor(caller, release), alias, workflowId)
+    ))
   );
 };

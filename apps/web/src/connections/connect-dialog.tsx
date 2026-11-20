@@ -1,6 +1,7 @@
 import {
   canSignInAgain,
   composioConsentText,
+  composioKeyConsentText,
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
 import type {
@@ -8,6 +9,7 @@ import type {
   ConnectionScope,
   ListedConnection,
   OAuthProvider,
+  ToolkitKeyField,
 } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -36,6 +38,7 @@ import {
   FieldLabel,
 } from "../grasp/field/index.ts";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { Input } from "../grasp/input/index.ts";
 import {
   Item,
   ItemContent,
@@ -238,7 +241,8 @@ const Starting = ({
 }: {
   app: string;
   disabled: boolean;
-  onRetry: () => void;
+  /** Trying again; none offered without it. */
+  onRetry: (() => void) | undefined;
 }) => {
   const [long, setLong] = useState(false);
   useEffect(() => {
@@ -256,7 +260,7 @@ const Starting = ({
         <Spinner aria-hidden />
         {t`Waiting for ${app}`}
       </output>
-      {long ? (
+      {long && onRetry !== undefined ? (
         <div {...stylex.props(styles.actions)}>
           <Text element="span" size="sm" tone="muted">
             {t`Taking long?`}
@@ -284,6 +288,7 @@ const Actions = ({
   attempt,
   busy,
   disabled = false,
+  retries = true,
   onClose,
   onStart,
   children,
@@ -294,6 +299,12 @@ const Actions = ({
   attempt: number;
   busy: boolean;
   disabled?: boolean;
+  /**
+   * Whether a start that takes long may be tried again meanwhile. Not
+   * where each start makes something of its own, which the first, still
+   * under way, would make too.
+   */
+  retries?: boolean;
   onClose: () => void;
   onStart: () => void;
   children: ButtonWords;
@@ -308,7 +319,11 @@ const Actions = ({
       key={`starting-${attempt}`}
       {...stylex.props(arrive.in)}
     >
-      <Starting app={app} disabled={disabled} onRetry={onStart} />
+      <Starting
+        app={app}
+        disabled={disabled}
+        onRetry={retries ? onStart : undefined}
+      />
     </div>
   ) : (
     <div
@@ -511,8 +526,155 @@ const NativeFlow = ({
 };
 
 /**
+ * What an admin types to connect a toolkit with a key, as Composio
+ * describes each field: a secret one as a password, never filled back in.
+ * The values stay in this form until they go to core, and the form never
+ * submits by itself, so they never reach an address or the history.
+ */
+const KeyFields = ({
+  fields,
+  values,
+  disabled,
+  onChange,
+}: {
+  fields: readonly ToolkitKeyField[];
+  values: Readonly<Record<string, string>>;
+  disabled: boolean;
+  onChange: (name: string, value: string) => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <form
+      method="post"
+      onSubmit={(event) => {
+        event.preventDefault();
+      }}
+      {...stylex.props(styles.part)}
+    >
+      {fields.map(({ name, label, description, required, secret }) => (
+        <Field key={name}>
+          <FieldLabel>{required ? label : t`${label} (optional)`}</FieldLabel>
+          <Input
+            autoComplete="off"
+            disabled={disabled}
+            onValueChange={(value) => {
+              onChange(name, value);
+            }}
+            required={required}
+            secret={secret}
+            spellCheck={false}
+            type={secret ? "password" : "text"}
+            value={values[name] ?? ""}
+          />
+          {description === null ? null : (
+            <FieldDescription>{description}</FieldDescription>
+          )}
+        </Field>
+      ))}
+    </form>
+  );
+};
+
+/**
+ * The last step of connecting a toolkit that takes a key: the consent as
+ * written, then the fields Composio asks for, typed in here. Core answers
+ * with the integration's page, which the browser loads afresh, so what was
+ * typed is gone from the page too.
+ */
+const KeyStep = ({
+  integration,
+  allowed,
+  returnTo,
+  onClose,
+}: {
+  integration: Integration;
+  allowed: AllowedTool[];
+  returnTo: string;
+  onClose: () => void;
+}) => {
+  const { attempt, begin, busy, failure } = useSignInStart();
+  const { t, i18n } = useLingui();
+  const core = useCore();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState<Loaded<ToolkitKeyField[]>>();
+  const { id } = integration;
+  useEffect(() => {
+    const left = new AbortController();
+    const read = async (): Promise<void> => {
+      const answer = await loadFromCore(
+        core,
+        async (session) => await session.connections.keyFields(id),
+        left.signal
+      );
+      if (!left.signal.aborted) {
+        setLoaded(answer);
+      }
+    };
+    void read();
+    return () => {
+      left.abort();
+    };
+  }, [core, id]);
+  const fields = loaded?.state === "ready" ? loaded.data : undefined;
+  const filled =
+    fields?.every(
+      ({ name, required }) => !required || (values[name] ?? "") !== ""
+    ) === true;
+  const connect = async (): Promise<void> => {
+    await begin(
+      async (session) =>
+        await session.connections.connectToolkitWithKey({
+          toolkit: id,
+          tools: toolRules(allowed),
+          consent: composioKeyConsentText,
+          values,
+          returnTo,
+        })
+    );
+  };
+  return (
+    <>
+      {/* As the sign-in's consent: core keeps a hash of this exact text. */}
+      <Text size="sm" tone="muted">
+        {composioKeyConsentText}
+      </Text>
+      {loaded === undefined ? <LoadingLines /> : null}
+      {loaded === undefined || loaded.state === "ready" ? null : (
+        <Alert title={notLoadedText(loaded, i18n) ?? ""} tone="danger" />
+      )}
+      {fields === undefined ? null : (
+        <KeyFields
+          disabled={busy}
+          fields={fields}
+          onChange={(name, value) => {
+            setValues((current) => ({ ...current, [name]: value }));
+          }}
+          values={values}
+        />
+      )}
+      <Actions
+        app={integration.name}
+        attempt={attempt}
+        busy={busy}
+        cancel={t`Cancel`}
+        disabled={allowed.length === 0 || !filled}
+        onClose={onClose}
+        onStart={() => {
+          void connect();
+        }}
+        retries={false}
+      >
+        {t`Consent and connect`}
+      </Actions>
+      {failure === undefined ? null : <Alert title={failure} tone="danger" />}
+    </>
+  );
+};
+
+/**
  * Connecting a Composio toolkit, for an admin: the tools to allow and which
- * of them only read, the consent as written, then signing in. A read-only
+ * of them only read, the consent as written, then signing in, or, for one
+ * that takes a key, typing it in here (`KeyStep`). A read-only
  * tool runs without asking; a call of any other is a side effect, which
  * waits for its person to confirm it wherever a person is there (chat, an
  * App they use), and which a workflow's run makes as a step.
@@ -568,7 +730,10 @@ const ComposioFlow = ({
       state: allowed.length === 0 ? "active" : "done",
     },
     {
-      title: t`Consent and sign in`,
+      title:
+        integration.auth === "key"
+          ? t`Consent and enter the key`
+          : t`Consent and sign in`,
       state: allowed.length === 0 ? "idle" : "active",
     },
   ] as const;
@@ -605,26 +770,39 @@ const ComposioFlow = ({
         )}
       </Step>
       <Step state={steps[1].state} title={steps[1].title}>
-        {/* The consent stays as written: core keeps a hash of the exact
-            text consented to (connection-list.tsx shows it again). */}
-        <Text size="sm" tone="muted">
-          {composioConsentText}
-        </Text>
-        <SignInSteps app={app} />
-        <Actions
-          app={app}
-          attempt={attempt}
-          busy={busy}
-          cancel={t`Cancel`}
-          disabled={allowed.length === 0}
-          onClose={onClose}
-          onStart={() => {
-            void connect();
-          }}
-        >
-          {t`Consent and connect`}
-        </Actions>
-        {failure === undefined ? null : <Alert title={failure} tone="danger" />}
+        {integration.auth === "key" ? (
+          <KeyStep
+            allowed={allowed}
+            integration={integration}
+            onClose={onClose}
+            returnTo={returnTo}
+          />
+        ) : (
+          <>
+            {/* The consent stays as written: core keeps a hash of the exact
+                text consented to (connection-list.tsx shows it again). */}
+            <Text size="sm" tone="muted">
+              {composioConsentText}
+            </Text>
+            <SignInSteps app={app} />
+            <Actions
+              app={app}
+              attempt={attempt}
+              busy={busy}
+              cancel={t`Cancel`}
+              disabled={allowed.length === 0}
+              onClose={onClose}
+              onStart={() => {
+                void connect();
+              }}
+            >
+              {t`Consent and connect`}
+            </Actions>
+            {failure === undefined ? null : (
+              <Alert title={failure} tone="danger" />
+            )}
+          </>
+        )}
       </Step>
     </div>
   );

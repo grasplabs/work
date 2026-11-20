@@ -1123,6 +1123,35 @@ describe("connector events", () => {
     ]);
   });
 
+  it("settle a whole take at once: remove those done, and have each that failed wait", async () => {
+    // A full take, more IDs than one statement of D1's 100 bound
+    // parameters names one by one.
+    const ids = Array.from({ length: 100 }, () => crypto.randomUUID());
+    await env.DB.batch(
+      ids.map((id, at) =>
+        env.DB.prepare(
+          "INSERT INTO connector_events (id, key, connection_id, event, attempts, retry_at, created_at) VALUES (?, ?, 'connection', '{}', 0, 0, 0)"
+        ).bind(id, `settle-${at}`)
+      )
+    );
+    const done = ids.slice(0, 40);
+    const failed = ids.slice(40);
+
+    await exports.default.ackConnectorEvents({ done, failed });
+
+    const { results } = await env.DB.prepare(
+      "SELECT id, attempts, retry_at > 0 AS waits FROM connector_events WHERE id IN (SELECT value FROM json_each(?))"
+    )
+      .bind(JSON.stringify(ids))
+      .all<{ id: string; attempts: number; waits: number }>();
+    expect({
+      left: results.map(({ id }) => id).toSorted(),
+      waiting: results.every(
+        ({ attempts, waits }) => attempts === 1 && waits === 1
+      ),
+    }).toStrictEqual({ left: failed.toSorted(), waiting: true });
+  });
+
   it("drop an event after its last try, and say so in the audit log", async () => {
     const outlook = await connected();
     await sync([listener(outlook)]);

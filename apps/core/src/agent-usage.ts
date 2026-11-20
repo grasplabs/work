@@ -1,10 +1,10 @@
-import type { AgentUsage } from "@grasp-os/shared/agents";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import type { AgentUsage, OwnAgentsUsage } from "@grasp-os/shared/agents";
+import { and, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { listAgents } from "./agent-builder.ts";
 import { firstAgentId } from "./agents.ts";
-import { modelUsage } from "./db/core/schema.ts";
+import { agents, modelUsage } from "./db/core/schema.ts";
 
 // What each of the company's agents used of the organization's models,
 // for admins to read on the Agents pages: what it cost this month and the
@@ -36,7 +36,7 @@ export const agentsUsage = async (
   const before = monthBefore(month);
   // The agent a row counts for: the one it names, else the first.
   const agent = sql<string>`coalesce(${modelUsage.agentId}, ${firstAgentId})`;
-  const [agents, rows] = await Promise.all([
+  const [listed, rows] = await Promise.all([
     listAgents(env),
     drizzle(env.DB)
       .select({
@@ -62,7 +62,7 @@ export const agentsUsage = async (
   ]);
   const of = (agentId: string, period: string) =>
     rows.find((row) => row.agentId === agentId && row.period === period);
-  return agents.map(({ id }) => {
+  return listed.map(({ id }) => {
     const now = of(id, month);
     const earlier = of(id, before);
     const lastAt = now?.lastAt ?? earlier?.lastAt;
@@ -76,4 +76,67 @@ export const agentsUsage = async (
       lastAt: lastAt === undefined ? null : new Date(lastAt).toISOString(),
     };
   });
+};
+
+/**
+ * What each person's own agents used in `month` and the month before, per
+ * person who has any, the most spent this month first: for admins, who
+ * learn how many each has and what they cost, never what they are.
+ */
+export const ownAgentsUsage = async (
+  env: Env,
+  month: string
+): Promise<OwnAgentsUsage[]> => {
+  const before = monthBefore(month);
+  const db = drizzle(env.DB);
+  const [owned, rows] = await Promise.all([
+    db
+      .select({ personId: agents.ownerId, agents: sql<number>`count(*)` })
+      .from(agents)
+      .where(and(isNotNull(agents.ownerId), ne(agents.state, "deleted")))
+      .groupBy(agents.ownerId),
+    db
+      .select({
+        personId: agents.ownerId,
+        period: modelUsage.period,
+        spent: sql<number>`sum(${modelUsage.cost})`,
+        requests: sql<number>`count(*)`,
+      })
+      .from(modelUsage)
+      .innerJoin(agents, eq(agents.id, modelUsage.agentId))
+      .where(
+        and(
+          isNotNull(agents.ownerId),
+          inArray(modelUsage.period, [month, before]),
+          eq(modelUsage.triggerType, "agent"),
+          or(
+            eq(modelUsage.credential, "organization"),
+            eq(modelUsage.feature, "organization")
+          )
+        )
+      )
+      .groupBy(agents.ownerId, modelUsage.period),
+  ]);
+  const of = (personId: string, period: string) =>
+    rows.find((row) => row.personId === personId && row.period === period);
+  return owned
+    .flatMap(({ personId, agents: count }) => {
+      if (personId === null) {
+        return [];
+      }
+      const now = of(personId, month);
+      return [
+        {
+          personId,
+          agents: count,
+          month,
+          spent: now?.spent ?? 0,
+          spentBefore: of(personId, before)?.spent ?? 0,
+          requests: now?.requests ?? 0,
+        },
+      ];
+    })
+    .toSorted(
+      (a, b) => b.spent - a.spent || a.personId.localeCompare(b.personId)
+    );
 };

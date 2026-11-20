@@ -6,19 +6,21 @@ import type {
   ComposerKind,
   ComposerMentionItem,
 } from "../grasp/composer/index.ts";
-import { AppWindow, Person, Workflow } from "../grasp/icons/index.ts";
+import { Agent, AppWindow, Person, Workflow } from "../grasp/icons/index.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
 // What a question can mention, typed after `@` in the box to ask in or
-// picked from its + menu (Grasp UI's Composer): the organization's Apps,
-// workflows and people, each kind with its icon and its hue. A mention is
+// picked from its + menu (Grasp UI's Composer): the agents the person may
+// ask, each of which then answers the question in turn, and the
+// organization's Apps, workflows and people, each kind with its icon and
+// its hue. A mention is
 // a chip in the text, and goes with the question by its ID
 // (`ChatQuestion.mentions`), so core tells the agent exactly which. The
 // commands a question can run (`/`, to come) are a kind of their own.
 
-/** Something a question can mention: an App, a workflow or someone, by ID, with its name. */
+/** Something a question can mention: an agent, an App, a workflow or someone, by ID, with its name. */
 export interface Mentionable {
   kind: ChatMentionKind;
   id: string;
@@ -27,8 +29,8 @@ export interface Mentionable {
 }
 
 /**
- * What can be mentioned, as core lists it for the person: their Apps,
- * workflows and the organization's people (by role, for an admin), read once the
+ * What can be mentioned, as core lists it for the person: the agents
+ * they may ask, their Apps, workflows and the organization's people (by role, for an admin), read once the
  * box is shown; none before. A kind core refused or couldn't read is left
  * out.
  */
@@ -46,7 +48,12 @@ export const useMentionables = (
       };
     }
     const readNow = async (): Promise<void> => {
-      const [apps, workflows, people] = await Promise.all([
+      const [agents, apps, workflows, people] = await Promise.all([
+        loadFromCore(
+          core,
+          async (session) => await session.chats.agents(),
+          left.signal
+        ),
         loadFromCore(
           core,
           async (session) => await session.apps.list(),
@@ -67,6 +74,15 @@ export const useMentionables = (
         return;
       }
       setRead([
+        // The agents they may ask: one mentioned answers the question.
+        ...(agents.state === "ready" ? agents.data : []).map(
+          ({ id, name, job }): Mentionable => ({
+            kind: "agent",
+            id,
+            label: name,
+            ...(job === "" ? {} : { description: job }),
+          })
+        ),
         ...(apps.state === "ready" ? apps.data : []).map(
           ({ id, name }): Mentionable => ({ kind: "app", id, label: name })
         ),
@@ -91,7 +107,7 @@ export const useMentionables = (
   return read;
 };
 
-/** The mentions in the box that go with the question: an App, a workflow or a person, by ID. */
+/** The mentions in the box that go with the question: an agent, an App, a workflow or a person, by ID. */
 export const chatMentionsOf = (
   mentions: readonly Mentionable[]
 ): ChatMention[] => mentions.map(({ kind, id }) => ({ kind, id }));
@@ -112,7 +128,7 @@ export const mentionedIn = (text: string, label: string): boolean => {
   return false;
 };
 
-/** What Grasp UI's Composer needs to mention an App, a workflow or someone. */
+/** What Grasp UI's Composer needs to mention an agent, an App, a workflow or someone. */
 export interface ComposerMentions {
   kinds: ComposerKind[];
   items: ComposerMentionItem[];
@@ -137,6 +153,7 @@ export const useComposerMentions = (
   const { t } = useLingui();
   const mentionables = useMentionables(onMentions !== undefined);
   const kinds: ComposerKind[] = [
+    { value: "agent", label: t`Agents`, icon: Agent },
     { value: "app", label: t`Apps`, icon: AppWindow },
     { value: "workflow", label: t`Workflows`, icon: Workflow },
     { value: "person", label: t`People`, icon: Person },

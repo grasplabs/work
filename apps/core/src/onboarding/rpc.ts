@@ -64,6 +64,7 @@ import { z } from "zod";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
+import { intoMembersTeams, syncTeams } from "../staff-list-teams.ts";
 import {
   inProgramme,
   nextReport,
@@ -83,9 +84,14 @@ import {
   placeItems,
   sharePlaceFile,
 } from "./document-places.ts";
-import { shareDocument } from "./documents.ts";
+import { removeDocument, shareDocument } from "./documents.ts";
 import { gateView, openAsFlowSays } from "./gate.ts";
 import { connectHr, onboardingHr, readOnboardingHr } from "./hr.ts";
+import {
+  eraseOwedClaimsQuietly,
+  eraseOwedKickoffs,
+  eraseOwedRosters,
+} from "./new-brain.ts";
 import { mondayOf } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
 import { summaryOf } from "./summary.ts";
@@ -94,7 +100,8 @@ import { summaryOf } from "./summary.ts";
 // whose access is the admin role) gives the store who works where and the
 // plan, and reads back numbers per team, never anyone's words; and takes
 // everyone's own link, to send themselves as well (the threat model's L3:
-// a link opens on the first device only, whoever holds it). At the end it
+// a link opens only for the account whose address it was sent to, signed
+// in with the company's sign-in, whoever holds it; GRA-1790). At the end it
 // settles the steps people told two ways and nobody could explain, never
 // told who said which. What only Grasp's staff do is a command from
 // Grasp's admin (admin-command.ts). The admin also shares documents,
@@ -179,11 +186,26 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         rosterSchema,
         roster
       );
-      return await onboardingStore(this.#env).saveRoster(
+      const by = actorOf(person);
+      // The list names the members' teams (GRA-2055): each of its teams
+      // keeps one id from the first save that names it (a members' team's,
+      // one the store holds, or a new one core makes); a confirm makes and
+      // names its members' teams under those ids, in order with every other
+      // confirm and rename (`syncTeams`). A confirm changes no membership.
+      const store = onboardingStore(this.#env);
+      const { roster: named, minted } = await intoMembersTeams(
+        this.#env,
         parsed,
-        actorOf(person),
-        { confirmed }
+        { held: async () => await store.heldTeams() }
       );
+      const view = await store.saveRoster(named, by, { confirmed, minted });
+      if (confirmed) {
+        await syncTeams(this.#env, by);
+      }
+      // A team the save took under seven loses its claims in the Brain now,
+      // not only by core's clock (onboarding/new-brain.ts).
+      await eraseOwedClaimsQuietly(this.#env);
+      return view;
     });
   }
 
@@ -349,6 +371,30 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     });
   }
 
+  async deleteKickoff(): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      await onboardingStore(this.#env).deleteKickoff(actorOf(person));
+      // Its source in the new Brain goes now; whatever fails is core's
+      // clock's, and the admin may ask again.
+      if (!(await eraseOwedKickoffs(this.#env))) {
+        throw onboardingErrors.create("onboarding.kickoff_unfinished");
+      }
+    });
+  }
+
+  async eraseTeamsFromBrain(): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      await onboardingStore(this.#env).eraseTeamsFromBrain(actorOf(person));
+      // What the Brain kept goes now; whatever fails is core's clock's, and
+      // the admin may ask again.
+      if (!(await eraseOwedRosters(this.#env))) {
+        throw onboardingErrors.create("onboarding.teams_unfinished");
+      }
+    });
+  }
+
   async choices(): Promise<SetupChoices> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
@@ -428,6 +474,14 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         input
       );
       return await shareDocument(this.#env, person, parsed);
+    });
+  }
+
+  async removeDocument(id: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = documentErrors.parse("document.invalid", z.string(), id);
+      await removeDocument(this.#env, person, parsed);
     });
   }
 

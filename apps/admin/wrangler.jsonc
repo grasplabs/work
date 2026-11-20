@@ -237,7 +237,7 @@
       "vars": {
         "STAGE": "staging",
         // For testing only, and on staging only: Grasp's own speech
-        // (ElevenLabs) and listening and conversion (OpenAI) go to the
+        // (ElevenLabs) and listening (OpenAI) go to the
         // providers' usual hosts, not their EU data residency hosts, so
         // keys of accounts without EU residency can be tried
         // (@grasp-os/shared/ai-providers, `usualHostProviders`). Never set

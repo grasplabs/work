@@ -1,6 +1,7 @@
-import type { AppDraft } from "@grasp-os/shared/app-drafts";
-import type { App, AppMember, ViewedApp } from "@grasp-os/shared/apps";
+import type { App, ViewedApp } from "@grasp-os/shared/apps";
+import type { Draft } from "@grasp-os/shared/drafts";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { SubjectMember } from "@grasp-os/shared/subject-members";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
@@ -8,10 +9,19 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { setActiveChat } from "../chat/active-chat.ts";
-import { answeredAfterBuild } from "../chat/build-answered.ts";
 import { chatLink } from "../chat/chat-link.ts";
-import { slotOf, useChatSubject } from "../chat/chat-subject.ts";
-import { useGlobalChat } from "../chat/global-chat.tsx";
+import { slotOf } from "../chat/chat-subject.ts";
+import { useChatAbout, useGlobalChat } from "../chat/global-chat.tsx";
+import { ConfirmChange, useDraftChange } from "../drafts/draft-history.tsx";
+import type { Asked } from "../drafts/draft-history.tsx";
+import {
+  ShareWithTeam,
+  showsUnpublishedChanges,
+  UnpublishedChanges,
+} from "../drafts/share-with-team.tsx";
+import { memberNames, useMembersRead } from "../drafts/sharing.tsx";
+import { StatusBadge } from "../drafts/status-badge.tsx";
+import { hasChanges, useDraft } from "../drafts/use-draft.ts";
 import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
@@ -46,20 +56,19 @@ import {
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
 import { useVersionPushes } from "../pages/use-version-pushes.ts";
 import { AppDataModel } from "./app-data-model.tsx";
 import { AppData } from "./app-data.tsx";
-import { ConfirmChange, useDraftChange } from "./app-history.tsx";
-import type { Asked } from "./app-history.tsx";
 import { AppLinkDialog } from "./app-own-link.tsx";
+import { sharesApp } from "./app-role.ts";
 import { AppSettings, Read } from "./app-settings.tsx";
 import type { AppSettingsSection } from "./app-settings.tsx";
-import { readMembers, sharesApp } from "./app-sharing.tsx";
 import { AppStart } from "./app-start.tsx";
-import { StatusBadge, useStatusMove, userNames } from "./app-status.tsx";
+import { useStatusMove } from "./app-status.tsx";
 import { DraftPreview } from "./draft-preview.tsx";
 import { fixQuestion } from "./fix-with-grasp.ts";
 import { dismissMadeTip, showsMadeTip } from "./made-tip.ts";
@@ -72,8 +81,6 @@ import type {
   PreviewControlsProps,
   PreviewWidth,
 } from "./preview-controls.tsx";
-import { ChangesLine, ShareAndPublish, showsChangesLine } from "./publish.tsx";
-import { hasChanges, useAppDraft } from "./use-app-draft.ts";
 import { readTables, useAppRead } from "./use-app-read.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
@@ -88,9 +95,9 @@ const AppCode = lazy(async () => {
 // App's (frame/item-shell.tsx): back to the Apps, its name and where it
 // stands in plain words ("Only you see this", or who uses it), the
 // preview's own controls, "…", Share, and Publish, the page's one main
-// action (publish.tsx). What the main area shows (the App, Code,
-// Data, Settings' sections) are rows of the sidebar's section, the App's
-// while its workspace is open (app-section.tsx). The main area
+// action (drafts/share-with-team.tsx). What the main area shows (the
+// App, Code, Data, Settings' sections) are rows of the sidebar's section,
+// the App's while its workspace is open (app-section.tsx). The main area
 // always shows the App: an App with no page yet asks what it should do
 // (app-start.tsx), and one just made says what to do next, once
 // (made-tip.ts).
@@ -112,11 +119,12 @@ const AppCode = lazy(async () => {
 // Publishing is what gives the team the changes, and sharing is who the
 // team is: Share asks who gets the App, Publish says where it stands and
 // makes the changes live; once shared and live, a line under the bar says
-// how many changes only its builders see, with Undo (publish.tsx). The
+// how many changes only its builders see, with Undo
+// (drafts/share-with-team.tsx). The
 // chat's agent never publishes or shares.
 // History, in Settings, steps the changes back and goes back to an
-// earlier version (app-history.tsx); its Preview opens an undo point or a
-// version here, read-only (`?point=`, `?version=`).
+// earlier version (drafts/draft-history.tsx); its Preview opens a
+// checkpoint or a version here, read-only (`?point=`, `?version=`).
 
 /** What the main area shows. */
 export type WorkspaceView = "preview" | "code" | "data" | "settings";
@@ -124,7 +132,7 @@ export type WorkspaceView = "preview" | "code" | "data" | "settings";
 /** What Preview, Code and Data show: the builders' version, or what the team sees. */
 export type WorkspaceEnv = "draft" | "live";
 
-/** An undo point of the draft, or a version, the preview shows read-only. */
+/** A checkpoint of the draft, or a version, the preview shows read-only. */
 export type ReadOnlyShown = { point: number } | { version: number };
 
 /** What the preview shows, as a key: another starts it afresh. */
@@ -134,6 +142,12 @@ const shownKey = (shown: ReadOnlyShown | undefined): string => {
   }
   return "point" in shown ? `point:${shown.point}` : `version:${shown.version}`;
 };
+
+// What comes over the preview comes in softly.
+const fadeIn = stylex.keyframes({
+  from: { opacity: 0 },
+  to: { opacity: 1 },
+});
 
 const styles = stylex.create({
   // A state in place of the preview, on the page's soft ground.
@@ -203,6 +217,19 @@ const styles = stylex.create({
   },
   unseen: { opacity: 0 },
   strip: { flexShrink: 0 },
+  // Over the preview's bottom corner, fading in: nothing under the
+  // person's pointer moves for it.
+  corner: {
+    position: "absolute",
+    insetInlineEnd: grasp.space3,
+    insetBlockEnd: grasp.space3,
+    maxWidth: grasp.toastWidth,
+    animationName: { default: fadeIn, [media.reduced]: "none" },
+    animationDuration: grasp.durationUi,
+    animationTimingFunction: grasp.ease,
+  },
+  // An alert's action, under its words.
+  below: { display: "flex", marginBlockStart: grasp.space2 },
   // A preview drawn narrower than its room, in the middle of it.
   drawn: { width: "100%", marginInline: "auto" },
   padded: { padding: grasp.space4 },
@@ -298,6 +325,7 @@ const WorkspaceBar = ({
   draft,
   members,
   running = false,
+  pending = false,
   settingUp = false,
   chatId,
   onShared,
@@ -310,11 +338,13 @@ const WorkspaceBar = ({
   preview?: PreviewControlsProps | undefined;
   identity: Pick<Identity, "staff">;
   /** The App's changes, as read last; none while they are read, or archived. */
-  draft: AppDraft | undefined;
+  draft: Draft | undefined;
   /** Whom it is shared with; none while they are read. */
-  members: readonly AppMember[] | undefined;
+  members: readonly SubjectMember[] | undefined;
   /** Whether the chat's agent is at work on it, or checking it. */
   running?: boolean;
+  /** Whether it is shared and has changes only its builders see. */
+  pending?: boolean;
   /** Whether Grasp sets up a new App still (`SetUp`): its name alone, and Share off. */
   settingUp?: boolean;
   /** The App's chat; none while it is found, or for an archived App. */
@@ -343,11 +373,18 @@ const WorkspaceBar = ({
             linked={!shares}
           />
           {shares ? (
-            <ShareAndPublish
+            <ShareWithTeam
               app={app}
               draft={draft}
               members={members ?? []}
+              pending={pending}
               running={running}
+              shared={{
+                subject: { kind: "app", id: app.id },
+                name: app.name,
+                owner: app.owner,
+                live: app.currentVersion,
+              }}
               {...(onShared === undefined ? {} : { onShared })}
             />
           ) : null}
@@ -357,7 +394,11 @@ const WorkspaceBar = ({
       name={app.name}
       state={
         members === undefined && !archived ? undefined : (
-          <StatusBadge app={app} who={userNames(members ?? [])} />
+          <StatusBadge
+            archived={archived}
+            live={app.currentVersion}
+            who={memberNames(members ?? [])}
+          />
         )
       }
     />
@@ -394,37 +435,41 @@ const PreviewState = ({
  * Over the preview, once a call of it was refused as its test data
  * doesn't fit the draft's data model: core applies the change to the
  * test data only once it is reset (core's sealed-previews.ts), in Data.
+ * Over its bottom corner, never in a row above it: it comes with a call
+ * the person made, or a write of Grasp's, and goes at the draft's next
+ * write, so a row would move the page under their pointer each time; a
+ * corner leaves the rest of the page's foot to use.
  */
 const StaleTestData = ({ app }: { app: string }) => {
   const { t } = useLingui();
   return (
-    <Alert
-      variant="banner"
-      action={
-        <Button
-          render={
-            <Link
-              params={{ app }}
-              replace
-              search={(held) => ({ project: held.project, view: "data" })}
-              to="/apps/$app"
-            />
-          }
-          size="xs"
-          variant="quiet"
-        >
-          {t`Open Data`}
-        </Button>
-      }
-      layout={styles.strip}
-      title={t`The example data doesn't fit the change`}
-      tone="attention"
-    >
-      <Trans>
-        Reset the example data in Data to try the change. Your team&apos;s
-        records aren&apos;t touched.
-      </Trans>
-    </Alert>
+    <div {...stylex.props(styles.corner)}>
+      <Alert
+        title={t`The example data doesn't fit the change`}
+        tone="attention"
+      >
+        <Trans>
+          Reset the example data in Data to try the change. Your team&apos;s
+          records aren&apos;t touched.
+        </Trans>
+        <span {...stylex.props(styles.below)}>
+          <Button
+            render={
+              <Link
+                params={{ app }}
+                replace
+                search={(held) => ({ project: held.project, view: "data" })}
+                to="/apps/$app"
+              />
+            }
+            size="xs"
+            variant="quiet"
+          >
+            {t`Open Data`}
+          </Button>
+        </span>
+      </Alert>
+    </div>
   );
 };
 
@@ -451,7 +496,7 @@ const FirstBuild = () => {
 };
 
 /** Whether the App has no page to preview yet: nothing written to it and no version. */
-const hasNoPage = (app: App, draft: AppDraft): boolean =>
+const hasNoPage = (app: App, draft: Draft): boolean =>
   draft.revision === 0 && app.currentVersion === null;
 
 /**
@@ -467,7 +512,9 @@ const useVersionLabel = (
   version: number | undefined
 ): string | undefined => {
   const read = useCoreRead(`${app}/${version ?? ""}`, async (session) =>
-    version === undefined ? null : await session.apps.versions.get(app, version)
+    version === undefined
+      ? null
+      : await session.versions.get({ kind: "app", id: app }, version)
   );
   return read?.state === "ready" ? (read.data?.label ?? undefined) : undefined;
 };
@@ -487,8 +534,8 @@ const useShownTitle = (
 };
 
 /**
- * Over the preview of an undo point or a version, read-only (`shown`):
- * what it is, the way back to the draft, and, for an undo point,
+ * Over the preview of a checkpoint or a version, read-only (`shown`):
+ * what it is, the way back to the draft, and, for a checkpoint,
  * restoring it, once the person confirms.
  */
 const ReadOnlyBar = ({
@@ -496,7 +543,7 @@ const ReadOnlyBar = ({
   shown,
   onChanged,
 }: {
-  draft: AppDraft;
+  draft: Draft;
   shown: ReadOnlyShown;
   onChanged: () => void;
 }) => {
@@ -504,7 +551,7 @@ const ReadOnlyBar = ({
   const navigate = useNavigate();
   const [asked, setAsked] = useState<Asked>();
   const label = useVersionLabel(
-    draft.app,
+    draft.subject.id,
     "version" in shown ? shown.version : undefined
   );
   const title = useShownTitle(shown, label);
@@ -520,7 +567,7 @@ const ReadOnlyBar = ({
     });
   };
   const { busy, failure, change } = useDraftChange(
-    draft.app,
+    draft.subject,
     draft.revision,
     () => {
       onChanged();
@@ -647,7 +694,7 @@ const SetUpOver = ({ failed, name }: { failed: boolean; name: string }) => (
 /**
  * The main area's preview of the builders' working version: the App as
  * its draft has it, never the live App itself, while it has changes or
- * no version yet; an undo point or a version read-only when History
+ * no version yet; a checkpoint or a version read-only when History
  * asked for one (`shown`). One frame throughout, so the chat's first
  * write, and each after it, comes into the App it shows in place. An App
  * with nothing written and no version asks what it should do instead.
@@ -670,7 +717,7 @@ const PreviewArea = ({
   at: string | undefined;
   width: PreviewWidth;
   /** The App's draft; none until it is read. */
-  draft: AppDraft | undefined;
+  draft: Draft | undefined;
   shown: ReadOnlyShown | undefined;
   running: boolean;
   /** Where a new App's first version stands: the preview shows once ready. */
@@ -724,13 +771,11 @@ const PreviewArea = ({
       {shown === undefined ? null : (
         <ReadOnlyBar draft={draft} onChanged={onChanged} shown={shown} />
       )}
-      {shown === undefined && ready ? (
-        <>
-          {/* Once Grasp is done: the example data it speaks of is there then. */}
-          {running ? null : <MadeTip app={app.id} />}
-          {staleAt === revision ? <StaleTestData app={app.id} /> : null}
-        </>
-      ) : null}
+      {/* As the preview first shows, in the same step that fades it in,
+        never later: the person may use it while Grasp still works, and
+        a tip put over it then would push the page down under their
+        pointer, a click meant for the page landing on the tip. */}
+      {shown === undefined && ready ? <MadeTip app={app.id} /> : null}
       {/* Running unseen while Grasp sets it up, so it is there to fade
         in once its first version runs; nothing of it reached before. */}
       <div
@@ -760,6 +805,9 @@ const PreviewArea = ({
           shown={shown}
         />
       </div>
+      {staleAt === revision && shown === undefined && ready ? (
+        <StaleTestData app={app.id} />
+      ) : null}
       {ready ? null : <SetUpOver failed={setUp === "failed"} name={name} />}
       {/* Broken mid-turn: never the error while Grasp still works on it. */}
       {ready && running && failedAt === revision ? (
@@ -898,7 +946,7 @@ const MainArea = ({
   identity: Identity;
   preview: ReactNode;
   /** The App's draft the preview shows, which the code shows too. */
-  building?: AppDraft | undefined;
+  building?: Draft | undefined;
   /** The draft the Data view changes; none without one. */
   modelDraft?: ModelDraft;
 }) => (
@@ -949,7 +997,7 @@ const showsTeams = ({
   shown,
 }: {
   app: App;
-  draft: AppDraft | undefined;
+  draft: Draft | undefined;
   env: WorkspaceEnv;
   shown: ReadOnlyShown | undefined;
 }): boolean => {
@@ -1020,43 +1068,23 @@ const useSetUp = ({
 };
 
 /**
- * Grasp's chat on App `app`, once it is (chat-subject.ts), and nothing of
- * the chat it showed before: its ID, whether its agent works on the App
- * (`running`), or checks it too (`busy`), and how often it wrote drafts,
- * which reads the App again as its build moves on (its name may change).
- */
-const useAppChat = (app: string) => {
-  const chat = useGlobalChat();
-  const ours = chat.slot === slotOf({ kind: "app", id: app });
-  const running = ours && chat.view.running;
-  return {
-    chatId: ours ? chat.chatId : undefined,
-    running,
-    busy: running || (ours && chat.view.checking),
-    built:
-      ours && answeredAfterBuild(chat.view.messages, { kind: "app", id: app }),
-    draftChanges: chat.view.worked,
-  };
-};
-
-/**
  * Reads the page again once the chat's agent stops, or its drafts change
- * after (`draftChanges`): during a turn they change at every write, and
- * its end reads anyway.
+ * after (`worked`): during a turn they change at every write, and its end
+ * reads anyway.
  */
-const useReadAgainOnceBuilt = (running: boolean, draftChanges: number) => {
+const useReadAgainOnceBuilt = (running: boolean, worked: number) => {
   const router = useRouter();
-  const seen = useRef({ running, draftChanges });
+  const seen = useRef({ running, worked });
   useEffect(() => {
     // Read again once the agent stops, or its drafts change after.
     const before = seen.current;
-    seen.current = { running, draftChanges };
+    seen.current = { running, worked };
     // During a turn the drafts change at every write; its end reads anyway.
-    const draftsMoved = !running && before.draftChanges !== draftChanges;
+    const draftsMoved = !running && before.worked !== worked;
     if ((before.running && !running) || draftsMoved) {
       void router.invalidate();
     }
-  }, [router, running, draftChanges]);
+  }, [router, running, worked]);
 };
 
 /**
@@ -1072,6 +1100,43 @@ const useReadAgainOnNewBase = (app: App, base: number | null | undefined) => {
       void router.invalidate();
     }
   }, [router, base, live]);
+};
+
+/**
+ * Whether the line of changes only its builders see shows under the bar
+ * (`changesLine`), over the builders' own version (`mine`), and the draft
+ * the preview shows (`previewed`): none until whether the line shows is
+ * known, the first time. That waits on who uses the App (`members`),
+ * read apart from the draft, while that read is on its way: a line coming
+ * in once the preview shows would push the page down under the person's
+ * pointer. A read that failed shows the preview without the line.
+ */
+const useChangesLine = ({
+  app,
+  draft,
+  members,
+  mine,
+}: {
+  app: App;
+  draft: Draft | undefined;
+  members: Loaded<SubjectMember[]> | undefined;
+  mine: boolean;
+}): { changesLine: boolean; previewed: Draft | undefined } => {
+  const waits =
+    mine &&
+    members === undefined &&
+    app.currentVersion !== null &&
+    hasChanges(draft);
+  const [known, setKnown] = useState(false);
+  if (!known && draft !== undefined && !waits) {
+    setKnown(true);
+  }
+  const shared = members?.state === "ready" ? members.data : [];
+  return {
+    changesLine:
+      mine && showsUnpublishedChanges(app.currentVersion, draft, shared),
+    previewed: known ? draft : undefined,
+  };
 };
 
 /**
@@ -1095,16 +1160,21 @@ const Building = ({
   section: AppSettingsSection | undefined;
   identity: Identity;
 }) => {
-  const { chatId, running, busy, built, draftChanges } = useAppChat(app.id);
-  const { draft, reread } = useAppDraft(app.id, draftChanges);
+  const { chatId, running, busy, built, worked } = useChatAbout(
+    { kind: "app", id: app.id },
+    app.name
+  );
+  const { draft, reread } = useDraft({ kind: "app", id: app.id }, worked);
   const changing = hasChanges(draft);
   // Each reset of the test data in Data starts the preview afresh on it,
   // without the alert that it didn't fit.
   const [resets, setResets] = useState(0);
-  useReadAgainOnceBuilt(running, draftChanges);
+  useReadAgainOnceBuilt(running, worked);
   useReadAgainOnNewBase(app, draft?.base);
-  // Whom it is shared with: who uses it, and whom Share adds to.
-  const membersRead = useAppRead(app.id, readMembers);
+  // Whom it is shared with: who uses it, and whom Share adds to, read
+  // again each time it is shared from here.
+  const [shares, setShares] = useState(0);
+  const membersRead = useMembersRead({ kind: "app", id: app.id }, shares);
   const members = membersRead?.state === "ready" ? membersRead.data : undefined;
   const { setUp, onFrame } = useSetUp({
     app,
@@ -1116,10 +1186,12 @@ const Building = ({
   const settingUp = setUp !== "ready";
   const theirs = showsTeams({ app, draft, env, shown });
   const showing: WorkspaceEnv = theirs ? "live" : "draft";
-  const changesLine =
-    !theirs &&
-    sharesApp(app, identity) &&
-    showsChangesLine(app, draft, members ?? []);
+  const { changesLine, previewed } = useChangesLine({
+    app,
+    draft,
+    members: membersRead,
+    mine: !theirs && sharesApp(app, identity),
+  });
   const { controls, width, page, reloads } = usePreviewControls(
     app,
     theirs,
@@ -1135,7 +1207,11 @@ const Building = ({
           draft={draft}
           identity={identity}
           members={members}
-          onShared={reread}
+          onShared={() => {
+            reread();
+            setShares((before) => before + 1);
+          }}
+          pending={changesLine}
           preview={controls}
           running={busy}
           settingUp={settingUp}
@@ -1145,12 +1221,7 @@ const Building = ({
     >
       {env === "live" && changing ? <TeamViewBar app={app.id} /> : null}
       {changesLine && draft !== undefined ? (
-        <ChangesLine
-          app={app}
-          draft={draft}
-          onChanged={reread}
-          running={busy}
-        />
+        <UnpublishedChanges draft={draft} onChanged={reread} running={busy} />
       ) : null}
       <MainArea
         app={app}
@@ -1178,7 +1249,7 @@ const Building = ({
             <PreviewArea
               app={app}
               at={page}
-              draft={draft}
+              draft={previewed}
               key={`${shownKey(shown)}/${resets}/${reloads}`}
               width={width}
               onChanged={reread}
@@ -1265,7 +1336,7 @@ interface WorkspaceAt {
   view: WorkspaceView;
   /** Draft or Live (`?env=live`): what Preview, Code and Data show. */
   env: WorkspaceEnv;
-  /** An undo point or a version the preview shows read-only, if asked. */
+  /** A checkpoint or a version the preview shows read-only, if asked. */
   shown: ReadOnlyShown | undefined;
   section: AppSettingsSection | undefined;
   identity: Identity;
@@ -1284,7 +1355,6 @@ const Workspace = ({
   handedOver: string | undefined;
 }) => {
   const { app } = at;
-  useChatSubject({ kind: "app", id: app.id }, app.name);
   const navigate = useNavigate();
   useEffect(() => {
     if (handedOver === undefined) {

@@ -2,7 +2,7 @@
 //
 // A run that took longer than a file should is split over files, each
 // running one part: `<run>-<part>-of-<parts>.test.ts`, as
-// `permission-probes-teams-bram-plain-1-of-2.test.ts`. Each file reads its
+// `stephen-eval-1-of-2.test.ts`. Each file reads its
 // part from its own name (`import.meta.url`), and the run's coverage test
 // lists the files themselves (Vite's `import.meta.glob`) and checks that
 // the parts they name are the whole run, each once. A file deleted or

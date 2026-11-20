@@ -1,3 +1,9 @@
+import { agentAppOf } from "@grasp-os/shared/agents";
+import {
+  instructionFileErrors,
+  instructionsMaxLength,
+  instructionsTooLong,
+} from "@grasp-os/shared/instruction-files";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -25,12 +31,20 @@ import { AppsStep } from "./setup/apps-step.tsx";
 import { AudienceStep } from "./setup/audience-step.tsx";
 import { InstructionsStep } from "./setup/instructions-step.tsx";
 import { JobStep } from "./setup/job-step.tsx";
-import { blank, classesOf, cronOfSchedule, steps } from "./setup/model.ts";
+import {
+  audiences,
+  blank,
+  classesOf,
+  companySteps,
+  cronOfSchedule,
+  steps,
+} from "./setup/model.ts";
 import type { CatalogApp, Setup, Step, StepProps } from "./setup/model.ts";
 import { NameStep } from "./setup/name-step.tsx";
 import { ReviewStep } from "./setup/review-step.tsx";
 import { ScheduleStep } from "./setup/schedule-step.tsx";
 import { ThinkingStep } from "./setup/thinking-step.tsx";
+import { saveFirstInstructions } from "./unsaved-instructions.ts";
 
 // A new agent, set up by hand (Ruben, 19 Nov 2026): Grasp takes the
 // person by the hand, one question at a time, never a page of blocks.
@@ -42,11 +56,17 @@ import { ThinkingStep } from "./setup/thinking-step.tsx";
 // in as the last one goes. Each step is a file of its own (setup/), on
 // the contract in setup/model.ts; this file holds the flow and the frame.
 //
-// What core keeps today is saved: its words, model, schedule, whom it
-// answers and its kinds of work. The rest (its apps, web, workflows and
-// Apps access, its effort, and "just me", as core keeps no maker) is asked
-// as Ruben decided and waits on core (.context/core-needs.md); until then
-// "just me" reaches nobody else.
+// What core keeps today is saved: its words, model, apps, schedule, whom
+// it answers and its kinds of work, and its instructions as its
+// instruction file. "Just me" makes one of the person's own (core's
+// `makeOwnAgent`), which reaches them alone, has no kinds of work or
+// schedule of its own, and which they may offer the company later. Anyone
+// of the company makes one of their own; only its admins one for the
+// company, and only they are asked who may use it, what it may do and
+// when it works. The rest (web, workflows and Apps access, its effort) is
+// asked as Ruben decided and waits on core (.context/core-needs.md).
+// Should its instructions not save once it is made, its page opens on
+// Instructions with them as an unsaved draft (unsaved-instructions.ts).
 
 /** Each step's question. */
 const questions: Record<Step, ComponentType<StepProps>> = {
@@ -213,6 +233,8 @@ export const ManualAgent = ({
   teams,
   taken,
   personId,
+  company,
+  own,
 }: {
   /** The models the organization chose, which an agent can be given. */
   models: readonly string[];
@@ -223,17 +245,30 @@ export const ManualAgent = ({
   taken: readonly string[];
   /** The person making it: a schedule chosen here works for them. */
   personId: string;
+  /** Whether they may make one for the company: its own admins. */
+  company: boolean;
+  /** Whether the company lets people have agents of their own. */
+  own: boolean;
 }) => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
   const { failure, run } = useCoreAction();
-  const [setup, setSetup] = useState<Setup>(blank);
+  // Who it may be for: one of their own only while the company lets them,
+  // the company's only for its admins.
+  const offered = audiences.filter((each) => (each === "me" ? own : company));
+  const asked = company
+    ? steps
+    : steps.filter((each) => !companySteps.has(each));
+  const [setup, setSetup] = useState<Setup>({
+    ...blank,
+    audience: offered[0] ?? blank.audience,
+  });
   const [at, setAt] = useState(0);
   // The setup, then the agent coming to life while core makes it, then made.
   const [phase, setPhase] = useState<"setup" | "making" | "made">("setup");
   // The column the backdrop keeps clear of, so the words read on it.
   const column = useRef<HTMLDivElement>(null);
-  const step: Step = steps[at] ?? "review";
+  const step: Step = asked[at] ?? "review";
   const change = (next: Partial<Setup>) => {
     setSetup({ ...setup, ...next });
   };
@@ -275,7 +310,7 @@ export const ManualAgent = ({
         ? proposal(template, job)
         : {};
     change(proposed);
-    setAt(Math.min(at + 1, steps.length - 1));
+    setAt(Math.min(at + 1, asked.length - 1));
   };
   const pick = (template: AgentTemplate) => {
     const job = i18n._(template.job);
@@ -285,21 +320,49 @@ export const ManualAgent = ({
       template: template.key,
       ...(setup.instructionsTouched ? {} : proposal(template, job)),
     });
-    setAt(Math.min(at + 1, steps.length - 1));
+    setAt(Math.min(at + 1, asked.length - 1));
   };
 
   const make = async (): Promise<void> => {
     setPhase("making");
     const job = setup.job.trim();
+    const { instructions } = setup;
+    const mine = setup.audience === "me";
     const made = await run(async (session) => {
-      const agent = await session.connections.makeAgent({
+      // Refused before anything is made, as their save would be.
+      if (instructionsTooLong(instructions)) {
+        throw instructionFileErrors.create("instructions.too_large", {
+          maxLength: instructionsMaxLength,
+        });
+      }
+      const input = {
         name,
         job,
-        instructions: setup.instructions,
         face: faceOf(lookFromName(name)),
         model: setup.model,
         modelRole: null,
-      });
+      };
+      const agent = mine
+        ? await session.connections.makeOwnAgent(input)
+        : await session.connections.makeAgent(input);
+      // Its apps, as the catalog names each.
+      await Promise.all(
+        apps
+          .filter(({ id }) => setup.apps.has(id))
+          .map(async ({ source, id }) => {
+            await session.connections.setAgentApp(
+              agent.id,
+              agentAppOf(source, id),
+              true
+            );
+          })
+      );
+      const told =
+        instructions.trim() === "" ||
+        (await saveFirstInstructions(session, agent.id, instructions));
+      if (mine) {
+        return { agent, told };
+      }
       // Its kinds of work: core makes it with none; each one on is as the
       // company has it.
       const classes = [...setup.abilities].flatMap(
@@ -331,7 +394,7 @@ export const ManualAgent = ({
           opening: job === "" ? name : job,
         });
       }
-      return agent;
+      return { agent, told };
     });
     if (made === undefined) {
       // Back to the last question: the button says it failed, and why
@@ -341,7 +404,12 @@ export const ManualAgent = ({
     }
     setPhase("made");
     await wait(readyFor);
-    await navigate({ to: "/agents/$agent", params: { agent: made.id } });
+    await navigate({
+      to: "/agents/$agent",
+      params: { agent: made.agent.id },
+      // Its instructions didn't save: its page opens where they wait.
+      search: made.told ? {} : { tab: "instructions" },
+    });
   };
   // Making it takes a few calls to core: the button says it is working.
   const making = useAction(make, {
@@ -363,7 +431,7 @@ export const ManualAgent = ({
   };
 
   const Asked = questions[step];
-  const stepCount = steps.length;
+  const stepCount = asked.length;
   return (
     <Backdrop
       clear={column}
@@ -401,6 +469,7 @@ export const ManualAgent = ({
           <div key={step} {...stylex.props(arrive.in)}>
             <Asked
               apps={apps}
+              audiences={offered}
               change={change}
               models={models}
               name={name}

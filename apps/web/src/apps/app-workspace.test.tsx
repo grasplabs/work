@@ -1,28 +1,25 @@
-import type {
-  AppDraft,
-  AppDraftChanges,
-  AppDraftHistoryPoint,
-} from "@grasp-os/shared/app-drafts";
 // @vitest-environment happy-dom
-import type {
-  App,
-  AppMember,
-  AppMemberRef,
-  ShareCandidates,
-  ViewedApp,
-} from "@grasp-os/shared/apps";
+import type { AppReview } from "@grasp-os/shared/app-review";
+import type { App, ViewedApp } from "@grasp-os/shared/apps";
 import type {
   ChatQuestion,
   ChatUpdate,
   PreviewBundle,
 } from "@grasp-os/shared/chat";
-import {
-  appIdSchema,
-  permissionIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
-import type { Permission } from "@grasp-os/shared/permissions";
+import type {
+  Draft,
+  DraftCheck,
+  DraftCheckpoint,
+  LiveVersion,
+} from "@grasp-os/shared/drafts";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { Subject } from "@grasp-os/shared/subject";
+import type {
+  ShareCandidates,
+  SubjectMember,
+  SubjectMemberRef,
+} from "@grasp-os/shared/subject-members";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -83,13 +80,23 @@ const memberNames: Record<string, string> = {
 };
 
 /** Someone the App is shared with, as core lists them. */
-const memberOf = (type: AppMemberRef["type"], id: string): AppMember => ({
+const memberOf = (
+  type: SubjectMemberRef["type"],
+  id: string
+): SubjectMember => ({
   type,
   id,
   name: memberNames[id] ?? id,
   role: "user",
   addedBy: "user-1",
   addedAt: "2026-10-20T08:00:00.000Z",
+});
+
+/** What a publish or roll back made live, as core answers it. */
+const liveOf = (made: App): LiveVersion => ({
+  subject: { kind: "app", id: made.id },
+  version: made.currentVersion ?? 0,
+  label: made.liveLabel ?? "",
 });
 
 /** Core's `apps` for one App, as someone with `role` in it reads it. */
@@ -99,16 +106,20 @@ const fakeApps = ({
   currentVersion = 1,
   sharedWith = [],
   points = [],
+  restoreConflicts = 0,
 }: {
   role?: ViewedApp["role"];
   archived?: boolean;
   currentVersion?: number | null;
   /** Whom it is shared with now. */
-  sharedWith?: AppMember[];
-  /** The draft's undo points, newest first. */
-  points?: AppDraftHistoryPoint[];
+  sharedWith?: SubjectMember[];
+  /** The draft's checkpoints, newest first. */
+  points?: DraftCheckpoint[];
+  /** How many restores someone else's write refuses first (`draft.conflict`). */
+  restoreConflicts?: number;
 } = {}) => {
   const calls: string[] = [];
+  let conflicts = restoreConflicts;
   let members = sharedWith;
   let app: ViewedApp = {
     id: appIdSchema.parse("invoice-desk"),
@@ -129,7 +140,7 @@ const fakeApps = ({
   return {
     calls,
     /** Someone shares the App meanwhile, as `member`, the page unaware. */
-    sharedMeanwhile: (member: AppMember): void => {
+    sharedMeanwhile: (member: SubjectMember): void => {
       members = [...members, member];
     },
     /** The App's draft was published as version `version`: it is live. */
@@ -142,23 +153,23 @@ const fakeApps = ({
       versions: {
         // A version as core answers it: labelled once it was live.
         get: async (
-          _id: string,
+          _subject: Subject,
           version: number
         ): Promise<{ label: string | null }> =>
           await Promise.resolve({
             label:
               version <= (app.currentVersion ?? 0) ? `26.11.${version}` : null,
           }),
-        // Publishing a version again: `version` live, over the draft at
+        // Rolling back to a version: `version` live, over the draft at
         // `revision`, only over `expected`, the version the person saw live.
-        publish: async (
-          id: string,
+        rollback: async (
+          { id }: Subject,
           version: number,
           revision?: number,
           expected?: number | null
-        ): Promise<App> => {
+        ): Promise<LiveVersion> => {
           calls.push(
-            `publish ${id} ${version} over ${revision} from ${expected}`
+            `rollback ${id} ${version} over ${revision} from ${expected}`
           );
           await Promise.resolve();
           app = {
@@ -166,7 +177,7 @@ const fakeApps = ({
             currentVersion: version,
             liveLabel: `26.11.${version}`,
           };
-          return app;
+          return liveOf(app);
         },
       },
       list: async (): Promise<ViewedApp[]> => await Promise.resolve([app]),
@@ -177,7 +188,8 @@ const fakeApps = ({
         return app;
       },
       members: {
-        list: async (): Promise<AppMember[]> => await Promise.resolve(members),
+        list: async (): Promise<SubjectMember[]> =>
+          await Promise.resolve(members),
         candidates: async (): Promise<ShareCandidates> =>
           await Promise.resolve({
             teams: [{ id: "t-fin", name: "Finance team" }],
@@ -189,13 +201,13 @@ const fakeApps = ({
           }),
         add: async (
           _app: string,
-          { type, id, role: as }: AppMemberRef & { role: string }
+          { type, id, role: as }: SubjectMemberRef & { role: string }
         ): Promise<void> => {
           calls.push(`share ${type}:${id} as ${as}`);
           await Promise.resolve();
           members = [...members, memberOf(type, id)];
         },
-        remove: async (_app: string, { type, id }: AppMemberRef) => {
+        remove: async (_app: string, { type, id }: SubjectMemberRef) => {
           calls.push(`unshare ${type}:${id}`);
           await Promise.resolve();
           members = members.filter(
@@ -203,22 +215,33 @@ const fakeApps = ({
           );
         },
       },
-      /** The draft's undo points, newest first. */
-      draftPoints: async (): Promise<AppDraftHistoryPoint[]> =>
-        await Promise.resolve(points),
-      /** Makes undo point `point` the draft again, over `revision`. */
-      restoreDraftPoint: async (
-        _app: string,
-        point: number,
-        revision: number
-      ): Promise<void> => {
-        calls.push(`restore point ${point} over ${revision}`);
-        await Promise.resolve();
-      },
-      /** Discards the draft's changes, over the revision the person saw. */
-      discardDraft: async (_app: string, revision: number): Promise<void> => {
-        calls.push(`discard over ${revision}`);
-        await Promise.resolve();
+      drafts: {
+        /** The draft's checkpoints, newest first. */
+        checkpoints: async (): Promise<DraftCheckpoint[]> =>
+          await Promise.resolve(points),
+        /** Makes checkpoint `point` the draft again, over `revision`. */
+        restore: async (
+          _subject: Subject,
+          point: number,
+          revision: number
+        ): Promise<void> => {
+          calls.push(`restore point ${point} over ${revision}`);
+          await Promise.resolve();
+          if (conflicts > 0) {
+            conflicts -= 1;
+            throw Object.assign(
+              new Error(
+                "Someone else changed the draft at the same time. Read it again and retry."
+              ),
+              { code: "draft.conflict" }
+            );
+          }
+        },
+        /** Discards the draft's changes, over the revision the person saw. */
+        discard: async (_subject: Subject, revision: number): Promise<void> => {
+          calls.push(`discard over ${revision}`);
+          await Promise.resolve();
+        },
       },
     },
   };
@@ -256,8 +279,8 @@ const isApp = (data: unknown): data is ViewedApp =>
 const draftOf = (
   app: string,
   changed: string[] = ["src/routes/index.tsx"]
-): AppDraft => ({
-  app: appIdSchema.parse(app),
+): Draft => ({
+  subject: { kind: "app", id: appIdSchema.parse(app) },
   base: 1,
   changed,
   deleted: [],
@@ -296,34 +319,32 @@ const opened = async (
    * The App's draft, as core reads it; by default one with a change only
    * its builders see, so the workspace shows their working version.
    */
-  draft: () => Promise<AppDraft> = async () =>
+  draft: () => Promise<Draft> = async () =>
     await Promise.resolve(draftOf("invoice-desk")),
   /** How core answers the person publishing the App's draft; by default not yet. */
-  publish: (
-    app: string,
-    revision: number,
-    message?: string
-  ) => Promise<App> = async () => await Promise.withResolvers<never>().promise,
-  /** What publishing the draft changes, as core reads it; by default not yet. */
-  changes: () => Promise<AppDraftChanges> = async () =>
+  publish: (app: string, revision: number) => Promise<App> = async () =>
+    await Promise.withResolvers<never>().promise,
+  /** What publishing the draft changes and its check, as core reads them; by default not yet. */
+  changes: () => Promise<Reviewed> = async () =>
     await Promise.withResolvers<never>().promise,
   /** Draft or Live, as the address says. */
   env: WorkspaceEnv = "draft",
-  /** An undo point or a version History opened read-only, if any. */
+  /** A checkpoint or a version History opened read-only, if any. */
   shown?: ReadOnlyShown
 ) => {
-  // The App's chat: core never answers `forApp` here. A chat that is
+  // The App's chat: core never answers `forSubject` here. A chat that is
   // followed sends nothing yet and worked on nothing.
   const askedForApp: string[] = [];
   const sent: { chatId: string; question: ChatQuestion }[] = [];
   const chats = {
-    forApp: async (app: string) => {
-      askedForApp.push(app);
+    forSubject: async ({ id }: { kind: string; id: string }) => {
+      askedForApp.push(id);
       return await forApp();
     },
     watch,
     worked: async () => await Promise.resolve([]),
     connectionRequests: async () => await Promise.resolve([]),
+    heldCalls: async () => await Promise.resolve([]),
     models: async () => await Promise.resolve(["openai/gpt-5"]),
     send: async (chatId: string, question: ChatQuestion) => {
       sent.push({ chatId, question });
@@ -333,25 +354,35 @@ const opened = async (
     summary: async () => await Promise.withResolvers<never>().promise,
   };
   const pendingActions = { list: async () => await Promise.resolve([]) };
-  const withDrafts = {
-    ...apps,
-    drafts: {
-      get: draft,
-      publish,
-      changes,
-      points: apps.draftPoints,
-      restorePoint: apps.restoreDraftPoint,
-      discard: apps.discardDraft,
+  const { drafts: kept, versions, ...rest } = apps;
+  const withReview = { ...rest, review: changes };
+  const drafts = {
+    ...kept,
+    get: draft,
+    check: async (): Promise<DraftCheck> => {
+      const { revision, check } = await changes();
+      return { revision, ...check };
     },
+    publish: async ({ id }: Subject, revision: number) =>
+      liveOf(await publish(id, revision)),
   };
   const core = {
     withSession: async <T,>(
       action: (session: {
-        apps: typeof withDrafts;
+        apps: typeof withReview;
+        drafts: typeof drafts;
+        versions: typeof versions;
         chats: typeof chats;
         pendingActions: typeof pendingActions;
       }) => Promise<T>
-    ): Promise<T> => await action({ apps: withDrafts, chats, pendingActions }),
+    ): Promise<T> =>
+      await action({
+        apps: withReview,
+        drafts,
+        versions,
+        chats,
+        pendingActions,
+      }),
     // The live App's page joins the tab's connection, which never
     // answers here: it stays on its way.
     onEnded: () => () => {},
@@ -474,14 +505,15 @@ const press = async (element: HTMLElement): Promise<void> => {
   await settled();
 };
 
+/** An App's review, and its draft's check (`drafts.check`) at its revision. */
+type Reviewed = AppReview & { check: Omit<DraftCheck, "revision"> };
+
 /**
  * What publishing the draft of `draftOf` changes, as core reads it at
  * revision 1: its page changed, checks passing, unless `overrides` says
  * otherwise.
  */
-const changesOf = (
-  overrides: Partial<AppDraftChanges> = {}
-): AppDraftChanges => ({
+const changesOf = (overrides: Partial<Reviewed> = {}): Reviewed => ({
   revision: 1,
   live: null,
   liveLabel: null,
@@ -503,40 +535,8 @@ const changesOf = (
   readsPeople: false,
   rowRules: [],
   permissions: [],
-  grants: [],
-  callers: [],
   ...overrides,
 });
-
-/**
- * A workflow's grant to call the App's function `path`, as core lists it
- * among the draft's callers.
- */
-const callerGrant = (workflow: string, path: string): Permission => {
-  const workflowId = workflowResourceIdSchema.parse(crypto.randomUUID());
-  return {
-    id: permissionIdSchema.parse(crypto.randomUUID()),
-    subject: { type: "workflow", workflowId },
-    object: {
-      type: "app",
-      appId: appIdSchema.parse("invoice-desk"),
-      function: "f1",
-    },
-    actions: ["call"],
-    binding: "INVOICES",
-    status: "active",
-    requestedBy: "user-1",
-    requestedAt: "2026-10-20T08:00:00.000Z",
-    grantedBy: "admin-1",
-    grantedAt: "2026-10-20T09:00:00.000Z",
-    revokedBy: null,
-    revokedAt: null,
-    requestedVia: null,
-    chat: null,
-    workflowNames: { [workflowId]: workflow },
-    functionName: path,
-  };
-};
 
 /** The dialog titled `title`, once open. */
 const dialogTitled = (title: string): HTMLElement | null =>
@@ -794,11 +794,11 @@ class PreviewingCore extends RpcTarget {
     return this;
   }
 
-  get drafts(): this {
+  get preview(): this {
     return this;
   }
 
-  async preview(...args: unknown[]): Promise<PreviewBundle> {
+  async open(...args: unknown[]): Promise<PreviewBundle> {
     this.asked.push(args);
     this.#reached.resolve(true);
     if (this.#refusal !== undefined) {
@@ -1408,7 +1408,6 @@ describe(AppWorkspace, () => {
             id: 2,
             role: "assistant",
             text: "",
-            citations: [],
             code: [],
             tools: [],
             planned: {
@@ -1569,8 +1568,8 @@ describe(AppWorkspace, () => {
         await Promise.resolve(
           drafted ? draftOf("invoice-desk") : draftOf("invoice-desk", [])
         ),
-      async (app, revision, message) => {
-        published.push([app, revision, message]);
+      async (app, revision) => {
+        published.push([app, revision]);
         await Promise.resolve();
         // Core makes it version 1: its changes are the team's now.
         drafted = false;
@@ -1600,7 +1599,7 @@ describe(AppWorkspace, () => {
         stands: "Not live",
         facts: ["None yet", "Only its builders", "Checks pass"],
       },
-      published: [["invoice-desk", 1, "Published from the App's workspace"]],
+      published: [["invoice-desk", 1]],
       // Publishing shares it with nobody.
       calls: [],
       // A first version has none before it to go back to: no Undo.
@@ -1691,13 +1690,13 @@ describe(AppWorkspace, () => {
     await press(panelButton("Publish"));
 
     expect(fake.calls).toStrictEqual([
-      "publish invoice-desk 1 over 0 from null",
+      "rollback invoice-desk 1 over 0 from null",
     ]);
   });
 
   it("undoes publishing from its toast: the team has the version it had before again, and the changes published are the draft again", async () => {
     // The draft as published, at revision 1, over version 1.
-    const publishedPoint: AppDraftHistoryPoint = {
+    const publishedPoint: DraftCheckpoint = {
       number: 3,
       revision: 1,
       base: 1,
@@ -1752,12 +1751,84 @@ describe(AppWorkspace, () => {
       calls: [
         // Its changes emptied over version 2, at revision 0, and version 2
         // still the team's: a colleague's since would stay.
-        "publish invoice-desk 1 over 0 from 2",
+        "rollback invoice-desk 1 over 0 from 2",
         // The changes published are the draft again, as before.
         "restore point 3 over 0",
       ],
     });
   });
+
+  it.each([
+    {
+      conflicts: 1,
+      restores: 2,
+      said: "Publishing undone",
+    },
+    {
+      conflicts: 2,
+      restores: 2,
+      said: "Your team has the version they had beforeThe changes you published couldn't be put back as the draft. They're in its History, to restore from there.",
+    },
+  ])(
+    "puts the published changes back after Undo, tried again once over someone's write, or says they're in History ($conflicts refused)",
+    async ({ conflicts, restores, said }) => {
+      const publishedPoint: DraftCheckpoint = {
+        number: 3,
+        revision: 1,
+        base: 1,
+        contentHash: "published",
+        personId: "user-1",
+        chatId: null,
+        callId: null,
+        restoredFrom: null,
+        createdAt: "2026-10-20T08:00:00.000Z",
+        touched: ["src/routes/index.tsx"],
+        changes: 1,
+      };
+      const fake = fakeApps({
+        currentVersion: 1,
+        points: [publishedPoint],
+        sharedWith: [memberOf("person", "p-bo")],
+        restoreConflicts: conflicts,
+      });
+      let drafted = true;
+      await opened(
+        fake.apps,
+        identityOf(false),
+        "chat-undo-retries",
+        async () => await Promise.resolve(watching()),
+        undefined,
+        async () =>
+          await Promise.resolve(
+            drafted ? draftOf("invoice-desk") : draftOf("invoice-desk", [])
+          ),
+        async () => {
+          await Promise.resolve();
+          drafted = false;
+          return fake.published(2);
+        },
+        async () =>
+          await Promise.resolve(
+            changesOf({ live: 1, liveLabel: "26.11.1", next: "26.11.2" })
+          )
+      );
+      await settled();
+      await press(publishButton());
+      await press(panelButton("Publish"));
+      await press(button("Undo"));
+      await settled();
+
+      expect({
+        // The team has the version before either way.
+        rolledBack: fake.calls.includes(
+          "rollback invoice-desk 1 over 0 from 2"
+        ),
+        restores: fake.calls.filter((call) => call.startsWith("restore"))
+          .length,
+        said: toasts().includes(said),
+      }).toStrictEqual({ rolledBack: true, restores, said: true });
+    }
+  );
 
   it("asks before Undo drops changes taken since publishing, even once the workspace was left", async () => {
     const fake = fakeApps({ currentVersion: 1 });
@@ -1805,7 +1876,7 @@ describe(AppWorkspace, () => {
       left: true,
       asked: true,
       before: [],
-      calls: ["publish invoice-desk 1 over 1 from 2"],
+      calls: ["rollback invoice-desk 1 over 1 from 2"],
     });
   });
 
@@ -1870,9 +1941,7 @@ describe(AppWorkspace, () => {
    * What Publish's popover says of the draft's access, once its changes
    * are shown, as core reads the draft's changes as `changes` says.
    */
-  const accessShown = async (
-    changes: Partial<AppDraftChanges>
-  ): Promise<string> => {
+  const accessShown = async (changes: Partial<Reviewed>): Promise<string> => {
     await opened(
       fakeApps().apps,
       identityOf(false),
@@ -1899,35 +1968,6 @@ describe(AppWorkspace, () => {
     );
     return access?.textContent ?? "";
   };
-
-  it("names in Publish only the workflows that call the App again once an admin grants it again", async () => {
-    const access = await accessShown({
-      callers: [
-        {
-          permission: callerGrant("Approve", "invoices.approve"),
-          askedAgain: true,
-        },
-        {
-          permission: callerGrant("Remind", "invoices.remind"),
-          askedAgain: false,
-        },
-      ],
-    });
-
-    expect({
-      heading: access.includes(
-        "Workflows that call it again once an admin grants it again for the new version"
-      ),
-      askedAgain: access.includes("Approve calls invoices.approve"),
-      notAskedAgain: access.includes("Remind"),
-      nothingNew: access.includes("Nothing new"),
-    }).toStrictEqual({
-      heading: true,
-      askedAgain: true,
-      notAskedAgain: false,
-      nothingNew: false,
-    });
-  });
 
   it("says in Publish who sees and changes which rows of the App's tables", async () => {
     const access = await accessShown({
@@ -2066,8 +2106,10 @@ describe(AppWorkspace, () => {
       async () => {
         await Promise.resolve();
         throw Object.assign(
-          new Error("Someone else changed this App at the same time."),
-          { code: "app.conflict" }
+          new Error(
+            "Someone else changed the draft at the same time. Read it again and retry."
+          ),
+          { code: "draft.conflict" }
         );
       },
       async () => {
@@ -2082,15 +2124,16 @@ describe(AppWorkspace, () => {
 
     expect({
       said: says(
-        "Someone changed the App since you opened this. Look at the changes again, then share."
+        "Someone changed it since you opened this. Look at the changes again, then share."
       ),
       reads,
       calls: fake.calls,
       status: status(),
     }).toStrictEqual({
       said: true,
-      // Once as the workspace opened, and again after the refusal.
-      reads: 2,
+      // Its review and its check, as the workspace opened and again after
+      // the refusal.
+      reads: 4,
       calls: [],
       status: "Only you see this",
     });
@@ -2354,7 +2397,6 @@ describe(AppWorkspace, () => {
                 id: 2,
                 role: "assistant",
                 text: "Invoices is set up.",
-                citations: [],
                 code: [],
                 tools: [],
                 end: "done",
@@ -2425,5 +2467,140 @@ describe(AppWorkspace, () => {
       dismissed: false,
       again: false,
     });
+  });
+
+  it("says what to do next over a newly made App as soon as it shows, while Grasp still works on it, so Grasp finishing moves nothing under the person", async () => {
+    markMade("invoice-desk");
+    const tip = "This is your new App, with example data.";
+    const core = new PreviewingCore();
+    socketsTo(core);
+    let send: ((update: ChatUpdate) => void) | undefined;
+    const turn = { messages: [], partial: null, stopped: null, held: 0 };
+    await opened(
+      fakeApps().apps,
+      identityOf(false),
+      "chat-finishing",
+      // The preview shows while Grasp's turn still runs: the person can
+      // use it then.
+      async (_chat, _after, received) => {
+        send = received;
+        received({ ...turn, running: true, worked: 1 });
+        return await Promise.resolve(watching());
+      }
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    const frame = document.querySelector("iframe");
+    // What is drawn over the preview, in the order it stands: something
+    // put there later pushes the page down under the person's pointer.
+    const over = (): string[] =>
+      [...document.querySelectorAll("body *")]
+        .filter(
+          (each) =>
+            frame !== null &&
+            each.childElementCount === 0 &&
+            each.closest('[aria-label="Chat"]') === null &&
+            // oxlint-disable-next-line no-bitwise -- a DOM position mask
+            (each.compareDocumentPosition(frame) &
+              Node.DOCUMENT_POSITION_FOLLOWING) !==
+              0
+        )
+        .map((each) => each.textContent)
+        .filter((text) => text !== "");
+    const whileWorking = { tip: says(tip), over: over() };
+    await act(async () => {
+      send?.({ ...turn, running: false, worked: 2 });
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      whileWorking: whileWorking.tip,
+      sameFrame: document.querySelector("iframe") === frame,
+      overWhenDone: over(),
+    }).toStrictEqual({
+      whileWorking: true,
+      sameFrame: true,
+      overWhenDone: whileWorking.over,
+    });
+  });
+
+  it("says what changes only you see over the preview before the preview shows, however late who uses the App is read, so the line never comes in over a preview in use", async () => {
+    const core = new PreviewingCore(undefined, deskOfVersion1);
+    socketsTo(core);
+    const fake = fakeApps({ sharedWith: [memberOf("team", "t-fin")] });
+    // Who uses it is read apart from the draft, and answers last.
+    const membersRead = Promise.withResolvers<boolean>();
+    const { list } = fake.apps.members;
+    fake.apps.members.list = async () => {
+      await membersRead.promise;
+      return await list();
+    };
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-members-late",
+      async () => await Promise.resolve(watching())
+    );
+    await settled();
+    const whileRead = {
+      preview: document.querySelector("iframe") !== null,
+      line: changesLine() !== null,
+    };
+    await act(async () => {
+      membersRead.resolve(true);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    const frame = document.querySelector("iframe");
+    const line = changesLine();
+
+    expect({
+      whileRead,
+      // Both at once, the line over the preview from the start.
+      shown: {
+        preview: frame !== null,
+        lineOver:
+          frame !== null &&
+          line !== null &&
+          // oxlint-disable-next-line no-bitwise -- a DOM position mask
+          (line.compareDocumentPosition(frame) &
+            Node.DOCUMENT_POSITION_FOLLOWING) !==
+            0,
+      },
+    }).toStrictEqual({
+      whileRead: { preview: false, line: false },
+      shown: { preview: true, lineOver: true },
+    });
+  });
+
+  it("shows the preview without the line under the bar when who uses the App can't be read", async () => {
+    const core = new PreviewingCore(undefined, deskOfVersion1);
+    socketsTo(core);
+    const fake = fakeApps({ sharedWith: [memberOf("team", "t-fin")] });
+    // Who uses it is lost on the way, as a dropped connection loses it.
+    fake.apps.members.list = async () => {
+      await Promise.resolve();
+      throw new Error("Peer closed WebSocket: 1006");
+    };
+    await opened(
+      fake.apps,
+      identityOf(false),
+      "chat-members-lost",
+      async () => await Promise.resolve(watching())
+    );
+    await act(async () => {
+      await core.reached;
+    });
+    await settled();
+    expect({
+      preview: document.querySelector("iframe") !== null,
+      line: changesLine() !== null,
+    }).toStrictEqual({ preview: true, line: false });
   });
 });

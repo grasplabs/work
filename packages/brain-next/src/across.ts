@@ -1,6 +1,7 @@
 import { exactCandidatesMax, listPageMax, recallLimit } from "./contract.ts";
 import type {
   FoundBy,
+  FoundMemory,
   FoundPassage,
   Finding,
   ListedSource,
@@ -9,10 +10,12 @@ import type {
   SourceList,
 } from "./contract.ts";
 import { exactsOf, foundIn } from "./exact.ts";
-import { byBytes, byNearness } from "./order.ts";
+import { byBytes, byFreshness, byNearness, byWordsFound } from "./order.ts";
+import type { MemoryOrder } from "./order.ts";
 import { fuse, packOf } from "./pack.ts";
-import type { Found } from "./pack.ts";
-import { sequenceOf, termsOf } from "./words.ts";
+import type { Entry } from "./pack.ts";
+import { holdsTerm, termsOf, wordsOf } from "./words.ts";
+import type { WordMemo } from "./words.ts";
 
 // A recall's pack from what one store or several found (`Finding`, each a
 // store's `find`): the stores a reader may read from are searched apart,
@@ -39,8 +42,8 @@ import { sequenceOf, termsOf } from "./words.ts";
 //   it had more (`capped`). The first `exactCandidatesMax` of all are
 //   among those; a part is capped when a store capped it or all together
 //   give more. Only then is each candidate checked to hold the part as
-//   written, and each part's list ordered by the merged words list's
-//   rank, as one store does.
+//   written (a date, to mention one of its days), and each part's list
+//   ordered by the merged words list's rank, as one store does.
 // - Meaning: each store's nearest, by cosine, merged by cosine. One store
 //   re-scores the `rescoreCandidates` codes nearest by Hamming distance
 //   (vectors.ts), so two stores re-score up to twice as many: a passage
@@ -76,16 +79,28 @@ const allOf = <T extends FoundPassage>(
     }))
   );
 
-/** `passage` as an item of a way's list (pack.ts), found by `how`. */
+/** `passage` as an entry of a way's list (pack.ts), found by `how`. */
 const foundAs = (
-  { row, source, version, position, text }: FoundPassage,
+  { row, source, version, position, text, readAt }: FoundPassage,
   how: FoundBy
-): Found => ({ row, source, version, position, text, found: how });
+): Entry => ({
+  kind: "passage",
+  key: `passage ${row}`,
+  passage: {
+    row,
+    source,
+    version,
+    position,
+    text,
+    found: how,
+    ...(readAt === undefined ? {} : { readAt }),
+  },
+});
 
 /** The words way's list, best first, and the telling terms it found. */
 const byWords = (
   findings: readonly Finding[]
-): { found: Found[]; terms: Set<number> } => {
+): { found: Entry[]; terms: Set<number> } => {
   const telling = allOf(findings, ({ words }) => words)
     .toSorted(
       (a, b) =>
@@ -109,13 +124,18 @@ const byWords = (
 
 /**
  * The exact way's lists, one per part, the parts it found and those it
- * capped, its lists in the words way's order (`byWordsRank`).
+ * capped, its lists in the words way's order (`byWordsRank`). A date's
+ * list holds only the passages mentioning its day that the words way's
+ * list doesn't (exact.ts rule 3): what the date finds that the words
+ * missed. A passage the words list holds counts once, by its words, so a
+ * day many passages mention never lifts them twice above an ID's or a
+ * phrase's passage; the date's own words are the words way's.
  */
 const byExact = (
   findings: readonly Finding[],
   exacts: ReturnType<typeof exactsOf>,
   byWordsRank: ReadonlyMap<number, number>
-): { lists: Found[][]; parts: Set<number>; capped: Set<number> } => {
+): { lists: Entry[][]; parts: Set<number>; capped: Set<number> } => {
   const candidates = allOf(findings, ({ exact }) => exact);
   const capped = new Set(findings.flatMap((finding) => finding.capped));
   // Each part's first `exactCandidatesMax` of all stores, as one store's
@@ -139,18 +159,18 @@ const byExact = (
   const held = candidates.map((candidate) => ({
     candidate,
     parts: new Set(
-      foundIn(
-        sequenceOf(candidate.text),
-        exacts,
-        among.get(candidate.row) ?? []
-      )
+      foundIn(candidate.text, exacts, among.get(candidate.row) ?? [])
     ),
   }));
   const rankOf = ({ row }: FoundPassage): number =>
     byWordsRank.get(row) ?? recallLimit;
-  const lists = exacts.map((_, part) =>
+  const lists = exacts.map(({ kind }, part) =>
     held
-      .filter(({ parts }) => parts.has(part))
+      .filter(
+        ({ candidate, parts }) =>
+          parts.has(part) &&
+          (kind !== "date" || !byWordsRank.has(candidate.row))
+      )
       .map(({ candidate }) => candidate)
       .toSorted((a, b) => rankOf(a) - rankOf(b) || byPassage(a, b))
       .slice(0, recallLimit)
@@ -158,28 +178,122 @@ const byExact = (
   );
   return {
     lists,
-    parts: new Set(
-      lists.flatMap((list, part) => (list.length > 0 ? [part] : []))
-    ),
+    parts: new Set(held.flatMap(({ parts }) => [...parts])),
     capped,
   };
 };
 
 /** The meaning way's list: the nearest of all stores, by cosine. */
-const byMeaning = (findings: readonly Finding[]): Found[] =>
+const byMeaning = (findings: readonly Finding[]): Entry[] =>
   allOf(findings, ({ meaning }) => meaning)
     .toSorted((a, b) => byNearness(a, b) || a.store - b.store)
     .slice(0, recallLimit)
     .map((passage) => foundAs(passage, "meaning"));
 
+/** A memory of the store `store`, as merged. */
+type MemoryOf = FoundMemory & { store: number };
+
+/** `memory` as order.ts `byFreshness` orders it. */
+const orderOf = ({
+  confirmed,
+  learnedAt,
+  usedAt,
+  id,
+}: FoundMemory): MemoryOrder => ({
+  confirmed: confirmed !== null,
+  learnedAt: learnedAt.getTime(),
+  usedAt: usedAt?.getTime() ?? null,
+  id,
+});
+
+/** A memory's key in the fused lists: its store's and its id. */
+const memoryKeyOf = ({ store, id }: MemoryOf): string =>
+  `memory ${store} ${id}`;
+
+/**
+ * After a way's own order: order.ts `byFreshness`, the order each store
+ * cut its own lists in, then by store.
+ */
+const byMemory = (a: MemoryOf, b: MemoryOf): number =>
+  byFreshness(orderOf(a), orderOf(b)) || a.store - b.store;
+
+/**
+ * The memory ways' lists, merged over the stores as one store's
+ * statements order them (memories.ts, recall-memories.ts): by words, more
+ * of the question's telling words first, then more as written; along
+ * entities, the nearest step first; each then as `byMemory`, the first
+ * `recallLimit` of all, the order each store cut its own in. A contested
+ * memory carries the other sides its store found (an entity is one
+ * store's: sides are never across stores).
+ */
+const memoriesOf = (
+  findings: readonly Finding[]
+): { words: Entry[]; entities: Entry[] } => {
+  const tagged = (
+    pick: (memories: Finding["memories"]) => FoundMemory[]
+  ): MemoryOf[] =>
+    findings.flatMap((finding, store) =>
+      pick(finding.memories).map((memory) => ({ ...memory, store }))
+    );
+  const all = [
+    ...tagged(({ words }) => words),
+    ...tagged(({ entities }) => entities),
+    ...tagged(({ rivals }) => rivals),
+  ];
+  const rivalsOf = (memory: MemoryOf) =>
+    memory.contested
+      ? all
+          .filter(
+            (other) =>
+              other.store === memory.store &&
+              other.id !== memory.id &&
+              other.contested &&
+              other.about === memory.about &&
+              other.attribute === memory.attribute
+          )
+          .filter(
+            (other, index, list) =>
+              list.findIndex(({ id }) => id === other.id) === index
+          )
+          .map((other) => ({ key: memoryKeyOf(other), memory: other }))
+      : [];
+  const entryOf = (memory: MemoryOf, found: "words" | "entities"): Entry => ({
+    kind: "memory",
+    key: memoryKeyOf(memory),
+    memory,
+    found,
+    rivals: rivalsOf(memory),
+  });
+  return {
+    words: tagged(({ words }) => words)
+      .toSorted(
+        (a, b) =>
+          byWordsFound(
+            { ...orderOf(a), words: a.words, exact: a.exact },
+            { ...orderOf(b), words: b.words, exact: b.exact }
+          ) || a.store - b.store
+      )
+      .slice(0, recallLimit)
+      .map((memory) => entryOf(memory, "words")),
+    entities: tagged(({ entities }) => entities)
+      .toSorted((a, b) => a.step - b.step || byMemory(a, b))
+      .slice(0, recallLimit)
+      .map((memory) => entryOf(memory, "entities")),
+  };
+};
+
 /**
  * The pack for `question` within `budget` tokens from what `findings` (one
  * per store, each `find` of the same request) found: the stores' lists
- * merged per way, fused by rank (the exact parts' first on a tie, in the
- * question's order, then words, then meaning) and packed, with the parts
- * of the question no store found by words or exact: its exact parts, but
- * those capped, then its telling words, but those of its IDs. The same
- * pack, for one finding, as recall.ts has always made.
+ * merged per way, fused by rank (on a tie, the phrases' and IDs' first, in
+ * the question's order, then words, then the dates', so a day many
+ * passages mention never puts its own first before an ID's or a phrase's,
+ * then meaning) and packed, with the parts of the question no store found
+ * by words or exact and no packed memory holds: its phrases and IDs, but
+ * those capped, then its telling words, but those of its IDs and of its
+ * dates found (a date stands for its words once a passage or packed
+ * memory mentions its day, or more do than were checked, exact.ts rule
+ * 3). The same pack, for one finding, as one store makes.
  */
 export const packAcross = (
   question: string,
@@ -188,32 +302,67 @@ export const packAcross = (
 ): Pack => {
   const exacts = exactsOf(question);
   const terms = termsOf(question);
-  // An ID stands for its words: none is said not found apart.
-  const standing = new Set(
-    exacts.filter(({ kind }) => kind === "id").flatMap(({ words }) => words)
-  );
   const words = byWords(findings);
   const exact = byExact(
     findings,
     exacts,
-    new Map(words.found.map(({ row }, rank) => [row, rank]))
+    new Map(
+      words.found.flatMap((entry, rank) =>
+        entry.kind === "passage" ? [[entry.passage.row, rank]] : []
+      )
+    )
+  );
+  const memories = memoriesOf(findings);
+  const dated = (index: number) => exacts[index]?.kind === "date";
+  const pack = packOf(
+    fuse([
+      ...exact.lists.filter((_, index) => !dated(index)),
+      words.found,
+      ...exact.lists.filter((_, index) => dated(index)),
+      memories.words,
+      memories.entities,
+      byMeaning(findings),
+    ]),
+    { terms: terms.telling, exacts },
+    budget,
+    []
+  );
+  // What a packed memory holds, as packed (its statement, and its quote
+  // when the budget gave it), was found too.
+  const memo: WordMemo = new Map();
+  const held = pack.memories.map(({ statement, quote }) => {
+    const text = quote === null ? statement : `${statement}\n${quote}`;
+    return { text, words: wordsOf(text, memo) };
+  });
+  const every = exacts.map((_, index) => index);
+  const partsHeld = new Set(
+    held.flatMap(({ text }) => foundIn(text, exacts, every))
+  );
+  const found = (index: number) =>
+    exact.parts.has(index) || exact.capped.has(index) || partsHeld.has(index);
+  // An ID stands for its words, and a date found for its: none is said
+  // not found apart.
+  const standing = new Set(
+    exacts
+      .filter(
+        ({ kind }, index) => kind === "id" || (kind === "date" && found(index))
+      )
+      .flatMap(({ words: of }) => of)
   );
   const notFound = [
     ...exacts
-      .filter((_, index) => !exact.parts.has(index) && !exact.capped.has(index))
+      .filter(({ kind }, index) => kind !== "date" && !found(index))
       .map(({ asked: part }) => part),
     ...terms.telling
       .filter(
-        ({ word }, index) => !words.terms.has(index) && !standing.has(word)
+        (term, index) =>
+          !words.terms.has(index) &&
+          !standing.has(term.word) &&
+          !held.some((memory) => holdsTerm(memory.words, term))
       )
       .map(({ word }) => word),
   ];
-  return packOf(
-    fuse([...exact.lists, words.found, byMeaning(findings)]),
-    { terms: terms.telling, exacts },
-    budget,
-    notFound
-  );
+  return { ...pack, notFound };
 };
 
 /**

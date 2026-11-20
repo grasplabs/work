@@ -1,3 +1,5 @@
+import { heldAppCallsPage, shownVisibly } from "@grasp-os/shared/chat";
+import type { HeldAppCall } from "@grasp-os/shared/chat";
 import type {
   ActionDescription,
   PendingAction,
@@ -13,6 +15,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { Alert } from "../grasp/alert/index.ts";
 import {
   ApprovalRequest,
   ApprovalRequestApprove,
@@ -49,12 +52,40 @@ import type { DraftShown, HeldDraft } from "./held-drafts.ts";
 // whenever the draft and that list might not show all of the input whole,
 // the exact input is open from the start: confirming is then never for
 // less than the person was shown.
+//
+// Beside them, the writes to Apps core holds once the chat used something
+// only the person can read, each with that reason and its exact request,
+// open from the start. Why a decision didn't go through stands above the
+// list, which keeps it should the card go, until the next decision.
 
-/** What the page read of the chat's held writes. */
+/**
+ * What the page read of the chat's held writes: connect's (`actions`), and
+ * the writes to Apps core holds once the chat used something only the
+ * person can read (`calls`).
+ */
 type Held =
   | { state: "loading" }
   | { state: "refused"; message: string }
-  | { state: "ready"; actions: PendingAction[] };
+  | { state: "ready"; actions: PendingAction[]; calls: HeldAppCall[] };
+
+/**
+ * Every App write held in chat `chatId`, oldest first: page after page
+ * (`heldAppCallsPage` each), until one comes back short.
+ */
+const heldCallsOf = async (
+  session: Session,
+  chatId: string
+): Promise<HeldAppCall[]> => {
+  const calls: HeldAppCall[] = [];
+  let page = await session.chats.heldCalls(chatId);
+  calls.push(...page);
+  while (page.length === heldAppCallsPage) {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    page = await session.chats.heldCalls(chatId, page.at(-1)?.id);
+    calls.push(...page);
+  }
+  return calls;
+};
 
 /**
  * The person's held writes from chat `chatId`, newest first. Outside the
@@ -65,14 +96,19 @@ const readHeld = async (
   chatId: string
 ): Promise<Held> => {
   try {
-    const waiting = await core.withSession(
-      async (session) => await session.pendingActions.list()
+    const [waiting, calls] = await core.withSession(
+      async (session) =>
+        await Promise.all([
+          session.pendingActions.list(),
+          heldCallsOf(session, chatId),
+        ])
     );
     return {
       state: "ready",
       actions: waiting.filter(
         ({ context }) => context.type === "chat" && context.chatId === chatId
       ),
+      calls,
     };
   } catch (error) {
     return { state: "refused", message: failureText(error) };
@@ -107,12 +143,15 @@ const styles = stylex.create({
   },
 });
 
-/** The input an action runs with, laid out to read. */
+/**
+ * The input an action runs with, laid out to read, every character nobody
+ * sees shown as an escape (`shownVisibly`).
+ */
 export const inputOf = (input: string): string => {
   try {
-    return JSON.stringify(JSON.parse(input), null, 2);
+    return shownVisibly(JSON.stringify(JSON.parse(input), null, 2));
   } catch {
-    return input;
+    return shownVisibly(input);
   }
 };
 
@@ -122,31 +161,41 @@ const shownLines = 12;
 /** Characters of a value shown before the rest waits behind "Show all". */
 const shownCharacters = 1200;
 
-/** How much of `value` a card shows before "Show all": its start, if not all. */
-const startOf = (value: string): string =>
-  value.split("\n").slice(0, shownLines).join("\n").slice(0, shownCharacters);
-
-/** Whether a card starts `value` cut short. */
-const isCutShort = (value: string): boolean =>
-  startOf(value).length < value.length;
+/**
+ * A value as the card shows it, the one place both what is shown and
+ * whether it was all shown are decided: every character nobody sees as an
+ * escape (`shownVisibly`), and, measured on that, its start before "Show
+ * all" and whether that start cuts it short. So an escape that lengthens a
+ * value counts toward what is cut, and Confirm waits for what the start
+ * hides (`useShown`).
+ */
+const shownOf = (held: string) => {
+  const value = shownVisibly(held);
+  const start = value
+    .split("\n")
+    .slice(0, shownLines)
+    .join("\n")
+    .slice(0, shownCharacters);
+  return { value, start, cutShort: start.length < value.length };
+};
 
 /**
  * A text value, exactly as the input holds it, all of it: no scroll box
- * hides a part. A very long one starts cut short, with a control that says
- * how much there is and shows it all (`onShowAll`), so what follows a run
- * of blank lines can't go unseen unnoticed.
+ * hides a part, and every character nobody sees is shown as an escape,
+ * counted as shown (`shownOf`). A very long one starts cut short, with a
+ * control that says how much there is and shows it all (`onShowAll`), so
+ * what follows a run of blank lines can't go unseen unnoticed.
  */
 const TextValue = ({
-  value,
+  value: held,
   onShowAll,
 }: {
   value: string;
   onShowAll: () => void;
 }) => {
+  const { value, start, cutShort: long } = shownOf(held);
   const [all, setAll] = useState(false);
   const lines = value.split("\n");
-  const start = startOf(value);
-  const long = isCutShort(value);
   const { t } = useLingui();
   const count = lines.length;
   const characters = value.length;
@@ -192,7 +241,7 @@ const FieldValue = ({
         {value.map((item, index) => (
           // By position: the input's own order, and values may repeat.
           <li key={index} {...stylex.props(styles.words)}>
-            {item}
+            {shownVisibly(item)}
           </li>
         ))}
       </ul>
@@ -314,7 +363,9 @@ export const useShown = ({
     !inputSeen &&
     (description?.fields ?? []).some(
       ({ input, value }) =>
-        typeof value === "string" && isCutShort(value) && !seen.includes(input)
+        typeof value === "string" &&
+        shownOf(value).cutShort &&
+        !seen.includes(input)
     );
   const unseenId = useId();
   return {
@@ -356,20 +407,54 @@ const useUnseenWords = (): string => {
   return t`Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm.`;
 };
 
+/** Why a held write can only be rejected while what it would send is withheld. */
+const useWithheldWords = (
+  withheld: NonNullable<PendingAction["withheld"]>
+): string => {
+  const { t } = useLingui();
+  return withheld === "revoked"
+    ? t`What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it.`
+    : t`What this would send can't be shown right now, so you can only reject it for now. Try again in a moment.`;
+};
+
+/**
+ * Why a held write shows nothing of what it would send (core's
+ * `withheld`): its run may no longer read what it read, or that can't be
+ * checked now. Either way it can only be rejected.
+ */
+const WithheldInput = ({
+  withheld,
+  id,
+}: {
+  withheld: NonNullable<PendingAction["withheld"]>;
+  id?: string | undefined;
+}) => {
+  const words = useWithheldWords(withheld);
+  return (
+    <div id={id} role="note">
+      <Text size="sm">{words}</Text>
+    </div>
+  );
+};
+
 /**
  * Where a held write would act and when it was asked for, and everything
- * it would send: what a person reads before they confirm it. `saysUnseen`
- * says under it when confirming waits for more (off where the card holds
- * its Confirm with that reason itself).
+ * it would send: what a person reads before they confirm it; nothing of it
+ * while withheld (`WithheldInput`, `withheldId` its line's id).
+ * `saysUnseen` says under it when confirming waits for more (off where the
+ * card holds its Confirm with that reason itself).
  */
 export const HeldWriteDetails = ({
   action,
   shown,
   saysUnseen = true,
+  withheldId,
 }: {
   action: PendingAction;
   shown: Shown;
   saysUnseen?: boolean;
+  /** The id of the line that says why it is withheld, if it is. */
+  withheldId?: string;
 }) => {
   const { t } = useLingui();
   const unseenWords = useUnseenWords();
@@ -397,29 +482,35 @@ export const HeldWriteDetails = ({
       </Text>
       {action.restricted ? (
         <Badge tone="attention">
-          {t`This chat read restricted data: this may send it out`}
+          {t`This chat read private or restricted data: this may send it out`}
         </Badge>
       ) : null}
-      {description === undefined ? null : (
-        <Described
-          description={description}
-          onShowAll={(input) => {
-            shown.onShowAll(input);
-          }}
-        />
+      {action.withheld === undefined ? (
+        <>
+          {description === undefined ? null : (
+            <Described
+              description={description}
+              onShowAll={(input) => {
+                shown.onShowAll(input);
+              }}
+            />
+          )}
+          {description?.complete === false ? (
+            <Text size="sm">
+              {t`More will be sent than is shown above. Read exactly what will be sent before you confirm.`}
+            </Text>
+          ) : null}
+          <ExactInput
+            input={action.input}
+            onOpen={() => {
+              shown.onInputOpen();
+            }}
+            shown={description?.complete === true}
+          />
+        </>
+      ) : (
+        <WithheldInput id={withheldId} withheld={action.withheld} />
       )}
-      {description?.complete === false ? (
-        <Text size="sm">
-          {t`More will be sent than is shown above. Read exactly what will be sent before you confirm.`}
-        </Text>
-      ) : null}
-      <ExactInput
-        input={action.input}
-        onOpen={() => {
-          shown.onInputOpen();
-        }}
-        shown={description?.complete === true}
-      />
       {saysUnseen && shown.unseen ? (
         <Text id={shown.unseenId} size="sm" tone="muted">
           {unseenWords}
@@ -452,7 +543,7 @@ const shownWhole = ({ as, values }: DraftShown): boolean =>
       return value.length <= lineCharacters && !lineBreak.test(value);
     }
     if (as === "grows") {
-      return fieldsGrow() && !isCutShort(value);
+      return fieldsGrow() && !shownOf(value).cutShort;
     }
     return as === "whole";
   });
@@ -470,7 +561,7 @@ const draftRest = (action: PendingAction, draft: HeldDraft): PendingAction => {
   const complete =
     draft.left.every((key) => fields.some(({ input }) => input === key)) &&
     fields.every(
-      ({ value }) => typeof value !== "string" || !isCutShort(value)
+      ({ value }) => typeof value !== "string" || !shownOf(value).cutShort
     ) &&
     draft.shown.every(shownWhole);
   return {
@@ -483,13 +574,58 @@ const draftRest = (action: PendingAction, draft: HeldDraft): PendingAction => {
   };
 };
 
+/** A held write whose decision failed: which, and why, in core's words. */
+interface DecisionFailed {
+  what: string;
+  reason: string;
+}
+
+/** What a card tells its list once a decision of it ended. */
+interface Decided {
+  /**
+   * Told once a decision ended, with why it failed if it did: connect
+   * takes a confirmed action before it carries it out, and a held App
+   * write ends either way, so one that then fails is gone, its card with
+   * it, and only the list can say why.
+   */
+  onDecided: (failed?: DecisionFailed) => void;
+  /** Told once the person's confirmation went through. */
+  onConfirmed: () => void;
+}
+
+/**
+ * Decides a held write named `what` as `decision` says, then tells the
+ * list (`Decided`) and reads the chat list again: core notes the decision
+ * in the chat, which moves it up the list. Whether it went through.
+ */
+const useDecide = (what: string, { onDecided, onConfirmed }: Decided) => {
+  const { busy, run } = useCoreAction();
+  const router = useRouter();
+  const decide = async (
+    decision: (session: Session) => Promise<unknown>,
+    confirming: boolean
+  ): Promise<boolean> => {
+    let reason: string | undefined;
+    await run(decision, (failed) => {
+      reason = failed;
+    });
+    onDecided(reason === undefined ? undefined : { what, reason });
+    if (confirming && reason === undefined) {
+      onConfirmed();
+    }
+    await router.invalidate();
+    return reason === undefined;
+  };
+  return { busy, decide };
+};
+
 /**
  * A held write as the thing it makes, on Grasp UI's draft, read only: its
  * main action (Send, Create event, Add task) confirms exactly the input,
  * Discard rejects it. Under it, where it would act, what the draft has no
  * place for, and the exact input. `onDecided` follows each decision,
  * whether it went through (`done`) or core refused it, which the draft
- * says in core's words.
+ * says in core's words (`reason`).
  */
 export const HeldWriteDraft = ({
   action,
@@ -498,9 +634,14 @@ export const HeldWriteDraft = ({
 }: {
   action: PendingAction;
   draft: HeldDraft;
-  onDecided: (done: boolean, confirmed: boolean) => Promise<void>;
+  onDecided: (
+    done: boolean,
+    confirmed: boolean,
+    reason?: string
+  ) => Promise<void>;
 }) => {
-  const { failure, run } = useCoreAction();
+  const { run } = useCoreAction();
+  const [failure, setFailure] = useState<string>();
   const [status, setStatus] = useState<DraftStatus>("ready");
   const rest = draftRest(action, draft);
   const shown = useShown(rest);
@@ -508,14 +649,20 @@ export const HeldWriteDraft = ({
     if (confirming) {
       setStatus("sending");
     }
-    const done = await run(async (session) => {
-      await (confirming ? confirmHeld(action) : declineHeld(action))(session);
-      return true;
-    });
-    if (done !== true && confirming) {
+    let reason: string | undefined;
+    await run(
+      async (session) => {
+        await (confirming ? confirmHeld(action) : declineHeld(action))(session);
+      },
+      (failed) => {
+        reason = failed;
+      }
+    );
+    setFailure(reason);
+    if (reason !== undefined && confirming) {
       setStatus("failed");
     }
-    await onDecided(done === true, confirming);
+    await onDecided(reason === undefined, confirming, reason);
   };
   const confirm = async (): Promise<void> => {
     // Never so as the page is built (the exact input is open whenever
@@ -563,90 +710,176 @@ export const HeldWriteDraft = ({
 
 /**
  * A held write on Grasp UI's Approval request: Confirm and Reject, Confirm
- * held with its reason until all it sends was shown.
+ * held with its reason until all it sends was shown, or for good while
+ * what it would send is withheld. A refusal reaches the card, which says
+ * it could not; the list says why.
  */
 const HeldCard = ({
   action,
-  onDecided,
-}: {
+  ...decided
+}: Decided & {
   action: PendingAction;
-  onDecided: () => void;
 }) => {
-  const { failure, run } = useCoreAction();
-  const router = useRouter();
   const { t } = useLingui();
-  // Read again however it went: a failed decision may have changed
-  // something too (the action gone already, say). A refusal reaches the
-  // card, which says it could not.
-  const decide = async (
-    decision: (session: Session) => Promise<unknown>
+  const shown = useShown(action);
+  const what = useHeldName(action);
+  const { decide } = useDecide(what, decided);
+  const withheldWords = useWithheldWords(action.withheld ?? "revoked");
+  const decideCard = async (
+    decision: (session: Session) => Promise<unknown>,
+    confirming: boolean
   ): Promise<void> => {
-    const done = await run(async (session) => {
-      await decision(session);
-      return true;
-    });
-    onDecided();
-    // Core notes the decision in the chat, which moves it up the chat
-    // list: the list is read again so it shows under its new time.
-    await router.invalidate();
-    if (done !== true) {
+    if (!(await decide(decision, confirming))) {
       throw new Error("The decision was not taken");
     }
   };
-  const shown = useShown(action);
-  const what = useHeldName(action);
+  let approveHeld: string | undefined;
+  if (action.withheld !== undefined) {
+    approveHeld = withheldWords;
+  } else if (shown.unseen) {
+    approveHeld = t`Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm.`;
+  }
   return (
-    <>
-      <ApprovalRequest
-        approveHeld={
-          shown.unseen
-            ? t`Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm.`
-            : undefined
-        }
-        onApprove={async () => {
-          await decide(confirmHeld(action));
-        }}
-        onDecline={async () => {
-          await decide(declineHeld(action));
-        }}
-        title={what}
-        words={{ decline: t`Reject` }}
-      >
-        <ApprovalRequestApprove>{t`Confirm`}</ApprovalRequestApprove>
-        <HeldWriteDetails action={action} saysUnseen={false} shown={shown} />
-      </ApprovalRequest>
-      {/* Core's own words for a refusal, under the card's "Could not approve". */}
-      <ErrorText>{failure}</ErrorText>
-    </>
+    <ApprovalRequest
+      approveHeld={approveHeld}
+      onApprove={async () => {
+        await decideCard(confirmHeld(action), true);
+      }}
+      onDecline={async () => {
+        await decideCard(declineHeld(action), false);
+      }}
+      title={what}
+      words={{ decline: t`Reject` }}
+    >
+      <ApprovalRequestApprove>{t`Confirm`}</ApprovalRequestApprove>
+      <HeldWriteDetails action={action} saysUnseen={false} shown={shown} />
+    </ApprovalRequest>
   );
 };
 
 /**
- * A held write in the chat: as its draft when it makes one, else on Grasp
- * UI's Approval request.
+ * A held write in the chat: as its draft when it makes one and what it
+ * would send is shown, else on Grasp UI's Approval request.
  */
 export const HeldWrite = ({
   action,
-  onDecided,
-}: {
+  ...decided
+}: Decided & {
   action: PendingAction;
-  onDecided: () => void;
 }) => {
   const router = useRouter();
-  const draft = draftOf(action);
+  const what = useHeldName(action);
+  const draft = action.withheld === undefined ? draftOf(action) : undefined;
   if (draft === undefined) {
-    return <HeldCard action={action} onDecided={onDecided} />;
+    return <HeldCard action={action} {...decided} />;
   }
   return (
     <HeldWriteDraft
       action={action}
       draft={draft}
-      onDecided={async () => {
+      onDecided={async (done, confirmed, reason) => {
         // Read again however it went, as the card does.
-        onDecided();
+        decided.onDecided(reason === undefined ? undefined : { what, reason });
+        if (done && confirmed) {
+          decided.onConfirmed();
+        }
         await router.invalidate();
       }}
     />
+  );
+};
+
+/** A held App write's name: its function, in its App, as the person reads both. */
+const useCallName = (call: HeldAppCall): string => {
+  const { t } = useLingui();
+  // Named by the App's builder and the agent's code: every character nobody
+  // sees shown as an escape, as the request is (`shownVisibly`).
+  const fn = shownVisibly(call.function);
+  const app = shownVisibly(call.appName ?? call.appId);
+  return t`${fn} in ${app}`;
+};
+
+/**
+ * A write to an App held because the chat used something only the person
+ * can read (held-app-calls.ts in core), on Grasp UI's Approval request:
+ * which function of which App, why it waits, and exactly the request that
+ * would run, open from the start. Confirming names that request's hash.
+ */
+const HeldAppCallCard = ({
+  chatId,
+  call,
+  ...decided
+}: Decided & {
+  chatId: string;
+  call: HeldAppCall;
+}) => {
+  const { t } = useLingui();
+  const what = useCallName(call);
+  const { decide } = useDecide(what, decided);
+  const where = shownVisibly(call.appName ?? call.appId);
+  const asked = formatDateTime(call.heldAt);
+  const decideCard = async (
+    decision: (session: Session) => Promise<unknown>,
+    confirming: boolean
+  ): Promise<void> => {
+    if (!(await decide(decision, confirming))) {
+      throw new Error("The decision was not taken");
+    }
+  };
+  return (
+    <ApprovalRequest
+      onApprove={async () => {
+        await decideCard(async (session) => {
+          await session.chats.confirmHeldCall(
+            chatId,
+            call.id,
+            call.requestHash
+          );
+        }, true);
+      }}
+      onDecline={async () => {
+        await decideCard(async (session) => {
+          await session.chats.declineHeldCall(chatId, call.id);
+        }, false);
+      }}
+      title={what}
+      words={{ decline: t`Reject` }}
+    >
+      <ApprovalRequestApprove>{t`Confirm`}</ApprovalRequestApprove>
+      <div {...stylex.props(styles.stack)}>
+        <Badge tone="attention">{t`This uses something only you can read`}</Badge>
+        <Text size="sm" tone="muted">
+          {t`On ${where}`}
+        </Text>
+        <Text size="sm" tone="muted">
+          <Trans>
+            Asked for <time dateTime={call.heldAt}>{asked}</time>
+          </Trans>
+        </Text>
+        <ExactInput
+          input={call.request}
+          onOpen={() => {
+            // Open from the start: nothing waits for it.
+          }}
+          shown={false}
+        />
+      </div>
+    </ApprovalRequest>
+  );
+};
+
+/**
+ * Why a held write the person decided didn't go through, kept in the
+ * list, since its card may have gone, with core's reason. Until their next
+ * decision in this chat.
+ */
+const DecisionFailedAlert = ({ failed }: { failed: DecisionFailed }) => {
+  const { what, reason } = failed;
+  const { t } = useLingui();
+  return (
+    <Alert title={t`${what} didn't go through.`} tone="danger">
+      {reason}
+    </Alert>
   );
 };
 
@@ -655,16 +888,38 @@ export const HeldWrite = ({
  * time: each is confirmed only once what it sends has been shown.
  */
 const RejectAll = ({
+  chatId,
   actions,
+  calls,
   onDecided,
 }: {
+  chatId: string;
   actions: readonly PendingAction[];
-  onDecided: () => void;
+  calls: readonly HeldAppCall[];
+  /**
+   * Told once the rejections settled, with why the first refused one
+   * failed: what it rejected may still wait, but this row goes once fewer
+   * than two do, so only the list can say why.
+   */
+  onDecided: (failed?: DecisionFailed) => void;
 }) => {
   const { t } = useLingui();
-  const { busy, failure, run } = useCoreAction();
+  const { busy, run } = useCoreAction();
   const router = useRouter();
-  const count = actions.length;
+  const count = actions.length + calls.length;
+  // Each write as its own card names it (`useHeldName`, `useCallName`).
+  const names = [
+    ...actions.map((action) => {
+      const title = action.description?.title ?? action.action;
+      const connection = action.connectionName ?? action.connectionId;
+      return t`${title} on ${connection}`;
+    }),
+    ...calls.map((call) => {
+      const fn = shownVisibly(call.function);
+      const app = shownVisibly(call.appName ?? call.appId);
+      return t`${fn} in ${app}`;
+    }),
+  ];
   return (
     <div {...stylex.props(styles.rejectAll)}>
       <Text size="sm" tone="muted">
@@ -674,23 +929,34 @@ const RejectAll = ({
         disabled={busy}
         onClick={() => {
           void (async () => {
-            await run(async (session) => {
-              // Every rejection settles before the list is read again, so
-              // none still running is shown as waiting; then the first
-              // refusal says why.
-              const outcomes = await Promise.allSettled(
-                actions.map(async ({ id }) => {
-                  await session.pendingActions.decline(id);
-                })
-              );
-              const refused = outcomes.find(
-                (outcome) => outcome.status === "rejected"
-              );
-              if (refused !== undefined) {
-                throw refused.reason;
+            let failed: DecisionFailed | undefined;
+            let firstRefused = -1;
+            await run(
+              async (session) => {
+                // Every rejection settles before the list is read again, so
+                // none still running is shown as waiting; then the first
+                // refusal says why.
+                const outcomes = await Promise.allSettled([
+                  ...actions.map(async ({ id }) => {
+                    await session.pendingActions.decline(id);
+                  }),
+                  ...calls.map(async ({ id }) => {
+                    await session.chats.declineHeldCall(chatId, id);
+                  }),
+                ]);
+                firstRefused = outcomes.findIndex(
+                  (outcome) => outcome.status === "rejected"
+                );
+                const refused = outcomes[firstRefused];
+                if (refused?.status === "rejected") {
+                  throw refused.reason;
+                }
+              },
+              (reason) => {
+                failed = { what: names[firstRefused] ?? "", reason };
               }
-            });
-            onDecided();
+            );
+            onDecided(failed);
             // Each rejection is noted in the chat: its place in the list moves.
             await router.invalidate();
           })();
@@ -700,26 +966,26 @@ const RejectAll = ({
       >
         {t`Reject all`}
       </Button>
-      <ErrorText>{failure}</ErrorText>
     </div>
   );
 };
 
-/**
- * The chat's held writes, each with confirm and reject. Read again when
- * `version` changes (core says the agent had a write held: `ChatUpdate.held`) and after each
- * decision.
- */
-export const HeldWrites = ({
+/** The held writes of chat `chatId`, as `HeldWrites` shows them. */
+const ChatHeldWrites = ({
   chatId,
   version,
+  onConfirmed,
 }: {
   chatId: string;
   version: number;
+  onConfirmed: () => void;
 }) => {
   const [held, setHeld] = useState<Held>({ state: "loading" });
   const core = useCore();
   const [reads, setReads] = useState(0);
+  // Why the person's last decision failed, if it did: its card may be
+  // gone, so the list keeps it until their next decision.
+  const [failed, setFailed] = useState<DecisionFailed>();
   const { t } = useLingui();
   useEffect(() => {
     let current = true;
@@ -739,29 +1005,69 @@ export const HeldWrites = ({
   if (held.state === "refused") {
     return <ErrorText>{held.message}</ErrorText>;
   }
-  if (held.state === "loading" || held.actions.length === 0) {
+  const count =
+    held.state === "loading" ? 0 : held.actions.length + held.calls.length;
+  if (held.state === "loading" || (count === 0 && failed === undefined)) {
     return null;
   }
-  const count = held.actions.length;
+  const decided = (failure?: DecisionFailed): void => {
+    setFailed(failure);
+    setReads((read) => read + 1);
+  };
   return (
     <section aria-label={t`Waiting for you`} {...stylex.props(styles.list)}>
+      {failed === undefined ? null : <DecisionFailedAlert failed={failed} />}
       {count > 1 ? (
         <RejectAll
           actions={held.actions}
-          onDecided={() => {
-            setReads(reads + 1);
-          }}
+          calls={held.calls}
+          chatId={chatId}
+          onDecided={decided}
         />
       ) : null}
+      {held.calls.map((call) => (
+        <HeldAppCallCard
+          call={call}
+          chatId={chatId}
+          key={call.id}
+          onConfirmed={onConfirmed}
+          onDecided={decided}
+        />
+      ))}
       {held.actions.map((action) => (
         <HeldWrite
           action={action}
           key={action.id}
-          onDecided={() => {
-            setReads(reads + 1);
-          }}
+          onConfirmed={onConfirmed}
+          onDecided={decided}
         />
       ))}
     </section>
   );
 };
+
+/**
+ * The chat's held writes, each with confirm and reject. Read again when
+ * `version` changes (core says the agent had a write held:
+ * `ChatUpdate.held`) and after each decision. `onConfirmed` is told each
+ * time a confirmation went through: a rejection, or one that failed, tells
+ * it nothing.
+ */
+export const HeldWrites = ({
+  chatId,
+  version,
+  onConfirmed,
+}: {
+  chatId: string;
+  version: number;
+  onConfirmed: () => void;
+}) => (
+  // One list per chat: what it read and why a decision failed are that
+  // chat's, never shown, announced or pressed in the next one opened.
+  <ChatHeldWrites
+    chatId={chatId}
+    key={chatId}
+    onConfirmed={onConfirmed}
+    version={version}
+  />
+);

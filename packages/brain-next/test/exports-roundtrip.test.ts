@@ -9,7 +9,7 @@ import type {
   Access,
   NewEntity,
   NewMemory,
-  Reader,
+  PersonReader,
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -30,9 +30,10 @@ const shared = (): Store => env.BRAIN_STORE.getByName("brain");
 
 /**
  * The seeds the test runs: together they make every feature. Seeds 1 to
- * 40 were each run once when these were chosen, and all passed.
+ * 40 were each run once when these were chosen, and all passed; of them,
+ * only 30 settles a fact sources disagree on (a confirmation).
  */
-const seeds = [9, 25];
+const seeds = [9, 25, 30];
 
 /** What a store a seed makes may hold, each checked to be made by some seed. */
 const features = [
@@ -52,6 +53,8 @@ const features = [
   "more names for one entity from one memory than one entity of an add takes",
   "a source narrowed after its memories",
   "an erased source",
+  "a source removed with its history",
+  "a key removed before its first version",
 ] as const;
 type Feature = (typeof features)[number];
 
@@ -77,7 +80,7 @@ interface Series {
   pick: <T>(items: readonly T[]) => T;
   tag: string;
   people: string[];
-  readers: Reader[];
+  readers: PersonReader[];
   accesses: Access[];
   emails: string[];
   sources: { source: string; versions: number }[];
@@ -279,7 +282,12 @@ const retireOne = async ({
   const { id, writer } = pick(theirs);
   const reader = readers.find(({ person }) => person === writer);
   if (reader !== undefined) {
-    await shared().retireMemory({ memory: id, reader });
+    await shared().retireMemory({
+      memory: id,
+      reader,
+      writer: reader.person,
+      change: "retire",
+    });
   }
 };
 
@@ -308,10 +316,20 @@ const operate = async (series: Series, operation: number): Promise<void> => {
     if (chance < 0.6) {
       await addOne(series, operation);
     } else if (chance < 0.75 && memories.length > 0) {
-      await shared().confirmMemory({
-        memory: pick(memories).id,
-        reader: pick(readers),
-      });
+      // Only a contested memory takes a confirmation: from the one picked
+      // on, the first the reader picked settles, drawing no more of the
+      // series' randomness than one pick each.
+      const start = memories.indexOf(pick(memories));
+      const reader = pick(readers);
+      for (const { id } of [
+        ...memories.slice(start),
+        ...memories.slice(0, start),
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one try at a time
+        if ((await shared().confirmMemory({ memory: id, reader })) === "done") {
+          break;
+        }
+      }
     } else if (chance < 0.88) {
       await retireOne(series);
     } else if (chance < 0.95) {
@@ -402,6 +420,12 @@ const featuresHeld = async (): Promise<Record<string, number>> =>
       JOIN source_versions ON source_versions.row = current_versions.version_row
       WHERE source_versions.version > memories.version`
       ),
+      "a source removed with its history": count(
+        "SELECT count(*) AS count FROM removed_sources WHERE version_row IS NOT NULL"
+      ),
+      "a key removed before its first version": count(
+        "SELECT count(*) AS count FROM removed_sources WHERE version_row IS NULL"
+      ),
     };
   });
 
@@ -423,6 +447,20 @@ const madeBy = async (seed: number) => {
     // oxlint-disable-next-line no-await-in-loop -- one operation at a time
     await operate(series, operation);
   }
+  // Removals (removal.ts), after the series, so its seeds make what they
+  // made before: a source with a version, removed with its history, and a
+  // key removed before any version was added under it. Both keys stay
+  // closed after a restore (`keys`, read by `everyRead`).
+  const removed = `test:${tag}-removed`;
+  const removedEarly = `test:${tag}-removed-early`;
+  await shared().addSource({
+    source: removed,
+    change: "1",
+    text: `words of ${removed}`,
+    access: pick(series.accesses),
+  });
+  await shared().removeSources({ sources: [removed] });
+  await shared().removeSources({ sources: [removedEarly] });
   for (let ticks = 0; ticks < 3; ticks += 1) {
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
     await tick(shared());
@@ -442,6 +480,7 @@ const madeBy = async (seed: number) => {
       emails,
       questions: [`status ${tag}`, "words of", "requires sso"],
       asOf: new Date(Date.now() + 60_000),
+      keys: [removed, removedEarly],
     },
   };
 };
@@ -454,45 +493,175 @@ describe("a company's export, round trip", () => {
     empty = await copyOf(shared());
   });
 
-  it(
-    "answers every reader alike after an export restored into an empty store, for stores made by a fixed set of seeds",
-    { timeout: 60_000 },
-    async () => {
-      const outcomes: string[] = [];
-      const made = new Set<Feature>();
-      for (const seed of seeds) {
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        await restore(shared(), empty);
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const store = await madeBy(seed);
-        for (const feature of store.made) {
-          made.add(feature);
-        }
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const before = await everyRead(shared(), store.asked);
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const { id } = await shared().startExport("test");
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const exported = await exportSettled(shared, id);
-        const restored =
-          exported === "done"
-            ? // oxlint-disable-next-line no-await-in-loop -- one store at a time
-              await restoredAfterLoss(shared, id, empty)
-            : undefined;
-        // oxlint-disable-next-line no-await-in-loop -- one store at a time
-        const after = await everyRead(shared(), store.asked);
-        const differ = differences(before, after);
-        if (exported !== "done" || restored !== "done" || differ.length > 0) {
-          outcomes.push(
-            `seed ${seed}: export ${exported}, restore ${restored}, reads that differ: ${differ.join("; ")}`
-          );
-        }
+  it("answers every reader alike after an export restored into an empty store, for stores made by a fixed set of seeds", async () => {
+    const outcomes: string[] = [];
+    const made = new Set<Feature>();
+    for (const seed of seeds) {
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      await restore(shared(), empty);
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const store = await madeBy(seed);
+      for (const feature of store.made) {
+        made.add(feature);
       }
-
-      expect({
-        outcomes,
-        unmade: features.filter((feature) => !made.has(feature)),
-      }).toStrictEqual({ outcomes: [], unmade: [] });
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const before = await everyRead(shared(), store.asked);
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const { id } = await shared().startExport("test");
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const exported = await exportSettled(shared, id);
+      const restored =
+        exported === "done"
+          ? // oxlint-disable-next-line no-await-in-loop -- one store at a time
+            await restoredAfterLoss(shared, id, empty)
+          : undefined;
+      // oxlint-disable-next-line no-await-in-loop -- one store at a time
+      const after = await everyRead(shared(), store.asked);
+      const differ = differences(before, after);
+      if (exported !== "done" || restored !== "done" || differ.length > 0) {
+        outcomes.push(
+          `seed ${seed}: export ${exported}, restore ${restored}, reads that differ: ${differ.join("; ")}`
+        );
+      }
     }
-  );
+
+    expect({
+      outcomes,
+      unmade: features.filter((feature) => !made.has(feature)),
+    }).toStrictEqual({ outcomes: [], unmade: [] });
+  });
+
+  it("keeps a thread a thread through an export, and judges a document's quotes again at its next version", async () => {
+    await restore(shared(), empty);
+    const access: Access = { kind: "audience", group: "company" };
+    const reader: PersonReader = { person: "reader", groups: ["company"] };
+    const drawnFrom = async (source: string, thread: boolean) => {
+      const line = `${source} pays by card`;
+      const { version } = await shared().addSource({
+        source,
+        change: "1",
+        text: `${line}.`,
+        access,
+        thread,
+      });
+      const added = await shared().addMemories({
+        change: crypto.randomUUID(),
+        access,
+        entities: [{ key: "c", kind: "customer", names: [`${source} Group`] }],
+        memories: [
+          {
+            about: "c",
+            type: "fact",
+            statement: `${line}.`,
+            speaker: { kind: "outside" },
+            basis: { kind: "source", source, version, quote: line },
+          },
+        ],
+      });
+      return { source, thread, entity: added.entities.c ?? "" };
+    };
+    const made = [
+      await drawnFrom("thread-a", true),
+      await drawnFrom("doc-a", false),
+    ];
+    const { id } = await shared().startExport("test");
+    const exported = await exportSettled(shared, id);
+    const restored = await restoredAfterLoss(shared, id, empty);
+    const after = [];
+    for (const { source, thread, entity } of made) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await shared().addSource({
+        source,
+        change: "2",
+        text: "Something else was said.",
+        access,
+        thread,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      const { memories } = await shared().readMemories({
+        entity,
+        reader,
+        history: true,
+      });
+      after.push(memories.map(({ endedAt }) => endedAt === null));
+    }
+
+    expect({ exported, restored, current: after }).toStrictEqual({
+      exported: "done",
+      restored: "done",
+      current: [[true], [false]],
+    });
+  });
+
+  it("keeps a source several groups read, its narrowing and what was drawn from it, through an export", async () => {
+    await restore(shared(), empty);
+    const [kept, taken] = ["team:kept", "team:taken"];
+    const both: Access = { kind: "readers", groups: [kept, taken] };
+    const narrowed: Access = { kind: "readers", groups: [kept, "team:new"] };
+    const line = "The lease ends in March";
+    await shared().addSource({
+      source: "lease",
+      change: "1",
+      text: `${line}.`,
+      access: both,
+    });
+    const narrowedTo = await shared().changeReaders({
+      source: "lease",
+      change: "2",
+      access: narrowed,
+    });
+    const added = await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: narrowed,
+      entities: [{ key: "l", kind: "supplier", names: ["Lease Holdings"] }],
+      memories: [
+        {
+          about: "l",
+          type: "fact",
+          statement: `${line}.`,
+          speaker: { kind: "outside" },
+          basis: {
+            kind: "source",
+            source: "lease",
+            version: narrowedTo?.version ?? 0,
+            quote: line,
+          },
+        },
+      ],
+    });
+    const reads = async () => {
+      const readsOf = async (group: string) => {
+        const reader: PersonReader = { person: `in-${group}`, groups: [group] };
+        const [current, first, memories] = await Promise.all([
+          shared().readCurrent({ sources: ["lease"], reader }),
+          shared().readVersion({ source: "lease", version: 1, reader }),
+          shared().readMemories({ entity: added.entities.l ?? "", reader }),
+        ]);
+        return {
+          current: current.map(({ version, text }) => ({ version, text })),
+          first: first?.text ?? null,
+          memories: memories.memories.length,
+        };
+      };
+      return { kept: await readsOf(kept), taken: await readsOf(taken) };
+    };
+    const before = await reads();
+    const { id } = await shared().startExport("test");
+    const exported = await exportSettled(shared, id);
+    const restored = await restoredAfterLoss(shared, id, empty);
+
+    expect({ before, exported, restored, after: await reads() }).toStrictEqual({
+      before: {
+        kept: {
+          current: [{ version: 2, text: `${line}.` }],
+          first: `${line}.`,
+          memories: 1,
+        },
+        taken: { current: [], first: null, memories: 0 },
+      },
+      exported: "done",
+      restored: "done",
+      after: before,
+    });
+  });
 });

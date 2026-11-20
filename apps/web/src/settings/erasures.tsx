@@ -72,6 +72,7 @@ const areaLabels: Record<string, MessageDescriptor> = {
   runs: msg`Unfinished runs (stopped) and decision confirmations`,
   interview: msg`Onboarding interview`,
   brain_sources: msg`What the Brain keeps that only they may read`,
+  brain_shared: msg`What the Brain learned about them under the address they signed in with, and what they said, where others may read it`,
 };
 
 /** How far an area got, in the page's language. */
@@ -184,6 +185,9 @@ const WhatErasingDoes = ({ areas }: { areas: readonly string[] }) => {
     t`Their name, on what they did, so it stays traceable`,
     t`Runs they started, and their place in the roster`,
     t`The audit trail`,
+    t`Documents they or others shared with a team or the company stay, and their text can still name them.`,
+    t`An admin can still delete a specific document.`,
+    t`Cards about them without the address they signed in with can remain. Those built from documents go when an admin deletes those documents, and those an App wrote go when that App’s data is reset.`,
   ];
   return (
     <div {...stylex.props(styles.columns)}>

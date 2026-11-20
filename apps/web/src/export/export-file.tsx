@@ -8,7 +8,7 @@ import { Heading } from "../grasp/heading/index.ts";
 import { iconVars } from "../grasp/icons/icon.stylex.ts";
 import { BrandGrasp, Icon } from "../grasp/icons/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { bodyOf, PlainMarkdown } from "../knowledge/markdown.tsx";
+import { PlainMarkdown } from "../markdown.tsx";
 import { FigureTiles } from "./figure-tiles.tsx";
 import type { ExportFigure } from "./figure-tiles.tsx";
 
@@ -98,6 +98,21 @@ export const downloadText = (
   }, downloadKeptMs);
 };
 
+/**
+ * A Markdown file's frontmatter, from its first line's `---` to the next
+ * line that is one. A line is anything up to a line feed: `.` would stop
+ * at U+2028 and U+2029, which a name in it may hold.
+ */
+const frontmatter = /^---\r?\n(?:[^\n]*\n)*?---(?:\r?\n|$)/u;
+
+/**
+ * `markdown` without its frontmatter, which only the file needs: a
+ * brain note's export opens with one (brain/brain-markdown.ts), which the
+ * printed page leaves out.
+ */
+export const withoutFrontmatter = (markdown: string): string =>
+  markdown.replace(frontmatter, "");
+
 /** A backslash and what it escapes, as Markdown writes a character it would read as syntax. */
 const escaped = /\\(?<character>[!-/:-@[-`{-~])/gu;
 
@@ -136,7 +151,7 @@ const PrintPage = ({
     <Heading level={1}>{title}</Heading>
     <FigureTiles figures={figures} />
     <PlainMarkdown
-      text={withoutTitleLine(bodyOf(markdown).trimStart(), title)}
+      text={withoutTitleLine(withoutFrontmatter(markdown).trimStart(), title)}
     />
   </main>
 );

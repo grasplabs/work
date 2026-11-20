@@ -114,6 +114,12 @@ export const adminInterviewSchema = z.object({
   out: count,
   /** Facts read back and agreed to. */
   confirmed: count,
+  /**
+   * Of the facts kept in, those the person chose to share with their team
+   * as how they work (GRA-1987); the rest are only counted anonymously.
+   * Missing from a core older than this field (expand, then contract).
+   */
+  shared: count.optional(),
   /** From 1 to 5, when they gave one: it is theirs to give or not. */
   rating: z.int().min(1).max(5).nullable(),
   typed: z.boolean(),

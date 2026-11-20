@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { activeMember } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
+import { inertInMessage } from "./channels/inert.ts";
 import { companyDay } from "./channels/stephen-requests.ts";
 import { teamsAdapter } from "./channels/teams.ts";
 import { channelLocales, say } from "./channels/words.ts";
@@ -177,7 +178,11 @@ const sendOne = async (
     const locale = localeOf(chat.locale);
     const text = [
       `**${titleOf(summary, locale)}**`,
-      ...summaryLines(summary, locale).map((line) => `- ${line}`),
+      // A question's name, which a model wrote, inert in Teams' message
+      // text (channels/inert.ts).
+      ...summaryLines(summary, locale).map(
+        (line) => `- ${inertInMessage("teams")(line)}`
+      ),
       ...(link === null ? [] : [say("summaryOpen", locale, { url: link })]),
     ].join("\n");
     const adapter = await teamsAdapter(env);

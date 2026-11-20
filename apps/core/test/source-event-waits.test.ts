@@ -23,10 +23,7 @@ import {
 } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
-import {
-  createWorkflowResource,
-  publishWorkflowVersion,
-} from "../src/workflow-resources.ts";
+import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import {
   keptPerSource,
@@ -57,6 +54,7 @@ import { engineOfTest } from "./run-host.ts";
 import { admittedFreely, liveStatus, runObject } from "./runs.ts";
 import { moduleOf as harnessModuleOf } from "./sealed-run-harness.ts";
 import { routed, unique } from "./sign-in.ts";
+import { publishDefinition } from "./workflow-publishing.ts";
 
 // Waits on an event source's events by a match (event-waits.ts), from
 // their threat model. A run waits for `payment.paid` whose data's
@@ -139,29 +137,40 @@ const sourceOf = async (admin: Identity) => {
  * takes `payment.paid` from a webhook source, approved for a source of
  * its own.
  */
-const paymentWorkflow = async (on?: {
-  admin: Identity;
-  source: Awaited<ReturnType<typeof sourceOf>>;
-}) => {
+const paymentWorkflow = async (
+  on?: {
+    admin: Identity;
+    source: Awaited<ReturnType<typeof sourceOf>>;
+  },
+  types: readonly string[] = [paid]
+) => {
   const admin = on?.admin ?? (await person("admin"));
   const contract = `payments-${unique()}`;
   await publishCatalogContract(env, admin, {
     key: contract,
     kind: "event",
-    events: {
-      [paid]: { data: paymentData, browser: false, ingress: "webhook" },
-    },
+    events: Object.fromEntries(
+      types.map((type) => [
+        type,
+        { data: paymentData, browser: false, ingress: "webhook" },
+      ])
+    ),
   });
   const workflow = await createWorkflowResource(env, admin, `pay-${unique()}`);
-  await publishWorkflowVersion(env, admin, workflow.id, {
-    definition: JSON.stringify({
+  await publishDefinition(
+    env,
+    admin,
+    workflow.id,
+    JSON.stringify({
       $schema: workflowSchemaUrl,
       args: objectSchema({ invoice: { kind: "string" } }),
       permissions: { events: { payments: { contract } } },
-      steps: [{ id: "linger", type: "wait", for: "1 hour" }, awaitPaid],
-    }),
-    basedOn: null,
-  });
+      steps: [
+        { id: "linger", type: "wait", for: "1 hour" },
+        { ...awaitPaid, eventType: types.length === 1 ? paid : types },
+      ],
+    })
+  );
   const source = on?.source ?? (await sourceOf(admin));
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "payments",
@@ -182,7 +191,7 @@ const waitingRun = async (
     env,
     { type: "person", person: admin },
     workflow.id,
-    { version: 1, args: { invoice }, key: unique() }
+    { expected: 1, args: { invoice }, key: unique() }
   );
   if (runId === null) {
     throw new Error("The start admitted no run");
@@ -678,6 +687,39 @@ describe(
       });
     });
 
+    it("takes the event of its match when it waits on many types at once", async () => {
+      // More types than one statement of D1's 100 bound parameters keeps
+      // the wait of.
+      const types = [
+        paid,
+        ...Array.from({ length: 15 }, (_, at) => `payment.step${at}`),
+      ];
+      const paying = await paymentWorkflow(undefined, types);
+      const runId = await waitingRun(paying, "INV-1");
+      const statuses: number[] = [];
+      const ran = await ranAs(
+        runId,
+        waiting(),
+        inboxEngine(runId, keptOfTest(), async () => {
+          statuses.push(
+            await send(paying.source, invoice("INV-1"), {
+              type: "payment.step10",
+            })
+          );
+        })
+      );
+
+      expect({
+        statuses,
+        ran,
+        inbox: await inboxOf(runId),
+      }).toStrictEqual({
+        statuses: [202],
+        ran: { ended: "INV-1", tampered: [] },
+        inbox: ["INV-1"],
+      });
+    });
+
     it("takes an event of its match that comes while it waits, once, kept for others, and ends its wait", async () => {
       const paying = await paymentWorkflow();
       const runId = await waitingRun(paying, "INV-1");
@@ -707,6 +749,84 @@ describe(
         inbox: ["INV-1"],
         kept: [{ data: invoice("INV-1"), taken: [runId] }],
         waits: 0,
+      });
+    });
+
+    it("hands an event to the runs that can take it past the wait of a run an earlier release started, which it ends, audited", async () => {
+      const paying = await paymentWorkflow();
+      const runId = await waitingRun(paying, "INV-1");
+      // A run an earlier release started, waiting on the same match: its
+      // receipt froze a Knowledge collection's binding beside its event
+      // binding, which this release doesn't read. It sorts first, so the
+      // delivery reaches its wait before the healthy run's.
+      const old = `00000000-0000-4000-8000-${crypto.randomUUID().slice(-12)}`;
+      const frozen = [
+        {
+          alias: "payments",
+          kind: "event",
+          contractId: paying.contract,
+          fingerprint: "f",
+          approval: paying.approval,
+          target: { kind: "event", source: paying.source.id },
+        },
+        {
+          alias: "notes",
+          kind: "knowledge",
+          contractId: "old/notes@1",
+          fingerprint: "f",
+          approval: "approval-notes",
+          target: { kind: "knowledge", permissionId: "perm-old" },
+        },
+      ];
+      const statuses: number[] = [];
+      const ran = await ranAs(
+        runId,
+        waiting(),
+        inboxEngine(runId, keptOfTest(), async () => {
+          await env.DB.batch([
+            env.DB.prepare(
+              "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, bindings, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'm', ?, 1, 'h', ?, ?)"
+            ).bind(
+              old,
+              paying.admin.userId,
+              `key-${old}`,
+              paying.workflow.id,
+              paying.admin.userId,
+              JSON.stringify(frozen),
+              Date.now()
+            ),
+            env.DB.prepare(
+              "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, 'm', 'b', ?, 'running', ?)"
+            ).bind(old, paying.workflow.id, paying.admin.userId, Date.now()),
+            env.DB.prepare(
+              "INSERT INTO event_waits (run_id, step, event_type, workflow_id, binding, source_id, match_hash, expires_at) SELECT ?, step, event_type, workflow_id, binding, source_id, match_hash, expires_at FROM event_waits WHERE run_id = ?"
+            ).bind(old, runId),
+          ]);
+          statuses.push(await send(paying.source, invoice("INV-1")));
+        })
+      );
+      const oldWaits = await env.DB.prepare(
+        "SELECT COUNT(*) AS waits FROM event_waits WHERE run_id = ?"
+      )
+        .bind(old)
+        .first<{ waits: number }>();
+
+      expect({
+        statuses,
+        ran,
+        inbox: await inboxOf(runId),
+        oldWaits: oldWaits?.waits,
+        refused: await auditedOf(
+          "workflow.webhook.wait_refused",
+          old,
+          "reason"
+        ),
+      }).toStrictEqual({
+        statuses: [202],
+        ran: { ended: "INV-1", tampered: [] },
+        inbox: ["INV-1"],
+        oldWaits: 0,
+        refused: ["run_ended"],
       });
     });
 
@@ -1069,15 +1189,17 @@ describe("publishing and approving a wait on a webhook source's events", () => {
     /** Publishing `awaitPaid` changed by `change`: "published", or its problems' codes. */
     const publishing = async (change: Record<string, unknown>) => {
       try {
-        await publishWorkflowVersion(env, admin, workflow.id, {
-          definition: JSON.stringify({
+        await publishDefinition(
+          env,
+          admin,
+          workflow.id,
+          JSON.stringify({
             $schema: workflowSchemaUrl,
             args: objectSchema({ invoice: { kind: "string" } }),
             permissions: { events: { payments: { contract } } },
             steps: [{ ...awaitPaid, ...change }],
-          }),
-          basedOn: null,
-        });
+          })
+        );
         return "published";
       } catch (error) {
         return z

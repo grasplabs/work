@@ -192,7 +192,6 @@ describe("a client's resources", () => {
     ).toStrictEqual({
       "d1:grasp-os-connect": `grasp-${id}-connect-db`,
       "d1:grasp-os-core": `grasp-${id}-core-db`,
-      "d1:grasp-os-knowledge": `grasp-${id}-core-knowledge`,
       "do:grasp-os-core:AuditLog": `grasp-${id}-core:AuditLog`,
       "do:grasp-os-core:Workspace": `grasp-${id}-core:Workspace`,
       "r2:grasp-os-audit-archive": `grasp-${id}-core-audit`,

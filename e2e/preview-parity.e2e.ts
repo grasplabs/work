@@ -77,7 +77,7 @@ for (const { blueprint, heading, settled } of pages) {
         .toBeTruthy();
       const created = await api.apps.blueprints.create(blueprint, { name });
       app = created.app.id;
-      await api.apps.versions.publish(app, 1);
+      await api.versions.rollback({ kind: "app", id: app }, 1);
       const thread = await api.chats.create(`Build ${tag}`);
       chat = thread.id;
     } finally {

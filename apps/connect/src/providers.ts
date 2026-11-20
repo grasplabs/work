@@ -112,7 +112,10 @@ export interface OAuthProviderConfig {
    * `allowed`, or less than `required`, are refused
    * (`connection.scopes_refused`). For a connection that must hold no
    * more than it asks for, as the directory's and the documents'; none
-   * for the rest.
+   * for the rest. A renewal (`renewedAsGranted`) must hold all its
+   * connection held before, and nothing beyond `allowed`: a scope added
+   * to `required` later is asked of connecting only, so a connection made
+   * before it goes on with what it was granted.
    */
   granted?: {
     allowed: ReadonlySet<string>;
@@ -151,6 +154,21 @@ export interface OAuthProviderConfig {
     tenant: string,
     clientId: string
   ) => Promise<ProviderAccount | null>;
+  /**
+   * For a provider whose reader lists name accounts by address (Google's),
+   * the address the provider confirms, at a renewal, for the account
+   * `accountId` in `tenant`, by the same rules as when it was connected;
+   * `null` when it confirms none. Core counts a connection's address as
+   * proved only while the last renewal confirmed it (connections.ts
+   * `personalAccounts`). None where reader lists name an account by a
+   * stable ID (Entra's object ID).
+   */
+  confirmAddress?: (
+    tokens: TokenSet,
+    tenant: string,
+    clientId: string,
+    accountId: string
+  ) => Promise<string | null>;
 }
 
 /** An app people connect with an API key they give. */
@@ -274,6 +292,51 @@ const microsoft: OAuthProviderConfig = {
   account: entraAccount,
 };
 
+/** Google's userinfo endpoint, as its discovery document names it. */
+const googleUserinfo = "https://openidconnect.googleapis.com/v1/userinfo";
+
+/** What a userinfo answer must hold for its address to count, as an ID token's would. */
+const googleUserinfoSchema = z.object({
+  sub: z.string().min(1),
+  email: z.string().min(1),
+  email_verified: z.literal(true),
+  hd: z.string(),
+});
+
+/** How long a userinfo read may take before its address counts as unconfirmed. */
+const userinfoTimeoutMs = 10_000;
+
+/**
+ * The address Google's userinfo endpoint confirms for `accessToken`: only
+ * for the account `accountId` under the hosted domain `tenant`, marked
+ * verified; `null` for anything else, an error included.
+ */
+export const googleUserinfoAddress = async (
+  accessToken: string,
+  tenant: string,
+  accountId: string
+): Promise<string | null> => {
+  try {
+    const response = await fetch(googleUserinfo, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      redirect: "manual",
+      signal: AbortSignal.timeout(userinfoTimeoutMs),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return null;
+    }
+    const info = googleUserinfoSchema.safeParse(await response.json());
+    return info.success &&
+      info.data.sub === accountId &&
+      info.data.hd.toLowerCase() === tenant
+      ? info.data.email.toLowerCase()
+      : null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Google Workspace. Google can only hint at the domain (`hd`), so the ID
  * token's `hd` is what counts. `access_type=offline` with `prompt=consent`
@@ -320,6 +383,20 @@ const google: OAuthProviderConfig = {
       ? { id: sub, name: email ?? null, email: email ?? null }
       : null;
   },
+  confirmAddress: async (tokens, tenant, clientId, accountId) => {
+    // The renewal's ID token, which Google returns from a refresh
+    // (https://developers.google.com/identity/openid-connect/openid-connect,
+    // "an ID token is returned from a token refresh"), checked as at
+    // connecting; else the userinfo endpoint of Google's discovery document,
+    // for the token just renewed, with the same checks.
+    const fromToken = await google.account(tokens, tenant, clientId);
+    if (fromToken !== null) {
+      return fromToken.id === accountId
+        ? (fromToken.email?.toLowerCase() ?? null)
+        : null;
+    }
+    return await googleUserinfoAddress(tokens.accessToken, tenant, accountId);
+  },
 };
 
 /** What the directory's Microsoft connection reads Graph with, and only that. */
@@ -332,6 +409,12 @@ const microsoftDirectoryScopes = [
   // Everyone's department, job title and manager: `User.ReadBasic.All`
   // holds names and addresses only.
   "User.Read.All",
+  // The groups an admin maps to teams, and their members, nested groups'
+  // included (GRA-2056, directory-groups.ts): asked of every company when
+  // it connects, so mapping a group never needs a second consent.
+  // `GroupMember.ReadBasic.All` reads members only, not the groups
+  // themselves, which a search and a group's properties need.
+  "Group.ReadBasic.All",
 ] as const;
 
 /**
@@ -355,7 +438,7 @@ const microsoftDirectory: OAuthProviderConfig = {
     allowed: new Set(
       microsoftDirectoryScopes.map((scope) => scope.toLowerCase())
     ),
-    required: ["User.Read.All"],
+    required: ["User.Read.All", "Group.ReadBasic.All"],
   },
   sharedOnly: true,
   client: (env) =>
@@ -707,13 +790,52 @@ export const grantedAsAsked = (
   );
 };
 
-/** The OpenID scopes, which a provider's answer may name or leave out. */
+/**
+ * The OpenID scopes, which a provider's answer may name or leave out:
+ * Google's answer names email and profile by their full URIs.
+ */
 const signInScopes: ReadonlySet<string> = new Set([
   "openid",
   "profile",
   "email",
   "offline_access",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
 ]);
+
+/**
+ * Whether a renewal's `tokens` hold what their connection was granted,
+ * where it must hold no more (`granted`): nothing beyond what is allowed,
+ * and nothing less than the connection's earlier grant (`before`, its
+ * token answer's scope, as kept), the OpenID scopes aside, which an
+ * answer may leave out. A grant that predates a scope asked for since is
+ * no change; one that lost a scope it had, or gained one unasked, is. An
+ * answer that lists none is refused.
+ */
+export const renewedAsGranted = (
+  { granted }: OAuthProviderConfig,
+  { scope }: TokenSet,
+  before: string | null
+): boolean => {
+  if (granted === undefined) {
+    return true;
+  }
+  // Connect keeps no connection with a restricted grant whose answer said
+  // nothing of it (`grantedAsAsked`): an unknown either way is refused.
+  if (scope === undefined || before === null) {
+    return false;
+  }
+  const scopes = scopesOf(scope);
+  const held = [...scopesOf(before)];
+  return (
+    [...scopes].every((each) => granted.allowed.has(each)) &&
+    held.every((each) => signInScopes.has(each) || scopes.has(each))
+  );
+};
+
+/** Whether a grant of `scope` (a token answer's, as kept) holds `wanted`. */
+export const grantHolds = (scope: string, wanted: string): boolean =>
+  scopesOf(scope).has(wanted.toLowerCase());
 
 /**
  * The scopes `provider` asks for now that a grant of `scope` (a token

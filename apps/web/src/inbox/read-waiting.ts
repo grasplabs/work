@@ -10,7 +10,6 @@ import type {
 
 import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
-import { readPeople } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { readOutcomes } from "./everyones-outcomes.ts";
@@ -76,6 +75,7 @@ export const readWaiting = async (
     const listed = read.items.flatMap((item) =>
       item.kind === "openQuestion" ||
       item.kind === "stoppedSchedule" ||
+      item.kind === "workflowChanged" ||
       item.kind === "packageNotice" ||
       item.kind === "stoppedEvents" ||
       item.kind === "appMessage"
@@ -129,14 +129,6 @@ export const readWaiting = async (
         return { view, links, stage: programme?.stage ?? null };
       })
     : undefined;
-  const workflowGoLives = partOf(feed, "workflowGoLives", (read) =>
-    ofKind(read, "workflowGoLive")
-  );
-  // Who asked for each go-live, by name: only when one waits.
-  const goLivePeople =
-    workflowGoLives.state === "ready" && workflowGoLives.data.length > 0
-      ? await loadFromCore(core, readPeople)
-      : undefined;
   // Everyone's, for the organization's own admins, as Settings › Unknown outcomes was.
   const everyonesOutcomes =
     listOutcomes && decidesRequests(identity)
@@ -162,14 +154,13 @@ export const readWaiting = async (
     decisions: partOf(feed, "decisions", (read) =>
       ofKind(read, "decision").map(({ decision }) => decision)
     ),
-    workflowGoLives,
-    ...(goLivePeople?.state === "ready"
-      ? { goLivePeople: goLivePeople.data }
-      : {}),
     ...(decidesRequests(identity)
       ? {
           bindings: partOf(feed, "bindings", (read) =>
             ofKind(read, "bindingApproval")
+          ),
+          skillShares: partOf(feed, "skillShares", (read) =>
+            ofKind(read, "skillShare")
           ),
           gaps: await loadFromCore(
             core,

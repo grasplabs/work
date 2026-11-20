@@ -18,6 +18,7 @@ import {
 import type { ParamMetadata, ParamValues, Params } from "./workflow-params.ts";
 import type {
   BrainActions,
+  BrainMembers,
   CallOptions,
   ConnectionCallOptions,
   Decision,
@@ -103,10 +104,21 @@ export { sensitiveParam } from "./workflow-params.ts";
 // (workflow-generated.ts), which the SDK re-exports for it.
 export { caughtError, itemsOf, own, parse } from "./workflow-generated.ts";
 export type { Json } from "@grasp-os/shared/json";
+export type {
+  BrainFound,
+  BrainPack,
+  BrainPackItem,
+  BrainRecall,
+  BrainSkill,
+  BrainSkillText,
+  BrainCard,
+  BrainEntity,
+  BrainMemory,
+} from "./brain-recall.ts";
 export type { Param, ParamMetadata } from "./workflow-params.ts";
 export type {
   BrainActions,
-  BrainHit,
+  BrainMembers,
   CallOptions,
   CaughtError,
   ConnectionCallOptions,
@@ -263,9 +275,11 @@ export interface WorkflowCtx<
     >;
   };
   readonly brain: {
-    readonly [Alias in keyof NonNullable<Permissions["brain"]>]: Pick<
-      BrainActions,
-      ListedOf<NonNullable<Permissions["brain"]>[Alias]>
+    readonly [Alias in keyof NonNullable<Permissions["brain"]>]: BrainMembers<
+      Extract<
+        ListedOf<NonNullable<Permissions["brain"]>[Alias]>,
+        keyof BrainActions
+      >
     >;
   };
   readonly ai: Permissions["ai"] extends true ? AiMembers : undefined;

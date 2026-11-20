@@ -7,8 +7,8 @@ import type {
 // What an admin's bind form of an App's resource (resource-bindings.tsx)
 // decides, apart from how it looks: what it starts on, what it sends, and
 // when it starts afresh. A refreshed review can change what is declared or
-// offered under a form, so what it sends is built from the declaration as
-// it is now, never from what the form held before.
+// offered under a form, so what it sends is built from what is offered
+// now, never from what the form held before.
 
 /** Whether `choices` offer nothing to bind. */
 export const noChoice = (choices: BindingChoices): boolean => {
@@ -27,61 +27,20 @@ export const firstChoice = (choices: BindingChoices): string => {
 };
 
 /**
- * Each collection `declared` names, with the permission chosen for it
- * (empty while none is): the declared ones only, whatever else `chosen`
- * still holds from an earlier declaration.
- */
-export const collectionsOf = (
-  declared: readonly string[],
-  chosen: Readonly<Record<string, string>>
-): Record<string, string> =>
-  Object.fromEntries(
-    declared.map((collection) => [
-      collection,
-      Object.hasOwn(chosen, collection) ? (chosen[collection] ?? "") : "",
-    ])
-  );
-
-/** Whether every collection `declared` names has a permission chosen. */
-export const allChosen = (
-  declared: readonly string[],
-  chosen: Readonly<Record<string, string>>
-): boolean =>
-  Object.values(collectionsOf(declared, chosen)).every(
-    (permission) => permission !== ""
-  );
-
-/**
- * The target the form's choice names for `resource` as declared now:
- * undefined while it names nothing that is offered.
+ * The target the form's choice names: undefined while it names nothing
+ * that is offered now.
  */
 export const targetOf = (
-  resource: Pick<DeclaredResource, "collections">,
   choices: BindingChoices,
-  picked: string,
-  chosen: Readonly<Record<string, string>>
+  picked: string
 ): BindingTargetInput | undefined => {
   if (choices.kind === "model") {
     return choices.models.includes(picked)
       ? { kind: "model", model: picked }
       : undefined;
   }
-  if (
-    choices.kind === "connector" ||
-    choices.kind === "grasp" ||
-    choices.kind === "guests"
-  ) {
-    return choices.permissions.some(
-      ({ permissionId }) => permissionId === picked
-    )
-      ? { kind: choices.kind, permissionId: picked }
-      : undefined;
-  }
-  return allChosen(resource.collections, chosen)
-    ? {
-        kind: "knowledge",
-        collections: collectionsOf(resource.collections, chosen),
-      }
+  return choices.permissions.some(({ permissionId }) => permissionId === picked)
+    ? { kind: choices.kind, permissionId: picked }
     : undefined;
 };
 
@@ -113,7 +72,6 @@ export const formKey = (
     resource.contract,
     resource.actions,
     resource.operations,
-    resource.collections,
     resource.binding?.id ?? null,
     choiceIds(resource.choices),
   ]);

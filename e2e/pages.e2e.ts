@@ -47,7 +47,7 @@ const releaseApp = async (
   const { core, api } = apiOf(builder);
   try {
     const { id } = await api.apps.create({ name });
-    await release(api, id, pageAppFiles(attacker), name);
+    await release(api, id, pageAppFiles(attacker));
     if (sharedWith !== undefined) {
       await api.apps.members.add(id, {
         type: "person",
@@ -361,14 +361,9 @@ test("a page with nothing unsaved switches to a new current version by itself", 
   const before = await frameAddress();
   const { core, api } = apiOf(one);
   try {
-    await release(
-      api,
-      app,
-      {
-        "src/routes/index.tsx": `${pageAppFiles(attacker.url).files["src/routes/index.tsx"]}// v2\n`,
-      },
-      "v2"
-    );
+    await release(api, app, {
+      "src/routes/index.tsx": `${pageAppFiles(attacker.url).files["src/routes/index.tsx"]}// v2\n`,
+    });
   } finally {
     core[Symbol.dispose]();
   }

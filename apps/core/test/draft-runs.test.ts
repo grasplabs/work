@@ -131,7 +131,7 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
       },
       revision
     );
-    const update = await builder.api.apps.drafts.previewUpdate(app, broken, {});
+    const update = await builder.api.apps.preview.update(app, broken, {});
     const titles = outcome(
       await previewCall(
         builder,
@@ -237,7 +237,7 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
   it("is emptied for good at once when a builder resets the test data, and the next call starts on an empty store", async () => {
     const { builder, app, storeId, titles } = await withNote();
     const before = await titles();
-    await builder.api.apps.drafts.resetTestData(app);
+    await builder.api.apps.preview.resetData(app);
     const emptied = await storeEmptied(storeId);
     expect({ before, emptied, after: await titles() }).toStrictEqual({
       before: ["Typed in"],
@@ -248,8 +248,8 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
 
   it("keeps its test data when the draft is discarded, for the next draft over the same schema", async () => {
     const { builder, app, write, titles } = await withNote();
-    const { revision } = await builder.api.apps.drafts.get(app);
-    await builder.api.apps.drafts.discard(app, revision);
+    const { revision } = await builder.api.drafts.get({ kind: "app", id: app });
+    await builder.api.drafts.discard({ kind: "app", id: app }, revision);
     await write(
       { "server/notes.ts": notesFiles("again").files["server/notes.ts"] ?? "" },
       revision + 1
@@ -297,7 +297,7 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
     const { builder, app } = await setUp();
     // A call under way read the seed, then the test data was reset.
     const { seed } = await previewOf(app).run();
-    await builder.api.apps.drafts.resetTestData(app);
+    await builder.api.apps.preview.resetData(app);
     const storeId = `throwaway-${crypto.randomUUID()}`;
     const kept = await refusalOf(previewOf(app).keepStore({ storeId, seed }));
     expect({ kept, recorded: await previewStores(app) }).toStrictEqual({
@@ -317,7 +317,7 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
       },
       { timeout: 10_000, interval: 100 }
     );
-    await builder.api.apps.drafts.resetTestData(app);
+    await builder.api.apps.preview.resetData(app);
     const settled = outcome(await late);
     const titles = outcome(
       await previewCall(builder, app, await requestFor(at, "notes.titles"))
@@ -338,7 +338,7 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
 
   it("is never held again once emptied, by a call that was already under way", async () => {
     const { builder, app, storeId } = await withNote();
-    await builder.api.apps.drafts.resetTestData(app);
+    await builder.api.apps.preview.resetData(app);
     const held = await refusalOf(
       holdThrowawayStore(
         env,

@@ -1,3 +1,4 @@
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type {
   ConnectionWorkflow,
   ConnectionWorkflows,
@@ -50,7 +51,7 @@ const WorkflowItem = ({ workflow }: { workflow: ConnectionWorkflow }) => (
   >
     <ItemMedia icon={Workflow} iconLook="inline" />
     <ItemContent>
-      <ItemTitle>{workflow.name}</ItemTitle>
+      <ItemTitle>{workflowLabel(workflow)}</ItemTitle>
     </ItemContent>
   </Item>
 );

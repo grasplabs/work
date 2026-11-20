@@ -23,8 +23,8 @@ import { WorkflowTriggers } from "./workflow-triggers.tsx";
 // the page reaches them over RPC, faked: a stopped schedule says so, and
 // its owner turns it on again; a builder turns another's trigger off and
 // deletes it only once they confirm; a builder adds a schedule, and a
-// connection's event, with exactly the configuration typed, for the
-// version picked; anyone else is offered nothing to change.
+// connection's event, with exactly the configuration typed; anyone else
+// is offered nothing to change.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -39,9 +39,7 @@ const settled = async (): Promise<void> => {
 };
 
 const base = {
-  version: 1,
   workflowId: "workflow-1",
-  workflowVersion: 1,
   createdAt: "2026-10-30T09:00:00.000Z",
   start: "active" as const,
   events: null,
@@ -104,6 +102,7 @@ const shop: EventSource = {
   createdAt: "2026-10-01T09:00:00.000Z",
   createdBy: "admin",
   delivery: null,
+  activity: null,
 };
 
 const ownWebhook: WorkflowTrigger = {
@@ -162,7 +161,10 @@ const shown = async (
       await Promise.resolve();
       asked.push({ create: input });
       if (changeFails) {
-        throw new Error("The trigger couldn't be read back.");
+        // As core refuses a config: its message, and what is wrong where.
+        throw Object.assign(new Error("The trigger couldn't be read back."), {
+          details: { issues: ["config.input.report: Expected a string."] },
+        });
       }
       return stoppedSchedule;
     },
@@ -174,11 +176,6 @@ const shown = async (
       }
       return stoppedSchedule;
     },
-    setVersion: async (id: string, version: number) => {
-      await Promise.resolve();
-      asked.push({ setVersion: id, version });
-      return stoppedSchedule;
-    },
     delete: async (id: string) => {
       await Promise.resolve();
       asked.push({ delete: id });
@@ -186,9 +183,19 @@ const shown = async (
   };
   const workflowResources = {
     triggers,
-    versions: async () =>
-      await Promise.resolve([{ version: 1 }, { version: 2 }]),
     sources: { list: async () => await Promise.resolve(sources) },
+  };
+  // Its versions, as `versions` lists a workflow's: newest first.
+  const versions = {
+    list: async () =>
+      await Promise.resolve(
+        [2, 1].map((version) => ({
+          kind: "workflow",
+          resourceId: "workflow-1",
+          version,
+          label: `26.11.${version}`,
+        }))
+      ),
   };
   const connections = {
     list: async (): Promise<ListedConnection[]> => {
@@ -213,11 +220,12 @@ const shown = async (
     withSession: async <T,>(
       action: (session: {
         workflowResources: typeof workflowResources;
+        versions: typeof versions;
         connections: typeof connections;
         permissions: typeof permissions;
       }) => Promise<T>
     ): Promise<T> =>
-      await action({ workflowResources, connections, permissions }),
+      await action({ workflowResources, versions, connections, permissions }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
@@ -414,10 +422,9 @@ describe("a workflow's Triggers", () => {
     });
   });
 
-  it("adds a schedule with exactly what the builder typed, for the version picked", async () => {
+  it("adds a schedule with exactly what the builder typed", async () => {
     const asked = await shown(true);
     await openAdd();
-    await choose("Version it starts", "Version 1");
     await fill("When, as a cron expression", "30 7 * * *");
     await fill("Time zone", "Europe/Amsterdam");
     await fill(
@@ -431,7 +438,6 @@ describe("a workflow's Triggers", () => {
         create: {
           kind: "schedule",
           workflowId: "workflow-1",
-          version: 1,
           config: {
             schedule: { cron: "30 7 * * *", timeZone: "Europe/Amsterdam" },
             input: { report: "daily" },
@@ -463,8 +469,6 @@ describe("a workflow's Triggers", () => {
           create: {
             kind: "connector",
             workflowId: "workflow-1",
-            // The latest, as nothing else was picked.
-            version: 2,
             config: {
               connection: { connectionId: "connection-google" },
               event: "google.mail.received",
@@ -497,7 +501,6 @@ describe("a workflow's Triggers", () => {
           create: {
             kind: "email",
             workflowId: "workflow-1",
-            version: 2,
             config: {
               input: { fields: { subject: "/subject" }, defaults: {} },
             },
@@ -519,7 +522,6 @@ describe("a workflow's Triggers", () => {
         create: {
           kind: "email",
           workflowId: "workflow-1",
-          version: 2,
           config: {
             input: { fields: {}, defaults: {} },
             address: "invoices",
@@ -586,7 +588,6 @@ describe("a workflow's Triggers", () => {
     const afterChange = listReads;
     // An added trigger too: one core saved shows, and isn't added twice.
     await openAdd();
-    await choose("Version it starts", "Version 1");
     await fill("When, as a cron expression", "30 7 * * *");
     await fill("Time zone", "Europe/Amsterdam");
     await submit();
@@ -595,7 +596,15 @@ describe("a workflow's Triggers", () => {
       readAgain: afterChange > before,
       readAfterAdding: listReads > afterChange,
       said: document.body.textContent.includes("couldn't be read back"),
-    }).toStrictEqual({ readAgain: true, readAfterAdding: true, said: true });
+      saidWhere: document.body.textContent.includes(
+        "config.input.report: Expected a string."
+      ),
+    }).toStrictEqual({
+      readAgain: true,
+      readAfterAdding: true,
+      said: true,
+      saidWhere: true,
+    });
   });
 
   it("adds a webhook trigger on the source and event type chosen, by the source's name", async () => {
@@ -615,7 +624,6 @@ describe("a workflow's Triggers", () => {
           create: {
             kind: "webhook",
             workflowId: "workflow-1",
-            version: 2,
             config: { source: shop.id, type: "order.paid" },
           },
         },

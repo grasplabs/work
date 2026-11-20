@@ -16,6 +16,7 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useState } from "react";
+import { z } from "zod";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -77,6 +78,7 @@ import { Textarea } from "../grasp/textarea/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { workflowVersions } from "./reads.ts";
 import { inputSketchOf } from "./start-input.ts";
 import { ExpectedInput } from "./start-run.tsx";
 import {
@@ -96,8 +98,9 @@ import {
 // or an email to an address of its own (a name they choose, as an App's
 // email trigger has, or a random one when they leave it empty, with how
 // the message becomes the run's input, shown by the part of its address
-// before the @), for an exact published version. A trigger acts for whoever made it:
-// they alone turn it on again or move it to another version; its builders
+// before the @). A trigger starts the workflow's live version, whichever
+// that is as it starts, and acts for whoever made it: they alone turn it
+// on again; its builders
 // and admins turn it off and delete it (deleting asks first). A schedule
 // whose starts kept failing stopped, and says so, with Turn on again for
 // its owner. Core decides every change again (trigger-resources.ts) and
@@ -137,7 +140,7 @@ const TriggerWhat = ({
 
 const styles = stylex.create({
   triggers: { display: "flex", flexDirection: "column", gap: grasp.space4 },
-  // Under a row's title: its version and state, and what it waits for.
+  // Under a row's title: its state, and what it waits for.
   line: {
     display: "flex",
     flexWrap: "wrap",
@@ -157,6 +160,14 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "flex-end",
     gap: grasp.space1,
+  },
+  // What core said is wrong with a config it refused, one line each.
+  issues: {
+    margin: 0,
+    paddingInlineStart: grasp.space5,
+    color: grasp.danger,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
   },
 });
 
@@ -377,18 +388,16 @@ type TriggersApi = Parameters<
   Parameters<ReturnType<typeof useCoreAction>["run"]>[0]
 >[0]["workflowResources"]["triggers"];
 
-/** One trigger: what starts it, its version, where it stands, and what the reader may change. */
+/** One trigger: what starts it, where it stands, and what the reader may change. */
 const TriggerRow = ({
   trigger,
   connections,
-  versions,
   me,
   builder,
   onChanged,
 }: {
   trigger: WorkflowTrigger;
   connections: readonly ListedConnection[];
-  versions: readonly number[];
   me: string;
   builder: boolean;
   onChanged: () => Promise<void>;
@@ -397,7 +406,6 @@ const TriggerRow = ({
   const { busy, failure, run } = useCoreAction();
   const own = trigger.owner === me;
   const manages = own || builder;
-  const { workflowVersion } = trigger;
 
   // Whether core made the change; read again whatever came of it, as a
   // change core made can still fail as it reads the trigger back.
@@ -443,8 +451,6 @@ const TriggerRow = ({
           {/* Each in its own box: two runs of text side by side would
               merge into one and lose the gap between them. */}
           <span {...stylex.props(styles.line)}>
-            <span>{t`Starts version ${workflowVersion}`}</span>
-            <span aria-hidden="true">·</span>
             <span>
               <TriggerState trigger={trigger} />
             </span>
@@ -509,34 +515,6 @@ const TriggerRow = ({
                 {t({ message: "Turn off", context: "turn a trigger off" })}
               </Button>
             ) : null}
-            {own && builder && versions.length > 1 ? (
-              <Select
-                disabled={busy}
-                items={versions.map((version) => ({
-                  value: String(version),
-                  label: t`Version ${version}`,
-                }))}
-                onValueChange={(value) => {
-                  const next = Number(value);
-                  if (value !== null && next !== workflowVersion) {
-                    void change(
-                      async (triggers) =>
-                        await triggers.setVersion(trigger.id, next)
-                    );
-                  }
-                }}
-                value={String(workflowVersion)}
-              >
-                <SelectTrigger
-                  aria-label={t`Version it starts`}
-                  size="sm"
-                  variant="text"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent />
-              </Select>
-            ) : null}
             <AlertDialog>
               <AlertDialogTrigger
                 disabled={busy}
@@ -580,6 +558,19 @@ const jsonOf = (text: string): { ok: true; value: unknown } | { ok: false } => {
   }
 };
 
+const refusalSchema = z.object({
+  details: z.object({ issues: z.array(z.string()) }),
+});
+
+/**
+ * What core said is wrong with a config it refused, field by field
+ * (`details.issues`, core's own words): nothing for any other failure.
+ */
+const issuesIn = (error: unknown): string[] => {
+  const refusal = refusalSchema.safeParse(error);
+  return refusal.success ? refusal.data.details.issues : [];
+};
+
 /** The person's own time zone, as the browser has it. */
 const ownTimeZone = (): string =>
   Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -598,7 +589,7 @@ const kindLabels = {
 } as const satisfies Record<AddedKind, MessageDescriptor>;
 
 /**
- * The input's shape, for the version new runs run, to start a schedule's
+ * The input's shape, for the live version new runs run, to start a schedule's
  * JSON from; undefined when it can't be read, and the JSON starts empty.
  */
 const startFormOf = async (
@@ -616,19 +607,17 @@ const startFormOf = async (
 
 /**
  * A new trigger, for a builder, in a dialog: a schedule, a connection's
- * event, an email or an event from a webhook source, for one version.
+ * event, an email or an event from a webhook source.
  * What is typed stays while the list behind it is read again, and when
  * the dialog closes without adding.
  */
 const AddTrigger = ({
   workflow,
-  versions,
   connections,
   sources,
   onAdded,
 }: {
   workflow: string;
-  versions: readonly number[];
   connections: readonly ListedConnection[];
   sources: readonly EventSource[];
   onAdded: () => Promise<void>;
@@ -640,8 +629,8 @@ const AddTrigger = ({
   const [open, setOpen] = useState(false);
   const [shape, setShape] = useState<WorkflowStartForm>();
   const [problem, setProblem] = useState<string>();
+  const [issues, setIssues] = useState<string[]>([]);
   const [kind, setKind] = useState<AddedKind>("schedule");
-  const [chosen, setChosen] = useState(versions.at(-1) ?? 1);
   const [cron, setCron] = useState("");
   const [timeZone, setTimeZone] = useState(ownTimeZone);
   const [input, setInput] = useState("{}");
@@ -652,18 +641,15 @@ const AddTrigger = ({
   const [address, setAddress] = useState("");
   const [source, setSource] = useState("");
   const [sourceType, setSourceType] = useState("");
-  // The shape is known for the version new runs run, so only for it.
-  const sketch =
-    shape !== undefined && shape.version === chosen
-      ? inputSketchOf(shape.args)
-      : undefined;
+  // The shape of the live version, which new runs run.
+  const sketch = shape === undefined ? undefined : inputSketchOf(shape.args);
   /** Opens the dialog, and starts an input not typed yet from the shape. */
   const opened = async (): Promise<void> => {
     setOpen(true);
     const given = await startFormOf(core, workflow);
     setShape(given);
     const next = given === undefined ? undefined : inputSketchOf(given.args);
-    if (next !== undefined && given?.version === chosen) {
+    if (next !== undefined) {
       setInput((typed) => (typed === "{}" ? next.json : typed));
     }
   };
@@ -724,19 +710,23 @@ const AddTrigger = ({
 
   const add = async (): Promise<void> => {
     setProblem(undefined);
+    setIssues([]);
     const config = configOf();
     if (config === undefined) {
       return;
     }
-    const created = await run(
-      async (session) =>
-        await session.workflowResources.triggers.create({
+    const created = await run(async (session) => {
+      try {
+        return await session.workflowResources.triggers.create({
           kind,
           workflowId: workflow,
-          version: chosen,
           config,
-        })
-    );
+        });
+      } catch (error) {
+        setIssues(issuesIn(error));
+        throw error;
+      }
+    });
     if (created !== undefined) {
       setCron("");
       setInput(sketch?.json ?? "{}");
@@ -776,46 +766,26 @@ const AddTrigger = ({
                 void add();
               }}
             >
-              <FormRow>
-                <Field>
-                  <FieldLabel>{t`What starts it`}</FieldLabel>
-                  <Select
-                    items={addedKinds.map((each) => ({
-                      value: each,
-                      label: t(kindLabels[each]),
-                    }))}
-                    onValueChange={(value) => {
-                      setKind(
-                        addedKinds.find((each) => each === value) ?? "schedule"
-                      );
-                    }}
-                    value={kind}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent />
-                  </Select>
-                </Field>
-                <Field>
-                  <FieldLabel>{t`Version it starts`}</FieldLabel>
-                  <Select
-                    items={versions.map((version) => ({
-                      value: String(version),
-                      label: t`Version ${version}`,
-                    }))}
-                    onValueChange={(value) => {
-                      setChosen(Number(value));
-                    }}
-                    value={String(chosen)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent />
-                  </Select>
-                </Field>
-              </FormRow>
+              <Field>
+                <FieldLabel>{t`What starts it`}</FieldLabel>
+                <Select
+                  items={addedKinds.map((each) => ({
+                    value: each,
+                    label: t(kindLabels[each]),
+                  }))}
+                  onValueChange={(value) => {
+                    setKind(
+                      addedKinds.find((each) => each === value) ?? "schedule"
+                    );
+                  }}
+                  value={kind}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent />
+                </Select>
+              </Field>
               {kind === "schedule" ? (
                 <>
                   <FormRow>
@@ -990,6 +960,13 @@ const AddTrigger = ({
                 </>
               ) : null}
               <ErrorText>{problem ?? failure}</ErrorText>
+              {issues.length === 0 ? null : (
+                <ul {...stylex.props(styles.issues)}>
+                  {issues.map((issue) => (
+                    <li key={issue}>{issue}</li>
+                  ))}
+                </ul>
+              )}
             </Form>
           </DialogBody>
           <DialogFooter>
@@ -1007,7 +984,8 @@ const AddTrigger = ({
 /** What the tab read from core. */
 interface Read {
   triggers: WorkflowTrigger[];
-  versions: number[];
+  /** Whether a version of the workflow is live, for its triggers to start. */
+  live: boolean;
   connections: ListedConnection[];
   /** The workspace's webhook sources, for a builder to add a trigger on. */
   sources: EventSource[];
@@ -1062,7 +1040,7 @@ const TriggersRead = ({
             await Promise.all([
               session.workflowResources.triggers.list(workflow),
               builder
-                ? session.workflowResources.versions(workflow)
+                ? workflowVersions(session, workflow)
                 : Promise.resolve([]),
               builder
                 ? session.workflowResources.sources.list()
@@ -1074,9 +1052,7 @@ const TriggersRead = ({
           setFailure(undefined);
           setRead({
             triggers,
-            versions: versions
-              .map(({ version }) => version)
-              .toSorted((a, b) => a - b),
+            live: versions.some(({ label }) => label !== null),
             sources,
             ...accounts,
           });
@@ -1112,14 +1088,13 @@ const TriggersRead = ({
         aria-label={t`Triggers`}
         density="compact"
         flush
-        {...(builder && read.versions.length > 0
+        {...(builder && read.live
           ? {
               footer: (
                 <AddTrigger
                   connections={read.connections}
                   onAdded={changed}
                   sources={read.sources}
-                  versions={read.versions}
                   workflow={workflow}
                 />
               ),
@@ -1142,7 +1117,6 @@ const TriggersRead = ({
                 me={me}
                 onChanged={changed}
                 trigger={trigger}
-                versions={read.versions}
               />
             ))}
           </ItemGroup>

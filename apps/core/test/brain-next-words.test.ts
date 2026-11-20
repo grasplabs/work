@@ -17,7 +17,7 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
 import { noProducers } from "./no-producers.ts";
-import { signedInWithRole, unique } from "./sign-in.ts";
+import { signedInWithRole, uniqueWord } from "./sign-in.ts";
 
 // Recall finds words in their other forms (GRA-1725): every word is
 // indexed under its stem in English, Dutch, German, French and Spanish,
@@ -66,6 +66,22 @@ const recalledAs = async (
     budget: { tokens: recallBudgetMax },
   });
   return chunks.map(({ source }) => source);
+};
+
+/**
+ * What `personId` recalls for `question`: each chunk's source and the way
+ * it was found, by words, an exact part or meaning.
+ */
+const foundAs = async (
+  personId: string,
+  question: string
+): Promise<{ source: SourceRef; found: string }[]> => {
+  const { items: chunks } = await recallAs(env, personId, {
+    personal: true,
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
+  return chunks.map(({ source, found }) => ({ source, found }));
 };
 
 /** `word` 150 times: a paragraph too long to share a passage with another. */
@@ -128,7 +144,7 @@ const indexesStore = async (term: string): Promise<boolean[]> =>
 describe("finding words in their other forms", { timeout: 120_000 }, () => {
   it("finds the passage of a long document that holds another form of the word, and only that passage", async () => {
     const reader = await person();
-    const tag = `w${unique()}`;
+    const tag = uniqueWord();
     // Paragraphs too long to share a passage: each is a chunk of its own.
     const passages = [
       `${filler("magazijn")} ${tag}`,
@@ -178,7 +194,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
 
   it("ranks the form asked for above another form, whatever hidden sources hold", async () => {
     const [reader, other] = await Promise.all([person(), person()]);
-    const tag = `w${unique()}`;
+    const tag = uniqueWord();
     // The other form in a shorter passage, which shorter-first alone would
     // put first.
     const otherForm = await add(`factuur ${tag}`, await ownedBy(reader));
@@ -252,7 +268,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
 
   it("finds what shares only a question's common words after what its other words find, and never what the reader may not read", async () => {
     const [reader, other] = await Promise.all([person(), person()]);
-    const tag = `w${unique()}`;
+    const tag = uniqueWord();
     const telling = await add(`Laptop ${tag} bestellen`, await ownedBy(reader));
     const phrasing = await add(
       "Wie en wat: de servicedesk, voor wie vastloopt",
@@ -310,7 +326,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
       await add(text, await ownedBy(reader));
     }
-    const after = `w${unique()}`;
+    const after = uniqueWord();
     const id = await add(`Added after them: ${after}`, await ownedBy(reader));
 
     await expect(recalledAs(reader, after)).resolves.toStrictEqual([id]);
@@ -461,9 +477,15 @@ describe(
   () => {
     it("finds other forms and newly folded letters in an older store's passages once their turn in the rebuild came, and never another reader's", async () => {
       const [reader, other] = await Promise.all([person(), person()]);
-      const mark = `w${unique()}`;
+      const mark = uniqueWord();
       const invoices = await add(
         `De facturen van maart ${mark}`,
+        await ownedBy(reader)
+      );
+      // A passage mentioning a day: the rebuild rewrites its days with its
+      // words (dates.ts), and finds it by that day written otherwise.
+      const signed = await add(
+        `Signed March 14th, 2098 ${mark}`,
         await ownedBy(reader)
       );
       const street = await add(
@@ -479,28 +501,41 @@ describe(
         firstRules: await chunksFoundBy(mark, "straße"),
       };
       const ticks = await ticksUntilRebuilt();
+      const byWords = async (personId: string, question: string) => {
+        const found = await foundAs(personId, question);
+        return found.filter(({ found: way }) => way !== "meaning");
+      };
+      const others = await foundAs(other, "strasse");
+      // By its day, written otherwise: the passage found by meaning aside.
+      const signedFound = await byWords(reader, "le 14 mars");
 
       expect({
         before,
         rebuilt: ticks > 0 && Number.isFinite(ticks),
-        invoice: await recalledAs(reader, "factuur"),
-        street: await recalledAs(reader, "strasse"),
-        other: await recalledAs(other, "strasse"),
+        invoice: await byWords(reader, "factuur"),
+        street: await byWords(reader, "strasse"),
+        // By its words nothing of theirs, and by no way the reader's.
+        other: others.filter(
+          ({ found, source }) =>
+            found !== "meaning" || [invoices.id, street.id].includes(source.id)
+        ),
+        signed: signedFound.map(({ source }) => source),
         // The first rules' rows went: none is left beside the new ones.
         firstRules: await chunksFoundBy(mark, "straße"),
       }).toStrictEqual({
         before: { invoice: [], street: [], firstRules: 1 },
         rebuilt: true,
-        invoice: [invoices],
-        street: [street],
+        invoice: [{ source: invoices, found: "words" }],
+        street: [{ source: street, found: "words" }],
         other: [],
+        signed: [signed],
         firstRules: 0,
       });
     });
 
     it("finds symbols that fold into letters by those letters, as the first rules did, on a fresh add and after a rebuild", async () => {
       const reader = await person();
-      const mark = `w${unique()}`;
+      const mark = uniqueWord();
       // "㍿" folds to "株式会社", "℡" to "tel", "Ⓐ" to "a".
       const symbols = await add(`㍿ ℡ Ⓐ ${mark}`, await ownedBy(reader));
       const questions = ["株式会社", "TEL", "a"];
@@ -573,7 +608,10 @@ describe(
           midway.version === 1 && midway.target === 2 && midway.cursor > 0,
         rebuilt: Number.isFinite(ticks),
         indexed,
-        found: chunks.length,
+        // The one passage holding it, by its words; by meaning, others.
+        byWords: chunks.flatMap(({ found, text }) =>
+          found === "meaning" ? [] : [{ found, first: text.split(" ")[0] }]
+        ),
       }).toStrictEqual({
         midway: true,
         rebuilt: true,
@@ -581,7 +619,7 @@ describe(
           { chunks: count, twice: 0 },
           { chunks: count, twice: 0 },
         ],
-        found: 1,
+        byWords: [{ found: "words", first: `${mark}x7ingen` }],
       });
     });
 

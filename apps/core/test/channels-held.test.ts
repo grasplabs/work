@@ -12,10 +12,18 @@ import { say } from "../src/channels/words.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
+import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { signedInApi, unique } from "./sign-in.ts";
-import { member, messageFrom, post, reached, watched } from "./teams-door.ts";
+import {
+  failsOnce,
+  member,
+  messageFrom,
+  post,
+  reached,
+  watched,
+} from "./teams-door.ts";
 
 // A Teams turn's held writes on one card (src/channels/held.ts, answer.ts,
 // cards.tsx `heldWritesCard`): what the person sees before anything
@@ -117,6 +125,10 @@ describe("the card's check line", () => {
   });
 });
 
+/** A paragraph of `words`, said over and over: long enough to fill a message. */
+const paragraph = (words: string): string =>
+  Array.from({ length: 300 }, () => `${words}.`).join(" ");
+
 describe("a Teams turn that holds writes", setUpTime, () => {
   it("sends one card naming both, after its answer, carrying what a press confirms", async () => {
     const admin = await signedInApi(idp, "admin");
@@ -146,7 +158,7 @@ describe("a Teams turn that holds writes", setUpTime, () => {
       })
     );
 
-    const waiting = await person.api.pendingActions.list();
+    const waiting = await heldFor(person, "chat_app");
     const { activities } = await reached(person.teams.conversation);
     const messages = activities
       .filter(({ type }) => type === "message")
@@ -160,11 +172,15 @@ describe("a Teams turn that holds writes", setUpTime, () => {
       answer: answer?.includes("Both mails wait for you"),
       more,
       waiting: waiting.length,
+      // Decided on the card: Grasp's own list, which links each to its
+      // chat, shows none of a conversation no page of Grasp opens.
+      listedInGrasp: await person.api.pendingActions.list(),
       sent: await mail.did(),
     }).toStrictEqual({
       answer: true,
       more: [],
       waiting: 2,
+      listedInGrasp: [],
       // Nothing went out: the card asks first.
       sent: { calls: 0, sent: [] },
     });
@@ -188,5 +204,65 @@ describe("a Teams turn that holds writes", setUpTime, () => {
     }
     // Nothing read mail this turn: no check line.
     expect(card).not.toContain(say("checkMail", "en"));
+    // A chat app's conversation is no chat in Grasp (GRA-1919): nothing
+    // the turn posted leads to one.
+    expect(messages.join("\n")).not.toContain("?chat=");
+  });
+
+  it("still gets its card, and the line that something went wrong, when Teams refuses a part of a long answer, and nothing is posted twice", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const mail = await mailConnection([], ["MAIL_SEND"]);
+    const binding = `MAIL${unique()}`.toUpperCase();
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId: chatAgentId },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["MAIL_SEND"],
+      binding,
+    });
+    // Three messages' worth: the second one holds the marker.
+    const answer = [
+      paragraph("The first part of a long answer"),
+      paragraph("The first part again"),
+      paragraph("The second part, SECOND-PART"),
+      paragraph("The third part of it"),
+      paragraph("The third part again"),
+    ].join("\n\n");
+    const person = await member(
+      idp,
+      codeStep(
+        `export default async (self, env) => { await env.connections.call(${JSON.stringify(binding)}, "MAIL_SEND", ${JSON.stringify({ to: "ben@acme.test", subject: "Invoice INV-7" })}); return "held"; };`
+      ),
+      says(answer)
+    );
+    const { conversation } = person.teams;
+    // Its first part is the card it was written into; its second, posted
+    // after it, refused, once.
+    await failsOnce(conversation, "SECOND-PART");
+
+    await post(
+      messageFrom(person.teams, { text: "Mail ben@acme.test the invoice." })
+    );
+
+    const { activities } = await reached(conversation);
+    const messages = activities
+      .filter(({ type }) => type === "message")
+      .map((activity) => JSON.stringify(activity))
+      .filter((activity) => !activity.includes("/connect-microsoft"));
+    const waiting = await heldFor(person, "chat_app");
+    expect({
+      firstPart: messages.some((each) => each.includes("The first part")),
+      secondPart: messages.some((each) => each.includes("SECOND-PART")),
+      failedLine: messages.some((each) => each.includes(say("failed", "en"))),
+      card: messages.some((each) => each.includes(confirmAction)),
+      postedOnce: new Set(messages).size === messages.length,
+      waiting: waiting.length,
+    }).toStrictEqual({
+      firstPart: true,
+      secondPart: false,
+      failedLine: true,
+      card: true,
+      postedOnce: true,
+      waiting: 1,
+    });
   });
 });

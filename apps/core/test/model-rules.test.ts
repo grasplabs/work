@@ -14,12 +14,10 @@ import { outcome } from "./sign-in.ts";
 // The rules a JSON workflow's model call meets are tried where its runs
 // are: a start refused until an admin approves its model binding, and its
 // call refused once the approval is revoked (workflow-bindings' "list a
-// live version's and a go-live version's unapproved bindings…" and "needs
-// an approval for each catalog binding, freezes it, and is refused once it
-// is revoked…", workflow-actions' "refuses a call once the approval behind
-// its binding is revoked…"), and a model task that names no model binding
-// (workflow-actions' "refuses a model task that names no model
-// binding…"). Only App workflows had the rest, and they go with them: an
+// live version's unapproved bindings for admins…" and "needs an approval
+// for each catalog binding, freezes it, and is refused once it is
+// revoked…", workflow-model-calls' "refuses the next model call once its
+// approval is revoked"). Only App workflows had the rest, and they go with them: an
 // AI step through an App's model resource and its structured output, a run
 // pinned to an App version whose alias was rebound, a version made current
 // past activation, and an AI step's retry taking the answer its timed-out

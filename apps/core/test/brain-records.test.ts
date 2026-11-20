@@ -3,20 +3,13 @@ import {
   brainRecordsMaxPerCall,
   brainRecordsMaxPerType,
 } from "@grasp-os/shared/brain-records";
-import { purgedMarker } from "@grasp-os/shared/knowledge";
-import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  signedInApi,
-  unique,
-} from "./sign-in.ts";
+import { teamsMade } from "./members-teams.ts";
+import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The brain's records (`brain.addRecords`, core's brain-records.ts), as
 // an admin adds them and every member reads them in `brain.read`. What
@@ -70,13 +63,13 @@ const interview = (tag: string) => {
       how: "Live, 45 minutes",
       step: 2,
       interviewee: "stakeholder",
-      teamIds: ["team-finance"],
+      teamIds: ["finance"],
     },
     {
       type: "tool",
       id: ids.tool,
       name: "Exact Online",
-      teamIds: ["team-finance"],
+      teamIds: ["finance"],
       sourceId: ids.source,
       ai: "none",
     },
@@ -87,7 +80,7 @@ const interview = (tag: string) => {
       kind: "blocker",
       text: "Invoices are typed over by hand.",
       sourceId: ids.source,
-      teamIds: ["team-finance"],
+      teamIds: ["finance"],
       toolIds: [ids.tool],
       candidateId: ids.candidate,
       pain: "high",
@@ -98,7 +91,7 @@ const interview = (tag: string) => {
       kind: "blocker",
       text: "Typing invoices over still takes a day a week.",
       sourceId: ids.source,
-      teamIds: ["team-finance"],
+      teamIds: ["finance"],
       toolIds: [ids.tool],
       candidateId: ids.candidate,
       followsUp: ids.blocker,
@@ -120,7 +113,7 @@ const interview = (tag: string) => {
 describe("the brain's records", { timeout: 120_000 }, () => {
   it("are added by an admin, read by every member in the brain, and audited", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const member = await signedInApi(idp, "user");
     const { ids, records: interviewed } = interview(unique());
     // Given by an accountant, one of five: their role may show.
@@ -132,7 +125,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
       date: "2026-10-21",
       who: "Accountant",
       step: 2,
-      teamIds: ["team-finance"],
+      teamIds: ["finance"],
     };
     const records = [...interviewed, accountants];
 
@@ -196,14 +189,14 @@ describe("the brain's records", { timeout: 120_000 }, () => {
         how: "Live, 45 minutes",
         step: 2,
         interviewee: "stakeholder",
-        teamIds: ["team-finance"],
+        teamIds: ["finance"],
         // One of the brain's own records: an admin may take it out.
         forgettable: true,
       },
       tool: {
         id: ids.tool,
         name: "Exact Online",
-        teamIds: ["team-finance"],
+        teamIds: ["finance"],
         sourceId: ids.source,
         ai: "none",
       },
@@ -215,7 +208,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
           kind: "blocker",
           text: "Invoices are typed over by hand.",
           sourceId: ids.source,
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
           toolIds: [ids.tool],
           candidateId: ids.candidate,
           pain: "high",
@@ -225,7 +218,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
           kind: "blocker",
           text: "Typing invoices over still takes a day a week.",
           sourceId: ids.source,
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
           toolIds: [ids.tool],
           candidateId: ids.candidate,
           followsUp: ids.blocker,
@@ -265,7 +258,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
 
   it("are never written over: a retry changes nothing, and a different record under a held id keeps none of its call", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const { ids, records } = interview(unique());
     await admin.api.brain.addRecords(records);
     const extra = `cand-${unique()}`;
@@ -313,7 +306,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
 
   it("take a retry racing its first call as unchanged, and write what is still fresh when a racing call took only some ids", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const other = await signedInApi(idp, "admin");
 
     /**
@@ -366,7 +359,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
 
   it("refuse a reference to nothing, a pain on what doesn't hurt, and anything a record doesn't name", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const tag = unique();
     const statement = {
       type: "statement",
@@ -474,7 +467,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
 
   it("stop at each type's cap", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const tag = unique();
     const cap = brainRecordsMaxPerType.candidate;
     const before = await admin.api.brain.read();
@@ -503,203 +496,3 @@ describe("the brain's records", { timeout: 120_000 }, () => {
     });
   });
 });
-
-type Signed = Awaited<ReturnType<typeof signedInApi>>;
-
-/** Saves `text` as a note in `person`'s Personal collection. */
-const noteOf = async (person: Signed, text: string) => {
-  const { personal } = await person.api.memory.collections();
-  return await person.api.knowledge.saveDocument({
-    collectionId: personal,
-    path: `notes/${unique()}.md`,
-    text,
-    ifVersion: 0,
-  });
-};
-
-/** A source naming `name`, a tool and a statement in its words. */
-const naming = (tag: string, name: string) => {
-  const ids = {
-    source: `src-${tag}`,
-    tool: `tool-${tag}`,
-    statement: `st-${tag}`,
-  };
-  const records: BrainRecordInput[] = [
-    {
-      type: "source",
-      id: ids.source,
-      kind: "interview",
-      title: `Interview with ${name}`,
-      date: "2026-10-20",
-    },
-    {
-      type: "tool",
-      id: ids.tool,
-      name: `${name}'s sheet`,
-      sourceId: ids.source,
-      ai: "none",
-    },
-    {
-      type: "statement",
-      id: ids.statement,
-      kind: "blocker",
-      text: `${name} types invoices over by hand.`,
-      sourceId: ids.source,
-      toolIds: [ids.tool],
-      pain: "high",
-    },
-  ];
-  return { ids, records };
-};
-
-/** A content purge of `terms` from a note naming them, prepared and run. */
-const purgeOf = async (admin: Signed, terms: string[]) => {
-  const note = await noteOf(admin, `# Handover\n${terms.join(" ")} leaves.`);
-  const input: PurgeInput = {
-    type: "content",
-    documentIds: [note.id],
-    terms,
-    reason: "erasure_request",
-  };
-  return { input, plan: await admin.api.knowledge.preparePurge(input) };
-};
-
-describe(
-  "the Playbook's records under a content purge",
-  { timeout: 120_000 },
-  () => {
-    it("lose a purged term from their words, keep what they name, are audited without the term, and stay purged when sent again", async () => {
-      const admin = await signedInApi(idp, "admin");
-      const member = await signedInApi(idp, "user");
-      const tag = unique();
-      const name = `Visser${tag}`;
-      const { ids, records } = naming(tag, name);
-      await admin.api.brain.addRecords(records);
-
-      const { input, plan } = await purgeOf(admin, [name]);
-      let stillFound: number | undefined;
-      const events = await auditedDuring(async () => {
-        ({ stillFound } = await admin.api.knowledge.purge(input, plan.token));
-      });
-      // The onboarding gives a team's intake again: the same records.
-      const again = await admin.api.brain.addRecords(records);
-      const read = await member.api.brain.read();
-
-      expect({
-        stillFound,
-        again,
-        source: read.sources.find(({ id }) => id === ids.source)?.title,
-        tool: read.tools.find(({ id }) => id === ids.tool),
-        statement: read.statements.find(({ id }) => id === ids.statement),
-        anywhere: JSON.stringify(read).includes(name),
-        purged: events
-          .filter(({ action }) => action === "brain.records.purged")
-          .map(({ target }) => String(target?.id))
-          .toSorted((a, b) => a.localeCompare(b)),
-        inAudit: JSON.stringify(events).includes(name),
-      }).toStrictEqual({
-        stillFound: 0,
-        again: { added: 0, unchanged: 3 },
-        source: `Interview with ${purgedMarker}`,
-        tool: {
-          id: ids.tool,
-          name: `${purgedMarker}'s sheet`,
-          teamIds: [],
-          sourceId: ids.source,
-          ai: "none",
-        },
-        statement: {
-          id: ids.statement,
-          kind: "blocker",
-          text: `${purgedMarker} types invoices over by hand.`,
-          sourceId: ids.source,
-          teamIds: [],
-          toolIds: [ids.tool],
-          pain: "high",
-        },
-        anywhere: false,
-        purged: [
-          `source:${ids.source}`,
-          `statement:${ids.statement}`,
-          `tool:${ids.tool}`,
-        ].toSorted((a, b) => a.localeCompare(b)),
-        inAudit: false,
-      });
-    });
-
-    it("leave a record added after the purge read them to a run again, which rewrites it", async () => {
-      const admin = await signedInApi(idp, "admin");
-      const tag = unique();
-      const name = `Visser${tag}`;
-      const { ids, records } = naming(tag, name);
-      await admin.api.brain.addRecords(records);
-      const late: BrainRecordInput = {
-        type: "statement",
-        id: `st-${tag}-late`,
-        kind: "wish",
-        text: `${name} wants the numbers sooner.`,
-        sourceId: ids.source,
-      };
-      // Core's database adds a record holding the term just before the
-      // purge's batch rewrites the ones it read.
-      const real = env.DB;
-      let rewriting = false;
-      let added = false;
-      const db: D1Database = {
-        prepare: (query) => {
-          rewriting ||= query.startsWith('update "brain_records"');
-          return real.prepare(query);
-        },
-        batch: async <T>(statements: D1PreparedStatement[]) => {
-          if (rewriting && !added) {
-            added = true;
-            await admin.api.brain.addRecords([late]);
-          }
-          return await real.batch<T>(statements);
-        },
-        exec: async (query) => await real.exec(query),
-        // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
-        dump: async () => await real.dump(),
-        withSession: (constraint) => real.withSession(constraint),
-      };
-      const { core } = await openRpc(admin.session, {
-        coreEnv: { ...env, DB: db },
-      });
-      const racing = await core.authenticate();
-
-      const first = await purgeOf(admin, [name]);
-      await racing.knowledge.purge(first.input, first.plan.token);
-      const raced = await admin.api.brain.read();
-      const second = await purgeOf(admin, [name]);
-      await admin.api.knowledge.purge(second.input, second.plan.token);
-      const read = await admin.api.brain.read();
-
-      expect({
-        raced: raced.statements.find(({ id }) => id === late.id)?.text,
-        late: read.statements.find(({ id }) => id === late.id)?.text,
-      }).toStrictEqual({
-        raced: `${name} wants the numbers sooner.`,
-        late: `${purgedMarker} wants the numbers sooner.`,
-      });
-    });
-
-    it("keep a form the purge leaves on purpose, and its check counts only the documents named", async () => {
-      const admin = await signedInApi(idp, "admin");
-      const tag = unique();
-      const { ids, records } = naming(tag, `Rene${tag}`);
-      await admin.api.brain.addRecords(records);
-
-      const { input, plan } = await purgeOf(admin, [`René${tag}`]);
-      const result = await admin.api.knowledge.purge(input, plan.token);
-      const read = await admin.api.brain.read();
-
-      expect({
-        stillFound: result.stillFound,
-        statement: read.statements.find(({ id }) => id === ids.statement)?.text,
-      }).toStrictEqual({
-        stillFound: 0,
-        statement: `Rene${tag} types invoices over by hand.`,
-      });
-    });
-  }
-);

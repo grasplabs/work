@@ -6,6 +6,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
+import { formatList } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -53,6 +54,12 @@ const SavedText = ({
   );
 };
 
+/** What the earlier memories it replaced said, as one sentence. */
+const ReplacedText = ({ statements }: { statements: readonly string[] }) => {
+  const replaced = formatList(statements);
+  return <Trans>In place of: {replaced}</Trans>;
+};
+
 /** Whether it says how Grasp should act for the person, and which way. */
 const SavedKind = ({ type }: Pick<ChatSavedMemory, "type">) => {
   if (type === "instruction") {
@@ -75,8 +82,9 @@ const SavedKind = ({ type }: Pick<ChatSavedMemory, "type">) => {
 /**
  * Under a call of `remember`: what Grasp saved of what the person said,
  * as the store keeps it (its statement, who or what it is about when it
- * isn't them, its value, and whether it says how Grasp should act for
- * them), and a way to undo it, which retires the memory (core's
+ * isn't them, its value, whether it says how Grasp should act for them,
+ * and what it replaced), and a way to undo it, which brings back what it
+ * replaced, which retires the memory (core's
  * `session.brainMemories.forget`): it never becomes current again, even
  * once a later save replaced it. Said forgotten only when core answers
  * `done` (one undone before, here or elsewhere, too); `nothing` means
@@ -113,6 +121,11 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
           <Text size="sm" tone="muted">
             <SavedText saved={saved} />
           </Text>
+          {saved.replaced === undefined ? null : (
+            <Text size="sm" tone="muted">
+              <ReplacedText statements={saved.replaced} />
+            </Text>
+          )}
           <Button
             disabled={busy}
             onClick={() => {

@@ -13,7 +13,6 @@ import { z } from "zod";
 
 const runtimeDir = path.join(import.meta.dirname, "../packages/runtime");
 const sharedDir = path.join(import.meta.dirname, "../packages/shared/src");
-const brainDir = path.join(import.meta.dirname, "../packages/brain/src");
 
 /** An origin of its own, served below: no page of Grasp is involved. */
 const origin = "http://sdk-values.test";
@@ -28,22 +27,12 @@ const modulePath = /^\/(?:src|test)\/[\w-]+\.ts$/u;
  */
 const sharedPath = /^\/shared\/(?<name>[\w-]+?)(?:\.ts)?$/u;
 
-/**
- * A module of `@grasp-os/brain` those import (its limits), on the same
- * terms: only the dependency-free ones load.
- */
-const brainPath = /^\/brain\/(?<name>[\w-]+?)(?:\.ts)?$/u;
-
-/** The file a `/shared/` or `/brain/` path serves, if it is one. */
+/** The file a `/shared/` path serves, if it is one. */
 const dependencyFile = (pathname: string): string | undefined => {
   const shared = sharedPath.exec(pathname)?.groups?.name;
-  if (shared !== undefined) {
-    return path.join(sharedDir, `${shared}.ts`);
-  }
-  const fromBrain = brainPath.exec(pathname)?.groups?.name;
-  return fromBrain === undefined
+  return shared === undefined
     ? undefined
-    : path.join(brainDir, `${fromBrain}.ts`);
+    : path.join(sharedDir, `${shared}.ts`);
 };
 
 const outcomesSchema = z
@@ -71,7 +60,7 @@ test("the SDK's values give the same outcomes in a browser as in workerd", async
         contentType: "text/html",
         body: `<!doctype html><title>SDK values</title><pre id="outcomes"></pre>
           <script type="importmap">
-            { "imports": { "@grasp-os/shared/": "/shared/", "@grasp-os/brain/": "/brain/" } }
+            { "imports": { "@grasp-os/shared/": "/shared/" } }
           </script>
           <script type="module">
             import { runValueCases } from "/test/value-cases.ts";

@@ -78,6 +78,167 @@
       "when": 1794562202108,
       "tag": "0010_export_memories",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794566018767,
+      "tag": "0011_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794604583761,
+      "tag": "0012_read_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794605870651,
+      "tag": "0013_entity_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1794649597640,
+      "tag": "0014_erasure_counts",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1794753474660,
+      "tag": "0015_writer_erasure",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1794753475381,
+      "tag": "0016_writer_erasure_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1794757508536,
+      "tag": "0017_writer_erasure_change",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1794760019523,
+      "tag": "0018_writer_erase_failures",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1794762556474,
+      "tag": "0019_writer_erase_sweep",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1794771918426,
+      "tag": "0020_work_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1794773999806,
+      "tag": "0021_removals",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1794782134390,
+      "tag": "0022_memory_outs",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1794794154588,
+      "tag": "0023_memory_judging",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1794819084162,
+      "tag": "0024_chunk_days",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1794857369310,
+      "tag": "0025_own_entity",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1794872781859,
+      "tag": "0026_chunk_blocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1794901556910,
+      "tag": "0027_person_erasure",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1794922879415,
+      "tag": "0028_extractors",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1794965790717,
+      "tag": "0029_skill_proposals",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1794996787562,
+      "tag": "0030_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1795001400302,
+      "tag": "0031_person_erasure_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1795012821248,
+      "tag": "0032_events_system",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1795105809694,
+      "tag": "0033_memory_replacements",
+      "breakpoints": true
     }
   ]
 }

@@ -4,19 +4,25 @@ import { toBase64, toHex } from "@grasp-os/shared/encoding";
 import {
   eventSourceCreateSchema,
   eventSourceErrors,
+  eventSourceRetention,
 } from "@grasp-os/shared/event-sources";
 import type {
   EventSource,
+  EventSourceActivity,
   EventSourceWithSecret,
 } from "@grasp-os/shared/event-sources";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { isAdmin, requireAdmin, requireBuilder } from "@grasp-os/shared/roles";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import { eventSources } from "./db/core/schema.ts";
+import {
+  eventSourceCounts,
+  eventSourceDeliveries,
+  eventSources,
+} from "./db/core/schema.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
 import { requireNotStaff } from "./sharing.ts";
 
@@ -51,6 +57,10 @@ import { requireNotStaff } from "./sharing.ts";
 //   Rotating core's auth secret changes them all. A delivery checked with
 //   a secret rotated, revoked or deleted while it was admitted starts
 //   nothing (source-events.ts).
+// - Someone but an admin learning what a source received. What it kept of
+//   its deliveries (workflows/source-deliveries.ts, whose threat model
+//   covers them) is an admin's alone, as its URL is: a builder's listing
+//   says nothing of it. Deleting a source deletes it all, in one batch.
 
 const secretPurpose = "grasp-os event source secret";
 
@@ -86,10 +96,11 @@ const secretOf = async (
 ): Promise<string> =>
   `${secretPrefix}${toBase64(await sourceSecretKeyOf(env, id, generation))}`;
 
-const unavailable = () =>
+export const sourceUnavailable = () =>
   eventSourceErrors.create("webhook.source_unavailable");
 
-const entry = (
+/** An audit entry of `by`'s `action` on source `id`. */
+export const sourceEntry = (
   by: Acting,
   action: string,
   id: string,
@@ -104,8 +115,22 @@ const entry = (
 /** A source's row, as `viewOf` reads it. */
 type SourceRow = typeof eventSources.$inferSelect;
 
-/** Source `row` as `by` sees it: its URL's token for an admin alone. */
-const viewOf = (row: SourceRow, admin: boolean): EventSource => ({
+/** What a source that received nothing lately says of it. */
+const quiet: EventSourceActivity = {
+  lastEventAt: null,
+  acceptedLastDay: 0,
+  refusedLastDay: 0,
+};
+
+/**
+ * Source `row` as `by` sees it: its URL's token, and what it received
+ * lately (`activity`), for an admin alone.
+ */
+const viewOf = (
+  row: SourceRow,
+  admin: boolean,
+  activity: EventSourceActivity = quiet
+): EventSource => ({
   id: row.id,
   name: row.name,
   createdAt: row.createdAt.toISOString(),
@@ -117,10 +142,55 @@ const viewOf = (row: SourceRow, admin: boolean): EventSource => ({
           secret: row.secretRevokedAt === null ? "active" : "revoked",
         }
       : null,
+  activity: admin ? activity : null,
 });
 
+const dayMs = 24 * 60 * 60 * 1000;
+
+/**
+ * What each source received lately, by its ID, from its counts by the
+ * hour (workflows/source-deliveries.ts): one read, however many sources.
+ */
+const activityBySource = async (
+  env: Env
+): Promise<Map<string, EventSourceActivity>> => {
+  const now = Date.now();
+  const accepted = sql`${eventSourceCounts.outcome} = 'accepted'`;
+  const lastDay = sql`${eventSourceCounts.hour} > ${now - dayMs}`;
+  const rows = await drizzle(env.DB)
+    .select({
+      source: eventSourceCounts.sourceId,
+      lastEventAt: sql<
+        number | null
+      >`MAX(CASE WHEN ${accepted} THEN ${eventSourceCounts.lastAt} END)`,
+      acceptedLastDay: sql<number>`SUM(CASE WHEN ${accepted} AND ${lastDay}
+        THEN ${eventSourceCounts.count} ELSE 0 END)`,
+      refusedLastDay: sql<number>`SUM(CASE WHEN NOT ${accepted} AND ${lastDay}
+        THEN ${eventSourceCounts.count} ELSE 0 END)`,
+    })
+    .from(eventSourceCounts)
+    .where(
+      gt(
+        eventSourceCounts.hour,
+        new Date(now - eventSourceRetention.deliveryMs)
+      )
+    )
+    .groupBy(eventSourceCounts.sourceId);
+  return new Map(
+    rows.map(({ source, lastEventAt, acceptedLastDay, refusedLastDay }) => [
+      source,
+      {
+        lastEventAt:
+          lastEventAt === null ? null : new Date(lastEventAt).toISOString(),
+        acceptedLastDay,
+        refusedLastDay,
+      },
+    ])
+  );
+};
+
 /** The live source `id`, if there is one. */
-const liveSource = async (
+export const liveSource = async (
   env: Env,
   id: unknown
 ): Promise<SourceRow | undefined> => {
@@ -138,7 +208,7 @@ const liveSource = async (
 };
 
 /** Refuses anyone but an admin who isn't Grasp staff. */
-const requireSourceAdmin = (by: Acting): void => {
+export const requireSourceAdmin = (by: Acting): void => {
   requireAdmin(by);
   requireNotStaff(by);
 };
@@ -157,7 +227,10 @@ export const listEventSources = async (
     .orderBy(asc(eventSources.createdAt), asc(eventSources.id))
     .all();
   const admin = isAdmin(by.role);
-  return rows.map((row) => viewOf(row, admin));
+  const activity = admin
+    ? await activityBySource(env)
+    : new Map<string, EventSourceActivity>();
+  return rows.map((row) => viewOf(row, admin, activity.get(row.id)));
 };
 
 /** Creates a source for an admin, its secret answered this once (`EventSourcesApi.create`). */
@@ -185,7 +258,7 @@ export const createEventSource = async (
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db.insert(eventSources).values(row),
-    outboxed(db, entry(by, "event_source.created", row.id, { name })),
+    outboxed(db, sourceEntry(by, "event_source.created", row.id, { name })),
   ]);
   return {
     source: viewOf(row, true),
@@ -207,7 +280,7 @@ export const rotateSourceSecret = async (
   requireSourceAdmin(by);
   const source = await liveSource(env, id);
   if (source === undefined) {
-    throw unavailable();
+    throw sourceUnavailable();
   }
   const db = drizzle(env.DB);
   const [[rotated]] = await auditedBatch(env, db, [
@@ -221,10 +294,13 @@ export const rotateSourceSecret = async (
         and(eq(eventSources.id, source.id), isNull(eventSources.deletedAt))
       )
       .returning(),
-    outboxedIfChanged(db, entry(by, "event_source.secret_rotated", source.id)),
+    outboxedIfChanged(
+      db,
+      sourceEntry(by, "event_source.secret_rotated", source.id)
+    ),
   ]);
   if (rotated === undefined) {
-    throw unavailable();
+    throw sourceUnavailable();
   }
   return {
     source: viewOf(rotated, true),
@@ -244,7 +320,7 @@ export const revokeSourceSecret = async (
   requireSourceAdmin(by);
   const source = await liveSource(env, id);
   if (source === undefined) {
-    throw unavailable();
+    throw sourceUnavailable();
   }
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
@@ -258,11 +334,14 @@ export const revokeSourceSecret = async (
           isNull(eventSources.secretRevokedAt)
         )
       ),
-    outboxedIfChanged(db, entry(by, "event_source.secret_revoked", source.id)),
+    outboxedIfChanged(
+      db,
+      sourceEntry(by, "event_source.secret_revoked", source.id)
+    ),
   ]);
   const revoked = await liveSource(env, source.id);
   if (revoked === undefined) {
-    throw unavailable();
+    throw sourceUnavailable();
   }
   return viewOf(revoked, true);
 };
@@ -270,7 +349,9 @@ export const revokeSourceSecret = async (
 /**
  * Deletes source `id`, for an admin: its token goes, so its URL answers as
  * one nobody has, and no trigger on it starts anything more (each start
- * reads the source live as it is admitted). Audited.
+ * reads the source live as it is admitted). What it kept of its
+ * deliveries, and its counts, go in the same batch, and nothing is
+ * written for it after (workflows/source-deliveries.ts). Audited.
  */
 export const deleteEventSource = async (
   env: Env,
@@ -280,7 +361,7 @@ export const deleteEventSource = async (
   requireSourceAdmin(by);
   const source = await liveSource(env, id);
   if (source === undefined) {
-    throw unavailable();
+    throw sourceUnavailable();
   }
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
@@ -290,6 +371,12 @@ export const deleteEventSource = async (
       .where(
         and(eq(eventSources.id, source.id), isNull(eventSources.deletedAt))
       ),
-    outboxedIfChanged(db, entry(by, "event_source.deleted", source.id)),
+    outboxedIfChanged(db, sourceEntry(by, "event_source.deleted", source.id)),
+    db
+      .delete(eventSourceDeliveries)
+      .where(eq(eventSourceDeliveries.sourceId, source.id)),
+    db
+      .delete(eventSourceCounts)
+      .where(eq(eventSourceCounts.sourceId, source.id)),
   ]);
 };

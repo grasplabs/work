@@ -1,3 +1,5 @@
+import { datesIn, daysIn, sameDay } from "./dates.ts";
+import type { Day } from "./dates.ts";
 import { allOf, sequenceOf } from "./words.ts";
 
 // The exact way of recall: the parts of a question that must be found as
@@ -29,11 +31,23 @@ import { allOf, sequenceOf } from "./words.ts";
 //    PO 17 and PO/17 match each other), but written as one word it is
 //    another word: PO17 doesn't match PO-17, nor A12 A-12.
 //
-// Dates (found however a source writes them) wait for a parser at
-// indexing (GRA-1798); names are left to the words way, since no rule
-// tells a name from a sentence's first word or a run of German nouns.
+// 3. Dates: a date the question writes in any form dates.ts reads, found
+//    by its day however a passage writes it (GRA-1798): "14 maart 2026"
+//    finds "14/03/2026" and "March 14th, 2026"; "14 maart" finds 14 March
+//    of any year, and "03/04/2026" either reading. Read before the IDs,
+//    so a timestamp is one date ("2026-03-14T09:00:00Z"); one inside an
+//    ID is the ID's ("INV-2026-03-14-7"). A date stands for its words, as
+//    an ID does, but only once it is found: its words are still the
+//    words way's, so a passage writing the day in a form dates.ts doesn't
+//    read, or added before days were kept, is found by them as before,
+//    and the date is never said not found as a whole (across.ts).
 //
-// A phrase is read first and is then no longer there for the IDs.
+// Names are left to the words way, since no rule tells a name from a
+// sentence's first word or a run of German nouns.
+//
+// A phrase is read first and is then no longer there for the dates, nor a
+// date for the IDs. Of the parts, at most eight count: phrases first, then
+// IDs, then dates.
 //
 // What the word index holds of a chunk is its distinct words, so it finds
 // the chunks holding every word of a part (`query`), and the order is
@@ -43,8 +57,8 @@ import { allOf, sequenceOf } from "./words.ts";
 // though not all and not only those: it orders the candidates, never
 // decides.
 
-/** A part of the question to find as written. */
-export interface Exact {
+/** A part of the question to find as written: a phrase or an ID. */
+export interface Written {
   /** The part as the question wrote it. */
   asked: string;
   /** Its words in order (`sequenceOf`). */
@@ -62,6 +76,23 @@ export interface Exact {
    */
   kind: "phrase" | "id";
 }
+
+/** A date of the question, found by its day (rule 3). */
+export interface Dated {
+  /** The date as the question wrote it. */
+  asked: string;
+  /**
+   * Its words (`sequenceOf`), and those of every other writing of the same
+   * day in the question: what it stands for once found.
+   */
+  words: string[];
+  /** The days it may be: two when it reads both ways. */
+  days: Day[];
+  kind: "date";
+}
+
+/** A part of the question to find as written, or a date by its day. */
+export type Exact = Written | Dated;
 
 /** Most exact parts of a question that count. */
 const maxExacts = 8;
@@ -89,8 +120,8 @@ const reference = new RegExp(`\\p{N}{${referenceDigits}}`, "u");
 const exactOf = (
   asked: string,
   words: string[],
-  kind: Exact["kind"]
-): Exact | undefined =>
+  kind: Written["kind"]
+): Written | undefined =>
   words.length === 0
     ? undefined
     : {
@@ -107,7 +138,7 @@ const isId = (word: string): boolean =>
   reference.test(word);
 
 /** The IDs among `text`'s words, in order (rule 2). */
-const idsOf = (text: string): Exact[] =>
+const idsOf = (text: string): Written[] =>
   (text.match(idWord) ?? []).flatMap((word) => {
     const exact = isId(word)
       ? exactOf(word, sequenceOf(word), "id")
@@ -116,8 +147,8 @@ const idsOf = (text: string): Exact[] =>
   });
 
 /**
- * The parts of `question` to find as written (above), in the order the
- * rules take them, each once, at most `maxExacts`.
+ * The parts of `question` to find as written (above): phrases, IDs, then
+ * dates, each once, at most `maxExacts`.
  */
 export const exactsOf = (question: string): Exact[] => {
   const phrases: Exact[] = [];
@@ -129,17 +160,43 @@ export const exactsOf = (question: string): Exact[] => {
     phrases.push(exact);
     return " ";
   });
+  // A date once per day, its days in any order: "March 14th March 15th"
+  // also reads "14th March", the same day again. A repeat's words join the
+  // first's, so the date stands for every writing of it once it is found.
+  const dates = new Map<string, Dated>();
+  let undated = "";
+  let from = 0;
+  for (const { start, end, days } of datesIn(rest)) {
+    const asked = rest.slice(start, end);
+    const words = sequenceOf(asked);
+    const key = days
+      .map(({ year, month, day }) => `${year}-${month}-${day}`)
+      .toSorted()
+      .join(" ");
+    const known = dates.get(key);
+    if (known === undefined) {
+      dates.set(key, { asked, words, days, kind: "date" });
+    } else {
+      known.words = [...new Set([...known.words, ...words])];
+    }
+    undated += `${rest.slice(from, start)} `;
+    from = end;
+  }
+  undated += rest.slice(from);
   const seen = new Set<string>();
-  return [...phrases, ...idsOf(rest)]
-    .filter(({ words }) => {
+  // Dates are read before IDs, but listed after them: a question of many
+  // dates keeps its IDs within `maxExacts`, as before dates were read.
+  return [
+    ...[...phrases, ...idsOf(undated)].filter(({ words }) => {
       const key = words.join(" ");
       if (seen.has(key)) {
         return false;
       }
       seen.add(key);
       return true;
-    })
-    .slice(0, maxExacts);
+    }),
+    ...dates.values(),
+  ].slice(0, maxExacts);
 };
 
 /** Whether `words` hold `part`'s words in a row, in its order. */
@@ -155,10 +212,30 @@ const holdsInARow = (
   return false;
 };
 
-/** Which of `exacts` (by index) a text holds as written, given its `words` (`sequenceOf`). */
+/**
+ * Which of `exacts` (by index, of `among`) `text` holds: a phrase or an ID
+ * as written, a date by one of its days.
+ */
 export const foundIn = (
-  words: readonly string[],
+  text: string,
   exacts: readonly Exact[],
   among: readonly number[]
-): number[] =>
-  among.filter((index) => holdsInARow(words, exacts[index]?.words ?? [""]));
+): number[] => {
+  let words: string[] | undefined;
+  let days: Day[] | undefined;
+  return among.filter((index) => {
+    const exact = exacts[index];
+    if (exact === undefined) {
+      return false;
+    }
+    if (exact.kind === "date") {
+      days ??= daysIn(text);
+      const written = days;
+      return exact.days.some((day) =>
+        written.some((other) => sameDay(day, other))
+      );
+    }
+    words ??= sequenceOf(text);
+    return holdsInARow(words, exact.words);
+  });
+};

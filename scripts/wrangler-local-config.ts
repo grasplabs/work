@@ -18,6 +18,13 @@
  * AI providers' keys) never reached it, so Composio was never offered
  * locally. The local config requires every secret its `.dev.vars` sets.
  *
+ * With `CONNECT_DEV_MAIN` set, the local config's `main` is that file
+ * instead of the Worker's own: `vp run dev` (scripts/dev.ts) names
+ * connect's test/dev-entry.ts, which is connect with a fake outside API
+ * beside it. An environment variable of this script's, read on a
+ * developer's machine: no Worker reads it, and a deployment is rendered
+ * from wrangler.jsonc, never from the local config.
+ *
  * Usage: `node scripts/wrangler-local-config.ts <config> NAME:value...`
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -64,8 +71,16 @@ const requiredSecrets = (): string[] => {
   return [...new Set([...named, ...set])];
 };
 
+// Never for a stack that brings a config of its own, as the e2e stack
+// does (`CONNECT_WRANGLER_CONFIG`): a variable left in a shell can't swap
+// the connect its tests run against.
+const devMain =
+  process.env.CONNECT_WRANGLER_CONFIG === undefined
+    ? process.env.CONNECT_DEV_MAIN
+    : undefined;
 const local = {
   ...parsed,
+  ...(devMain === undefined ? {} : { main: devMain }),
   vars: { ...(typeof vars === "object" ? vars : {}), ...added },
   secrets: { required: requiredSecrets() },
 };

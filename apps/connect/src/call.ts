@@ -11,6 +11,7 @@ import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type {
   ConnectCall,
+  ConnectResult,
   HeldOutcome,
   PendingReference,
 } from "@grasp-os/shared/connect";
@@ -28,6 +29,8 @@ import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
+
+import { toolkitsWithoutCopies } from "#composio-classes";
 
 import { requirePointedResource } from "./app-pointers.ts";
 import { changeOf } from "./changes.ts";
@@ -216,6 +219,8 @@ export interface CallDone extends StoredAnswer {
   reconciled?: boolean;
   /** What it changed, as its native connector said: kept with its answer. */
   change?: CallChange;
+  /** A read core may keep as a source (`ConnectResult.keep`). */
+  keep?: ConnectResult["keep"];
 }
 
 /** What a held call answers: nothing done yet. */
@@ -240,6 +245,8 @@ export interface CallProgress extends Repeat {
    * unknown outcome a run waits on for its person to resolve.
    */
   native?: boolean;
+  /** Set once its connection is found: its connector, as the catalog names it. */
+  provider?: string;
   /**
    * An HTTP connection's request (GRA-1478): its method and path once it
    * is checked, its status and size once answered, for the audit log.
@@ -622,16 +629,20 @@ export const recoverableNow = async (env: Env, row: Row): Promise<boolean> => {
 };
 
 /**
- * Refuses a side effect of work that may only read (`readOnly`), before it
- * is held or run: a read can't turn into a change further on, whatever
- * the code that called it asks. Refuses one of a turn nobody was there for
+ * Refuses a tool that isn't a read for work that may only read
+ * (`readOnly`), before it is held or run: a read can't turn into a change
+ * further on, whatever the code that called it asks. A read it holds only
+ * because of where it was asked (`restricted`: its input leaves for a
+ * third party, policy.ts) is still a read, and waits for its person
+ * (GRA-1928). Refuses a side effect of a turn nobody was there for
  * (`unattended`) that carries no end for what is held.
  */
 const requireAllowedEffect = (
   { readOnly, unattended, heldUntil }: CapabilityClaims,
+  tool: McpTool,
   sideEffect: boolean
 ): void => {
-  if (sideEffect && readOnly) {
+  if (readOnly && !tool.readOnly) {
     throw connectErrors.create("connect.read_only");
   }
   // What nobody was there to ask for ends with the company's day: one
@@ -639,6 +650,25 @@ const requireAllowedEffect = (
   if (sideEffect && unattended && heldUntil === undefined) {
     throw connectErrors.create("connect.invalid");
   }
+};
+
+/**
+ * Whether core may keep what a read answered as sources in the Brain
+ * (`ConnectResult.keep`): never anything from a toolkit whose provider's
+ * terms forbid copies. A native connector's or an HTTP connection's only
+ * when its server named the items it read (a name `withProvenance` makes
+ * up from the tool is no item); a toolkit's whatever it named, as core
+ * keeps its whole answer as one source, keyed by the call (GRA-1845). An
+ * error answer goes back as `connect.action_failed`, never as a result.
+ */
+const keepOf = (
+  connection: Pick<Connection, "serverKind" | "provider">,
+  answered: McpToolResult
+): ConnectResult["keep"] => {
+  if (connection.serverKind === "composio") {
+    return toolkitsWithoutCopies.has(connection.provider) ? undefined : true;
+  }
+  return answered.provenance.length > 0 ? true : undefined;
 };
 
 /** One call of a read, its answer as the tool gave it. */
@@ -650,22 +680,24 @@ const readOnce = async (
 ): Promise<Omit<CallDone, "sideEffect">> => {
   // Every refusal is behind: only now may a token be read.
   const server = await open();
-  let read: McpToolResult;
+  let answered: McpToolResult;
   try {
-    read = withProvenance(
-      connection,
-      tool.name,
-      await server.call(tool.name, input)
-    );
+    answered = await server.call(tool.name, input);
   } catch (error) {
     throw error instanceof McpError
       ? connectErrors.create("connect.server_unavailable")
       : error;
   }
+  const read = withProvenance(connection, tool.name, answered);
   if (didNothing(connection.serverKind, read)) {
     throw notPerformed(connection.serverKind, read);
   }
-  return { ...answerOf(read), replayed: false };
+  const keep = keepOf(connection, answered);
+  return {
+    ...answerOf(read),
+    replayed: false,
+    ...(keep === undefined ? {} : { keep }),
+  };
 };
 
 /**
@@ -995,6 +1027,7 @@ export const carryOut = async (
   const { authority, resource, idempotencyKey } = claims;
   const connection = await connectionFor(env, claims, call.connectionId, held);
   progress.native = connection.serverKind === "native";
+  progress.provider = connection.provider;
   const { input } = call;
   // MCP tools take an object of arguments.
   if (!isInput(input)) {
@@ -1031,7 +1064,7 @@ export const carryOut = async (
     claims.restricted
   );
   progress.sideEffect = sideEffect;
-  requireAllowedEffect(claims, sideEffect);
+  requireAllowedEffect(claims, tool, sideEffect);
   checkResourceScope(resource, tool, input);
   requirePointedMailbox(claims, connection, call.action, tool, input);
   requirePointedResource(claims, connection, call.action, input);

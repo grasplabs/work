@@ -1,6 +1,7 @@
-import { z } from "zod";
+import type { z } from "zod";
 
 import { ToolError } from "./connector.ts";
+import type { readAsSchema } from "./manifest.ts";
 
 // What connectors share in reading a provider's answers: a file's or an
 // attachment's content as the caller asked for it, within the limits
@@ -10,7 +11,7 @@ import { ToolError } from "./connector.ts";
  * Largest file or attachment a tool reads, in bytes; connect's egress lets
  * a connector read 10 MiB of a provider's answer (`maxEgressResponseBytes`).
  */
-const maxReadBytes = 4 * 1024 * 1024;
+export const maxReadBytes = 4 * 1024 * 1024;
 
 /**
  * Largest content a read returns, in bytes of JSON: base64 of the largest
@@ -18,10 +19,8 @@ const maxReadBytes = 4 * 1024 * 1024;
  * six bytes) would make it larger than connect reads (16 MiB,
  * `nativeResponseBytes`).
  */
-const maxContentBytes = 8 * 1024 * 1024;
+export const maxContentBytes = 8 * 1024 * 1024;
 
-/** How a caller wants a file's content: as text, or base64 for extraction. */
-export const readAsSchema = z.enum(["text", "base64"]);
 type ReadAs = z.infer<typeof readAsSchema>;
 
 /** Base64 of `bytes`, a chunk at a time to spare the call stack. */

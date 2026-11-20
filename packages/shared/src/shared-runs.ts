@@ -15,14 +15,25 @@
 // asks for again would stay for the isolate's life, so every call first
 // drops the entries long past their own time (`pruneAbandoned`): the map
 // holds no more than the work that may still be running or waited on.
+//
+// No request awaits another's promise. The request whose work it is notes
+// how it ended on the entry, and the others read that on timers of their
+// own. A promise is settled only in the request that made it, so awaited
+// from another its continuations ran there; and since workerd
+// 1.20261113.1, an await of one whose request ended rejects at once ("can
+// never settle"), which a waiter would have taken for the work's failure.
+
+/** How a request's work ended: its answer, or what it threw. */
+type Outcome<T> = { readonly value: T } | { readonly error: unknown };
 
 /** One request's work, as the others see it. */
 export interface SharedRun<T> {
-  readonly promise: Promise<T>;
   /** When it started, by `Date.now()`. */
   readonly started: number;
   /** How long it may take, from its start, before it is taken for abandoned. */
   readonly abandonAfterMs: number;
+  /** How it ended, noted by the request whose work it is. */
+  outcome?: Outcome<T>;
   /** The work that took its place once it was taken for abandoned. */
   replacedBy?: SharedRun<T>;
 }
@@ -44,38 +55,29 @@ const pause = async (ms: number): Promise<void> => {
 };
 
 /**
- * What `running` settles with within `ms`, or `elapsed` once `ms` passed
- * first; its rejection, if it rejects first.
- *
- * `running` is another request's work, and workerd can run a promise's
- * continuations in the request that settled it. Awaited here, the rest of
- * this request (an activation of one workflow run, say, sharing another
- * run's build) would go on in the other's: as one Durable Object, its
- * storage calls on another object's behalf, which workerd refuses ("Cannot
- * perform I/O on behalf of a different Durable Object"), and its RPC calls
- * the other's, whose answers land there. So the work's outcome is only
- * noted where it settles, and this request goes on from a timer of its
- * own once it sees it.
+ * What another request's work (`running`) noted it ended with within `ms`,
+ * or `elapsed` once `ms` passed first; what it threw, if it failed first.
+ * Read on this request's own timer, never by awaiting the other's promise
+ * (see above): the rest of this request (an activation of one workflow
+ * run, say, sharing another run's build) then never goes on in the other's,
+ * where, as one Durable Object, its storage calls would be on another
+ * object's behalf, which workerd refuses ("Cannot perform I/O on behalf of
+ * a different Durable Object"), and its RPC calls the other's.
  */
 const settledWithin = async <T>(
-  running: Promise<T>,
+  running: { readonly outcome?: Outcome<T> },
   ms: number
 ): Promise<{ value: T } | "elapsed"> => {
-  const seen: { outcome?: { value: T } | { error: unknown } } = {};
-  // Noted where it settles, run in the request that settles it: nothing
-  // more than that, so nothing of this request's runs there. Not awaited,
-  // for that reason; it never rejects.
-  const note = async (): Promise<void> => {
-    try {
-      seen.outcome = { value: await running };
-    } catch (error) {
-      seen.outcome = { error };
-    }
-  };
-  void note();
   const endsAt = Date.now() + ms;
   let lookMs = lookFirstMs;
-  while (seen.outcome === undefined) {
+  for (;;) {
+    const { outcome } = running;
+    if (outcome !== undefined) {
+      if ("error" in outcome) {
+        throw outcome.error;
+      }
+      return outcome;
+    }
     const left = endsAt - Date.now();
     if (left <= 0) {
       return "elapsed";
@@ -85,11 +87,6 @@ const settledWithin = async <T>(
     await pause(Math.min(lookMs, left));
     lookMs = Math.min(lookMs * 2, lookMostMs);
   }
-  const { outcome } = seen;
-  if ("error" in outcome) {
-    throw outcome.error;
-  }
-  return outcome;
 };
 
 /**
@@ -149,7 +146,7 @@ export const sharedRun = async <T>(
     // One wait after the other: each on the work running now.
     const settled =
       // oxlint-disable-next-line no-await-in-loop
-      left > 0 ? await settledWithin(running.promise, left) : "elapsed";
+      left > 0 ? await settledWithin(running, left) : "elapsed";
     if (settled !== "elapsed") {
       return settled.value;
     }
@@ -164,17 +161,19 @@ export const sharedRun = async <T>(
   // Given up on while it waited: it starts nothing, and leaves the
   // abandoned work for another waiter to replace.
   signal?.throwIfAborted();
-  const run: SharedRun<T> = {
-    promise: start(),
-    started: Date.now(),
-    abandonAfterMs,
-  };
+  const work = start();
+  const run: SharedRun<T> = { started: Date.now(), abandonAfterMs };
   if (replaced !== undefined) {
     replaced.replacedBy = run;
   }
   runs.set(key, run);
   try {
-    return await run.promise;
+    const value = await work;
+    run.outcome = { value };
+    return value;
+  } catch (error) {
+    run.outcome = { error };
+    throw error;
   } finally {
     if (runs.get(key) === run) {
       runs.delete(key);
@@ -182,9 +181,15 @@ export const sharedRun = async <T>(
   }
 };
 
+/** A turn of `inTurn`: when it is due to end, and, once it did, that it did. */
+interface Turn {
+  readonly endsBy: number;
+  outcome?: { readonly value: true };
+}
+
 /** Work of an isolate's requests that runs one at a time (`inTurn`): its last turn. */
 export interface Turns {
-  last?: { done: Promise<unknown>; endsBy: number };
+  last?: Turn;
 }
 
 /**
@@ -200,9 +205,7 @@ export const inTurn = async <T>(
   start: () => Promise<T>
 ): Promise<T> => {
   const previous = turns.last;
-  const { promise: done, resolve } = Promise.withResolvers<boolean>();
-  const turn = {
-    done,
+  const turn: Turn = {
     endsBy: Math.max(Date.now(), previous?.endsBy ?? 0) + turnMs,
   };
   turns.last = turn;
@@ -210,11 +213,11 @@ export const inTurn = async <T>(
     const left = (previous?.endsBy ?? 0) - Date.now();
     if (previous !== undefined && left > 0) {
       // Its outcome is the other request's: only its end matters here.
-      await settledWithin(previous.done, left);
+      await settledWithin(previous, left);
     }
     return await start();
   } finally {
-    resolve(true);
+    turn.outcome = { value: true };
     if (turns.last === turn) {
       turns.last = undefined;
     }

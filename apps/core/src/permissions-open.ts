@@ -1,5 +1,4 @@
 import { isExpectedError } from "@grasp-os/shared/errors";
-import type { AppId } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { drizzle } from "drizzle-orm/d1";
@@ -131,23 +130,24 @@ export const permissionsOpenTo = async (
   env: Env,
   by: Member,
   subject?: unknown,
-  status?: unknown,
-  /** Only the workflows' grants to call App `calling`'s functions. */
-  calling?: AppId
+  status?: unknown
 ): Promise<Permission[]> => {
   const listed = await listPermissions(
     env,
     by,
     subject,
     appsFoundBy(env, by),
-    status,
-    calling
+    status
   );
   const named = listed.flatMap(({ subject: of, object }) => [
     ...(of.type === "app" ? [of.appId] : []),
     ...(object.type === "app" ? [object.appId] : []),
   ]);
-  const readable = await appsReadableBy(env, by, [...new Set(named)]);
+  // A permission is what manages an App, never its data: an admin or its
+  // owner outside a team its Brain grant names still sees and decides it.
+  const readable = await appsReadableBy(env, by, [...new Set(named)], {
+    managing: true,
+  });
   const open: Permission[] = [];
   const answers: Answers = new Map();
   for (const permission of listed) {

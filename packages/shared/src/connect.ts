@@ -94,6 +94,16 @@ export interface ConnectResult {
    */
   provenance: string[];
   /**
+   * Set when core may keep `output` as a source in the Brain: a native
+   * connector's as the source of the one item `provenance` names
+   * (GRA-1730), a toolkit's as the whole answer of the call (GRA-1845).
+   * Only on a read connect carried out just now (no side effect, never
+   * held, never a stored answer), from a connection whose provider's
+   * terms allow copies; for any but a toolkit, only when its server named
+   * the items it read. Absent, nothing of the call is kept.
+   */
+  keep?: true;
+  /**
    * Set when connect held the call for the person it acts for to confirm
    * (a side effect from chat, from a person using an App, or from a context
    * that read restricted data): nothing was done yet, so `output` is the
@@ -413,6 +423,13 @@ export interface ConnectionSummary {
   /** ISO 8601. */
   createdAt: string;
   /**
+   * How a Composio connection was made, and so which consent was given:
+   * signing in (`managed`, {@link composioConsentText}) or with a key
+   * (`key`, {@link composioKeyConsentText}). Absent for a native
+   * connection, and for one where it wasn't recorded.
+   */
+  composioAuth?: "managed" | "key";
+  /**
    * A Composio connection's allowed tools, by name, as the admin who
    * connected it consented to them. Absent for a native connection, and
    * from a connect that predates it.
@@ -479,6 +496,12 @@ export interface OrganizationConnection {
 export interface ListedConnection extends ConnectionSummary {
   /** `connectedBy`'s name, while core knows them. */
   connectedByName: string | null;
+  /**
+   * The Brain may keep some of what agents read for the person through
+   * it (core's connection-capture.ts): it is their own connection of a
+   * kind capture keeps reads from. Disconnecting it erases what was kept.
+   */
+  keepsReads?: true;
 }
 
 /**
@@ -496,6 +519,34 @@ export const canSignInAgain = (
   offered &&
   (connection.scope === "personal" || isAdmin(person.role)) &&
   !person.staff;
+
+/**
+ * An account at a suite a person connected as their own: the provider,
+ * the company's tenant there, the account's stable subject (an Entra
+ * object ID in the tenant, a Google `sub` under its hosted domain), its
+ * address as the provider last confirmed it (Google's; null otherwise)
+ * and when (milliseconds since the epoch), and whether it is still
+ * connected (a disconnected one is listed for its person's erasure).
+ */
+export interface PersonalAccount {
+  provider: string;
+  tenant: string;
+  accountId: string;
+  verifiedEmail: string | null;
+  verifiedEmailAt: number | null;
+  /** Addresses it was confirmed under before, for its person's erasure alone. */
+  pastVerifiedEmails: string[];
+  /**
+   * The groups the account is in at the provider, nested ones included,
+   * as the last whole read with its own token said (connect's
+   * reader-groups.ts); none until one was. Each by the ID a reader list
+   * names it by: an Entra object ID, a Google group's address.
+   */
+  groups: string[];
+  /** When that read was (milliseconds); null when there was none. */
+  groupsReadAt: number | null;
+  connected: boolean;
+}
 
 /** Most connections one `connectionOwners` call takes. */
 export const connectionOwnersMax = 100;
@@ -663,6 +714,27 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
     returnTo?: string;
   }) => Promise<{ url: string }>;
   /**
+   * What an admin types to connect a toolkit whose `auth` is `key`, as
+   * Composio describes it now: admins only, never Grasp staff.
+   */
+  keyFields: (toolkit: string) => Promise<ToolkitKeyField[]>;
+  /**
+   * Connects a toolkit whose `auth` is `key` with what the admin typed
+   * (`values`, by field name), for an admin who consented to
+   * {@link composioKeyConsentText}: connect passes the values to Composio
+   * once and keeps none of them. No browser leaves Grasp: the answer is
+   * where to send it next, the integration's page by default. A key the
+   * provider rejects is `connection.key_rejected`.
+   */
+  connectToolkitWithKey: (request: {
+    toolkit: string;
+    tools: (string | ComposioToolRule)[];
+    /** Exactly {@link composioKeyConsentText}, as the admin was shown it. */
+    consent: string;
+    values: Record<string, string>;
+    returnTo?: string;
+  }) => Promise<{ url: string }>;
+  /**
    * Changes which tools a shared Composio connection allows, and which of
    * them only read, for an admin, audited (GRA-993): only tools the
    * toolkit has. A held action of a tool taken away is dropped. Someone
@@ -718,6 +790,92 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
     mailbox: string,
     audience: ToolClassAudience
   ) => Promise<void>;
+  /**
+   * The shared connections an admin chose who may read in the Brain what
+   * agents read through them (GRA-1831), and for whom, and those whose
+   * kept reads are being erased. Admins only.
+   */
+  brainAudiences: () => Promise<ConnectionBrainAudienceSetting[]>;
+  /**
+   * Chooses who may read in the Brain what agents read through the shared
+   * connection `connectionId`: one team, everyone, or nobody. Admins only,
+   * never Grasp staff; audited. Refused (`connection.brain_erasing`) while
+   * what the Brain kept of it is being erased. `from` is the audience the
+   * admin was looking at: refused (`connection.brain_audience_changed`),
+   * with nothing changed, once another is held. A change that lets anyone
+   * read who couldn't before is refused (`sync.unacknowledged`) unless
+   * `acknowledged` is `audience`: the admin confirmed it reads everything
+   * the connection brings, whatever the source's permissions (GRA-2207).
+   */
+  setBrainAudience: (
+    connectionId: string,
+    audience: ConnectionBrainAudience,
+    from: ConnectionBrainAudience,
+    acknowledged?: ConnectionBrainAudience
+  ) => Promise<void>;
+  /**
+   * Erases everything the Brain kept from the shared connection
+   * `connectionId`, for good, and its audience with it (GRA-1831): what
+   * agents read through it afterwards is kept again once an admin chooses
+   * an audience. Admins only, never Grasp staff; audited when asked and
+   * when done. Asking again while it runs changes nothing.
+   */
+  eraseBrainReads: (connectionId: string) => Promise<void>;
+  /**
+   * The places of the shared connection `connectionId` an admin may pick
+   * to sync into the Brain (its shared drives or SharePoint libraries, as
+   * the connected account sees them), every one, with whether it is
+   * picked; null when the connection syncs no picked places. Admins only,
+   * never Grasp staff.
+   */
+  syncPlaces: (connectionId: string) => Promise<SharedSyncPlaces | null>;
+  /**
+   * Sets which places of the shared connection the sync `feed` reads: the
+   * whole set, replacing the one before, from the picks the page started
+   * from. Admins only, never Grasp staff; audited, refusals too.
+   */
+  pickSyncPlaces: (request: {
+    connectionId: string;
+    feed: string;
+    /**
+     * The picks the page started from (`SharedSyncPlaces.picks`): refused
+     * (`sync.picks_changed`), with nothing changed, once another change
+     * landed meanwhile.
+     */
+    from: string[];
+    places: string[];
+    /**
+     * The connection's Brain audience the admin confirmed will read
+     * everything in the places picked, whatever the source's permissions
+     * (GRA-2207). Needed when the save picks a place `from` doesn't hold,
+     * and it must be the audience held now: else refused
+     * (`sync.unacknowledged`), with nothing changed.
+     */
+    acknowledged?: ConnectionBrainAudience;
+  }) => Promise<void>;
+}
+
+/**
+ * Every place of a shared connection an admin may pick to sync, as its
+ * connector lists them: the sync they are of, and each place.
+ */
+export interface SharedSyncPlaces {
+  feed: string;
+  /**
+   * Each place: its ID, its own name, what it is in (a library's site;
+   * null for a shared drive), and whether it is picked. Names are whole.
+   */
+  choices: {
+    place: string;
+    title: string;
+    within: string | null;
+    picked: boolean;
+  }[];
+  /**
+   * Every place picked now, those the listing doesn't show too: what a
+   * save starts from, so it never drops a pick the page didn't show.
+   */
+  picks: string[];
 }
 
 // The catalog: everything an admin can connect, in one list. Native
@@ -781,14 +939,31 @@ export interface CatalogEntry {
 }
 
 /**
- * Whose sign-in app connecting an entry takes. `managed`: one Grasp or
- * Composio holds, so connecting needs nothing but consent; every native
- * provider is. `own`: a Composio toolkit Composio holds no app for, which
- * the organization connects only with a sign-in app of its own (its own
- * OAuth client or API key). Grasp can't take one yet, so connecting such a
- * toolkit is refused (`connection.own_auth_required`).
+ * What connecting an entry takes. `managed`: signing in, with an app Grasp
+ * or Composio holds, so connecting needs nothing but consent; every native
+ * provider is. `key`: a Composio toolkit Composio connects with a key, a
+ * token or a username and password, which an admin types into Grasp's own
+ * form (`ConnectionsApi.keyFields`). `own`: a Composio toolkit that only
+ * signs in with an OAuth app nobody registered for this deployment, which
+ * Grasp can't take yet, so connecting it is refused
+ * (`connection.own_auth_required`).
  */
-export type CatalogAuth = "managed" | "own";
+export type CatalogAuth = "managed" | "key" | "own";
+
+/**
+ * One thing an admin types to connect a toolkit with a key, as Composio
+ * describes it: its `name` is what Composio takes it as, its `label` and
+ * `description` are Composio's text, rendered as text. A `secret` one is
+ * never shown as it is typed; one Composio doesn't say of counts as
+ * secret.
+ */
+export interface ToolkitKeyField {
+  name: string;
+  label: string;
+  description: string | null;
+  required: boolean;
+  secret: boolean;
+}
 
 /**
  * Which group a category is in, by its words in lower case. The first
@@ -1079,6 +1254,54 @@ export const sharedMailboxSchema = z
   .transform((mailbox) => mailbox.toLowerCase());
 
 /**
+ * Who may read in the Brain what agents read through a shared connection
+ * (GRA-1831), as an admin chooses: nobody, which it is until one chooses,
+ * one team, or everyone in the company. The choice an uploaded document
+ * has, but never one person: the connection is the company's.
+ */
+export const connectionBrainAudienceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("nobody") }),
+  z.strictObject({ kind: z.literal("team"), teamId: identifierSchema }),
+  z.strictObject({ kind: z.literal("everyone") }),
+]);
+export type ConnectionBrainAudience = z.infer<
+  typeof connectionBrainAudienceSchema
+>;
+
+/** A shared connection's Brain audience, as an admin last chose it. */
+export interface ConnectionBrainAudienceSetting {
+  connectionId: string;
+  /** Who may read it now: nobody while an erasure is under way. */
+  audience: ConnectionBrainAudience;
+  /**
+   * Whether what the Brain kept of it is being erased: no audience can
+   * be chosen until that has ended.
+   */
+  erasing: boolean;
+  /** The admin who last chose its audience: null while it is nobody. */
+  changedBy: string | null;
+  /** When (ISO 8601): null while it is nobody. */
+  changedAt: string | null;
+}
+
+/**
+ * A shared connection's ID, as the Brain's groups and keys take it
+ * (GRA-1831): well-formed, never "/" nor ":", and at most 170 characters,
+ * so every key of what is kept of it fits a Brain source's id: the kind
+ * `connected:` (10) and `<id>/<generation>/<SHA-256 in hex>` within 256,
+ * a generation of up to 10 digits. Its group (`connection:` and it) fits
+ * a Brain principal (256) too. Connect's IDs are far shorter.
+ */
+export const brainConnectionIdSchema = z
+  .string()
+  .min(1)
+  .max(170)
+  .refine(
+    (id) => id.isWellFormed() && !(id.includes("/") || id.includes(":")),
+    { message: "Not a connection's ID" }
+  );
+
+/**
  * A shared mailbox Stephen is pointed at, and for whom (`audience`): the
  * chat's agent reaches a mailbox other than its person's own only when
  * pointed at it for them, whatever classes are on.
@@ -1140,6 +1363,15 @@ export interface ToolClassSetting {
  */
 export const composioConsentText =
   "Composio, a third party, will hold this connection's tokens in its own cloud, outside this deployment, and Grasp won't see them. Grasp calls only the tools you allow, through Composio, which acts for your organization with those tokens. Disconnecting deletes the account at Composio.";
+
+/**
+ * What an admin consents to before connecting a Composio toolkit with a
+ * key they type in: as {@link composioConsentText}, shown word for word,
+ * sent back and recorded as its SHA-256. Deleting a key at Composio doesn't
+ * revoke it at its provider, so it says so.
+ */
+export const composioKeyConsentText =
+  "Composio, a third party, will hold the key you enter in its own cloud, outside this deployment. Grasp passes it on once and keeps no copy. Grasp calls only the tools you allow, through Composio, which acts for your organization with that key. Disconnecting deletes the key at Composio, but doesn't revoke it: revoke it at its provider too. Use a key made for Grasp alone, with no more access than it needs.";
 
 /** Most tools an admin may allow on one Composio connection. */
 export const composioToolsMax = 1000;
@@ -1206,6 +1438,31 @@ export type StartToolkitConnection = z.input<
   typeof startToolkitConnectionSchema
 >;
 
+/** Asks for what an admin types to connect a toolkit with a key. */
+export const toolkitKeyFieldsSchema = z.strictObject({
+  person: connectionPersonSchema,
+  toolkit: composioToolkitSchema,
+});
+export type ToolkitKeyFieldsRequest = z.input<typeof toolkitKeyFieldsSchema>;
+
+/**
+ * Connects a toolkit with a key, for an admin who consented to Composio
+ * holding it. `values` are what they typed, by field name: connect takes
+ * only the names Composio lists for the toolkit, and passes the values on
+ * to Composio without keeping, logging or answering any of them.
+ */
+export const connectToolkitWithKeySchema = z.strictObject({
+  person: connectionPersonSchema,
+  toolkit: composioToolkitSchema,
+  tools: composioToolsSchema,
+  /** Exactly {@link composioKeyConsentText}, as the admin was shown it. */
+  consent: z.string().refine((text) => text === composioKeyConsentText),
+  values: z.record(z.string(), z.string()),
+  /** The deployment's origin, from its config: its Composio user. */
+  origin: z.url(),
+});
+export type ConnectToolkitWithKey = z.input<typeof connectToolkitWithKeySchema>;
+
 /** Changes the tools a shared Composio connection allows (GRA-993). */
 export const changeToolkitToolsSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -1259,6 +1516,23 @@ export interface ActionDescription {
   complete: boolean;
 }
 
+/**
+ * Where a held action was held: in Grasp (a chat in Grasp, an App, a
+ * run), or in a chat app's conversation, which Grasp never shows as a
+ * chat and whose held actions are decided on their card there.
+ */
+export const heldInSchema = z.enum(["grasp", "chat_app"]);
+export type HeldIn = z.infer<typeof heldInSchema>;
+
+/**
+ * Why a held action's or an unknown outcome's input isn't shown
+ * (`PendingAction.withheld`): `revoked` once the run that made the call
+ * may no longer read what it read; `unchecked` while that can't be checked
+ * (Grasp can't reach what it needs right now), until a later read shows
+ * it.
+ */
+export type InputWithheld = "revoked" | "unchecked";
+
 /** A held action, as the person it waits for sees it. */
 export interface PendingAction {
   id: string;
@@ -1277,8 +1551,11 @@ export interface PendingAction {
    * confirmation and its events record it.
    */
   restricted: boolean;
-  /** The permission that allowed it. */
-  permissionId: string;
+  /**
+   * The permission that allowed it; null for a read that needs no grant
+   * (core's ungranted-reads.ts), held because of where it was asked.
+   */
+  permissionId: string | null;
   connectionId: string;
   /**
    * The connection as people know it, by what it reaches and its account,
@@ -1297,15 +1574,23 @@ export interface PendingAction {
   /** The key its answer is kept under: a repeat of the call gets it. */
   idempotencyKey: string;
   /**
-   * The exact input it runs with once confirmed, as JSON text: always
-   * there for the person to see, whatever `description` shows.
+   * The exact input it runs with once confirmed, as JSON text: there for
+   * the person to see, whatever `description` shows; empty while
+   * `withheld`.
    */
   input: string;
   /**
    * SHA-256 of its resource and input: confirming names it, so only what
-   * the person was shown runs.
+   * the person was shown runs. Empty while `withheld`.
    */
   inputHash: string;
+  /**
+   * Present when its input isn't shown (no `description`, `input`,
+   * `inputHash` or `attachments` with it), its run having read what it may
+   * no longer read, or that not checked: it can't be confirmed, only
+   * declined, which sends nothing.
+   */
+  withheld?: InputWithheld;
   /**
    * The files it attaches, each by name, type, size and digest (GRA-887):
    * only a native action that takes files has any. Confirming it needs
@@ -1555,7 +1840,8 @@ export type RefuseResolution = z.input<typeof refuseResolutionSchema>;
 export interface UnknownOutcomeOrigin {
   mode: "interactive" | "workflow";
   appVersion: number | null;
-  permissionId: string;
+  /** As `PendingAction.permissionId`. */
+  permissionId: string | null;
   context: WorkContext;
   /** The App's resource binding it came through, as `PendingAction.binding`. */
   binding?: HeldBinding;
@@ -1569,8 +1855,17 @@ export interface UnknownOutcome {
   resource: string | null;
   /** As `PendingAction.description`, of the input it was sent with. */
   description?: ActionDescription;
-  /** The exact input it was sent with, as JSON text, while connect has it. */
+  /**
+   * The exact input it was sent with, as JSON text, while connect has it;
+   * null while `withheld` too.
+   */
   input: string | null;
+  /**
+   * Present when what was sent isn't shown (no `description` or `input`
+   * with it), as `PendingAction.withheld`: only "it happened", which sends
+   * nothing, is taken.
+   */
+  withheld?: InputWithheld;
   /** When it was first sent, ISO 8601. */
   sentAt: string;
   /**
@@ -1687,7 +1982,7 @@ export const eventListenersMax = 5000;
  * Who listens for events of `type` on a connection: an App whose current
  * version has an event trigger for `type` and holds an active
  * permission on the connection that allows the type's read action
- * (`connectorEventActions`), from a version an admin approved. The
+ * (`connectorEventActions`). The
  * permission is on the whole connection (`resource` null) or on one
  * resource of it (a mailbox, a drive). `owner` is the App's owner, whom
  * its triggered runs act for. On a personal connection connect listens
@@ -1860,6 +2155,28 @@ export interface ConnectApi
     connectionIds: readonly string[]
   ) => Promise<ConnectionOwner[]>;
   /**
+   * The suite accounts the person `userId` connected as their own,
+   * disconnected ones too, as connect verified them (`PersonalAccount`):
+   * what core counts them as a reader of where it copies who may read an
+   * item, while connected and recently confirmed, and what their erasure
+   * forgets (GRA-1761).
+   */
+  personalAccounts: (userId: string) => Promise<PersonalAccount[]>;
+  /**
+   * Reads, with each person's own token, the groups of the personal suite
+   * connections whose token was minted since their last read, or whose
+   * read is under way (connect's reader-groups.ts), sending at most
+   * `requests` requests to the providers and starting no turn once it made
+   * `queries` D1 queries: core's clock asks every minute, with its shares
+   * of the platform's limits. Nothing of the connections `paused` people
+   * own, core's suspended members (GRA-2143). How many reads became whole.
+   */
+  readReaderGroups: (request: {
+    requests: number;
+    queries: number;
+    paused: string[];
+  }) => Promise<{ read: number }>;
+  /**
    * Asks the connections whose grant lacks the rights of `classes`, those
    * an admin just turned on, to be connected again (`needs_reauth`), in
    * place. How many it asked.
@@ -1891,6 +2208,14 @@ export interface ConnectApi
    */
   erasePersonal: (request: ErasePersonal) => Promise<{ connections: number }>;
   /**
+   * Marks a person's erasure begun in connect, and nothing else: from then
+   * on connect makes nothing of theirs, a flow already under way included
+   * (its insert refuses them). For core only, first of all in the erasure
+   * (person-erasure.ts `identity`), before it reads their accounts.
+   * `erasePersonal` marks it too. Safe to ask again.
+   */
+  beginErasure: (request: ErasePersonal) => Promise<void>;
+  /**
    * Spends a flow that came back but can't finish (no session, say), so its
    * code can't be brought back to finish it later.
    */
@@ -1912,6 +2237,24 @@ export interface ConnectApi
   startToolkitConnection: (
     request: StartToolkitConnection
   ) => Promise<{ url: string }>;
+  /**
+   * What an admin types to connect a toolkit whose `auth` is `key`, as
+   * Composio describes it now. Admins only, never Grasp staff.
+   */
+  toolkitKeyFields: (
+    request: ToolkitKeyFieldsRequest
+  ) => Promise<ToolkitKeyField[]>;
+  /**
+   * Connects a toolkit whose `auth` is `key` with what the admin typed,
+   * passed to Composio once and kept by connect nowhere: not stored, not
+   * logged, not in an audit event or an error. Admins only, never Grasp
+   * staff; their consent and the connection are recorded, the names of
+   * the fields given but none of their values. A key the provider rejects
+   * is `connection.key_rejected`, and nothing is left at Composio.
+   */
+  connectToolkitWithKey: (
+    request: ConnectToolkitWithKey
+  ) => Promise<{ connectionId: string }>;
   /**
    * Changes the tools a shared Composio connection allows, for an admin:
    * Composio's server first, then connect's own list, which every call
@@ -1980,10 +2323,15 @@ export interface ConnectApi
     request: NativeOperationRequest
   ) => Promise<NativeOperation>;
   /**
-   * The held actions waiting for `person`, newest first (at most 200):
-   * none for Grasp staff.
+   * The held actions waiting for `person` that were held where `heldIn`
+   * says, newest first (at most 200, of those alone): in Grasp, or in a
+   * chat app's conversation (`chatApp` on the capability). None for Grasp
+   * staff.
    */
-  listPendingActions: (person: ConnectionPerson) => Promise<PendingAction[]>;
+  listPendingActions: (
+    person: ConnectionPerson,
+    heldIn: HeldIn
+  ) => Promise<PendingAction[]>;
   /** One held action waiting for the person, or `null`. */
   pendingAction: (request: HeldRequest) => Promise<PendingAction | null>;
   /**
@@ -2081,11 +2429,13 @@ export interface ConnectApi
   refuseConfirmation: (request: RefuseConfirmation) => Promise<void>;
   /**
    * The oldest audit events connect recorded that core hasn't acknowledged,
-   * in the order they were stored, at most `auditOutboxTakeMax`. Taking
-   * removes nothing: events core took but didn't acknowledge are taken
-   * again, so core appends each at least once, and the log keeps it once.
+   * but those `held` names by ID (those core holds within a drain: an
+   * erasure it could not finish yet; none by default), in the order they
+   * were stored, at most `auditOutboxTakeMax`. Taking removes nothing:
+   * events core took but didn't acknowledge are taken again, so core
+   * appends each at least once, and the log keeps it once.
    */
-  takeAuditEvents: () => Promise<OutboxedAuditEvent[]>;
+  takeAuditEvents: (held?: readonly string[]) => Promise<OutboxedAuditEvent[]>;
   /**
    * Settles taken events by ID: removes those core appended to the audit
    * log, and moves those the log can't take to `audit_outbox_rejected`,
@@ -2118,6 +2468,10 @@ export interface ConnectApi
 /** Why connecting or disconnecting an account didn't work. */
 export const connectionErrors = defineErrorFamily({
   "connection.invalid": "That isn't a valid connection request.",
+  "connection.brain_audience_changed":
+    "Who may read this in the Brain was changed in the meantime. Look at it again before you change it.",
+  "connection.brain_erasing":
+    "What the Brain kept from this connection is still being erased. Choose who may read it once that is done.",
   "connection.provider_unavailable":
     "Connecting this provider isn't set up for this deployment.",
   "connection.flow_invalid":
@@ -2128,6 +2482,10 @@ export const connectionErrors = defineErrorFamily({
     "That account isn't in your organization. Connect an account of your organization.",
   "connection.refresh_failed":
     "The provider didn't renew this connection's access. Try again shortly.",
+  "connection.directory_unreadable":
+    "That account can't read your directory, so the directory stays connected as it was. Connect it again with an account that administers your directory.",
+  "connection.directory_unchecked":
+    "Grasp couldn't check that this account can read your directory just now, so the directory stays connected as it was. Try again in a moment.",
   "connection.already_connected":
     "That account is already connected here. Disconnect it first to connect it again.",
   "connection.not_own_account":
@@ -2137,9 +2495,11 @@ export const connectionErrors = defineErrorFamily({
   "connection.not_offered":
     "Your organization doesn't offer this connection. An admin can offer it.",
   "connection.scopes_refused":
-    "The provider granted more or less access than this connection asks for, so it wasn't kept. Connect it again, granting exactly what it asks.",
+    "The access granted wasn't exactly what this connection asks for, so it wasn't kept. An administrator of your organization's Microsoft or Google account has to grant everything it asks for, and nothing more; then connect it again.",
   "connection.own_auth_required":
-    "Composio holds no sign-in app for this one: connecting it needs your organization's own, which Grasp can't take yet.",
+    "This app signs in only with an app of its own, which nobody registered for Grasp yet.",
+  "connection.key_rejected":
+    "The app didn't accept that key. Check it and what you typed with it, then try again.",
   "connection.erase_pending":
     "Their connections aren't all revoked at their providers yet. Erasing them goes on once they are.",
   "connection.http_origin_refused":
@@ -2353,6 +2713,8 @@ export const connectErrors = defineErrorFamily({
   "connect.catalog_entry_not_found": "There's no such entry in the catalog.",
   "connect.catalog_unavailable":
     "Composio's toolkits can't be listed right now. Try again shortly.",
+  "connect.agent_app_off":
+    "This agent doesn't have this app. Whoever manages it can add the app on its page.",
   "connect.class_off":
     "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
   "connect.class_unknown":

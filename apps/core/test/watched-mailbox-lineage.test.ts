@@ -232,7 +232,6 @@ const triggerOn = async (
   const { id } = await admin.api.workflowResources.triggers.create({
     kind: "connector",
     workflowId: workflow,
-    version: 1,
     config: {
       connection,
       event: "m365.mail.received",

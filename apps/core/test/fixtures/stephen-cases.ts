@@ -85,14 +85,18 @@ export interface StephenObservation {
   held: { action: string; input: Record<string, unknown> }[];
   /** What reached the model that the model didn't write itself. */
   modelRead: string;
-  /** The documents the answer cites. */
-  cited: string[];
+  /**
+   * The text of each source of the Brain a recall of the turn handed the
+   * model a passage of: what the answer can name as its source.
+   */
+  recalled: string[];
 }
 
 /** A check: nothing when it holds, otherwise what went wrong. */
 export type StephenCheck = (
   seen: StephenObservation,
-  context: StephenContext
+  context: StephenContext,
+  item: StephenCase
 ) => string | undefined;
 
 export interface StephenCase {
@@ -110,7 +114,7 @@ export interface StephenCase {
   failFirstCalendarRead?: true;
   stub: {
     calls?: (context: StephenContext) => StephenCall[];
-    /** A Knowledge search, as the agent's code runs it. */
+    /** A recall of the Brain, as the agent's code runs it. */
     search?: string;
     /** What must have reached the model before the stub answers. */
     evidence?: (context: StephenContext) => string[];
@@ -180,8 +184,23 @@ const english: StephenCheck = ({ answer }) =>
   /\b(?:je|jij|niet|werkdagen|morgen)\b/iu.test(prose(answer))
     ? "not English"
     : undefined;
-const cites: StephenCheck = ({ cited }) =>
-  cited.length > 0 ? undefined : "cites no source";
+/**
+ * The turn's recalls handed the model a passage of the source that holds
+ * each of the case's evidence markers: the source its answer rests on.
+ */
+const recallsEvidence: StephenCheck = ({ recalled }, context, item) => {
+  const markers = item.stub.evidence?.(context) ?? [];
+  const missing = markers.filter(
+    (marker) =>
+      !recalled.some((text) => normalized(text).includes(normalized(marker)))
+  );
+  if (markers.length === 0) {
+    return "names no evidence to recall";
+  }
+  return missing.length === 0
+    ? undefined
+    : `recalled no source holding ${missing.join(", ")}`;
+};
 const noColleagueNamed =
   (own: string): StephenCheck =>
   (seen) => {
@@ -633,11 +652,11 @@ const bench: StephenCase[] = [
     text: "Move my planning with Sam tomorrow to 16:00.",
     checks: [
       holdsNo(/^calendar\.update$/u),
-      (seen, context) =>
+      (seen, context, item) =>
         says(
           new RegExp(calendarApp(context), "u"),
           `to move it in ${calendarApp(context)}`
-        )(seen, context),
+        )(seen, context, item),
     ],
     judge:
       "Doesn't move the planning, as Sam is invited and Stephen only moves meetings with nobody else invited; tells her to move it in Outlook, where Sam gets the update.",
@@ -1415,7 +1434,7 @@ const bench: StephenCase[] = [
       holdsNothing,
       readsNothing,
       says(/two working days|2 working days/iu, "two working days"),
-      cites,
+      recallsEvidence,
     ],
     judge:
       "Says complaints are acknowledged within two working days, in writing, citing the complaints page; looks in no app.",
@@ -1432,7 +1451,11 @@ const bench: StephenCase[] = [
     lang: "en",
     messy: false,
     text: "How do I register a complaint here?",
-    checks: [holdsNothing, cites, says(/CRM/u, "the CRM's complaint form")],
+    checks: [
+      holdsNothing,
+      recallsEvidence,
+      says(/CRM/u, "the CRM's complaint form"),
+    ],
     judge:
       "Says to register it in the CRM's complaint form and forward it to compliance the same day, citing the complaints page.",
     stub: {
@@ -1506,7 +1529,7 @@ const answerSet: StephenCase[] = [
         [/notion/iu, "Notion"],
         [/intercom/iu, "Intercom"],
       ],
-      checks: [cites, holdsNothing],
+      checks: [recallsEvidence, holdsNothing],
       judge:
         "Names Outlook, the CRM, Copilot, Notion and Intercom, citing the team's notes.",
       search: "applications we use",
@@ -1522,7 +1545,7 @@ const answerSet: StephenCase[] = [
     "How fast do we have to acknowledge a complaint?",
     {
       has: [[/two working days/iu, "two working days"]],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge: "Says within two working days, citing the complaints page.",
       search: "acknowledge complaint",
       evidence: ["two working days"],
@@ -1540,7 +1563,7 @@ const answerSet: StephenCase[] = [
         [/copilot/iu, "Copilot"],
         [/chatgpt/iu, "ChatGPT"],
       ],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Says Microsoft Copilot and ChatGPT Enterprise, and never client data in other tools, citing the AI tools page.",
       search: "AI tools drafting replies",
@@ -1560,7 +1583,7 @@ const answerSet: StephenCase[] = [
         [/two weeks/iu, "two weeks"],
         [/month/iu, "a month"],
       ],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Says at least two weeks ahead, a month for more than a week off, citing the leave page.",
       search: "ask for leave ahead",
@@ -1580,7 +1603,7 @@ const answerSet: StephenCase[] = [
         [/\b8\b/u, "8 hours"],
         [/\b60\b/u, "60 letters"],
       ],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Says about 8 hours a week for around 60 letters, citing operations' notes.",
       search: "renewal letters",
@@ -1599,7 +1622,7 @@ const answerSet: StephenCase[] = [
         [/four|\b4\b/iu, "four"],
         [/eight|\b8\b/iu, "eight"],
       ],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge: "Says four to eight minutes, citing finance's notes.",
       search: "coding supplier invoice",
       evidence: ["four to eight minutes"],
@@ -1614,7 +1637,7 @@ const answerSet: StephenCase[] = [
     "How much time goes into checking VAT on foreign invoices?",
     {
       has: [[/hour/iu, "an hour"]],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge: "Says about an hour a week, citing finance's notes.",
       search: "VAT foreign invoices",
       evidence: ["about an hour a week"],
@@ -1629,7 +1652,7 @@ const answerSet: StephenCase[] = [
     "hw many mails do we get in the shared inbox a week??",
     {
       has: [[/600/u, "600"]],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Understands the typos and says about 600 a week, citing the team's notes.",
       search: "shared inbox mails a week",
@@ -1645,7 +1668,7 @@ const answerSet: StephenCase[] = [
     "copilot cant see crm right so i check evry draft by hand?",
     {
       has: [[/crm/iu, "the CRM"]],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Confirms Copilot can't see the CRM, so drafts mentioning a client's file are checked by hand against the CRM.",
       search: "Copilot CRM",
@@ -1665,7 +1688,7 @@ const answerSet: StephenCase[] = [
         [/compliance/iu, "compliance"],
         [/two working days/iu, "two working days"],
       ],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Says register it in the CRM's complaint form, forward it to compliance the same day, and acknowledge within two working days.",
       search: "complaint",
@@ -1685,7 +1708,7 @@ const answerSet: StephenCase[] = [
         [/expenses@/iu, "expenses@"],
         [/250/u, "€250"],
       ],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Says mail the receipt to expenses@noordkade.example within a month; above €250 needs the team lead's approval first.",
       search: "client lunch receipt expenses",
@@ -1705,7 +1728,7 @@ const answerSet: StephenCase[] = [
         [/test/iu, "still testing"],
         [/coo/iu, "the COO"],
       ],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Says it's still in testing and the COO decides when it goes live.",
       search: "weekly report automation testing",
@@ -1721,7 +1744,7 @@ const answerSet: StephenCase[] = [
     "is it us (ops) chasing the teamleads for leave every wk??",
     {
       has: [[/yes|operations/iu, "yes, operations"]],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge: "Says yes, operations chases the team leads every week.",
       search: "operations chases team leads leave",
       evidence: ["operations chases the team leads"],
@@ -1736,7 +1759,7 @@ const answerSet: StephenCase[] = [
     "Binnen hoeveel dagen moeten we een klacht bevestigen?",
     {
       has: [[/twee werkdagen|2 werkdagen/iu, "twee werkdagen"]],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge: "Zegt in het Nederlands: binnen twee werkdagen, schriftelijk.",
       search: "acknowledge complaint",
       evidence: ["two working days"],
@@ -1751,7 +1774,7 @@ const answerSet: StephenCase[] = [
     "Welke AI-tools mag ik gebruiken voor conceptmails?",
     {
       has: [[/copilot/iu, "Copilot"]],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Zegt in het Nederlands: Microsoft Copilot en ChatGPT Enterprise, en nooit klantgegevens in andere tools.",
       search: "AI tools drafting replies",
@@ -1771,7 +1794,7 @@ const answerSet: StephenCase[] = [
         [/vier|\b4\b/iu, "vier"],
         [/acht|\b8\b/iu, "acht"],
       ],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge: "Zegt in het Nederlands: vier tot acht minuten per factuur.",
       search: "coding supplier invoice",
       evidence: ["four to eight minutes"],
@@ -1789,7 +1812,7 @@ const answerSet: StephenCase[] = [
         [/twee weken/iu, "twee weken"],
         [/maand/iu, "een maand"],
       ],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Zegt in het Nederlands: minstens twee weken van tevoren, een maand voor meer dan een week vrij.",
       search: "ask for leave ahead",
@@ -1926,7 +1949,7 @@ const answerSet: StephenCase[] = [
     "Who approves supplier invoice payments, is it Eva Bakker?",
     {
       has: [[/cfo/iu, "the CFO"]],
-      checks: [cites],
+      checks: [recallsEvidence],
       judge:
         "Says the CFO approves supplier invoice payments, without confirming a name it can't back.",
       search: "supplier invoice payments",

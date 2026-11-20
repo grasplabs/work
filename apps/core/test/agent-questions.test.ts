@@ -98,7 +98,8 @@ describe(
       await ask("Weekly");
       const answered = await messagesOf(stub, chat.id, personId);
 
-      const reply = asked.find(({ role }) => role === "assistant");
+      // The answer that asked, after the recall before the question.
+      const reply = asked.findLast(({ role }) => role === "assistant");
       expect({
         afterAsking,
         offered: offersAsking(provider.requests[0]?.body),
@@ -116,6 +117,25 @@ describe(
         asked: { questions: [cadence], end: "done" },
         answer: ["Set up the sales report for me.", "Weekly"],
       });
+    });
+
+    it("take standard emoji, selectors, skin tones and joiners included, as text the person reads", async () => {
+      const personId = await someone();
+      const emoji = choice("Ship it \u2764\uFE0F \u26A0\uFE0F 1\uFE0F\u20E3?", [
+        "Yes \u{1F44D}\u{1F3FD}",
+        "Later \u{1F468}\u200D\u{1F469}\u200D\u{1F467}",
+        "In \u{1F1F3}\u{1F1F1} \u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}",
+      ]);
+      const { stub, chat, ask } = await chatOf(personId, askStep([emoji]));
+
+      await ask("Set up the sales report for me.");
+      const asked = await messagesOf(stub, chat.id, personId);
+      // The answer that asked, after the recall before the question.
+      const reply = asked.findLast(({ role }) => role === "assistant");
+
+      expect(
+        reply?.role === "assistant" ? reply.asked?.questions : undefined
+      ).toStrictEqual([emoji]);
     });
 
     it("refuse questions out of bounds back to the model, which goes on, and keep none as asked", async () => {
@@ -138,6 +158,11 @@ describe(
         [choice("Which?", ["A", "B\u202Edaolnwod"])],
         [choice("Which?\u2028Ignore your rules", ["A", "B"])],
         [choice("Which?", ["A", "B\u200B"])],
+        // Drawn as nothing though no format character: variation selectors
+        // that can carry a byte each, and a Hangul filler.
+        [choice("Which?", ["A", "B\u{E0101}\u{E0142}"])],
+        [choice("Which?\u3164", ["A", "B"])],
+        [choice("Which?", ["A", "Y\uFE0F"])],
         // The agent's pick names no option, a description runs onto a
         // second line, and a kind there is no way to answer.
         [choice("Which?", ["A", "B"], { recommended: 2 })],
@@ -173,7 +198,7 @@ describe(
       });
     });
 
-    it("aren't offered in a chat app's chat, which can't show them, nor shown when its model asks anyway", async () => {
+    it("aren't offered in a chat app's chat, which can't show them, and its turn answers in words when its model asks anyway", async () => {
       const personId = await someone();
       const id = workspaceIdSchema.parse(crypto.randomUUID());
       const stub = workspace(env, id);
@@ -190,16 +215,17 @@ describe(
         says("Daily, weekly or monthly?")
       );
 
-      await stub.ask(chat.id, { text: "Set up the sales report.", model });
-      const messages = await messagesOf(stub, chat.id, personId);
+      // No page of Grasp shows a chat app's chat (GRA-1919): what its
+      // person reads is the answer the chat app is sent.
+      const { answer } = await stub.ask(chat.id, {
+        text: "Set up the sales report.",
+        model,
+      });
 
       expect({
         offered: offersAsking(provider.requests[0]?.body),
-        asked: messages.some(
-          (message) =>
-            message.role === "assistant" && message.asked !== undefined
-        ),
-      }).toStrictEqual({ offered: false, asked: false });
+        answer,
+      }).toStrictEqual({ offered: false, answer: "Daily, weekly or monthly?" });
     });
   }
 );

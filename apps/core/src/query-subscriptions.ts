@@ -15,6 +15,7 @@ import {
 } from "@grasp-os/shared/pages";
 import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { waitUntil } from "cloudflare:workers";
 
 import { functionRoles } from "./app-access.ts";
 import {
@@ -1612,10 +1613,18 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // follow starts afresh, so a connection keeps nothing per App it left.
     this.#revocations.delete(app);
     this.#rolesSeen.delete(app);
-    // Not answered yet: `#follow` leaves once it is.
-    if (following?.id !== undefined) {
-      void this.#leave(app, following.id);
+    if (following === undefined) {
+      return;
     }
+    // Past the release, as its store's unwatch (`#release`): left to a
+    // request that ended, the word never reaches the App's host, which
+    // keeps its stub of the watcher until the runtime evicts it,
+    // unreleased. Not answered yet, `#follow` leaves once it is.
+    waitUntil(
+      following.id === undefined
+        ? following.ready
+        : this.#leave(app, following.id)
+    );
   }
 
   async #leave(app: AppId, id: string): Promise<void> {
@@ -1814,7 +1823,11 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     this.#detach(listener)[Symbol.dispose]();
     if (evaluation.listeners.size === 0 && !evaluation.closed) {
       this.#close(evaluation);
-      void this.#unwatch(evaluation);
+      // Past the release, which may be the connection's last act (its
+      // socket closed): a call left to a request that ended never reaches
+      // the store, which then keeps its stub of the watcher until the
+      // runtime evicts it, unreleased.
+      waitUntil(this.#unwatch(evaluation));
     } else {
       QuerySubscriptions.#forgetDelivered(evaluation);
     }

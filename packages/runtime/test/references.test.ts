@@ -260,7 +260,7 @@ describe("generated modules", () => {
       generateModules(changedContracts, notesFunctions, [
         {
           alias: "summarizeNote",
-          pinned: { workflowId: "workflow-7", version: 7 },
+          workflowId: "workflow-7",
         },
       ]),
     ]);
@@ -368,7 +368,7 @@ const unsealed = (generated: Readonly<Record<string, string>>) =>
   );
 
 describe("workflow references", () => {
-  const pinned = { workflowId: "workflow-1", version: 3 };
+  const workflowId = "workflow-1";
 
   /**
    * The fixture's generated modules, with the versions the host resolved
@@ -400,7 +400,7 @@ describe("workflow references", () => {
   test("seal the workflow version each was resolved from, never into a reference or a page", async () => {
     const [unbound, files] = await Promise.all([
       generatedWith([]),
-      generatedWith([{ alias: "summarizeNote", pinned }]),
+      generatedWith([{ alias: "summarizeNote", workflowId }]),
     ]);
     const contracts: unknown = JSON.parse(
       files[".grasp/contracts.json"] ?? "{}"
@@ -408,26 +408,24 @@ describe("workflow references", () => {
     expect({
       // `archiveNotes`, bound to nothing, seals nothing.
       sealed: readSealedWorkflows(at(contracts, ["workflows"])),
-      // The references and the page's build are the same bytes, pinned or not.
+      // The references and the page's build are the same bytes, bound or not.
       rest: unsealed(files),
     }).toStrictEqual({
-      sealed: [{ alias: "summarizeNote", pinned }],
+      sealed: [{ alias: "summarizeNote", workflowId }],
       rest: unsealed(unbound),
     });
   });
 
   test.each([
-    ["no pin at all", undefined],
-    ["no workflow", { version: 1 }],
-    ["an empty workflow", { workflowId: "", version: 1 }],
-    ["a version that isn't one", { workflowId: "workflow-1", version: 0 }],
-    ["a fractional version", { workflowId: "workflow-1", version: 1.5 }],
-  ])("refuse a sealed pin with %s", (_case, sealed) => {
+    ["no workflow", undefined],
+    ["a workflow that isn't text", 7],
+    ["an empty workflow", ""],
+  ])("refuse a sealed binding with %s", (_case, sealed) => {
     expect(() =>
       readSealedWorkflows({
-        summarizeNote: { alias: "summarizeNote", pinned: sealed },
+        summarizeNote: { alias: "summarizeNote", workflowId: sealed },
       })
-    ).toThrow(/pin/u);
+    ).toThrow(/names no workflow/u);
   });
 
   test("are names alone, frozen all the way down", () => {
@@ -721,7 +719,7 @@ describe("workflow references", () => {
     });
   });
 
-  test("are covered by the release's contracts with all the App declares of them, and the version each binding pinned", async () => {
+  test("are covered by the release's contracts with all the App declares of them, and the workflow each binding names", async () => {
     const text = v.string().descriptor;
     const edited = summarizeNote.events.noteEdited;
     const approve = summarizeNote.decisions.approveSummary;
@@ -763,10 +761,8 @@ describe("workflow references", () => {
     ];
     const generated = await Promise.all([
       generatedWith([]),
-      generatedWith([{ alias: "summarizeNote", pinned }]),
-      generatedWith([
-        { alias: "summarizeNote", pinned: { ...pinned, version: 4 } },
-      ]),
+      generatedWith([{ alias: "summarizeNote", workflowId }]),
+      generatedWith([{ alias: "summarizeNote", workflowId: "workflow-4" }]),
       ...declarationChanges.map(
         async (change) => await generatedWith([], { summarizeNote: change })
       ),
@@ -785,12 +781,9 @@ describe("workflow references", () => {
   });
 
   test("are the same bytes whatever order the bindings, the events and the listen tasks come in", async () => {
-    const pins: WorkflowBindingExtras[] = [
-      {
-        alias: "archiveNotes",
-        pinned: { workflowId: "workflow-2", version: 1 },
-      },
-      { alias: "summarizeNote", pinned },
+    const bindings: WorkflowBindingExtras[] = [
+      { alias: "archiveNotes", workflowId: "workflow-2" },
+      { alias: "summarizeNote", workflowId },
     ];
     const reversed = changed((data) => {
       const declared = ["permissions", "summarizeNote"];
@@ -815,10 +808,10 @@ describe("workflow references", () => {
       generateModules(
         readAppManifest(reversed),
         notesFunctions,
-        pins.toReversed()
+        bindings.toReversed()
       )
     ).resolves.toStrictEqual(
-      await generateModules(notesManifest(), notesFunctions, pins)
+      await generateModules(notesManifest(), notesFunctions, bindings)
     );
   });
 
@@ -868,17 +861,17 @@ describe("workflow references", () => {
     [
       "the same alias twice",
       [
-        { alias: "summarizeNote", pinned },
-        { alias: "summarizeNote", pinned: { ...pinned, version: 4 } },
+        { alias: "summarizeNote", workflowId },
+        { alias: "summarizeNote", workflowId: "workflow-4" },
       ],
     ],
     [
       "a workflow the App doesn't declare",
-      [{ alias: "translateNote", pinned }],
+      [{ alias: "translateNote", workflowId }],
     ],
-    ["an alias that isn't plain", [{ alias: "summarize-note", pinned }]],
-    ["an inherited key", [{ alias: "constructor", pinned }]],
-    ["another kind's permission", [{ alias: "files", pinned }]],
+    ["an alias that isn't plain", [{ alias: "summarize-note", workflowId }]],
+    ["an inherited key", [{ alias: "constructor", workflowId }]],
+    ["another kind's permission", [{ alias: "files", workflowId }]],
   ])("refuse a binding of %s", async (_what, bound) => {
     await expect(generatedWith(bound)).rejects.toThrow(TypeError);
   });

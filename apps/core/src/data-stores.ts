@@ -23,6 +23,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { requireAppRole, requireNotArchived } from "./app-access.ts";
+import { eraseAppMemories } from "./app-memory-erasure.ts";
+import { mayReadBrainTeamsOf } from "./app-provenance.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { appDefaultStores, apps, businessStores } from "./db/core/schema.ts";
@@ -266,7 +268,7 @@ export const liveStoreOf = async (
  * conditional statement, so of two creations at once one record wins and
  * both answer its store; the other's store is never listed, nor audited.
  * The versions sealed on a deleted store stay bound to it and are refused
- * as they are made current (`makeCurrent`): their data is gone, and a
+ * as they are made current (`activateVersion`): their data is gone, and a
  * fresh store isn't it. Its caller decides who may: only the App's
  * builders seal its versions (app-releases.ts).
  */
@@ -318,7 +320,13 @@ export const appStoreFor = async (
  * Resets the data of App `app`'s store for `by` (`StoreHost.resetData`,
  * audited in the store's own transaction), applying `apply` to the empty
  * store in the same one: its store, if it has one that lives, or null.
- * Its caller decides who may.
+ * Its caller decides who may. What the App's code remembered goes with
+ * its data (app-memory-erasure.ts), whether or not it has a store (an App
+ * without tables never gets one, yet may remember): erased first, under
+ * one change for this request, so a reset that fails afterwards leaves
+ * data without memories, never memories without data. A call already
+ * running can still remember afterwards what it read before the reset:
+ * the next erasure of the App erases that, not this one.
  */
 export const resetAppStore = async (
   env: Env,
@@ -326,17 +334,20 @@ export const resetAppStore = async (
   app: AppId,
   reset: Pick<StoreReset, "apply">
 ): Promise<StoreId | null> => {
+  const actor = by.actor ?? actorOf(by);
+  await eraseAppMemories(env, {
+    app,
+    change: `app-data-reset:${crypto.randomUUID()}`,
+    actor,
+    cause: "data_reset",
+  });
   const store = await liveStoreOf(env, app);
   if (store === null) {
     return null;
   }
   await inJurisdiction(env, env.DATA_STORES)
     .getByName(store)
-    .resetData(store, {
-      ...reset,
-      actor: by.actor ?? actorOf(by),
-      app,
-    });
+    .resetData(store, { ...reset, actor, app });
   return store;
 };
 
@@ -404,7 +415,16 @@ const managedBy = async (
     throw dataErrors.create("data.store_unavailable");
   }
   if (app.removed) {
-    if (!isMemberAdmin(by)) {
+    // Its admins', and only those in every team whose Brain content it
+    // may hold (GRA-1842), as for a live App.
+    if (
+      !isMemberAdmin(by) ||
+      !(await mayReadBrainTeamsOf(
+        env,
+        app.id,
+        by.teams.map((team) => team.id)
+      ))
+    ) {
       throw dataErrors.create("data.store_unavailable");
     }
   } else {
@@ -447,7 +467,7 @@ const boundSql = (id: StoreId): SQL =>
  * statement that requires it live, bound to no sealed release, and not
  * closing for another deletion (unless that mark lapsed,
  * `storeClosingMs`): the mark a seal's binding (app-releases.ts) and
- * `makeCurrent` honour, so of this deletion and a seal that binds
+ * `activateVersion` honour, so of this deletion and a seal that binds
  * the store, exactly one wins. True when this call holds the mark: only
  * then may it close the store.
  */

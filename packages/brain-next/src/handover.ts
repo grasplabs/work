@@ -1,9 +1,12 @@
 import { z } from "zod";
 
 import { sourceIdSchema } from "./contract.ts";
-import type { HandOverPriority, HandOverRequest } from "./contract.ts";
+import type {
+  HandOverPriority,
+  HandOverRequest,
+  WorkPriority,
+} from "./contract.ts";
 import { defineWork, enqueueWork } from "./work.ts";
-import type { WorkPriority } from "./work.ts";
 
 // Hand-overs (contract.ts): a source the host produces, put on the shared
 // store's work queue by its key alone. Each run asks the host to hand it

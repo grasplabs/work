@@ -250,7 +250,7 @@ export const BannerHeader = ({
             : note.title}
         </Heading>
         {note.kind === "statement" && isTeamClaim(note.id) ? (
-          <ClaimBasis />
+          <ClaimBasis statementId={note.id} />
         ) : null}
         {/* Last heard follows the summary's last word, so a summary that wraps keeps it beside its words. A source's summary already carries its date. */}
         <Text size="sm" tone="muted">
@@ -303,7 +303,9 @@ export const StatementLine = ({
             <KindLabel kind={statement.kind} />
           </span>
         ) : null}
-        {isTeamClaim(statement.id) ? <ClaimBasis /> : null}
+        {isTeamClaim(statement.id) ? (
+          <ClaimBasis statementId={statement.id} />
+        ) : null}
       </span>
       {/* Who said it as the company may read it, and the week: never a name, a day or the minute in the conversation. The source's title is its tooltip. */}
       <Tooltip>

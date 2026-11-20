@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+import type {
+  AgentChangeDrafted,
+  AgentDraftMade,
+  AgentDraftMake,
+  AgentDrafted,
+} from "./agents.ts";
 import type { ChatSavedMemory } from "./brain-memories.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import { identifierSchema } from "./ids.ts";
@@ -7,6 +13,7 @@ import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type { PageBundle } from "./pages.ts";
 import type { Role } from "./roles.ts";
+import type { Subject, SubjectKind } from "./subject.ts";
 import type { ThinkingStep } from "./thinking.ts";
 import { uploadTypes } from "./uploads.ts";
 
@@ -61,25 +68,11 @@ export type ChatChannel = z.infer<typeof chatChannelSchema>;
 /** A chat's title: what the person, or their first question, named it. */
 /** The longest a chat's name may be. */
 /**
- * The kinds of thing a question may be about: the page it is asked on
- * (the web's chat-subject.ts), as an App's workspace is about the App and
- * a workflow's page about the workflow.
- */
-export const chatSubjectKinds = ["app", "workflow"] as const;
-export type ChatSubjectKind = (typeof chatSubjectKinds)[number];
-
-/** What a question is about: one thing of a kind, by its ID. */
-export const chatSubjectSchema = z.strictObject({
-  kind: z.enum(chatSubjectKinds),
-  id: z.string().min(1).max(256),
-});
-export type ChatSubject = z.infer<typeof chatSubjectSchema>;
-
-/**
  * The kinds of thing a question may mention: what the person picks with
- * `@` in the composer, an App, a workflow or a member of the organization.
+ * `@` in the composer, an App, a workflow, a member of the organization,
+ * or an agent they may ask (`ChatsApi.agents`), which then answers it.
  */
-export const chatMentionKinds = ["app", "workflow", "person"] as const;
+export const chatMentionKinds = ["app", "workflow", "person", "agent"] as const;
 export type ChatMentionKind = (typeof chatMentionKinds)[number];
 
 /** One thing a question mentions: of a kind, by its ID (a person's user ID). */
@@ -135,6 +128,8 @@ export interface ChatAgent {
    * answers with the model its asker picks.
    */
   model: string | null;
+  /** Whether it is the person's own, which nobody else sees or asks. */
+  own: boolean;
 }
 
 /** A chat in the person's list. */
@@ -152,13 +147,6 @@ export interface ChatSummary {
   lastAt: string;
   /** Whether its agent is working on a question now. */
   running: boolean;
-  /** The App it is for (`ChatsApi.forApp`), or null for none. */
-  appId: string | null;
-  /**
-   * Which channel it came through: Grasp's own app (`web`), or a chat
-   * platform by its adapter's name (`teams`, `slack`), for good.
-   */
-  via: ChatChannel;
   /** What "Make something" started it to make, for good; null for any other chat. */
   make: ChatMake | null;
   /**
@@ -263,13 +251,14 @@ export interface ChatFileInput {
 }
 
 /**
- * What a chat's agent worked on (`ChatsApi.worked`): an App whose draft
- * it wrote, when it last did, and in which code step or tool call
- * (`ChatCode.callId`, `ChatToolCall.callId`), where the chat's thread shows
- * it. Shaped to name a workflow too, once workflows have drafts.
+ * What a chat worked on (`ChatsApi.worked`): an App or workflow whose
+ * draft its agent wrote, or which its Build it made, when it last did,
+ * and in which code step or tool call (`ChatCode.callId`,
+ * `ChatToolCall.callId`), or by which plan (`ChatPlanned.callId`), where
+ * the chat's thread shows it.
  */
 export interface ChatWork {
-  kind: "app";
+  kind: SubjectKind;
   id: string;
   /** When the chat's agent last wrote it (ISO 8601). */
   updatedAt: string;
@@ -277,8 +266,8 @@ export interface ChatWork {
 }
 
 /**
- * The revision a preview of an undo point of an App's draft carries
- * (`AppDraftsApi.preview` with `point`): no draft
+ * The revision a preview of a checkpoint of an App's draft carries
+ * (`apps.preview.open` with `checkpoint`): no draft
  * is ever at it (a draft starts at 0, before its first write), so
  * every call of that preview (function, query, stream) is refused, the
  * latest version's too, and nothing it reports is kept. Read-only by
@@ -289,7 +278,7 @@ export const readOnlyRevision = -1;
 /**
  * The build a frame of a draft's preview shows, which its reports name and
  * its updates are asked from: the draft at its revision
- * (`readOnlyRevision` for an undo point opened read-only), or a
+ * (`readOnlyRevision` for a checkpoint opened read-only), or a
  * version of the App, shown while the draft changes nothing or its page
  * doesn't build. Only the draft's own revision counts toward the agent's
  * check of the draft. Its calls name nothing of it: they run on the draft
@@ -306,13 +295,13 @@ export const shownAt = ({
 
 /**
  * A page of an App's draft, ready for a frame, as
- * `PageBundle` is for a running App (`AppDraftsApi.preview`): at the draft's
+ * `PageBundle` is for a running App (`apps.preview.open`): at the draft's
  * revision instead of a version, with the names of the draft's pages.
  */
 export interface PreviewBundle extends Omit<PageBundle, "version" | "lease"> {
   /**
    * The draft's revision it was opened at; `readOnlyRevision` for an
-   * undo point or a version opened read-only. A frame that takes updates
+   * checkpoint or a version opened read-only. A frame that takes updates
    * names what its `refresh` shows (`shownAt`) in its reports.
    */
   revision: number;
@@ -328,7 +317,7 @@ export interface PreviewBundle extends Omit<PageBundle, "version" | "lease"> {
   /**
    * The pages' modules, as the frame opened them: what later updates
    * are measured against (`PreviewUpdate`). Only for the draft as it is
-   * now; an undo point opened read-only never updates.
+   * now; a checkpoint opened read-only never updates.
    */
   refresh?: PreviewRefresh;
   /**
@@ -378,7 +367,7 @@ export interface PreviewRefresh {
 
 /**
  * What an open frame of a draft's preview shows as it asks for an update
- * (`AppDraftsApi.previewUpdate`): the App's version it shows, when it shows
+ * (`apps.preview.update`): the App's version it shows, when it shows
  * one rather than the draft's changes.
  */
 export const previewShownSchema = z.strictObject({
@@ -389,7 +378,7 @@ export const previewShownSchema = z.strictObject({
 export type PreviewShown = z.infer<typeof previewShownSchema>;
 
 /**
- * What `AppDraftsApi.previewUpdate` answers an open frame: a build of its
+ * What `apps.preview.update` answers an open frame: a build of its
  * pages to swap in (`refresh`); that the build it shows is still the
  * one to show (`unchanged`); or that the one to show is one it can't swap
  * in, another version of the App (`restart`), which it opens afresh on,
@@ -402,7 +391,7 @@ export type PreviewUpdate =
   | { app: AppId; restart: true };
 
 /**
- * A problem a preview of a draft reported (`AppDraftsApi.previewReport`), or
+ * A problem a preview of a draft reported (`apps.preview.report`), or
  * one its server code failed with: text the draft's code wrote, held to
  * size, and only ever read as data.
  */
@@ -503,60 +492,6 @@ export interface ChatReplyUsage {
 }
 
 /**
- * A note an answer cites: a Knowledge document the chat's code was given
- * by one of its reads before the answer, which the answer links to as
- * `[title](grasp:note/<documentId>)`. Only its ID: who reads the answer
- * resolves it with their own access.
- */
-export interface ChatCitation {
-  kind: "document";
-  documentId: string;
-}
-
-/** Most citations one answer carries: the first it links to. */
-export const chatCitationsMax = 50;
-
-/**
- * A span of an answer that cites a document: one of its links to the
- * note, `[text](grasp:note/<documentId> "quote")`, as stored. `at` is where
- * the link starts in the answer's text (the offset of its `[`), so a page
- * finds it as it renders the Markdown; `text` is the words it links, as
- * Markdown. `quote` is the words of the document it rests on, which the
- * answer wrote as the link's title, only when the document says them now
- * (whitespace aside), and never longer than {@link citedQuoteMax}; else
- * null, and the span cites the document alone.
- */
-export interface ChatCitedSpan {
-  at: number;
-  text: string;
-  quote: string | null;
-}
-
-/** Longest quote a cited span keeps (`ChatCitedSpan`). */
-export const citedQuoteMax = 300;
-
-/**
- * A document an answer cites (`ChatCitation`), as the chat's agent may
- * read it for the chat's person now: where it is, what it is called, and
- * the start of what it says (its description, or else its first section),
- * cut to {@link citedSnippetMax} characters; and the spans of the answer
- * that cite it, in order, each with its quote. A document either of them
- * can no longer read, or that is gone, is never one, so neither are its
- * spans nor their quotes.
- */
-export interface ChatCitedDocument {
-  documentId: string;
-  collectionId: string;
-  title: string;
-  path: string;
-  snippet: string;
-  spans: ChatCitedSpan[];
-}
-
-/** Longest snippet of a cited document (`ChatCitedDocument`). */
-export const citedSnippetMax = 200;
-
-/**
  * How much the chat's agent may ask at once (`askQuestions`): a few short
  * questions, each with a few options, plain text, one line each. The
  * person can always answer in their own words, which the page offers
@@ -576,26 +511,103 @@ export const chatAskLimits = {
 const unpadded = /^\S(?:.*\S)?$/su;
 
 /**
- * What a question or an option never holds: controls (line breaks among
- * them), invisible formatting (bidi overrides, zero-width characters) and
- * the line and paragraph separators, so it shows as the one line it reads
- * as, and can't pass for something the page itself shows.
+ * The characters nobody sees as text, one class for every rule that reads
+ * them: controls (line breaks among them), invisible formatting (bidi
+ * overrides, zero-width characters, tag characters: Cf), private-use and
+ * unassigned code points (Co, Cn), half a surrogate pair alone (Cs), and
+ * what Unicode lists as drawn as nothing though it is no format character
+ * (`Default_Ignorable_Code_Point`: variation selectors, which can carry a
+ * byte each after a visible letter, Hangul fillers, the grapheme joiner).
+ * Written once, as a regular expression's class, so the rules below can't
+ * drift apart.
  */
-const notInAskLine = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+const unseenClass = String.raw`\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorable_Code_Point}`;
+
+/**
+ * What a question or an option never holds outside a standard emoji
+ * (`withoutStandardEmoji`): anything nobody sees as text (`unseenClass`) and the
+ * line and paragraph separators, so it shows as the one line it reads as,
+ * and can't pass for something the page itself shows.
+ */
+const notInAskLine = new RegExp(`[${unseenClass}\\p{Zl}\\p{Zp}]`, "u");
+
+/**
+ * A standard emoji (Unicode's recommended sequences: `RGI_Emoji`), its
+ * selectors, skin tones, joiners and tags included: text people read, so a
+ * line that asks something may hold one. Only ask lines read it; what a
+ * person confirms before it is sent (`shownVisibly`) shows every character
+ * nobody sees, inside an emoji too.
+ *
+ * `RGI_Emoji` needs the `v` flag, which not every browser the web build
+ * targets has (Chrome 111, Firefox 114 and 115, Safari 16.4 to 16.6 lack
+ * it), so the pattern is built the first time an ask line is read, never
+ * as this module loads. Where it can't be built, it is `null` and no emoji
+ * is taken out: an ask line holding one is refused, the stricter rule.
+ */
+let standardEmoji: RegExp | null | undefined;
+
+/** `line` with every standard emoji taken out, where the runtime can find them. */
+const withoutStandardEmoji = (line: string): string => {
+  if (standardEmoji === undefined) {
+    try {
+      // From a string: the `v` flag is newer than the language level the
+      // App compiler type-checks this file at.
+      // oxlint-disable-next-line prefer-regex-literals -- see above
+      standardEmoji = new RegExp(String.raw`\p{RGI_Emoji}`, "gv");
+    } catch {
+      standardEmoji = null;
+    }
+  }
+  return standardEmoji === null ? line : line.replaceAll(standardEmoji, "");
+};
+
+/**
+ * What a person sees of text that is sent as it is, which they confirm
+ * before it goes (a held write's exact request or values, on a card in
+ * Grasp or a chat app): every character nobody sees as text
+ * (`unseenClass`) shown as an escape of its code point, `\u{200D}`; a tab
+ * and a line break are text. So a title the model was steered to hide
+ * something in shows what it holds, and is sent unchanged: only what is
+ * shown is escaped. An ordinary emoji keeps its picture, its variation
+ * selector shown beside it (`❤\u{FE0F}`).
+ *
+ * Every `\u{` in what is shown is such an escape: a backslash the text
+ * itself has before `u{` is escaped too (`\u{5C}`), so a written escape
+ * never looks like a hidden character, and no two texts look the same.
+ * JSON's own escapes (`\\`, `\"`, `\n`) never start `u{`, and stay as
+ * they are.
+ */
+const unseenOrEscape = new RegExp(
+  String.raw`\\(?=u\{)|(?![\t\n\r])[${unseenClass}]`,
+  "gu"
+);
+
+/** `text` as a person is shown it before it is sent as it is: see `unseenOrEscape`. */
+export const shownVisibly = (text: string): string =>
+  text.replaceAll(
+    unseenOrEscape,
+    (character) =>
+      `\\u{${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}}`
+  );
 
 /**
  * One line of plain text, as everything asked is: taken as written or
- * refused, never trimmed.
+ * refused, never trimmed. The one rule for a line a person reads as what
+ * it is, a workflow's title too (`workflowTitleSchema`).
  */
-const askLine = (max: number) =>
+export const askLine = (max: number) =>
   z
     .string()
     .max(max)
     .regex(unpadded)
-    .refine((line) => !notInAskLine.test(line) && line.isWellFormed(), {
-      message:
-        "One line of well-formed text, with no control or invisible formatting characters",
-    });
+    .refine(
+      (line) =>
+        !notInAskLine.test(withoutStandardEmoji(line)) && line.isWellFormed(),
+      {
+        message:
+          "One line of well-formed text, with no control or invisible formatting characters outside a standard emoji",
+      }
+    );
 
 /** An option to pick: a few words, and a line saying what it means. */
 const askOptionSchema = z.strictObject({
@@ -809,6 +821,15 @@ export interface ChatReasoning {
   ms: number | null;
 }
 
+/** The longest reason a rating takes. */
+export const chatRatingReasonMax = 2000;
+
+/** What a person thought of an answer in their own chat, and why if they said. */
+export interface ChatRating {
+  value: "up" | "down";
+  reason?: string;
+}
+
 /**
  * One stored message of a chat, oldest first by `id`. The agent's
  * instructions and the APIs it was shown aren't among them.
@@ -832,19 +853,20 @@ export type ChatMessage =
       id: number;
       role: "assistant";
       /**
-       * Its answer, in Markdown. A link to a note it was given stays a
-       * `grasp:note/<documentId>` link, one of `citations`; one to any
-       * other note is shown as its text alone.
+       * The agent that gave it (`ChatsApi.agents`); none for an answer
+       * kept before a chat could have several.
        */
+      agentId?: string;
+      /** Its answer, in Markdown. */
       text: string;
-      /** The notes it cites, in the order it first links to them. */
-      citations: ChatCitation[];
       /** The code it asked to run, each run in a code step. */
       code: ChatCode[];
       /** The calls of its other tools, each shown as one line. */
       tools: ChatToolCall[];
       /** What the model thought before it, when it thought. */
       reasoning?: ChatReasoning;
+      /** What the person thought of it, if they rated it (`ChatsApi.rate`). */
+      rating?: ChatRating;
       /**
        * The questions it asked the person, with choices, if it ended its
        * response asking them (`askQuestions`): shown in place of the
@@ -856,6 +878,16 @@ export type ChatMessage =
        * (`proposePlan`): shown as a card with Build it.
        */
       planned?: ChatPlanned;
+      /**
+       * The agent it drafted, if it ended its response drafting one
+       * (`draftAgent`): shown as a card with Make it.
+       */
+      agentDraft?: AgentDrafted;
+      /**
+       * The change to an agent it drafted, if it ended its response
+       * drafting one (`draftAgentChange`): shown as a card with Change it.
+       */
+      agentChange?: AgentChangeDrafted;
       end: ChatReplyEnd;
       /**
        * Why it failed, as one of the model gateway's error codes: the page
@@ -895,13 +927,10 @@ export type ChatMessage =
       saved?: ChatSavedMemory;
     };
 
-/**
- * What the agent is writing now, before it is stored. It holds no note
- * link: each is its text alone until the answer is stored and its
- * citations decided. A page makes a `grasp:note/<id>` link a link only
- * when `<id>` is among that stored message's `citations`, never in this.
- */
+/** What the agent is writing now, before it is stored. */
 export interface ChatPartial {
+  /** The agent writing it: the chat's agent of the turn under way. */
+  agentId?: string;
   text: string;
   code: ChatCode[];
   /** Its calls of other tools so far, their texts cut short. */
@@ -1134,6 +1163,12 @@ export interface ChatConnectionRequest {
 
 /** A question for the chat's agent, and the model to answer it with. */
 export interface ChatQuestion {
+  /**
+   * A UUID the page makes for this question, so it may send it again
+   * when it never heard that core took it: the same key is the same
+   * question, asked once. Good for a day.
+   */
+  key?: string;
   text: string;
   /** One of `ChatsApi.models()`. */
   model: string;
@@ -1156,7 +1191,7 @@ export interface ChatQuestion {
    * about the App. Core tells the agent, by name, with the question, so
    * "this" and "it" mean that; only one the person may change.
    */
-  subject?: ChatSubject;
+  subject?: Subject;
   /**
    * What the person picked with `@` as they wrote it, at most
    * {@link chatMentionsMax}, each once: core tells the agent each by name
@@ -1175,6 +1210,31 @@ export interface ChatSubscriptionApi {
   release: () => Promise<void>;
 }
 
+/** The most held App calls one page of `ChatsApi.heldCalls` lists. */
+export const heldAppCallsPage = 50;
+
+/**
+ * A write to an App the chat's agent asked for after the chat used
+ * something only its person may read, held until that person confirms
+ * or declines it (`ChatsApi.heldCalls`). `request` is the call exactly as
+ * it would run; confirming names its `requestHash`.
+ */
+export interface HeldAppCall {
+  id: string;
+  appId: string;
+  /** The App's name now; null once it was removed. */
+  appName: string | null;
+  /** The function's path in the App, as the request names it. */
+  function: string;
+  /** `mutation` or `action`. */
+  kind: string;
+  request: string;
+  requestHash: string;
+  heldAt: string;
+  /** When it lapses, never run, unless confirmed before. */
+  expiresAt: string;
+}
+
 /** The signed-in person's chats with the organization's agent. */
 export interface ChatsApi {
   /** The models a question may name, the default first. */
@@ -1185,6 +1245,13 @@ export interface ChatsApi {
    * none is offered for it.
    */
   efforts: () => Promise<Record<string, ModelEfforts>>;
+  /**
+   * What people call each of `models()`: its provider's own name for it
+   * ("Claude Sonnet 4.5"), for any member, since only admins read the
+   * providers' catalog. A model the organization named itself, on its
+   * OpenAI-compatible endpoint, is called what the organization named it.
+   */
+  names: () => Promise<Record<string, string>>;
   /**
    * The person's chats, the most recently active first: those in their
    * list, or with `{ archived: true }` those they archived.
@@ -1212,19 +1279,23 @@ export interface ChatsApi {
    * Makes a chat with the agent `agentId`, one of `agents()`, or with
    * the company's first agent when none is named. An agent the person may
    * not talk to is `agent.unknown`, as one the company doesn't have. From
-   * "Make something", with what to make (`make`), which it keeps.
+   * "Make something", with what to make (`make`), which it keeps. With
+   * `key`, a UUID the page makes for this chat, a repeat within a day
+   * answers the chat the first call made and makes none.
    */
   create: (
     title: string,
     agentId?: string,
-    make?: ChatMake
+    make?: ChatMake,
+    key?: string
   ) => Promise<ChatSummary>;
   /**
-   * The person's chat for App `app`, where its agent changes the App with
-   * them: the one they last used, or a new one named after the App. Only
-   * for someone who builds the App, and not while it is archived.
+   * The person's chat for an App or a workflow, where its agent changes it
+   * with them: the one that last worked on it, or null while none did,
+   * when the next question asked about it starts one. Only for someone
+   * who may change it: not an archived App.
    */
-  forApp: (app: string) => Promise<ChatSummary>;
+  forSubject: (subject: Subject) => Promise<ChatSummary | null>;
   /**
    * The organization's members, by name, that a question can mention
    * (`ChatQuestion.mentions`): whoever asks needn't be an admin.
@@ -1273,6 +1344,17 @@ export interface ChatsApi {
    */
   send: (chatId: string, question: ChatQuestion) => Promise<void>;
   /**
+   * Rates an answer of the person's own chat, by its message's `id`, or
+   * takes the rating back (`null`). Kept with the chat, where only its
+   * person reads it: nobody else sees a rating, and nothing learns from
+   * one. Audited without the rating or its reason. Anything but an answer of that chat is `agent.invalid_request`.
+   */
+  rate: (
+    chatId: string,
+    messageId: number,
+    rating: ChatRating | null
+  ) => Promise<void>;
+  /**
    * Build it: makes what the chat's plan `build.plan` lists (an App, a
    * workflow, or both), owned by the person, in the project the chat was
    * started with (`ChatSummary.make`, shared with everyone in it), each
@@ -1284,16 +1366,35 @@ export interface ChatsApi {
    */
   build: (chatId: string, build: ChatBuild) => Promise<ChatBuilt>;
   /**
+   * Make it: makes the agent the chat drafted (`make.draft`), as its card
+   * showed it, by the Agents page's own checks: one of the company's for
+   * its admins alone, a person's own for anyone the company lets; each
+   * draft once. Then asks the chat's agent on, in the person's words
+   * (`make.text`). A draft the chat doesn't hold, or made already, is
+   * refused (`agent.draft_not_found`), with nothing made.
+   */
+  makeDraftedAgent: (
+    chatId: string,
+    make: AgentDraftMake
+  ) => Promise<AgentDraftMade>;
+  /**
+   * Change it: changes the agent the chat drafted a change to
+   * (`make.draft`), as its card showed it, by the agent page's own checks,
+   * each draft once; then asks the chat's agent on, in the person's words.
+   * Refused, with nothing changed, for a draft the chat doesn't hold or
+   * changed already (`agent.draft_not_found`), an agent the person may
+   * not change (`agent.unknown`), and one changed since the chat drafted
+   * it (`agent.draft_stale`).
+   */
+  changeDraftedAgent: (
+    chatId: string,
+    make: AgentDraftMake
+  ) => Promise<AgentDraftMade>;
+  /**
    * What the chat's agent worked on, the most recently written first: each
-   * App whose draft it wrote (`ChatWork`).
+   * App or workflow whose draft it wrote (`ChatWork`).
    */
   worked: (chatId: string) => Promise<ChatWork[]>;
-  /**
-   * The documents the chat's answer `messageId` cites, in the order it
-   * first links to them, each only while the chat's agent may still read
-   * it for the person; none for a message that isn't an answer.
-   */
-  cited: (chatId: string, messageId: number) => Promise<ChatCitedDocument[]>;
   /** Stops the agent's work on the chat; `false` when there was none. */
   cancel: (chatId: string) => Promise<boolean>;
   /** The npm packages the chat's agent asked for that wait, oldest first. */
@@ -1311,6 +1412,25 @@ export interface ChatsApi {
    * `id`. Audited; the agent is told.
    */
   denyConnection: (chatId: string, id: string) => Promise<void>;
+  /**
+   * The writes to Apps the chat's agent asked for after the chat used
+   * something only the person can read, which wait for them, oldest
+   * first, at most {@link heldAppCallsPage} a page: a full page goes on
+   * `after` its last one's `id`.
+   */
+  heldCalls: (chatId: string, after?: string) => Promise<HeldAppCall[]>;
+  /**
+   * Confirms the chat's held App call `id` for exactly the request whose
+   * SHA-256 is `requestHash`, and runs it once, as the agent acting for
+   * the person. Audited; the agent is told how it ended.
+   */
+  confirmHeldCall: (
+    chatId: string,
+    id: string,
+    requestHash: string
+  ) => Promise<void>;
+  /** Declines the chat's held App call `id`: it never runs. Audited; the agent is told. */
+  declineHeldCall: (chatId: string, id: string) => Promise<void>;
   /**
    * Follows the chat: `onUpdate` gets the messages after the one with ID
    * `after` (all of them for `null`) and what the agent is writing, then

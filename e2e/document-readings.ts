@@ -29,6 +29,7 @@ const callSchema = z.tuple([
 ]);
 const shareArgsSchema = z.tuple([z.object({ name: z.string() })]);
 const answerArgsSchema = z.tuple([z.string(), z.string()]);
+const removeArgsSchema = z.tuple([z.string()]);
 const resolveSchema = z.tuple([z.literal("resolve"), z.number(), z.unknown()]);
 const listSchema = z.tuple([z.array(z.unknown())]);
 
@@ -48,6 +49,7 @@ const written = (value: unknown): unknown => {
 /** What the page is answered on one call, once core has answered it. */
 type Answer =
   | { kind: "share"; name: string; reading: DocumentReading }
+  | { kind: "remove"; id: string }
   | { kind: "answer"; id: string; answer: string }
   | { kind: "list" };
 
@@ -72,6 +74,13 @@ const answerFor = (
       ? { kind: "answer", id, answer }
       : undefined;
   }
+  const removed = removeArgsSchema.safeParse(args);
+  if (method === "onboarding.removeDocument" && removed.success) {
+    const [id] = removed.data;
+    return kept.some((each) => each.id === id)
+      ? { kind: "remove", id }
+      : undefined;
+  }
   return method === "onboarding.documents" ? { kind: "list" } : undefined;
 };
 
@@ -92,6 +101,14 @@ const valueOf = (
     // Core lists the newest first.
     kept.unshift(read);
     return written(read);
+  }
+  if (answer.kind === "remove") {
+    const at = kept.findIndex((each) => each.id === answer.id);
+    if (at !== -1) {
+      kept.splice(at, 1);
+    }
+    // Core's remove answers nothing.
+    return null;
   }
   if (answer.kind === "answer") {
     const read = kept.find((each) => each.id === answer.id);

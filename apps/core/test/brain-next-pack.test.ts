@@ -1,9 +1,13 @@
 import {
+  brainOf,
   exactCandidatesMax,
   packItemTokens,
+  packMemoryTokens,
+  personalBrainOf,
   recallBudgetMax,
   recallLimit,
 } from "@grasp-os/brain-next/contract";
+import type { Access, Brain, NewMemory } from "@grasp-os/brain-next/contract";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -16,6 +20,7 @@ import type {
   SourceRef,
 } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
@@ -232,7 +237,7 @@ describe("the cited pack", () => {
     );
   });
 
-  it("reads a date, a time and a word with one digit as words: the passage writing them otherwise comes first, and none is said not found", async () => {
+  it("reads a time and a word with one digit as words, and a date by its day: the passage writing them otherwise comes first, and none is said not found", async () => {
     const reader = await person();
     const [topic, other] = [word(), word()];
     const signed = await add(
@@ -244,7 +249,8 @@ describe("the cited pack", () => {
       owner(reader)
     );
     // A dozen log lines holding the date, the time and "2e" as written:
-    // as IDs, each would have a list of its own, first in the fusion.
+    // as IDs, each would have a list of its own, first in the fusion; the
+    // date's list holds only what the words list doesn't.
     for (let index = 0; index < 12; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
       await add(
@@ -276,6 +282,133 @@ describe("the cited pack", () => {
         )
       )
     ).toStrictEqual([]);
+  });
+
+  it("finds a question's date in passages writing its day otherwise: an ordinal, each language's month name, ISO with a time, the other order", async () => {
+    const reader = await person();
+    const [topic, other] = [word(), word()];
+    // More passages than a list holds, each with every word of the
+    // question but its date, which none of them mentions: word search
+    // ranks every passage below past its limit.
+    for (let index = 0; index <= recallLimit; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(
+        `${topic} ${other}: room 14, floor 03, budget 2093, number ${index}.`,
+        owner(reader)
+      );
+    }
+    const texts = [
+      "Signed March 14th, 2093.",
+      "Getekend op 14 maart.",
+      "Unterschrieben am 14. März 2093.",
+      "Signé le 14 mars 2093.",
+      "Firmado el 14 de marzo de 2093.",
+      "Logged 2093-03-14T09:00:00Z.",
+      "Due 03/14/2093.",
+    ];
+    const written: SourceRef[] = [];
+    for (const text of texts) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      written.push(await add(text, owner(reader)));
+    }
+    // Another day, written as the question writes its own.
+    const otherDay = await add("Signed 15/03/2093.", owner(reader));
+
+    const pack = await packFor(reader, `${topic} ${other} 14/03/2093`);
+
+    const ids = new Set(pack.items.map(({ source }) => source.id));
+    expect({
+      written: written.map(({ id: source }) => ids.has(source)),
+      otherDay: ids.has(otherDay.id),
+      notFound: pack.notFound,
+    }).toStrictEqual({
+      written: texts.map(() => true),
+      otherDay: false,
+      notFound: [],
+    });
+  });
+
+  it("says no word of a date not found when a passage mentions its day otherwise, and its words when none does", async () => {
+    const reader = await person();
+    const topic = word();
+    await add(`${topic} was signed 14/03/2094.`, owner(reader));
+
+    const [mentioned, unmentioned] = await Promise.all([
+      packFor(reader, `${topic} signed 14 maart 2094`),
+      packFor(reader, `${topic} signed 15 maart 2094`),
+    ]);
+
+    // "maart" is in no passage: said not found only when no passage
+    // mentions the day.
+    expect([mentioned.notFound, unmentioned.notFound]).toStrictEqual([
+      [],
+      ["15", "maart"],
+    ]);
+  });
+
+  it("never puts a passage only a common date found before an ID's or a phrase's", async () => {
+    const reader = await person();
+    const topic = word();
+    const invoice = id();
+    // A dozen passages mentioning the day, holding no other word of the
+    // question, and a dozen holding the date's words and the topic.
+    for (let index = 0; index < 12; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(`Log ${index}: 2095-03-14T08:00:00Z.`, owner(reader));
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await add(`${topic} log ${index}: 14/03/2095.`, owner(reader));
+    }
+    const byId = await add(
+      `Paid: ${invoice.replace("-", " ")}.`,
+      owner(reader)
+    );
+    const byPhrase = await add("Posted: the night shift rota.", owner(reader));
+
+    const pack = await packFor(
+      reader,
+      `${topic} ${invoice} "night shift rota" 14 March 2095`
+    );
+
+    expect(
+      pack.items
+        .slice(0, 2)
+        .map(({ source }) => source.id)
+        .toSorted()
+    ).toStrictEqual([byId.id, byPhrase.id].toSorted());
+  });
+
+  it("finds a date from what the reader may read alone: as in a store where the hidden source doesn't exist", async () => {
+    const [reader, holder] = await Promise.all([person(), person()]);
+    const holders = await teamOf(holder);
+    const topic = word();
+    await add(`${topic} is ours.`, owner(reader));
+    // The hidden day is mentioned only in sources the reader may not
+    // read, in the store the reader's recall reads (a team's, not one
+    // person's own), more of them than the exact way checks; the absent
+    // day nowhere.
+    await add(
+      Array.from(
+        { length: exactCandidatesMax + 1 },
+        (_, index) => `Withheld: due 13/11/2096, part ${index}.`
+      ).join("\n\n"),
+      team(holders)
+    );
+
+    const ask = (day: string): string => `Where is ${topic} on ${day} 2096?`;
+    const packs = await Promise.all(
+      [1, 12, recallBudgetMax].flatMap((tokens) => [
+        packFor(reader, ask("13 november"), { tokens }),
+        packFor(reader, ask("14 november"), { tokens }),
+      ])
+    );
+
+    for (let index = 0; index < packs.length; index += 2) {
+      const [asHidden, asAbsent] = [packs[index], packs[index + 1]];
+      expect(JSON.stringify(asHidden).replaceAll('"13"', '"14"')).toBe(
+        JSON.stringify(asAbsent)
+      );
+    }
+    expect(packs.at(-1)?.notFound).toStrictEqual(["14", "november", "2096"]);
   });
 
   it("reads IDs a question lists with commas, semicolons or sentence punctuation one by one", async () => {
@@ -534,7 +667,10 @@ describe("the cited pack", () => {
           found: "words",
         },
       ],
-      // A date is words: found apart, or not, as any word.
+      memories: [],
+      contested: [],
+      // A date no passage the reader may read mentions is said not found
+      // by its words, as any word.
       notFound: [
         `${hidden} plan`,
         hiddenId,
@@ -564,5 +700,121 @@ describe("the cited pack", () => {
       found: "stop words",
     });
     expect(pack.notFound).toStrictEqual([absent]);
+  });
+});
+
+// A contested fact is packed with every side or none, from each store a
+// recall reads (the shared store and the person's own, `packAcross`):
+// never some of its sides listed as the whole fact, at any budget, with
+// the person's own passage competing for the room.
+/** Adds a three-sided fact about a customer named `name` to `store`. */
+const contested = async (store: Brain, access: Access, name: string) => {
+  for (const [writer, month] of [
+    ["crm", "March"],
+    ["ledger", "June"],
+    ["sheet", "September"],
+  ] as const) {
+    const memory: NewMemory = {
+      about: "c",
+      attribute: "renewal_date",
+      value: month,
+      type: "fact",
+      statement: `${name} renews in ${month}`,
+      speaker: { kind: "system" },
+      basis: { kind: "writer", writer },
+    };
+    // oxlint-disable-next-line no-await-in-loop -- one lineage each
+    await store.addMemories({
+      change: crypto.randomUUID(),
+      access,
+      entities: [{ key: "c", kind: "customer", names: [name] }],
+      memories: [memory],
+    });
+  }
+};
+
+/** The tokens all of `pack` takes, as the Brain counts them. */
+const tokensOf = (pack: RecalledPack): number =>
+  pack.items.reduce(
+    (sum, item) =>
+      sum +
+      packItemTokens({
+        ...item,
+        source: `${item.source.producer}:${item.source.id}`,
+      }),
+    0
+  ) +
+  pack.memories.reduce(
+    (sum, memory) => sum + packMemoryTokens({ ...memory, source: null }),
+    0
+  );
+
+describe("contested facts in a pack across stores", () => {
+  it("packs every side of each store's contested fact or none, at every budget", async () => {
+    const reader = await person();
+    const teamId = await teamOf(reader);
+    const name = `${word()} ${word()}`;
+    const stores = inJurisdiction(env, env.BRAIN_STORE);
+    await contested(
+      brainOf(stores),
+      { kind: "audience", group: `team:${teamId}` },
+      name
+    );
+    await contested(
+      personalBrainOf(stores, reader),
+      { kind: "owner", person: reader },
+      name
+    );
+    await addSource(env, {
+      source: newSource(),
+      change: crypto.randomUUID(),
+      text: `${name} renews its contract with care, says the account team`,
+      readers: { kind: "owner", personId: reader },
+    });
+    const question = `${name} renews`;
+    const recall = async (tokens: number) =>
+      await recallAs(env, reader, {
+        question,
+        budget: { tokens },
+        personal: true,
+      });
+    const whole = await recall(recallBudgetMax);
+    const counts = new Set<string>();
+    const broken: string[] = [];
+    for (let tokens = 1; tokens <= tokensOf(whole); tokens += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one budget at a time
+      const pack = await recall(tokens);
+      const sidesByFact = new Map<string, number>();
+      for (const { about, attribute } of pack.memories) {
+        if (attribute === "renewal_date") {
+          sidesByFact.set(about, (sidesByFact.get(about) ?? 0) + 1);
+        }
+      }
+      const held = [...sidesByFact.values()];
+      const listed = pack.contested.map(({ memories }) => memories.length);
+      counts.add(JSON.stringify(held.toSorted((x, y) => x - y)));
+      if (
+        held.some((sides) => sides !== 3) ||
+        JSON.stringify(listed.toSorted((x, y) => x - y)) !==
+          JSON.stringify(held.toSorted((x, y) => x - y)) ||
+        tokensOf(pack) > tokens
+      ) {
+        broken.push(
+          `${tokens}: sides ${held.join("+")}, listed ${listed.join("+")}`
+        );
+      }
+    }
+
+    expect(
+      whole.contested.map(({ memories }) => memories.length)
+    ).toStrictEqual([3, 3]);
+    expect({
+      broken,
+      reached: counts,
+    }).toStrictEqual({
+      broken: [],
+      // Both facts packed, one, and none: every case is reached.
+      reached: new Set(["[3,3]", "[3]", "[]"]),
+    });
   });
 });

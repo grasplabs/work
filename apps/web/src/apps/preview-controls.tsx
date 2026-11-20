@@ -101,11 +101,15 @@ export const useAppPages = (
     `${app}/${draft === undefined ? `v${version ?? ""}` : `r${draft.revision}`}`,
     async (session) => {
       if (draft !== undefined) {
-        return Object.keys(await session.apps.drafts.files(app));
+        return Object.keys(
+          await session.drafts.files({ kind: "app", id: app })
+        );
       }
       return version === null
         ? []
-        : Object.keys(await session.apps.files.read(app, version));
+        : Object.keys(
+            await session.versions.files({ kind: "app", id: app }, version)
+          );
     },
     app
   );

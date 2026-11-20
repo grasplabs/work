@@ -1,0 +1,85 @@
+// @vitest-environment happy-dom
+import type { ChatAgent } from "@grasp-os/shared/chat";
+import { i18n } from "@lingui/core";
+import { I18nProvider } from "@lingui/react";
+import { act } from "react";
+import type { ReactNode } from "react";
+import { createRoot } from "react-dom/client";
+import type { Root } from "react-dom/client";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
+import { AgentName, agentModelOf } from "./agent-choice.tsx";
+
+// Which agent answers, in the box to ask in. These start from the ways it
+// can fail: a person with one agent shown a choice they don't have; a new
+// chat started with an agent that isn't theirs any more; an open chat
+// naming another agent than its own, or one the person may no longer see.
+
+Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+
+const stephen: ChatAgent = {
+  id: "organization",
+  name: "Stephen",
+  face: "stephen",
+  job: "Answers from what the company told Grasp.",
+  model: null,
+  own: false,
+};
+const claire: ChatAgent = {
+  id: "agent-claire",
+  name: "Claire",
+  face: "claire",
+  job: "Chases unpaid invoices.",
+  model: "anthropic/claude-sonnet-5-5",
+  own: false,
+};
+
+let root: Root | undefined;
+
+/** `node` on the page. */
+const shown = async (node: ReactNode): Promise<HTMLElement> => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host);
+    root.render(<I18nProvider i18n={i18n}>{node}</I18nProvider>);
+    await Promise.resolve();
+  });
+  return host;
+};
+
+describe("which agent answers, in the box to ask in", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+  });
+
+  it("answers with the model an admin gave the agent, else the asker's", () => {
+    expect([
+      agentModelOf([stephen, claire], claire.id),
+      agentModelOf([stephen, claire], stephen.id),
+      agentModelOf([stephen, claire], "agent-gone"),
+    ]).toStrictEqual(["anthropic/claude-sonnet-5-5", undefined, undefined]);
+  });
+
+  it("names the agent an open chat is with, and nothing for one that isn't the person's", async () => {
+    const hers = await shown(
+      <AgentName agentId={claire.id} agents={[stephen, claire]} />
+    );
+    expect(hers.textContent).toBe("Claire");
+    expect(hers.querySelector("[aria-label]")?.getAttribute("aria-label")).toBe(
+      "Claire answers in this chat"
+    );
+    const gone = await shown(
+      <AgentName agentId="agent-gone" agents={[stephen, claire]} />
+    );
+    expect(gone.textContent).toBe("");
+    const alone = await shown(
+      <AgentName agentId={stephen.id} agents={[stephen]} />
+    );
+    expect(alone.textContent).toBe("");
+  });
+});

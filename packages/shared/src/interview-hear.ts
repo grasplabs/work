@@ -8,7 +8,8 @@ import { interviewLocaleSchema } from "./onboarding.ts";
 // someone said on their interview link, written down from its recording.
 // The page's way when the live line (`GET /api/transcription`) can't be
 // used, or its words don't come in time. Authorised to the link as the
-// rest of it is: the link's secret and the device's key go with it. The
+// rest of it is: the link's secret, with the session of the account the
+// interview belongs to. The
 // recording is written down and dropped: never kept, nor logged.
 
 export const interviewHearPath = "/api/interview/hear";
@@ -26,7 +27,6 @@ export const hearMaxBytes = 1024 * 1024;
 /** The fields beside the recording (`audio`), as the form sends them. */
 export const hearFieldsSchema = z.strictObject({
   secret: interviewSecretSchema,
-  key: interviewSecretSchema,
   locale: interviewLocaleSchema,
   /** How long there was a voice in the stretch, as the page measured it. */
   seconds: z.coerce.number().min(0).max(hearSecondsMax),

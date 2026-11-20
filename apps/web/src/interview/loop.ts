@@ -26,7 +26,13 @@ import type { EarlyEvent, TurnFailed } from "./api.ts";
 import type { DotSign } from "./dot-signs.ts";
 import { openEar, pauseMs } from "./ear.ts";
 import type { Ear, EarEvent } from "./ear.ts";
-import { approveWhenKept, linkNow, progressNow, update } from "./kept.ts";
+import {
+  approveWhenKept,
+  kindNow,
+  linkNow,
+  progressNow,
+  update,
+} from "./kept.ts";
 import { hangUp, lastHeard, muteMic } from "./mic.ts";
 import {
   afterTurn,
@@ -568,12 +574,15 @@ const requestOf = (
     event,
     locale: told.locale,
     interviewer: now.interviewer ?? "stephen",
-    lines: lines.map(({ from, text, typed, file }) => ({
-      from,
-      text,
-      ...(typed === true ? { typed } : {}),
-      ...(file === undefined ? {} : { file }),
-    })),
+    // A line they removed is said to no one again, the model included.
+    lines: lines
+      .filter(({ removed }) => removed !== true)
+      .map(({ from, text, typed, file }) => ({
+        from,
+        text,
+        ...(typed === true ? { typed } : {}),
+        ...(file === undefined ? {} : { file }),
+      })),
     facts: now.facts
       .filter(({ out }) => out !== true)
       .map(({ id, tag, text }) => ({ id, tag, text })),
@@ -912,7 +921,7 @@ const taken = (
     afterTurn(
       progress,
       { ...turn, ...where },
-      { answered, ...(inRead ? { pin: part } : {}) }
+      { answered, kind: kindNow(), ...(inRead ? { pin: part } : {}) }
     )
   );
   if (!on || decided) {
@@ -1055,7 +1064,7 @@ const answer = (turn: StephenTurn, known: Turn, after: () => void): void => {
     afterTurn(
       progress,
       inRead ? { ...turn, phase: "readback", wants: staysIn(turn) } : turn,
-      { answered, ...(inRead ? { pin: part } : {}) }
+      { answered, kind: kindNow(), ...(inRead ? { pin: part } : {}) }
     )
   );
   set({ said: theirs(said, turn) });

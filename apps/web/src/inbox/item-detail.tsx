@@ -446,13 +446,18 @@ const HeldItem = ({
       </div>
     );
   }
+  // Nobody approves what they can't read: withheld, it is only declined.
+  let approveHeld: string | undefined;
+  if (action.withheld === "revoked") {
+    approveHeld = t`What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it.`;
+  } else if (action.withheld === "unchecked") {
+    approveHeld = t`What this would send can't be shown right now, so you can only reject it for now. Try again in a moment.`;
+  } else if (shown.unseen) {
+    approveHeld = t`Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm.`;
+  }
   return (
     <ApprovalFrame
-      approveHeld={
-        shown.unseen
-          ? t`Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm.`
-          : undefined
-      }
+      approveHeld={approveHeld}
       approveLabel={t`Confirm`}
       details={
         <HeldWriteDetails action={action} saysUnseen={false} shown={shown} />
@@ -525,38 +530,6 @@ const RequestItem = ({
       onDecline={async (session) =>
         await session.permissions.revoke(request.id)
       }
-    />
-  );
-};
-
-/**
- * A version of a workflow asked to go live: approved or sent back here,
- * through the workflow's lifecycle, which checks again that the person
- * may and that it is still the version waiting.
- */
-const WorkflowGoLiveDetail = ({
-  frame,
-  source,
-}: {
-  frame: Frame;
-  source: Extract<InboxSource, { type: "workflowGoLive" }>;
-}) => {
-  const { t } = useLingui();
-  const { item } = source;
-  const { version } = item;
-  const decide = (verdict: "approve" | "reject") => async (session: Session) =>
-    await session.workflowResources.lifecycle.decideGoLive(item.workflow.id, {
-      version,
-      verdict,
-      revision: item.revision,
-    });
-  return (
-    <ApprovalFrame
-      approveLabel={t`Let it go live`}
-      frame={frame}
-      grave
-      onApprove={decide("approve")}
-      onDecline={decide("reject")}
     />
   );
 };
@@ -933,9 +906,6 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "request") {
     return <RequestItem frame={frame} source={source} />;
-  }
-  if (source.type === "workflowGoLive") {
-    return <WorkflowGoLiveDetail frame={frame} source={source} />;
   }
   if (source.type === "bindings") {
     return <BindingsDetail frame={frame} source={source} />;

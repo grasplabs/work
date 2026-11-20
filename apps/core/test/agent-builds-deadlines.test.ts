@@ -1,10 +1,11 @@
-import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
+import { draftErrors } from "@grasp-os/shared/drafts";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { emptyDraft, readDraft, saveDraft } from "../src/app-drafts.ts";
+import { appKind } from "../src/apps.ts";
+import { emptyDraft, readDraft, saveDraft } from "../src/drafts.ts";
 import {
   endedRefusals,
   idp,
@@ -65,7 +66,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       },
       { timeout: 15_000, interval: 100 }
     );
-    await expect(readDraft(env, existing)).resolves.toStrictEqual({
+    await expect(
+      readDraft(env, { kind: "app", id: existing })
+    ).resolves.toStrictEqual({
       base: null,
       changes: {},
       definition: null,
@@ -90,14 +93,15 @@ export const Route = createFileRoute("/late")({ component: Page });
 
     // The write is let in at once, then waits on the App's files while the
     // person presses Stop: refused as it commits. The chat shows the
-    // question, then the call under way.
+    // question, the recall before it (its call and result), then the call
+    // under way.
     await slowFilesDuring(chat.stub, async () => {
       const reply = chat.ask("Write it.");
       await vi.waitFor(
         async () => {
           await expect(
             transcript(chat.stub, chat.chat.id)
-          ).resolves.toHaveLength(2);
+          ).resolves.toHaveLength(4);
         },
         { timeout: 10_000 }
       );
@@ -118,7 +122,8 @@ export const Route = createFileRoute("/late")({ component: Page });
         runInDurableObject(chat.stub, (_instance, state) =>
           state.storage.sql
             .exec<{ status: string }>(
-              "SELECT status FROM chat_code_runs WHERE chat_id = ?",
+              // The write's run, never the recall's before the question.
+              "SELECT status FROM chat_code_runs WHERE chat_id = ? AND tool_call_id NOT LIKE 'recall\\_%' ESCAPE '\\'",
               chat.chat.id
             )
             .toArray()
@@ -136,7 +141,9 @@ export const Route = createFileRoute("/late")({ component: Page });
       },
       { timeout: 15_000, interval: 100 }
     );
-    await expect(readDraft(env, existing)).resolves.toStrictEqual({
+    await expect(
+      readDraft(env, { kind: "app", id: existing })
+    ).resolves.toStrictEqual({
       base: null,
       changes: {},
       definition: null,
@@ -163,13 +170,18 @@ export const Route = createFileRoute("/late")({ component: Page });
     ) =>
       await saveDraft(
         env,
+        appKind,
+
         existing,
-        { ...(await readDraft(env, existing)), ...over(revision) },
+        {
+          ...(await readDraft(env, { kind: "app", id: existing })),
+          ...over(revision),
+        },
         { changes, unchanged },
         writer
       )
         .then(() => "written")
-        .catch((error: unknown) => appErrors.codeOf(error));
+        .catch((error: unknown) => draftErrors.codeOf(error));
 
     const outcomes = [
       await written(0, { "a.md": "a" }),
@@ -178,20 +190,27 @@ export const Route = createFileRoute("/late")({ component: Page });
       // Its only change written back as the base has it: none left.
       await written(1, {}, ["a.md"]),
       // A write that read the draft before a discard lands on nothing.
-      await emptyDraft(env, existing, { revision: 2, base: 1, ...writer })
+      await emptyDraft(env, appKind, existing, {
+        revision: 2,
+        base: 1,
+        ...writer,
+      })
         .then(() => "discarded")
-        .catch((error: unknown) => appErrors.codeOf(error)),
+        .catch((error: unknown) => draftErrors.codeOf(error)),
       await written(2, { "b.md": "b" }),
       await written(3, { "c.md": "c" }),
     ];
 
-    expect({ outcomes, draft: await readDraft(env, existing) }).toStrictEqual({
+    expect({
+      outcomes,
+      draft: await readDraft(env, { kind: "app", id: existing }),
+    }).toStrictEqual({
       outcomes: [
         "written",
-        "app.conflict",
+        "draft.conflict",
         "written",
         "discarded",
-        "app.conflict",
+        "draft.conflict",
         "written",
       ],
       draft: {

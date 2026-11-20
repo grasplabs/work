@@ -45,6 +45,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { openToUsersSql } from "./app-access.ts";
 import { callVisitorFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
+import { recallsTheBrain } from "./app-provenance.ts";
 import { grantHeld } from "./app-visitor-grants.ts";
 import { editableApp, toApp } from "./apps.ts";
 import {
@@ -196,6 +197,15 @@ export const setAppVisitors = async (
     throw appVisitorErrors.create("visitor.invalid");
   }
   const found = await editableApp(env, by, app);
+  // An App that may hold what the Brain recalled lets no visitor in
+  // (`callVisitorFunction` holds its calls to the same): emptying the
+  // list stays possible.
+  if (
+    parsed.data.length > 0 &&
+    (await recallsTheBrain(env, appIdSchema.parse(found.id)))
+  ) {
+    throw appVisitorErrors.create("visitor.not_granted");
+  }
   const wanted = [
     ...new Map(
       parsed.data.map((entry) => [`${entry.kind}:${entry.value}`, entry])

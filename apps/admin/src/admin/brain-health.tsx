@@ -7,11 +7,13 @@
  * model calls spent this month by purpose, as the model gateway recorded
  * them; and the
  * three things staff may do: put a parked item back in the queue, rebuild
- * the word indexes, and re-embed. Every
- * read and action is in the company's audit log, by the staff member.
+ * the word indexes, and re-embed; and whether one source or person was
+ * erased (brain-erasure-lookup.tsx). Every read, action and lookup is in
+ * the company's audit log, by the staff member.
  *
  * Operational state only: counts, ages, kinds of work, error codes,
- * sizes, recall's counts, and erasures as counts alone. Amber marks what
+ * sizes, recall's counts, erasures as counts alone, and each synced
+ * connection by a hash of it (GRA-1817). Amber marks what
  * needs someone: parked items, a store near its limit, a ledger that
  * isn't read through, a step that failed, a way of recall that failed.
  * What is fine is said in a line or folded: the queue's one kind, upkeep
@@ -29,6 +31,8 @@ import type {
   BrainReport,
   BrainSearchWay,
   BrainStep,
+  BrainSyncConnection,
+  BrainSyncPhase,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -52,6 +56,7 @@ import { useState } from "react";
 import { brainActionFn } from "../clients/brain-functions.ts";
 import { thenRefresh } from "../use-action.ts";
 import { agoWords } from "./ai-status-words.ts";
+import { BrainErasureLookupSection } from "./brain-erasure-lookup.tsx";
 import type { BrainRead } from "./brain-loads.ts";
 import { Figure } from "./parts.tsx";
 import { EmptySection, Section, SectionRow } from "./section.tsx";
@@ -115,12 +120,14 @@ const stepWords: Record<BrainStep, string> = {
   sweep: "Sweeping files nothing holds",
   repack: "Repacking vector codes",
   reindex: "Rebuilding the word indexes",
+  quotes: "Judging memories against their sources",
   embedding: "Putting passages on the queue to embed",
 };
 
 const wayWords: Record<BrainSearchWay, string> = {
   words: "Words",
   exact: "Exact parts",
+  entities: "Entities",
   meaning: "Meaning",
 };
 
@@ -560,6 +567,21 @@ const Recall = ({ report }: { report: BrainReport }) => {
           <TableBody>
             {brainSearchWays.map((way) => {
               const counts = recall.ways[way];
+              if (counts === undefined) {
+                // A core of an older release, on a slower channel, doesn't send it.
+                return (
+                  <TableRow key={way}>
+                    <TableCell variant="card">{wayWords[way]}</TableCell>
+                    <TableCell
+                      className="text-right"
+                      colSpan={2}
+                      variant="card"
+                    >
+                      Not available yet
+                    </TableCell>
+                  </TableRow>
+                );
+              }
               return (
                 <TableRow key={way}>
                   <TableCell variant="card">{wayWords[way]}</TableCell>
@@ -582,7 +604,7 @@ const Recall = ({ report }: { report: BrainReport }) => {
         </Table>
       </div>
       <SectionRow
-        description="Recalls by words and exact parts alone, as the embedding model gave no vector for the question in time or none the Brain could use. Without a model, none is counted."
+        description="Recalls that went by words and exact parts alone because the embedding model failed, was too slow or had no files, or gave a vector the Brain couldn't use."
         label="Without meaning"
       >
         <span className="tabular-nums">
@@ -684,7 +706,7 @@ const ModelSpend = ({ report }: { report: BrainReport }) => {
  */
 const Ledger = ({ report }: { report: BrainReport }) => {
   const { ledger } = report;
-  const unwritten = ledger.source.unwritten + ledger.person.unwritten;
+  const { unwritten } = ledger.source;
   return (
     <Collapsible defaultOpen={unwritten > 0}>
       <Section
@@ -697,7 +719,7 @@ const Ledger = ({ report }: { report: BrainReport }) => {
         title="Erasures"
       >
         <SectionRow
-          description="Erased sources and people, whole, with their ledger entry written."
+          description="Erased sources, whole, with their ledger entry written."
           label="In the ledger"
         >
           <span className="flex items-center gap-3">
@@ -707,7 +729,7 @@ const Ledger = ({ report }: { report: BrainReport }) => {
               </Badge>
             ) : null}
             <span className="tabular-nums">
-              {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}, ${whole(ledger.person.written)} ${plural(ledger.person.written, "person", "people")}`}
+              {`${whole(ledger.source.written)} ${plural(ledger.source.written, "source", "sources")}`}
             </span>
           </span>
         </SectionRow>
@@ -752,8 +774,9 @@ const Ledger = ({ report }: { report: BrainReport }) => {
 const Steps = ({ report }: { report: BrainReport }) => {
   const now = Date.parse(report.now);
   const failing = brainSteps.flatMap((step) => {
+    // Not reported (undefined) by a core of an older release: nothing.
     const failed = report.stepsFailed[step];
-    return failed === null ? [] : [{ step, failed }];
+    return failed === null || failed === undefined ? [] : [{ step, failed }];
   });
   return (
     <Section
@@ -862,6 +885,178 @@ const OwnStores = ({ report }: { report: BrainReport }) => {
   );
 };
 
+/** Where a connection's sync stands, in words. */
+const phaseWords: Record<BrainSyncPhase, string> = {
+  listing: "Listing everything",
+  relisting: "Daily relist",
+  changes: "Following changes",
+};
+
+/** Whether a synced connection needs someone: failing, behind, or its relist past its day. */
+const needsSomeone = (row: BrainSyncConnection): boolean =>
+  row.failing || row.behindSince !== null || row.relistOverdue;
+
+/** Where one synced connection stands: what needs someone in amber, else fine. */
+const SyncState = ({ row, now }: { row: BrainSyncConnection; now: number }) => {
+  if (!needsSomeone(row)) {
+    return <Badge variant="passed">Fine</Badge>;
+  }
+  return (
+    <span className="flex flex-col items-end gap-1">
+      {row.failing ? <Badge variant="attention">Failing</Badge> : null}
+      {row.behindSince === null ? null : (
+        <Badge variant="attention">
+          {`Behind since ${agoWords(Date.parse(row.behindSince), now)}`}
+        </Badge>
+      )}
+      {row.relistOverdue ? (
+        <Badge variant="attention">Relist past its day</Badge>
+      ) : null}
+    </span>
+  );
+};
+
+/** Synced connections in a table, each row one sync of one connection. */
+const SyncTable = ({
+  rows,
+  now,
+}: {
+  rows: readonly BrainSyncConnection[];
+  now: number;
+}) => (
+  <div className="border-t">
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead variant="card">Sync</TableHead>
+          <TableHead className="text-right" variant="card">
+            Items
+          </TableHead>
+          <TableHead className="text-right" variant="card">
+            Last synced
+          </TableHead>
+          <TableHead variant="card">Latest error</TableHead>
+          <TableHead className="text-right" variant="card">
+            State
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={`${row.connection} ${row.feed}`}>
+            <TableCell className="whitespace-normal" variant="card">
+              <span className="flex flex-col gap-0.5">
+                <span>{`${row.provider} · ${row.feed}`}</span>
+                <span className="text-muted-foreground text-xs">
+                  <span className="font-mono">{row.connection}</span>
+                  {` · ${phaseWords[row.phase]}`}
+                </span>
+              </span>
+            </TableCell>
+            <TableCell className="text-right" variant="card">
+              <span className="tabular-nums">{whole(row.items)}</span>
+            </TableCell>
+            <TableCell className="text-right" variant="card">
+              {row.syncedAt === null
+                ? "Never"
+                : agoWords(Date.parse(row.syncedAt), now)}
+            </TableCell>
+            <TableCell variant="card">
+              {row.error === null ? (
+                <span className="text-muted-foreground">None</span>
+              ) : (
+                <span className="flex flex-col gap-0.5">
+                  <span className="font-mono text-xs">{row.error.code}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {agoWords(Date.parse(row.error.at), now)}
+                  </span>
+                </span>
+              )}
+            </TableCell>
+            <TableCell className="text-right" variant="card">
+              <SyncState now={now} row={row} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  </div>
+);
+
+/**
+ * Each connection native sync reads into the Brain, sync by sync: what
+ * needs someone (failing, behind, a relist past its day) shown, what is
+ * fine folded. Each connection by a hash of its ID alone: never whose it
+ * is, its account or anything it holds.
+ */
+const Synced = ({ report }: { report: BrainReport }) => {
+  const now = Date.parse(report.now);
+  const description =
+    "Each connection synced into the Brain, sync by sync, by a hash of the connection: never whose it is or what it holds.";
+  const connections = report.sync?.connections;
+  if (connections === undefined) {
+    // A core of an older release, on a slower channel, doesn't send them.
+    return (
+      <Section description={description} title="Synced connections">
+        <SectionRow label="Not available yet">
+          <span>
+            This client’s release doesn’t report its synced connections yet.
+          </span>
+        </SectionRow>
+      </Section>
+    );
+  }
+  if (connections.length === 0) {
+    return (
+      <Section description={description} title="Synced connections">
+        <SectionRow label="Connections">
+          <span className="text-muted-foreground">None syncs yet</span>
+        </SectionRow>
+      </Section>
+    );
+  }
+  const attention = connections.filter((row) => needsSomeone(row));
+  const fine = connections.filter((row) => !needsSomeone(row));
+  return (
+    <Collapsible>
+      <Section
+        action={
+          fine.length > 0 && attention.length > 0 ? (
+            <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
+              Details
+            </CollapsibleTrigger>
+          ) : undefined
+        }
+        description={description}
+        title="Synced connections"
+      >
+        <SectionRow
+          description="Failing, behind (a run of the clock went by without reading it), or its daily relist past its day."
+          label="Need someone"
+        >
+          {attention.length > 0 ? (
+            <Badge variant="attention">
+              {`${whole(attention.length)} of ${whole(connections.length)}`}
+            </Badge>
+          ) : (
+            <Badge variant="passed">None</Badge>
+          )}
+        </SectionRow>
+        {attention.length > 0 ? (
+          <SyncTable now={now} rows={attention} />
+        ) : (
+          <SyncTable now={now} rows={fine} />
+        )}
+        {attention.length > 0 && fine.length > 0 ? (
+          <CollapsibleContent keepMounted>
+            <SyncTable now={now} rows={fine} />
+          </CollapsibleContent>
+        ) : null}
+      </Section>
+    </Collapsible>
+  );
+};
+
 /** While the section waits for its core, or hasn't asked it (a preload). */
 const Reading = () => (
   <EmptySection>Reading how its Brain is doing from its core…</EmptySection>
@@ -887,6 +1082,7 @@ const Report = ({ acting, read }: { acting: Acting; read: BrainRead }) => {
       <Figures report={report} />
       <Parked acting={acting} report={report} />
       <Waiting report={report} />
+      <Synced report={report} />
       <Recall report={report} />
       <ModelSpend report={report} />
       <Ledger report={report} />
@@ -926,6 +1122,7 @@ export const BrainHealth = ({
       <Await fallback={<Reading />} promise={read}>
         {(answered) => <Report acting={{ busy, act }} read={answered} />}
       </Await>
+      <BrainErasureLookupSection clientId={clientId} />
     </>
   );
 };

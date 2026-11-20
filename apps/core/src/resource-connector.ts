@@ -39,8 +39,7 @@ import type {
 // - is checked against the contract's argument descriptor before connect
 //   sees it, and sends the normalized arguments;
 // - goes through `signedCall`, so the permission is checked again (active,
-//   allowing exactly this tool, and for an action that changes things, a
-//   version an admin approved) and connect gets a capability for this one
+//   allowing exactly this tool) and connect gets a capability for this one
 //   call, carrying the App's restricted mode and the invocation's
 //   deadline; the person's own connection stays theirs alone (connect);
 // - carries the host's derived idempotency key, so the same call made

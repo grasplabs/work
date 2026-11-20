@@ -14,8 +14,8 @@ import {
   People,
   Play,
   Question,
+  Skill,
   Swap,
-  Upload,
   Web,
   Workflow,
 } from "../grasp/icons/index.ts";
@@ -35,7 +35,6 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Check a proposal",
     context: "inbox item kind",
   }),
-  goLive: msg({ message: "Go live", context: "inbox item kind" }),
   approveChange: msg({ message: "Change", context: "inbox item kind" }),
   confirmResult: msg({ message: "Result", context: "inbox item kind" }),
   conflict: msg({
@@ -63,6 +62,11 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Stopped schedule",
     context: "inbox item kind",
   }),
+  workflowChanged: msg({
+    message: "Workflow changed",
+    context:
+      "inbox item kind: another version of a workflow the person's triggers start went live",
+  }),
   packageNotice: msg({
     message: "Packages",
     context: "inbox item kind: what a scan found of approved packages",
@@ -80,6 +84,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     context:
       "inbox item kind: what a workflow reaches, for an admin to approve",
   }),
+  skillShare: msg({
+    message: "Skill",
+    context: "inbox item kind: a skill someone asked to share with the company",
+  }),
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
@@ -91,7 +99,6 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
 export const kindMark: Record<InboxKind, IconData> = {
   checkDrawing: Workflow,
   checkProposal: Swap,
-  goLive: Upload,
   approveChange: Edit,
   confirmResult: Done,
   conflict: Swap,
@@ -107,9 +114,11 @@ export const kindMark: Record<InboxKind, IconData> = {
   unknownOutcome: Question,
   permissionRequest: Lock,
   stoppedSchedule: CalendarIcon,
+  workflowChanged: Swap,
   packageNotice: Alert,
   stoppedEvents: Mail,
   appMessage: Bell,
   bindingApproval: Lock,
+  skillShare: Skill,
   decision: Checklist,
 };

@@ -3,9 +3,10 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { readDraft, saveDraft } from "../src/app-drafts.ts";
-import { commitApp, redefined, testApp } from "./app-definitions.ts";
-import { release } from "./apps.ts";
+import { appKind } from "../src/apps.ts";
+import { readDraft, saveDraft } from "../src/drafts.ts";
+import { redefined, testApp } from "./app-definitions.ts";
+import { commitApp, release } from "./apps.ts";
 import { agentWriting } from "./draft-writers.ts";
 import { mockIdp } from "./idp.ts";
 import { deskFiles } from "./preview-drafts.ts";
@@ -14,7 +15,7 @@ import { failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The App's code view reads the files of the App's draft as its writers
-// read them (`apps.drafts.files`): its changes over the version it is
+// read them (`drafts.files`): its changes over the version it is
 // over, each write as it lands, or the App's live version while the draft
 // changes nothing. The ways it can fail: a write that doesn't show, a
 // deleted file that still does, and someone reading the draft who doesn't
@@ -48,21 +49,21 @@ describe("an App's draft files, for the App's code view", () => {
   it("are the draft's as each write lands, and the App's live version while it changes nothing", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await deskOf(builder);
-    const { drafts } = builder.api.apps;
-    const before = await drafts.files(app);
+    const { drafts } = builder.api;
+    const before = await drafts.files({ kind: "app", id: app });
     const { revision, write } = await chatWithDraft(builder, app, {
       "server/notes.ts": notes(10),
       "src/routes/index.tsx": null,
     });
 
-    const first = await drafts.files(app);
+    const first = await drafts.files({ kind: "app", id: app });
     const written = await write({ "server/notes.ts": notes(25) }, revision);
-    const second = await drafts.files(app);
-    await drafts.discard(app, written);
-    const discarded = await drafts.files(app);
+    const second = await drafts.files({ kind: "app", id: app });
+    await drafts.discard({ kind: "app", id: app }, written);
+    const discarded = await drafts.files({ kind: "app", id: app });
     // A version committed, not live: the draft stays over the live one.
-    await commitApp(builder.api.apps.files, app, renamed, "Rename");
-    const committed = await drafts.files(app);
+    await commitApp(builder.api, app, renamed);
+    const committed = await drafts.files({ kind: "app", id: app });
 
     expect({ before, first, second, discarded, committed }).toStrictEqual({
       before: released.files,
@@ -99,15 +100,17 @@ describe("an App's draft files, for the App's code view", () => {
           ]
         : [],
     };
-    const before = await builder.api.apps.drafts.get(app);
+    const before = await builder.api.drafts.get({ kind: "app", id: app });
     await saveDraft(
       env,
+      appKind,
+
       app,
-      await readDraft(env, app),
+      await readDraft(env, { kind: "app", id: app }),
       { changes: {}, unchanged: [], definition: definitionText(reIded) },
       await agentWriting(builder, chatId)
     );
-    const after = await builder.api.apps.drafts.get(app);
+    const after = await builder.api.drafts.get({ kind: "app", id: app });
     expect({
       before: [before.changed, before.definitionChanged],
       after: [after.changed, after.definitionChanged],
@@ -137,7 +140,9 @@ describe("an App's draft files, for the App's code view", () => {
       "server/notes.ts": notes(10),
     });
     const read = async (person: Person): Promise<string> =>
-      await failure(async () => await person.api.apps.drafts.files(app));
+      await failure(
+        async () => await person.api.drafts.files({ kind: "app", id: app })
+      );
 
     const own = await read(builder);
     const another = await read(other);

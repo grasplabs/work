@@ -11,7 +11,7 @@ import { accountedTransport } from "@grasp-os/shared/rpc-accounting";
 import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
 import { RpcSession, WebSocketTransport } from "capnweb";
 
-import { oidcProviders, signInConfig } from "./auth/config.ts";
+import { oidcProviders, providerIds, signInConfig } from "./auth/config.ts";
 import { identify, signedInSession } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
 import {
@@ -72,6 +72,7 @@ const signInOptions = (env: Env): SignInOption[] => {
     ? oidcProviders(env, config, Date.now()).map(({ providerId, label }) => ({
         providerId,
         label,
+        staff: providerId === providerIds.staff,
       }))
     : [];
 };

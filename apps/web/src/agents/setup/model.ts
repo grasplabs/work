@@ -22,6 +22,17 @@ export const steps = [
 ] as const;
 export type Step = (typeof steps)[number];
 
+/**
+ * The steps only one of the company's agents is asked: an agent of the
+ * person's own reaches them alone, has no kinds of work of its own and
+ * never works on its own (core's agents.ts).
+ */
+export const companySteps: ReadonlySet<Step> = new Set([
+  "abilities",
+  "schedule",
+  "audience",
+]);
+
 /** What it may do: three reaches of its own, and three kinds of work. */
 export const abilities = [
   "web",
@@ -97,7 +108,7 @@ export const cronOfSchedule = (schedule: Schedule): string | undefined => {
   return `${at} * * ${days}`;
 };
 
-/** Who may use it. */
+/** Who may use it: `me` makes one of the person's own (core's `makeOwnAgent`). */
 export const audiences = ["me", "teams", "everyone"] as const;
 export type Audience = (typeof audiences)[number];
 
@@ -105,6 +116,8 @@ export type Audience = (typeof audiences)[number];
 export interface CatalogApp {
   /** The catalog's id for it, which a connection's `provider` names. */
   id: string;
+  /** Where the catalog has it from (`native`, `composio`): with `id`, the app an agent is given (`agentAppOf`). */
+  source: string;
   name: string;
   logo: string | null;
   description: string | null;
@@ -177,6 +190,8 @@ export interface StepProps {
   nameTaken: boolean;
   /** Takes a starting point and goes on to the next question. */
   pick: (template: AgentTemplate) => void;
+  /** Who it may be for: `me` only while the company lets people have agents of their own. */
+  audiences: readonly Audience[];
 }
 
 /** A copy of `set` with `value` in it or out of it. */

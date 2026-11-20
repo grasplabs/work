@@ -15,9 +15,11 @@ import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import { interviewLinkOf } from "./interview-link.ts";
 import {
+  addressOf,
   answered,
   personIn,
   readBack,
+  signedInFor,
   speechSchema,
   today,
   wavOf,
@@ -205,8 +207,8 @@ const salesLedBy = async (staff: Person, run: string) => {
     await api.onboarding.confirmRoster({
       teams: [{ id: ids.team, name: "Sales", lead: ids.lea }],
       people: [
-        { id: ids.lea, name: "Lea", team: ids.team },
-        { id: ids.sam, name: "Sam", team: ids.team },
+        { id: ids.lea, name: "Lea", team: ids.team, email: addressOf(ids.lea) },
+        { id: ids.sam, name: "Sam", team: ids.team, email: addressOf(ids.sam) },
       ],
     });
     await api.onboarding.savePlan({ start: today() });
@@ -251,7 +253,8 @@ test("a lead has their interview by voice, agrees to the read-back by saying so,
   });
   await watchLoop(page);
 
-  // The screens before it, and the sound check, by voice.
+  // The screens before it, and the sound check, by voice, signed in as Lea.
+  await signedInFor(page, addressOf(ids.lea));
   await page.goto(await interviewLinkOf(ids.lea));
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Stephen", exact: true }).click();

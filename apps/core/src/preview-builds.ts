@@ -4,7 +4,7 @@ import type { PreviewBundle, PreviewUpdate } from "@grasp-os/shared/chat";
 /** What a preview's build answers: its frame's bundle, or an update. */
 export type PreviewBuilt = PreviewBundle | PreviewUpdate;
 
-// The builds of one App's previews (app-drafts-rpc.ts): one build per
+// The builds of one App's previews (app-preview-rpc.ts): one build per
 // viewer and revision of the App's draft, shared by every ask of theirs
 // for it (each viewer's frame is staged as theirs, page-frame.ts).
 // Several previews of one draft (two tabs, the dock and the

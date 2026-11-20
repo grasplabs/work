@@ -15,13 +15,14 @@ import type { IconData } from "../../grasp/icons/index.ts";
 import { RadioGroup, RadioGroupItem } from "../../grasp/radio-group/index.ts";
 import { Text } from "../../grasp/text/index.ts";
 import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
-import { audiences, toggled } from "./model.ts";
+import { toggled } from "./model.ts";
 import type { Audience, StepProps } from "./model.ts";
 import { Question } from "./question.tsx";
 import { useSetupWords } from "./words.ts";
 
-// Who may use it, as three cards side by side: just the maker, some
-// teams, or everyone. One Radio group; each card is a Field row with its
+// Who may use it, as three cards side by side: just the maker (an agent
+// of their own, which they may offer the company later), some teams, or
+// everyone. Just me only while the company lets people have their own. One Radio group; each card is a Field row with its
 // radio, so a press anywhere on it chooses it. The chosen card stands
 // raised with the view's one gradient mark, the others lie soft. Some
 // teams opens the teams to tick under the cards.
@@ -38,7 +39,7 @@ const styles = stylex.create({
   cards: {
     display: "grid",
     gridTemplateColumns: {
-      default: "repeat(3, minmax(0, 1fr))",
+      default: "repeat(auto-fit, minmax(0, 1fr))",
       "@media (width < 40rem)": "minmax(0, 1fr)",
     },
     gap: grasp.space3,
@@ -78,7 +79,13 @@ const TeamsChoice = ({
   );
 };
 
-export const AudienceStep = ({ setup, change, name, teams }: StepProps) => {
+export const AudienceStep = ({
+  setup,
+  change,
+  name,
+  teams,
+  audiences,
+}: StepProps) => {
   const { t } = useLingui();
   const { audienceNames } = useSetupWords();
   const explained: Record<Audience, string> = {

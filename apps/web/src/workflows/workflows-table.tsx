@@ -35,7 +35,6 @@ const phaseNames: Readonly<Record<Phase, MessageDescriptor>> = {
   needsYou: msg({ message: "Needs you", context: "workflow phase" }),
   running: msg({ message: "Running", context: "workflow phase" }),
   building: msg({ message: "Building", context: "workflow phase" }),
-  toBuild: msg({ message: "To build", context: "workflow phase" }),
 };
 
 const styles = stylex.create({

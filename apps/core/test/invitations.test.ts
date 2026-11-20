@@ -2,6 +2,8 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { adoptDirectoryMember } from "../src/auth/auth.ts";
+import { memberFromDirectory } from "../src/auth/directory-members.ts";
 import { mockIdp } from "./idp.ts";
 import { racingDb } from "./racing-db.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -324,5 +326,327 @@ describe("inviting someone", () => {
       await outcome(admin.api.members.withdrawInvitation("no-such-invitation"));
     });
     expect(events).toStrictEqual([]);
+  });
+});
+
+/** `person` made a member by the directory, before they sign in: their member's user id. */
+const madeByDirectory = async (person: Record<string, unknown>) => {
+  const oid = String(person.oid);
+  const userId = await memberFromDirectory(env, oid, {
+    id: oid,
+    name: String(person.name),
+    email: String(person.email),
+    department: "",
+    title: "",
+    manager: null,
+  });
+  if (userId === null) {
+    throw new Error("The directory made no member");
+  }
+  return userId;
+};
+
+/** Whether invitation `id` is still open. */
+const isPending = async (id: string) =>
+  (await env.DB.prepare("SELECT status FROM invitations WHERE id = ?")
+    .bind(id)
+    .first<string>("status")) === "pending";
+
+/** `userId`'s role. */
+const roleOf = async (userId: string) =>
+  await env.DB.prepare("SELECT role FROM members WHERE user_id = ?")
+    .bind(userId)
+    .first<string>("role");
+
+describe("inviting someone the directory made a member before they signed in", () => {
+  it("gives them the role at their first sign-in, as that member, and takes the invitation up once", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const member = await madeByDirectory(person);
+    const { id } = await admin.api.members.invite(
+      String(person.email),
+      "builder"
+    );
+    let session = "";
+    const events = await auditedDuring(async () => {
+      session = await signedIn(idp, "microsoft", person);
+    });
+
+    await expect(whoami(session)).resolves.toMatchObject({
+      userId: member,
+      role: "builder",
+    });
+    await expect(admin.api.members.invitations()).resolves.not.toContainEqual(
+      expect.objectContaining({ id })
+    );
+    expect(
+      events.filter(({ action }) => action === "member.invitation.accepted")
+    ).toStrictEqual([
+      expect.objectContaining({
+        target: { type: "invitation", id },
+        detail: { userId: member, role: "builder" },
+      }),
+    ]);
+  });
+
+  it("makes a configured admin admin, while another admin is one, and records the change as the system's", async () => {
+    await signedInApi(idp, "admin");
+    const person = newcomer();
+    const member = await madeByDirectory(person);
+    const membership = await env.DB.prepare(
+      "SELECT id FROM members WHERE user_id = ?"
+    )
+      .bind(member)
+      .first<string>("id");
+    let session = "";
+    const events = await auditedDuring(async () => {
+      session = await signedIn(idp, "microsoft", person, {
+        coreEnv: withSignIn({ admins: [String(person.email)] }),
+      });
+    });
+
+    await expect(whoami(session)).resolves.toMatchObject({
+      userId: member,
+      role: "admin",
+    });
+    expect(
+      events
+        .filter(({ action }) => action === "member.role.updated")
+        .map(({ actor, target, detail }) => ({ actor, target, detail }))
+    ).toStrictEqual([
+      {
+        actor: { type: "system" },
+        target: { type: "member", id: membership },
+        detail: { userId: member, role: "admin", reason: "joined" },
+      },
+    ]);
+  });
+
+  it("takes up a configured admin's invitation as admin, and records it once, by the take-up", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const member = await madeByDirectory(person);
+    const { id } = await admin.api.members.invite(
+      String(person.email),
+      "builder"
+    );
+    let session = "";
+    const events = await auditedDuring(async () => {
+      session = await signedIn(idp, "microsoft", person, {
+        coreEnv: withSignIn({ admins: [String(person.email)] }),
+      });
+    });
+
+    await expect(whoami(session)).resolves.toMatchObject({
+      userId: member,
+      role: "admin",
+    });
+    await expect(isPending(id)).resolves.toBeFalsy();
+    expect(
+      events
+        .filter(({ action }) =>
+          ["member.invitation.accepted", "member.role.updated"].includes(action)
+        )
+        .map(({ action, target, detail }) => ({ action, target, detail }))
+    ).toStrictEqual([
+      {
+        action: "member.invitation.accepted",
+        target: { type: "invitation", id },
+        detail: { userId: member, role: "admin" },
+      },
+    ]);
+  });
+
+  it("gives a suspended member no role and takes up nothing at a sign-in that is refused", async () => {
+    const admin = await signedInApi(idp, "admin");
+    /** Someone the directory made and suspended, invited as `role`, signing in: their role, and whether the invitation is open. */
+    const suspendedSignsIn = async (role: Role) => {
+      const person = newcomer();
+      const member = await madeByDirectory(person);
+      await env.DB.prepare(
+        "UPDATE members SET suspended_at = ?, suspended_by = 'directory' WHERE user_id = ?"
+      )
+        .bind(Date.now(), member)
+        .run();
+      const { id } = await admin.api.members.invite(String(person.email), role);
+      const session = await signedIn(idp, "microsoft", person).catch(
+        () => null
+      );
+      return {
+        session,
+        role: await roleOf(member),
+        pending: await isPending(id),
+      };
+    };
+
+    // Invited as builder (a role the fold would give) and as user (the
+    // role they have, so only their suspension stops the take-up).
+    await expect(suspendedSignsIn("builder")).resolves.toStrictEqual({
+      session: null,
+      role: "user",
+      pending: true,
+    });
+    await expect(suspendedSignsIn("user")).resolves.toStrictEqual({
+      session: null,
+      role: "user",
+      pending: true,
+    });
+  });
+
+  it("keeps a role an admin gave them before they signed in, and leaves the invitation open", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const member = await madeByDirectory(person);
+    await admin.api.members.setRole(member, "builder");
+    const { id } = await admin.api.members.invite(
+      String(person.email),
+      "admin"
+    );
+    const session = await signedIn(idp, "microsoft", person);
+
+    await expect(whoami(session)).resolves.toMatchObject({
+      userId: member,
+      role: "builder",
+    });
+    await expect(isPending(id)).resolves.toBeTruthy();
+  });
+
+  it("records no role change for a configured admin an admin gave another role before they signed in, whose role stays", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const member = await madeByDirectory(person);
+    await admin.api.members.setRole(member, "builder");
+    let session = "";
+    const events = await auditedDuring(async () => {
+      session = await signedIn(idp, "microsoft", person, {
+        coreEnv: withSignIn({ admins: [String(person.email)] }),
+      });
+    });
+
+    await expect(whoami(session)).resolves.toMatchObject({
+      userId: member,
+      role: "builder",
+    });
+    expect(
+      events.filter(({ action }) => action === "member.role.updated")
+    ).toStrictEqual([]);
+  });
+
+  it("gives nothing when withdrawn just before their first sign-in lands", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const member = await madeByDirectory(person);
+    const { id } = await admin.api.members.invite(
+      String(person.email),
+      "admin"
+    );
+    // Withdrawn after core read the invitation, just before the fold lands.
+    const racing = racingDb(
+      async (db) =>
+        await db
+          .prepare("UPDATE invitations SET status = 'canceled' WHERE id = ?")
+          .bind(id)
+          .run()
+    );
+    const session = await signedIn(idp, "microsoft", person, {
+      coreEnv: { ...env, DB: racing },
+    });
+
+    await expect(whoami(session)).resolves.toMatchObject({
+      userId: member,
+      role: "user",
+    });
+  });
+
+  it("records a configured admin's role once when their invitation is withdrawn just before their first sign-in lands", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const email = String(person.email);
+    const member = await madeByDirectory(person);
+    const { id } = await admin.api.members.invite(email, "builder");
+    // Withdrawn after core read the invitation, just before the fold lands.
+    const racing = racingDb(
+      async (db) =>
+        await db
+          .prepare("UPDATE invitations SET status = 'canceled' WHERE id = ?")
+          .bind(id)
+          .run()
+    );
+    let session = "";
+    const events = await auditedDuring(async () => {
+      session = await signedIn(idp, "microsoft", person, {
+        coreEnv: { ...withSignIn({ admins: [email] }), DB: racing },
+      });
+    });
+
+    await expect(whoami(session)).resolves.toMatchObject({
+      userId: member,
+      role: "admin",
+    });
+    expect(
+      events
+        .filter(({ action }) =>
+          ["member.invitation.accepted", "member.role.updated"].includes(action)
+        )
+        .map(({ action, detail }) => ({ action, detail }))
+    ).toStrictEqual([
+      {
+        action: "member.role.updated",
+        detail: { userId: member, role: "admin", reason: "joined" },
+      },
+    ]);
+  });
+
+  it("gives nothing, and takes up nothing, when the fold doesn't land", async () => {
+    const admin = await signedInApi(idp, "admin");
+    /** A person invited as `role` whose first sign-in folds nothing: their member's role, and whether the invitation is open. */
+    const unfolded = async (role: Role) => {
+      const person = newcomer();
+      const member = await madeByDirectory(person);
+      const { id } = await admin.api.members.invite(String(person.email), role);
+      // Their sign-in's own user, a member already by another sign-in of
+      // theirs: the batch folds nothing.
+      const fresh = crypto.randomUUID();
+      const now = Date.now();
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)"
+        ).bind(fresh, String(person.name), String(person.email), now, now),
+        env.DB.prepare(
+          "INSERT INTO accounts (id, account_id, provider_id, user_id, oid, created_at, updated_at) VALUES (?, ?, 'microsoft', ?, ?, ?, ?)"
+        ).bind(
+          crypto.randomUUID(),
+          String(person.sub),
+          fresh,
+          String(person.oid),
+          now,
+          now
+        ),
+        env.DB.prepare(
+          "INSERT INTO members (id, organization_id, user_id, role, created_at) SELECT ?, organization_id, ?, 'user', ? FROM members WHERE user_id = ?"
+        ).bind(crypto.randomUUID(), fresh, now, member),
+      ]);
+      const adopted = await adoptDirectoryMember(env, fresh, async () => {
+        // Nothing of theirs to move.
+      });
+      return {
+        adopted: adopted === fresh,
+        role: await roleOf(member),
+        pending: await isPending(id),
+      };
+    };
+
+    // Invited as builder (a role the fold would give) and as user (the
+    // role they have, so only the fold's landing decides the take-up).
+    await expect(unfolded("builder")).resolves.toStrictEqual({
+      adopted: true,
+      role: "user",
+      pending: true,
+    });
+    await expect(unfolded("user")).resolves.toStrictEqual({
+      adopted: true,
+      role: "user",
+      pending: true,
+    });
   });
 });

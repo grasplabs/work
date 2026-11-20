@@ -1,4 +1,3 @@
-import { knowledgeSearchMaxLength } from "@grasp-os/shared/function-limits";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -8,7 +7,6 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { appMembers, appResourceBindings } from "../src/db/core/schema.ts";
-import { revokePermission } from "../src/permissions.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import {
   approveResourceBinding,
@@ -16,25 +14,20 @@ import {
   reviewResourceBindings,
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
-import { isRestricted } from "../src/restricted.ts";
 import {
   answer,
-  answerOf,
   approveModel,
   auditedFor,
   call,
   chooseModel,
   codeOfError,
-  hitsSchema,
-  knowledgeApp,
-  knowledgeFiles,
+  deskApp,
   modelFiles,
   nextVersion,
   outcomeOf,
   providerEnv,
   requestFor,
   sealedApp,
-  searchTextOf,
   sentText,
   writerApproval,
 } from "./resource-bindings-harness.ts";
@@ -647,155 +640,25 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     }).toStrictEqual({ one: "revoked", two: "revoked", recorded: 1 });
   });
 
-  it("search and read only the bound collections, as the person may", async () => {
-    const { sealed, documents, collections } = await knowledgeApp();
-    const found = await answerOf(sealed, "help.find", { text: "leave" });
-    const opened = await answerOf(sealed, "help.open", {
-      id: documents.leave,
-    });
-    // A document of a collection the binding doesn't name is no item at
-    // all, whatever else the App may read.
-    const unbound = await answerOf(sealed, "help.open", {
-      id: documents.secret,
-    });
-    const hits = hitsSchema.parse(outcomeOf(found.result));
-    expect({
-      // Each collection's best, interleaved; a hit is a title and an excerpt.
-      found: hits.map(({ title, excerpt }) => [
-        title,
-        excerpt.toLowerCase().includes("leave"),
-      ]),
-      opened: outcomeOf(opened.result),
-      unbound: outcomeOf(unbound.result),
-    }).toStrictEqual({
-      found: [
-        ["Leave", true],
-        ["Pay", true],
-      ],
-      opened: {
-        title: "Leave",
-        text: "# Leave\nAsk your lead before you take leave.",
-      },
-      unbound: { failed: "permission.item_not_found" },
-    });
-    // The handbook alone was read: nothing sensitive in the answer.
-    expect(opened.provenance).toStrictEqual({
-      collectionIds: [collections.handbook],
-      sensitive: false,
-      restricted: false,
-      connections: [],
-      truncated: false,
-    });
-  });
-
-  it("search what the person may read of the bound collections, and nothing else", async () => {
-    const { sealed, documents, collections, team } = await knowledgeApp();
-    // The App's owner leaves the payroll team: its salaries collection is
-    // still bound, but no longer theirs to read.
-    await env.DB.prepare(
-      "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
-    )
-      .bind(team, sealed.owner.userId)
-      .run();
-    const found = await answerOf(sealed, "help.find", { text: "leave" });
-    const opened = await answerOf(sealed, "help.open", { id: documents.pay });
-    expect({
-      found: hitsSchema
-        .parse(outcomeOf(found.result))
-        .map(({ title }) => title),
-      provenance: found.provenance,
-      opened: outcomeOf(opened.result),
-    }).toStrictEqual({
-      found: ["Leave"],
-      provenance: {
-        collectionIds: [collections.handbook],
-        sensitive: false,
-        restricted: false,
-        connections: [],
-        truncated: false,
-      },
-      // As a document that doesn't exist.
-      opened: { failed: "permission.item_not_found" },
-    });
-  });
-
-  it("search with text up to Knowledge's own limit, and refuse longer up front", async () => {
-    const { sealed } = await knowledgeApp();
-    const atLimit = await answerOf(sealed, "help.find", {
-      text: searchTextOf(knowledgeSearchMaxLength),
-    });
-    const pastLimit = await answerOf(sealed, "help.find", {
-      text: searchTextOf(knowledgeSearchMaxLength + 1),
-    });
-    expect({
-      atLimit: hitsSchema
-        .parse(outcomeOf(atLimit.result))
-        .map(({ title }) => title),
-      pastLimit: outcomeOf(pastLimit.result),
-    }).toStrictEqual({
-      atLimit: ["Leave", "Pay"],
-      pastLimit: { failed: "contract.invalid_args" },
-    });
-  });
-
-  it("carry a sensitive source's classification and restrict the App", async () => {
-    const { sealed, documents, collections } = await knowledgeApp();
-    const authority = {
-      subject: { type: "app" as const, appId: sealed.app },
-      onBehalfOf: sealed.owner.userId,
-      mode: "interactive" as const,
-      appVersion: 1,
-    };
-    const context = { type: "app" as const, appId: sealed.app };
-    const before = await isRestricted(env, authority, context);
-    const opened = await answerOf(sealed, "help.open", { id: documents.pay });
-    expect({
-      before,
-      after: await isRestricted(env, authority, context),
-      provenance: opened.provenance,
-    }).toStrictEqual({
-      before: false,
-      after: true,
-      provenance: {
-        collectionIds: [collections.salaries],
-        sensitive: true,
-        restricted: true,
-        connections: [],
-        truncated: false,
-      },
-    });
-  });
-
-  it("stop knowledge whose collection permission was revoked", async () => {
-    const { sealed, admin, permissions } = await knowledgeApp();
-    await revokePermission(env, admin, permissions.salaries);
-    const found = await answerOf(sealed, "help.find", { text: "leave" });
-    expect(outcomeOf(found.result)).toStrictEqual({
-      failed: "permission.unavailable",
-    });
-  });
-
-  it("bind knowledge only to the App's own grants, for every collection declared", async () => {
-    const { sealed, admin, permissions } = await knowledgeApp();
-    const other = await sealedApp(knowledgeFiles());
-    const refusal = async (collections: Record<string, string>, app = sealed) =>
+  it("bind the Brain only to the App's own grant to read it", async () => {
+    const { sealed, admin } = await deskApp();
+    const other = await deskApp();
+    const refusal = async (permissionId: string) =>
       await failure(
         async () =>
           await approveResourceBinding(env, admin, {
-            app: app.app,
+            app: sealed.app,
             alias: "brain",
-            target: { kind: "knowledge", collections },
+            target: { kind: "brain", permissionId },
             reviewed: { version: 1 },
           })
       );
     expect({
-      missing: await refusal({ handbook: permissions.handbook }),
-      extra: await refusal({ ...permissions, more: permissions.handbook }),
-      anotherApps: await refusal(permissions, other),
+      anotherApps: await refusal(other.permission),
+      none: await refusal(crypto.randomUUID()),
     }).toStrictEqual({
-      missing: "permission.target_invalid",
-      extra: "permission.target_invalid",
       anotherApps: "permission.target_invalid",
+      none: "permission.target_invalid",
     });
   });
 });

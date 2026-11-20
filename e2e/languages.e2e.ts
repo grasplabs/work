@@ -13,7 +13,7 @@ test("follows the browser's language, then the one the person picks", async ({
   const { member } = peopleIn("languages");
   const page = await pageOf(member, { locale: "de-DE" });
 
-  await page.goto("/knowledge");
+  await page.goto("/projects");
   const nav = page.getByRole("navigation", { name: "Hauptmenü" });
   await expect(nav.getByRole("link", { name: "Gehirn" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
@@ -30,7 +30,9 @@ test("follows the browser's language, then the one the person picks", async ({
 
   // Kept for this browser, over its own language.
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Kennis" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Projecten", exact: true })
+  ).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "nl");
 
   // And in Settings → Profile, which the sidebar's Settings opens.

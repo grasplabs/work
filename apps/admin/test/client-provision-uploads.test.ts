@@ -1480,7 +1480,7 @@ describe("provisioning a placed client", () => {
           props: { script: connect },
         },
       },
-      databases: 6,
+      databases: 4,
     });
   });
 

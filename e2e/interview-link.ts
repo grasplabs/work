@@ -3,8 +3,8 @@
  * person by mail, which a local stack doesn't send, and nothing hands it
  * to anyone else: core keeps only a random id per person and makes the
  * secret from it with its own key (apps/core/src/onboarding/link-secret.ts).
- * So this reads the id straight from the stack's local state, as
- * connections-seed.ts writes there, and makes the secret the same way,
+ * So this reads the id straight from the onboarding store's SQLite file in
+ * the stack's local state, read-only, and makes the secret the same way,
  * from the stack's auth secret.
  */
 import { readdir } from "node:fs/promises";

@@ -1,4 +1,4 @@
-import type { AppDraftChanges } from "@grasp-os/shared/app-drafts";
+import type { AppReview } from "@grasp-os/shared/app-review";
 import type {
   FileDiff,
   ReviewedRowRule,
@@ -20,12 +20,13 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PlanList, planLines } from "./data-model-changes.tsx";
 
-// What publishing an App's draft changes, as Publish (publish.tsx) shows
-// it before the person publishes, and History (app-history.tsx) of a
-// version against the one before it: its files, grouped by what they
-// are, each with its diff (the library's DiffFiles); what it does to the App's data; and
-// the access the App waits for or is asked for again. All as core worked
-// it out (`apps.drafts.changes`), never as whoever wrote the draft says.
+// What publishing an App's draft changes, as Publish's dialog
+// (drafts/share-with-team.tsx) shows it before the person publishes, and
+// History (drafts/draft-history.tsx) of a version against the one before
+// it: its files, grouped by what they are, each with its diff (the
+// library's DiffFiles); what it does to the App's data; and the access
+// the App waits for. All as core worked it out (`apps.review`), never as
+// whoever wrote the draft says.
 
 /** What a changed file is part of: its group in the list. */
 export type FileGroup = "pages" | "functions" | "data" | "tests" | "other";
@@ -123,7 +124,7 @@ export const FileChanges = ({ files }: { files: readonly FileDiff[] }) => {
 export const DataChanges = ({
   changes,
 }: {
-  changes: Pick<AppDraftChanges, "plan" | "migrations">;
+  changes: Pick<AppReview, "plan" | "migrations">;
 }) => {
   const { i18n } = useLingui();
   const lines = changes.plan === null ? [] : planLines(changes.plan, i18n);
@@ -152,7 +153,6 @@ export const DataChanges = ({
 
 const objectNames = {
   connection: msg`A connection`,
-  collection: msg`A collection`,
   workflow: msg`A workflow`,
   app: msg`Another App`,
   platform: msg`Grasp itself`,
@@ -164,22 +164,6 @@ const permissionText = (permission: Permission, i18n: I18n): string => {
   const { binding } = permission;
   const actions = formatList(permission.actions);
   return i18n._(msg`${what}, as ${binding} in its code: ${actions}`);
-};
-
-/**
- * A workflow's grant to call one of the App's functions, in a line: the
- * workflow's name and the function's path, where core gives them.
- */
-const callerText = (permission: Permission, i18n: I18n): string => {
-  const { subject, object, workflowNames, functionName } = permission;
-  const workflow =
-    subject.type === "workflow"
-      ? (workflowNames?.[subject.workflowId] ?? subject.workflowId)
-      : "";
-  const path =
-    functionName ??
-    (object.type === "app" ? (object.function ?? object.appId) : "");
-  return i18n._(msg`${workflow} calls ${path}`);
 };
 
 /** Lines of access, each with its icon. */
@@ -282,27 +266,14 @@ export const AccessChanges = ({
   changes,
 }: {
   changes: Pick<
-    AppDraftChanges,
-    | "permissions"
-    | "grants"
-    | "callers"
-    | "readsPeople"
-    | "handsFilesToWorkflows"
-    | "rowRules"
+    AppReview,
+    "permissions" | "readsPeople" | "handsFilesToWorkflows" | "rowRules"
   >;
 }) => {
   const { i18n } = useLingui();
-  const askedAgain = changes.grants.filter((grant) => grant.askedAgain);
-  // The workflows that call the App trust its code as its own grants do:
-  // publishing asks an admin for those grants again likewise.
-  const callersAskedAgain = changes.callers.filter(
-    (caller) => caller.askedAgain
-  );
   // What core can't read, it can't rule out: only false is nothing new.
   const nothing =
     changes.permissions.length === 0 &&
-    askedAgain.length === 0 &&
-    callersAskedAgain.length === 0 &&
     changes.readsPeople === false &&
     changes.handsFilesToWorkflows === false &&
     changes.rowRules !== null;
@@ -322,37 +293,6 @@ export const AccessChanges = ({
             lines={changes.permissions.map((permission) => ({
               key: permission.id,
               text: permissionText(permission, i18n),
-            }))}
-          />
-        </div>
-      )}
-      {askedAgain.length === 0 ? null : (
-        <div {...stylex.props(styles.tight)}>
-          <Text element="span" size="xs" tone="muted">
-            <Trans>
-              Works again once an admin grants it again for the new version
-            </Trans>
-          </Text>
-          <AccessLines
-            lines={askedAgain.map(({ permission }) => ({
-              key: permission.id,
-              text: permissionText(permission, i18n),
-            }))}
-          />
-        </div>
-      )}
-      {callersAskedAgain.length === 0 ? null : (
-        <div {...stylex.props(styles.tight)}>
-          <Text element="span" size="xs" tone="muted">
-            <Trans>
-              Workflows that call it again once an admin grants it again for the
-              new version
-            </Trans>
-          </Text>
-          <AccessLines
-            lines={callersAskedAgain.map(({ permission }) => ({
-              key: permission.id,
-              text: callerText(permission, i18n),
             }))}
           />
         </div>

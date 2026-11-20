@@ -362,6 +362,16 @@ export interface McpServer {
   ) => Promise<McpToolResult>;
 }
 
+/** An MCP server that also takes a native connector's own methods. */
+export interface NativeMcpServer extends McpServer {
+  /**
+   * Sends one request of a method of a native connector's own, not MCP's
+   * (a sync page, `syncMethod`): its result, unchecked. Throws
+   * {@link McpError} if it didn't answer.
+   */
+  send: (method: string, params: Record<string, Json>) => Promise<unknown>;
+}
+
 /**
  * A client for the MCP server at `endpoint`, reached through `send`,
  * reading responses of up to `maxBytes`.
@@ -370,7 +380,7 @@ export const mcpServer = (
   endpoint: string,
   send: McpFetch,
   maxBytes: number = maxResponseBytes
-): McpServer => {
+): NativeMcpServer => {
   let nextId = 1;
   let sessionId: string | null = null;
   let version = mcpProtocolVersion;
@@ -542,6 +552,10 @@ export const mcpServer = (
           ...(meta === undefined ? {} : { _meta: meta }),
         })
       );
+    },
+    send: async (method, params) => {
+      await started();
+      return await request(method, params);
     },
   };
 };
