@@ -19,14 +19,15 @@ import { signInConfig } from "./config.ts";
  * routes (`/list-sessions`,
  * `/revoke-session(s)`, `/revoke-other-sessions`): they name sessions by
  * their tokens, which are what the cookie holds. A person lists and ends
- * their own sessions over `/rpc` instead (own-sessions.ts).
+ * their own sessions over `/rpc` instead (own-sessions.ts). Nor are its
+ * member lists (`/get-full-organization`, `/list-members`), which would
+ * name guests to every member: who is in the company comes from core's
+ * own reads, which leave guests out (membership-sql.ts `mayAct`).
  */
 const allowedRoutes = new Set([
   "POST /sign-in/sso",
   "GET /get-session",
   "POST /sign-out",
-  "GET /organization/get-full-organization",
-  "GET /organization/list-members",
   "GET /organization/list-teams",
   "POST /organization/create-team",
   "POST /organization/update-team",

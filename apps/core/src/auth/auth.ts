@@ -10,7 +10,7 @@ import {
   staffListTeamRefusals,
   teamNameKey,
 } from "@grasp-os/shared/onboarding";
-import { roleSchema } from "@grasp-os/shared/roles";
+import { guestRole, roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import type { SignInRefusal } from "@grasp-os/shared/sign-in";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -122,6 +122,8 @@ const roles = {
   }),
   builder: defaultAc.newRole({}),
   user: defaultAc.newRole({}),
+  // Someone outside the company: nothing here, as nowhere else (`mayAct`).
+  [guestRole]: defaultAc.newRole({}),
 };
 
 const schema = {
@@ -1254,6 +1256,11 @@ const createAuth = (
           // never undoes it. These two routes alone change a membership
           // by hand (routes.ts keeps the others off).
           beforeAddTeamMember: async ({ teamMember }) => {
+            // Teams are the company's: a guest is never in one, nor is
+            // anyone else who may not act (`mayAct`).
+            if (await mayNotAct(env, teamMember.userId)) {
+              throw new APIError("FORBIDDEN", { message: "Not a member." });
+            }
             await pinTeamMember(
               env,
               teamMember.teamId,

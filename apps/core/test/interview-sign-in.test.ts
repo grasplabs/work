@@ -171,11 +171,11 @@ describe("signing in for an interview while the gate is closed", () => {
     const { address, secret } = await invited();
     const cookie = await signedInAs(address);
     const { response } = await openLinkAs(secret, cookie);
-    const members = await callAuth("/organization/list-members", cookie);
+    const teams = await callAuth("/organization/list-teams", cookie);
     expect({
       interview: response.status,
       rpc: await outcome(whoami(cookie)),
-      organization: members.ok,
+      organization: teams.ok,
       memberships: await membershipsOf(address),
     }).toStrictEqual({
       interview: 200,
@@ -217,13 +217,13 @@ describe("signing in for an interview while the gate is closed", () => {
     await adminCommands().close();
     const cookie = await signedInAs(address);
     const { response } = await openLinkAs(secret, cookie);
-    const members = await callAuth("/organization/list-members", cookie);
+    const teams = await callAuth("/organization/list-teams", cookie);
     expect({
       wasMember,
       before: await outcome(whoami(before)),
       interview: response.status,
       rpc: await outcome(whoami(cookie)),
-      organization: members.ok,
+      organization: teams.ok,
     }).toStrictEqual({
       wasMember: 1,
       before: "auth.unauthenticated",
