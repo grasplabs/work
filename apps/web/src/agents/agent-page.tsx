@@ -58,6 +58,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
@@ -90,7 +91,9 @@ import { AgentForm } from "./agent-form.tsx";
 import type { Part, Typed } from "./agent-form.tsx";
 import { AgentWakes, useLast } from "./agent-wakes.tsx";
 
-// One agent's page, for the company's admins, on Grasp UI: its Page
+// One agent's page, for the company's admins, on Grasp UI, in the
+// library's settings column: one column in the page's middle, a card of
+// rows per topic, every control at its own width on one edge. Its Page
 // header holds the agent (picture, name, what it is for, whether it is
 // on) and the things done most: turning it off and on, Chat, and Edit,
 // which changes its name, job, picture and model in a dialog. Its parts
@@ -142,7 +145,8 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space3,
   },
-  stack: { display: "grid", gap: grasp.space6 },
+  // A part's cards, as far apart as the column sets its own.
+  stack: { display: "grid", gap: grasp.space8 },
   // The `hidden` attribute alone loses to the stack's own display.
   hidden: { display: "none" },
 });
@@ -250,7 +254,7 @@ const Facts = ({
   const nextMoment = next === undefined ? "" : moment(next);
   return (
     <SectionCard variant="grouped" density="compact" flush title={t`Details`}>
-      <SettingsRows>
+      <SettingsRows controls="fit">
         <FactRow label={t`What it is for`}>
           {agent.job === "" ? t`No job written yet` : agent.job}
         </FactRow>
@@ -383,7 +387,7 @@ const Access = ({
         flush
         title={t`Who may use it`}
       >
-        <SettingsRows>
+        <SettingsRows controls="fit">
           <SettingRow
             info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
             label={t`Answers`}
@@ -417,7 +421,7 @@ const Access = ({
         info={t`Each as the company has it, or for fewer people. Never more.`}
         title={t`What it may do`}
       >
-        <SettingsRows>
+        <SettingsRows controls="fit">
           {settings.classes.map(({ toolClass, audience }) => {
             const className = i18n._(classNames[toolClass]);
             return (
@@ -478,6 +482,7 @@ const EditAgent = ({
         onClick={() => {
           setOpen(true);
         }}
+        size="sm"
       >
         {t`Edit`}
       </Button>
@@ -668,142 +673,149 @@ export const AgentPage = ({
   };
   return (
     <Page>
-      <PageHeader
-        actions={
-          <div {...stylex.props(styles.actions)}>
-            <Field orientation="horizontal" disabled={!can}>
-              <FieldLabel>{t`On`}</FieldLabel>
-              <Switch
-                checked={on}
-                onCheckedChange={(next) => {
-                  void change(async (session) => {
-                    await session.connections.setAgentPaused(agent.id, !next);
-                  });
-                }}
+      <PageColumn align="center" measure="settings">
+        <PageHeader
+          actions={
+            <div {...stylex.props(styles.actions)}>
+              <Field orientation="horizontal" disabled={!can}>
+                <FieldLabel>{t`On`}</FieldLabel>
+                <Switch
+                  checked={on}
+                  onCheckedChange={(next) => {
+                    void change(async (session) => {
+                      await session.connections.setAgentPaused(agent.id, !next);
+                    });
+                  }}
+                />
+              </Field>
+              <EditAgent
+                agent={agent}
+                can={can}
+                models={models}
+                save={save}
+                typed={typed}
               />
-            </Field>
-            <EditAgent
-              agent={agent}
-              can={can}
-              models={models}
-              save={save}
-              typed={typed}
-            />
-            {usable && on ? (
-              <Button
-                icon={Conversation}
-                render={<Link search={{ agent: agent.id }} to="/" />}
-                variant="ink"
-              >
-                {t`Chat`}
-              </Button>
-            ) : null}
-          </div>
-        }
-        // The agent's name on every part: the side nav marks which part.
-        title={name}
-      />
-      <AgentFailure>{failure}</AgentFailure>
-      {/* Every tab stays mounted, the others hidden: what is typed and
-          not yet saved on one stays while another is looked at. */}
-      <div
-        hidden={tab !== "overview"}
-        {...stylex.props(styles.stack, tab !== "overview" && styles.hidden)}
-      >
-        <Facts
-          agent={agent}
-          first={first}
-          settings={settings}
-          teams={teams}
-          usage={usage}
-          wakes={wakes}
-        />
-        <RecentActivity usage={usage} wakes={wakes} />
-        {first ? null : <DeleteAgent can={can} name={name} remove={remove} />}
-      </div>
-      <div
-        hidden={tab !== "instructions"}
-        {...stylex.props(styles.stack, tab !== "instructions" && styles.hidden)}
-      >
-        {/* No title: the side nav says "Instructions" already. */}
-        <SectionCard
-          variant="grouped"
-          aria-label={t`Instructions`}
-          density="compact"
-          footer={
-            <div {...stylex.props(styles.foot)}>
-              <Text size="sm" tone="muted">
-                {t`Grasp's own rules always hold over these.`}
-              </Text>
-              <Button
-                disabled={!can}
-                form={instructionsId}
-                size="sm"
-                type="submit"
-                variant="ink"
-              >
-                {t`Save`}
-              </Button>
+              {usable && on ? (
+                <Button
+                  icon={Conversation}
+                  render={<Link search={{ agent: agent.id }} to="/" />}
+                  size="sm"
+                  variant="ink"
+                >
+                  {t`Chat`}
+                </Button>
+              ) : null}
             </div>
           }
-        >
-          <AgentForm
-            can={can}
-            id={instructionsId}
-            initial={typed}
-            key={`${agent.id}:${agent.instructions}`}
-            onSave={async (said) => {
-              await save(said);
-            }}
-            parts={["instructions"]}
-          />
-        </SectionCard>
-        <AgentDocuments
-          agent={agent}
-          can={can}
-          change={change}
-          documents={documents}
-          editable={editable}
+          size="md"
+          // The agent's name on every part: the side nav marks which part.
+          title={name}
         />
-      </div>
-      <div
-        hidden={tab !== "access"}
-        {...stylex.props(styles.stack, tab !== "access" && styles.hidden)}
-      >
-        {firstAccess === undefined ? (
-          <Access
+        <AgentFailure>{failure}</AgentFailure>
+        {/* Every tab stays mounted, the others hidden: what is typed and
+          not yet saved on one stays while another is looked at. */}
+        <div
+          hidden={tab !== "overview"}
+          {...stylex.props(styles.stack, tab !== "overview" && styles.hidden)}
+        >
+          <Facts
+            agent={agent}
+            first={first}
+            settings={settings}
+            teams={teams}
+            usage={usage}
+            wakes={wakes}
+          />
+          <RecentActivity usage={usage} wakes={wakes} />
+          {first ? null : <DeleteAgent can={can} name={name} remove={remove} />}
+        </div>
+        <div
+          hidden={tab !== "instructions"}
+          {...stylex.props(
+            styles.stack,
+            tab !== "instructions" && styles.hidden
+          )}
+        >
+          {/* No title: the side nav says "Instructions" already. */}
+          <SectionCard
+            variant="grouped"
+            aria-label={t`Instructions`}
+            density="compact"
+            footer={
+              <div {...stylex.props(styles.foot)}>
+                <Text size="sm" tone="muted">
+                  {t`Grasp's own rules always hold over these.`}
+                </Text>
+                <Button
+                  disabled={!can}
+                  form={instructionsId}
+                  size="sm"
+                  type="submit"
+                  variant="ink"
+                >
+                  {t`Save`}
+                </Button>
+              </div>
+            }
+          >
+            <AgentForm
+              can={can}
+              id={instructionsId}
+              initial={typed}
+              key={`${agent.id}:${agent.instructions}`}
+              onSave={async (said) => {
+                await save(said);
+              }}
+              parts={["instructions"]}
+            />
+          </SectionCard>
+          <AgentDocuments
             agent={agent}
             can={can}
             change={change}
-            settings={settings}
-            teams={teams}
-          />
-        ) : (
-          // The first agent's reach is the company's own, with a place
-          // for each chat app and a row for each app: its settings
-          // whole, as Settings › Stephen had them.
-          <StephenSettings
-            classes={firstAccess.classes}
+            documents={documents}
             editable={editable}
-            reach={firstAccess.reach}
-            week={firstAccess.week}
-            workflows={firstAccess.workflows}
           />
-        )}
-      </div>
-      <div
-        hidden={tab !== "schedule"}
-        {...stylex.props(styles.stack, tab !== "schedule" && styles.hidden)}
-      >
-        <AgentWakes
-          agent={agent}
-          can={can}
-          change={change}
-          editable={editable}
-          people={people}
-          wakes={wakes}
-        />
-      </div>
+        </div>
+        <div
+          hidden={tab !== "access"}
+          {...stylex.props(styles.stack, tab !== "access" && styles.hidden)}
+        >
+          {firstAccess === undefined ? (
+            <Access
+              agent={agent}
+              can={can}
+              change={change}
+              settings={settings}
+              teams={teams}
+            />
+          ) : (
+            // The first agent's reach is the company's own, with a place
+            // for each chat app and a row for each app: its settings
+            // whole, as Settings › Stephen had them.
+            <StephenSettings
+              classes={firstAccess.classes}
+              editable={editable}
+              reach={firstAccess.reach}
+              week={firstAccess.week}
+              workflows={firstAccess.workflows}
+            />
+          )}
+        </div>
+        <div
+          hidden={tab !== "schedule"}
+          {...stylex.props(styles.stack, tab !== "schedule" && styles.hidden)}
+        >
+          <AgentWakes
+            agent={agent}
+            can={can}
+            change={change}
+            editable={editable}
+            people={people}
+            wakes={wakes}
+          />
+        </div>
+      </PageColumn>
     </Page>
   );
 };

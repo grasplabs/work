@@ -6,9 +6,11 @@ import { AgentPage, agentTabOf } from "../agents/agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "../agents/agent-page.tsx";
 import type { Session } from "../core.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
+import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { Agent as AgentMark } from "../grasp/icons/index.ts";
+import { PageColumn } from "../grasp/page-column/index.ts";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 import { readManaged } from "./_shell.agents.index.tsx";
 
@@ -87,8 +89,8 @@ const AgentRoutePage = () => {
 
 /**
  * An agent's page before it arrives: its crumbs, then the library's
- * settings skeleton as its Overview stands, the Details card's seven rows
- * and Recent activity's one.
+ * settings skeleton as its Overview stands, in the page's own column: the
+ * Details card's seven rows and Recent activity's one.
  */
 const AgentLoading = () => {
   const { t } = useLingui();
@@ -97,7 +99,11 @@ const AgentLoading = () => {
       <SiteHeader
         crumbs={[{ label: t`Agents`, to: "/agents" }, { label: t`Agent` }]}
       />
-      <PageSkeletonSettings sections={[7, 1]} />
+      <Page>
+        <PageColumn align="center" measure="settings">
+          <PageSkeletonSettings sections={[7, 1]} />
+        </PageColumn>
+      </Page>
     </>
   );
 };
