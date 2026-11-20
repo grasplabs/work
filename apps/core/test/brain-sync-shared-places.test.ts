@@ -35,6 +35,7 @@ import {
   parkWorkerSources,
   pollMs,
   setUpTime,
+  signInShared,
   sitesFailing,
   sitesHeld,
   syncOn,
@@ -235,6 +236,68 @@ describe("native sync of a shared connection's picked places", () => {
         everyone: { seller: true, other: true },
         narrowed: { seller: true, other: false },
         left: { seller: false, other: false },
+        kept: { [site]: 1 },
+      });
+    }
+  );
+
+  it(
+    "hides a picked place from everyone while the provider's grant is refused, erases nothing, and shows it again once the same account signs in again",
+    setUpTime,
+    async () => {
+      const [admin, member] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "user"),
+      ]);
+      const marker = markerOf();
+      const site = `site-${unique()}`;
+      const { connectionId, subject } = await connectSharedSites(admin, {
+        [site]: marker,
+      });
+      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+      await pick(admin, connectionId, [site]);
+      await syncAll();
+      const before = await finds(member.userId, marker);
+
+      // The provider refused the grant: connect lets its tokens go and
+      // marks the connection as needing someone to sign in again
+      // (connect's tokens.ts `markDead`).
+      await connectDb().batch([
+        connectDb()
+          .prepare("DELETE FROM connection_tokens WHERE connection_id = ?")
+          .bind(connectionId),
+        connectDb()
+          .prepare(
+            "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
+          )
+          .bind(connectionId),
+      ]);
+      const whileRefused = {
+        member: await finds(member.userId, marker),
+        admin: await finds(admin.userId, marker),
+      };
+      // Signing in to another account is another connection: the hidden
+      // one stays hidden.
+      const other = await signInShared(admin, `shared-${unique()}`);
+      const afterOther = await finds(member.userId, marker);
+      const again = await signInShared(admin, subject);
+
+      expect({
+        before,
+        whileRefused,
+        otherIsNew: other.id !== connectionId,
+        afterOther,
+        again,
+        after: await finds(member.userId, marker),
+        // Nothing erased meanwhile.
+        kept: await heldBy(connectionId),
+      }).toStrictEqual({
+        before: true,
+        whileRefused: { member: false, admin: false },
+        otherIsNew: true,
+        afterOther: false,
+        again: { id: connectionId, status: "active" },
+        after: true,
         kept: { [site]: 1 },
       });
     }
@@ -773,6 +836,17 @@ describe("native sync of a shared connection's picked places", () => {
       });
     };
     try {
+      // Connections connect holds, shared and active: one it doesn't know,
+      // or one waiting for a sign-in, gives nobody anything.
+      await connectDb().batch(
+        [first, last].map((connectionId) =>
+          connectDb()
+            .prepare(
+              "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'microsoft', 'shared', NULL, 'active', 'native', 'sample-sync', ?, ?)"
+            )
+            .bind(connectionId, now, now)
+        )
+      );
       for (const connectionId of [last, first]) {
         // oxlint-disable-next-line no-await-in-loop -- one connection at a time
         await env.DB.batch([
@@ -867,6 +941,10 @@ describe("native sync of a shared connection's picked places", () => {
           "DELETE FROM brain_sync_sources WHERE connection_id IN (?, ?)"
         ).bind(first, last),
       ]);
+      await connectDb()
+        .prepare("DELETE FROM connections WHERE id IN (?, ?)")
+        .bind(first, last)
+        .run();
     }
   });
 

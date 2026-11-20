@@ -1,3 +1,4 @@
+import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { MemberRole } from "@grasp-os/shared/subject-members";
 import { sql } from "drizzle-orm";
@@ -668,6 +669,19 @@ const covers = (
 };
 
 /**
+ * Whether what was read through `owner` is still readable: a disconnected
+ * one is gone, whoever owned it. A shared one waiting for someone to sign
+ * in again shows nobody what was read through it until then, as the Brain
+ * shows nobody what it kept of it (GRA-2227); a person's own one waiting
+ * so changes nobody's access.
+ */
+const stillReadable = ({
+  status,
+  ownerUserId,
+}: Pick<ConnectionOwner, "status" | "ownerUserId">): boolean =>
+  status === "active" || (status === "needs_reauth" && ownerUserId !== null);
+
+/**
  * Of the connection reads in `sources`, those the agent may make for its
  * person now: a grant it holds in this chat now covers the read
  * (`covers`), and the connection is not disconnected and is one the
@@ -698,12 +712,10 @@ const readableConnections = async (
     ...new Set(covered.map(({ connectionId }) => connectionId)),
   ]);
   const usable = new Set(
-    owners.flatMap(({ id, ownerUserId, status }) =>
-      // A disconnected one is gone, whoever owned it; one waiting to be
-      // signed in again changes nobody's access.
-      status !== "disconnected" &&
-      (ownerUserId === null || ownerUserId === scope.personId)
-        ? [id]
+    owners.flatMap((owner) =>
+      stillReadable(owner) &&
+      (owner.ownerUserId === null || owner.ownerUserId === scope.personId)
+        ? [owner.id]
         : []
     )
   );
@@ -738,8 +750,7 @@ const readableUngrantedReads = async (
   ]);
   const readable = new Set(
     owners.flatMap((owner) =>
-      owner.status !== "disconnected" &&
-      readsWithoutGrant(owner, scope.personId, shared)
+      stillReadable(owner) && readsWithoutGrant(owner, scope.personId, shared)
         ? [owner.id]
         : []
     )
@@ -800,10 +811,10 @@ const obsoleteBrainGrantPin = "brain-grant";
 /**
  * Of `sourceIds`, those the chat's agent may read for its person now: a
  * connection call a grant the agent holds in this chat now covers, on a
- * connection not disconnected that the person may use themselves; an App
- * read the agent's grants and the person's role in the App allow now; a
- * read with no grant, while the person still reads its connection so and
- * it is not disconnected; a
+ * connection still readable (`stillReadable`) that the person may use
+ * themselves; an App read the agent's grants and the person's role in the
+ * App allow now; a read with no grant, while the person still reads its
+ * connection so and it is still readable; a
  * version of the Brain, while the person may read it (their teams and
  * the company, for what code's recall handed over); a memory of the new
  * Brain, while the person (or, as the company read it, the company) may
