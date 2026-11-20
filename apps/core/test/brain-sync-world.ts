@@ -249,18 +249,14 @@ export const sitesFailing = async (
 };
 
 /**
- * A Microsoft 365 account `admin` connects for the company (GRA-1719),
- * read by the sample sync connector, whose sites to pick are `sites`
- * (`sitesHeld`, their files opened at the source by `readers`): its
- * connection, one of the test's own, and the account's subject.
+ * `admin` signs in to the Microsoft 365 account `subject` for the company:
+ * a new shared connection, or the one of that account again when it needs
+ * someone to sign in again. The connection of that account.
  */
-export const connectSharedSites = async (
+export const signInShared = async (
   admin: Person,
-  sites: Record<string, string>,
-  readers: readonly unknown[] | null = null
-): Promise<{ connectionId: string; subject: string }> => {
-  const subject = `shared-${unique()}`;
-  await sitesHeld(subject, sites, "1", readers);
+  subject: string
+): Promise<{ id: string; status: string }> => {
   const { url } = await admin.api.connections.start({
     provider: "microsoft",
     scope: "shared",
@@ -285,6 +281,23 @@ export const connectSharedSites = async (
   if (connection === undefined) {
     throw new Error("Expected the shared Microsoft connection");
   }
+  return { id: connection.id, status: connection.status };
+};
+
+/**
+ * A Microsoft 365 account `admin` connects for the company (GRA-1719),
+ * read by the sample sync connector, whose sites to pick are `sites`
+ * (`sitesHeld`, their files opened at the source by `readers`): its
+ * connection, one of the test's own, and the account's subject.
+ */
+export const connectSharedSites = async (
+  admin: Person,
+  sites: Record<string, string>,
+  readers: readonly unknown[] | null = null
+): Promise<{ connectionId: string; subject: string }> => {
+  const subject = `shared-${unique()}`;
+  await sitesHeld(subject, sites, "1", readers);
+  const connection = await signInShared(admin, subject);
   // Read by the sample sync connector instead of the suite's own.
   await connectDb()
     .prepare("UPDATE connections SET server = 'sample-sync' WHERE id = ?")

@@ -9627,6 +9627,10 @@ msgstr "Niemand mit diesem Namen"
 msgid "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
 msgstr "Von da an kann niemand ihn finden oder lesen, auch du nicht, und er lässt sich nicht zurückholen. Das Brain behält seinen Verlauf, bis ein Admin ihn löscht."
 
+#: src/connections/brain-audience.tsx
+msgid "Nobody can find what the Brain kept from {label} until someone signs in again. None of it is erased."
+msgstr "Niemand kann finden, was das Brain aus {label} gespeichert hat, bis sich jemand erneut anmeldet. Nichts davon wird gelöscht."
+
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody can make one, and those people have don't answer until you turn this back on."
 msgstr "Niemand kann einen erstellen, und vorhandene antworten nicht, bis du dies wieder einschaltest."
