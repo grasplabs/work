@@ -5307,11 +5307,13 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Tells the agent of `personId`'s own chat how a write it had held for
-   * them ended (pending-actions.ts), which it otherwise never learns: a
-   * notice in its context (`ChatSession.note`), which the turn under way
-   * reads before its next request, or else the next turn. The person isn't
-   * shown it: they decided it. No turn starts.
+   * Tells the agent of `personId`'s own chat how a call it had held for
+   * them ended (pending-actions.ts), a write or a read (GRA-1928), which
+   * it otherwise never learns: a notice in its context
+   * (`ChatSession.note`), which the turn under way reads before its next
+   * request, or else the next turn. The person isn't shown it: they
+   * decided it. No turn starts here: confirmed in the chat, its page goes
+   * on in a turn the person's own message starts (GRA-2224).
    */
   async heldDecided(
     chatId: unknown,
@@ -5323,7 +5325,7 @@ export class Workspace extends DurableObject<Env> {
     const { id, action } = heldSchema.parse(held);
     await this.#note(
       chat.id,
-      `The change you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`
+      `The call you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`
     );
   }
 
