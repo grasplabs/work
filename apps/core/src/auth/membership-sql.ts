@@ -93,21 +93,13 @@ export const memberNotRemoved = (
   withRoles?: readonly string[]
 ): SQL => memberWhile(userId, withRoles, notRemoved);
 
-/** `members`, as `guestNow` reads it: apart from any caller's. */
-const guestMembership = alias(members, "guest_membership");
-
 /**
- * That `userId` (an ID, or a column holding one) is a guest of the
- * organization now (roles.ts `guestRole`), as a SQL condition: a `guest`
- * membership, neither removed by an admin nor suspended. Never someone
- * who `mayAct`: what a guest reaches is the Apps shared with them alone
- * (guest-access.ts).
+ * That `userId` is a guest now, as a SQL condition: a membership with the
+ * role `guest` (roles.ts `guestRole`) that an admin hasn't removed. The
+ * one check a guest's way in reads: who is sent a code to sign in with,
+ * and whom a code signs in (auth/guest-codes.ts). A guest is never
+ * suspended: the directory suspends only members tied to its accounts, and
+ * a guest holds no account at all.
  */
 export const guestNow = (userId: string | SQLiteColumn | SQL): SQL =>
-  sql`(${notRemoved(userId)} AND EXISTS (
-    SELECT 1 FROM ${members} AS ${guestMembership}
-    WHERE ${guestMembership.organizationId} = ${organizationId}
-      AND ${guestMembership.userId} = ${userId}
-      AND ${guestMembership.role} = ${guestRole}
-      AND ${guestMembership.suspendedAt} IS NULL
-  ))`;
+  memberWhile(userId, [guestRole], notRemoved);

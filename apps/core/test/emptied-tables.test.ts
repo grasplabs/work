@@ -18,7 +18,7 @@ const empty = async (name: string): Promise<void> => {
     .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
     .parse(testBinding("CORE_MIGRATIONS"));
   const emptying = migrations
-    .find((migration) => migration.name.endsWith(`_${name}`))
+    .find((migration) => migration.name.includes(`_${name}`))
     ?.queries.filter((query) => deleteStatement.test(query));
   if (emptying === undefined || emptying.length === 0) {
     throw new Error(`${name} deletes nothing`);

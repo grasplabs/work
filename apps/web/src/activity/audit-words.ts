@@ -244,6 +244,12 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "member.signed_in_from_directory",
     text: msg`Signed in for the first time, after joining from the directory`,
   },
+  { action: "member.guest_invited", text: msg`Invited a guest` },
+  {
+    action: "member.guest_code_sent",
+    text: msg`Was sent a code to sign in as a guest`,
+  },
+  { action: "member.guest_signed_in", text: msg`Signed in as a guest` },
   { action: "member", text: msg`Changed a member` },
   { action: "team.created", text: msg`Created a team` },
   { action: "team.deleted", text: msg`Deleted a team` },
