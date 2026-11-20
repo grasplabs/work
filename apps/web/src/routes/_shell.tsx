@@ -16,6 +16,7 @@ import { readWithin, shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
 import { useMatchLatest } from "../frame/match-latest.ts";
+import { usePageDock } from "../frame/page-fill.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { ShellPending } from "../frame/shell-pending.tsx";
 import { forgetSignedIn, markSignedIn } from "../frame/signed-in-here.ts";
@@ -81,13 +82,15 @@ const ShellFrame = () => {
   const { failing } = Route.useLoaderData();
   // Chat's start has no bar: its backdrop takes the whole card.
   const chatStart = useMatchLatest()({ to: "/" }) !== false;
+  // A page that takes someone through a task of its own has no chat box.
+  const docked = usePageDock();
   useSidebarPagesFetched();
   return (
     <AppFrame
       bar={chatStart ? "none" : "page"}
       core={core}
       dock={<ChatBar />}
-      dockShown={stage.bar}
+      dockShown={stage.bar && docked}
       failing={failing}
       identity={identity}
       panels={panels}
