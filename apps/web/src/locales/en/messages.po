@@ -18038,6 +18038,7 @@ msgid "United States"
 msgstr "United States"
 
 #: src/activity/pending.tsx
+#: src/chat/sources.tsx
 msgid "Unknown"
 msgstr "Unknown"
 

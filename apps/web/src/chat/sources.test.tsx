@@ -113,23 +113,29 @@ describe(ChatSources, () => {
     document.body.replaceChildren();
   });
 
-  it("piles what the chat read, and lists each with its kind once opened", async () => {
+  it("piles what the chat read, and once opened lists each, one it can't name with nothing to open", async () => {
     await shown(["handbook", "memory", "hubspot-1", "unknown"]);
-    const pile =
-      document.querySelector("[data-slot=source-pile]")?.textContent ?? "";
-    await press(document.querySelector<HTMLElement>("[data-slot=source-pile]"));
-    const rows = [
-      ...document.querySelectorAll<HTMLElement>("[data-slot=source-row]"),
-    ].map((row) => [row.dataset.kind, row.textContent]);
+    const pile = document.querySelector<HTMLElement>("[data-slot=source-pile]");
+    const counted = pile?.textContent.includes("4 sources");
+    await press(pile);
+    const list = document.querySelector("ol")?.textContent ?? "";
+    const opens = [...document.querySelectorAll("ol button")].map(
+      (button) => button.textContent
+    );
 
-    expect({ pile: pile.includes("4 sources"), rows }).toStrictEqual({
-      pile: true,
-      rows: [
-        ["file", "Handbook1Knowledge"],
-        ["memory", "Memory2Knowledge"],
-        ["record", "hubspot (sales@acme.test)3Connection"],
-        ["record", "unknown4Connection"],
-      ],
+    expect({
+      counted,
+      listed: [
+        "Handbook",
+        "Memory",
+        "hubspot (sales@acme.test)",
+        "unknown",
+      ].map((title) => list.includes(title)),
+      opens,
+    }).toStrictEqual({
+      counted: true,
+      listed: [true, true, true, true],
+      opens: ["Handbook", "Memory", "hubspot (sales@acme.test)"],
     });
   });
 
@@ -144,7 +150,7 @@ describe(ChatSources, () => {
     await expect(opened(title, router)).resolves.toBe(path);
   });
 
-  it("says a restricted chat is restricted, read or not, and shows nothing for a chat that read nothing", async () => {
+  it("says a restricted chat is restricted, and shows nothing for a chat that read nothing", async () => {
     await shown([], true);
     const restricted = document.body.textContent;
     act(() => {

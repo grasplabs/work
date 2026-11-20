@@ -42,7 +42,7 @@ const styles = stylex.create({
     gap: grasp.space2,
   },
   // The badge at its own width, over the list's full one.
-  restricted: { display: "flex" },
+  restricted: { justifySelf: "start" },
 });
 
 /**
@@ -65,12 +65,22 @@ export const ChatSources = ({
   const { restricted } = provenance;
   const read = (sourcesShown ? provenance.sources : []).map((id) => ({
     id,
-    name: names.get(id) ?? { name: id, kind: "connection" as const },
+    name: names.get(id),
   }));
   if (read.length === 0 && !restricted) {
     return null;
   }
-  const items = read.map(({ name }): Source => {
+  const items = read.map(({ id, name }): Source => {
+    // One Grasp can't name (its list was refused, or it is gone since):
+    // said as it is, and nothing to open.
+    if (name === undefined) {
+      return {
+        kind: "file",
+        title: id,
+        origin: t`Unknown`,
+        access: "locked",
+      };
+    }
     if (name.kind === "connection") {
       return {
         kind: "record",
@@ -102,9 +112,9 @@ export const ChatSources = ({
   return (
     <div {...stylex.props(styles.sources)}>
       {restricted ? (
-        <div {...stylex.props(styles.restricted)}>
-          <Badge tone="attention">{t`Restricted`}</Badge>
-        </div>
+        <Badge layout={styles.restricted} tone="attention">
+          {t`Restricted`}
+        </Badge>
       ) : null}
       {items.length === 0 ? null : (
         <Sources
@@ -112,7 +122,7 @@ export const ChatSources = ({
           labels={labels}
           onOpen={(_source, index) => {
             const source = read[index];
-            if (source === undefined) {
+            if (source?.name === undefined) {
               return;
             }
             if (source.name.kind !== "connection") {
