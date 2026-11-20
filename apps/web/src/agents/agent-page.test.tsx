@@ -899,7 +899,7 @@ const makeInChat = async ({
     await press(button("Next"));
   }
   if (whose === "offered") {
-    // Nobody yet, and only when asked: as offered.
+    // Everyone in the company, and only when asked: as offered.
     await press(button("Next"));
     await press(button("Next"));
   }
@@ -974,8 +974,9 @@ describe("an agent's page", () => {
     await press(button("Next"));
     await press(answer("Ember"));
     await press(button("Next"));
-    // Nobody yet, and only when asked: as offered.
+    await press(answer("Nobody yet"));
     await press(button("Next"));
+    // Only when asked: as offered.
     await press(button("Next"));
     await set(answerBox(), "Answer only about invoices.", "input");
     await press(button("Review"));
@@ -1425,6 +1426,8 @@ describe("an agent's page", () => {
       asked: [
         ["make", expect.objectContaining({ name: "Claire" })],
         ["told", "agent-1", claireTold],
+        // For everyone, as offered.
+        ["reach", "agent-1", true, { who: "everyone" }],
         ["told", "agent-1", claireTold],
         ["work out", "agent-1"],
       ],
