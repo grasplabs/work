@@ -247,18 +247,33 @@ describe("an app's panel", () => {
       forEveryone: dialog?.textContent.includes("Everyone") ?? false,
       choice: buttons("Just you").length,
     };
+    // Every tool may change things too, asking first: none goes as a read.
+    await press(
+      document.querySelector('[aria-label="What Grasp may do: All tools"]')
+    );
+    await press(
+      [...document.querySelectorAll('[role="option"]')].find((each) =>
+        each.textContent.startsWith("Write")
+      )
+    );
     await press(dialogAction("Connect"));
 
-    expect({ shown, sent }).toStrictEqual({
+    expect({
+      shown,
+      sent,
+      // Refused, it stays open and says so.
+      failed: dialogAction("Connect")?.textContent.includes("Could not finish"),
+    }).toStrictEqual({
       shown: { consent: true, forEveryone: true, choice: 0 },
       sent: [
         {
           toolkit: "hubspot",
-          tools: [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
+          tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_NOTE"],
           consent: composioConsentText,
           returnTo: "/integrations/composio:hubspot",
         },
       ],
+      failed: true,
     });
   });
 

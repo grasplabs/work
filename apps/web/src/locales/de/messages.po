@@ -2691,7 +2691,7 @@ msgstr "Alle Schritte erledigt"
 
 #: src/frame/part-words.tsx
 msgid "All tools"
-msgstr "Alle Werkzeuge"
+msgstr "Alle Tools"
 
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
