@@ -4510,7 +4510,6 @@ msgstr "Cliffs"
 #: src/brain/memory-page.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
-#: src/chat/chat-panel.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
@@ -5115,6 +5114,7 @@ msgstr "Copy the URL"
 msgid "Copy the URL of {name}"
 msgstr "Copy the URL of {name}"
 
+#: src/chat/chat-more.tsx
 #: src/copy.ts
 #: src/routes/_shell.settings.members.tsx
 msgid "Copying didn't work"
@@ -12288,6 +12288,10 @@ msgstr "Press a line to change it, take out what is wrong, or type what is missi
 #: src/settings/invitations.tsx
 msgid "Press Enter to add it."
 msgstr "Press Enter to add it."
+
+#: src/frame/part-words.tsx
+msgid "Press or press F2 to rename"
+msgstr "Press or press F2 to rename"
 
 #: src/frame/part-words.tsx
 msgid "Press to use the app"

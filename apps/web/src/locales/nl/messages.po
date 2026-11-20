@@ -4510,7 +4510,6 @@ msgstr "Kliffen"
 #: src/brain/memory-page.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
-#: src/chat/chat-panel.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
@@ -5115,6 +5114,7 @@ msgstr "URL kopiëren"
 msgid "Copy the URL of {name}"
 msgstr "URL van {name} kopiëren"
 
+#: src/chat/chat-more.tsx
 #: src/copy.ts
 #: src/routes/_shell.settings.members.tsx
 msgid "Copying didn't work"
@@ -12288,6 +12288,10 @@ msgstr "Druk op een regel om hem aan te passen, haal weg wat niet klopt, of typ 
 #: src/settings/invitations.tsx
 msgid "Press Enter to add it."
 msgstr "Druk op Enter om het toe te voegen."
+
+#: src/frame/part-words.tsx
+msgid "Press or press F2 to rename"
+msgstr "Druk of druk op F2 om te hernoemen"
 
 #: src/frame/part-words.tsx
 msgid "Press to use the app"

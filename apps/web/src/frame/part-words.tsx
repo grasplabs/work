@@ -504,6 +504,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       collapse: t`Leave full screen`,
       width: t`Resize the panel's width`,
       height: t`Resize the panel's height`,
+      close: t`Close`,
     },
     alert: { dismiss: t`Dismiss` },
     // The viewer shows a page (the weekly report) and nothing else here:
@@ -1180,6 +1181,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       save: t`Save`,
       cancel: t`Cancel`,
       hint: t`Double-click or press F2 to rename`,
+      hintPress: t`Press or press F2 to rename`,
     },
     settingRow: {
       info: t`More about this setting`,
