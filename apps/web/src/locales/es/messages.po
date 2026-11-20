@@ -7652,6 +7652,10 @@ msgstr "Entrevistas"
 msgid "Invite"
 msgstr "Invitar"
 
+#: src/people/share-picker.tsx
+msgid "Invite {address} as a guest"
+msgstr "Invitar a {address} como invitado"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Invite people, change roles, sign them out and remove them"
 msgstr "Invitar a personas, cambiar roles, cerrar su sesión y quitarlas"
@@ -12809,6 +12813,10 @@ msgstr "Buscar personas"
 msgid "Search people and teams"
 msgstr "Buscar personas y equipos"
 
+#: src/people/share-picker.tsx
+msgid "Search people and teams, or type an email address"
+msgstr "Buscar personas y equipos, o escribe una dirección de correo"
+
 #: src/people/people-teams-picker.tsx
 msgid "Search people, teams and roles"
 msgstr "Buscar personas, equipos y roles"
@@ -13627,6 +13635,10 @@ msgstr "Alguien de tu organización"
 #: src/apps/app-settings.tsx
 msgid "Someone it is no longer shared with"
 msgstr "Alguien con quien ya no se comparte"
+
+#: src/people/share-picker.tsx
+msgid "Someone new"
+msgstr "Alguien nuevo"
 
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"

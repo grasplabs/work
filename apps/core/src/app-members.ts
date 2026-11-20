@@ -1,5 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import type { App } from "@grasp-os/shared/apps";
+import type { App, AppMembersApi } from "@grasp-os/shared/apps";
 import {
   actorOf,
   auditProvenanceMaxItems,
@@ -17,7 +17,6 @@ import type {
   ShareCandidates,
   SubjectMember,
   SubjectMemberRef,
-  SubjectMembersApi,
 } from "@grasp-os/shared/subject-members";
 import { and, asc, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -52,6 +51,8 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { inviteGuest } from "./guest-members.ts";
+import { mailGuestShared } from "./guest-share-mail.ts";
 import {
   namedProjectsFor,
   peopleInProject,
@@ -354,13 +355,15 @@ const requireReadable = async (
  * Refuses sharing `app` with a guest, whoever shares it, when the App
  * holds any source (`holdsAnySource`, GRA-2235), with
  * `app.guest_sources`; the refusal is audited. The same rule holds on
- * each of the guest's requests (app-access.ts `requireAppRole`).
+ * each of the guest's requests (app-access.ts `requireAppRole`). `member`
+ * without an ID: an address not invited yet (`inviteGuestToApp`), which
+ * the event never names.
  */
 const requireGuestShareable = async (
   env: Env,
   by: Identity,
   app: App,
-  member: NewSubjectMember
+  member: Omit<NewSubjectMember, "id"> & { id?: string }
 ): Promise<void> => {
   if (!(await holdsAnySource(env, app.id))) {
     return;
@@ -373,7 +376,7 @@ const requireGuestShareable = async (
       target: { type: "app", id: app.id },
       detail: {
         memberType: member.type,
-        member: member.id,
+        ...(member.id === undefined ? {} : { member: member.id }),
         role: member.role,
         reason: "app.guest_sources",
       },
@@ -475,6 +478,11 @@ export const addMember = async (
     ),
   ]);
   await tellKept(env, results[2]);
+  // A guest learns of a new share by mail alone: a guest is only ever its
+  // user, so a change here is a new share, never a new role.
+  if (guest && results[0].meta.changes > 0) {
+    await mailGuestShared(env, member.id, found);
+  }
   // Archived before the batch ran: it wrote nothing (`ifNotArchived`).
   if (results[0].meta.changes === 0) {
     await editableApp(env, by, found.id);
@@ -489,6 +497,36 @@ export const addMember = async (
     throw appErrors.create("app.conflict");
   }
   return added;
+};
+
+/**
+ * Invites `email` as a guest and shares `app` with them as its user, for
+ * whoever may share it: an address that belongs to nobody yet, typed in
+ * its sharing screen. Each step is the one it repeats, with its checks:
+ * the App's source rule first, so an App no guest may have invites
+ * nobody; then `inviteGuest`, whose refusal shares nothing; then
+ * `addMember`, which checks the App again and mails the guest. Again, or
+ * twice at once, it invites, shares and mails once: an address that is a
+ * guest's already is that guest, and sharing again changes nothing.
+ */
+export const inviteGuestToApp = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  email: unknown
+): Promise<SubjectMember> => {
+  // Grasp staff included: they change no App (`editableApp`).
+  const found = await editableApp(env, by, app);
+  await requireGuestShareable(env, by, found, {
+    type: "person",
+    role: "user",
+  });
+  const { userId } = await inviteGuest(env, by, email);
+  return await addMember(env, by, found.id, {
+    type: "person",
+    id: userId,
+    role: "user",
+  });
 };
 
 /**
@@ -560,7 +598,7 @@ export const removeMember = async (
 };
 
 /** A signed-in person's `apps.members`. */
-export class AppMembersRpc extends CoreRpcTarget implements SubjectMembersApi {
+export class AppMembersRpc extends CoreRpcTarget implements AppMembersApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 
@@ -588,6 +626,13 @@ export class AppMembersRpc extends CoreRpcTarget implements SubjectMembersApi {
     await withPerson(this.#check, async (by) => {
       await removeMember(this.#env, by, app, member);
     });
+  }
+
+  async inviteGuest(app: string, email: string): Promise<SubjectMember> {
+    return await withPerson(
+      this.#check,
+      async (by) => await inviteGuestToApp(this.#env, by, app, email)
+    );
   }
 
   /** For whoever may share it (`addMember`): a builder, while it isn't archived. */
