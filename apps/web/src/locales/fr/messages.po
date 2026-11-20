@@ -242,6 +242,10 @@ msgstr "{count, plural, one {{names} travaillent ici, sur # travail apparu dans 
 msgid "{count, plural, one {# agent} other {# agents}}"
 msgstr "{count, plural, one {# agent} other {# agents}}"
 
+#: src/frame/part-words.tsx
+msgid "{count, plural, one {# app needs you} other {# apps need you}}"
+msgstr "{count, plural, one {# app a besoin de vous} other {# apps ont besoin de vous}}"
+
 #: src/inbox/items.ts
 msgid "{count, plural, one {# binding} other {# bindings}}"
 msgstr "{count, plural, one {# liaison} other {# liaisons}}"
@@ -262,7 +266,7 @@ msgstr "{count, plural, one {# modification de ses données} other {# modificati
 msgid "{count, plural, one {# change waits for you to confirm or reject it.} other {# changes wait for you to confirm or reject them.}}"
 msgstr "{count, plural, one {# modification attend que vous la confirmiez ou la rejetiez.} other {# modifications attendent que vous les confirmiez ou les rejetiez.}}"
 
-#: src/connections/integrations-band.tsx
+#: src/frame/part-words.tsx
 msgid "{count, plural, one {# connected} other {# connected}}"
 msgstr "{count, plural, one {# connectée} other {# connectées}}"
 
@@ -11136,6 +11140,11 @@ msgstr "Il faut quelqu’un"
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Quelqu’un doit se reconnecter"
+
+#: src/frame/part-words.tsx
+msgctxt "state of one app"
+msgid "Needs you"
+msgstr "A besoin de vous"
 
 #: src/workflows/workflows-table.tsx
 msgctxt "workflow phase"

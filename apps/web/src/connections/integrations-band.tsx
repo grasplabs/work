@@ -1,20 +1,23 @@
-import { plural } from "@lingui/core/macro";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useId } from "react";
 
+import { AppsState } from "../grasp/blocks/app-integration/app-integration.tsx";
 import { Heading } from "../grasp/heading/index.ts";
 import { PanelTexture } from "../grasp/panel/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { useAppOf } from "./app-of.tsx";
 import type { Integration } from "./integrations.ts";
 import { ProviderMark } from "./provider-mark.tsx";
 
 // The Integrations overview's slim band (Ruben's direction B, RUB-68), as
 // the library's pattern draws it (Grasp UI, app-integrations-recommended):
 // what Grasp reaches in one line on the dither, and the connected apps'
-// marks stacked at its end with how many there are. What needs someone to
-// sign in again is said on that app's own tile, under Connected.
+// marks stacked at its end, and one line that sums them up (the library's
+// AppsState): how many need someone, in amber, else how many are
+// connected. Which app it is, and its fix, is on its own tile.
 
 /** Most connected apps' marks in the stack; the count says the rest. */
 const marksShown = 4;
@@ -38,7 +41,15 @@ const styles = stylex.create({
   },
   texture: { zIndex: -1 },
   words: { display: "grid", gap: grasp.space1, minWidth: 0 },
-  stack: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  stack: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    color: grasp.muted,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+  },
   marks: { display: "flex" },
   mark: {
     display: "inline-flex",
@@ -57,10 +68,13 @@ const styles = stylex.create({
 /** The band over the overview's runs. */
 export const IntegrationsBand = ({
   integrations,
+  identity,
 }: {
   integrations: readonly Integration[];
+  identity: Pick<Identity, "role" | "staff" | "userId">;
 }) => {
   const { t } = useLingui();
+  const appOf = useAppOf(identity);
   const id = useId();
   const connected = integrations.filter(
     (integration) => integration.connections.length > 0
@@ -90,9 +104,11 @@ export const IntegrationsBand = ({
               </span>
             ))}
           </span>
-          <Text element="span" size="sm" tone="muted">
-            {t`${plural(count, { one: "# connected", other: "# connected" })}`}
-          </Text>
+          <AppsState
+            apps={connected.map((integration) =>
+              appOf(integration, { size: "sm" })
+            )}
+          />
         </span>
       )}
     </section>

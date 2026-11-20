@@ -40,6 +40,9 @@ export type {
 export type { AppIntegrationWords } from "./words";
 export { appIntegrationWords } from "./words";
 export { groupTools } from "./tools";
+export { needsYou, rollUp } from "./state";
+export { AppsState } from "./parts";
+export type { AppsStateProps } from "./parts";
 export type { ToolGroup } from "./tools";
 
 export { AppPanel } from "./panel";
@@ -67,6 +70,13 @@ const TileFact = ({ app, words }: { app: App; words: AppIntegrationWords }) => {
     return (
       <Badge tone="attention" size="sm">
         {words.needsConnect}
+      </Badge>
+    );
+  }
+  if (state === "needs-you") {
+    return (
+      <Badge tone="attention" size="sm">
+        {words.needsYou}
       </Badge>
     );
   }

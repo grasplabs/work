@@ -29,9 +29,12 @@ import {
 import { Switch } from "../../switch";
 import { useMarkTint } from "../../texture/mark-tint";
 import { grasp, media } from "../../tokens/tokens.stylex";
+import { useWords } from "../../words/words";
 import type { App, AppState, AppTool, AppToolChoice } from "./model";
+import { needsYou } from "./state";
 import { choiceUnder, choicesFor, presetOf } from "./tools";
 import type { ToolGroup } from "./tools";
+import { appIntegrationWords } from "./words";
 import type { AppIntegrationWords } from "./words";
 
 /** What Grasp may do with a group: one choice for all its tools, or Mixed where they differ. */
@@ -390,11 +393,13 @@ export const StateWord = ({
       ? words.notConnected
       : {
           works: words.works,
+          "needs-you": words.needsYou,
           "sign-in": words.signedOut,
           reconnect: words.stopped,
         }[state];
   const looks = {
     works: styles.works,
+    "needs-you": styles.attention,
     "sign-in": styles.attention,
     reconnect: styles.attention,
   };
@@ -403,6 +408,36 @@ export const StateWord = ({
     <span {...stylex.props(styles.state)}>
       <span aria-hidden="true" {...stylex.props(styles.dot, look)} />
       {word}
+    </span>
+  );
+};
+
+/** Every prop an AppsState takes. */
+export interface AppsStateProps {
+  /** The connected apps. */
+  apps: readonly App[];
+  words?: Partial<AppIntegrationWords>;
+}
+
+/**
+ * The connected apps summed up in one line, as a page's band says it: how many need someone, in
+ * amber, else how many are connected.
+ */
+export const AppsState = ({ apps, words: given }: AppsStateProps) => {
+  const words = useWords("appIntegration", appIntegrationWords, given);
+  const waiting = apps.filter(needsYou).length;
+  return (
+    <span {...stylex.props(styles.state)}>
+      <span
+        aria-hidden="true"
+        {...stylex.props(
+          styles.dot,
+          waiting > 0 ? styles.attention : styles.works
+        )}
+      />
+      {waiting > 0
+        ? words.appsNeedYou(waiting)
+        : words.connectedCount(apps.length)}
     </span>
   );
 };

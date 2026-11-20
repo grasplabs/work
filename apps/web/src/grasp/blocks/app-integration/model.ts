@@ -31,8 +31,12 @@ export interface AppTool {
   group?: string;
 }
 
-/** How a connection stands: it works, its sign-in ran out, or it must be connected anew. */
-export type AppState = "works" | "sign-in" | "reconnect";
+/**
+ * How a connection stands: it works, its sign-in ran out, or it must be connected anew. For an app
+ * with several accounts, `needs-you`: it works, but one of its accounts needs someone (an expired
+ * account beside one that works). `rollUp` (state.ts) reads an app's state from its accounts'.
+ */
+export type AppState = "works" | "needs-you" | "sign-in" | "reconnect";
 
 /** The account an app is connected with. */
 export interface AppConnection {

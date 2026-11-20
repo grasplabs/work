@@ -644,7 +644,7 @@ const Integrations = () => {
         </output>
         <div {...stylex.props(styles.lists)}>
           {overview && loaded ? (
-            <IntegrationsBand integrations={integrations} />
+            <IntegrationsBand identity={identity} integrations={integrations} />
           ) : null}
           <RecommendedApps
             identity={identity}

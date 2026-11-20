@@ -123,7 +123,7 @@ const opened = async (
     path: "/integrations/",
     component: () => (
       <>
-        <IntegrationsBand integrations={integrations} />
+        <IntegrationsBand identity={identity} integrations={integrations} />
         <RecommendedApps
           identity={identity}
           onOpen={() => {
@@ -187,7 +187,7 @@ describe("the Integrations overview", () => {
     document.body.replaceChildren();
   });
 
-  it("says how many apps are connected", async () => {
+  it("sums up the connected apps: how many need someone", async () => {
     const { host } = await opened([
       connection("microsoft", { scope: "personal", ownerUserId: "u1" }),
       connection("google", { status: "needs_reauth" }),

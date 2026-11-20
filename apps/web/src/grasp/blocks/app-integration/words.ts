@@ -20,6 +20,12 @@ export interface AppIntegrationWords {
   /** Asks for attention on a tile. */
   needsSignIn: string;
   needsConnect: string;
+  /** An app that works but has an account that needs someone: its tile, its state. */
+  needsYou: string;
+  /** How many apps need someone, said where the page sums up its apps (`AppsState`). */
+  appsNeedYou: (count: number) => string;
+  /** How many apps are connected, where none needs anyone (`AppsState`). */
+  connectedCount: (count: number) => string;
   account: string;
   connection: string;
   signedInAs: string;
@@ -94,6 +100,10 @@ export const appIntegrationWords: AppIntegrationWords = {
   allowed: (allowed, of) => `${allowed} of ${of} tools allowed`,
   needsSignIn: "Sign in again",
   needsConnect: "Connect again",
+  needsYou: "Needs you",
+  appsNeedYou: (count) =>
+    count === 1 ? "1 app needs you" : `${count} apps need you`,
+  connectedCount: (count) => `${count} connected`,
   account: "Account",
   connection: "Connection",
   signedInAs: "Signed in as",
