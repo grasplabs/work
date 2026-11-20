@@ -13,7 +13,6 @@ import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -178,12 +177,6 @@ const ownChatOf = async (
   ...replies: ProviderReply[]
 ) => {
   const chat = await chatOf(personId, ...replies);
-  await requestGranted(idp, admin, {
-    subject: chat.agent,
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
   return chat;
 };
 
@@ -198,12 +191,6 @@ const directMessageOf = async (
   ...replies: ProviderReply[]
 ) => {
   const agentId = crypto.randomUUID();
-  await requestGranted(idp, admin, {
-    subject: { type: "agent", agentId },
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
   const provider = await fakeProvider(...replies);
   const stub = workspace(env, personalWorkspaceId(personId));
   const ask = async (text: string) => {
@@ -410,12 +397,6 @@ describe("a chat's code reading the Brain's entities", setUpTime, () => {
     /** What code returned through Teams, in a direct message or a shared thread. */
     const through = async (sharedThread: boolean) => {
       const agentId = crypto.randomUUID();
-      await requestGranted(idp, admin, {
-        subject: { type: "agent", agentId },
-        object: { type: "platform" },
-        actions: ["brain"],
-        binding: "BRAIN",
-      });
       const provider = await fakeProvider(readingCode(allNames), says("Read."));
       const stub = workspace(env, personalWorkspaceId(person.userId));
       const { chatId } = await stub.askThrough(

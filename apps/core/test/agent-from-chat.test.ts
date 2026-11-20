@@ -562,7 +562,11 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
     });
     await idle(admin, chat.id);
     const messages = await messagesOf(stub, chat.id, admin.userId);
-    const code = messages.find((message) => message.role === "result");
+    // The code step's result, never the recall's before the question.
+    const code = messages.find(
+      (message) =>
+        message.role === "result" && !message.callId.startsWith("recall_")
+    );
     const listed = await admin.api.connections.agents();
 
     expect({

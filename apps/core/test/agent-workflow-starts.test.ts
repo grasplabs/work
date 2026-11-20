@@ -9,7 +9,7 @@ import { memberOf } from "../src/auth/identity.ts";
 import { readSourceVersionAs, workBrain } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { confirmHeldStart, sweepHeldStartInputs } from "../src/held-starts.ts";
-import { brainGrantRead } from "../src/history-access.ts";
+import { brainPersonRead } from "../src/history-access.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
@@ -597,19 +597,15 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     const chats = await personalChatsOf(person.userId);
     await grantStart(builder, chats.agent.agentId, workflow.id);
     const { chatId, inRun } = await chatOf(chats, person);
-    const readId = await requestGranted(idp, builder, {
-      subject: { type: "agent", agentId: chats.agent.agentId },
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: `BRAIN_${unique().toUpperCase().replaceAll("-", "_")}`,
-    });
-    // What the chat had read before its agent asked: the Brain, under that
-    // grant.
+    const named = await signedInApi(idp, "user");
+    const read = brainPersonRead(named.userId);
+    // What the chat had read before its agent asked: who knows about a
+    // topic, which names a member.
     await runInDurableObject(chats.stub, (_object, state) => {
       state.storage.sql.exec(
         "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
         chatId,
-        brainGrantRead
+        read
       );
     });
     /** A start the agent asks for under `key`, as its person confirms it. */
@@ -627,7 +623,7 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     };
 
     const kept = await confirmedRun("kept");
-    await admin.api.permissions.revoke(readId);
+    await admin.api.members.remove(named.userId);
     const revoked = await confirmedRun("revoked");
     const pinned = await env.DB.prepare(
       "SELECT DISTINCT source_id AS source, chat_id AS chat FROM run_chat_sources WHERE agent_id = ?"
@@ -638,10 +634,46 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     expect({ kept, revoked, pinned: pinned.results }).toStrictEqual({
       // Its chat's reads still readable: it runs to its end.
       kept: { status: "completed", code: null },
-      // The agent's read of what its chat read revoked: its output, which
-      // its input may have carried, never leaves it.
+      // The member its chat was told of gone: its output, which its input
+      // may have carried, never leaves it.
       revoked: { status: "failed", code: "brain.revoked" },
-      pinned: [{ source: brainGrantRead, chat: chatId }],
+      pinned: [{ source: read, chat: chatId }],
+    });
+  });
+
+  it("runs a confirmed start to its end when its chat's run carries the Brain grant's pin an earlier release wrote", async () => {
+    const person = await signedInApi(idp, "user");
+    const { workflow, builder } = await workflowFor(person.userId);
+    const chats = await personalChatsOf(person.userId);
+    await grantStart(builder, chats.agent.agentId, workflow.id);
+    const { chatId, workflows } = await chatOf(chats, person);
+    // What the chat had read before its agent asked, under the grant an
+    // earlier release checked, which its start pins onto the run.
+    await runInDurableObject(chats.stub, (_object, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', 'brain-grant', NULL)",
+        chatId
+      );
+    });
+    const held = await workflows.start(workflow.id, { who: "Ada" }, "kept");
+    const listed = await person.api.heldStarts.list();
+    const shown = listed.find(({ id }) => id === held.held);
+    const confirmed = await person.api.heldStarts.confirm(
+      held.held,
+      shown?.argsHash ?? ""
+    );
+    const pinned = await env.DB.prepare(
+      "SELECT DISTINCT source_id AS source FROM run_chat_sources WHERE agent_id = ?"
+    )
+      .bind(chats.agent.agentId)
+      .all<{ source: string }>();
+
+    expect({
+      ended: await endOf(confirmed.run ?? confirmed.start),
+      pinned: pinned.results,
+    }).toStrictEqual({
+      ended: { status: "completed", code: null },
+      pinned: [{ source: "brain-grant" }],
     });
   });
 
@@ -651,19 +683,14 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     const chats = await personalChatsOf(person.userId);
     await grantStart(builder, chats.agent.agentId, workflow.id);
     const { chatId, workflows } = await chatOf(chats, person);
-    await requestGranted(idp, builder, {
-      subject: { type: "agent", agentId: chats.agent.agentId },
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: `BRAIN_${unique().toUpperCase().replaceAll("-", "_")}`,
-    });
-    // What the chat had read before its agent asked: the Brain, under that
-    // grant, which its start pins onto the run (workflow-starts.ts).
+    // What the chat had read before its agent asked, which its start pins
+    // onto the run (workflow-starts.ts): who knows about a topic, which
+    // names the person.
     await runInDurableObject(chats.stub, (_object, state) => {
       state.storage.sql.exec(
         "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
         chatId,
-        brainGrantRead
+        brainPersonRead(person.userId)
       );
     });
     const held = await workflows.start(workflow.id, { who: "Ada" }, "kept");

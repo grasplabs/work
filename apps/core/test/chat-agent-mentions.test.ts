@@ -125,12 +125,13 @@ describe("agents mentioned in a question", slow, () => {
       ],
       // A question that addresses none goes to the last that answered.
       next: asked[2]?.includes("You answer here as Pat"),
-      // The person sees their question once, and whose each answer is.
+      // The person sees their question once, and whose each answer is;
+      // the recall before a question is a step of its own, with no words.
       shown: shown.flatMap((message) => {
         if (message.role === "user") {
           return [["user", message.text]];
         }
-        return message.role === "assistant"
+        return message.role === "assistant" && message.text !== ""
           ? [["assistant", message.agentId, message.text]]
           : [];
       }),

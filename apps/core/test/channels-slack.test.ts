@@ -1024,7 +1024,6 @@ const bindingOf = (name: string): string =>
  */
 const heldAppWriteInSlack = async (title: string, body?: string) => {
   const builder = await signedInApi(idp, "builder");
-  const admin = await signedInApi(idp, "admin");
   const { app, release } = await liveNotes(builder);
   const { slackUser, userId } = await linkedPerson();
   await builder.api.apps.members.add(app, {
@@ -1037,12 +1036,6 @@ const heldAppWriteInSlack = async (title: string, body?: string) => {
     object: { type: "app", appId: app },
     actions: ["read", "write"],
     binding: bindingOf("NOTES"),
-  });
-  await requestGranted(idp, admin, {
-    subject: { type: "agent", agentId: chatAgentId },
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: bindingOf("BRAIN"),
   });
   const depot = marker();
   await ownSource(userId, `Depot ${depot} opens at seven.`);
@@ -1155,12 +1148,6 @@ describe("a linked person's direct message in Slack", () => {
     // A direct message is the person's own chat (GRA-1821): only one
     // Slack names a direct message both ways (`im`, a `D…` channel) is
     // one, and Slack's channels and group DMs never reach a turn at all.
-    await requestGranted(idp, await signedInApi(idp, "admin"), {
-      subject: { type: "agent", agentId: chatAgentId },
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     const { slackUser, userId, api } = await linkedPerson();
     const provider = await fakeProvider(says("Noted."));
     const [depot, own, ownWord, file] = [

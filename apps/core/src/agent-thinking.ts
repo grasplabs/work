@@ -25,8 +25,7 @@ import { showThinkingName } from "./agent-messages.ts";
 // the model can act on. An accepted step is kept with the answer, as the
 // call's result (`details`), so the page plays it as it comes and again
 // later; the model is told at once, so the answer never waits on the
-// picture. Only for a chat's agent that holds the brain permission, in a
-// person's own chat (workspace.ts).
+// picture. Only in a person's own chat (chat-harness.ts).
 
 /** The brain as a step may name it: what the asker may read of it. */
 export interface ThinkingBrain {

@@ -61,10 +61,10 @@ import { heldNothing } from "./skill-needs.ts";
 //   own limits (`codeRecallOf`), so it can't name a reader, groups or a
 //   vector, and refused in the function host's fixed words
 //   (`permission.invalid_args`).
-// - The caller's grant: the App, run or agent must hold the permission to
-//   read the Brain it names, active, now, as `authorize` checks every
-//   grant (the person still a member; a chat's own permission only in
-//   that chat). Filtering a pack afterwards would make `notFound` and
+// - The caller's grant: the App or run must hold the permission to read
+//   the Brain it names, active, now, as `authorize` checks every grant
+//   (the person still a member). A chat's agent needs none: each read
+//   checks its person (`requireBrainReader`). Filtering a pack afterwards would make `notFound` and
 //   `truncated` untrue, so nothing is: whom it reads as is the scope.
 // - Whom it reads as. An App's or a workflow's recall reads what everyone
 //   in the company may read (`company`), as no person. An App's grant may
@@ -102,8 +102,10 @@ export interface RecallCaller {
   /** Where it works: a chat's own permission holds only in that chat. */
   readonly context: WorkContext;
   /**
-   * Its permission to read the Brain (`{ type: "platform" }`, `brain`):
-   * null when it holds none, and the recall is refused (and audited).
+   * An App's or a workflow's permission to read the Brain
+   * (`{ type: "platform" }`, `brain`): null when it holds none, and the
+   * recall is refused (and audited). A chat's agent needs none
+   * (`requireBrainReader`), and gives null.
    */
   readonly permissionId: PermissionId | null;
   /**
@@ -127,6 +129,35 @@ export interface RecallCaller {
    */
   readonly keep?: (pack: BrainPack) => Promise<void>;
 }
+
+/**
+ * Refuses `caller` when it may not read the Brain now: an App or a
+ * workflow without its grant to read it, active, its person still a
+ * member (`authorize`). A chat's agent needs no grant: every agent reads
+ * the Brain, as far as where its turn reads lets it (`reach`; Nick's
+ * decision on GRA-2203). Its person is checked by each read itself, as
+ * every reader of the Brain is (brain-next.ts reads them through
+ * `currentMembership`): one suspended or removed reads nothing.
+ */
+const requireBrainReader = async (
+  env: Env,
+  caller: Pick<RecallCaller, "authority" | "context" | "permissionId">
+): Promise<void> => {
+  if (caller.authority.subject.type === "agent") {
+    return;
+  }
+  if (caller.permissionId === null) {
+    throw permissionErrors.create("permission.denied", { action: "brain" });
+  }
+  await authorize(
+    env,
+    caller.authority,
+    { type: "platform" },
+    "brain",
+    caller.permissionId,
+    caller.context
+  );
+};
 
 /** Whether `input` is a recall as code asks for one (`BrainRecall`). */
 export const isBrainRecall = (input: unknown): boolean =>
@@ -183,17 +214,7 @@ export const recallFor = async (
     if (recall === undefined) {
       throw functionErrors.create("permission.invalid_args");
     }
-    if (caller.permissionId === null) {
-      throw permissionErrors.create("permission.denied", { action: "brain" });
-    }
-    await authorize(
-      env,
-      caller.authority,
-      { type: "platform" },
-      "brain",
-      caller.permissionId,
-      caller.context
-    );
+    await requireBrainReader(env, caller);
     // An App's as the company and, of its grant's teams, the person's; a
     // workflow's as the company alone; a chat's code as its person's
     // teams in their own chat (`reach`), and as the company alone
@@ -208,7 +229,7 @@ export const recallFor = async (
       personal: false,
       company: subject.type !== "agent" || caller.reach !== "teams",
       teams:
-        subject.type === "app"
+        subject.type === "app" && caller.permissionId !== null
           ? await grantTeamsOf(env, caller.permissionId)
           : [],
     });
@@ -346,10 +367,9 @@ const byName = (one: PersonWhoKnows, other: PersonWhoKnows): number =>
  * Who uploaded the documents a recall for `input`'s question finds for
  * `caller`'s person at its reach, each with that passage (`WhoKnows`), for
  * the caller to judge by. Refused as
- * `permission.invalid_args` when `input` isn't a request, as
- * `permission.denied` without the grant, and as `permission.unavailable`
- * once the person is no longer a member. Audited, answered or refused,
- * before it returns.
+ * `permission.invalid_args` when `input` isn't a request, and as
+ * `permission.unavailable` once the person is no longer a member.
+ * Audited, answered or refused, before it returns.
  */
 export const whoKnowsFor = async (
   env: Env,
@@ -371,17 +391,7 @@ export const whoKnowsFor = async (
     if (asked === undefined || asked.asOf !== undefined) {
       throw functionErrors.create("permission.invalid_args");
     }
-    if (caller.permissionId === null) {
-      throw permissionErrors.create("permission.denied", { action: "brain" });
-    }
-    await authorize(
-      env,
-      caller.authority,
-      { type: "platform" },
-      "brain",
-      caller.permissionId,
-      caller.context
-    );
+    await requireBrainReader(env, caller);
     // As the chat's code recalls: its person's teams and the company in
     // their own chat (`reach`), the company alone anywhere else. Never
     // their own store (`personal: false`): a second layer, as the shared
@@ -545,17 +555,7 @@ export const skillsCallFor = async (
     if (!request.safeParse(input).success) {
       throw functionErrors.create("permission.invalid_args");
     }
-    if (caller.permissionId === null) {
-      throw permissionErrors.create("permission.denied", { action: "brain" });
-    }
-    await authorize(
-      env,
-      caller.authority,
-      { type: "platform" },
-      "brain",
-      caller.permissionId,
-      caller.context
-    );
+    await requireBrainReader(env, caller);
     if (operation === "skills.select") {
       const skills = await selectSkillsFor(
         env,
@@ -596,7 +596,7 @@ export const skillsCallFor = async (
 //
 // - The request first, strictly (`isCodeEntitiesRequest`): it can't name
 //   a reader.
-// - The caller's grant to read the Brain, now (`authorize`).
+// - The caller's grant to read the Brain, now (`requireBrainReader`).
 // - Whom it reads as (brain-next.ts `CodeReach`), as a recall's: an App
 //   and a workflow as the company alone, whatever teams their grant names,
 //   and an App's code, in a person's call on its page while they use it
@@ -781,17 +781,7 @@ export const entitiesCallFor = async (
     if (!isCodeEntitiesRequest(operation, input)) {
       throw functionErrors.create("permission.invalid_args");
     }
-    if (caller.permissionId === null) {
-      throw permissionErrors.create("permission.denied", { action: "brain" });
-    }
-    await authorize(
-      env,
-      caller.authority,
-      { type: "platform" },
-      "brain",
-      caller.permissionId,
-      caller.context
-    );
+    await requireBrainReader(env, caller);
     read = await readFor(env, caller, operation, input);
   } catch (error) {
     const refused = inHostBrainWords(error);

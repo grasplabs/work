@@ -20,7 +20,6 @@ import {
   toolResults,
   toolStep,
 } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { breakOwnStore } from "./brain-next-own-store.ts";
 import { chatIdsOf } from "./code-step-trace.ts";
@@ -28,7 +27,7 @@ import { botConnectorEditsUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider, connectModels } from "./model-provider.ts";
 import type { FakeProvider } from "./model-provider.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { unique } from "./sign-in.ts";
 import {
   failsOnce,
   member,
@@ -175,16 +174,6 @@ const forgottenBy = async (userId: string) => {
   );
 };
 
-/** The chat's agent may read the Brain, so a turn recalls before it answers. */
-const chatAgentReadsBrain = async () => {
-  await requestGranted(idp, await signedInApi(idp, "admin"), {
-    subject: { type: "agent", agentId: chatAgentId },
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
-};
-
 describe("the agent remembering in a person's Teams direct message", () => {
   it("names on the notice what the memory replaced", slow, async () => {
     // The earlier memory's id is known once it is saved, below.
@@ -230,7 +219,6 @@ describe("the agent remembering in a person's Teams direct message", () => {
     "keeps what they say in their own store, shows the notice there, and recalls it in a later turn there and in their chat in Grasp",
     slow,
     async () => {
-      await chatAgentReadsBrain();
       const depot = `d${unique()}`;
       const word = marker();
       const { said, statement, saves } = depotSaid(depot, word);

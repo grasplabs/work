@@ -29,7 +29,6 @@ import {
   readerGroupRequestsPerTick,
 } from "../src/source-readers.ts";
 import { says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { objectsHolding, tablesHolding } from "./brain-next-traces.ts";
 import {
   consentCode,
@@ -358,12 +357,6 @@ const findsInDirectMessage = async (
   secret: string
 ): Promise<boolean> => {
   const agentId = crypto.randomUUID();
-  await requestGranted(idp, admin, {
-    subject: { type: "agent", agentId },
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
   const provider = await fakeProvider(says("Noted."));
   await workspace(env, personalWorkspaceId(personId)).askThrough(
     personId,

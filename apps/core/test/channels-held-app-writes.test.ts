@@ -180,19 +180,12 @@ const heldInTeams = async (
   }: { first?: Step; later?: readonly Step[] } = {}
 ) => {
   const builder = await signedInApi(idp, "builder");
-  const admin = await signedInApi(idp, "admin");
   const { app, release } = await liveNotes(builder);
   await requestGranted(idp, builder, {
     subject: { type: "agent", agentId: chatAgentId },
     object: { type: "app", appId: app },
     actions: ["read", "write"],
     binding: bindingOf("NOTES"),
-  });
-  await requestGranted(idp, admin, {
-    subject: { type: "agent", agentId: chatAgentId },
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: bindingOf("BRAIN"),
   });
   await fakeProvider(
     ...[first, ...later].flatMap((step) => [

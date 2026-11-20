@@ -111,19 +111,23 @@ export const runRecords = async (stub: WorkspaceStub, chatId: string) =>
   await runInDurableObject(stub, (_instance, state) =>
     state.storage.sql
       .exec<Record<string, string | number | null>>(
-        "SELECT id, tool_call_id, source_hash, source_chars, agent, compatibility_date, runtime, cpu_limit, status FROM chat_code_runs WHERE chat_id = ? ORDER BY started_at",
+        // Never the recall before a question, which every turn runs as a
+        // run of its own (turn-recall.ts names its calls `recall_…`).
+        "SELECT id, tool_call_id, source_hash, source_chars, agent, compatibility_date, runtime, cpu_limit, status FROM chat_code_runs WHERE chat_id = ? AND tool_call_id NOT LIKE 'recall\\_%' ESCAPE '\\' ORDER BY started_at",
         chatId
       )
       .toArray()
   );
 
-/** The call ID of each code step the chat's agent asked for. */
+/** The call ID of each code step the chat's agent asked for, never a recall's. */
 export const toolCallIds = async (stub: WorkspaceStub, chatId: string) => {
   const messages = await transcript(stub, chatId);
   return messages.flatMap((message) =>
     message.role === "assistant"
       ? message.content.flatMap((block) =>
-          block.type === "toolCall" ? [block.id] : []
+          block.type === "toolCall" && block.name !== "searchBrain"
+            ? [block.id]
+            : []
         )
       : []
   );

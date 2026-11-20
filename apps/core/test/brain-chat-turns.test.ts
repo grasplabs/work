@@ -35,7 +35,6 @@ import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { brainHandOvers, teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { codeStep, model, says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { allEvents, loggedEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -623,16 +622,9 @@ describe("a person's chat turn", () => {
     const topic = word();
     const marker = word();
     const person = await signedInApi(idp, "user");
-    const admin = await signedInApi(idp, "admin");
     const stub = workspace(env, personalWorkspaceId(person.userId));
     const agentId = crypto.randomUUID();
     const made = await stub.createChat("Questions", person.userId, agentId);
-    await requestGranted(idp, admin, {
-      subject: { type: "agent", agentId },
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     const teamId = crypto.randomUUID();
     const db = drizzle(env.DB);
     await db.insert(teams).values({

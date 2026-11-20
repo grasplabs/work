@@ -97,7 +97,7 @@ Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo. Issu
 ## Architecture rules
 
 - Every external call goes through connect; every model call through the model gateway in core.
-- Agents and Apps start with access to nothing; every resource needs an explicit permission.
+- Agents and Apps start with access to nothing; every resource needs an explicit permission. The one exception is the Brain: every agent, App and workflow reads it by default, as the person it acts for in that person's own chat, and otherwise only what everyone in the company may read.
 - Anything that runs on its own is a workflow. Pages never run in the background or register hooks.
 - Workflow code imports only `@grasp-os/sdk`, never `@grasp-os/runtime`.
 - Only use platform APIs that also run on workerd. Platform services sit behind adapter interfaces so the on-prem profile can swap them.

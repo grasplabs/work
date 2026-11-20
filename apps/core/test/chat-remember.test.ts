@@ -21,7 +21,6 @@ import {
   toolResults,
   toolStep,
 } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -591,7 +590,7 @@ describe("the agent remembering in a person's own chat", () => {
     "shows the check none of the agent's words that rest on a source the person may no longer read",
     slow,
     async () => {
-      const [member, admin] = await Promise.all([
+      const [member] = await Promise.all([
         signedInApi(idp, "user"),
         signedInApi(idp, "admin"),
       ]);
@@ -603,12 +602,6 @@ describe("the agent remembering in a person's own chat", () => {
         checked(true),
         says("Noted.")
       );
-      await requestGranted(idp, admin, {
-        subject: chat.agent,
-        object: { type: "platform" },
-        actions: ["brain"],
-        binding: "BRAIN",
-      });
       const source = { producer: "upload" as const, id: crypto.randomUUID() };
       const readers: SourceReaders = { kind: "owner", personId: member.userId };
       await addSource(env, {

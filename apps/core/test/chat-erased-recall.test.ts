@@ -20,7 +20,6 @@ import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { codeStep, personalChatsOf, says, setObjectEnv } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import {
@@ -101,19 +100,12 @@ const teamOf = async (...people: string[]): Promise<string> => {
 };
 
 /**
- * A new member's own chats in Grasp's app, answered by `replies`, whose
- * agent holds the `brain` grant; `chat` is a new one of them.
+ * A new member's own chats in Grasp's app, answered by `replies`; `chat`
+ * is a new one of them.
  */
 const recallingChats = async (...replies: ProviderReply[]) => {
-  const admin = await signedInApi(idp, "admin");
   const person = await signedInApi(idp, "user");
   const chats = await personalChatsOf(person.userId, ...replies);
-  await requestGranted(idp, admin, {
-    subject: chats.agent,
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
   const { chat, ask } = await chats.newChat();
   /** Whether the next turn's requests to the model carry `text`. */
   const sendsNext = async (text: string): Promise<boolean> => {
@@ -231,15 +223,8 @@ const refusingErasedOf = (namespace: object): object =>
  * whether the Workspace object held the marker after the first turn.
  */
 const teamsDirect = async () => {
-  const admin = await signedInApi(idp, "admin");
   const person = await signedInApi(idp, "user");
   const agentId = crypto.randomUUID();
-  await requestGranted(idp, admin, {
-    subject: { type: "agent", agentId },
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
   const depot = word();
   const marker = word();
   const text = `${depot} ${marker}`;

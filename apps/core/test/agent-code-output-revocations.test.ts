@@ -73,8 +73,9 @@ describe("chat agent code output", () => {
     await reply;
 
     // Gone before the step's result came: with the refused call, not after.
+    // (The recall before the question carries a result of its own first.)
     const shownAt = seen.findIndex(({ output }) => output?.text === "shown");
-    const resultAt = seen.findIndex(({ result }) => result);
+    const resultAt = seen.findIndex(({ result }, at) => result && at > shownAt);
     expect(
       seen.slice(shownAt, resultAt).some(({ output }) => output === null)
     ).toBeTruthy();
@@ -109,6 +110,13 @@ describe("chat agent code output", () => {
         await expect(
           refusalsIn(chat.id, "agent.revocation_read_failed")
         ).resolves.toStrictEqual([
+          // The recall before the question, a run of the chat's too, ended
+          // unchecked: recorded as a run's end is.
+          {
+            method: "executeCode",
+            outcome: "refused",
+            reason: "agent.revocation_read_failed",
+          },
           {
             method: "output",
             outcome: "refused",

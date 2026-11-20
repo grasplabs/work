@@ -51,7 +51,6 @@ import {
   newSource,
   add,
   textsFor,
-  chatAgentReadsBrainOnce,
 } from "./brain-next-leaks-harness.ts";
 import type { Finding } from "./brain-next-leaks-harness.ts";
 import {
@@ -113,9 +112,6 @@ import {
 
 const idp = mockIdp();
 teamsWatched();
-
-/** Grants the chat agent the Brain permission, once for the file. */
-const chatAgentReadsBrain = chatAgentReadsBrainOnce(idp);
 
 /** An item found by meaning, as `textOf` writes it: its source's id. */
 const foundByMeaningPattern =
@@ -1705,7 +1701,6 @@ describe(
       // What the turn sends the model, through a Teams direct message:
       // not the chat's stored copy of it, which keeps what a turn handed
       // over while it was current, as it keeps what was narrowed since.
-      await chatAgentReadsBrain();
       const ann = await teamsMember(idp, says("Noted."));
       const team = await newTeam(ann.userId);
       const world = newWorld("shared", newSource(), outNames);

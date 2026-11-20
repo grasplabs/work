@@ -2,6 +2,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { turnRecallMethod } from "../src/turn-recall.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -60,8 +61,10 @@ const callsOf = async (agentId: string, count: number): Promise<AuditEvent[]> =>
       const calls = events.filter(
         ({ actor, action, detail }) =>
           action === "agent.call" &&
-          // Not the catalog each turn reads for its skills.
+          // Not the catalog each turn reads for its skills, nor the recall
+          // before its question.
           detail.turn !== true &&
+          detail.method !== turnRecallMethod &&
           actor.type === "agent" &&
           actor.agentId === agentId
       );

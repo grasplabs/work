@@ -4,28 +4,26 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { addSource } from "../src/brain-next.ts";
-import { turnRecallMethod, turnRecallTool } from "../src/turn-recall.ts";
+import { turnRecallMethod } from "../src/turn-recall.ts";
 import { newTeam } from "./admin-teams.ts";
 import {
   chatOf,
   codeResults,
   codeStep,
-  model,
   personalChatsOf,
   says,
   toolResults,
   toolStep,
 } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
 // The company brain for a chat's code (`env.brain`): read as the chat's
-// person, only once the agent holds the brain permission (a platform
-// permission, `brain`), and every call recorded as the chat's agent's.
-// Its open questions are the brain's gaps (GRA-527): an answered or
-// closed one is no longer open, and an answer never reaches the agent.
+// person, by every agent with no grant (GRA-2203), and every call
+// recorded as the chat's agent's. Its open questions are the brain's gaps
+// (GRA-527): an answered or closed one is no longer open, and an answer
+// never reaches the agent.
 
 const idp = mockIdp();
 
@@ -59,51 +57,33 @@ const gapCalls = async (
   );
 
 describe("a chat's brain", setUpTime, () => {
-  it("has its open questions only once the agent holds the brain permission, and records every read", async () => {
-    const admin = await signedInApi(idp, "admin");
+  it("has its open questions with no grant, and records every read", async () => {
     const person = await signedInWithRole(idp, "user");
-    const { stub, agent, newChat } = await personalChatsOf(
+    const { stub, agent, chat, ask } = await chatOf(
       person.userId,
-      askGaps,
-      says("None I can see."),
       askGaps,
       says("None open.")
     );
-    const before = await newChat();
-    await before.ask("What's still unknown?");
-    await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
-    const after = await newChat();
-    await after.ask("What's still unknown?");
+    await ask("What's still unknown?");
 
     const calls = await gapCalls(agent.agentId, 1);
-    const beforeSteps = await codeResults(stub, before.chat.id);
-    // Once granted, the turn recalls for the question before the model's
-    // first request (turn-recall.ts): its own search step, then the
-    // model's code step.
-    const [read] = await codeResults(stub, after.chat.id);
-    const [recalled] = await toolResults(stub, after.chat.id);
+    // The turn recalls for the question before the model's first request
+    // (turn-recall.ts): its own search step, then the model's code step.
+    const [read] = await codeResults(stub, chat.id);
+    const [recalled] = await toolResults(stub, chat.id, { recalls: true });
     expect({
-      before: beforeSteps.map(({ text }) => text),
       recalled:
         recalled?.tool === "searchBrain" &&
         recalled.text.startsWith('Returned:\n{"note":'),
-      after: read?.text,
+      read: read?.text,
       calls: calls.map(({ actor, detail }) => ({
         onBehalfOf: actor.type === "agent" ? actor.onBehalfOf : null,
         outcome: detail.outcome,
         reason: detail.reason,
       })),
     }).toStrictEqual({
-      // Without the permission, no recall step and no `env.brain` at
-      // all: nothing is called, so nothing is refused.
-      before: [expect.stringContaining("This chat has no API named env.brain")],
       recalled: true,
-      after: "Returned:\n[]",
+      read: "Returned:\n[]",
       calls: [{ onBehalfOf: person.userId, outcome: "ok", reason: null }],
     });
   });
@@ -139,22 +119,16 @@ describe("a chat's brain", setUpTime, () => {
     await admin.api.brain.addRecords(records);
     const secret = "Refunds go through Ann, cell 555 0100.";
     await member.api.brain.answerGap("gap-answered", secret);
-    const { stub, agent, newChat } = await personalChatsOf(
+    const { stub, newChat } = await personalChatsOf(
       member.userId,
       askGaps,
       says("One is open.")
     );
-    await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     const { chat, ask } = await newChat();
     await ask("What's still unknown?");
 
     // The recall before the first request, then the model's own read.
-    const [recalled] = await toolResults(stub, chat.id);
+    const [recalled] = await toolResults(stub, chat.id, { recalls: true });
     const [read] = await codeResults(stub, chat.id);
     const text = read?.text ?? "";
     expect(recalled?.text).not.toContain(secret);
@@ -170,64 +144,45 @@ describe("a chat's brain", setUpTime, () => {
     ]);
   });
 
-  it("is offered only once the agent holds the brain permission: without it no call is refused, and building goes on", async () => {
+  it("is offered with no grant, as the search tool and `env.brain` from the first request, and both find what the person's team may read", async () => {
     const admin = await signedInApi(idp, "admin");
-    const builder = await signedInApi(idp, "builder");
+    const person = await signedInApi(idp, "user");
     const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
     const fact = `The depot opens at ${unique()}`;
     await addSource(env, {
       source: { producer: "upload", id: crypto.randomUUID() },
       change: crypto.randomUUID(),
       text: `Depot ${word}: ${fact}.`,
-      // A team's of the builder's: the agent reads as their teams.
-      readers: { kind: "team", teamId: await newTeam(admin, [builder]) },
+      // A team's of the person's: the agent reads as their teams.
+      readers: { kind: "team", teamId: await newTeam(admin, [person]) },
     });
-    const app = await builder.api.apps.create({ name: `Depot ${unique()}` });
-    const { stub, agent, provider, newChat } = await personalChatsOf(
-      builder.userId,
-      toolStep("writeFile", { app: app.id, files: { "notes.md": "Depot" } }),
-      says("Written."),
+    const { stub, chat, provider, ask } = await chatOf(
+      person.userId,
       toolStep("searchBrain", { question: word }),
       says("It opens then.")
     );
-    const forApp = await builder.api.chats.create("App changes");
-    await stub.ask(forApp.id, { text: "Note the depot.", model });
-    const withoutGrant = provider.requests.length;
-    await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
-    const { chat, ask } = await newChat();
     await ask("When does the depot open?");
 
-    const offered = (from: number, to?: number) =>
-      provider.requests.slice(from, to).map(({ body }) => {
-        const sent = JSON.stringify(body);
-        return {
-          tool: sent.includes('"name":"searchBrain"'),
-          api: sent.includes("env.brain:"),
-        };
-      });
-    const built = await toolResults(stub, forApp.id);
-    const searched = await toolResults(stub, chat.id);
+    const [first] = provider.requests.map(({ body }) => {
+      const sent = JSON.stringify(body);
+      return {
+        tool: sent.includes('"name":"searchBrain"'),
+        api: sent.includes("env.brain:"),
+      };
+    });
+    const searched = [
+      ...(await toolResults(stub, chat.id, { recalls: true })),
+      ...(await toolResults(stub, chat.id)),
+    ];
     expect({
-      without: offered(0, withoutGrant),
-      built: built.map(({ tool, isError }) => [tool, isError]),
-      with: offered(withoutGrant).at(0),
+      first,
       searched: searched
         .filter(({ tool }) => tool === "searchBrain")
         .map(({ isError, text }) => [isError, text.includes(fact)]),
     }).toStrictEqual({
-      without: Array.from({ length: withoutGrant }, () => ({
-        tool: false,
-        api: false,
-      })),
-      built: [["writeFile", false]],
-      with: { tool: true, api: true },
+      first: { tool: true, api: true },
       // The recall before the question, then the model's own search: both
-      // find the note of the builder's team.
+      // find the note of the person's team.
       searched: [
         [false, true],
         [false, true],
@@ -235,8 +190,7 @@ describe("a chat's brain", setUpTime, () => {
     });
   });
 
-  it("recalls nothing before a question while the agent lacks the brain permission, and recalls once it holds it", async () => {
-    const admin = await signedInApi(idp, "admin");
+  it("recalls before every question with no grant", async () => {
     const person = await signedInWithRole(idp, "user");
     const depot = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
     const fact = `Depot ${depot} opens at seven`;
@@ -246,28 +200,20 @@ describe("a chat's brain", setUpTime, () => {
       text: fact,
       readers: { kind: "owner", personId: person.userId },
     });
-    const { stub, chat, provider, ask, agent } = await chatOf(
+    const { stub, chat, provider, ask } = await chatOf(
       person.userId,
-      says("I can't look."),
-      says("Seven.")
+      says("Seven."),
+      says("Still seven.")
     );
     const question = `When does depot ${depot} open?`;
 
     await ask(question);
-    await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     await ask(question);
 
     /** Each request's own recall part, if it carries one. */
     const recalled = provider.requests.map(({ body }) =>
       JSON.stringify(body).includes("[Recall ")
     );
-    // Once the granted turn's recall is in the log: the first turn's
-    // would be before it.
     const recalls = await vi.waitFor(
       async () => {
         const logged = await allEvents();
@@ -277,22 +223,20 @@ describe("a chat's brain", setUpTime, () => {
             detail.method === turnRecallMethod &&
             detail.chat === chat.id
         );
-        expect(events.length).toBeGreaterThan(0);
+        expect(events).toHaveLength(2);
         return events;
       },
       { timeout: 10_000, interval: 50 }
     );
-    const results = await toolResults(stub, chat.id);
-    const steps = results.filter(({ tool }) => tool === turnRecallTool);
+    const steps = await toolResults(stub, chat.id, { recalls: true });
     expect({
       recalled,
       steps: steps.map(({ text }) => text.includes(fact)),
       recalls: recalls.length,
     }).toStrictEqual({
-      // The first request, before the grant, carried none.
-      recalled: [false, true],
-      steps: [true],
-      recalls: 1,
+      recalled: [true, true],
+      steps: [true, true],
+      recalls: 2,
     });
   });
 });
