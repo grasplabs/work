@@ -62,8 +62,10 @@ import { saveFirstInstructions } from "./unsaved-instructions.ts";
 // `makeOwnAgent`), which reaches them alone, has no kinds of work or
 // schedule of its own, and which they may offer the company later. Anyone
 // of the company makes one of their own; only its admins one for the
-// company, and only they are asked who may use it, what it may do and
-// when it works. The rest (web, workflows and Apps access, its effort) is
+// company. Who may use it is asked first, and only where there is a
+// choice, so the questions after it are the ones its answer leaves: what
+// it may do and when it works only for one of the company's. An admin's
+// starts as the company's, for everyone. The rest (web, workflows and Apps access, its effort) is
 // asked as Ruben decided and waits on core (.context/core-needs.md).
 // Should its instructions not save once it is made, its page opens on
 // Instructions with them as an unsaved draft (unsaved-instructions.ts).
@@ -184,8 +186,10 @@ const Becoming = ({ setup, step }: { setup: Setup; step: Step }) => {
       follow
       aria-label={named ? setup.name : t`The new agent`}
       look={look}
-      // Large while it is being named, smaller once the questions need the room.
-      size={step === "name" || step === "job" ? "lg" : "md"}
+      // Large until it is named, smaller once the questions need the room.
+      size={
+        step === "audience" || step === "name" || step === "job" ? "lg" : "md"
+      }
       state={poseAt(step, named)}
     />
   );
@@ -257,13 +261,15 @@ export const ManualAgent = ({
   // Who it may be for: one of their own only while the company lets them,
   // the company's only for its admins.
   const offered = audiences.filter((each) => (each === "me" ? own : company));
-  const asked = company
-    ? steps
-    : steps.filter((each) => !companySteps.has(each));
   const [setup, setSetup] = useState<Setup>({
     ...blank,
-    audience: offered[0] ?? blank.audience,
+    audience: company ? "everyone" : "me",
   });
+  const asked = steps.filter((each) =>
+    each === "audience"
+      ? offered.length > 1
+      : setup.audience !== "me" || !companySteps.has(each)
+  );
   const [at, setAt] = useState(0);
   // The setup, then the agent coming to life while core makes it, then made.
   const [phase, setPhase] = useState<"setup" | "making" | "made">("setup");

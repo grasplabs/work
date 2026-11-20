@@ -2103,10 +2103,6 @@ msgstr "Access for who you add"
 msgid "Access isn't shown"
 msgstr "Access isn't shown"
 
-#: src/agents/agents-overview.tsx
-msgid "Access not shown"
-msgstr "Access not shown"
-
 #: src/apps/access-view.tsx
 msgid "Access to {name}"
 msgstr "Access to {name}"
@@ -20460,17 +20456,15 @@ msgid "Who can talk to him"
 msgstr "Who can talk to him"
 
 #: src/agents/setup/audience-step.tsx
-msgid "Who can use {name}"
-msgstr "Who can use {name}"
-
-#: src/agents/setup/audience-step.tsx
-msgid "Who can use {name}?"
-msgstr "Who can use {name}?"
-
 #: src/agents/setup/review-step.tsx
 #: src/frame/part-words.tsx
 msgid "Who can use it"
 msgstr "Who can use it"
+
+#: src/agents/setup/audience-step.tsx
+#: src/routes/_shell.agents.new.tsx
+msgid "Who can use it?"
+msgstr "Who can use it?"
 
 #: src/interview/words.ts
 msgid "Who does it"

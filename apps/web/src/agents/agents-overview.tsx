@@ -55,13 +55,11 @@ import type { OwnAgentsAdmin } from "./own-agents-admin.tsx";
 // keys, grows three facts inside the card: whether it works on its own and when next, its model,
 // and this month's use.
 //
-// An admin's agents stand under two tabs, by whom each answers: My agents, their own agents and
-// the company's that answer nobody else yet, and Organization, the ones that answer everyone or
-// some teams, the company's first among them, with the agents people offered the company
-// (agent-share.tsx) and people's own agents (own-agents-admin.tsx) under them. Core keeps no maker
-// of the company's agents, so one that answers nobody else is every admin's. The tab is in the
-// address (`?tab=`). Anyone else has only their own and the agents shared with them, and so no
-// tabs.
+// An admin's agents stand under two tabs: My agents, their own agents and nobody else's, and
+// Organization, every agent of the company, the company's first among them, with the agents people
+// offered the company (agent-share.tsx) and people's own agents (own-agents-admin.tsx) under them.
+// The tab is in the address (`?tab=`). Anyone else has only their own and the agents shared with
+// them, and so no tabs.
 
 /** The overview's tabs, by the names its address carries. */
 export const agentsTabs = ["mine", "organization"] as const;
@@ -163,16 +161,6 @@ const shownOf = (
   }));
 };
 
-/**
- * The tab an agent stands under: My agents while it answers nobody else, Organization once it
- * answers everyone or some teams, as the company's first always does and one whose access core
- * didn't say.
- */
-const tabOf = ({ managed }: Shown): AgentsTab =>
-  managed?.first === false && managed.settings?.audience.who === "nobody"
-    ? "mine"
-    : "organization";
-
 /** The wake-up that ran last, if any did. */
 const lastRunOf = (wakes: readonly AgentWake[]): AgentWake | undefined =>
   wakes
@@ -188,8 +176,8 @@ const failed = (wake: AgentWake | undefined): boolean =>
 
 /** What a card says of an agent beyond its name and job. */
 interface Facts {
-  /** Whom it answers, as the pill at the card's foot. */
-  audience: string;
+  /** Whom it answers, as the pill at the card's foot; none where core didn't say. */
+  audience: string | undefined;
   /** What grows inside the card: on its own, its model, this month. */
   details: AgentCardFact[];
   /** Its last run didn't start. */
@@ -197,9 +185,8 @@ interface Facts {
 }
 
 /**
- * What an admin's card says of an agent before it is opened. Whom it answers: just the person while
- * nobody else can use it, else everyone or its teams, or that it isn't shown where core didn't say,
- * never passed off as everyone. Then whether it works on its own and when next, its model, and this
+ * What an admin's card says of an agent before it is opened. Whom it answers: everyone, its teams or
+ * nobody yet, and nothing where core didn't say, never passed off as everyone. Then whether it works on its own and when next, its model, and this
  * month's use.
  */
 const useFacts = (teams: StephenReach["teams"]) => {
@@ -214,11 +201,9 @@ const useFacts = (teams: StephenReach["teams"]) => {
       minute: "2-digit",
     }).format(new Date(iso));
   return ({ settings, first, model, usage, wakes }: Managed): Facts => {
-    let audience = t`Access not shown`;
+    let audience: string | undefined;
     if (first) {
       audience = t`Everyone`;
-    } else if (settings?.audience.who === "nobody") {
-      audience = t`Just for me`;
     } else if (settings !== undefined) {
       audience = audienceLine(settings.audience);
     }
@@ -387,9 +372,9 @@ export const AgentTabsWaiting = ({ tab }: { tab: AgentsTab | undefined }) => (
 );
 
 /**
- * An admin's agents under their two tabs, the chosen one's shown: their `mine` and the company's
- * that answer nobody else under My agents, and what an admin keeps of the company's (`company`)
- * under Organization.
+ * An admin's agents under their two tabs, the chosen one's shown: their own (`mine`) under My
+ * agents, and every agent of the company with what an admin keeps of it (`company`) under
+ * Organization.
  */
 const AgentTabs = ({
   mine,
@@ -407,10 +392,6 @@ const AgentTabs = ({
   onTab: (tab: AgentsTab) => void;
 }) => {
   const { t } = useLingui();
-  const under = (each: AgentsTab) =>
-    agents.filter((agent) => tabOf(agent) === each);
-  const count = (each: AgentsTab) =>
-    under(each).length + (each === "mine" ? mine.length : 0);
   return (
     <Tabs
       onValueChange={(value) => {
@@ -419,14 +400,14 @@ const AgentTabs = ({
           onTab(chosen);
         }
       }}
-      // With no tab in the address, the first with agents in it.
-      value={tab ?? agentsTabs.find((each) => count(each) > 0) ?? "mine"}
+      // With no tab in the address, My agents while there are any, else the company's.
+      value={tab ?? (mine.length > 0 ? "mine" : "organization")}
     >
       <div {...stylex.props(styles.tabsRoom)}>
         <AgentTabList />
       </div>
       <TabsContent value="mine">
-        {count("mine") === 0 ? (
+        {mine.length === 0 ? (
           <Empty>
             <EmptyHeader>
               <EmptyMedia picture="nothing" />
@@ -436,17 +417,13 @@ const AgentTabs = ({
             </EmptyHeader>
           </Empty>
         ) : (
-          <AgentGroups agents={under("mine")} facts={facts} mine={mine} />
+          <AgentGrid agents={mine} facts={facts} label={t`Your agents`} />
         )}
       </TabsContent>
       <TabsContent value="organization">
         {/* Never empty: the company's first agent is always the organization's. */}
         <div {...stylex.props(styles.groups)}>
-          <AgentGrid
-            agents={under("organization")}
-            facts={facts}
-            label={t`Agents`}
-          />
+          <AgentGrid agents={agents} facts={facts} label={t`Agents`} />
           {company}
         </div>
       </TabsContent>

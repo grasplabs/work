@@ -666,7 +666,7 @@ describe("the company's agents, on pages of their own", () => {
       }).toStrictEqual({ listed: true, takeOn: null });
     });
 
-    it("shows an admin every agent under the tab for whom it answers, each card opening its page with whom it answers at its foot", async () => {
+    it("shows an admin every agent of the company under Organization, each card opening its page with whom it answers at its foot", async () => {
       await mounted(
         <Overview
           makes
@@ -678,27 +678,21 @@ describe("the company's agents, on pages of their own", () => {
           usable={[chatAgent(stephen)]}
         />
       );
-      // With no tab in the address, the first with agents in it: Milan
-      // answers nobody else yet.
-      const mine = { tabs: tabs(), cards: cards() };
-      await press(tabNamed("Organization"));
+      // With no tab in the address and none of their own, the company's:
+      // Milan too, though he answers nobody yet.
+      const organization = { tabs: tabs(), cards: cards() };
+      await press(tabNamed("My agents"));
       expect({
-        mine: {
-          tabs: mine.tabs,
-          cards: mine.cards.map(({ name, to, chat }) => ({ name, to, chat })),
-        },
         organization: {
-          tabs: tabs(),
-          cards: cards().map(({ name, to, chat }) => ({ name, to, chat })),
+          tabs: organization.tabs,
+          cards: organization.cards.map(({ name, to, chat }) => ({
+            name,
+            to,
+            chat,
+          })),
         },
+        mine: cards(),
       }).toStrictEqual({
-        mine: {
-          tabs: [
-            { name: "My agents", chosen: true },
-            { name: "Organization", chosen: false },
-          ],
-          cards: [{ name: "Milan", to: "/agents/agent-milan", chat: [] }],
-        },
         organization: {
           tabs: [
             { name: "My agents", chosen: false },
@@ -707,18 +701,19 @@ describe("the company's agents, on pages of their own", () => {
           cards: [
             { name: "Stephen", to: "/agents/organization", chat: [] },
             { name: "Claire", to: "/agents/agent-claire", chat: [] },
+            { name: "Milan", to: "/agents/agent-milan", chat: [] },
           ],
         },
+        mine: [],
       });
-      const [milansCard] = mine.cards;
-      const [stephensCard, clairesCard] = cards();
+      const [stephensCard, clairesCard, milansCard] = organization.cards;
       expect({
         // Whom each answers, and how it stands.
         claire: clairesCard?.text.includes("Finance"),
         stephen: ["Everyone", "Last run failed"].map((words) =>
           stephensCard?.text.includes(words)
         ),
-        milan: ["Just for me", "Paused"].map((words) =>
+        milan: ["Nobody yet", "Paused"].map((words) =>
           milansCard?.text.includes(words)
         ),
         newAgent: document.querySelector("a[href='/agents/new']") !== null,
@@ -771,7 +766,7 @@ describe("the company's agents, on pages of their own", () => {
       });
     });
 
-    it("puts an admin's own agents under My agents, before the company's that answer nobody else", async () => {
+    it("puts an admin's own agents under My agents, and none of the company's", async () => {
       const scribe = agentOf("agent-scribe", "Scribe", { ownerId: "user-me" });
       await mounted(
         <Overview
@@ -791,10 +786,7 @@ describe("the company's agents, on pages of their own", () => {
           { name: "My agents", chosen: true },
           { name: "Organization", chosen: false },
         ],
-        cards: [
-          { name: "Scribe", to: "/agents/agent-scribe", chat: [] },
-          { name: "Milan", to: "/agents/agent-milan", chat: [] },
-        ],
+        cards: [{ name: "Scribe", to: "/agents/agent-scribe", chat: [] }],
         alone: true,
       });
     });
@@ -946,7 +938,7 @@ describe("the company's agents, on pages of their own", () => {
       ).toStrictEqual([true, true, true, true, true]);
     });
 
-    it("says an agent's access isn't shown where core didn't say it, never that it answers everyone", async () => {
+    it("says nothing of whom an agent answers where core didn't say it, never that it answers everyone", async () => {
       // As for an admin among Grasp's staff, whom core refuses the read.
       const unread: ManagedAgents = { ...managed, settings: {} };
       await mounted(
@@ -961,8 +953,9 @@ describe("the company's agents, on pages of their own", () => {
       const [firstCard, clairesCard] = cards();
       const onCards = {
         first: firstCard?.text.includes("Everyone"),
-        claire: clairesCard?.text.includes("Access not shown"),
+        // No pill: neither everyone nor nobody.
         claireEveryone: clairesCard?.text.includes("Everyone"),
+        claireNobody: clairesCard?.text.includes("Nobody yet"),
       };
       act(() => {
         root?.unmount();
@@ -992,8 +985,8 @@ describe("the company's agents, on pages of their own", () => {
         everyone: document.body.textContent?.includes("Everyone"),
       }).toStrictEqual({
         first: true,
-        claire: true,
         claireEveryone: false,
+        claireNobody: false,
         access: true,
         everyone: false,
       });
