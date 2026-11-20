@@ -527,7 +527,11 @@ const ToDo = ({
     };
   }, []);
 
-  const failed = notLoaded.flatMap((part) => notLoadedText(part, i18n) ?? []);
+  // Each reason once: when several reads fail for the same reason (Grasp
+  // can't be reached), it is said once, not once per read.
+  const failed = [
+    ...new Set(notLoaded.flatMap((part) => notLoadedText(part, i18n) ?? [])),
+  ];
   if (items.length === 0) {
     return (
       <div {...stylex.props(styles.list, styles.listEmpty)}>

@@ -25,6 +25,7 @@ import { z } from "zod";
 
 import { PagePanelProvider, usePagePanelSlot } from "../frame/page-panel.tsx";
 import { AppShell } from "../grasp/app-shell/index.ts";
+import type { Loaded } from "../load-from-core.tsx";
 import { InboxPage } from "./inbox-page.tsx";
 import { inboxItems } from "./items.ts";
 import type { Waiting } from "./waiting.ts";
@@ -130,7 +131,9 @@ const shown = async (
   gaps: Gap[],
   width: number,
   at = "/inbox",
-  held: PendingAction[] = []
+  held: PendingAction[] = [],
+  /** The reads that failed, as the page's loader hands them over. */
+  notLoaded: Loaded<unknown>[] = []
 ) => {
   windowOf(width);
   let open = gaps;
@@ -200,7 +203,7 @@ const shown = async (
             { role: "admin", staff: false, name: "Ada Admin" },
             "2026-11-17T12:00:00.000Z"
           )}
-          notLoaded={[]}
+          notLoaded={notLoaded}
         />
       </Frame>
     );
@@ -292,6 +295,13 @@ describe("the inbox in the shell", () => {
     document.body.replaceChildren();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("says once why nothing loaded, however many reads failed for that reason", async () => {
+    const offline: Loaded<unknown> = { state: "offline" };
+    await shown([], 1440, "/inbox", [], [offline, offline, offline]);
+    const said = "Grasp can't be reached right now. Try again in a moment.";
+    expect(document.body.textContent?.split(said)).toHaveLength(2);
   });
 
   it("shows the first item in the shell's panel beside the list, and J and K walk what waits", async () => {
