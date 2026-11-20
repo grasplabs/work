@@ -7,14 +7,6 @@ import { useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";
 
 import { formatNumber } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-  EmptyDescription,
-} from "../grasp/empty/index.ts";
 import { Workflow } from "../grasp/icons/index.ts";
 import {
   Item,
@@ -29,17 +21,14 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "../grasp/popover/index.ts";
-import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import type { Integration } from "./integrations.ts";
 import { workflowsOf } from "./integrations.ts";
 
 // Which workflows use an app, as the prototype shows them: "Used by N
-// workflows" on its row in Integrations, opening the list of them
-// (`components/integration-row.tsx`), and its page's Workflows tab
-// (`routes/integrations/$integrationId.tsx`). Each opens the workflow's
-// page. They come from a read of their own, which the rest of either page
-// never waits on.
+// workflows" on its row (`components/integration-row.tsx`), opening the
+// list of them, each opening the workflow's page. They come from a read
+// of their own, which the rest of the page never waits on.
 
 /** Which workflows use each connection, as the page reads it. */
 export type ConnectionUses = Promise<Loaded<ConnectionWorkflows[]>>;
@@ -117,67 +106,5 @@ export const UsedBy = ({
 }) => (
   <Await fallback={null} promise={uses}>
     {(loaded) => <UsedByCount workflows={usingOf(integration, loaded)} />}
-  </Await>
-);
-
-/**
- * The workflows that use the app, on its page's Workflows tab: each opens
- * its workflow; or that none does yet, or why that can't be read.
- */
-const WorkflowList = ({
-  uses,
-  workflows,
-  app,
-}: {
-  uses: Loaded<unknown>;
-  workflows: readonly ConnectionWorkflow[];
-  app: string;
-}) => {
-  const { i18n, t } = useLingui();
-  if (uses.state !== "ready") {
-    return (
-      <Empty size="sm" tone="danger">
-        <EmptyHeader>
-          <EmptyMedia />
-          <EmptyTitle />
-          <EmptyDescription>{notLoadedText(uses, i18n)}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    );
-  }
-  if (workflows.length === 0) {
-    return (
-      <Empty size="sm">
-        <EmptyHeader>
-          <EmptyDescription>{t`No workflow uses ${app} yet.`}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    );
-  }
-  return (
-    <ItemGroup aria-label={t`Workflows`} separated>
-      {workflows.map((workflow) => (
-        <WorkflowItem key={workflow.id} workflow={workflow} />
-      ))}
-    </ItemGroup>
-  );
-};
-
-/** `WorkflowList` once the workflows are read. */
-export const WorkflowsUsing = ({
-  integration,
-  uses,
-}: {
-  integration: Integration;
-  uses: ConnectionUses;
-}) => (
-  <Await fallback={<LoadingLines />} promise={uses}>
-    {(loaded) => (
-      <WorkflowList
-        app={integration.name}
-        uses={loaded}
-        workflows={usingOf(integration, loaded)}
-      />
-    )}
   </Await>
 );

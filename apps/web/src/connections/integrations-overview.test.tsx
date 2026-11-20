@@ -12,19 +12,23 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useNavigate,
 } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { IntegrationTile, TileGrid } from "./integration-tile.tsx";
+import { ItemGrid } from "../grasp/item/index.ts";
+import { IntegrationTile } from "./integration-tile.tsx";
 import { IntegrationsHeader } from "./integrations-header.tsx";
 import { integrationsOf } from "./integrations.ts";
+import type { Integration } from "./integrations.ts";
 
 // The Integrations overview as people meet it: the header card says how
 // many apps Grasp reaches and names the one that needs someone to sign in
-// again, with its fix; every app is a tile that opens it over the page.
+// again, with its fix; every app is the library's tile, saying where it
+// stands, that opens it over the page.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -67,12 +71,38 @@ const connection = (
 let root: Root | undefined;
 
 /** The overview's header and tiles at `/integrations`, and the router, to read where a press went. */
-const admin = { role: "admin", staff: false } as const;
-const member = { role: "user", staff: false } as const;
+const admin = { role: "admin", staff: false, userId: "u1" } as const;
+const member = { role: "user", staff: false, userId: "u2" } as const;
+
+/** The tiles, each opening its app over the page as the overview does (`?app=`). */
+const Tiles = ({
+  integrations,
+  identity,
+}: {
+  integrations: readonly Integration[];
+  identity: { role: "admin" | "user"; staff: boolean; userId: string };
+}) => {
+  const navigate = useNavigate({ from: "/integrations/" });
+  return (
+    <ItemGrid aria-label="Apps">
+      {integrations.map((integration) => (
+        <IntegrationTile
+          identity={identity}
+          integration={integration}
+          key={integration.key}
+          onOpen={(key) => {
+            void navigate({ search: { app: key } });
+          }}
+          open={false}
+        />
+      ))}
+    </ItemGrid>
+  );
+};
 
 const opened = async (
   connections: ListedConnection[],
-  identity: { role: "admin" | "user"; staff: boolean } = admin
+  identity: { role: "admin" | "user"; staff: boolean; userId: string } = admin
 ) => {
   const integrations = integrationsOf(
     [
@@ -89,16 +119,7 @@ const opened = async (
     component: () => (
       <>
         <IntegrationsHeader identity={identity} integrations={integrations} />
-        <TileGrid label="Apps">
-          {integrations.map((integration) => (
-            <IntegrationTile
-              identity={identity}
-              integration={integration}
-              key={integration.key}
-              open={false}
-            />
-          ))}
-        </TileGrid>
+        <Tiles identity={identity} integrations={integrations} />
       </>
     ),
   });
@@ -132,13 +153,13 @@ const heard = (element: HTMLElement): string => {
   return copy.textContent ?? "";
 };
 
-/** Where pressing `link` sent the page: the app it opened. */
+/** Where pressing `control` (a link, or a tile's button) sent the page: the app it opened. */
 const appAfter = async (
   router: Awaited<ReturnType<typeof opened>>["router"],
-  link: HTMLAnchorElement | null | undefined
+  control: HTMLElement | null | undefined
 ): Promise<string | null> => {
   await act(async () => {
-    link?.click();
+    control?.click();
     await Promise.resolve();
   });
   return new URLSearchParams(router.state.location.searchStr).get("app");
@@ -168,12 +189,12 @@ describe("the Integrations overview", () => {
     await expect(appAfter(router, fix)).resolves.toBe("native:google");
   });
 
-  it("has an admin connect a toolkit again from its Sheet, as it can't be signed in to again", async () => {
+  it("has an admin connect a toolkit again from its panel, as it can't be signed in to again", async () => {
     const { host, router } = await opened([
       connection("acme-crm", { source: "composio", status: "needs_reauth" }),
     ]);
     expect(host.textContent).toContain(
-      "Acme CRM stopped working. Disconnect it and connect it again"
+      "Acme CRM stopped working. Connect it again"
     );
     const open = [...host.querySelectorAll("a")].find(
       (link) => link.textContent === "Open Acme CRM"
@@ -224,8 +245,8 @@ describe("the Integrations overview", () => {
       "Google WorkspaceSign in again",
       "Acme CRM3 tools",
     ]);
-    await expect(appAfter(router, tiles[2]?.querySelector("a"))).resolves.toBe(
-      "composio:acme-crm"
-    );
+    await expect(
+      appAfter(router, tiles[2]?.querySelector("button"))
+    ).resolves.toBe("composio:acme-crm");
   });
 });

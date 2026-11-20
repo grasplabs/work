@@ -1,4 +1,3 @@
-import type { CatalogTool } from "@grasp-os/shared/connect";
 import { catalogGroups } from "@grasp-os/shared/connect-names";
 import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -23,8 +22,9 @@ import {
   HttpConnections,
   httpConnectionsMatching,
 } from "../connections/http-connections.tsx";
-import { IntegrationInspector } from "../connections/integration-inspector.tsx";
-import { IntegrationTile, TileGrid } from "../connections/integration-tile.tsx";
+import { IntegrationPanel } from "../connections/integration-panel.tsx";
+import { IntegrationTile } from "../connections/integration-tile.tsx";
+import type { OpenApp } from "../connections/integration-tile.tsx";
 import { loadIntegrations } from "../connections/integrations-data.ts";
 import { IntegrationsHeader } from "../connections/integrations-header.tsx";
 import { IntegrationsSkeleton } from "../connections/integrations-skeleton.tsx";
@@ -36,8 +36,6 @@ import type {
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
 import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
-import type { ConnectionUses } from "../connections/workflows-using.tsx";
-import type { CoreConnection } from "../core-connection.ts";
 import { formatNumber } from "../format.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -59,12 +57,11 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
+import { ItemGrid } from "../grasp/item/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
-import { Sheet, SheetContent, SheetTitle } from "../grasp/sheet/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
-import type { Loaded } from "../load-from-core.tsx";
 
 // Integrations: what Grasp can reach. A header card says it at a glance,
 // a brain in dots with a nerve into it for every connected app
@@ -74,8 +71,10 @@ import type { Loaded } from "../load-from-core.tsx";
 // each kind of app, a few of each. The kinds themselves stand in the
 // sidebar (integrations-sidebar.tsx), each opening that kind whole here
 // (`?group=`); the search beside "Request app" narrows every app. An app
-// opens in a Sheet over the page (`?app=`), which never squeezes the
-// tiles, and its own page holds everything rarely changed. Outside APIs
+// opens in a panel over the page (`?app=`), which never squeezes the
+// tiles, and its own page holds everything rarely changed. Tiles, panel
+// and page are the library's app parts (Grasp UI's app-integration
+// block), drawn from one App each (connections/app-of.tsx). Outside APIs
 // an admin approved, the apps people asked for and what an admin still
 // has to revoke by hand follow. Core's callback sends a flow that failed
 // back here with `connectionError=<code>`, and one that worked with
@@ -158,35 +157,6 @@ const Search = ({ q }: { q: string | undefined }) => {
   );
 };
 
-/** An app's tools, as one read of them: the same read each time it opens. */
-interface ToolsRead {
-  tools: Promise<Loaded<CatalogTool[]>>;
-}
-
-/** Each app's tools, read once a tab first opens it, kept for as long as the tab is. */
-const toolsRead = new WeakMap<CoreConnection, Map<string, ToolsRead>>();
-
-/**
- * `integration`'s tools: read now, or the read from before, so the panel
- * waits for one read, not a new one with every render.
- */
-const toolsOf = (core: CoreConnection, integration: Integration): ToolsRead => {
-  const known = toolsRead.get(core) ?? new Map<string, ToolsRead>();
-  toolsRead.set(core, known);
-  const read = known.get(integration.key) ?? {
-    tools: loadFromCore(
-      core,
-      async (session) =>
-        await session.connections.catalogTools(
-          integration.source,
-          integration.id
-        )
-    ),
-  };
-  known.set(integration.key, read);
-  return read;
-};
-
 /** A titled run of tiles, its count beside the title. */
 const Tiles = ({
   title,
@@ -217,10 +187,12 @@ const Connected = ({
   sections,
   uses,
   open,
+  onOpen,
 }: {
   sections: IntegrationSections;
   uses: readonly ConnectionWorkflows[] | undefined;
   open: string | undefined;
+  onOpen: OpenApp;
 }) => {
   const { identity } = Route.useRouteContext();
   const { t } = useLingui();
@@ -234,17 +206,18 @@ const Connected = ({
   });
   return (
     <Tiles count={shown.length} title={title}>
-      <TileGrid label={title}>
+      <ItemGrid aria-label={title}>
         {shown.map((integration) => (
           <IntegrationTile
             identity={identity}
             integration={integration}
             key={integration.key}
+            onOpen={onOpen}
             open={integration.key === open}
             uses={uses}
           />
         ))}
-      </TileGrid>
+      </ItemGrid>
     </Tiles>
   );
 };
@@ -254,10 +227,12 @@ const Drawn = ({
   integrations,
   label,
   open,
+  onOpen,
 }: {
   integrations: readonly Integration[];
   label: string;
   open: string | undefined;
+  onOpen: OpenApp;
 }) => {
   const { identity } = Route.useRouteContext();
   const [drawn, setDrawn] = useState(step);
@@ -284,16 +259,17 @@ const Drawn = ({
   };
   return (
     <>
-      <TileGrid label={label}>
+      <ItemGrid aria-label={label}>
         {integrations.slice(0, drawn).map((integration) => (
           <IntegrationTile
             identity={identity}
             integration={integration}
             key={integration.key}
+            onOpen={onOpen}
             open={integration.key === open}
           />
         ))}
-      </TileGrid>
+      </ItemGrid>
       {integrations.length > drawn ? (
         <span
           aria-hidden="true"
@@ -310,9 +286,11 @@ const Drawn = ({
 const Kinds = ({
   others,
   open,
+  onOpen,
 }: {
   others: readonly Integration[];
   open: string | undefined;
+  onOpen: OpenApp;
 }) => {
   const { identity } = Route.useRouteContext();
   const { t, i18n } = useLingui();
@@ -325,16 +303,17 @@ const Kinds = ({
     const count = ofKind.length;
     return (
       <Tiles count={count} key={group} title={label}>
-        <TileGrid label={label}>
+        <ItemGrid aria-label={label}>
           {ofKind.slice(0, perKind).map((integration) => (
             <IntegrationTile
               identity={identity}
               integration={integration}
               key={integration.key}
+              onOpen={onOpen}
               open={integration.key === open}
             />
           ))}
-        </TileGrid>
+        </ItemGrid>
         {count > perKind ? (
           <Button
             layout={styles.more}
@@ -365,18 +344,20 @@ const Others = ({
   group,
   q,
   open,
+  onOpen,
 }: {
   others: readonly Integration[];
   group: CatalogGroup | undefined;
   q: string | undefined;
   open: string | undefined;
+  onOpen: OpenApp;
 }) => {
   const { t, i18n } = useLingui();
   if (others.length === 0) {
     return null;
   }
   if (q === undefined && group === undefined) {
-    return <Kinds open={open} others={others} />;
+    return <Kinds onOpen={onOpen} open={open} others={others} />;
   }
   const title =
     group === undefined
@@ -392,6 +373,7 @@ const Others = ({
         integrations={others}
         key={`${group ?? ""}·${q ?? ""}`}
         label={title}
+        onOpen={onOpen}
         open={open}
       />
     </Tiles>
@@ -429,55 +411,6 @@ const Returned = ({
         });
       }}
     />
-  );
-};
-
-/** The open app, in a Sheet over the page: it never squeezes the tiles. */
-const Details = ({
-  integration,
-  identity,
-  uses,
-  core,
-}: {
-  integration: Integration;
-  identity: Identity;
-  uses: ConnectionUses;
-  core: CoreConnection;
-}) => {
-  const { t } = useLingui();
-  const navigate = useNavigate({ from: "/integrations/" });
-  const close = () => {
-    void navigate({
-      resetScroll: false,
-      search: (last) => ({ ...last, app: undefined }),
-    });
-  };
-  const tools = integration.listed
-    ? toolsOf(core, integration).tools
-    : undefined;
-  return (
-    <Sheet
-      onOpenChange={(open: boolean) => {
-        if (!open) {
-          close();
-        }
-      }}
-      open
-    >
-      <SheetContent closeLabel={t`Close`}>
-        {/* Named for a screen reader only: the panel's own head says its name. */}
-        <SheetTitle hidden>{integration.name}</SheetTitle>
-        {/* The Sheet's corner close is its only one: a second in the panel's own bar drew an
-            opaque bar over the head's dither. */}
-        <IntegrationInspector
-          framed={false}
-          identity={identity}
-          integration={integration}
-          tools={tools}
-          uses={uses}
-        />
-      </SheetContent>
-    </Sheet>
   );
 };
 
@@ -604,7 +537,7 @@ const shownOf = (
 const Integrations = () => {
   const { catalog, connections, requests, toRevoke, uses } =
     Route.useLoaderData();
-  const { identity, core } = Route.useRouteContext();
+  const { identity } = Route.useRouteContext();
   const { q, group, app, connectionError, connection } = Route.useSearch();
   const { t, i18n } = useLingui();
   const listed = connections.state === "ready" ? connections.data : undefined;
@@ -619,6 +552,16 @@ const Integrations = () => {
   const loaded = catalog.state === "ready" && connections.state === "ready";
   const opened = integrations.find((integration) => integration.key === app);
   const [requesting, setRequesting] = useState(false);
+  // The tile an app was opened from, so its panel grows from it.
+  const [from, setFrom] = useState<HTMLElement | null>(null);
+  const navigate = useNavigate({ from: "/integrations/" });
+  const onOpen: OpenApp = (key, tile) => {
+    setFrom(tile);
+    void navigate({
+      resetScroll: false,
+      search: (last) => ({ ...last, app: key }),
+    });
+  };
   // The overview itself: no kind chosen and nothing searched.
   const overview = group === undefined && q === undefined;
   const kind = group === undefined ? undefined : i18n._(groupLabel[group]);
@@ -681,7 +624,12 @@ const Integrations = () => {
           {group === undefined ? (
             <Await
               fallback={
-                <Connected open={app} sections={first} uses={undefined} />
+                <Connected
+                  onOpen={onOpen}
+                  open={app}
+                  sections={first}
+                  uses={undefined}
+                />
               }
               promise={uses}
             >
@@ -689,6 +637,7 @@ const Integrations = () => {
                 const known = read.state === "ready" ? read.data : undefined;
                 return (
                   <Connected
+                    onOpen={onOpen}
                     open={app}
                     sections={sectionsOf(
                       integrations,
@@ -702,7 +651,13 @@ const Integrations = () => {
               }}
             </Await>
           ) : null}
-          <Others group={group} open={app} others={others} q={q} />
+          <Others
+            group={group}
+            onOpen={onOpen}
+            open={app}
+            others={others}
+            q={q}
+          />
           {loaded && shown === 0 ? (
             <NothingFound
               onRequest={() => {
@@ -721,11 +676,17 @@ const Integrations = () => {
         </div>
       </Page>
       {opened === undefined ? null : (
-        <Details
-          core={core}
+        <IntegrationPanel
+          from={from}
           identity={identity}
           integration={opened}
           key={opened.key}
+          onClose={() => {
+            void navigate({
+              resetScroll: false,
+              search: (last) => ({ ...last, app: undefined }),
+            });
+          }}
           uses={uses}
         />
       )}

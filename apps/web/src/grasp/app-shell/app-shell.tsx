@@ -601,8 +601,9 @@ const styles = stylex.create({
     [pageBandVars.top]: grasp.space7,
     [pageBandVars.inline]: grasp.shellPageInline,
   },
-  // A page's own bar stands at its very top: the bar keeps the room under itself.
-  mainUnderOwnBar: { paddingBlockStart: 0, [pageBandVars.top]: "0px" },
+  // A page's own bar stands at its very top: the bar keeps the room under itself (bar.tsx's
+  // pageBar), which a band takes back to stand flush under it.
+  mainUnderOwnBar: { paddingBlockStart: 0, [pageBandVars.top]: grasp.space7 },
   // No bar: the page has the whole card, edge to edge, such as a backdrop.
   mainWhole: {
     paddingBlockStart: 0,

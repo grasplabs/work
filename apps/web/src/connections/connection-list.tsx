@@ -286,12 +286,50 @@ const SignInAgain = ({
   );
 };
 
-/** Disconnecting, once confirmed: its tokens go, and everything that used it loses it. */
-export const Disconnect = ({
+/** What Disconnect asks before it goes: its tokens go, and everything that used it loses it. */
+const DisconnectContent = ({
   connection,
   label,
   last,
 }: {
+  connection: ListedConnection;
+  label: string;
+  last: boolean;
+}) => {
+  const { failure, change } = useChange({ leave: last });
+  const { t } = useLingui();
+  return (
+    <AlertDialogContent>
+      <AlertDialogTitle>{t`Disconnect ${label}?`}</AlertDialogTitle>
+      <AlertDialogDescription>
+        {t`Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again.`}
+      </AlertDialogDescription>
+      {failure === undefined ? null : <Alert title={failure} tone="danger" />}
+      <AlertDialogFooter>
+        <AlertDialogAction>{t`Close`}</AlertDialogAction>
+        <AlertDialogAction
+          action={async () => {
+            let gone = false;
+            await change(async (session) => {
+              await session.connections.disconnect(connection.id);
+              gone = true;
+            });
+            if (!gone) {
+              throw new Error("Not disconnected");
+            }
+          }}
+          failedLabel={t`Couldn't disconnect`}
+          variant="danger"
+        >
+          {t`Disconnect`}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  );
+};
+
+/** What Disconnect is given: the connection, its name, and whether it is the page's last. */
+interface DisconnectProps {
   connection: ListedConnection;
   label: string;
   /**
@@ -299,43 +337,34 @@ export const Disconnect = ({
    * its page goes with it, so the list shows next.
    */
   last: boolean;
-}) => {
-  const { failure, change } = useChange({ leave: last });
+}
+
+/** Disconnecting, from its own button, once confirmed. */
+export const Disconnect = ({ connection, label, last }: DisconnectProps) => {
   const { t } = useLingui();
   return (
     <AlertDialog>
       <AlertDialogTrigger aria-label={t`Disconnect ${label}`} size="sm">
         {t`Disconnect`}
       </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogTitle>{t`Disconnect ${label}?`}</AlertDialogTitle>
-        <AlertDialogDescription>
-          {t`Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again.`}
-        </AlertDialogDescription>
-        {failure === undefined ? null : <Alert title={failure} tone="danger" />}
-        <AlertDialogFooter>
-          <AlertDialogAction>{t`Close`}</AlertDialogAction>
-          <AlertDialogAction
-            action={async () => {
-              let gone = false;
-              await change(async (session) => {
-                await session.connections.disconnect(connection.id);
-                gone = true;
-              });
-              if (!gone) {
-                throw new Error("Not disconnected");
-              }
-            }}
-            failedLabel={t`Couldn't disconnect`}
-            variant="danger"
-          >
-            {t`Disconnect`}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
+      <DisconnectContent connection={connection} label={label} last={last} />
     </AlertDialog>
   );
 };
+
+/** Disconnecting, opened by another control (an app's Manage menu), once confirmed. */
+export const DisconnectDialog = ({
+  open,
+  onOpenChange,
+  ...rest
+}: DisconnectProps & {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => (
+  <AlertDialog onOpenChange={onOpenChange} open={open}>
+    <DisconnectContent {...rest} />
+  </AlertDialog>
+);
 
 /**
  * One connection to the integration, as the prototype's Account section
@@ -452,3 +481,44 @@ export const ConnectionList = ({
       key={connection.id}
     />
   ));
+
+/**
+ * What an app's one connection holds beyond what the app's page says of it
+ * (its account, who connected it, signing in again and disconnecting): the
+ * consent a Composio one was connected with, and, for admins and builders,
+ * which Apps and agents hold a permission for it. Nothing for someone who
+ * would see neither.
+ */
+export const ConnectionAccess = ({
+  connection,
+  held,
+  identity,
+}: {
+  connection: ListedConnection;
+  /** Undefined for someone who can't list permissions. */
+  held: Loaded<HeldPermissions> | undefined;
+  identity: Identity;
+}) => {
+  const { t } = useLingui();
+  const consented = connection.source === "composio";
+  const holders = held?.state === "ready" ? held.data : undefined;
+  if (!consented && holders === undefined) {
+    return null;
+  }
+  return (
+    <SectionCard density="compact" flush title={t`Access`}>
+      {consented ? (
+        <SettingsRows>
+          <ConsentRecord connection={connection} />
+        </SettingsRows>
+      ) : null}
+      {holders === undefined ? null : (
+        <Holders
+          held={holders}
+          id={connection.id}
+          mayRevoke={isMemberAdmin(identity)}
+        />
+      )}
+    </SectionCard>
+  );
+};

@@ -9,6 +9,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 
+import { groupMoreStyles } from "../avatar/more.styles";
 import { avatarGroupWords } from "../avatar/words";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
@@ -59,32 +60,18 @@ const styles = stylex.create({
     flexShrink: 0,
     verticalAlign: "middle",
   },
-  // The rest, as a tile of its own: the soft fill, the system's edge, the count in quiet ink, at
-  // least a tile wide and wider for a long count.
+  // The rest, as a tile of its own (Avatar group's "+N", src/components/avatar/more.styles.ts): at
+  // least a tile wide and wider for a long count, the tile's corner and the system's edge.
   more: (tile: string, corner: string) => ({
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    boxSizing: "border-box",
     minWidth: tile,
-    height: tile,
-    paddingInline: grasp.space1,
     borderRadius: corner,
     cornerShape: grasp.cornerShape,
-    backgroundColor: grasp.soft,
     boxShadow: grasp.edge,
     outline: {
       default: "none",
       [media.forced]: `${grasp.hairline} solid CanvasText`,
     },
     outlineOffset: `calc(-1 * ${grasp.hairline})`,
-    fontFamily: grasp.fontSans,
-    fontSize: `max(10px, calc(${tile} * 0.4))`,
-    fontWeight: grasp.weightMedium,
-    fontVariantNumeric: "tabular-nums",
-    letterSpacing: "-0.02em",
-    color: grasp.muted,
-    whiteSpace: "nowrap",
   }),
 });
 
@@ -144,7 +131,10 @@ export const BrandIconGroup = ({
         <span
           aria-hidden="true"
           data-slot="brand-icon-group-more"
-          {...stylex.props(styles.more(tile, corner))}
+          {...stylex.props(
+            groupMoreStyles.more(tile),
+            styles.more(tile, corner)
+          )}
         >
           {words.more(rest)}
         </span>

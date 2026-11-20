@@ -200,13 +200,14 @@ export const InspectorPanel = (props: InspectorPanelProps) => {
     props.words ?? {}
   );
   const tile =
-    icon === undefined ? undefined : (
+    props.mark ??
+    (icon === undefined ? undefined : (
       <IconTile
         icon={icon}
         variant={props.iconLook ?? "tint"}
         running={props.running === true}
       />
-    );
+    ));
   return (
     <Panel
       aria-label={label}
@@ -231,6 +232,7 @@ export const InspectorPanel = (props: InspectorPanelProps) => {
         }))}
         viewsLabel={words.views}
         texture={props.texture === true}
+        tint={props.tint}
         loading={props.loading === true}
       />
       {views === undefined ? (

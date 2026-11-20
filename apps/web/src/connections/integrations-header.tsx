@@ -55,9 +55,9 @@ const styles = stylex.create({
 /**
  * What this person can do about an app whose connection ran out, as core
  * decides it: sign in again (their own, or a shared Microsoft or Google
- * one for an admin); for an admin, disconnect a shared one that can't be
- * signed in to again (a Composio toolkit) and connect it anew, from its
- * Sheet; or nothing, when only an admin can.
+ * one for an admin); for an admin, connect anew a shared one that can't be
+ * signed in to again (a Composio toolkit), from its panel, which
+ * disconnects it first; or nothing, when only an admin can.
  */
 export type Fix = "sign-in" | "reconnect" | "none";
 
@@ -103,7 +103,7 @@ const Line = ({
     return t`${app} needs someone to sign in again. Until then, what uses it waits.`;
   }
   if (fix === "reconnect") {
-    return t`${app} stopped working. Disconnect it and connect it again; until then, what uses it waits.`;
+    return t`${app} stopped working. Connect it again; until then, what uses it waits.`;
   }
   return t`An admin needs to connect ${app} again. Until then, what uses it waits.`;
 };

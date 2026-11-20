@@ -97,7 +97,7 @@ interface ItemBase {
   size?: ItemSize;
   /**
    * Before its data, in the parts shape: each part given empty waits as a quiet placeholder of its
-   * own size (an ItemMedia with no icon its square, an ItemTitle its line, an ItemDescription its
+   * own size (an ItemMedia with no icon its square, or the bare icon's box with `iconLook="inline"`, an ItemTitle its line, an ItemDescription its
    * line), so the row stands as tall as it will be. The row says it is busy.
    * @default false
    */
@@ -434,6 +434,8 @@ const waits = stylex.create({
   // The mark's square, at the row's size.
   media: { flexShrink: 0, width: grasp.controlMd, height: grasp.controlMd },
   mediaSm: { width: grasp.controlSm, height: grasp.controlSm },
+  // The bare icon's box, in line with the title.
+  icon: { flexShrink: 0, width: grasp.iconSm, height: grasp.iconSm },
   // The title's and the description's lines, as long as a short name and a short line.
   title: { width: "10rem", maxWidth: "100%" },
   description: { width: "14rem", maxWidth: "100%" },
@@ -460,7 +462,15 @@ export const ItemMedia = ({
   const size = useContext(RowSize);
   const waiting = useContext(RowLoading);
   if (waiting && !icon && (children === undefined || children === null)) {
-    return (
+    // The bare icon waits in line with the title; the square at the row's size.
+    return iconLook === "inline" ? (
+      <span
+        aria-hidden="true"
+        {...stylex.props(styles.mediaInline, styles.leadAuto)}
+      >
+        <Skeleton variant="block" layout={waits.icon} />
+      </span>
+    ) : (
       <Skeleton
         variant="block"
         layout={[waits.media, size !== "md" && waits.mediaSm]}

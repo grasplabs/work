@@ -90,11 +90,10 @@ export interface PanelHeaderProps {
    */
   texture?: boolean;
   /**
-   * The icon stands beside the title, on its line, instead of above it: for a head whose icon is a
-   * mark (an app's logo) and its title a short name. The description runs under both.
-   * @default false
+   * The texture in the object's own colour (an app's brand, from `useMarkTint`), fading down from the
+   * top. Given, the texture is drawn without `texture`.
    */
-  iconBeside?: boolean;
+  tint?: string;
   /**
    * This instance's own words, over the catalogue's (GraspWords), key by key (`{ close: "Close the details" }`). Any left out
    * are the catalogue's, else English. A flat text prop given beside it still wins until the
@@ -134,6 +133,9 @@ const styles = stylex.create({
     transitionTimingFunction: grasp.ease,
   },
   barScrolled: { borderBlockEndColor: grasp.line },
+  // Over the head's texture, the bar is clear until something scrolls under it, so the light reaches
+  // the panel's top behind the close.
+  barClear: { backgroundColor: "transparent" },
   // A bar that holds nothing (no actions, no close) takes no room: it stands just above the views,
   // over the room they already have, and is there only for them to fold into once they reach the
   // panel's top. With no views there is no bar at all.
@@ -173,15 +175,6 @@ const styles = stylex.create({
   // With no bar above the head, the texture starts at the head's own top.
   textureTopmost: { insetBlockStart: 0 },
   tile: { position: "relative", marginBlockEnd: grasp.space3 },
-  // The icon beside the title (`iconBeside`): two columns, the icon and the title on one line, what
-  // follows across both.
-  headIconBeside: {
-    gridTemplateColumns: "auto minmax(0, 1fr)",
-    columnGap: grasp.space3,
-    alignItems: "center",
-  },
-  tileBeside: { marginBlockEnd: 0 },
-  across: { gridColumn: "1 / -1" },
   title: {
     position: "relative",
     margin: 0,
@@ -502,10 +495,12 @@ const Bar = ({
   onClose,
   closeLabel,
   bare = false,
+  clear = false,
 }: Pick<PanelHeaderProps, "actions" | "onClose"> & {
   bar: RefObject<HTMLDivElement | null>;
   closeLabel: string;
   bare?: boolean;
+  clear?: boolean;
 }) => {
   const { scrolled, folded } = usePanel();
   // A bare bar shows its hairline once the views have folded into it; nothing else passes under it sooner.
@@ -518,6 +513,7 @@ const Bar = ({
       {...stylex.props(
         styles.bar,
         bare && styles.barBare,
+        clear && !scrolled && styles.barClear,
         lined && styles.barScrolled
       )}
     >
@@ -544,44 +540,12 @@ const Meta = ({ meta }: { meta: ReactNode[] }) => (
   </div>
 );
 
-/** The head's box: its dither behind, then its tile, then what the head says. */
-const HeadFrame = ({
-  icon,
-  texture,
-  topmost,
-  beside,
-  sideBySide,
-  loading,
-  children,
-}: {
-  icon: ReactNode;
-  texture: boolean;
-  topmost: boolean;
-  beside: boolean;
-  sideBySide: boolean;
-  loading: boolean;
-  children: ReactNode;
-}) => (
-  <div
-    data-slot="panel-head"
-    aria-busy={loading ? "true" : undefined}
-    {...stylex.props(
-      styles.head,
-      beside && styles.headBeside,
-      sideBySide && styles.headIconBeside
-    )}
-  >
-    {texture && (
-      <PanelTexture layout={topmost ? styles.textureTopmost : styles.texture} />
-    )}
-    {given(icon) && (
-      <span {...stylex.props(styles.tile, sideBySide && styles.tileBeside)}>
-        {icon}
-      </span>
-    )}
-    {children}
-  </div>
-);
+/** Whether the head draws its texture: asked for, or tinted. */
+const textured = (texture: boolean, tint: string | undefined) =>
+  texture || tint !== undefined;
+
+/** Whether the bar stands clear over the head's texture until something scrolls under it. */
+const clearOver = (texture: boolean, headed: boolean) => texture && headed;
 
 /** The head: the tile, the title, its line, and who and when. */
 const Head = ({
@@ -591,52 +555,64 @@ const Head = ({
   meta,
   level,
   texture,
+  tint,
   topmost,
   loading,
   beside,
-  iconBeside,
-}: Pick<PanelHeaderProps, "description" | "icon" | "meta"> & {
+}: Pick<PanelHeaderProps, "description" | "icon" | "meta" | "tint"> & {
   title: string | undefined;
   level: 1 | 2;
   texture: boolean;
   topmost: boolean;
   loading: boolean;
   beside: boolean;
-  iconBeside: boolean;
 }) => {
-  const sideBySide = iconBeside && given(icon);
   const Heading = headings[level];
-  const frame = { icon, texture, topmost, beside, sideBySide, loading };
   if (loading) {
     return (
-      <HeadFrame {...frame}>
+      <div
+        data-slot="panel-head"
+        aria-busy="true"
+        {...stylex.props(styles.head, beside && styles.headBeside)}
+      >
+        {texture && (
+          <PanelTexture
+            tint={tint}
+            layout={topmost ? styles.textureTopmost : styles.texture}
+          />
+        )}
+        {given(icon) && <span {...stylex.props(styles.tile)}>{icon}</span>}
         <div {...stylex.props(styles.titleWaitLine)}>
           <Skeleton layout={styles.titleWait} />
         </div>
         {description !== undefined && (
-          <p {...stylex.props(styles.description, sideBySide && styles.across)}>
+          <p {...stylex.props(styles.description)}>
             <Skeleton text="sm" layout={styles.descriptionWait} />
           </p>
         )}
-      </HeadFrame>
+      </div>
     );
   }
   return (
-    <HeadFrame {...frame}>
+    <div
+      data-slot="panel-head"
+      {...stylex.props(styles.head, beside && styles.headBeside)}
+    >
+      {texture && (
+        <PanelTexture
+          tint={tint}
+          layout={topmost ? styles.textureTopmost : styles.texture}
+        />
+      )}
+      {given(icon) && <span {...stylex.props(styles.tile)}>{icon}</span>}
       {title !== undefined && (
         <Heading {...stylex.props(styles.title)}>{title}</Heading>
       )}
       {given(description) && (
-        <p {...stylex.props(styles.description, sideBySide && styles.across)}>
-          {description}
-        </p>
+        <p {...stylex.props(styles.description)}>{description}</p>
       )}
-      {meta !== undefined && meta.length > 0 && (
-        <div {...stylex.props(sideBySide && styles.across)}>
-          <Meta meta={meta} />
-        </div>
-      )}
-    </HeadFrame>
+      {meta !== undefined && meta.length > 0 && <Meta meta={meta} />}
+    </div>
   );
 };
 
@@ -720,11 +696,12 @@ export const PanelHeader = ({
   viewsLabel: viewsLabelGiven,
   level: levelDeprecated,
   headingLevel: level = levelDeprecated ?? 2,
-  texture = false,
-  iconBeside = false,
+  texture: textureGiven = false,
+  tint,
   words,
   loading = false,
 }: PanelHeaderProps) => {
+  const texture = textured(textureGiven, tint);
   const { close: closeLabel, views: viewsLabel } = withGiven(
     useWords("panel", panelWords, words),
     { close: closeLabelGiven, views: viewsLabelGiven }
@@ -760,6 +737,7 @@ export const PanelHeader = ({
           actions={actions}
           onClose={onClose}
           closeLabel={closeLabel}
+          clear={clearOver(texture, headed)}
         />
       )}
       {holds && (
@@ -773,10 +751,10 @@ export const PanelHeader = ({
           meta={meta}
           level={level}
           texture={texture}
+          tint={tint}
           topmost={!holds}
           loading={loading}
           beside={reachesHead(seat, holds, hasViews)}
-          iconBeside={iconBeside}
         />
       )}
       {!holds && hasViews && <Bar bar={bar} closeLabel={closeLabel} bare />}

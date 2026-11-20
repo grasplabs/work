@@ -15,8 +15,8 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
+import { toolWords } from "./tool-choices.ts";
 import type { AllowedTool } from "./tool-choices.ts";
-import { toolWords } from "./tool-rows.tsx";
 
 /**
  * One tool of a toolkit, as a row of Grasp UI's Item: a switch to allow
