@@ -92,3 +92,14 @@ export const memberNotRemoved = (
   userId: string | SQLiteColumn | SQL,
   withRoles?: readonly string[]
 ): SQL => memberWhile(userId, withRoles, notRemoved);
+
+/**
+ * That `userId` is a guest now, as a SQL condition: a membership with the
+ * role `guest` (roles.ts `guestRole`) that an admin hasn't removed. The
+ * one check a guest's way in reads: who is sent a code to sign in with,
+ * and whom a code signs in (auth/guest-codes.ts). A guest is never
+ * suspended: the directory suspends only members tied to its accounts, and
+ * a guest holds no account at all.
+ */
+export const guestNow = (userId: string | SQLiteColumn | SQL): SQL =>
+  memberWhile(userId, [guestRole], notRemoved);
