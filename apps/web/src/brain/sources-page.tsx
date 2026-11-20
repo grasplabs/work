@@ -1301,7 +1301,9 @@ const saidOf = (
     ? {
         content: (
           <div {...stylex.props(styles.cardBody)}>
-            <Trans>You can&apos;t read this version.</Trans>
+            <Text size="sm" tone="muted">
+              <Trans>You can&apos;t read this version.</Trans>
+            </Text>
           </div>
         ),
       }
