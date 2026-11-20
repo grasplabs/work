@@ -1883,6 +1883,10 @@ msgstr "Un projet regroupe des apps et des workflows pour un processus, une équ
 msgid "A question"
 msgstr "Une question"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "A receipt for each payment"
+msgstr "Un reçu pour chaque paiement"
+
 #: src/apps/field-kinds.tsx
 msgid "A record of another table"
 msgstr "Un enregistrement d’une autre table"
@@ -3265,8 +3269,11 @@ msgstr "Comme dans l’entreprise"
 msgid "As your device"
 msgstr "Comme votre appareil"
 
-#: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
+msgid "As your endpoint names it, such as llama-3.3-70b"
+msgstr "Tel que votre point de terminaison le nomme, par exemple llama-3.3-70b"
+
+#: src/onboarding/ai-step.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
 msgstr "Tel que votre endpoint le nomme, par exemple llama-3.3-70b."
 
@@ -6272,6 +6279,10 @@ msgstr "Chaque domaine est effacé à part. Un domaine qui échoue est réessay�
 msgid "Each as the company has it, or for fewer people. Never more."
 msgstr "Chacun comme l'entreprise l'a, ou pour moins de personnes. Jamais pour plus."
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "Each invoice to your billing email"
+msgstr "Chaque facture à votre e-mail de facturation"
+
 #: src/inbox/interviews-item.tsx
 msgid "Each link is its owner's own: send it only to them."
 msgstr "Chaque lien est personnel : envoyez-le seulement à son destinataire."
@@ -7300,6 +7311,10 @@ msgstr "Pour les demandes de Stephen, à propos de « {label} » ({why}), fais c
 #: src/inbox/item-detail.tsx
 msgid "For the {owner}"
 msgstr "Pour {owner}"
+
+#: src/settings/ai-providers.tsx
+msgid "For when the default's provider is down"
+msgstr "Pour quand le fournisseur du modèle par défaut est en panne"
 
 #: src/agents/agent-wakes.tsx
 msgid "For whom"
@@ -12487,10 +12502,6 @@ msgstr "passage {number}"
 #: src/interview/words.ts
 msgid "Passing it on"
 msgstr "Passation"
-
-#: src/routes/_shell.settings.security.tsx
-msgid "Passwords and two-step sign-in live with your organization"
-msgstr "Les mots de passe et la connexion en deux étapes relèvent de votre organisation"
 
 #: src/settings/invitations.tsx
 msgid "Paste several at once, split by commas or lines."
@@ -18245,8 +18256,8 @@ msgid "Used by {queries}"
 msgstr "Utilisé par {queries}"
 
 #: src/settings/ai-providers.tsx
-msgid "Used in this order when the default's provider is down."
-msgstr "Utilisés dans cet ordre quand le fournisseur du modèle par défaut est indisponible."
+msgid "Used in this order when the default's provider is down"
+msgstr "Utilisés dans cet ordre quand le fournisseur du modèle par défaut est en panne"
 
 #: src/labels.ts
 msgid "User"
@@ -18750,6 +18761,10 @@ msgstr "Ce que {alias} atteint"
 msgid "What <0/> changed"
 msgstr "Ce que <0/> a changé"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "What AI costs this month"
+msgstr "Ce que coûte l'IA ce mois-ci"
+
 #: src/brain/brain-atlas.ts
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
@@ -18771,6 +18786,10 @@ msgstr "Ce qui change"
 msgctxt "the files a change touches"
 msgid "What changes"
 msgstr "Ce qui change"
+
+#: src/settings/ai-providers.tsx
+msgid "What chat, agents and workflows run on"
+msgstr "Ce sur quoi tournent le chat, les agents et les workflows"
 
 #: src/inbox/report-view.tsx
 msgid "What could be better"
@@ -20088,6 +20107,10 @@ msgstr "Votre message"
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Votre organisation n’autorise pas ce modèle. Choisissez-en un autre."
+
+#: src/routes/_shell.settings.security.tsx
+msgid "Your organization manages your password"
+msgstr "Votre organisation gère votre mot de passe"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx

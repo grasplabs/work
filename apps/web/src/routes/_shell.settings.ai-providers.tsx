@@ -46,7 +46,6 @@ const AiProvidersPage = () => {
 const AiProvidersPending = () => (
   <PageSkeletonSettings
     header={false}
-    help={false}
     sections={[1, 3, { variant: "chart" }]}
   />
 );
