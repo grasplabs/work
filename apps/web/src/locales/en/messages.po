@@ -2689,13 +2689,13 @@ msgstr "All providers"
 msgid "All steps done"
 msgstr "All steps done"
 
+#: src/frame/part-words.tsx
+msgid "All tools"
+msgstr "All tools"
+
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
 msgstr "Allow at least one method."
-
-#: src/connections/app-actions.tsx
-msgid "Allow at least one tool to connect {app}."
-msgstr "Allow at least one tool to connect {app}."
 
 #: src/apps/field-editor.tsx
 msgid "Allow decimals"
@@ -5283,13 +5283,9 @@ msgid "Connects with a key"
 msgstr "Connects with a key"
 
 #: src/connections/connection-list.tsx
+#: src/frame/part-words.tsx
 msgid "Consent"
 msgstr "Consent"
-
-#. {provider} keeps the access, such as Composio.
-#: src/frame/part-words.tsx
-msgid "Consent · {provider}"
-msgstr "Consent · {provider}"
 
 #: src/connections/connect-dialog.tsx
 msgid "Consent and connect"
@@ -7161,10 +7157,6 @@ msgstr "Everyone in the company will be able to find what agents read through {l
 #: src/connections/sync-places.tsx
 msgid "Everyone in the company will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Everyone in the company will be able to read everything in the places you pick, whatever their permissions in {label}."
-
-#: src/frame/part-words.tsx
-msgid "Everyone in the organization"
-msgstr "Everyone in the organization"
 
 #: src/connections/sync-places.tsx
 msgid "Everyone in the team {team} will be able to read everything in the places you pick, whatever their permissions in {label}."
@@ -12333,7 +12325,6 @@ msgstr "Nothing was added. Fix these rows and try again."
 
 #: src/agents/agent-page.tsx
 #: src/brain/brain.ts
-#: src/frame/part-words.tsx
 msgid "Nothing yet"
 msgstr "Nothing yet"
 
@@ -13946,14 +13937,6 @@ msgstr "Read entities from the Brain"
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Read everyone's calls of unknown outcome"
-
-#: src/frame/part-words.tsx
-msgid "Read everything, ask before changes"
-msgstr "Read everything, ask before changes"
-
-#: src/frame/part-words.tsx
-msgid "Read everything, change nothing"
-msgstr "Read everything, change nothing"
 
 #: src/activity/audit-event.tsx
 msgid "Read from"
@@ -15689,10 +15672,6 @@ msgstr "Set aside entries the audit trail couldn't take"
 msgid "Set for each app"
 msgstr "Set for each app"
 
-#: src/frame/part-words.tsx
-msgid "Set group by group"
-msgstr "Set group by group"
-
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Set in"
@@ -16104,6 +16083,7 @@ msgid "Sign in again to go on."
 msgstr "Sign in again to go on."
 
 #: src/connections/connect-dialog.tsx
+#: src/frame/part-words.tsx
 msgid "Sign in to {app}"
 msgstr "Sign in to {app}"
 
@@ -21143,6 +21123,11 @@ msgstr "You withdrew. Nothing you said is used from now on."
 #: src/interview/page.tsx
 msgid "You withdrew. What the Brain kept of it is being removed."
 msgstr "You withdrew. What the Brain kept of it is being removed."
+
+#. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
+#: src/frame/part-words.tsx
+msgid "You’ll sign in at {host}."
+msgstr "You’ll sign in at {host}."
 
 #: src/frame/part-words.tsx
 msgid "You're offline. Log in when you're back online."

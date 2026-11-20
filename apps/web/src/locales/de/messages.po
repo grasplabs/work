@@ -2689,13 +2689,13 @@ msgstr "Alle Anbieter"
 msgid "All steps done"
 msgstr "Alle Schritte erledigt"
 
+#: src/frame/part-words.tsx
+msgid "All tools"
+msgstr "Alle Tools"
+
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
 msgstr "Erlauben Sie mindestens eine Methode."
-
-#: src/connections/app-actions.tsx
-msgid "Allow at least one tool to connect {app}."
-msgstr "Erlaube mindestens ein Tool, um {app} zu verbinden."
 
 #: src/apps/field-editor.tsx
 msgid "Allow decimals"
@@ -5283,13 +5283,9 @@ msgid "Connects with a key"
 msgstr "Verbindet mit einem Schlüssel"
 
 #: src/connections/connection-list.tsx
+#: src/frame/part-words.tsx
 msgid "Consent"
 msgstr "Zustimmung"
-
-#. {provider} keeps the access, such as Composio.
-#: src/frame/part-words.tsx
-msgid "Consent · {provider}"
-msgstr "Zustimmung · {provider}"
 
 #: src/connections/connect-dialog.tsx
 msgid "Consent and connect"
@@ -7161,10 +7157,6 @@ msgstr "Alle in der Firma können finden, was Agenten über {label} lesen und wa
 #: src/connections/sync-places.tsx
 msgid "Everyone in the company will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Alle in der Firma können alles in den ausgewählten Orten lesen, unabhängig von ihren Berechtigungen in {label}."
-
-#: src/frame/part-words.tsx
-msgid "Everyone in the organization"
-msgstr "Alle in der Organisation"
 
 #: src/connections/sync-places.tsx
 msgid "Everyone in the team {team} will be able to read everything in the places you pick, whatever their permissions in {label}."
@@ -12333,7 +12325,6 @@ msgstr "Es wurde nichts hinzugefügt. Korrigieren Sie diese Zeilen und versuchen
 
 #: src/agents/agent-page.tsx
 #: src/brain/brain.ts
-#: src/frame/part-words.tsx
 msgid "Nothing yet"
 msgstr "Noch nichts"
 
@@ -13946,14 +13937,6 @@ msgstr "Entitäten aus dem Gehirn gelesen"
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Die Aufrufe aller mit unbekanntem Ergebnis gelesen"
-
-#: src/frame/part-words.tsx
-msgid "Read everything, ask before changes"
-msgstr "Alles lesen, vor Änderungen fragen"
-
-#: src/frame/part-words.tsx
-msgid "Read everything, change nothing"
-msgstr "Alles lesen, nichts ändern"
 
 #: src/activity/audit-event.tsx
 msgid "Read from"
@@ -15689,10 +15672,6 @@ msgstr "Einträge beiseitegelegt, die der Audit-Trail nicht aufnehmen konnte"
 msgid "Set for each app"
 msgstr "Für jede App festgelegt"
 
-#: src/frame/part-words.tsx
-msgid "Set group by group"
-msgstr "Gruppe für Gruppe festgelegt"
-
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Set in"
@@ -16104,6 +16083,7 @@ msgid "Sign in again to go on."
 msgstr "Melden Sie sich erneut an, um fortzufahren."
 
 #: src/connections/connect-dialog.tsx
+#: src/frame/part-words.tsx
 msgid "Sign in to {app}"
 msgstr "Bei {app} anmelden"
 
@@ -21143,6 +21123,11 @@ msgstr "Sie haben sich zurückgezogen. Nichts von dem, was Sie gesagt haben, wir
 #: src/interview/page.tsx
 msgid "You withdrew. What the Brain kept of it is being removed."
 msgstr "Sie haben sich zurückgezogen. Was das Gehirn davon behalten hat, wird gerade entfernt."
+
+#. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
+#: src/frame/part-words.tsx
+msgid "You’ll sign in at {host}."
+msgstr "Du meldest dich bei {host} an."
 
 #: src/frame/part-words.tsx
 msgid "You're offline. Log in when you're back online."

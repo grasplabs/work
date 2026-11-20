@@ -1472,21 +1472,19 @@ export const usePartWords = (): GraspWordsCatalog => {
     connectApp: {
       title: (app) => t`Connect ${app}`,
       titleAgain: (app) => t`Connect ${app} again`,
-      summaryAll: t`Read everything, ask before changes`,
-      summaryRead: t`Read everything, change nothing`,
-      summaryNone: t`Nothing yet`,
-      summaryMixed: t`Set group by group`,
-      change: t`Change`,
-      done: t`Done`,
       whoUses: t`Who uses it`,
-      forEveryone: t`Everyone in the organization`,
       forYou: t`Just you`,
-      consentFrom: (provider) =>
+      forEveryone: t`Everyone`,
+      signInAt: (host) =>
         t({
-          message: `Consent · ${provider}`,
-          comment: "{provider} keeps the access, such as Composio.",
+          message: `You’ll sign in at ${host}.`,
+          comment:
+            "{host} is the web address of the sign-in page, e.g. login.microsoftonline.com.",
         }),
       cancel: t`Cancel`,
+      signIn: (app) => t`Sign in to ${app}`,
+      consent: t`Consent`,
+      allTools: t`All tools`,
       connect: t`Connect`,
     },
     signIn: {

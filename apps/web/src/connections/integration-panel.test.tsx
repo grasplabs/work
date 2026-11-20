@@ -25,11 +25,14 @@ import { integrationsOf } from "./integrations.ts";
 
 // One app's panel over the Integrations page, on the library's app panel,
 // against core's connections as the page reaches them over RPC, faked: an
-// admin connects a Composio toolkit in the library's connect dialog, for
-// everyone, consenting to its text word for word, and connecting sends
-// the tools chosen and that text; members and Grasp's staff get nothing
-// to connect it with; and whoever may sign in to a lapsed native
-// connection again finds it under Manage.
+// admin connects a Composio toolkit in the library's consent dialog, for
+// everyone, consenting to its text word for word, and connecting sends the
+// tools chosen (reads on, changes off, to start) and that text;
+// members and Grasp's staff get nothing to connect it with; Microsoft 365
+// connects in the library's connect dialog, for everyone where an admin
+// chooses it and otherwise for the person alone, saying where they'll sign
+// in; and whoever may sign in to a lapsed native connection again finds it
+// under Manage.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -112,13 +115,20 @@ interface Sent {
   returnTo?: string;
 }
 
+/** What starting a native provider's sign-in sends to core. */
+interface Started {
+  provider: string;
+  scope: string;
+  returnTo: string;
+}
+
 /** The panel of `id`, as `identity` sees it, recording each toolkit connect sent to core. */
 const opened = async (
   id: string,
   connections: ListedConnection[],
   identity: Identity = person()
-): Promise<(Sent | { disconnected: string })[]> => {
-  const sent: (Sent | { disconnected: string })[] = [];
+): Promise<(Sent | Started | { disconnected: string })[]> => {
+  const sent: (Sent | Started | { disconnected: string })[] = [];
   const api = {
     disconnect: async (connectionId: string): Promise<{ revoked: boolean }> => {
       sent.push({ disconnected: connectionId });
@@ -129,6 +139,10 @@ const opened = async (
     connectToolkit: async (request: Sent): Promise<{ url: string }> => {
       sent.push(request);
       // Refused, so the browser stays here for the test to read.
+      return await Promise.reject(new Error("Not now"));
+    },
+    start: async (request: Started): Promise<{ url: string }> => {
+      sent.push(request);
       return await Promise.reject(new Error("Not now"));
     },
   };
@@ -198,13 +212,22 @@ const buttons = (text: string): HTMLElement[] =>
       (each.getAttribute("aria-label") ?? each.textContent.trim()) === text
   );
 
-/** The connect dialog's own Connect, which carries its working and failed words too. */
-const dialogConnect = (): HTMLElement | undefined =>
+/**
+ * A dialog's action, which carries its working and failed words too: the
+ * last such button, as the dialog stands over the panel and its Connect.
+ */
+const dialogAction = (text: string): HTMLElement | undefined =>
   [
     ...document.querySelectorAll<HTMLElement>(
-      '[role="dialog"] [data-slot="button"]'
+      '[data-slot="dialog-footer"] button'
     ),
-  ].find((each) => each.textContent.startsWith("Connect"));
+  ].find((each) => each.textContent.startsWith(text));
+
+/** The open dialog titled `title`. */
+const dialogOf = (title: string): Element | undefined =>
+  [...document.querySelectorAll('[role="dialog"]')].find((each) =>
+    each.textContent.includes(title)
+  );
 
 describe("an app's panel", () => {
   afterEach(() => {
@@ -218,32 +241,40 @@ describe("an app's panel", () => {
   it("has an admin connect a toolkit for everyone, consenting to its text word for word", async () => {
     const sent = await opened("hubspot", []);
     await press(buttons("Connect")[0]);
-    const dialog = [...document.querySelectorAll('[role="dialog"]')].find(
-      (each) => each.textContent.includes("Connect HubSpot")
-    );
+    const dialog = dialogOf("Connect HubSpot");
     const shown = {
       consent: dialog?.textContent.includes(composioConsentText) ?? false,
-      forEveryone:
-        dialog?.textContent.includes("Everyone in the organization") ?? false,
       // Who uses a toolkit isn't asked: it is always everyone.
-      choices: dialog?.querySelectorAll('[role="combobox"]').length ?? -1,
+      forEveryone: dialog?.textContent.includes("Everyone") ?? false,
+      choice: buttons("Just you").length,
     };
-    await press(dialogConnect());
+    // Every tool may change things too, asking first: none goes as a read.
+    await press(
+      document.querySelector('[aria-label="What Grasp may do: All tools"]')
+    );
+    await press(
+      [...document.querySelectorAll('[role="option"]')].find((each) =>
+        each.textContent.startsWith("Write")
+      )
+    );
+    await press(dialogAction("Connect"));
 
-    expect({ shown, sent }).toStrictEqual({
-      shown: { consent: true, forEveryone: true, choices: 0 },
+    expect({
+      shown,
+      sent,
+      // Refused, it stays open and says so.
+      failed: dialogAction("Connect")?.textContent.includes("Could not finish"),
+    }).toStrictEqual({
+      shown: { consent: true, forEveryone: true, choice: 0 },
       sent: [
         {
           toolkit: "hubspot",
-          // As the dialog starts: reads run, changes ask first.
-          tools: [
-            { name: "HUBSPOT_LIST_CONTACTS", read: true },
-            "HUBSPOT_CREATE_NOTE",
-          ],
+          tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_NOTE"],
           consent: composioConsentText,
           returnTo: "/integrations/composio:hubspot",
         },
       ],
+      failed: true,
     });
   });
 
@@ -264,11 +295,50 @@ describe("an app's panel", () => {
     };
     const sent = await opened("hubspot", [stopped]);
     await press(buttons("Connect again")[0]);
-    await press(dialogConnect());
+    await press(dialogAction("Connect"));
 
     expect(
       sent.map((each) => ("toolkit" in each ? "connect" : each))
     ).toStrictEqual([{ disconnected: "c-hubspot" }, "connect"]);
+  });
+
+  it("has an admin connect Microsoft 365 for everyone, saying where they'll sign in", async () => {
+    const sent = await opened("microsoft", []);
+    await press(buttons("Connect")[0]);
+    const where = dialogOf("Connect Microsoft 365")?.textContent.includes(
+      "login.microsoftonline.com"
+    );
+    await press(buttons("Everyone")[0]);
+    await press(dialogAction("Sign in to Microsoft 365"));
+
+    expect({ where, sent }).toStrictEqual({
+      where: true,
+      sent: [
+        {
+          provider: "microsoft",
+          scope: "shared",
+          returnTo: "/integrations/native:microsoft",
+        },
+      ],
+    });
+  });
+
+  it("has a member connect Microsoft 365 for themselves alone, with no choice", async () => {
+    const sent = await opened("microsoft", [], person({ role: "user" }));
+    await press(buttons("Connect")[0]);
+    const choice = buttons("Everyone").length;
+    await press(dialogAction("Sign in to Microsoft 365"));
+
+    expect({ choice, sent }).toStrictEqual({
+      choice: 0,
+      sent: [
+        {
+          provider: "microsoft",
+          scope: "personal",
+          returnTo: "/integrations/native:microsoft",
+        },
+      ],
+    });
   });
 
   it("gives members and Grasp's staff nothing to connect a toolkit with", async () => {
