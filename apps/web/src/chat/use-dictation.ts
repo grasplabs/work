@@ -147,6 +147,8 @@ export const useDictation = (
     // What a source says once it is no longer the box's (cancelled, or
     // another dictation begun) is not heard, and it never starts late.
     const current = (): boolean => source.current === chosen;
+    // A problem stopped it while it still stands in its band.
+    let stopped = false;
     const begin = (): void => {
       if (!current()) {
         return;
@@ -156,7 +158,14 @@ export const useDictation = (
         // Told: now it asks for the microphone, as it says.
         setRun((was) => (was === undefined ? was : { ...was, telling: false }));
       }
-      void microphone.start();
+      void (async () => {
+        await microphone.start();
+        // Put away, or stopped by a problem, while the browser still asked:
+        // the microphone it gave goes at once. A newer dictation keeps its own.
+        if (source.current === null || (current() && stopped)) {
+          microphone.stop();
+        }
+      })();
       chosen.start({
         ready: () => {
           if (!current()) {
@@ -192,6 +201,7 @@ export const useDictation = (
           // A problem that stops it lets the microphone go at once: the
           // band stands over a box that takes text again, and the browser
           // would otherwise go on showing it recording.
+          stopped = true;
           chosen.cancel();
           microphone.stop();
           setRun((was) =>
@@ -246,6 +256,10 @@ export const useDictation = (
               );
               void (async () => {
                 const said = (await chosen?.finish()) ?? "";
+                // Cancelled while it was written down: nothing goes in.
+                if (chosen === null || source.current !== chosen) {
+                  return;
+                }
                 stop();
                 if (said !== "") {
                   onText(

@@ -244,15 +244,21 @@ const constructed = (make: () => object): object =>
 
 /**
  * Core's live transcription, faked where it reaches the browser: a
- * microphone that gives no sound, and a line on which core says it isn't
- * set up for this deployment and hangs up, as core does.
+ * microphone that gives no sound once `asked` settles (the person's answer
+ * to the browser), and a line on which core says it isn't set up for this
+ * deployment and hangs up, as core does. Says whether a microphone is still
+ * recording, and how many lines were opened.
  */
-const transcriptionNotSetUp = (): (() => boolean) => {
+const transcriptionNotSetUp = (
+  asked: Promise<unknown> = Promise.resolve()
+): { recording: () => boolean; lines: () => number } => {
   const tracks: { stopped: boolean; stop: () => void }[] = [];
+  let lines = 0;
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: {
       getUserMedia: async () => {
+        await asked;
         const track = {
           stopped: false,
           stop: () => {
@@ -299,6 +305,7 @@ const transcriptionNotSetUp = (): (() => boolean) => {
     globalThis,
     "WebSocket",
     constructed(() => {
+      lines += 1;
       const line = new EventTarget();
       queueMicrotask(() => {
         line.dispatchEvent(new Event("open"));
@@ -325,7 +332,10 @@ const transcriptionNotSetUp = (): (() => boolean) => {
       });
     })
   );
-  return () => tracks.some((track) => !track.stopped);
+  return {
+    recording: () => tracks.some((track) => !track.stopped),
+    lines: () => lines,
+  };
 };
 
 /** The model and effort control's name, as a screen reader hears it. */
@@ -633,6 +643,49 @@ describe(ChatComposer, () => {
     });
   });
 
+  it("lets the microphone go and opens no line when an admin cancels while the browser asks for it", async () => {
+    const given = {
+      mediaDevices: Object.getOwnPropertyDescriptor(navigator, "mediaDevices"),
+      AudioContext: Reflect.get(globalThis, "AudioContext"),
+      WebSocket: Reflect.get(globalThis, "WebSocket"),
+    };
+    const answer = Promise.withResolvers<boolean>();
+    const { recording, lines } = transcriptionNotSetUp(answer.promise);
+    try {
+      await shown();
+      await press(button("Dictate"));
+      await press(button("Cancel"));
+      // Cancel plays its leaving first; the browser's answer comes after.
+      await vi.waitFor(() => {
+        if (document.querySelector("[data-slot=composer-voice-foot]")) {
+          throw new Error("Still leaving");
+        }
+      });
+      await act(async () => {
+        answer.resolve(true);
+        const { promise, resolve } = Promise.withResolvers<boolean>();
+        setTimeout(() => {
+          resolve(true);
+        }, 0);
+        await promise;
+      });
+
+      expect({
+        recording: recording(),
+        lines: lines(),
+        microphone: offersDictation(),
+      }).toStrictEqual({ recording: false, lines: 0, microphone: true });
+    } finally {
+      if (given.mediaDevices === undefined) {
+        Reflect.deleteProperty(navigator, "mediaDevices");
+      } else {
+        Object.defineProperty(navigator, "mediaDevices", given.mediaDevices);
+      }
+      Reflect.set(globalThis, "AudioContext", given.AudioContext);
+      Reflect.set(globalThis, "WebSocket", given.WebSocket);
+    }
+  });
+
   // Last: what it notes lasts for the rest of the visit, as it should.
   it("says once that core's dictation isn't set up, then offers no microphone in any box for the rest of the visit", async () => {
     const given = {
@@ -640,7 +693,7 @@ describe(ChatComposer, () => {
       AudioContext: Reflect.get(globalThis, "AudioContext"),
       WebSocket: Reflect.get(globalThis, "WebSocket"),
     };
-    const recording = transcriptionNotSetUp();
+    const { recording } = transcriptionNotSetUp();
     try {
       await shown();
       const before = offersDictation();

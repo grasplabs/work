@@ -241,7 +241,9 @@ const recognitionOf = (): (new () => Recognition) | undefined =>
 
 /** What the browser's recognition reports as an error, as the Composer says it. */
 const problemOf = (error: string): ComposerVoiceProblem => {
-  if (error === "not-allowed" || error === "service-not-allowed") {
+  // The microphone itself; `service-not-allowed` is the browser's own
+  // service refusing, which no setting of the person's mends: a failure.
+  if (error === "not-allowed") {
     return "blocked";
   }
   if (error === "audio-capture") {
