@@ -23,7 +23,7 @@ import { Button } from "../button";
 import { ArrowLeft, ArrowRight } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { Progress } from "../progress";
-import { useStepKeys } from "../step-foot/keys";
+import { useStepKeys } from "../step-keys/step-keys";
 import { grasp } from "../tokens/tokens.stylex";
 import { Tip } from "../tooltip/tip";
 import { useWords } from "../words/words";

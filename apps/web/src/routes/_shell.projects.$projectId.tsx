@@ -52,7 +52,13 @@ const ProjectPending = () => {
     <>
       <SiteHeader crumbs={[{ label: t`Projects`, to: "/projects" }]} />
       <Page>
-        <PageSkeletonRecord actions={1} density="compact" rows={4} />
+        <PageSkeletonRecord
+          actions={1}
+          density="compact"
+          rows={4}
+          size="sm"
+          variant="items"
+        />
       </Page>
     </>
   );

@@ -10,7 +10,6 @@ import { Fill, LoadingBar } from "../frame/page-skeletons-b.tsx";
 import { NotFound } from "../frame/page-states.tsx";
 import { PageSkeletonChat } from "../grasp/blocks/page-skeleton-chat/page-skeleton-chat.tsx";
 import { Composer, ComposerAdd } from "../grasp/composer/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // A chat's own page (chat/chat-page.tsx), at its own address: linked,
@@ -28,8 +27,8 @@ const Chat = () => {
 };
 
 const styles = stylex.create({
-  // The box at the chat's width, as the block's column has it.
-  composer: { maxWidth: grasp.chatWidth },
+  // The box across the block's column, as the chat's page has it.
+  composer: { maxWidth: "none" },
 });
 
 /** Does nothing: the box takes nothing until the chat is there. */

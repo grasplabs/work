@@ -74,12 +74,15 @@ export interface PageSkeletonToolbarProps {
   variant: PageSkeletonToolbarVariant;
   /** How many tabs or filters it holds. @default 3 */
   count?: number;
+  /** With `search`: the field's icon at its start, as the loaded field has it; `false` for a field with none. @default true */
+  icon?: boolean;
 }
 
 /** The row between a page's header and its content, waiting in the real control's box. */
 export const PageSkeletonToolbar = ({
   variant,
   count = 3,
+  icon = true,
 }: PageSkeletonToolbarProps) => {
   if (variant === "search") {
     return (
@@ -88,7 +91,7 @@ export const PageSkeletonToolbar = ({
         data-slot="page-skeleton-toolbar"
         {...stylex.props(styles.search)}
       >
-        <Icon icon={Search} />
+        {icon ? <Icon icon={Search} /> : null}
       </div>
     );
   }

@@ -14,6 +14,7 @@ import type { IconData } from "../grasp/icons/index.ts";
 import { simply } from "../grasp/motion/simply.stylex.ts";
 import { PanelTexture } from "../grasp/panel/texture.tsx";
 import { RowProblem } from "../grasp/setting-row/line-context.ts";
+import { Skeleton } from "../grasp/skeleton/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { useOrganizationLogo, useOrganizationName } from "./workspace-name.tsx";
 
@@ -180,6 +181,68 @@ const styles = stylex.create({
   },
   tagIcon: { display: "inline-flex", color: grasp.muted },
 });
+
+// The card waiting (Workspace's pending page): words as quiet lines, the
+// well and each fact as their own empty frames, so the card is as tall
+// loading as loaded and the card under it never drops.
+const waits = stylex.create({
+  // The well's own empty frame: its size (96px), its corner and its edge.
+  well: {
+    boxSizing: "border-box",
+    width: grasp.space24,
+    height: grasp.space24,
+    borderRadius: `min(${grasp.corner}, 28%)`,
+    cornerShape: grasp.cornerShape,
+    boxShadow: grasp.edge,
+  },
+  // The name's line at the title's height (the serif's, smaller on a phone).
+  name: {
+    width: "10rem",
+    maxWidth: "100%",
+    height: { default: grasp.titleMdLine, [NARROW]: grasp.titleSmLine },
+  },
+  // The pencil's room, kept for an admin: a small button's square.
+  pencil: { flexShrink: 0, width: grasp.controlSm, height: grasp.controlSm },
+  // A fact's own empty pill, at a short fact's width.
+  tag: { width: "8rem" },
+});
+
+/**
+ * The organization's card before it is read: the cover stands, the well
+ * and the two facts wait as empty frames, the name as a quiet line, the
+ * pencil's room kept for an admin.
+ */
+export const OrgCardLoading = ({ canChange }: { canChange: boolean }) => {
+  const { t } = useLingui();
+  return (
+    <section
+      aria-busy="true"
+      aria-label={t`Organization`}
+      {...stylex.props(styles.card)}
+    >
+      <div aria-hidden="true" {...stylex.props(styles.cover)}>
+        <PanelTexture layout={styles.reach} />
+      </div>
+      <div aria-hidden="true" {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.who)}>
+          <div {...stylex.props(styles.picture)}>
+            <span {...stylex.props(waits.well)} />
+          </div>
+          <div {...stylex.props(styles.words)}>
+            <div {...stylex.props(styles.nameLine)}>
+              <Skeleton layout={waits.name} />
+              {canChange ? <span {...stylex.props(waits.pencil)} /> : null}
+            </div>
+          </div>
+        </div>
+        <ul {...stylex.props(styles.tags)}>
+          <li {...stylex.props(styles.tag, waits.tag)} />
+          <li {...stylex.props(styles.tag, waits.tag)} />
+        </ul>
+      </div>
+    </section>
+  );
+};
 
 /** One fact the deployment decides, as a small tag with its icon. */
 const Fact = ({ icon, children }: { icon: IconData; children: ReactNode }) => (

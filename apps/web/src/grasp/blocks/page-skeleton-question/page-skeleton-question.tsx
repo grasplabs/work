@@ -24,7 +24,7 @@ export const questionPageStyles = stylex.create({
   page: {
     display: "flex",
     flexDirection: "column",
-    gap: grasp.space6,
+    gap: grasp.pageGap,
     width: "100%",
   },
   // One centred column: the preview card, then the question.

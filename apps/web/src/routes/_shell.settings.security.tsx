@@ -322,7 +322,11 @@ const chatAccounts = async (
 
 /** How the person signs in, then their devices, as many as fill the first screen. */
 const SecurityPending = () => (
-  <PageSkeletonSettings header={false} help={false} sections={[1, 12]} />
+  <PageSkeletonSettings
+    header={false}
+    help={false}
+    sections={[1, { rows: 10, variant: "items" }]}
+  />
 );
 
 export const Route = createFileRoute("/_shell/settings/security")({

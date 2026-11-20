@@ -12,6 +12,14 @@ import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import { InspectorPanel } from "../../inspector-panel";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../../item";
 import { PageHeader } from "../../page-header";
 import { RowList, RowListItem } from "../../row-list";
 import { SectionCard } from "../../section-card";
@@ -20,7 +28,7 @@ import { grasp } from "../../tokens/tokens.stylex";
 
 const styles = stylex.create({
   // The header, then the record's card, a section's gap apart: as the loaded page lays them.
-  page: { display: "grid", gap: grasp.space6, minWidth: 0 },
+  page: { display: "grid", gap: grasp.pageGap, minWidth: 0 },
   // A row's placeholder, in the row's mark slot after an empty name: pulled back over the row's own
   // gap, so its first box stands where the row's first box will (the kind's icon, or the name), and
   // its line, a gap on, where the name's words will start.
@@ -37,8 +45,16 @@ const styles = stylex.create({
   w48: { width: "8rem" },
   w56: { width: "10rem" },
   w64: { width: "7rem" },
-  // A head action's place: a small button's height, a short word's width, standing still.
-  action: { width: "4.5rem", height: grasp.controlSm },
+  // A head action's own empty frame: a small button's height and corner, a short word's width, its
+  // hairline edge and no fill, standing still.
+  action: {
+    boxSizing: "border-box",
+    width: "4.5rem",
+    height: grasp.controlSm,
+    borderRadius: `min(${grasp.corner}, calc(${grasp.controlSm} / 2))`,
+    cornerShape: grasp.cornerShape,
+    boxShadow: `inset 0 0 0 1px ${grasp.fieldEdge}`,
+  },
   actions: { display: "flex", alignItems: "center", gap: grasp.space2 },
 });
 
@@ -86,12 +102,68 @@ export interface PageSkeletonRecordProps {
    */
   density?: "comfortable" | "compact";
   /**
-   * How many actions the card's head holds (Edit, Share): each waits as a still small button in its
-   * place, so a phone's head, where they wrap under the title, keeps its height when they arrive.
+   * How many actions the card's head holds (Edit, Share): each waits as a small button's empty frame
+   * in its place, so a phone's head, where they wrap under the title, keeps its height when they arrive.
    * @default 0
    */
   actions?: number;
+  /**
+   * What the card's rows are: `rows`, RowList's one-line rows (44px); `items`, an ItemGroup of Items
+   * two lines high, each in its own `loading` (a project's Apps).
+   * @default "rows"
+   */
+  variant?: "rows" | "items";
+  /** With `items`: their size, as the loaded card's rows have it. @default "md" */
+  size?: "xs" | "sm" | "md";
+  /** With `items`: the icon in its square, or `inline`, the bare icon on the title's line. @default "square" */
+  iconLook?: "square" | "inline";
 }
+
+/** The card's rows waiting: RowList's one-line rows, or two-line Items in their `loading`. */
+const Rows = ({
+  rows,
+  icons,
+  variant,
+  size,
+  iconLook,
+}: {
+  rows: number;
+  icons: boolean;
+  variant: "rows" | "items";
+  size: "xs" | "sm" | "md";
+  iconLook: "square" | "inline";
+}) =>
+  variant === "items" ? (
+    <ItemGroup separated>
+      {Array.from({ length: rows }, (_, index) => (
+        <Item key={index} size={size} loading>
+          {icons ? <ItemMedia iconLook={iconLook} /> : null}
+          <ItemContent>
+            <ItemTitle />
+            <ItemDescription />
+          </ItemContent>
+        </Item>
+      ))}
+    </ItemGroup>
+  ) : (
+    <RowList>
+      {Array.from({ length: rows }, (_, index) => (
+        <RowListItem
+          key={index}
+          name=""
+          mark={
+            <span {...stylex.props(styles.lead)}>
+              {icons ? <Skeleton variant="block" layout={styles.icon} /> : null}
+              <Skeleton
+                text="sm"
+                layout={WIDTHS[index % WIDTHS.length] ?? styles.w48}
+              />
+            </span>
+          }
+        />
+      ))}
+    </RowList>
+  );
 
 /** The record's page before it arrives: the header's placeholders, then its card's quiet rows. */
 export const PageSkeletonRecord = ({
@@ -100,6 +172,9 @@ export const PageSkeletonRecord = ({
   icons = true,
   density = "comfortable",
   actions = 0,
+  variant = "rows",
+  size = "md",
+  iconLook = "square",
   header = true,
   toolbar,
   headerActions,
@@ -127,32 +202,20 @@ export const PageSkeletonRecord = ({
         actions > 0 ? (
           <span aria-hidden="true" {...stylex.props(styles.actions)}>
             {Array.from({ length: actions }, (_, index) => (
-              <Skeleton key={index} variant="block" layout={styles.action} />
+              <span key={index} {...stylex.props(styles.action)} />
             ))}
           </span>
         ) : undefined
       }
     >
       <div aria-hidden="true">
-        <RowList>
-          {Array.from({ length: rows }, (_, index) => (
-            <RowListItem
-              key={index}
-              name=""
-              mark={
-                <span {...stylex.props(styles.lead)}>
-                  {icons ? (
-                    <Skeleton variant="block" layout={styles.icon} />
-                  ) : null}
-                  <Skeleton
-                    text="sm"
-                    layout={WIDTHS[index % WIDTHS.length] ?? styles.w48}
-                  />
-                </span>
-              }
-            />
-          ))}
-        </RowList>
+        <Rows
+          rows={rows}
+          icons={icons}
+          variant={variant}
+          size={size}
+          iconLook={iconLook}
+        />
       </div>
     </SectionCard>
   </div>

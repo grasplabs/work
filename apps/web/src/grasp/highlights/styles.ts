@@ -89,7 +89,10 @@ export const highlightStyles = stylex.create({
   attention: { color: grasp.attention },
   info: { color: grasp.info },
   // Loading: the value's and the change's room, held by skeletons so nothing moves.
-  skeletonValue: { width: "60%", height: grasp.textMdLine },
+  // About four figures of the value at its size (a ch is a figure's width): a figure waits as wide
+  // as a figure, not across the cell.
+  skeletonValueAt: { display: "flex", fontSize: grasp.textLg },
+  skeletonValue: { width: "4ch", maxWidth: "100%", height: grasp.textMdLine },
   skeletonChange: { width: "35%" },
 
   // The grid: one box with the edge, its cells parted by hairlines: a hairline's gap between the

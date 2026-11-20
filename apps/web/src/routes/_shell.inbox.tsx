@@ -53,7 +53,14 @@ const InboxPending = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Inbox` }]} />
-      <PageSkeletonListDetail header={false} rows={8} />
+      <PageSkeletonListDetail
+        header={false}
+        iconLook="inline"
+        rows={8}
+        separated={false}
+        size="xs"
+        variant="items"
+      />
       <PagePanel label={t`Inbox`}>
         <PageSkeletonDetail />
       </PagePanel>

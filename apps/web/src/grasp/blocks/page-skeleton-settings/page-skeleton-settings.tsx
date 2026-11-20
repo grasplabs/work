@@ -6,6 +6,7 @@
 //
 //   <PageSkeletonSettings sections={[3, 2]} />
 //   <PageSkeletonSettings header={false} help={false} sections={[{ rows: 2, title: false }, 3]} />
+//   <PageSkeletonSettings sections={[2, { rows: 3, variant: "items" }]} />   a card listing things (devices)
 //
 // A card the page draws with no title over it (an organization's own settings at the top) waits
 // as its rows alone, so the next card's title stands where it will; rows whose help sits behind
@@ -13,10 +14,19 @@
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../../item";
 import { PageHeader } from "../../page-header";
 import { SectionCard } from "../../section-card";
 import { SettingRow, SettingsRows } from "../../setting-row";
 import { grasp } from "../../tokens/tokens.stylex";
+import { PageSkeletonChartFrame } from "../page-skeleton-dashboard/page-skeleton-dashboard";
 
 const styles = stylex.create({
   // The header, then the sections, a section's gap apart: as the loaded settings page lays them.
@@ -67,10 +77,21 @@ export interface PageSkeletonSettingsProps {
 
 /** A section given in full: its rows, and whether a title stands over it. */
 export interface PageSkeletonSettingsSection {
-  /** How many settings it holds. */
-  rows: number;
+  /** How many settings it holds (none for a chart's card). @default 0 */
+  rows?: number;
   /** A title over the card. @default true */
   title?: boolean;
+  /**
+   * What its rows are: `settings`, SettingRows with a control; `items`, two-line Items at the
+   * setting rows' size (xs), each in its `loading`, for a list of things in a settings card
+   * (Security's devices); `chart`, a chart's own frame at `height` (its level lines, nothing
+   * filled), as the dashboard's chart waits (AI and spend). @default "settings"
+   */
+  variant?: "settings" | "items" | "chart";
+  /** With `chart`: the chart's height, Chart's own `height`. @default 240 */
+  height?: number;
+  /** With `items`: each row leads with the bare icon on its title's line. @default true */
+  icons?: boolean;
 }
 
 /** The rows of a card waiting: each a SettingRow in its `loading`, a small control's box in its place. */
@@ -84,6 +105,47 @@ const Rows = ({ rows, help }: { rows: number; help: boolean }) => (
   </SettingsRows>
 );
 
+/** A list of things in a settings card waiting: two-line Items at the setting rows' size. */
+const ItemRows = ({ rows, icons }: { rows: number; icons: boolean }) => (
+  <ItemGroup separated>
+    {Array.from({ length: rows }, (_, row) => (
+      <Item key={row} size="xs" loading>
+        {icons ? <ItemMedia iconLook="inline" /> : null}
+        <ItemContent>
+          <ItemTitle />
+          <ItemDescription />
+        </ItemContent>
+      </Item>
+    ))}
+  </ItemGroup>
+);
+
+/** One section's rows: setting rows, or a list of things. */
+const SectionRows = ({
+  section,
+  help,
+}: {
+  section: number | PageSkeletonSettingsSection;
+  help: boolean;
+}) => {
+  if (typeof section === "number") {
+    return <Rows rows={section} help={help} />;
+  }
+  const rows = section.rows ?? 0;
+  if (section.variant === "chart") {
+    return (
+      <div aria-hidden="true">
+        <PageSkeletonChartFrame height={section.height ?? 240} />
+      </div>
+    );
+  }
+  return section.variant === "items" ? (
+    <ItemRows rows={rows} icons={section.icons ?? true} />
+  ) : (
+    <Rows rows={rows} help={help} />
+  );
+};
+
 /** One section waiting: its title's placeholder over it, or the rows alone (hidden from a reader). */
 const Section = ({
   section,
@@ -92,19 +154,26 @@ const Section = ({
   section: number | PageSkeletonSettingsSection;
   help: boolean;
 }) => {
-  const rows = typeof section === "number" ? section : section.rows;
   if (typeof section !== "number" && section.title === false) {
     return (
       <div aria-hidden="true">
         <SectionCard aria-label="" flush density="compact">
-          <Rows rows={rows} help={help} />
+          <SectionRows section={section} help={help} />
         </SectionCard>
       </div>
     );
   }
+  // A chart stands inside the card's inset; rows run to its edges.
+  const flush = typeof section === "number" || section.variant !== "chart";
   return (
-    <SectionCard variant="grouped" flush density="compact" title="" loading>
-      <Rows rows={rows} help={help} />
+    <SectionCard
+      variant="grouped"
+      flush={flush}
+      density="compact"
+      title=""
+      loading
+    >
+      <SectionRows section={section} help={help} />
     </SectionCard>
   );
 };
