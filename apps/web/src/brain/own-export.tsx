@@ -58,19 +58,21 @@ const styles = stylex.create({
 const Files = ({ shown }: { shown: OwnExport }) => {
   const { t } = useLingui();
   return (
-    <ul aria-label={t`Your export's files`} {...stylex.props(styles.files)}>
-      {shown.files.map((file) => (
-        <li key={file}>
-          <Link
-            download
-            href={ownExportFileHref(shown.id, file)}
-            variant="standalone"
-          >
-            {file}
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <Text element="div" size="sm">
+      <ul aria-label={t`Your export's files`} {...stylex.props(styles.files)}>
+        {shown.files.map((file) => (
+          <li key={file}>
+            <Link
+              download
+              href={ownExportFileHref(shown.id, file)}
+              variant="standalone"
+            >
+              {file}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Text>
   );
 };
 

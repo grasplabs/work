@@ -127,12 +127,14 @@ const EntityLinks = ({
   memory: BrainMemoryShown;
   entities: ReadonlyMap<string, BrainEntityListed & { firstSeen: boolean }>;
 }) => (
-  <span {...stylex.props(styles.row)}>
-    <EntityLink entities={entities} id={memory.about} />
-    {memory.object === null ? null : (
-      <EntityLink entities={entities} id={memory.object.id} />
-    )}
-  </span>
+  <Text element="span" size="sm">
+    <span {...stylex.props(styles.row)}>
+      <EntityLink entities={entities} id={memory.about} />
+      {memory.object === null ? null : (
+        <EntityLink entities={entities} id={memory.object.id} />
+      )}
+    </span>
+  </Text>
 );
 
 /** One list of the change: memories with their entities, and for a contested one what another source says. */
