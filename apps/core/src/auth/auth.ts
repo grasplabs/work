@@ -1257,7 +1257,13 @@ const createAuth = (
             // opening, which ends every interview's session, so they sign
             // in again as a member.
             const open = await gateLetsIn(env, config, session.userId);
-            if (session.interview === true ? open : !open) {
+            // And a guest's: one removed after `startSession` looked is
+            // gone either way, by this or by the removal, which ends every
+            // stored session of theirs.
+            const noGuest =
+              session.guest === true &&
+              !(await isGuestNow(env, session.userId));
+            if ((session.interview === true ? open : !open) || noGuest) {
               await drizzle(env.DB)
                 .delete(sessions)
                 .where(eq(sessions.id, session.id));

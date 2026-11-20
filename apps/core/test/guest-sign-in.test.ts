@@ -106,13 +106,18 @@ const askCode = async (email: string) => {
 /** Signs in with `otp`: the session cookie, or what refused it. */
 const codeSignIn = async (
   email: string,
-  otp: string
+  otp: string,
+  coreEnv: Env = env
 ): Promise<{ session?: string; refused?: string }> => {
-  const response = await routed(`/api/auth${guestSignInPath}`, {
-    method: "POST",
-    headers: { origin: clientOrigin, "content-type": "application/json" },
-    body: JSON.stringify({ email, otp }),
-  });
+  const response = await routed(
+    `/api/auth${guestSignInPath}`,
+    {
+      method: "POST",
+      headers: { origin: clientOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ email, otp }),
+    },
+    coreEnv
+  );
   const session = response.headers
     .getSetCookie()
     .map((cookie) => cookie.split(";")[0] ?? "")
@@ -521,8 +526,18 @@ describe("a guest signing in with a code", () => {
     };
     const recordedBefore = await erasuresOf(guest.userId, member.userId);
     await guest.admin.api.members.erase(guest.userId, guest.address);
+    // Asked again, after the erasure rewrote their address: where it stands.
+    const askedAgain = {
+      sameAddress: await outcome(
+        guest.admin.api.members.erase(guest.userId, guest.address)
+      ),
+      otherAddress: await outcome(
+        guest.admin.api.members.erase(guest.userId, outsider())
+      ),
+    };
 
     expect({
+      askedAgain,
       wrongConfirmations,
       recordedBefore,
       recordedAfter: await erasuresOf(guest.userId),
@@ -535,6 +550,10 @@ describe("a guest signing in with a code", () => {
       held: await heldBy(guest.address),
       holding: await holding(guest.address),
     }).toStrictEqual({
+      askedAgain: {
+        sameAddress: "ok",
+        otherAddress: "member.erase_name_mismatch",
+      },
       wrongConfirmations: {
         otherAddress: "member.erase_name_mismatch",
         empty: "member.erase_name_mismatch",
@@ -552,6 +571,83 @@ describe("a guest signing in with a code", () => {
       held: { users: 0, accounts: 0 },
       holding: [],
     });
+  });
+});
+
+/**
+ * Core's env whose database runs `before` once, just before it stores a
+ * session: what lands between `startSession`'s look and the stored row.
+ */
+const beforeSessionStored = (before: () => Promise<unknown>): Env => {
+  let ran = false;
+  const storing = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, key) => {
+        if (key === "bind") {
+          return (...values: unknown[]) => storing(target.bind(...values));
+        }
+        const value: unknown = Reflect.get(target, key);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return async (...args: unknown[]) => {
+          if (!ran) {
+            ran = true;
+            await before();
+          }
+          const result: unknown = await Reflect.apply(value, target, args);
+          return result;
+        };
+      },
+    });
+  const db = new Proxy(env.DB, {
+    get: (target, key) => {
+      if (key === "prepare") {
+        return (query: string) => {
+          const statement = target.prepare(query);
+          return query.toLowerCase().startsWith('insert into "sessions"')
+            ? storing(statement)
+            : statement;
+        };
+      }
+      const value: unknown = Reflect.get(target, key);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return (...args: unknown[]): unknown =>
+        Reflect.apply(value, target, args);
+    },
+  });
+  return { ...env, DB: db };
+};
+
+describe("a guest removed while signing in", () => {
+  it("keeps no session, and records no sign-in, when the removal lands before the session is stored", async () => {
+    const mail = await mailbox();
+    const guest = await invited();
+    await askCode(guest.address);
+    const code = codeIn(mail, guest.address);
+    let signedIn: Awaited<ReturnType<typeof codeSignIn>> = {};
+    const events = await auditedDuring(async () => {
+      signedIn = await codeSignIn(
+        guest.address,
+        code,
+        beforeSessionStored(
+          async () => await guest.admin.api.members.remove(guest.userId)
+        )
+      );
+    });
+
+    expect({
+      session:
+        signedIn.session === undefined
+          ? null
+          : await sessionOf(signedIn.session),
+      signedInEvents: events.filter(
+        ({ action }) => action === "member.guest_signed_in"
+      ).length,
+      removed: events.some(({ action }) => action === "member.removed"),
+    }).toStrictEqual({ session: null, signedInEvents: 0, removed: true });
   });
 });
 

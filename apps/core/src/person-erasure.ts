@@ -86,6 +86,7 @@ import {
   emailHashOf,
   emailKeyVersion,
   erasedAddress,
+  normalizedEmail,
   subjectHashOf,
   subjectKeyVersion,
   subjectsOf,
@@ -1076,6 +1077,44 @@ const addressKeptOut = async (env: Env, userId: string): Promise<boolean> => {
 };
 
 /**
+ * Whether `typed` confirms erasing `person` (`userId`): their name exactly
+ * as it stands. A guest has no name (guest-members.ts), so their address
+ * confirms them, never kept: as `users` has it until their erasure is
+ * recorded, then by the keyed hash the erasure keeps of it
+ * (`emailHashOf`), since the erasure rewrites `users.email`, so asking
+ * again still answers where it stands. Once the address is released (no
+ * hash kept), nothing confirms a guest again; the clock still finishes
+ * their erasure.
+ */
+const confirms = async (
+  env: Env,
+  userId: string,
+  person: { name: string; email: string },
+  typed: unknown
+): Promise<boolean> => {
+  if (typeof typed !== "string") {
+    return false;
+  }
+  if (person.name !== "") {
+    return typed === person.name;
+  }
+  const [recorded] = await drizzle(env.DB)
+    .select({ hash: personErasures.emailHash })
+    .from(personErasures)
+    .where(eq(personErasures.userId, userId));
+  if (recorded === undefined) {
+    return typed === person.email;
+  }
+  return (
+    recorded.hash !== null &&
+    typed !== "" &&
+    // Exactly as it was shown: the hash would take any case or spacing.
+    typed === normalizedEmail(typed) &&
+    (await emailHashOf(env, typed)) === recorded.hash
+  );
+};
+
+/**
  * What erasing `userId` would do, or where their erasure stands, for one of
  * the client's admins.
  */
@@ -1125,10 +1164,7 @@ export const erasePerson = async (
   if (!(await isRemoved(env, target))) {
     throw memberErrors.create("member.erase_not_removed");
   }
-  // A guest has no name (guest-members.ts): they are confirmed by their
-  // address instead, which is never kept.
-  const confirmedBy = person.name === "" ? person.email : person.name;
-  if (typeof name !== "string" || name !== confirmedBy) {
+  if (!(await confirms(env, target, person, name))) {
     throw memberErrors.create("member.erase_name_mismatch");
   }
   const db = drizzle(env.DB);
