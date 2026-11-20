@@ -276,6 +276,7 @@ export const useAppActions = ({
   app,
   tools,
   size,
+  accountRows,
 }: {
   integration: Integration;
   identity: Identity;
@@ -284,6 +285,12 @@ export const useAppActions = ({
   /** The read of its tools: a toolkit's Connect waits for it. */
   tools: Loaded<CatalogTool[]> | undefined;
   size: "xs" | "sm";
+  /**
+   * Whether the host draws a row for each account, which offers signing in
+   * again to it: the app's page does, so its Manage menu doesn't; the panel
+   * has no rows.
+   */
+  accountRows: boolean;
 }): { actions: AppActions; dialogs: ReactNode } => {
   const [native, setNative] = useState<Native>();
   const connectable = canConnect(integration, identity);
@@ -317,7 +324,7 @@ export const useAppActions = ({
   } else if (way === "dialog") {
     actions.onConnect = openNative();
   }
-  if (again !== undefined) {
+  if (again !== undefined && !accountRows) {
     actions.onSignIn = openNative(again);
   }
   if (connectable && !none && integration.source === "native") {
