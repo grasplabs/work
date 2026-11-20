@@ -15,8 +15,8 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
-import type { ReactNode } from "react";
+import { act, useState } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -24,14 +24,15 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { AgentPage } from "./agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
 import { AgentsOverview } from "./agents-overview.tsx";
-import type { ManagedAgents } from "./agents-overview.tsx";
+import type { AgentsTab, ManagedAgents } from "./agents-overview.tsx";
 
 // The Agents page and one agent's page, on what their routes read from
 // core. These start from the ways the pages can fail: someone who isn't an
 // admin shown agents that aren't theirs, or a way to change one; a chat
 // offered with an agent that won't answer the person; a paused agent
-// passed off as on; a change that sends core less than the whole agent
-// and so wipes what wasn't on the card.
+// passed off as on; an agent that answers nobody else listed among the
+// organization's, or the other way round; a change that sends core less
+// than the whole agent and so wipes what wasn't on the card.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -244,6 +245,34 @@ const cards = () =>
     };
   });
 
+/**
+ * The Agents page as its route shows it: the tab chosen is kept, as the
+ * address keeps it, starting from the one the address names (`at`).
+ */
+const Overview = ({
+  at,
+  ...page
+}: Pick<
+  ComponentProps<typeof AgentsOverview>,
+  "makes" | "managed" | "usable"
+> & { at?: AgentsTab }) => {
+  const [tab, setTab] = useState(at);
+  return <AgentsOverview {...page} onTab={setTab} tab={tab} />;
+};
+
+/** The overview's tabs, by their words, and which is chosen. */
+const tabs = () =>
+  [...document.querySelectorAll("[role='tab']")].map((tab) => ({
+    name: tab.textContent,
+    chosen: tab.getAttribute("aria-selected") === "true",
+  }));
+
+/** The overview's tab named `name`. */
+const tabNamed = (name: string) =>
+  [...document.querySelectorAll("[role='tab']")].find(
+    (tab) => tab.textContent === name
+  );
+
 /** The button named `name` on the open tab, or outside the tabs. */
 const buttonNamed = (name: string) =>
   [...document.querySelectorAll("button")].find(
@@ -291,7 +320,7 @@ describe("the company's agents, on pages of their own", () => {
   describe("the Agents page", () => {
     it("shows someone who isn't an admin only their agents, each opening a chat with it and nothing to change", async () => {
       await mounted(
-        <AgentsOverview
+        <Overview
           makes={false}
           managed={undefined}
           usable={[chatAgent(stephen), chatAgent(claire)]}
@@ -306,12 +335,14 @@ describe("the company's agents, on pages of their own", () => {
       expect({
         newAgent: document.querySelector("a[href='/agents/new']") !== null,
         says: document.body.textContent?.includes("Paused"),
-      }).toStrictEqual({ newAgent: false, says: false });
+        // Every agent they see is shared with them: nothing to tell apart.
+        tabs: tabs(),
+      }).toStrictEqual({ newAgent: false, says: false, tabs: [] });
     });
 
-    it("shows an admin every agent, each card opening its page with one fact at its foot", async () => {
+    it("shows an admin every agent under the tab for whom it answers, each card opening its page with one fact at its foot", async () => {
       await mounted(
-        <AgentsOverview
+        <Overview
           makes
           managed={{
             ...managed,
@@ -321,14 +352,40 @@ describe("the company's agents, on pages of their own", () => {
           usable={[chatAgent(stephen)]}
         />
       );
-      expect(
-        cards().map(({ name, to, chat }) => ({ name, to, chat }))
-      ).toStrictEqual([
-        { name: "Stephen", to: "/agents/organization", chat: [] },
-        { name: "Claire", to: "/agents/agent-claire", chat: [] },
-        { name: "Milan", to: "/agents/agent-milan", chat: [] },
-      ]);
-      const [stephensCard, clairesCard, milansCard] = cards();
+      // With no tab in the address, the first with agents in it: Milan
+      // answers nobody else yet.
+      const mine = { tabs: tabs(), cards: cards() };
+      await press(tabNamed("Organization"));
+      expect({
+        mine: {
+          tabs: mine.tabs,
+          cards: mine.cards.map(({ name, to, chat }) => ({ name, to, chat })),
+        },
+        organization: {
+          tabs: tabs(),
+          cards: cards().map(({ name, to, chat }) => ({ name, to, chat })),
+        },
+      }).toStrictEqual({
+        mine: {
+          tabs: [
+            { name: "My agents", chosen: true },
+            { name: "Organization", chosen: false },
+          ],
+          cards: [{ name: "Milan", to: "/agents/agent-milan", chat: [] }],
+        },
+        organization: {
+          tabs: [
+            { name: "My agents", chosen: false },
+            { name: "Organization", chosen: true },
+          ],
+          cards: [
+            { name: "Stephen", to: "/agents/organization", chat: [] },
+            { name: "Claire", to: "/agents/agent-claire", chat: [] },
+          ],
+        },
+      });
+      const [milansCard] = mine.cards;
+      const [stephensCard, clairesCard] = cards();
       expect({
         // Its next run at its foot, and whom it answers for a touch screen.
         claire: ["Next", "Finance"].map((words) =>
@@ -347,9 +404,67 @@ describe("the company's agents, on pages of their own", () => {
       });
     });
 
+    it("opens on the tab the address names, and says so where that tab has no agents", async () => {
+      // Every agent answers someone: none is only the admin's.
+      const shared: ManagedAgents = {
+        ...managed,
+        settings: {
+          ...managed.settings,
+          [milan.id]: settingsOf({ who: "everyone" }, 0),
+        },
+      };
+      await mounted(
+        <Overview makes managed={shared} usable={[chatAgent(stephen)]} />
+      );
+      const unnamed = { tabs: tabs(), cards: cards().map(({ name }) => name) };
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      await mounted(
+        <Overview
+          at="mine"
+          makes
+          managed={shared}
+          usable={[chatAgent(stephen)]}
+        />
+      );
+      expect({
+        unnamed,
+        mine: {
+          tabs: tabs(),
+          cards: cards().map(({ name }) => name),
+          says: document.body.textContent?.includes(
+            "Agents only you can use stand here."
+          ),
+        },
+      }).toStrictEqual({
+        unnamed: {
+          tabs: [
+            { name: "My agents", chosen: false },
+            { name: "Organization", chosen: true },
+          ],
+          cards: ["Stephen", "Claire", "Milan"],
+        },
+        mine: {
+          tabs: [
+            { name: "My agents", chosen: true },
+            { name: "Organization", chosen: false },
+          ],
+          cards: [],
+          says: true,
+        },
+      });
+    });
+
     it("tells an admin resting on a card what is worth knowing before opening it", async () => {
       await mounted(
-        <AgentsOverview makes managed={managed} usable={[chatAgent(stephen)]} />
+        <Overview
+          at="organization"
+          makes
+          managed={managed}
+          usable={[chatAgent(stephen)]}
+        />
       );
       const card = document.querySelector("a[href='/agents/agent-claire']");
       await act(async () => {
@@ -508,7 +623,7 @@ describe("the company's agents, on pages of their own", () => {
       // As for an admin among Grasp's staff, whom core refuses the read.
       const unread: ManagedAgents = { ...managed, settings: {} };
       await mounted(
-        <AgentsOverview
+        <Overview
           makes={false}
           managed={unread}
           usable={[chatAgent(stephen)]}

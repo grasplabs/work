@@ -2564,6 +2564,10 @@ msgstr "Agent nicht gefunden"
 msgid "Agents"
 msgstr "Agenten"
 
+#: src/agents/agents-overview.tsx
+msgid "Agents only you can use stand here."
+msgstr "Hier stehen die Agenten, die nur du nutzen kannst."
+
 #: src/knowledge/new-collection.tsx
 msgid "Agents read this before they look inside."
 msgstr "Agenten lesen dies, bevor sie hineinschauen."
@@ -10357,6 +10361,10 @@ msgctxt "your microphone is off for a moment"
 msgid "Muted"
 msgstr "Stumm"
 
+#: src/agents/agents-overview.tsx
+msgid "My agents"
+msgstr "Meine Agenten"
+
 #: src/apps/apps-overview.tsx
 msgid "My apps"
 msgstr "Meine Apps"
@@ -12272,6 +12280,7 @@ msgstr "Kugel"
 msgid "Order"
 msgstr "Reihenfolge"
 
+#: src/agents/agents-overview.tsx
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/org-card.tsx
 msgid "Organization"
@@ -13807,7 +13816,6 @@ msgctxt "column: billed requests"
 msgid "Requests"
 msgstr "Anfragen"
 
-#: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.workflows.requests.tsx
 msgctxt "Stephen's requests: the page"
 msgid "Requests"
@@ -20122,6 +20130,10 @@ msgstr "Ihre Chats"
 #: src/interview/before.tsx
 msgid "Your choice"
 msgstr "Ihre Entscheidung"
+
+#: src/agents/agents-overview.tsx
+msgid "Your company has no other agents yet."
+msgstr "Dein Unternehmen hat noch keine anderen Agenten."
 
 #: src/apps/apps-overview.tsx
 msgid "Your company has no other Apps yet."

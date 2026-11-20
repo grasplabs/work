@@ -37,6 +37,12 @@ import {
 import { AgentPerson, Plus } from "../grasp/icons/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import type { KeyValueItem } from "../grasp/key-value/key-value.tsx";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { dollars } from "../settings/money.ts";
@@ -62,6 +68,20 @@ import { lookOf } from "./figure/look.ts";
 // before opening it: whom it answers, what it may do, whether it works on its own and when next,
 // this month's use and its last run. A touch screen has no hover, and a tap follows the link: there
 // the facts that matter most stand on the card itself.
+//
+// An admin's agents stand under two tabs, by whom each answers: My agents, the ones that answer
+// nobody else yet, and Organization, the ones that answer everyone or some teams, the company's
+// first among them. Core keeps no maker, so an agent that answers nobody else is every admin's.
+// The tab is in the address (`?tab=`). Anyone else has only the agents shared with them, and so
+// no tabs.
+
+/** The overview's tabs, by the names its address carries. */
+export const agentsTabs = ["mine", "organization"] as const;
+export type AgentsTab = (typeof agentsTabs)[number];
+
+/** The tab an address names; none for any other. */
+export const agentsTabOf = (value: unknown): AgentsTab | undefined =>
+  agentsTabs.find((tab) => tab === value);
 
 /** What an admin's read adds to the agents: every agent, and what core keeps of each. */
 export interface ManagedAgents {
@@ -77,6 +97,8 @@ export interface ManagedAgents {
 }
 
 const styles = stylex.create({
+  // The room between the tabs and the cards: with the tab panel's own 16px, the page gap (24px).
+  tabsRoom: { marginBlockEnd: grasp.space2 },
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 16rem), 1fr))",
@@ -186,6 +208,16 @@ const shownOf = (
     },
   }));
 };
+
+/**
+ * The tab an agent stands under: My agents while it answers nobody else, Organization once it
+ * answers everyone or some teams, as the company's first always does and one whose access core
+ * didn't say.
+ */
+const tabOf = ({ managed }: Shown): AgentsTab =>
+  managed?.first === false && managed.settings?.audience.who === "nobody"
+    ? "mine"
+    : "organization";
 
 /** The wake-up that ran last, if any did. */
 const lastRunOf = (wakes: readonly AgentWake[]): AgentWake | undefined =>
@@ -455,19 +487,111 @@ const AgentCard = ({
   return <Card padding="none">{inside}</Card>;
 };
 
-/** The Agents page's body: the agents the person may `usable`, and what an admin `managed`. */
+/** The agents as cards in a grid. */
+const AgentGrid = ({
+  agents,
+  teams,
+}: {
+  agents: readonly Shown[];
+  teams: StephenReach["teams"];
+}) => {
+  const { t } = useLingui();
+  const factsOf = useFacts(teams);
+  return (
+    <ul aria-label={t`Agents`} {...stylex.props(styles.grid)}>
+      {agents.map((agent) => (
+        <li key={agent.id}>
+          <AgentCard
+            facts={
+              agent.managed === undefined ? undefined : factsOf(agent.managed)
+            }
+            shown={agent}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+};
+
+/** An admin's agents under their two tabs, the chosen one's shown. */
+const AgentTabs = ({
+  agents,
+  teams,
+  tab,
+  onTab,
+}: {
+  agents: readonly Shown[];
+  teams: StephenReach["teams"];
+  tab: AgentsTab | undefined;
+  onTab: (tab: AgentsTab) => void;
+}) => {
+  const { t } = useLingui();
+  const under = (each: AgentsTab) =>
+    agents.filter((agent) => tabOf(agent) === each);
+  const tabName = { mine: t`My agents`, organization: t`Organization` };
+  const none = {
+    mine: t`Agents only you can use stand here.`,
+    organization: t`Your company has no other agents yet.`,
+  };
+  return (
+    <Tabs
+      onValueChange={(value) => {
+        const chosen = agentsTabOf(value);
+        if (chosen !== undefined) {
+          onTab(chosen);
+        }
+      }}
+      // With no tab in the address, the first with agents in it.
+      value={tab ?? agentsTabs.find((each) => under(each).length > 0) ?? "mine"}
+    >
+      <div {...stylex.props(styles.tabsRoom)}>
+        <TabsList aria-label={t`Agents`}>
+          {agentsTabs.map((each) => (
+            <TabsTrigger key={each} value={each}>
+              {tabName[each]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
+      {agentsTabs.map((each) => (
+        <TabsContent key={each} value={each}>
+          {under(each).length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia picture="nothing" />
+                <EmptyDescription>{none[each]}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <AgentGrid agents={under(each)} teams={teams} />
+          )}
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
+};
+
+/**
+ * The Agents page's body: the agents the person may `usable`, and what an admin `managed`, under
+ * the `tab` the address names.
+ */
 export const AgentsOverview = ({
   usable,
   managed,
   makes,
+  tab,
+  onTab,
 }: {
   usable: readonly ChatAgent[];
   managed: ManagedAgents | undefined;
   /** Whether the person may make an agent: the company's own admins. */
   makes: boolean;
+  /** The tab the address names; none shows the first with agents in it. */
+  tab: AgentsTab | undefined;
+  /** Puts the tab chosen in the address. */
+  onTab: (tab: AgentsTab) => void;
 }) => {
   const { t } = useLingui();
-  const factsOf = useFacts(managed?.teams ?? []);
   const agents = shownOf(usable, managed);
   const newAgent = makes ? (
     <Button icon={Plus} render={<Link to="/agents/new" />} variant="ink">
@@ -493,22 +617,18 @@ export const AgentsOverview = ({
             <EmptyContent>{newAgent}</EmptyContent>
           )}
         </Empty>
-      ) : (
-        <ul aria-label={t`Agents`} {...stylex.props(styles.grid)}>
-          {agents.map((agent) => (
-            <li key={agent.id}>
-              <AgentCard
-                facts={
-                  agent.managed === undefined
-                    ? undefined
-                    : factsOf(agent.managed)
-                }
-                shown={agent}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
+      ) : null}
+      {agents.length > 0 && managed !== undefined ? (
+        <AgentTabs
+          agents={agents}
+          onTab={onTab}
+          tab={tab}
+          teams={managed.teams}
+        />
+      ) : null}
+      {agents.length > 0 && managed === undefined ? (
+        <AgentGrid agents={agents} teams={[]} />
+      ) : null}
     </Page>
   );
 };
