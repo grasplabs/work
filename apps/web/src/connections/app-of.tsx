@@ -1,3 +1,4 @@
+import { canSignInAgain } from "@grasp-os/shared/connect";
 import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
@@ -63,6 +64,23 @@ export const appStateOf = (
   return fixOf(integration, identity) === "sign-in" ? "sign-in" : "reconnect";
 };
 
+/**
+ * How one account stands on its own row, as its own buttons do: it works,
+ * this person signs in to it again, or it is connected anew.
+ */
+const rowStateOf = (
+  connection: ListedConnection,
+  integration: Integration,
+  identity: Pick<Identity, "role" | "staff">
+): AppConnection["state"] => {
+  if (connection.status === "active") {
+    return "works";
+  }
+  return canSignInAgain(connection, integration.offered, identity)
+    ? "sign-in"
+    : "reconnect";
+};
+
 /** A promise's value once it settles, for as long as it is the promise given; undefined until then. */
 export const useSettled = <T,>(
   promise: Promise<T> | undefined
@@ -114,18 +132,21 @@ export const useAppOf = (
           ? t`You`
           : (each.connectedByName ?? t`Someone no longer here`),
       on: formatDate(each.createdAt),
-      state: appStateOf(each, integration, identity),
+      state: rowStateOf(each, integration, identity),
     }));
     const row = rows.find(({ id }) => id === primary?.id);
-    // The one the company relies on, when it ran out, says how to fix it;
-    // else every account counts: one that ran out beside one that works
-    // needs someone.
+    // The one the company relies on, when it ran out, says how to fix it
+    // (`fixOf`); else every account counts: one that ran out beside one that
+    // works needs someone.
     const connection: AppConnection | undefined =
-      row === undefined || primary?.status !== "active"
-        ? row
+      row === undefined || primary === undefined
+        ? undefined
         : {
             ...row,
-            state: rollUp(rows.map(({ state }) => state)) ?? row.state,
+            state:
+              primary.status === "active"
+                ? (rollUp(rows.map(({ state }) => state)) ?? row.state)
+                : appStateOf(primary, integration, identity),
           };
     const workflows =
       uses === undefined

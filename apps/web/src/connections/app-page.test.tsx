@@ -254,6 +254,15 @@ const openGroup = async (name: string): Promise<void> => {
   );
 };
 
+/** The page's first account row: its state, and how many buttons it has. */
+const rowOf = () => {
+  const row = document.querySelector<HTMLElement>('[data-slot="app-account"]');
+  return {
+    state: row?.dataset.state,
+    buttons: row?.querySelectorAll("button").length,
+  };
+};
+
 describe("changing what Grasp may do in a connected app", () => {
   afterEach(() => {
     act(() => {
@@ -426,5 +435,39 @@ describe("changing what Grasp may do in a connected app", () => {
         ],
       },
     ]);
+  });
+
+  it("leaves a row's buttons to who may use them: a member none on a shared account, Grasp staff none at all", async () => {
+    const microsoft: ListedConnection = {
+      id: "connection-1",
+      source: "native",
+      provider: "microsoft",
+      scope: "shared",
+      status: "needs_reauth",
+      ownerUserId: null,
+      connectedBy: "u2",
+      connectedByName: "Bo",
+      accountName: "ops@acme.test",
+      createdAt: "2026-10-01T00:00:00.000Z",
+    };
+    const app = {
+      ...entry,
+      source: "native" as const,
+      id: "microsoft",
+      name: "Microsoft 365",
+    };
+    await shown(microsoft, { app, identity: person({ role: "user" }) });
+    const member = rowOf();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.innerHTML = "";
+    await shown(microsoft, { app, identity: person({ staff: true }) });
+    const staff = rowOf();
+
+    expect({ member, staff }).toStrictEqual({
+      member: { state: "reconnect", buttons: 0 },
+      staff: { state: "reconnect", buttons: 0 },
+    });
   });
 });

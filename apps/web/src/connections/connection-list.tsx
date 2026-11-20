@@ -398,11 +398,21 @@ const choosesBrainAudience = (
   connection.status !== "disconnected";
 
 /**
+ * Whether this person disconnects `connection` from the app's page: only its
+ * owner sees a personal one, admins disconnect shared ones, and Grasp staff
+ * none. Connect checks it again.
+ */
+export const mayDisconnect = (
+  connection: ListedConnection,
+  identity: Pick<Identity, "role" | "staff">
+): boolean =>
+  (connection.scope === "personal" || isAdmin(identity.role)) &&
+  !identity.staff;
+
+/**
  * What can be done to one account from its row on the app's page: sign in
  * again where its access ran out and this person may, and disconnect where
- * they may (only its owner sees a personal connection, and admins
- * disconnect shared ones: connect checks both). Each dialog grows from its
- * own button.
+ * they may. Each dialog grows from its own button.
  */
 export const AccountActions = ({
   connection,
@@ -425,7 +435,7 @@ export const AccountActions = ({
           label={label}
         />
       ) : null}
-      {connection.scope === "personal" || isAdmin(identity.role) ? (
+      {mayDisconnect(connection, identity) ? (
         <Disconnect
           connection={connection}
           label={label}

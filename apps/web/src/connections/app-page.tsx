@@ -28,12 +28,12 @@ import { useChange } from "./use-change.ts";
 // each account (who connected it and when, who can use it, where it
 // stands, and signing in again and disconnecting from its own buttons),
 // the workflows that use it, what Grasp may do with each group of its
-// tools, and under them what the host adds. An admin changes what Grasp may do in a shared
-// Composio connection (GRA-993): each change goes to core at once with
-// what the page showed (connect refuses it when that changed meanwhile,
-// and the page is read again), and the last tool allowed can't be taken
-// away (disconnect instead). Everyone else, Grasp staff included, reads
-// it; a native connector's tools are fixed.
+// tools, and under them what the host adds. An admin changes what Grasp
+// may do in a shared Composio connection (GRA-993): each change goes to
+// core at once with what the page showed (connect refuses it when that
+// changed meanwhile, and the page is read again), and the last tool
+// allowed can't be taken away (disconnect instead). Everyone else, Grasp
+// staff included, reads it; a native connector's tools are fixed.
 
 /** One app's page, its actions' dialogs beside it. */
 export const IntegrationAppPage = ({
