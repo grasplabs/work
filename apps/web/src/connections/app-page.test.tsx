@@ -437,6 +437,47 @@ describe("changing what Grasp may do in a connected app", () => {
     ]);
   });
 
+  it("leaves disconnecting its one account to its row, not to the head's Manage menu", async () => {
+    await shown(
+      {
+        id: "connection-1",
+        source: "native",
+        provider: "microsoft",
+        scope: "personal",
+        status: "active",
+        ownerUserId: "u1",
+        connectedBy: "u1",
+        connectedByName: "Ada",
+        accountName: "sales@acme.test",
+        createdAt: "2026-10-01T00:00:00.000Z",
+      },
+      {
+        app: {
+          ...entry,
+          source: "native",
+          id: "microsoft",
+          name: "Microsoft 365",
+        },
+      }
+    );
+    const labelOf = (button: HTMLElement): string =>
+      button.getAttribute("aria-label") ?? wordsOf(button);
+    const row = document.querySelector('[data-slot="app-account"]');
+    await press(
+      [...document.querySelectorAll("button")].find(
+        (button) => labelOf(button) === "Manage"
+      )
+    );
+
+    expect({
+      row: [...(row?.querySelectorAll("button") ?? [])].map(labelOf),
+      menu: [...document.querySelectorAll('[role="menuitem"]')].map(wordsOf),
+    }).toStrictEqual({
+      row: ["Disconnect Microsoft 365 (sales@acme.test)"],
+      menu: ["Connect another account"],
+    });
+  });
+
   it("leaves a row's buttons to who may use them: a member none on a shared account, Grasp staff none at all", async () => {
     const microsoft: ListedConnection = {
       id: "connection-1",
@@ -469,5 +510,39 @@ describe("changing what Grasp may do in a connected app", () => {
       member: { state: "reconnect", buttons: 0 },
       staff: { state: "reconnect", buttons: 0 },
     });
+  });
+
+  it("opens signing in again from the row of the account whose access ran out", async () => {
+    const lapsed: ListedConnection = {
+      id: "connection-1",
+      source: "native",
+      provider: "microsoft",
+      scope: "personal",
+      status: "needs_reauth",
+      ownerUserId: "u1",
+      connectedBy: "u1",
+      connectedByName: "Ada",
+      accountName: "ops@acme.test",
+      createdAt: "2026-10-01T00:00:00.000Z",
+    };
+    await shown(lapsed, {
+      app: {
+        ...entry,
+        source: "native",
+        id: "microsoft",
+        name: "Microsoft 365",
+      },
+    });
+    await press(
+      document.querySelector(
+        '[aria-label="Sign in to Microsoft 365 (ops@acme.test) again"]'
+      )
+    );
+
+    expect(
+      [...document.querySelectorAll('[role="dialog"]')].map(
+        (dialog) => dialog.querySelector("h2")?.textContent
+      )
+    ).toStrictEqual(["Sign in to Microsoft 365 again"]);
   });
 });

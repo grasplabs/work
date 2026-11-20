@@ -6,7 +6,7 @@ import { AppPanel } from "../grasp/blocks/app-integration/app-integration.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { useAppActions } from "./app-actions.tsx";
+import { useAppActions, useMenuDisconnect } from "./app-actions.tsx";
 import { useAppOf, useSettled } from "./app-of.tsx";
 import { waitsForAdmin } from "./connect-dialog.tsx";
 import { FollowLinks } from "./follow-links.tsx";
@@ -82,6 +82,7 @@ export const IntegrationPanel = ({
     tools,
     size: "xs",
   });
+  const disconnect = useMenuDisconnect(integration, identity);
   return (
     <FollowLinks>
       <AppPanel
@@ -95,9 +96,11 @@ export const IntegrationPanel = ({
         open
         settingsHref={`/integrations/${integration.key}`}
         {...actions}
+        {...disconnect.actions}
         member={waitsForAdmin(integration, identity)}
       />
       {dialogs}
+      {disconnect.dialog}
     </FollowLinks>
   );
 };

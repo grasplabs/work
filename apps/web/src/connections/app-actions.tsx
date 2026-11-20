@@ -197,8 +197,8 @@ const ConnectNative = ({
 };
 
 /**
- * The connection this person may disconnect from the app's Manage menu:
- * its only one, where they may disconnect it. With more, each is
+ * The connection this person may disconnect from the app panel's Manage
+ * menu: its only one, where they may disconnect it. With more, each is
  * disconnected from its own row on the app's page.
  */
 const removableOf = (
@@ -286,11 +286,9 @@ export const useAppActions = ({
   size: "xs" | "sm";
 }): { actions: AppActions; dialogs: ReactNode } => {
   const [native, setNative] = useState<Native>();
-  const [disconnecting, setDisconnecting] = useState(false);
   const connectable = canConnect(integration, identity);
   const none = integration.connections.length === 0;
   const again = signInAgainTarget(integration, identity);
-  const removable = removableOf(integration, identity);
   const openNative = (target?: ListedConnection) => () => {
     setNative({ again: target });
   };
@@ -325,40 +323,55 @@ export const useAppActions = ({
   if (connectable && !none && integration.source === "native") {
     actions.onConnectAnother = openNative();
   }
-  if (removable !== undefined) {
-    actions.onDisconnect = () => {
-      setDisconnecting(true);
-    };
-  }
-  const { name } = integration;
   const dialogs = (
-    <>
-      <ConnectDialog
-        {...(native?.again === undefined ? {} : { again: native.again })}
-        identity={identity}
-        integration={integration}
-        onOpenChange={(open) => {
-          if (!open) {
-            setNative(undefined);
-          }
-        }}
-        open={native !== undefined}
-        replacing={stopped}
-      />
-      {removable === undefined ? null : (
-        <DisconnectDialog
-          connection={removable}
-          label={
-            removable.accountName === null
-              ? name
-              : `${name} (${removable.accountName})`
-          }
-          last={!integration.listed}
-          onOpenChange={setDisconnecting}
-          open={disconnecting}
-        />
-      )}
-    </>
+    <ConnectDialog
+      {...(native?.again === undefined ? {} : { again: native.again })}
+      identity={identity}
+      integration={integration}
+      onOpenChange={(open) => {
+        if (!open) {
+          setNative(undefined);
+        }
+      }}
+      open={native !== undefined}
+      replacing={stopped}
+    />
   );
   return { actions, dialogs };
+};
+
+/**
+ * Disconnect in the app panel's Manage menu, and the dialog it opens. The
+ * app's page has none there: each of its account rows has its own.
+ */
+export const useMenuDisconnect = (
+  integration: Integration,
+  identity: Identity
+): { actions: Pick<AppActions, "onDisconnect">; dialog: ReactNode } => {
+  const [open, setOpen] = useState(false);
+  const removable = removableOf(integration, identity);
+  if (removable === undefined) {
+    return { actions: {}, dialog: null };
+  }
+  const { name } = integration;
+  return {
+    actions: {
+      onDisconnect: () => {
+        setOpen(true);
+      },
+    },
+    dialog: (
+      <DisconnectDialog
+        connection={removable}
+        label={
+          removable.accountName === null
+            ? name
+            : `${name} (${removable.accountName})`
+        }
+        last={!integration.listed}
+        onOpenChange={setOpen}
+        open={open}
+      />
+    ),
+  };
 };
