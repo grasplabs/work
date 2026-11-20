@@ -15021,7 +15021,6 @@ msgstr "¿Debe trabajar por su cuenta?"
 msgid "Show"
 msgstr "Mostrar"
 
-#: src/brain/activity-page.tsx
 #: src/frame/part-words.tsx
 msgid "Show {count} more"
 msgstr "Mostrar {count} más"
@@ -15084,6 +15083,7 @@ msgstr "Mostrar clave"
 msgid "Show less"
 msgstr "Mostrar menos"
 
+#: src/brain/activity-page.tsx
 #: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/nav.tsx

@@ -91,10 +91,10 @@ const styles = stylex.create({
 });
 
 /**
- * What changed since the last look, or why it couldn't be read. The page
- * after the shown changes is read ahead, so "Show more" can say how many
- * it brings; `next` is where the page after that starts, and `failed`
- * why it couldn't be read.
+ * What changed since the last look, or why it couldn't be read. `next` is
+ * where the page after the shown changes starts, `reading` whether it is
+ * being read, and `failed` why it couldn't be. A page is read only when
+ * asked for, as reading it records its documents as read.
  */
 type Fresh =
   | { state: "loading" }
@@ -103,8 +103,8 @@ type Fresh =
       state: "ready";
       since: string;
       changes: BrainChange[];
-      ahead: BrainChange[];
       next: string | null;
+      reading: boolean;
       failed?: string;
     };
 
@@ -131,8 +131,8 @@ const readChanges = async (
   }
 };
 
-/** Reads the page after the shown changes into `fresh`, unless the page has moved on to another look. */
-const readAhead = async (
+/** Adds the page after the shown changes to `fresh`, unless the page has moved on to another look. */
+const readMore = async (
   core: Pick<CoreConnection, "withSession">,
   since: string,
   cursor: string,
@@ -144,8 +144,14 @@ const readAhead = async (
       return now;
     }
     return "reason" in answer
-      ? { ...now, next: null, failed: answer.reason }
-      : { ...now, ahead: answer.page.changes, next: answer.page.next };
+      ? { ...now, reading: false, failed: answer.reason }
+      : {
+          ...now,
+          changes: [...now.changes, ...answer.page.changes],
+          next: answer.page.next,
+          reading: false,
+          failed: undefined,
+        };
   });
 };
 
@@ -189,7 +195,7 @@ const listed = (
 
 /**
  * What changed since the last look, read as the page opens; the look then
- * counts as seen. `more` shows the page read ahead and reads the one after.
+ * counts as seen. `more` reads the next page and adds it.
  */
 const useFresh = (): { fresh: Fresh; more: () => void } => {
   const core = useCore();
@@ -209,11 +215,8 @@ const useFresh = (): { fresh: Fresh; more: () => void } => {
         return;
       }
       const { changes, next } = answer.page;
-      setFresh({ state: "ready", since, changes, ahead: [], next });
+      setFresh({ state: "ready", since, changes, next, reading: false });
       keepLooked(identity.userId, asked);
-      if (next !== null) {
-        await readAhead(core, since, next, setFresh);
-      }
     };
     void load();
     return () => {
@@ -221,18 +224,11 @@ const useFresh = (): { fresh: Fresh; more: () => void } => {
     };
   }, [core, identity.userId]);
   const more = (): void => {
-    if (fresh.state !== "ready") {
+    if (fresh.state !== "ready" || fresh.reading || fresh.next === null) {
       return;
     }
-    const { since, next } = fresh;
-    setFresh({
-      ...fresh,
-      changes: [...fresh.changes, ...fresh.ahead],
-      ahead: [],
-    });
-    if (next !== null) {
-      void readAhead(core, since, next, setFresh);
-    }
+    setFresh({ ...fresh, reading: true });
+    void readMore(core, fresh.since, fresh.next, setFresh);
   };
   return { fresh, more };
 };
@@ -500,7 +496,8 @@ export const ActivityPage = () => {
     waiting: t`Waiting for an answer`,
     kept: t`What the brain kept`,
     changed: t`Pages it changed`,
-    showMore: (count: number) => t`Show ${count} more`,
+    // brain.changes has no total, so the button says no count.
+    showMore: () => t`Show more`,
   };
   return (
     <div ref={pane} {...stylex.props(styles.pane)}>
@@ -518,7 +515,7 @@ export const ActivityPage = () => {
             description={description}
             error={error}
             fresh={freshListed.map(({ line }) => line)}
-            freshMore={fresh.state === "ready" ? fresh.ahead.length : 0}
+            freshMore={fresh.state === "ready" && fresh.next !== null ? 1 : 0}
             groups={stretches.map(({ id, label, listed: lines }) => ({
               id,
               label,

@@ -15021,7 +15021,6 @@ msgstr "Soll er selbstständig arbeiten?"
 msgid "Show"
 msgstr "Anzeigen"
 
-#: src/brain/activity-page.tsx
 #: src/frame/part-words.tsx
 msgid "Show {count} more"
 msgstr "{count} weitere anzeigen"
@@ -15084,6 +15083,7 @@ msgstr "Schlüssel anzeigen"
 msgid "Show less"
 msgstr "Weniger anzeigen"
 
+#: src/brain/activity-page.tsx
 #: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/nav.tsx

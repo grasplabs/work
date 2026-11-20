@@ -15021,7 +15021,6 @@ msgstr "Moet hij zelfstandig werken?"
 msgid "Show"
 msgstr "Tonen"
 
-#: src/brain/activity-page.tsx
 #: src/frame/part-words.tsx
 msgid "Show {count} more"
 msgstr "Toon er nog {count}"
@@ -15084,6 +15083,7 @@ msgstr "Sleutel tonen"
 msgid "Show less"
 msgstr "Minder tonen"
 
+#: src/brain/activity-page.tsx
 #: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/nav.tsx

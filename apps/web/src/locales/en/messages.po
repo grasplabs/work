@@ -15021,7 +15021,6 @@ msgstr "Should it work on its own?"
 msgid "Show"
 msgstr "Show"
 
-#: src/brain/activity-page.tsx
 #: src/frame/part-words.tsx
 msgid "Show {count} more"
 msgstr "Show {count} more"
@@ -15084,6 +15083,7 @@ msgstr "Show key"
 msgid "Show less"
 msgstr "Show less"
 
+#: src/brain/activity-page.tsx
 #: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/nav.tsx
