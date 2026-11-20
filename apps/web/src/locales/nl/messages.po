@@ -6902,6 +6902,10 @@ msgstr "Eindigt"
 msgid "Ends the workflow"
 msgstr "Beëindigt de workflow"
 
+#: src/settings/org-card.tsx
+msgid "Enter a name for the organization."
+msgstr "Vul een naam voor de organisatie in."
+
 #: src/settings/teams.tsx
 msgid "Enter a name for the team."
 msgstr "Vul een naam voor het team in."
@@ -12171,7 +12175,6 @@ msgstr "Niet ingetrokken"
 #: src/brain/goals-editor.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
-#: src/settings/org-card.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
 msgid "Not saved"
@@ -15470,7 +15473,6 @@ msgstr "Opgeslagen."
 #: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
-#: src/settings/org-card.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx

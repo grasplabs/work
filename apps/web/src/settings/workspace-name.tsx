@@ -17,7 +17,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
 // Settings › Workspace's own changes: a change to the organization, saved
-// as it is made, its row or its card saying how its save stands (saving, saved, or
+// as it is made, its row saying how its save stands (saving, saved, or
 // failed with Try again), and the page read again behind it. A field is
 // held only while its own save runs, never while the page reads again, so
 // it can be changed again at once.

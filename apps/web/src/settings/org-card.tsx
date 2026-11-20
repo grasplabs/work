@@ -6,7 +6,7 @@ import { useId, useState } from "react";
 
 import { formatList } from "../format.ts";
 import { organizationRenamed } from "../frame/organization-name.tsx";
-import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
 import {
   Dialog,
   DialogAction,
@@ -16,8 +16,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../grasp/dialog/index.ts";
-import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
 import { ImageWell } from "../grasp/file-upload/index.ts";
+import { Form } from "../grasp/form/index.ts";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
 import { Edit, Globe, Mail } from "../grasp/icons/index.ts";
 import { IdentityCard } from "../grasp/identity-card/index.ts";
@@ -35,8 +36,8 @@ import { useOrganizationLogo } from "./workspace-name.tsx";
 //
 // The logo is the well itself: a press or a dropped picture saves it
 // (workspace-name.tsx), and what went wrong with it is said in one line under
-// the card. Edit opens the name in a Dialog, saved with Save; core's reason
-// for refusing it shows there. Someone who is not one of the organization's
+// the card. Edit opens the name in a Dialog, saved with Save or Enter; core's
+// reason for refusing it shows under the field. Someone who is not one of the organization's
 // admins sees it all, and changes nothing.
 
 const styles = stylex.create({
@@ -69,45 +70,90 @@ const waits = stylex.create({
 export const OrgCardLoading = ({ canChange }: { canChange: boolean }) => {
   const { t } = useLingui();
   return (
-    <IdentityCard
-      action={canChange ? <span {...stylex.props(waits.pencil)} /> : undefined}
-      aria-label={t`Organization`}
-      cover
-      loading
-      mark={<span {...stylex.props(waits.well)} />}
-    />
+    <div aria-busy="true">
+      <IdentityCard
+        action={
+          canChange ? <span {...stylex.props(waits.pencil)} /> : undefined
+        }
+        aria-label={t`Organization`}
+        cover
+        loading
+        mark={<span {...stylex.props(waits.well)} />}
+      />
+    </div>
   );
 };
 
-/** The organization's name in a Dialog, saved with Save; the sidebar hears it at once. */
-const RenameOrganization = ({ name }: { name: string }) => {
+/** The rename form, mounted with each opening, so it starts from the name core keeps and no old refusal. */
+const RenameForm = ({ name, onDone }: { name: string; onDone: () => void }) => {
   const { t } = useLingui();
   const router = useRouter();
-  const { failure, run } = useCoreAction();
+  const formId = useId();
+  const { busy, failure, run } = useCoreAction();
   const [draft, setDraft] = useState(name);
   const save = async (): Promise<void> => {
     const next = draft.trim();
-    if (next === "" || next === name) {
+    if (next === "") {
       return;
     }
-    const saved = await run(
-      async (session) => await session.organization.update({ name: next })
-    );
-    if (saved === undefined) {
-      // Core's reason shows in the dialog, which stays open with what was typed.
-      throw new Error("The name was not saved.");
+    if (next !== name) {
+      const saved = await run(
+        async (session) => await session.organization.update({ name: next })
+      );
+      if (saved === undefined) {
+        // Core's reason shows under the field, which keeps what was typed.
+        return;
+      }
+      organizationRenamed(saved.name);
+      await router.invalidate({ sync: true });
     }
-    organizationRenamed(saved.name);
-    await router.invalidate({ sync: true });
+    onDone();
   };
   return (
-    <Dialog
-      onOpenChange={(open) => {
-        if (open) {
-          setDraft(name);
-        }
-      }}
-    >
+    <>
+      <DialogTitle>{t`Organization name`}</DialogTitle>
+      <DialogBody>
+        <Form
+          aria-label={t`Organization name`}
+          id={formId}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save();
+          }}
+        >
+          <Field invalid={failure !== undefined}>
+            <FieldLabel>{t`Name`}</FieldLabel>
+            <Input
+              autoComplete="off"
+              dir="auto"
+              maxLength={80}
+              onValueChange={setDraft}
+              required
+              value={draft}
+            />
+            <FieldError match="valueMissing">{t`Enter a name for the organization.`}</FieldError>
+            {failure === undefined ? null : (
+              <FieldError match>{failure}</FieldError>
+            )}
+          </Field>
+        </Form>
+      </DialogBody>
+      <DialogFooter>
+        <DialogAction>{t`Cancel`}</DialogAction>
+        <Button disabled={busy} form={formId} type="submit" variant="ink">
+          {t`Save`}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+};
+
+/** Edit, and the organization's name in a Dialog, saved with Save or Enter; the sidebar hears it at once. */
+const RenameOrganization = ({ name }: { name: string }) => {
+  const { t } = useLingui();
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger
         aria-label={t`Edit the name`}
         icon={Edit}
@@ -115,29 +161,12 @@ const RenameOrganization = ({ name }: { name: string }) => {
         variant="ghost"
       />
       <DialogContent closeLabel={t`Close`}>
-        <DialogTitle>{t`Organization name`}</DialogTitle>
-        <DialogBody>
-          <div {...stylex.props(styles.stack)}>
-            {failure === undefined ? null : (
-              <Alert tone="danger">{failure}</Alert>
-            )}
-            <Field name="name">
-              <FieldLabel>{t`Name`}</FieldLabel>
-              <Input maxLength={80} onValueChange={setDraft} value={draft} />
-            </Field>
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <DialogAction>{t`Cancel`}</DialogAction>
-          <DialogAction
-            action={save}
-            failedLabel={t`Not saved`}
-            variant="ink"
-            workingLabel={t`Saving`}
-          >
-            {t`Save`}
-          </DialogAction>
-        </DialogFooter>
+        <RenameForm
+          name={name}
+          onDone={() => {
+            setOpen(false);
+          }}
+        />
       </DialogContent>
     </Dialog>
   );
