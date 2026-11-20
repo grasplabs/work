@@ -509,7 +509,7 @@ const styles = stylex.create({
     backgroundColor: { default: grasp.raised, ":disabled": grasp.soft },
     boxShadow: {
       default: grasp.liftMedium,
-      ":has(textarea:focus-visible)": `inset 0 0 0 1px ${grasp.fieldEdgeFocus}, 0 0 0 3px ${grasp.fieldFocusHalo}, ${grasp.liftMedium}`,
+      ":has(textarea:focus-visible)": `inset 0 0 0 1px ${grasp.composerEdgeFocus}, 0 0 0 3px ${grasp.fieldFocusHalo}, ${grasp.liftMedium}`,
       ":has(textarea[aria-invalid=true]:focus-visible)": `inset 0 0 0 1px ${grasp.fieldEdgeInvalid}, 0 0 0 3px ${grasp.fieldFocusHaloInvalid}, ${grasp.liftMedium}`,
     },
     color: grasp.ink,
