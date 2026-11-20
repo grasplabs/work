@@ -45,10 +45,10 @@ import { RowNote, SectionNotLoaded } from "./section.tsx";
 // Settings › Security: the person's accounts on chat platforms that are
 // linked to them, so Grasp knows it is them writing there, as quiet rows in
 // the Chat apps card (none when none are); and a link a chat sent them,
-// waiting for them to confirm it, in a card of its own above it. Confirming is a
-// press here, never opening the link (chat apps open links to preview
-// them), and the card says whose account it is, by the platform's own
-// name for it, so a link someone forwarded doesn't pass for theirs. And
+// waiting for them to confirm it, as an outlined row above that card.
+// Confirming is a press here, never opening the link (chat apps open links
+// to preview them), and the card says whose account it is, by the
+// platform's own name for it, so a link someone forwarded doesn't pass for theirs. And
 // deleting what Grasp keeps of their conversations with Stephen there,
 // which no page of Grasp shows as a chat (GRA-1919): this is where the
 // person erases them.
@@ -299,7 +299,7 @@ const ForgetConversations = () => {
       label={t`Your conversations in chat apps`}
     >
       <AlertDialog>
-        <AlertDialogTrigger disabled={busy} size="sm" variant="danger">
+        <AlertDialogTrigger disabled={busy} size="sm" variant="quiet">
           {t`Delete`}
         </AlertDialogTrigger>
         <AlertDialogContent>
@@ -369,10 +369,11 @@ const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
 };
 
 /**
- * Chat apps: the link a chat app sent, while one waits in this tab, in its
- * own card above; then the rows, run edge to edge as every settings card's
- * (the accounts linked to the person, deleting their conversations with
- * Stephen there), so each name keeps the width it needs.
+ * Chat apps: the link a chat app sent, while one waits in this tab, as an
+ * outlined row above the card; in the card, edge to edge as the library's
+ * flush card has its rows, deleting the person's conversations with Stephen
+ * there, then the accounts linked to them. The accounts come second, as a
+ * labelled group, so the library draws the line between the two.
  */
 export const ChatAppsSection = ({
   chat,
@@ -391,12 +392,12 @@ export const ChatAppsSection = ({
         flush
         title={t`Chat apps`}
       >
-        {chat.state === "ready" ? (
-          <LinkedChatAccounts accounts={chat.data.accounts} />
-        ) : null}
         <SettingsRows>
           <ForgetConversations />
         </SettingsRows>
+        {chat.state === "ready" ? (
+          <LinkedChatAccounts accounts={chat.data.accounts} />
+        ) : null}
       </SectionCard>
     </>
   );
