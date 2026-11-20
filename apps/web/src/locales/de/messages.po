@@ -111,7 +111,7 @@ msgstr "Bei {app} muss sich jemand erneut anmelden. Bis dahin wartet, was es nut
 
 #: src/connections/integrations-header.tsx
 msgid "{app} stopped working. Connect it again; until then, what uses it waits."
-msgstr "{app} funktioniert nicht mehr. Verbinde es erneut; bis dahin wartet, was es nutzt."
+msgstr "{app} funktioniert nicht mehr. Verbinden Sie es erneut; bis dahin wartet, was es nutzt."
 
 #: src/connections/revocations-by-hand.tsx
 msgid "{app}, {whose}'s own"
@@ -1775,7 +1775,7 @@ msgstr "Eine Verbindung"
 
 #: src/connections/app-page.tsx
 msgid "A connection allows at least one tool. Disconnect it instead."
-msgstr "Eine Verbindung erlaubt mindestens ein Tool. Trenne sie stattdessen."
+msgstr "Eine Verbindung erlaubt mindestens ein Tool. Trennen Sie sie stattdessen."
 
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
@@ -2007,7 +2007,7 @@ msgstr "Ein Häkchen: ja oder nein"
 
 #: src/connections/connect-dialog.tsx
 msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Ein eingeschaltetes Tool beginnt mit Lesen, wo Composio angibt, dass es nur liest; Grasp prüft das nicht. Ein Tool mit Lesen läuft ohne Nachfrage. Ein Aufruf eines Tools mit Schreiben aus dem Chat oder von einer Person, die eine App nutzt, wartet, bis diese Person ihn bestätigt; ein Workflow-Lauf führt ihn als einen seiner Schritte aus. Drücke bei einem Tool auf Lesen oder Schreiben, um das zu ändern. Setze ein Tool nur auf Lesen, wenn es nichts ändert: Falsch markiert, ändert es Dinge ohne Nachfrage."
+msgstr "Ein eingeschaltetes Tool beginnt mit Lesen, wo Composio angibt, dass es nur liest; Grasp prüft das nicht. Ein Tool mit Lesen läuft ohne Nachfrage. Ein Aufruf eines Tools mit Schreiben aus dem Chat oder von einer Person, die eine App nutzt, wartet, bis diese Person ihn bestätigt; ein Workflow-Lauf führt ihn als einen seiner Schritte aus. Drücken Sie bei einem Tool auf Lesen oder Schreiben, um das zu ändern. Setzen Sie ein Tool nur auf Lesen, wenn es nichts ändert: Falsch markiert, ändert es Dinge ohne Nachfrage."
 
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
@@ -3519,7 +3519,7 @@ msgstr "Anfragen"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Ask for the app you need, and an admin can add it."
-msgstr "Frag nach der App, die du brauchst, und ein Admin kann sie hinzufügen."
+msgstr "Fragen Sie nach der App, die Sie brauchen, und ein Admin kann sie hinzufügen."
 
 #: src/chat/global-chat.tsx
 #: src/frame/shell-pending.tsx
@@ -5148,7 +5148,7 @@ msgstr "Zuerst verbinden: {systems}."
 
 #: src/connections/integrations-header.tsx
 msgid "Connect the apps your work runs on"
-msgstr "Verbinde die Apps, mit denen du arbeitest"
+msgstr "Verbinden Sie die Apps, mit denen Sie arbeiten"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
@@ -5187,7 +5187,7 @@ msgstr "Für alle verbunden"
 
 #: src/connections/integration-item.tsx
 msgid "Connected for you"
-msgstr "Für dich verbunden"
+msgstr "Für Sie verbunden"
 
 #: src/connections/connection-list.tsx
 msgid "Connected on"
@@ -8258,7 +8258,7 @@ msgstr "Grasp darf in {app} lesen und schreiben, nur für das, was Sie erlauben.
 
 #: src/connections/connected-dialog.tsx
 msgid "Grasp may use {app} only through the tools you allowed."
-msgstr "Grasp darf {app} nur über die Werkzeuge nutzen, die Sie erlaubt haben."
+msgstr "Grasp darf {app} nur über die Tools nutzen, die Sie erlaubt haben."
 
 #: src/chat/saved-memory.tsx
 msgid "Grasp no longer remembers this."
@@ -9369,7 +9369,7 @@ msgstr "Sie veröffentlicht wird"
 
 #: src/connections/integration-facts.ts
 msgid "It isn't offered to your organization yet: offer it before connecting it."
-msgstr "Es wird deiner Organisation noch nicht angeboten: Biete es an, bevor du es verbindest."
+msgstr "Es wird Ihrer Organisation noch nicht angeboten: Bieten Sie es an, bevor Sie es verbinden."
 
 #: src/connections/integration-facts.ts
 msgid "It isn't offered to your organization."
@@ -9747,7 +9747,7 @@ msgstr "Nur ich"
 
 #: src/frame/part-words.tsx
 msgid "Just you"
-msgstr "Nur du"
+msgstr "Nur Sie"
 
 #: src/onboarding/review-parts.tsx
 msgid "Keep “Require sender authentication” on, then save."
@@ -11385,7 +11385,7 @@ msgstr "Noch keine Apps darin."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "No apps match your search"
-msgstr "Keine Apps passen zu deiner Suche"
+msgstr "Keine Apps passen zu Ihrer Suche"
 
 #: src/apps/apps-overview.tsx
 msgid "No Apps yet"
@@ -12708,7 +12708,7 @@ msgstr "Nur wenn jemand fragt"
 #: src/agents/agent-page.tsx
 #: src/frame/part-words.tsx
 msgid "Only you"
-msgstr "Nur du"
+msgstr "Nur Sie"
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
@@ -13491,7 +13491,7 @@ msgstr "Tabelle auswählen"
 
 #: src/connections/integrations-header.tsx
 msgid "Pick an app below to connect it. Grasp reaches only what you connect."
-msgstr "Wähle unten eine App, um sie zu verbinden. Grasp erreicht nur, was du verbindest."
+msgstr "Wählen Sie unten eine App, um sie zu verbinden. Grasp erreicht nur, was Sie verbinden."
 
 #: src/agents/setup/schedule-step.tsx
 msgid "Pick at least one day."
@@ -18758,15 +18758,15 @@ msgstr "Werkzeuge"
 
 #: src/connections/connection-list.tsx
 msgid "Tools allowed: {tools}"
-msgstr "Erlaubte Werkzeuge: {tools}"
+msgstr "Erlaubte Tools: {tools}"
 
 #: src/connections/connection-list.tsx
 msgid "Tools allowed: none recorded"
-msgstr "Erlaubte Werkzeuge: keine erfasst"
+msgstr "Erlaubte Tools: keine erfasst"
 
 #: src/connections/connect-dialog.tsx
 msgid "Tools to allow"
-msgstr "Zu erlaubende Werkzeuge"
+msgstr "Zu erlaubende Tools"
 
 #: src/make/examples.ts
 msgid "Track the month-end close"
@@ -21110,7 +21110,7 @@ msgstr "Sie zeigen mir, wer wer ist, wo die Dokumente liegen und welche Tools di
 #. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
 #: src/connections/connect-dialog.tsx
 msgid "You sign in at {host}"
-msgstr "Du meldest dich bei {host} an"
+msgstr "Sie melden sich bei {host} an"
 
 #: src/connections/connect-dialog.tsx
 msgid "You sign in on {app}’s own page."
@@ -21127,7 +21127,7 @@ msgstr "Sie haben sich zurückgezogen. Was das Gehirn davon behalten hat, wird g
 #. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
 #: src/frame/part-words.tsx
 msgid "You’ll sign in at {host}."
-msgstr "Du meldest dich bei {host} an."
+msgstr "Sie melden sich bei {host} an."
 
 #: src/frame/part-words.tsx
 msgid "You're offline. Log in when you're back online."
