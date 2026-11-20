@@ -149,6 +149,42 @@ const storedFor = async (email: string): Promise<number> =>
     .bind(`%${email}`)
     .first<number>("n")) ?? 0;
 
+const tableSchema = z.object({ name: z.string() });
+const columnSchema = z.object({ name: z.string() });
+
+/**
+ * Every `table.column` of core's database holding `text` anywhere in
+ * it, whatever the column's type: what an erasure must leave nowhere.
+ */
+const holding = async (text: string): Promise<string[]> => {
+  const tables = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%'"
+  ).all();
+  const found: string[] = [];
+  for (const table of tables.results.map(
+    (row) => tableSchema.parse(row).name
+  )) {
+    // oxlint-disable-next-line no-await-in-loop -- one table after another
+    const columns = await env.DB.prepare(
+      `SELECT name FROM pragma_table_info('${table}')`
+    ).all();
+    for (const column of columns.results.map(
+      (row) => columnSchema.parse(row).name
+    )) {
+      // oxlint-disable-next-line no-await-in-loop -- one column after another
+      const hits = await env.DB.prepare(
+        `SELECT count(*) AS n FROM "${table}" WHERE instr(lower(CAST("${column}" AS TEXT)), ?) > 0`
+      )
+        .bind(text)
+        .first<number>("n");
+      if ((hits ?? 0) > 0) {
+        found.push(`${table}.${column}`);
+      }
+    }
+  }
+  return found;
+};
+
 /** Users under `email`, and their accounts. */
 const heldBy = async (email: string) => ({
   users:
@@ -447,7 +483,7 @@ describe("a guest signing in with a code", () => {
     });
   });
 
-  it("ends a guest's sessions and outstanding codes once an admin removes them, and leaves no row naming them once erased", async () => {
+  it("ends a guest's sessions and outstanding codes once an admin removes them, and leaves their address in no column of any table once erased", async () => {
     const guest = await signedInGuest();
     await askCode(guest.address);
     const outstanding = codeIn(guest.mail, guest.address);
@@ -466,6 +502,7 @@ describe("a guest signing in with a code", () => {
       storedRemoved,
       storedErased: await storedFor(guest.address),
       held: await heldBy(guest.address),
+      holding: await holding(guest.address),
     }).toStrictEqual({
       session: null,
       code: refused,
@@ -474,6 +511,7 @@ describe("a guest signing in with a code", () => {
       storedRemoved: 0,
       storedErased: 0,
       held: { users: 0, accounts: 0 },
+      holding: [],
     });
   });
 });

@@ -6996,6 +6996,7 @@ msgstr "Bündeln Sie die Apps und Workflows eines Prozesses, eines Teams oder ei
 msgid "Groups of teams"
 msgstr "Gruppen von Teams"
 
+#: src/settings/erasures.tsx
 #: src/settings/guests.tsx
 msgid "Guest"
 msgstr "Gast"

@@ -1104,7 +1104,8 @@ export const erasurePreview = async (
 
 /**
  * Erases the removed person `userId`, as one of the client's admins asked,
- * confirming them by `name` exactly as it stands now: records the erasure
+ * confirming them by `name` exactly as it stands now (a guest, who has no
+ * name, by their address): records the erasure
  * and each of its areas pending, once, while the admin still is one and the
  * person is still removed, then runs it (`runErasure`). Asking again only
  * runs what is still pending, and answers where it stands.
@@ -1124,7 +1125,10 @@ export const erasePerson = async (
   if (!(await isRemoved(env, target))) {
     throw memberErrors.create("member.erase_not_removed");
   }
-  if (typeof name !== "string" || name !== person.name) {
+  // A guest has no name (guest-members.ts): they are confirmed by their
+  // address instead, which is never kept.
+  const confirmedBy = person.name === "" ? person.email : person.name;
+  if (typeof name !== "string" || name !== confirmedBy) {
     throw memberErrors.create("member.erase_name_mismatch");
   }
   const db = drizzle(env.DB);

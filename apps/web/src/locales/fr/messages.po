@@ -6996,6 +6996,7 @@ msgstr "Regroupez les apps et les workflows d’un processus, d’une équipe ou
 msgid "Groups of teams"
 msgstr "Groupes d’équipes"
 
+#: src/settings/erasures.tsx
 #: src/settings/guests.tsx
 msgid "Guest"
 msgstr "Invité"

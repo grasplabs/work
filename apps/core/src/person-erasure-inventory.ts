@@ -85,7 +85,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.sign_in_addresses": { erased: "identity" },
   "core.members": { erased: "removal" },
   "core.member_removals": { kept: "keeps someone removed out" },
-  "core.person_erasures": { kept: "the erasure's own record, by ID" },
+  "core.person_erasures": {
+    kept: "the erasure's own record, by ID, with the name they had; a guest has none, and their address is never kept",
+  },
   "core.person_erasure_areas": { kept: "the erasure's own record, by ID" },
   "core.erased_subjects": {
     kept: "keeps someone erased out, as keyed hashes of their sign-in subjects",

@@ -187,6 +187,7 @@ export interface Erasure {
  */
 export interface ErasurePreview {
   userId: string;
+  /** Their name; empty for a guest, who is shown by their address. */
   name: string;
   /** Their email, or null once their erasure erased it. */
   email: string | null;
@@ -213,6 +214,7 @@ export interface ErasurePreview {
  */
 export interface RemovedPerson {
   userId: string;
+  /** Their name; empty for a guest, who is shown by their address. */
   name: string;
   /** Their email, or null once their erasure erased it. */
   email: string | null;
@@ -300,8 +302,9 @@ export interface MembersApi {
    * Erases the removed person with `userId` (GRA-903): each area the
    * preview names (`ErasurePreview.areas`) goes; their name and ID stay on
    * the company's records, so what they did stays traceable. `name` must be
-   * their name exactly as the preview showed it. Asking again while it
-   * runs, or after, answers where it stands.
+   * their name exactly as the preview showed it; a guest's, who has none,
+   * their address. Asking again while it runs, or after, answers where it
+   * stands.
    */
   erase: (userId: string, name: string) => Promise<Erasure>;
   /**

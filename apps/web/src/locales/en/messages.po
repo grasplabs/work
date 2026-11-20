@@ -6996,6 +6996,7 @@ msgstr "Group the apps and workflows of a process, a team or a goal in a project
 msgid "Groups of teams"
 msgstr "Groups of teams"
 
+#: src/settings/erasures.tsx
 #: src/settings/guests.tsx
 msgid "Guest"
 msgstr "Guest"

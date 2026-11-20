@@ -167,10 +167,13 @@ export const inviteGuest = async (
   const madeNow = sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${userId})`;
   await auditedBatch(env, db, [
     // Their address unproven until a code they were mailed signs them in.
+    // No name: a guest is shown by their address while they have one
+    // (`email`), and a name is kept after an erasure, so it never holds
+    // the address.
     db
       .insert(users)
       .select(
-        sql`SELECT ${userId}, ${address.data}, ${address.data}, 0, NULL, ${now}, ${now}
+        sql`SELECT ${userId}, '', ${address.data}, 0, NULL, ${now}, ${now}
           WHERE NOT ${isUserEmail(address.data)}
             AND NOT ${erased}
             AND NOT EXISTS (
