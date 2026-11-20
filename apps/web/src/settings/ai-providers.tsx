@@ -2,7 +2,6 @@ import {
   aiProviders,
   compatibleModelNamePattern,
   featuredModels,
-  organizationProviderIdSchema,
 } from "@grasp-os/shared/ai-providers";
 import type {
   AiModelChoice,
@@ -92,7 +91,8 @@ import { ReadOnlyRow } from "./read-only-row.tsx";
 // calls: each a row with its mark, its name, its key as dots and its last
 // four, how its calls go, and Test, one tiny call that says Works or why
 // not. Its key is replaced or deleted in a small dialog. Another provider is
-// added in the library's Add connection sheet, tested as it is added. A key is pasted
+// added in the library's Add connection sheet, its key tested as it is
+// added (an endpoint's once a model it serves is named). A key is pasted
 // once into a password field, goes straight to core and on to connect,
 // which seals it, and is never back on the page. Then the default model
 // and its fallbacks, the providers' main models first. The organization's
@@ -620,10 +620,11 @@ const AddProviderSheet = ({
         // it when the new one is refused. Its key is replaced from its row.
         const addable = offered.find((each) => each.provider === provider);
         if (addable === undefined) {
-          const name = providerName(
-            organizationProviderIdSchema.parse(provider),
-            shown.find((each) => each.provider === provider)?.label ?? ""
-          );
+          const tile = shown.find((each) => each.provider === provider);
+          const name =
+            tile === undefined
+              ? provider
+              : providerName(tile.provider, tile.label);
           throw new Error(t`${name} is connected already.`);
         }
         await whileBusy(async () => {
