@@ -114,7 +114,12 @@ const styles = stylex.create({
     forcedColorAdjust: "none",
   },
   // A connection's state: a dot and its word.
-  state: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
+  state: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    verticalAlign: "top",
+  },
   dot: {
     width: "6px",
     height: "6px",

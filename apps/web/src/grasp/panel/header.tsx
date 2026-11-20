@@ -1,5 +1,5 @@
 // PanelHeader: an inspector panel's header (panel.tsx), after Profound's. A bar of actions at the
-// top (the main one, Share, more, then close after a short line); under it the object's tile, its
+// top (the main one, Share, more, then close; Bar actions, as every top bar has them); under it the object's tile, its
 // title in the serif, one line about it, who and when, and its views as quiet tabs, each an icon
 // and a word. As the panel scrolls the bar stays: it gains its hairline once anything passes
 // under it, and when the views reach it they slide into it as icons only, in one motion, and back.
@@ -18,13 +18,13 @@ import type { TabsTabState } from "@ui-sdk/react/tabs";
 import { Fragment, use, useEffect, useLayoutEffect, useRef } from "react";
 import type { ReactNode, RefObject } from "react";
 
+import { BarActions, BarClose } from "../bar-actions/bar-actions";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
-import { Cross, Icon } from "../icons";
+import { Icon } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
-import { RowListAction } from "../row-list";
 import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
@@ -63,7 +63,7 @@ export interface PanelHeaderProps {
   meta?: ReactNode[];
   /** In the bar: the panel's own buttons, `xs`, the main one first ("Run agent", "Share", more). */
   actions?: ReactNode;
-  /** Shows a close button at the bar's end, after a short line. Runs when it is pressed. Left out in App shell's page-panel sheet, whose own close closes it. */
+  /** Shows a close button at the bar's end, after the actions. Runs when it is pressed. Left out in App shell's page-panel sheet, whose own close closes it. */
   onClose?: () => void;
   /**
    * The close button's name.
@@ -142,12 +142,6 @@ const styles = stylex.create({
   barBare: {
     marginBlockEnd: `calc(-1 * ${grasp.inspectorBar})`,
     pointerEvents: "none",
-  },
-  divider: {
-    flexShrink: 0,
-    width: grasp.hairline,
-    height: grasp.iconMd,
-    backgroundColor: grasp.line,
   },
   // The first sentinel: 1px under the bar, so anything passing under it is seen.
   sentinel: {
@@ -488,7 +482,7 @@ const useFold = ({ bar, top, fold, list }: FoldRefs) => {
   }, [folded, scroller, list]);
 };
 
-/** The bar: the panel's actions, a short line, and close. */
+/** The bar: the panel's actions, then close (Bar actions). */
 const Bar = ({
   bar,
   actions,
@@ -517,13 +511,15 @@ const Bar = ({
         lined && styles.barScrolled
       )}
     >
-      {actions}
-      {onClose !== undefined && given(actions) && (
-        <span aria-hidden {...stylex.props(styles.divider)} />
-      )}
-      {onClose !== undefined && (
-        <RowListAction icon={Cross} aria-label={closeLabel} onPress={onClose} />
-      )}
+      <BarActions
+        close={
+          onClose === undefined ? undefined : (
+            <BarClose label={closeLabel} onClick={onClose} />
+          )
+        }
+      >
+        {actions}
+      </BarActions>
     </div>
   );
 };
