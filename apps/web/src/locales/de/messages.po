@@ -2447,6 +2447,10 @@ msgid "Added"
 msgstr "Ergänzt"
 
 #: src/activity/audit-words.ts
+msgid "Added a document to an agent"
+msgstr "Einem Agenten ein Dokument hinzugefügt"
+
+#: src/activity/audit-words.ts
 msgid "Added a member to an App"
 msgstr "Ein Mitglied zu einer App hinzugefügt"
 
@@ -2478,6 +2482,10 @@ msgstr "Aus seinen Anweisungen hinzugefügt: {added}."
 #: src/connections/http-connections.tsx
 msgid "Added on"
 msgstr "Hinzugefügt am"
+
+#: src/activity/audit-words.ts
+msgid "Added records to the Brain"
+msgstr "Dem Brain Einträge hinzugefügt"
 
 #: src/activity/audit-words.ts
 msgid "Added someone to a team"
@@ -3395,6 +3403,10 @@ msgstr "Bereiche abgeschlossen"
 msgid "Arrange {name}"
 msgstr "{name} einordnen"
 
+#: src/activity/audit-words.ts
+msgid "Arranged the company's groups of teams"
+msgstr "Die Teamgruppen des Unternehmens angeordnet"
+
 #: src/frame/part-words.tsx
 msgid "Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page"
 msgstr "Pfeiltasten verschieben es, Umschalt für einen größeren Schritt, Ende dockt es neben der Seite an, Escape geht zurück zur Seite"
@@ -3607,6 +3619,10 @@ msgstr "vom Agenten angefragt, in dessen Chat"
 msgid "Asked from chat"
 msgstr "Im Chat gefragt"
 
+#: src/activity/audit-words.ts
+msgid "Asked Grasp which Apps an agent needs"
+msgstr "Grasp gefragt, welche Apps ein Agent braucht"
+
 #: src/frame/part-words.tsx
 msgid "Asked in this page"
 msgstr "Auf dieser Seite gefragt"
@@ -3628,6 +3644,14 @@ msgstr "An Sie gestellt"
 #: src/inbox/item-detail.tsx
 msgid "Asked of you as the {owner}"
 msgstr "An Sie gestellt als {owner}"
+
+#: src/activity/audit-words.ts
+msgid "Asked people to fill a gap in the Brain"
+msgstr "Personen gebeten, eine Lücke im Brain zu füllen"
+
+#: src/activity/audit-words.ts
+msgid "Asked Stephen to hear more people about a piece of work"
+msgstr "Stephen gebeten, mehr Personen zu einer Arbeit zu hören"
 
 #: src/inbox/item-detail.tsx
 msgid "Asked the {owner}: {question}"
@@ -3652,6 +3676,10 @@ msgstr "Am {since} zur erneuten Verbindung aufgefordert."
 #: src/activity/audit-words.ts
 msgid "Asked to erase a removed member"
 msgstr "Gebeten, ein entferntes Mitglied zu löschen"
+
+#: src/activity/audit-words.ts
+msgid "Asked to erase what the Brain kept from a shared connection"
+msgstr "Gebeten zu löschen, was das Brain aus einer geteilten Verbindung gespeichert hat"
 
 #: src/activity/audit-words.ts
 msgid "Asked to send, edit or delete a chat app message as the company's bot"
@@ -3970,6 +3998,10 @@ msgstr "Briefing-Desk"
 #: src/agents/manual-agent.tsx
 msgid "Bringing {name} to life…"
 msgstr "{name} wird zum Leben erweckt…"
+
+#: src/activity/audit-words.ts
+msgid "Brought back a dismissed opportunity"
+msgstr "Eine verworfene Chance zurückgeholt"
 
 #: src/activity/audit-words.ts
 msgid "Brought changes from a connected system into the Brain"
@@ -4409,8 +4441,16 @@ msgid "Changed a workflow's parameter"
 msgstr "Einen Parameter eines Workflows geändert"
 
 #: src/activity/audit-words.ts
+msgid "Changed an agent"
+msgstr "Einen Agenten geändert"
+
+#: src/activity/audit-words.ts
 msgid "Changed an App"
 msgstr "Eine App geändert"
+
+#: src/activity/audit-words.ts
+msgid "Changed an App an agent may use"
+msgstr "Eine App geändert, die ein Agent nutzen darf"
 
 #: src/apps/draft-changes.tsx
 msgid "Changed by <0/>"
@@ -4423,6 +4463,10 @@ msgstr "Geändert von <0/>, bei den Zeilen, die sie lesen können"
 #: src/apps/draft-changes.tsx
 msgid "Changed by nobody"
 msgstr "Von niemandem geändert"
+
+#: src/activity/audit-words.ts
+msgid "Changed for whom an agent has a kind of tool"
+msgstr "Geändert, für wen ein Agent eine Art Werkzeug hat"
 
 #: src/apps/app-workflows.tsx
 msgid "Changed in the draft: publish the App for it to start the new workflow."
@@ -4467,6 +4511,22 @@ msgstr "Geändert, ob die Daten einer App an Code außerhalb von Grasp gehen"
 #: src/activity/audit-words.ts
 msgid "Changed which integrations are offered"
 msgstr "Geändert, welche Integrationen angeboten werden"
+
+#: src/activity/audit-words.ts
+msgid "Changed who may reach an agent"
+msgstr "Geändert, wer einen Agenten erreichen darf"
+
+#: src/activity/audit-words.ts
+msgid "Changed who may reach Stephen"
+msgstr "Geändert, wer Stephen erreichen darf"
+
+#: src/activity/audit-words.ts
+msgid "Changed who reaches Stephen in a place"
+msgstr "Geändert, wer Stephen an einem Ort erreicht"
+
+#: src/activity/audit-words.ts
+msgid "Changed who reads what a shared connection brings into the Brain"
+msgstr "Geändert, wer liest, was eine geteilte Verbindung ins Brain bringt"
 
 #: src/frame/part-words.tsx
 msgid "Changes"
@@ -4894,6 +4954,10 @@ msgstr "Sprache schließen"
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
 msgstr "Ohne Antwort schließen"
+
+#: src/activity/audit-words.ts
+msgid "Closed Grasp to the company"
+msgstr "Grasp für das Unternehmen geschlossen"
 
 #: src/brain/activity-page.tsx
 msgid "Closed without an answer"
@@ -5670,6 +5734,10 @@ msgid "Created a collection"
 msgstr "Eine Sammlung angelegt"
 
 #: src/activity/audit-words.ts
+msgid "Created a data store"
+msgstr "Einen Datenspeicher erstellt"
+
+#: src/activity/audit-words.ts
 msgid "Created a team"
 msgstr "Ein Team angelegt"
 
@@ -5896,6 +5964,10 @@ msgstr "Abgelehnt"
 msgid "Declined a write to an App"
 msgstr "Eine Änderung in einer App abgelehnt"
 
+#: src/activity/audit-words.ts
+msgid "Declined an agent offered to the company"
+msgstr "Einen dem Unternehmen angebotenen Agenten abgelehnt"
+
 #: src/inbox/item-detail.tsx
 msgid "Declined: {title}"
 msgstr "Abgelehnt: {title}"
@@ -6062,12 +6134,24 @@ msgid "Deleted"
 msgstr "Gelöscht"
 
 #: src/activity/audit-words.ts
+msgid "Deleted a data store"
+msgstr "Einen Datenspeicher gelöscht"
+
+#: src/activity/audit-words.ts
 msgid "Deleted a team"
 msgstr "Ein Team gelöscht"
 
 #: src/activity/audit-words.ts
 msgid "Deleted a webhook source"
 msgstr "Hat eine Webhook-Quelle gelöscht"
+
+#: src/activity/audit-words.ts
+msgid "Deleted an agent"
+msgstr "Einen Agenten gelöscht"
+
+#: src/activity/audit-words.ts
+msgid "Deleted an agent's wake-up"
+msgstr "Einen Weckruf eines Agenten gelöscht"
 
 #: src/activity/audit-words.ts
 msgid "Deleted an AI provider's key"
@@ -6307,6 +6391,10 @@ msgstr "Tipp ausblenden"
 msgid "Dismissed a knowledge signal"
 msgstr "Ein Wissenssignal verworfen"
 
+#: src/activity/audit-words.ts
+msgid "Dismissed an opportunity"
+msgstr "Eine Chance verworfen"
+
 #: src/settings/composer-settings.tsx
 msgid "Dither"
 msgstr "Dither"
@@ -6494,6 +6582,10 @@ msgstr "Als PDF herunterladen"
 #: src/apps/app-code.tsx
 msgid "Download the file"
 msgstr "Datei herunterladen"
+
+#: src/activity/audit-words.ts
+msgid "Downloaded a file"
+msgstr "Eine Datei heruntergeladen"
 
 #: src/workflows/workflow-settings.tsx
 msgid "Draft"
@@ -6800,6 +6892,10 @@ msgstr "Beendet"
 msgid "Ended a held write to an App nobody confirmed within a day"
 msgstr "Eine zurückgehaltene Änderung in einer App beendet, die niemand innerhalb eines Tages bestätigt hat"
 
+#: src/activity/audit-words.ts
+msgid "Ended Grasp staff's access"
+msgstr "Den Zugang der Grasp-Mitarbeitenden beendet"
+
 #: src/settings/staff-access.tsx
 msgid "Ending access"
 msgstr "Zugriff wird beendet"
@@ -6906,6 +7002,10 @@ msgstr "Gelöscht, was das Brain aus einer Verbindung kopiert hatte, als sie get
 #: src/activity/audit-words.ts
 msgid "Erased what the Brain kept from a connection, as it was disconnected"
 msgstr "Gelöscht, was das Brain aus einer Verbindung gespeichert hatte, als sie getrennt wurde"
+
+#: src/activity/audit-words.ts
+msgid "Erased what the Brain kept from a shared connection"
+msgstr "Gelöscht, was das Brain aus einer geteilten Verbindung gespeichert hatte"
 
 #: src/onboarding/forget-teams.tsx
 msgid "Erased. Your Brain keeps nothing of your teams until you confirm them again."
@@ -7762,6 +7862,10 @@ msgstr "Unser erstes Gespräch vergessen"
 msgid "Forget our first conversation?"
 msgstr "Unser erstes Gespräch vergessen?"
 
+#: src/activity/audit-words.ts
+msgid "Forgot an erased member as the one who answered the Brain's questions"
+msgstr "Ein gelöschtes Mitglied als Antwortgeber der Fragen des Brain vergessen"
+
 #: src/brain/memories-page.tsx
 msgid "Forgotten, kept as history"
 msgstr "Vergessen, im Verlauf bewahrt"
@@ -8408,9 +8512,17 @@ msgstr "Gastkonten können sich nicht anmelden."
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Gastkonten können sich nicht anmelden. Verwenden Sie ein eigenes Konto Ihrer Organisation."
 
+#: src/activity/audit-words.ts
+msgid "Had the Brain forget a record"
+msgstr "Das Brain einen Eintrag vergessen lassen"
+
 #: src/onboarding/about-story.tsx
 msgid "Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask."
 msgstr "Mein halber Montag geht für Rechnungen drauf. Meist fehlt die Bestellnummer, also frage ich per Mail nach."
+
+#: src/activity/audit-words.ts
+msgid "Handed a file to a run"
+msgstr "Eine Datei an einen Lauf übergeben"
 
 #: src/activity/audit-words.ts
 msgid "Handed an email attachment to a run"
@@ -9120,6 +9232,10 @@ msgstr "Eingabe, als JSON"
 msgctxt "a menu of blocks to add"
 msgid "Insert"
 msgstr "Einfügen"
+
+#: src/activity/audit-words.ts
+msgid "Installed Grasp's skills with a release"
+msgstr "Grasps Skills mit einem Release installiert"
 
 #: src/chat/saved-memory.tsx
 msgid "Instruction"
@@ -10256,6 +10372,10 @@ msgstr "Ihr {app}-Konto {account} verknüpfen?"
 msgid "Linked"
 msgstr "Verknüpft"
 
+#: src/activity/audit-words.ts
+msgid "Linked a chat app account"
+msgstr "Ein Chat-App-Konto verknüpft"
+
 #: src/settings/chat-accounts.tsx
 msgid "Linked chat accounts"
 msgstr "Verknüpfte Chat-Konten"
@@ -10425,6 +10545,10 @@ msgstr "Den von Hand zu entfernenden Zugriff angesehen"
 msgid "Looked at the uploads shared with a team or everyone"
 msgstr "Hat sich die mit einem Team oder allen geteilten Uploads angesehen"
 
+#: src/activity/audit-words.ts
+msgid "Looked up whether something was erased from the Brain"
+msgstr "Nachgesehen, ob etwas aus dem Brain gelöscht wurde"
+
 #: src/frame/part-words.tsx
 msgid "Looking"
 msgstr "Wird gesucht"
@@ -10466,6 +10590,10 @@ msgstr "Erstellt"
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
 msgstr "Hat für eine Webhook-Quelle ein neues Geheimnis erzeugt"
+
+#: src/activity/audit-words.ts
+msgid "Made an agent"
+msgstr "Einen Agenten erstellt"
 
 #: src/apps/app-settings.tsx
 msgid "Made by {person} on {date}."
@@ -10637,6 +10765,10 @@ msgstr "Markdown (.md)"
 msgctxt "kind of app"
 msgid "Marketing"
 msgstr "Marketing"
+
+#: src/activity/audit-words.ts
+msgid "Matched a directory group to a team"
+msgstr "Eine Verzeichnisgruppe einem Team zugeordnet"
 
 #: src/agents/setup/words.ts
 msgid "Max"
@@ -12452,6 +12584,10 @@ msgstr "Bieten Sie {name} den Admins Ihres Unternehmens an. Übernehmen die Admi
 msgid "Offer to the company"
 msgstr "Dem Unternehmen anbieten"
 
+#: src/activity/audit-words.ts
+msgid "Offered an agent to the company, or took the offer back"
+msgstr "Dem Unternehmen einen Agenten angeboten oder das Angebot zurückgenommen"
+
 #: src/agents/agent-share.tsx
 msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
 msgstr "Angeboten am {since}. Die Admins Ihrer Firma können {name} übernehmen. Was Sie ihm gesagt haben, geht nicht mit, und sobald sie es übernommen haben, können Sie es nicht mehr öffnen."
@@ -12922,6 +13058,10 @@ msgstr "OpenAI-kompatibler Endpunkt"
 msgid "Opened"
 msgstr "Geöffnet"
 
+#: src/activity/audit-words.ts
+msgid "Opened Grasp to the whole company"
+msgstr "Grasp für das ganze Unternehmen geöffnet"
+
 #: src/frame/part-words.tsx
 msgid "Opening {name}"
 msgstr "{name} wird geöffnet"
@@ -13339,6 +13479,14 @@ msgstr "Pausiert"
 msgctxt "status of a workflow run"
 msgid "Paused"
 msgstr "Pausiert"
+
+#: src/activity/audit-words.ts
+msgid "Paused or resumed an agent"
+msgstr "Einen Agenten pausiert oder fortgesetzt"
+
+#: src/activity/audit-words.ts
+msgid "Paused or resumed an agent's wake-up"
+msgstr "Einen Weckruf eines Agenten pausiert oder fortgesetzt"
 
 #: src/inbox/interviews-item.tsx
 msgid "Paused: no link opens and none goes out."
@@ -13809,6 +13957,10 @@ msgstr "Veröffentlichen"
 msgid "Publish {name}"
 msgstr "{name} veröffentlichen"
 
+#: src/activity/audit-words.ts
+msgid "Published a version"
+msgstr "Eine Version veröffentlicht"
+
 #: src/drafts/share-with-team.tsx
 msgid "Publishing undone"
 msgstr "Veröffentlichung rückgängig gemacht"
@@ -13940,6 +14092,10 @@ msgid "Read a knowledge document"
 msgstr "Ein Wissensdokument gelesen"
 
 #: src/activity/audit-words.ts
+msgid "Read a snapshot of the workspace"
+msgstr "Eine Momentaufnahme des Workspace gelesen"
+
+#: src/activity/audit-words.ts
 msgid "Read an App's statistics"
 msgstr "Die Statistiken einer App gelesen"
 
@@ -14008,13 +14164,29 @@ msgstr "Eingeschränkte Quellen gelesen und ist jetzt an sie gebunden"
 msgid "Read skills from the Brain"
 msgstr "Skills aus dem Gehirn gelesen"
 
+#: src/activity/audit-words.ts
+msgid "Read the Brain's report"
+msgstr "Den Bericht des Brain gelesen"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Das des Unternehmens lesen"
 
+#: src/activity/audit-words.ts
+msgid "Read the directory for the onboarding"
+msgstr "Das Verzeichnis für das Onboarding gelesen"
+
+#: src/activity/audit-words.ts
+msgid "Read the HR system for the onboarding"
+msgstr "Das HR-System für das Onboarding gelesen"
+
 #: src/onboarding/hr-leads.tsx
 msgid "Read the leads from {name} again"
 msgstr "Leitungen erneut aus {name} lesen"
+
+#: src/activity/audit-words.ts
+msgid "Read the onboarding kickoff"
+msgstr "Den Auftakt des Onboardings gelesen"
 
 #: src/activity/audit-words.ts
 msgid "Read the payload of a webhook event"
@@ -14420,6 +14592,10 @@ msgid "Removed {date}"
 msgstr "Entfernt am {date}"
 
 #: src/activity/audit-words.ts
+msgid "Removed a document from an agent"
+msgstr "Ein Dokument von einem Agenten entfernt"
+
+#: src/activity/audit-words.ts
 msgid "Removed a file from a chat before sending it"
 msgstr "Eine Datei vor dem Senden aus einem Chat entfernt"
 
@@ -14430,6 +14606,10 @@ msgstr "Ein Mitglied entfernt"
 #: src/activity/audit-words.ts
 msgid "Removed a webhook from an App"
 msgstr "Hat einen Webhook aus einer App entfernt"
+
+#: src/activity/audit-words.ts
+msgid "Removed a widget from a dashboard"
+msgstr "Ein Widget von einem Dashboard entfernt"
 
 #: src/workflows/item-test.tsx
 msgid "Removed after a week"
@@ -15239,6 +15419,10 @@ msgstr "Gespeichert als {named}"
 msgid "Saved as a blueprint"
 msgstr "Als Blueprint gespeichert"
 
+#: src/activity/audit-words.ts
+msgid "Saved instructions"
+msgstr "Anweisungen gespeichert"
+
 #: src/workflows/saved-ago.tsx
 msgid "Saved just now"
 msgstr "Gerade gespeichert"
@@ -15246,6 +15430,10 @@ msgstr "Gerade gespeichert"
 #: src/workflows/saved-ago.tsx
 msgid "Saved on {date}"
 msgstr "Gespeichert am {date}"
+
+#: src/activity/audit-words.ts
+msgid "Saved the company's groups of teams"
+msgstr "Die Teamgruppen des Unternehmens gespeichert"
 
 #: src/chat/thread.tsx
 msgid "Saved to your memory"
@@ -15659,6 +15847,10 @@ msgid "Sent <0>{sent}</0>"
 msgstr "Gesendet <0>{sent}</0>"
 
 #: src/activity/audit-words.ts
+msgid "Sent a change from Grasp's admin"
+msgstr "Eine Änderung aus Grasps Verwaltung gesendet"
+
+#: src/activity/audit-words.ts
 msgid "Sent a webhook source a test event"
 msgstr "Hat einer Webhook-Quelle ein Testereignis gesendet"
 
@@ -15699,6 +15891,10 @@ msgstr "Einträge beiseitegelegt, die der Audit-Trail nicht aufnehmen konnte"
 msgid "Set for each app"
 msgstr "Für jede App festgelegt"
 
+#: src/activity/audit-words.ts
+msgid "Set how much Grasp must know before it opens to the company"
+msgstr "Festgelegt, wie viel Grasp wissen muss, bevor es sich für das Unternehmen öffnet"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Set in"
@@ -15724,6 +15920,10 @@ msgstr "Link festlegen"
 #: src/frame/part-words.tsx
 msgid "Set tool by tool"
 msgstr "Tool für Tool festgelegt"
+
+#: src/activity/audit-words.ts
+msgid "Set up an agent's wake-up"
+msgstr "Einen Weckruf für einen Agenten eingerichtet"
 
 #: src/workflows/resource-params.tsx
 msgid "Set. Type a new value to replace it."
@@ -15844,6 +16044,10 @@ msgstr "Teilen…"
 #: src/brain/memories-page.tsx
 msgid "Shared {when}"
 msgstr "Geteilt am {when}"
+
+#: src/activity/audit-words.ts
+msgid "Shared a document for the onboarding"
+msgstr "Ein Dokument für das Onboarding geteilt"
 
 #: src/apps/apps-overview.tsx
 msgid "Shared apps"
@@ -16635,6 +16839,10 @@ msgstr "Verspätet begonnen, einer Verbindung zu folgen: Änderungen davor wurde
 msgid "Started following what changes at a connection"
 msgstr "Begonnen zu verfolgen, was sich bei einer Verbindung ändert"
 
+#: src/activity/audit-words.ts
+msgid "Started handing something over to the Brain"
+msgstr "Begonnen, etwas an das Brain zu übergeben"
+
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
 msgid "Starting"
@@ -16837,6 +17045,10 @@ msgstr "Den Besuchern einer App eine ihrer Funktionen entzogen"
 #: src/activity/audit-words.ts
 msgid "Stopped following what changes at a connection"
 msgstr "Aufgehört zu verfolgen, was sich bei einer Verbindung ändert"
+
+#: src/activity/audit-words.ts
+msgid "Stopped matching a directory group to a team"
+msgstr "Die Zuordnung einer Verzeichnisgruppe zu einem Team aufgehoben"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -18774,8 +18986,16 @@ msgid "Took a reply to a run's email"
 msgstr "Eine Antwort auf die E-Mail eines Laufs angenommen"
 
 #: src/activity/audit-words.ts
+msgid "Took away an answer to the Brain's question"
+msgstr "Eine Antwort auf eine Frage des Brain entfernt"
+
+#: src/activity/audit-words.ts
 msgid "Took back the approval of a page's code"
 msgstr "Die Genehmigung für den Code einer Seite zurückgenommen"
+
+#: src/activity/audit-words.ts
+msgid "Took on an agent offered to the company"
+msgstr "Einen dem Unternehmen angebotenen Agenten übernommen"
 
 #: src/activity/audit-words.ts
 msgid "Took someone off a team"
@@ -19103,6 +19323,10 @@ msgstr "Verknüpfung aufheben"
 #: src/settings/chat-accounts.tsx
 msgid "Unlink {app} account {shown}"
 msgstr "Verknüpfung des {app}-Kontos {shown} aufheben"
+
+#: src/activity/audit-words.ts
+msgid "Unlinked a chat app account"
+msgstr "Die Verknüpfung eines Chat-App-Kontos aufgehoben"
 
 #: src/frame/part-words.tsx
 msgid "Unmute"
@@ -19466,6 +19690,10 @@ msgstr "Änderungen ansehen"
 msgid "View in map"
 msgstr "In der Karte zeigen"
 
+#: src/activity/audit-words.ts
+msgid "Viewed or changed something as Grasp staff"
+msgstr "Als Grasp-Mitarbeitende etwas angesehen oder geändert"
+
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx
 #: src/frame/shell-pending.tsx
@@ -19773,6 +20001,10 @@ msgstr "Wochenreporter"
 #: src/onboarding/setup-frame.tsx
 msgid "Welcome"
 msgstr "Willkommen"
+
+#: src/activity/audit-words.ts
+msgid "Went back to an earlier version"
+msgstr "Zu einer früheren Version zurückgekehrt"
 
 #: src/workflows/today-lanes.tsx
 msgid "went to people"

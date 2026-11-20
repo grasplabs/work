@@ -2447,6 +2447,10 @@ msgid "Added"
 msgstr "Added"
 
 #: src/activity/audit-words.ts
+msgid "Added a document to an agent"
+msgstr "Added a document to an agent"
+
+#: src/activity/audit-words.ts
 msgid "Added a member to an App"
 msgstr "Added a member to an App"
 
@@ -2478,6 +2482,10 @@ msgstr "Added from its instructions: {added}."
 #: src/connections/http-connections.tsx
 msgid "Added on"
 msgstr "Added on"
+
+#: src/activity/audit-words.ts
+msgid "Added records to the Brain"
+msgstr "Added records to the Brain"
 
 #: src/activity/audit-words.ts
 msgid "Added someone to a team"
@@ -3395,6 +3403,10 @@ msgstr "Areas finished"
 msgid "Arrange {name}"
 msgstr "Arrange {name}"
 
+#: src/activity/audit-words.ts
+msgid "Arranged the company's groups of teams"
+msgstr "Arranged the company's groups of teams"
+
 #: src/frame/part-words.tsx
 msgid "Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page"
 msgstr "Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page"
@@ -3607,6 +3619,10 @@ msgstr "asked for by the agent, in their chat"
 msgid "Asked from chat"
 msgstr "Asked from chat"
 
+#: src/activity/audit-words.ts
+msgid "Asked Grasp which Apps an agent needs"
+msgstr "Asked Grasp which Apps an agent needs"
+
 #: src/frame/part-words.tsx
 msgid "Asked in this page"
 msgstr "Asked in this page"
@@ -3628,6 +3644,14 @@ msgstr "Asked of you"
 #: src/inbox/item-detail.tsx
 msgid "Asked of you as the {owner}"
 msgstr "Asked of you as the {owner}"
+
+#: src/activity/audit-words.ts
+msgid "Asked people to fill a gap in the Brain"
+msgstr "Asked people to fill a gap in the Brain"
+
+#: src/activity/audit-words.ts
+msgid "Asked Stephen to hear more people about a piece of work"
+msgstr "Asked Stephen to hear more people about a piece of work"
 
 #: src/inbox/item-detail.tsx
 msgid "Asked the {owner}: {question}"
@@ -3652,6 +3676,10 @@ msgstr "Asked to connect again on {since}."
 #: src/activity/audit-words.ts
 msgid "Asked to erase a removed member"
 msgstr "Asked to erase a removed member"
+
+#: src/activity/audit-words.ts
+msgid "Asked to erase what the Brain kept from a shared connection"
+msgstr "Asked to erase what the Brain kept from a shared connection"
 
 #: src/activity/audit-words.ts
 msgid "Asked to send, edit or delete a chat app message as the company's bot"
@@ -3970,6 +3998,10 @@ msgstr "Briefing desk"
 #: src/agents/manual-agent.tsx
 msgid "Bringing {name} to life…"
 msgstr "Bringing {name} to life…"
+
+#: src/activity/audit-words.ts
+msgid "Brought back a dismissed opportunity"
+msgstr "Brought back a dismissed opportunity"
 
 #: src/activity/audit-words.ts
 msgid "Brought changes from a connected system into the Brain"
@@ -4409,8 +4441,16 @@ msgid "Changed a workflow's parameter"
 msgstr "Changed a workflow's parameter"
 
 #: src/activity/audit-words.ts
+msgid "Changed an agent"
+msgstr "Changed an agent"
+
+#: src/activity/audit-words.ts
 msgid "Changed an App"
 msgstr "Changed an App"
+
+#: src/activity/audit-words.ts
+msgid "Changed an App an agent may use"
+msgstr "Changed an App an agent may use"
 
 #: src/apps/draft-changes.tsx
 msgid "Changed by <0/>"
@@ -4423,6 +4463,10 @@ msgstr "Changed by <0/>, of the rows they can read"
 #: src/apps/draft-changes.tsx
 msgid "Changed by nobody"
 msgstr "Changed by nobody"
+
+#: src/activity/audit-words.ts
+msgid "Changed for whom an agent has a kind of tool"
+msgstr "Changed for whom an agent has a kind of tool"
 
 #: src/apps/app-workflows.tsx
 msgid "Changed in the draft: publish the App for it to start the new workflow."
@@ -4467,6 +4511,22 @@ msgstr "Changed whether an App's data goes to code outside Grasp"
 #: src/activity/audit-words.ts
 msgid "Changed which integrations are offered"
 msgstr "Changed which integrations are offered"
+
+#: src/activity/audit-words.ts
+msgid "Changed who may reach an agent"
+msgstr "Changed who may reach an agent"
+
+#: src/activity/audit-words.ts
+msgid "Changed who may reach Stephen"
+msgstr "Changed who may reach Stephen"
+
+#: src/activity/audit-words.ts
+msgid "Changed who reaches Stephen in a place"
+msgstr "Changed who reaches Stephen in a place"
+
+#: src/activity/audit-words.ts
+msgid "Changed who reads what a shared connection brings into the Brain"
+msgstr "Changed who reads what a shared connection brings into the Brain"
 
 #: src/frame/part-words.tsx
 msgid "Changes"
@@ -4894,6 +4954,10 @@ msgstr "Close voice"
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
 msgstr "Close without an answer"
+
+#: src/activity/audit-words.ts
+msgid "Closed Grasp to the company"
+msgstr "Closed Grasp to the company"
 
 #: src/brain/activity-page.tsx
 msgid "Closed without an answer"
@@ -5670,6 +5734,10 @@ msgid "Created a collection"
 msgstr "Created a collection"
 
 #: src/activity/audit-words.ts
+msgid "Created a data store"
+msgstr "Created a data store"
+
+#: src/activity/audit-words.ts
 msgid "Created a team"
 msgstr "Created a team"
 
@@ -5896,6 +5964,10 @@ msgstr "Declined"
 msgid "Declined a write to an App"
 msgstr "Declined a write to an App"
 
+#: src/activity/audit-words.ts
+msgid "Declined an agent offered to the company"
+msgstr "Declined an agent offered to the company"
+
 #: src/inbox/item-detail.tsx
 msgid "Declined: {title}"
 msgstr "Declined: {title}"
@@ -6062,12 +6134,24 @@ msgid "Deleted"
 msgstr "Deleted"
 
 #: src/activity/audit-words.ts
+msgid "Deleted a data store"
+msgstr "Deleted a data store"
+
+#: src/activity/audit-words.ts
 msgid "Deleted a team"
 msgstr "Deleted a team"
 
 #: src/activity/audit-words.ts
 msgid "Deleted a webhook source"
 msgstr "Deleted a webhook source"
+
+#: src/activity/audit-words.ts
+msgid "Deleted an agent"
+msgstr "Deleted an agent"
+
+#: src/activity/audit-words.ts
+msgid "Deleted an agent's wake-up"
+msgstr "Deleted an agent's wake-up"
 
 #: src/activity/audit-words.ts
 msgid "Deleted an AI provider's key"
@@ -6307,6 +6391,10 @@ msgstr "Dismiss the tip"
 msgid "Dismissed a knowledge signal"
 msgstr "Dismissed a knowledge signal"
 
+#: src/activity/audit-words.ts
+msgid "Dismissed an opportunity"
+msgstr "Dismissed an opportunity"
+
 #: src/settings/composer-settings.tsx
 msgid "Dither"
 msgstr "Dither"
@@ -6494,6 +6582,10 @@ msgstr "Download as PDF"
 #: src/apps/app-code.tsx
 msgid "Download the file"
 msgstr "Download the file"
+
+#: src/activity/audit-words.ts
+msgid "Downloaded a file"
+msgstr "Downloaded a file"
 
 #: src/workflows/workflow-settings.tsx
 msgid "Draft"
@@ -6800,6 +6892,10 @@ msgstr "Ended"
 msgid "Ended a held write to an App nobody confirmed within a day"
 msgstr "Ended a held write to an App nobody confirmed within a day"
 
+#: src/activity/audit-words.ts
+msgid "Ended Grasp staff's access"
+msgstr "Ended Grasp staff's access"
+
 #: src/settings/staff-access.tsx
 msgid "Ending access"
 msgstr "Ending access"
@@ -6906,6 +7002,10 @@ msgstr "Erased what the Brain copied from a connection, as it was disconnected"
 #: src/activity/audit-words.ts
 msgid "Erased what the Brain kept from a connection, as it was disconnected"
 msgstr "Erased what the Brain kept from a connection, as it was disconnected"
+
+#: src/activity/audit-words.ts
+msgid "Erased what the Brain kept from a shared connection"
+msgstr "Erased what the Brain kept from a shared connection"
 
 #: src/onboarding/forget-teams.tsx
 msgid "Erased. Your Brain keeps nothing of your teams until you confirm them again."
@@ -7762,6 +7862,10 @@ msgstr "Forget our first conversation"
 msgid "Forget our first conversation?"
 msgstr "Forget our first conversation?"
 
+#: src/activity/audit-words.ts
+msgid "Forgot an erased member as the one who answered the Brain's questions"
+msgstr "Forgot an erased member as the one who answered the Brain's questions"
+
 #: src/brain/memories-page.tsx
 msgid "Forgotten, kept as history"
 msgstr "Forgotten, kept as history"
@@ -8408,9 +8512,17 @@ msgstr "Guest accounts can't sign in."
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Guest accounts can't sign in. Use your organization's own account."
 
+#: src/activity/audit-words.ts
+msgid "Had the Brain forget a record"
+msgstr "Had the Brain forget a record"
+
 #: src/onboarding/about-story.tsx
 msgid "Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask."
 msgstr "Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask."
+
+#: src/activity/audit-words.ts
+msgid "Handed a file to a run"
+msgstr "Handed a file to a run"
 
 #: src/activity/audit-words.ts
 msgid "Handed an email attachment to a run"
@@ -9120,6 +9232,10 @@ msgstr "Input, as JSON"
 msgctxt "a menu of blocks to add"
 msgid "Insert"
 msgstr "Insert"
+
+#: src/activity/audit-words.ts
+msgid "Installed Grasp's skills with a release"
+msgstr "Installed Grasp's skills with a release"
 
 #: src/chat/saved-memory.tsx
 msgid "Instruction"
@@ -10256,6 +10372,10 @@ msgstr "Link your {app} account {account}?"
 msgid "Linked"
 msgstr "Linked"
 
+#: src/activity/audit-words.ts
+msgid "Linked a chat app account"
+msgstr "Linked a chat app account"
+
 #: src/settings/chat-accounts.tsx
 msgid "Linked chat accounts"
 msgstr "Linked chat accounts"
@@ -10425,6 +10545,10 @@ msgstr "Looked at the access to remove by hand"
 msgid "Looked at the uploads shared with a team or everyone"
 msgstr "Looked at the uploads shared with a team or everyone"
 
+#: src/activity/audit-words.ts
+msgid "Looked up whether something was erased from the Brain"
+msgstr "Looked up whether something was erased from the Brain"
+
 #: src/frame/part-words.tsx
 msgid "Looking"
 msgstr "Looking"
@@ -10466,6 +10590,10 @@ msgstr "Made"
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
 msgstr "Made a webhook source a new secret"
+
+#: src/activity/audit-words.ts
+msgid "Made an agent"
+msgstr "Made an agent"
 
 #: src/apps/app-settings.tsx
 msgid "Made by {person} on {date}."
@@ -10637,6 +10765,10 @@ msgstr "Markdown (.md)"
 msgctxt "kind of app"
 msgid "Marketing"
 msgstr "Marketing"
+
+#: src/activity/audit-words.ts
+msgid "Matched a directory group to a team"
+msgstr "Matched a directory group to a team"
 
 #: src/agents/setup/words.ts
 msgid "Max"
@@ -12452,6 +12584,10 @@ msgstr "Offer {name} to your company's admins. If they take it on, it becomes on
 msgid "Offer to the company"
 msgstr "Offer to the company"
 
+#: src/activity/audit-words.ts
+msgid "Offered an agent to the company, or took the offer back"
+msgstr "Offered an agent to the company, or took the offer back"
+
 #: src/agents/agent-share.tsx
 msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
 msgstr "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
@@ -12922,6 +13058,10 @@ msgstr "OpenAI-compatible endpoint"
 msgid "Opened"
 msgstr "Opened"
 
+#: src/activity/audit-words.ts
+msgid "Opened Grasp to the whole company"
+msgstr "Opened Grasp to the whole company"
+
 #: src/frame/part-words.tsx
 msgid "Opening {name}"
 msgstr "Opening {name}"
@@ -13339,6 +13479,14 @@ msgstr "Paused"
 msgctxt "status of a workflow run"
 msgid "Paused"
 msgstr "Paused"
+
+#: src/activity/audit-words.ts
+msgid "Paused or resumed an agent"
+msgstr "Paused or resumed an agent"
+
+#: src/activity/audit-words.ts
+msgid "Paused or resumed an agent's wake-up"
+msgstr "Paused or resumed an agent's wake-up"
 
 #: src/inbox/interviews-item.tsx
 msgid "Paused: no link opens and none goes out."
@@ -13809,6 +13957,10 @@ msgstr "Publish"
 msgid "Publish {name}"
 msgstr "Publish {name}"
 
+#: src/activity/audit-words.ts
+msgid "Published a version"
+msgstr "Published a version"
+
 #: src/drafts/share-with-team.tsx
 msgid "Publishing undone"
 msgstr "Publishing undone"
@@ -13940,6 +14092,10 @@ msgid "Read a knowledge document"
 msgstr "Read a knowledge document"
 
 #: src/activity/audit-words.ts
+msgid "Read a snapshot of the workspace"
+msgstr "Read a snapshot of the workspace"
+
+#: src/activity/audit-words.ts
 msgid "Read an App's statistics"
 msgstr "Read an App's statistics"
 
@@ -14008,13 +14164,29 @@ msgstr "Read restricted sources, and is held to them"
 msgid "Read skills from the Brain"
 msgstr "Read skills from the Brain"
 
+#: src/activity/audit-words.ts
+msgid "Read the Brain's report"
+msgstr "Read the Brain's report"
+
 #: src/settings/stephen-settings.tsx
 msgid "Read the company's"
 msgstr "Read the company's"
 
+#: src/activity/audit-words.ts
+msgid "Read the directory for the onboarding"
+msgstr "Read the directory for the onboarding"
+
+#: src/activity/audit-words.ts
+msgid "Read the HR system for the onboarding"
+msgstr "Read the HR system for the onboarding"
+
 #: src/onboarding/hr-leads.tsx
 msgid "Read the leads from {name} again"
 msgstr "Read the leads from {name} again"
+
+#: src/activity/audit-words.ts
+msgid "Read the onboarding kickoff"
+msgstr "Read the onboarding kickoff"
 
 #: src/activity/audit-words.ts
 msgid "Read the payload of a webhook event"
@@ -14420,6 +14592,10 @@ msgid "Removed {date}"
 msgstr "Removed {date}"
 
 #: src/activity/audit-words.ts
+msgid "Removed a document from an agent"
+msgstr "Removed a document from an agent"
+
+#: src/activity/audit-words.ts
 msgid "Removed a file from a chat before sending it"
 msgstr "Removed a file from a chat before sending it"
 
@@ -14430,6 +14606,10 @@ msgstr "Removed a member"
 #: src/activity/audit-words.ts
 msgid "Removed a webhook from an App"
 msgstr "Removed a webhook from an App"
+
+#: src/activity/audit-words.ts
+msgid "Removed a widget from a dashboard"
+msgstr "Removed a widget from a dashboard"
 
 #: src/workflows/item-test.tsx
 msgid "Removed after a week"
@@ -15239,6 +15419,10 @@ msgstr "Saved as {named}"
 msgid "Saved as a blueprint"
 msgstr "Saved as a blueprint"
 
+#: src/activity/audit-words.ts
+msgid "Saved instructions"
+msgstr "Saved instructions"
+
 #: src/workflows/saved-ago.tsx
 msgid "Saved just now"
 msgstr "Saved just now"
@@ -15246,6 +15430,10 @@ msgstr "Saved just now"
 #: src/workflows/saved-ago.tsx
 msgid "Saved on {date}"
 msgstr "Saved on {date}"
+
+#: src/activity/audit-words.ts
+msgid "Saved the company's groups of teams"
+msgstr "Saved the company's groups of teams"
 
 #: src/chat/thread.tsx
 msgid "Saved to your memory"
@@ -15659,6 +15847,10 @@ msgid "Sent <0>{sent}</0>"
 msgstr "Sent <0>{sent}</0>"
 
 #: src/activity/audit-words.ts
+msgid "Sent a change from Grasp's admin"
+msgstr "Sent a change from Grasp's admin"
+
+#: src/activity/audit-words.ts
 msgid "Sent a webhook source a test event"
 msgstr "Sent a webhook source a test event"
 
@@ -15699,6 +15891,10 @@ msgstr "Set aside entries the audit trail couldn't take"
 msgid "Set for each app"
 msgstr "Set for each app"
 
+#: src/activity/audit-words.ts
+msgid "Set how much Grasp must know before it opens to the company"
+msgstr "Set how much Grasp must know before it opens to the company"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Set in"
@@ -15724,6 +15920,10 @@ msgstr "Set the link"
 #: src/frame/part-words.tsx
 msgid "Set tool by tool"
 msgstr "Set tool by tool"
+
+#: src/activity/audit-words.ts
+msgid "Set up an agent's wake-up"
+msgstr "Set up an agent's wake-up"
 
 #: src/workflows/resource-params.tsx
 msgid "Set. Type a new value to replace it."
@@ -15844,6 +16044,10 @@ msgstr "Share…"
 #: src/brain/memories-page.tsx
 msgid "Shared {when}"
 msgstr "Shared {when}"
+
+#: src/activity/audit-words.ts
+msgid "Shared a document for the onboarding"
+msgstr "Shared a document for the onboarding"
 
 #: src/apps/apps-overview.tsx
 msgid "Shared apps"
@@ -16635,6 +16839,10 @@ msgstr "Started following a connection late: changes before then weren't read"
 msgid "Started following what changes at a connection"
 msgstr "Started following what changes at a connection"
 
+#: src/activity/audit-words.ts
+msgid "Started handing something over to the Brain"
+msgstr "Started handing something over to the Brain"
+
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
 msgid "Starting"
@@ -16837,6 +17045,10 @@ msgstr "Stopped an App's visitors using one of its functions"
 #: src/activity/audit-words.ts
 msgid "Stopped following what changes at a connection"
 msgstr "Stopped following what changes at a connection"
+
+#: src/activity/audit-words.ts
+msgid "Stopped matching a directory group to a team"
+msgstr "Stopped matching a directory group to a team"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -18774,8 +18986,16 @@ msgid "Took a reply to a run's email"
 msgstr "Took a reply to a run's email"
 
 #: src/activity/audit-words.ts
+msgid "Took away an answer to the Brain's question"
+msgstr "Took away an answer to the Brain's question"
+
+#: src/activity/audit-words.ts
 msgid "Took back the approval of a page's code"
 msgstr "Took back the approval of a page's code"
+
+#: src/activity/audit-words.ts
+msgid "Took on an agent offered to the company"
+msgstr "Took on an agent offered to the company"
 
 #: src/activity/audit-words.ts
 msgid "Took someone off a team"
@@ -19103,6 +19323,10 @@ msgstr "Unlink"
 #: src/settings/chat-accounts.tsx
 msgid "Unlink {app} account {shown}"
 msgstr "Unlink {app} account {shown}"
+
+#: src/activity/audit-words.ts
+msgid "Unlinked a chat app account"
+msgstr "Unlinked a chat app account"
 
 #: src/frame/part-words.tsx
 msgid "Unmute"
@@ -19466,6 +19690,10 @@ msgstr "View changes"
 msgid "View in map"
 msgstr "View in map"
 
+#: src/activity/audit-words.ts
+msgid "Viewed or changed something as Grasp staff"
+msgstr "Viewed or changed something as Grasp staff"
+
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx
 #: src/frame/shell-pending.tsx
@@ -19773,6 +20001,10 @@ msgstr "Weekly reporter"
 #: src/onboarding/setup-frame.tsx
 msgid "Welcome"
 msgstr "Welcome"
+
+#: src/activity/audit-words.ts
+msgid "Went back to an earlier version"
+msgstr "Went back to an earlier version"
 
 #: src/workflows/today-lanes.tsx
 msgid "went to people"
