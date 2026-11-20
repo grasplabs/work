@@ -1,4 +1,3 @@
-import { linkPath, wikiLinkPattern } from "@grasp-os/shared/knowledge";
 import type {
   Backlink,
   DocumentRead,
@@ -6,7 +5,7 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { copyText } from "../copy.ts";
@@ -40,7 +39,11 @@ import { Textarea } from "../grasp/textarea/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { bodyOf, DocumentMarkdown } from "./markdown.tsx";
+import {
+  DocumentMarkdown,
+  documentLinksOf,
+  readingMarkdown,
+} from "./markdown.tsx";
 import { saveOrNewer } from "./save.ts";
 import type { ResolveLink } from "./wiki-links.ts";
 
@@ -237,37 +240,13 @@ interface Linked {
   title: string;
 }
 
-/** Fenced code, whose `[[…]]` are code, not links; captured, to split a text around it. */
-const fencedBlocks =
-  /(?<fence>^(?:```|~~~)[^\n]*\n[\s\S]*?^(?:```|~~~)[ \t]*$)/mu;
-
-/** Fenced code, whose `[[…]]` are code, not links. */
-const fencedCode = /^(?:```|~~~)[^\n]*\n[\s\S]*?^(?:```|~~~)[ \t]*$/gmu;
-
-/**
- * The documents `text` links to with `[[links]]` that `resolve` knows, each
- * once, in the order they first appear, named by the link's label or its
- * target.
- */
-const linksOf = (doc: DocumentRead, resolve: ResolveLink): Linked[] => {
-  const found = new Map<string, string>();
-  for (const match of doc.version.text
-    .replaceAll(fencedCode, "")
-    .matchAll(wikiLinkPattern)) {
-    const [target = "", ...rest] = (match.groups?.inner ?? "").split("|");
-    const path = linkPath(target);
-    const documentId = path === undefined ? undefined : resolve(path);
-    if (documentId !== undefined && !found.has(documentId)) {
-      const label = rest.join("|").trim();
-      found.set(documentId, label === "" ? target.trim() : label);
-    }
-  }
-  return [...found].map(([documentId, title]) => ({
+/** The documents the text links to that `resolve` knows, named as the text names them. */
+const linksOf = (doc: DocumentRead, resolve: ResolveLink): Linked[] =>
+  documentLinksOf(doc.version.text, resolve).map(({ documentId, words }) => ({
     collectionId: doc.collectionId,
     documentId,
-    title,
+    title: words,
   }));
-};
 
 /** Documents as links to them, side by side: what this one links to, or what links to it. */
 const DocumentLinks = ({ documents }: { documents: readonly Linked[] }) => (
@@ -385,61 +364,8 @@ const EarlierVersion = ({ doc }: { doc: DocumentRead }) => {
   );
 };
 
-/** Markdown's own characters in a label, escaped so it reads as written. */
-const escapeLabel = (label: string): string =>
-  label.replaceAll(/[\\[\]*_`<>]/gu, String.raw`\$&`);
-
-/**
- * Each `[[link]]` in `text` to a document the page knows, as a link to it; any other, only its
- * words.
- */
-const withLinks = (
-  text: string,
-  doc: DocumentRead,
-  resolve: ResolveLink
-): string => {
-  let linked = "";
-  let from = 0;
-  for (const match of text.matchAll(wikiLinkPattern)) {
-    const [target = "", ...rest] = (match.groups?.inner ?? "").split("|");
-    const label = escapeLabel(rest.join("|").trim() || target.trim());
-    const path = linkPath(target);
-    const documentId = path === undefined ? undefined : resolve(path);
-    const address = `/knowledge/${encodeURIComponent(doc.collectionId)}?doc=${encodeURIComponent(documentId ?? "")}`;
-    linked += text.slice(from, match.index);
-    linked += documentId === undefined ? label : `[${label}](${address})`;
-    from = match.index + match[0].length;
-  }
-  return linked + text.slice(from);
-};
-
-/**
- * The text as the page reads it: without its frontmatter, a detail and not text, and without a
- * first `# heading` that only repeats the title the page shows, its `[[links]]` drawn as links.
- * Fenced code keeps its `[[…]]` as written.
- */
-const readingText = (
-  text: string,
-  doc: DocumentRead,
-  resolve: ResolveLink
-): string => {
-  const lines = bodyOf(text).split("\n");
-  const first = lines.findIndex((line) => line.trim() !== "");
-  const body =
-    first !== -1 && lines[first]?.trim() === `# ${doc.title}`
-      ? lines.slice(first + 1).join("\n")
-      : lines.join("\n");
-  return body
-    .split(fencedBlocks)
-    .map((part, index) =>
-      index % 2 === 1 ? part : withLinks(part, doc, resolve)
-    )
-    .join("")
-    .trim();
-};
-
 /** The versions in History, the newest first, each with its text. */
-export interface DocumentHistory {
+interface DocumentHistory {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   versions: PageVersion[];
@@ -464,7 +390,11 @@ export const useDocumentPage = ({
   const { t } = useLingui();
   const { run } = useCoreAction();
   const [open, setOpen] = useState(false);
-  const [texts, setTexts] = useState<ReadonlyMap<number, string>>(new Map());
+  // Each version's text, for the document they were read for.
+  const [loaded, setLoaded] = useState<{
+    docId: string;
+    texts: ReadonlyMap<number, string>;
+  }>();
   const [editing, setEditing] = useState<string>();
   const doc = read?.doc;
   const versions = read?.versions ?? [];
@@ -474,7 +404,10 @@ export const useDocumentPage = ({
     open,
     onOpenChange: setOpen,
     versions: versions.flatMap((version) => {
-      const markdown = texts.get(version.number);
+      const markdown =
+        loaded?.docId === doc?.id
+          ? loaded?.texts.get(version.number)
+          : undefined;
       const { number, restoredFrom } = version;
       return markdown === undefined
         ? []
@@ -512,9 +445,12 @@ export const useDocumentPage = ({
       toast.error(t`The history didn't load. Try again.`);
       return;
     }
-    setTexts(
-      new Map(docs.map((each) => [each.version.number, each.version.text]))
-    );
+    setLoaded({
+      docId: doc.id,
+      texts: new Map(
+        docs.map((each) => [each.version.number, each.version.text])
+      ),
+    });
     setOpen(true);
   };
   return {
@@ -643,7 +579,6 @@ export const DocumentView = ({
   onEditingChange: (editing: boolean) => void;
 }) => {
   const router = useRouter();
-  const navigate = useNavigate();
   const { failure, run } = useCoreAction();
   const followLinks = useFollowLinks();
   // An earlier version, opened from the history: read only.
@@ -668,11 +603,6 @@ export const DocumentView = ({
     if (restored === undefined) {
       return;
     }
-    await navigate({
-      to: "/knowledge/$collection",
-      params: { collection: doc.collectionId },
-      search: { doc: doc.id },
-    });
     await router.invalidate({ sync: true });
   };
   if (editing) {
@@ -712,11 +642,11 @@ export const DocumentView = ({
           onValueChange={unchanged}
           readOnly
           title={doc.title}
-          value={readingText(doc.version.text, doc, resolve)}
+          value={readingMarkdown(doc.version.text, doc.title, resolve)}
           // Each version as the page reads it, so History shows what changed in the text.
           versions={history.versions.map((version) => ({
             ...version,
-            markdown: readingText(version.markdown, doc, resolve),
+            markdown: readingMarkdown(version.markdown, doc.title, resolve),
           }))}
         />
       </div>

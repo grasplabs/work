@@ -8581,6 +8581,10 @@ msgstr "In the Netherlands the works council may need to agree before you turn t
 msgid "In this chat only, until you delete it. Anything it sends or changes still waits for you to confirm."
 msgstr "In this chat only, until you delete it. Anything it sends or changes still waits for you to confirm."
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "In this conversation"
+msgstr "In this conversation"
+
 #: src/brain/brain.ts
 msgctxt "note property: the drawn version of this workflow on the Workflows page"
 msgid "In Workflows"
@@ -9412,7 +9416,6 @@ msgstr "Kinds of field"
 msgid "Kinds of highlight"
 msgstr "Kinds of highlight"
 
-#: src/brain/brain-home.tsx
 #: src/chat/sources.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
@@ -17138,8 +17141,8 @@ msgid "The logo could not be removed"
 msgstr "The logo could not be removed"
 
 #: src/brain/brain-home.tsx
-msgid "The memory files, skills and uploads your agents read are in {knowledge}."
-msgstr "The memory files, skills and uploads your agents read are in {knowledge}."
+msgid "The memory files, skills and uploads your agents read are in [Knowledge](/knowledge)."
+msgstr "The memory files, skills and uploads your agents read are in [Knowledge](/knowledge)."
 
 #: src/onboarding/setup-steps.tsx
 msgid "The message"

@@ -604,10 +604,9 @@ export const useCompanyText = (brain: Brain): string => {
       t`${plural(count, { one: "# note", other: "# notes" })}`,
     ];
   });
-  const knowledge = `[${t`Knowledge`}](/knowledge)`;
   return [
     ...(company?.article ?? []).map(escapeMarkdown),
     ...sections,
-    t`The memory files, skills and uploads your agents read are in ${knowledge}.`,
+    t`The memory files, skills and uploads your agents read are in [Knowledge](/knowledge).`,
   ].join("\n\n");
 };

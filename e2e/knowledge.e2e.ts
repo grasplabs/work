@@ -170,7 +170,10 @@ test("a person searches, edits a document, meets a newer version instead of over
     // A `[[link]]` opens the document it names here, and each lists the
     // other as using it. The title is the page's heading (the text may
     // start with the same one).
-    await article.getByRole("link", { name: "the pay policy" }).click();
+    await article
+      .locator('[data-slot="document-editor"]')
+      .getByRole("link", { name: "the pay policy" })
+      .click();
     await expect(
       page.getByRole("heading", { level: 1, name: "Pay" }).first()
     ).toBeVisible();

@@ -39,10 +39,11 @@ import { loadTranscript, withTranscript } from "../brain/note-transcript.ts";
 import {
   SourceDocument,
   SourceInterview,
+  SourceQuotes,
   SourceTranscript,
 } from "../brain/source-interview.tsx";
 import type { TranscribedSource } from "../brain/source-interview.tsx";
-import { placeOf } from "../brain/transcript.ts";
+import { highlightsOf, placeOf } from "../brain/transcript.ts";
 import { labelOf } from "../brain/witness.ts";
 import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
@@ -112,6 +113,7 @@ const styles = stylex.create({
   },
   // What the note holds beyond its text, in the page's reading column (page-brain's own measure,
   // its gutter's room before it on a wider window).
+  quotes: { display: "flex", flexDirection: "column", gap: grasp.space3 },
   rest: {
     display: "flex",
     flexDirection: "column",
@@ -781,6 +783,7 @@ const SourceBody = ({
   activeId,
   onRemove,
 }: NoteParts) => {
+  const { t } = useLingui();
   if (transcribed?.transcript.unit === "passage") {
     // A document is read as a page: its own text, with what was tagged in it in the margin.
     return (
@@ -788,7 +791,24 @@ const SourceBody = ({
     );
   }
   if (transcribed) {
-    return <SourceTranscript />;
+    // What was said, each with a way to its moment, and for whoever may, to take it out.
+    return (
+      <>
+        <SourceTranscript />
+        {highlightsOf(transcribed, workspace.statements).length > 0 ? (
+          <section {...stylex.props(styles.quotes)}>
+            <Heading level={2} size="ui-sm">
+              {t`In this conversation`}
+            </Heading>
+            <SourceQuotes
+              onRemove={onRemove}
+              source={transcribed}
+              statements={workspace.statements}
+            />
+          </section>
+        ) : null}
+      </>
+    );
   }
   // An import has no text of its own: what it brought in is its content.
   const contents = workspace.sources.some((source) => source.id === note.id)
