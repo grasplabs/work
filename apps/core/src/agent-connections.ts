@@ -35,6 +35,7 @@ import {
   forSandbox,
   signedCall,
   signedStubCall,
+  signedUngrantedRead,
 } from "./bindings.ts";
 import type { ConnectionGrant, UngrantedRead } from "./bindings.ts";
 import { readsMail, textsOf } from "./channels/stephen-rules.ts";
@@ -453,6 +454,45 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
+   * The capability to read how the held call `held` ended with no grant:
+   * in a turn of the person's own chat, a read of a whole connection they
+   * read with no grant now (`signedUngrantedRead`). Refused as a call no
+   * grant allows (`permission.denied`) otherwise, as one with no grant
+   * always was.
+   */
+  async #ungrantedHeld(
+    held: { connectionId: string; resource: string | null },
+    call: { action: string; idempotencyKey: string }
+  ) {
+    const scope = this.ctx.props;
+    const denied = permissionErrors.create("permission.denied", {
+      action: call.action,
+    });
+    if (scope.ownChat !== true || held.resource !== null) {
+      throw denied;
+    }
+    try {
+      return await signedUngrantedRead(
+        this.env,
+        {
+          authority: chatAuthority(scope),
+          context: chatContext(scope),
+          connection: {
+            type: "connection",
+            connectionId: connectionIdSchema.parse(held.connectionId),
+          },
+        },
+        call
+      );
+    } catch (error) {
+      if (connectErrors.codeOf(error) === "connect.connection_not_found") {
+        throw denied;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * The connections the agent may use for its person: those it has a
    * permission for that the person may use themselves (a shared one, or
    * their own personal one).
@@ -702,10 +742,22 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           (connection.resource ?? null) === held.resource &&
           actions.includes(held.action)
       );
+      const heldCall = {
+        action: held.action,
+        idempotencyKey: held.idempotencyKey,
+      };
       if (grant === undefined) {
-        throw permissionErrors.create("permission.denied", {
-          action: held.action,
-        });
+        // Or, with none, a read the person makes with no grant in their
+        // own chat (ungranted-reads.ts), held because the chat read
+        // something only they may read (GRA-1928): by the same rule now.
+        const { capability, scope: call } = await this.#ungrantedHeld(
+          held,
+          heldCall
+        );
+        return {
+          request: { capability, ...call, idempotencyKey: held.idempotencyKey },
+          read: ungrantedRead(held.connectionId),
+        };
       }
       const { capability, scope: call } = await signedCall(
         this.env,
@@ -714,7 +766,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           authority: chatAuthority(scope),
           ...(scope.unattended === true ? { unattended: true } : {}),
         },
-        { action: held.action, idempotencyKey: held.idempotencyKey }
+        heldCall
       );
       return {
         request: { capability, ...call, idempotencyKey: held.idempotencyKey },

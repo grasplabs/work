@@ -982,30 +982,6 @@ describe("a person's own connections in their own chat", setUpTime, () => {
     });
   });
 
-  it("are signed read-only: connect refuses one it takes as a side effect, and searches and holds nothing", async () => {
-    const person = await signedInApi(idp, "user");
-    const mail = await mailConnection([], mailWithSearch, {
-      owner: person.userId,
-    });
-    const chat = await chatOf(
-      person.userId,
-      calling(mail.id, "mail.search", { query: "invoice" }),
-      says("Couldn't.")
-    );
-    // A restricted chat: connect takes every Composio call of it as a side
-    // effect (connect's policy.ts), which a read-only capability refuses.
-    await chat.stub.restrictChat(chat.chat.id);
-    await chat.ask("Find the mail.");
-
-    const [read] = await codeResults(chat.stub, chat.chat.id);
-    const held = await person.api.pendingActions.list();
-    expect({
-      refused: read?.text.includes("connect.read_only"),
-      searched: await mail.searched(),
-      held: held.length,
-    }).toStrictEqual({ refused: true, searched: [], held: 0 });
-  });
-
   it("keep what was read in the chat while the connection is theirs, and withhold it once it is disconnected", async () => {
     const person = await signedInApi(idp, "user");
     const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
@@ -1220,6 +1196,171 @@ describe(
         { found: true, withheld: false },
         { found: false, withheld: true },
       ]);
+    });
+  }
+);
+
+// A chat that handed over something only its person may read (GRA-1928;
+// the threat model is on the issue): an instruction in what it read must
+// not carry it out through another read with no confirmation. The ways it
+// can fail, first: a read whose input leaves for a third party (a
+// Composio toolkit's here) goes at once, granted or not; a grant-less
+// read held for the person is refused rather than held, or never answers
+// once confirmed; and one is confirmed after the person lost the access
+// it was asked under. Native reads go on in such a chat (connect's
+// connectors.test.ts), and an unmarked chat reads at once (above).
+/** A step that calls `connectionId`'s search for `query`, and returns what it got. */
+const searching = (connectionId: string, query: string) =>
+  codeStep(
+    `export default async (self, env) => { try { const { output, pending } = await env.connections.call(${JSON.stringify(connectionId)}, "mail.search", { query: ${JSON.stringify(query)} }); return { output, pending: pending === null ? null : "held" }; } catch (error) { return error.code ?? error.message; } };`
+  );
+
+describe(
+  "a chat that read something only its person may read",
+  setUpTime,
+  () => {
+    /** A person, their own mailbox, and a shared one everyone's audience holds. */
+    const mailboxes = async () => {
+      const [person, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const [own, shared] = await Promise.all([
+        mailConnection([], mailWithSearch, { owner: person.userId }),
+        mailConnection([], mailWithSearch),
+      ]);
+      await chooseAudience(admin.api, shared.id, { kind: "everyone" });
+      return { person, admin, own, shared };
+    };
+
+    it("holds a read with no grant through a third party, asked with what it read, shows its input, and hands its answer over once they confirm", async () => {
+      const { person, own, shared } = await mailboxes();
+      const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
+      const chat = await chatOf(
+        person.userId,
+        // Their own mailbox, read at once: its answer marks the chat.
+        searching(own.id, marker),
+        searching(shared.id, `${marker}-leak`),
+        says("It waits for you.")
+      );
+      await chat.ask("Find it, then look it up in the shared mailbox.");
+      const [ownRead, sharedRead] = await texts(chat.stub, chat.chat.id);
+      const searchedBefore = await shared.searched();
+      const [held] = await person.api.pendingActions.list();
+      const id = held?.id ?? "";
+      await person.api.pendingActions.confirm(id, held?.inputHash ?? "");
+      await fakeProvider(
+        outcomeOf(id),
+        says("No."),
+        outcomeOf(id),
+        says("Found it.")
+      );
+      // A turn nobody started reads nothing with no grant, a held one's
+      // answer neither; the person's next turn does.
+      await chat.stub.askUnattended(chat.chat.id, {
+        text: "What did it find?",
+        model,
+      });
+      await chat.ask("What did it find?");
+      const results = await texts(chat.stub, chat.chat.id);
+      const [woken, answered] = results.slice(2);
+
+      expect({
+        ownRead: ownRead?.includes(`${marker}-1`),
+        sharedRead,
+        searchedBefore,
+        held: {
+          connectionId: held?.connectionId,
+          permissionId: held?.permissionId,
+          restricted: held?.restricted,
+          input: z.json().parse(JSON.parse(held?.input ?? "null")),
+        },
+        searched: await shared.searched(),
+        woken,
+        answered,
+        marked: await chat.stub.isChatPrivateRead(chat.chat.id),
+      }).toStrictEqual({
+        ownRead: true,
+        sharedRead: `Returned:\n${JSON.stringify({ output: null, pending: "held" })}`,
+        searchedBefore: [],
+        held: {
+          connectionId: shared.id,
+          permissionId: null,
+          restricted: true,
+          input: { query: `${marker}-leak` },
+        },
+        searched: [`${marker}-leak`],
+        woken: `Returned:\n${permissionErrors.create("permission.denied").message}`,
+        answered: `Returned:\n${JSON.stringify({ status: "done", output: { messages: [`${marker}-leak-1`] }, error: null })}`,
+        marked: true,
+      });
+    });
+
+    it("holds a granted read through a third party too", async () => {
+      const { person, admin, own, shared } = await mailboxes();
+      const chat = await chatOf(
+        person.userId,
+        searching(own.id, "first"),
+        searching("MAIL", "granted"),
+        says("Done.")
+      );
+      await requestGranted(idp, admin, {
+        subject: chat.agent,
+        object: { type: "connection", connectionId: shared.id },
+        actions: ["mail.search"],
+        binding: "MAIL",
+      });
+      await chat.ask("Find it.");
+      const [, granted] = await texts(chat.stub, chat.chat.id);
+      const held = await person.api.pendingActions.list();
+
+      expect({
+        granted,
+        held: held.map(({ connectionId, restricted }) => ({
+          connectionId,
+          restricted,
+        })),
+        searched: await shared.searched(),
+      }).toStrictEqual({
+        granted: `Returned:\n${JSON.stringify({ output: null, pending: "held" })}`,
+        held: [{ connectionId: shared.id, restricted: true }],
+        searched: [],
+      });
+    });
+
+    it("sends nothing it held once the person left the audience it was asked under", async () => {
+      const { person, admin, own } = await mailboxes();
+      const team = await mailConnection([], mailWithSearch);
+      const teamId = await newTeam(admin, [person]);
+      await chooseAudience(admin.api, team.id, { kind: "team", teamId });
+      const chat = await chatOf(
+        person.userId,
+        searching(own.id, "first"),
+        searching(team.id, "leak"),
+        says("It waits for you.")
+      );
+      await chat.ask("Find it.");
+      const [held] = await person.api.pendingActions.list();
+      await env.DB.prepare(
+        "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
+      )
+        .bind(teamId, person.userId)
+        .run();
+
+      expect({
+        held: held?.connectionId,
+        confirmed: await outcome(
+          person.api.pendingActions.confirm(
+            held?.id ?? "",
+            held?.inputHash ?? ""
+          )
+        ),
+        searched: await team.searched(),
+      }).toStrictEqual({
+        held: team.id,
+        confirmed: "connect.connection_not_found",
+        searched: [],
+      });
     });
   }
 );

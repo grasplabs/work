@@ -10,7 +10,7 @@ import { answerCaptureIdOf } from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
-import { chatOf, codeStep, says } from "./agent-chat.ts";
+import { askAfresh, chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -238,26 +238,25 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       "mail.search": structured({ messages: [`Ben's ${found}`] }),
       "mail.read": blocks({ type: "text", text: `Quote ${quoted} for Ben` }),
     });
-    const reads = (binding: string) =>
-      step(
-        calling(binding, "mail.search", { query: found }),
-        calling(binding, "mail.read", { message: quoted })
-      );
+    const reads = (binding: string) => [
+      step(calling(binding, "mail.search", { query: found })),
+      says("Found it."),
+      step(calling(binding, "mail.read", { message: quoted })),
+      says("Read it."),
+    ];
     // One chat at a time: the tests' model answers whichever asks.
     for (const [person, mail] of [
       [anna, annas],
       [ben, bens],
     ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
-      const chat = await chatOf(
-        person.userId,
-        reads("MAIL"),
-        says("Read them.")
-      );
+      const chat = await chatOf(person.userId, ...reads("MAIL"));
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
       await grant(chat, mail.id, "MAIL", ["mail.search", "mail.read"]);
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
-      await chat.ask("Read them.");
+      await askAfresh(chat, "Find it.");
+      // oxlint-disable-next-line no-await-in-loop -- one chat at a time
+      await askAfresh(chat, "Read it.");
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
       await captures(mail.id, 2);
     }
@@ -360,7 +359,7 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
         })
       );
       // oxlint-disable-next-line no-await-in-loop -- one turn at a time
-      await chat.ask("Read it.");
+      await askAfresh(chat, "Read it.");
       // oxlint-disable-next-line no-await-in-loop -- its capture first
       await captures(own.id, index + 1);
       // oxlint-disable-next-line no-await-in-loop -- one answer at a time
@@ -446,7 +445,7 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       // oxlint-disable-next-line no-await-in-loop -- one answer at a time
       await own.answer("mail.read", answer);
       // oxlint-disable-next-line no-await-in-loop -- one turn at a time
-      await chat.ask("Read it.");
+      await askAfresh(chat, "Read it.");
       // oxlint-disable-next-line no-await-in-loop -- its capture first
       await captures(own.id, index + 1);
     }
@@ -518,13 +517,14 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     );
     const chat = await chatOf(
       person.userId,
-      step(
-        calling("OWN", "mail.send", { to: "ben@acme.test", subject: sent }),
-        tryCalling("OWN", "mail.search", { query: failed }),
-        calling("OWN", "mail.others", { mailbox: "ben@acme.test" }),
-        // Its capture last: once it is in, the calls before it ended.
-        calling("COMPANY", "mail.search", { query: company })
-      ),
+      step(calling("OWN", "mail.send", { to: "ben@acme.test", subject: sent })),
+      says("Held."),
+      step(tryCalling("OWN", "mail.search", { query: failed })),
+      says("Failed."),
+      step(calling("OWN", "mail.others", { mailbox: "ben@acme.test" })),
+      says("Read."),
+      // Its capture last: once it is in, the calls before it ended.
+      step(calling("COMPANY", "mail.search", { query: company })),
       says("Done.")
     );
     await grant(chat, own.id, "OWN", [
@@ -534,7 +534,10 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     ]);
     await grant(chat, companys.id, "COMPANY", ["mail.search"]);
 
-    await chat.ask("Do it.");
+    for (const ask of ["Send it.", "Find it.", "Read Ben's.", "Find ours."]) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
+      await askAfresh(chat, ask);
+    }
     const [ownEvents, companyEvents] = await Promise.all([
       captures(own.id),
       captures(companys.id),
@@ -731,7 +734,7 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       { timeout: 10_000, interval: 50 }
     );
     // The shared connection is still there and still answers.
-    await chat.ask("Read it again.");
+    await askAfresh(chat, "Read it again.");
     const sharedAfter = await captures(company.id, 2);
     const listedAfter = await person.api.connections.list();
 
@@ -789,13 +792,13 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     };
 
     await answering(`First ${marker}`);
-    await chat.ask("Page one.");
+    await askAfresh(chat, "Page one.");
     await captures(own.id, 1);
     await answering(`Changed ${marker}`);
-    await chat.ask("Page one again.");
+    await askAfresh(chat, "Page one again.");
     await captures(own.id, 2);
     await answering(`Second page ${marker}`);
-    await chat.ask("Page two.");
+    await askAfresh(chat, "Page two.");
     await captures(own.id, 3);
 
     const [first, second] = await Promise.all(
@@ -859,9 +862,9 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     );
     await grant(chat, own.id, "MAIL", ["mail.read", "mail.search"]);
 
-    await chat.ask("Read it.");
+    await askAfresh(chat, "Read it.");
     await captures(own.id, 1);
-    await chat.ask("Find it.");
+    await askAfresh(chat, "Find it.");
     const events = await captures(own.id, 2);
 
     const kept = await recalled(person.userId, marker);
