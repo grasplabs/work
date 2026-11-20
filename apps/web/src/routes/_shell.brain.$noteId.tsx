@@ -8,13 +8,12 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { intervieweeOf, kernOf } from "../brain/article-kern.ts";
+import { kernOf } from "../brain/article-kern.ts";
 import type { StatementRow } from "../brain/article-kern.ts";
 import { BackButton } from "../brain/back-button.tsx";
-import { BannerHeader, Interviewed } from "../brain/brain-article/kern.tsx";
+import { BannerHeader } from "../brain/brain-article/kern.tsx";
 import { MentionLinks } from "../brain/brain-article/mention-links.tsx";
 import { NoteArticle } from "../brain/brain-article/note-article.tsx";
 import type { SideTab } from "../brain/brain-article/note-article.tsx";
@@ -22,25 +21,22 @@ import { StatementsByKind } from "../brain/brain-article/statements-by-kind.tsx"
 import { TeamWork } from "../brain/brain-article/team-work.tsx";
 import { Capped, KindTag, NoteChip } from "../brain/brain-chips.tsx";
 import { useBrainData } from "../brain/brain-data.ts";
-import { HomePage } from "../brain/brain-home.tsx";
+import { useCompanyText } from "../brain/brain-home.tsx";
 import { noteFileName, noteMarkdown } from "../brain/brain-markdown.ts";
 import { SourceContentsTable } from "../brain/brain-source-contents.tsx";
-import {
-  DocumentView,
-  TranscriptRail,
-  TranscriptView,
-} from "../brain/brain-transcript.tsx";
+import { DocumentView, TranscriptView } from "../brain/brain-transcript.tsx";
 import type { TranscribedSource } from "../brain/brain-transcript.tsx";
 import {
   given,
+  kindLabel,
   mentionParts,
-  statementWords,
   sourceContents,
   splitTimeline,
+  statementWords,
 } from "../brain/brain.ts";
 import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
-import { ForgetButton, useCanForget, useForget } from "../brain/forget.tsx";
-import { GapActions } from "../brain/gap-actions.tsx";
+import { useCanForget, useForget } from "../brain/forget.tsx";
+import { nameableFrom, NoteBrainPage, onArticle } from "../brain/note-page.tsx";
 import { loadTranscript, withTranscript } from "../brain/note-transcript.ts";
 import { placeOf } from "../brain/transcript.ts";
 import { labelOf } from "../brain/witness.ts";
@@ -54,7 +50,19 @@ import { Button } from "../grasp/button/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
 import { focus } from "../grasp/focus/focus.ts";
 import { Heading } from "../grasp/heading/index.ts";
-import { Brain as BrainMark } from "../grasp/icons/index.ts";
+import {
+  Brain as BrainMark,
+  Clock,
+  Folder,
+  Link as LinkIcon,
+  Note as NoteIcon,
+  Workflow,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import type {
+  PageFact,
+  PageOpenQuestion,
+} from "../grasp/page-properties/index.ts";
 import {
   Tabs,
   TabsContent,
@@ -62,7 +70,7 @@ import {
   TabsTrigger,
 } from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 
 // One note, as the prototype has it (`routes/brain/$noteId.tsx`). Where the
@@ -90,21 +98,29 @@ const styles = stylex.create({
     color: grasp.text,
   },
   paragraph: { margin: 0 },
-  sourceTabs: {
-    paddingTop: grasp.space4,
-    borderTopWidth: grasp.hairline,
-    borderTopStyle: "solid",
-    borderTopColor: grasp.line,
+  // The page scrolls on its own, clear of the chat's box at the card's foot.
+  page: {
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+    paddingBlockEnd: grasp.space24,
   },
-  tabRow: {
+  // What the note holds beyond its text, in the page's reading column (page-brain's own measure,
+  // its gutter's room before it on a wider window).
+  rest: {
     display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    columnGap: grasp.space4,
-    rowGap: grasp.space2,
+    flexDirection: "column",
+    gap: grasp.space8,
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: {
+      default: `calc(44rem + ${grasp.space16})`,
+      [media.belowPhone]: "44rem",
+    },
+    marginInline: "auto",
+    paddingInlineStart: { default: grasp.space16, [media.belowPhone]: 0 },
   },
-  tabRowTabs: { minWidth: 0 },
-  tabRowTools: { marginInlineStart: "auto" },
   eventTitle: {
     color: "inherit",
     textDecorationLine: { default: "none", ":hover": "underline" },
@@ -258,80 +274,6 @@ const Article = ({
   );
 };
 
-/**
- * A conversation's page: its summary, and the whole conversation word for word with its statements
- * highlighted. It opens on the transcript, and a link to a statement always brings it there.
- */
-const SourceTabs = ({
-  source,
-  statements,
-  activeId,
-  onRemove,
-  children,
-}: {
-  source: TranscribedSource;
-  statements: Workspace["statements"];
-  activeId: string | undefined;
-  onRemove: ((statement: Statement) => void) | undefined;
-  children: ReactNode;
-}) => {
-  const { t } = useLingui();
-  const [tab, setTab] = useState("transcript");
-  const [opened, setOpened] = useState(activeId);
-  // The transcript's search and filter sit in the tab row, beside the tabs.
-  const [toolbar, setToolbar] = useState<HTMLElement | null>(null);
-  // A link to another statement opens the transcript again, even after the reader went to the summary.
-  if (activeId !== opened) {
-    setOpened(activeId);
-    if (activeId !== undefined) {
-      setTab("transcript");
-    }
-  }
-  return (
-    <div {...stylex.props(styles.sourceTabs)}>
-      <Tabs
-        onValueChange={(value) => {
-          if (value !== null) {
-            setTab(value);
-          }
-        }}
-        value={tab}
-      >
-        <div {...stylex.props(styles.tabRow)}>
-          <div {...stylex.props(styles.tabRowTabs)}>
-            <TabsList>
-              <TabsTrigger value="summary">
-                {t({
-                  message: "Summary",
-                  context: "tab: an interview written up short",
-                })}
-              </TabsTrigger>
-              <TabsTrigger value="transcript">
-                {t({
-                  message: "Transcript",
-                  context: "tab: the whole conversation word for word",
-                })}
-              </TabsTrigger>
-            </TabsList>
-          </div>
-          <div ref={setToolbar} {...stylex.props(styles.tabRowTools)} />
-        </div>
-        <TabsContent value="summary">{children}</TabsContent>
-        <TabsContent keepMounted value="transcript">
-          {/* The transcript stays mounted behind the summary, so its tools only take the row while it shows. */}
-          <TranscriptView
-            activeId={activeId}
-            onRemove={onRemove}
-            source={source}
-            statements={statements}
-            toolbarIn={tab === "transcript" ? toolbar : null}
-          />
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
-};
-
 const EventTitle = ({ entry }: { entry: NoteEvent }) => {
   if (entry.to !== undefined) {
     return (
@@ -430,18 +372,23 @@ const Fold = ({
   children,
 }: {
   title: string;
-  count: number;
+  /** How many it holds, beside its title; none for a fold that counts nothing. */
+  count?: number;
   children: ReactNode;
 }) => (
   <Collapsible
     fit
     title={
-      <>
-        {title}{" "}
-        <Text element="span" size="sm" tone="quiet">
-          {count}
-        </Text>
-      </>
+      count === undefined || count === 0 ? (
+        title
+      ) : (
+        <>
+          {title}{" "}
+          <Text element="span" size="sm" tone="quiet">
+            {count}
+          </Text>
+        </>
+      )
     }
   >
     {children}
@@ -492,9 +439,9 @@ const mergeRows = (rows: DetailRow[]): DetailRow[] => {
 };
 
 /**
- * A note's details: its properties and its links as one list, nothing said twice, each under its
- * own heading with its names below it, the whole width of the side: first what the note is, then
- * its work, then where it comes from and what is open. What the article already shows goes: how
+ * A note's details: its properties and its links as one list, nothing said twice, each a row of
+ * its own with its names in it: first what the note is, then its work, then where it comes from
+ * and what is open. What the article already shows goes: how
  * many of each kind were said; a team keeps its roles. Every tool it is
  * linked to joins the property that already names tools. The other links follow: the open
  * questions about it; its sources, its own first (for a team its interview, its employees' chats,
@@ -502,15 +449,11 @@ const mergeRows = (rows: DetailRow[]): DetailRow[] => {
  * its kind. What names it says on hover where: the sentence of a conversation, or the property of
  * a page. Long rows are capped behind "+N".
  */
-const DetailRows = ({
-  note,
-  byId,
-  workspace,
-}: {
-  note: Note;
-  byId: Map<string, Note>;
-  workspace: Workspace;
-}) => {
+const useDetailRows = (
+  note: Note,
+  byId: Map<string, Note>,
+  workspace: Workspace
+): DetailRow[] => {
   const { t } = useLingui();
   // What the article already shows: how many of each kind were said (the tabs over the statements).
   // A team's roles stay: its banner shows its interviewees or its drawing, not the roster's roles.
@@ -640,37 +583,117 @@ const DetailRows = ({
   );
   // What the note is first, then its work, then where it comes from and what is open.
   const order: DetailGroup[] = ["about", "work", "context"];
-  const sorted = order.flatMap((group) =>
-    rows.filter((row) => row.group === group)
-  );
-  return (
-    <div {...stylex.props(styles.details)}>
-      {sorted.map((row) => (
-        <section key={row.label} {...stylex.props(styles.detail)}>
-          <Heading level={3} size="ui-sm">
-            {row.label}
-          </Heading>
-          <Capped>
-            {row.refs.map((ref, at) => {
-              const target =
-                ref.to === undefined ? undefined : byId.get(ref.to);
-              return target ? (
-                <NoteChip
-                  key={`${ref.to}-${at}`}
-                  label={ref.label}
-                  note={target}
-                  reason={row.reasons?.get(target.id)}
-                />
-              ) : (
-                <Ref byId={byId} key={`${ref.label}-${at}`} value={ref} />
-              );
-            })}
-          </Capped>
-        </section>
-      ))}
-    </div>
-  );
+  return order.flatMap((group) => rows.filter((row) => row.group === group));
 };
+
+/** A row's names: a chip for each note, with why it is here where that says more; plain words for the rest. */
+const RowNames = ({
+  row,
+  byId,
+}: {
+  row: DetailRow;
+  byId: Map<string, Note>;
+}) => (
+  <Capped>
+    {row.refs.map((ref, at) => {
+      const target = ref.to === undefined ? undefined : byId.get(ref.to);
+      return target ? (
+        <NoteChip
+          key={`${ref.to}-${at}`}
+          label={ref.label}
+          note={target}
+          reason={row.reasons?.get(target.id)}
+        />
+      ) : (
+        <Ref byId={byId} key={`${ref.label}-${at}`} value={ref} />
+      );
+    })}
+  </Capped>
+);
+
+/**
+ * A team's or a subject's details, at the side of its article: each row under its own heading
+ * with its names below it, the whole width of the side.
+ */
+const DetailRows = ({
+  note,
+  byId,
+  workspace,
+}: {
+  note: Note;
+  byId: Map<string, Note>;
+  workspace: Workspace;
+}) => (
+  <div {...stylex.props(styles.details)}>
+    {useDetailRows(note, byId, workspace).map((row) => (
+      <section key={row.label} {...stylex.props(styles.detail)}>
+        <Heading level={3} size="ui-sm">
+          {row.label}
+        </Heading>
+        <RowNames byId={byId} row={row} />
+      </section>
+    ))}
+  </div>
+);
+
+/** A row's icon: the note's work, where it comes from, or what it links to. */
+const rowIcon = (row: DetailRow, sourcesLabel: string): IconData => {
+  if (row.group === "work") {
+    return Workflow;
+  }
+  return row.label === sourcesLabel ? Folder : LinkIcon;
+};
+
+/**
+ * The note's facts, behind the page's Properties: what it is, when it was last heard, then its
+ * details. Questions it waits on stand as questions of their own, so their row goes when there
+ * are any.
+ */
+const useNoteFacts = ({
+  note,
+  byId,
+  workspace,
+  lastHeard,
+  asking,
+}: {
+  note: Note;
+  byId: Map<string, Note>;
+  workspace: Workspace;
+  lastHeard: string | undefined;
+  asking: boolean;
+}): PageFact[] => {
+  const { t, i18n } = useLingui();
+  const questionsLabel = t`Open questions`;
+  const sourcesLabel = t`Sources`;
+  const rows = useDetailRows(note, byId, workspace).filter(
+    (row) => !(asking && row.label === questionsLabel)
+  );
+  return [
+    { key: t`Kind`, value: i18n._(kindLabel[note.kind]), icon: NoteIcon },
+    ...(lastHeard === undefined
+      ? []
+      : [{ key: t`Last heard`, value: formatDay(lastHeard), icon: Clock }]),
+    ...rows.map((row) => ({
+      key: row.label,
+      icon: rowIcon(row, sourcesLabel),
+      value: <RowNames byId={byId} row={row} />,
+    })),
+  ];
+};
+
+/** The questions the brain still waits on about this note, each with the role that can answer. */
+const openQuestionsOf = (
+  note: Note,
+  workspace: Workspace
+): PageOpenQuestion[] =>
+  workspace.gaps
+    .filter(
+      (gap) =>
+        gap.about.includes(note.id) &&
+        gap.closedAt === undefined &&
+        gap.answer === undefined
+    )
+    .map((gap) => ({ id: gap.id, question: gap.question, who: gap.owner }));
 
 /** Exports the note, as Markdown or a PDF, with its full history and, for a conversation, its transcript. */
 const ExportButton = ({
@@ -696,19 +719,9 @@ const ExportButton = ({
   />
 );
 
-/** Back, the kind, and the page's actions. */
-const NoteToolbar = ({
-  note,
-  source,
-  onForget,
-}: {
-  note: Note;
-  source: Source | undefined;
-  /** Takes the source out of the brain, for whoever may. */
-  onForget?: (() => void) | undefined;
-}) => {
+/** A team's or a subject's article: back, its kind, and its actions. */
+const NoteToolbar = ({ note }: { note: Note }) => {
   const { t } = useLingui();
-  const { title } = note;
   return (
     // The row wraps when there is no room for both sides, so nothing runs off the page.
     <div {...stylex.props(styles.toolbar)}>
@@ -717,68 +730,25 @@ const NoteToolbar = ({
         <KindTag kind={note.kind} />
       </div>
       <div {...stylex.props(styles.toolbarSide)}>
-        {/* Back to where this note sits in the brain; the company is the whole brain. */}
+        {/* Back to where this note sits in the brain. */}
         <Button
           icon={BrainMark}
-          render={
-            <Link
-              search={note.kind === "company" ? {} : { note: note.id }}
-              to="/brain"
-            />
-          }
+          render={<Link search={{ note: note.id }} to="/brain" />}
           size="sm"
         >
           {t`Show in the brain`}
         </Button>
-        {note.kind === "gap" ? <GapActions noteId={note.id} /> : null}
-        <ExportButton note={note} source={source} />
-        {onForget === undefined ? null : (
-          <ForgetButton
-            label={t`Remove ${title} from the brain`}
-            onClick={onForget}
-          />
-        )}
+        <ExportButton note={note} source={undefined} />
       </div>
     </div>
   );
 };
 
-/**
- * Who or what the note is, on its banner: a tool's logo, or the person a conversation was with.
- * None for any other note, whose banner then shows its interviewees or its part's drawing.
- */
-const stickerOf = (note: Note, source: Source | undefined): ReactNode => {
-  if (note.kind === "tool" || note.kind === "app") {
-    return <AppLogo name={note.title} size="lg" />;
-  }
-  return source?.interviewee === undefined ? undefined : (
-    <Interviewed people={[intervieweeOf(source)]} />
-  );
-};
-
-/**
- * The notes the article may name, as chips: everything around this note and in its properties,
- * but the statements and sources, which have their own places. The company is always nameable:
- * the longest name wins, so "Noordkade Finance" never reads as the Finance team.
- */
-const nameableFrom = (note: Note, byId: Map<string, Note>): Note[] =>
-  [
-    ...new Set([
-      "company",
-      ...note.links,
-      ...note.backlinks,
-      ...note.points.flatMap((point) =>
-        point.refs.flatMap((ref) => (ref.to === undefined ? [] : [ref.to]))
-      ),
-    ]),
-  ]
-    .map((id) => byId.get(id))
-    .filter(
-      (candidate): candidate is Note =>
-        candidate !== undefined &&
-        candidate.kind !== "statement" &&
-        candidate.kind !== "source"
-    );
+/** What a tool is, on its banner: its logo. None for any other note, whose banner then shows its part's drawing. */
+const stickerOf = (note: Note): ReactNode =>
+  note.kind === "tool" || note.kind === "app" ? (
+    <AppLogo name={note.title} size="lg" />
+  ) : undefined;
 
 /** The statements that name the note without being linked to it, folded at the page's foot. */
 const Mentions = ({ note }: { note: Note }) => {
@@ -793,8 +763,12 @@ const Mentions = ({ note }: { note: Note }) => {
   );
 };
 
-/** What the note says: a source's own words, or its article and what was said, one kind at a time. */
-const NoteBody = ({
+/**
+ * What a source holds beyond Grasp's text: a document as a page, a conversation word for word,
+ * or what an import brought in and what was said in it, one kind at a time. None for a note with
+ * nothing more.
+ */
+const SourceBody = ({
   note,
   workspace,
   byId,
@@ -802,21 +776,7 @@ const NoteBody = ({
   statements,
   activeId,
   onRemove,
-}: {
-  note: Note;
-  workspace: Workspace;
-  byId: Map<string, Note>;
-  transcribed: TranscribedSource | undefined;
-  statements: StatementRow[];
-  activeId: string | undefined;
-  /** Takes one thing that was said out of the brain, for whoever may. */
-  onRemove: ((statement: Statement) => void) | undefined;
-}) => {
-  const { brain } = useBrainData();
-  const nameable = nameableFrom(note, byId);
-  const article = (
-    <Article byId={byId} nameable={nameable} paragraphs={note.article} />
-  );
+}: NoteParts) => {
   if (transcribed?.transcript.unit === "passage") {
     // A document is read as a page: its own text, with what was tagged in it highlighted.
     return (
@@ -827,8 +787,7 @@ const NoteBody = ({
       />
     );
   }
-  if (transcribed && note.article === undefined) {
-    // A short conversation without a write-up, such as an employee's chat interview: only its words.
+  if (transcribed) {
     return (
       <TranscriptView
         activeId={activeId}
@@ -838,30 +797,154 @@ const NoteBody = ({
       />
     );
   }
-  if (transcribed) {
-    return (
-      <SourceTabs
-        activeId={activeId}
-        onRemove={onRemove}
-        source={transcribed}
-        statements={workspace.statements}
-      >
-        {article}
-      </SourceTabs>
-    );
-  }
   // An import has no text of its own: what it brought in is its content.
-  const source = workspace.sources.find(
-    (candidate) => candidate.id === note.id
-  );
-  const contents =
-    source === undefined ? undefined : sourceContents(workspace, source.id);
+  const contents = workspace.sources.some((source) => source.id === note.id)
+    ? sourceContents(workspace, note.id)
+    : undefined;
+  if (contents === undefined && statements.length === 0) {
+    return null;
+  }
   return (
     <>
       {contents ? (
         <SourceContentsTable byId={byId} contents={contents} />
       ) : null}
-      {article}
+      {statements.length > 0 ? (
+        <StatementsByKind
+          activeId={activeId}
+          kern={kernOf(note.id, statements)}
+          onRemove={onRemove}
+          rows={statements}
+        />
+      ) : null}
+    </>
+  );
+};
+
+/** What both kinds of note page are given: the note, what it was told, and how to take a statement out. */
+interface NoteParts {
+  note: Note;
+  workspace: Workspace;
+  byId: Map<string, Note>;
+  transcribed: TranscribedSource | undefined;
+  statements: StatementRow[];
+  /** The statement a link opened, when it is one of this note's. */
+  activeId: string | undefined;
+  /** Takes one thing that was said out of the brain, for whoever may. */
+  onRemove: ((statement: Statement) => void) | undefined;
+}
+
+/**
+ * A note as a Brain page (the library's page-brain, Ruben's pick D): its title, its facts and open
+ * questions behind Properties, Grasp's text, then what else a source holds, and its timeline and
+ * the statements that name it folded at its foot. The company's page, the brain's home, is its
+ * text alone.
+ */
+const BrainPageNote = (parts: NoteParts) => {
+  const { t } = useLingui();
+  const { brain } = useBrainData();
+  const { note, workspace, byId, statements } = parts;
+  const company = note.kind === "company";
+  const companyText = useCompanyText(brain);
+  const questions = openQuestionsOf(note, workspace);
+  const facts = useNoteFacts({
+    note,
+    byId,
+    workspace,
+    // A source's summary already carries its date; the company is heard from everywhere.
+    lastHeard:
+      note.kind === "source" || company
+        ? undefined
+        : kernOf(note.id, statements).lastHeard,
+    asking: questions.length > 0,
+  });
+  const events = note.timeline.length;
+  return (
+    <div {...stylex.props(styles.page)}>
+      <NoteBrainPage
+        byId={byId}
+        facts={facts}
+        note={note}
+        questions={questions}
+        {...(company ? { text: companyText } : {})}
+      />
+      {company ? null : (
+        <div {...stylex.props(styles.rest)}>
+          <SourceBody {...parts} />
+          {events > 0 || note.open.length > 0 ? (
+            <Fold count={events} title={t`Timeline`}>
+              <Timeline note={note} />
+            </Fold>
+          ) : null}
+          <Mentions note={note} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * A team's or a subject's page, as it was before page D, until Ruben picks between D and the
+ * library's parked BrainSubject for them: the banner of its part, the title and summary, its
+ * write-up, a team's work or what was said, one kind at a time; at the side its details and its
+ * timeline.
+ */
+const ArticleNote = ({
+  note,
+  workspace,
+  byId,
+  statements,
+  activeId,
+  onRemove,
+}: NoteParts) => {
+  const { t } = useLingui();
+  const { brain } = useBrainData();
+  const events = note.timeline.length;
+  // A page with no properties or links of its own lists what it holds on its timeline.
+  const details = note.points.length > 0 || note.linked.length > 0;
+  const timeline = events > 0 || note.open.length > 0;
+  const tabs: SideTab[] = [
+    ...(details
+      ? [
+          {
+            value: "details",
+            label: t`Details`,
+            content: (
+              <DetailRows byId={byId} note={note} workspace={workspace} />
+            ),
+          },
+        ]
+      : []),
+    ...(timeline
+      ? [
+          {
+            value: "timeline",
+            label: t`Timeline`,
+            // A timeline of only what is still open counts nothing that happened.
+            ...(events > 0 ? { count: events } : {}),
+            content: <Timeline note={note} />,
+          },
+        ]
+      : []),
+  ];
+  return (
+    <NoteArticle
+      footer={note.mentions.length > 0 ? <Mentions note={note} /> : undefined}
+      header={
+        <BannerHeader
+          kern={kernOf(note.id, statements)}
+          note={note}
+          sticker={stickerOf(note)}
+        />
+      }
+      tabs={tabs}
+      toolbar={<NoteToolbar note={note} />}
+    >
+      <Article
+        byId={byId}
+        nameable={nameableFrom(note, byId)}
+        paragraphs={note.article}
+      />
       {note.kind === "team" ? (
         // A team's page is its work, never its people's words: those live on the work's pages.
         <TeamWork brain={brain} team={note} ws={workspace} />
@@ -874,11 +957,14 @@ const NoteBody = ({
           rows={statements}
         />
       ) : null}
-    </>
+    </NoteArticle>
   );
 };
 
-/** One note's page, but the company's: its article, and its details and timeline at the side. */
+/**
+ * One note's page: what it was told and who may take a statement out, then a team's or a
+ * subject's article, or the Brain page every other note has.
+ */
 const NoteContent = ({
   note,
   workspace,
@@ -907,13 +993,6 @@ const NoteContent = ({
         forget.ask({ statements: [statement.id] }, t`what was said`);
       }
     : undefined;
-  const { title } = note;
-  const onForget =
-    canForget && source?.forgettable === true
-      ? () => {
-          forget.ask({ source: note.id }, title);
-        }
-      : undefined;
   const transcribed: TranscribedSource | undefined =
     source?.transcript === undefined
       ? undefined
@@ -927,80 +1006,26 @@ const NoteContent = ({
       ? [{ statement, place, who: labelOf(workspace, place.source) }]
       : [];
   });
-  // The statement a link opened, when it is one of this note's.
-  const activeId = statements.some((row) => row.statement.id === hash)
-    ? hash
-    : undefined;
-  const kern = kernOf(note.id, statements);
-  const events = note.timeline.length;
-  // A page such as a source folder's has no properties or links of its own: its timeline lists what it holds.
-  const details = note.points.length > 0 || note.linked.length > 0;
-  const timeline = events > 0 || note.open.length > 0;
-  const tabs: SideTab[] = [
-    ...(transcribed === undefined || transcribed.transcript.unit === "passage"
-      ? []
-      : [
-          {
-            value: "conversation",
-            label: t`In this conversation`,
-            content: (
-              <TranscriptRail
-                activeId={activeId}
-                onRemove={onRemove}
-                source={transcribed}
-                statements={workspace.statements}
-              />
-            ),
-          },
-        ]),
-    ...(details
-      ? [
-          {
-            value: "details",
-            label: t`Details`,
-            content: (
-              <DetailRows byId={byId} note={note} workspace={workspace} />
-            ),
-          },
-        ]
-      : []),
-    ...(timeline
-      ? [
-          {
-            value: "timeline",
-            label: t`Timeline`,
-            // A timeline of only what is still open counts nothing that happened.
-            ...(events > 0 ? { count: events } : {}),
-            content: <Timeline note={note} />,
-          },
-        ]
-      : []),
-  ];
-
+  const parts: NoteParts = {
+    note,
+    workspace,
+    byId,
+    transcribed,
+    statements,
+    activeId: statements.some((row) => row.statement.id === hash)
+      ? hash
+      : undefined,
+    onRemove,
+  };
   return (
-    <NoteArticle
-      footer={note.mentions.length > 0 ? <Mentions note={note} /> : undefined}
-      header={
-        <BannerHeader
-          kern={kern}
-          note={note}
-          sticker={stickerOf(note, source)}
-        />
-      }
-      tabs={tabs}
-      toolbar={<NoteToolbar note={note} onForget={onForget} source={source} />}
-    >
-      <NoteBody
-        activeId={activeId}
-        byId={byId}
-        note={note}
-        onRemove={onRemove}
-        statements={statements}
-        transcribed={transcribed}
-        workspace={workspace}
-      />
+    <>
+      {onArticle(note) ? (
+        <ArticleNote {...parts} />
+      ) : (
+        <BrainPageNote {...parts} />
+      )}
       {forget.element}
-    </NoteArticle>
+    </>
   );
 };
 
@@ -1069,18 +1094,6 @@ const NotePage = () => {
 
   if (!note) {
     return <NotFoundState icon={BrainMark} title={t`Note not found`} />;
-  }
-  // The company note is the brain's home, a page to go on from, without a timeline beside it.
-  if (note.kind === "company") {
-    const source = workspace.sources.find(
-      (candidate) => candidate.id === note.id
-    );
-    return (
-      <HomePage
-        brain={brain}
-        toolbar={<NoteToolbar note={note} source={source} />}
-      />
-    );
   }
   const content = (
     <>

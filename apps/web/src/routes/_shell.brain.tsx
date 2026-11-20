@@ -18,6 +18,8 @@ import {
   groupLabel,
 } from "../brain/brain.ts";
 import type { Folder, Note } from "../brain/brain.ts";
+import { NoteActions } from "../brain/note-actions.tsx";
+import { onArticle } from "../brain/note-page.tsx";
 import { NoteReveal } from "../brain/note-reveal.tsx";
 import { readBrain } from "../brain/read-brain.ts";
 import { BrainPending } from "../frame/page-skeletons-b.tsx";
@@ -165,7 +167,15 @@ const BrainLayout = () => {
   }
   return (
     <>
-      <SiteHeader crumbs={crumbs} />
+      <SiteHeader
+        actions={
+          // A Brain page's actions; a team's or a subject's article keeps its own.
+          note === undefined || onArticle(note) ? undefined : (
+            <NoteActions note={note} workspace={workspace} />
+          )
+        }
+        crumbs={crumbs}
+      />
       <div {...stylex.props(styles.body)}>
         {/* The brain, a part or a note; and over them, the layer that carries the brain's dots into a note's page. */}
         <div {...stylex.props(styles.page)}>
