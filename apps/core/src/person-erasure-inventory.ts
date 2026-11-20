@@ -54,6 +54,14 @@ export type ErasureClass =
 /** A table that holds no person at all. */
 export const noPerson = { none: "holds no person" } as const;
 
+/**
+ * The tables App visitors left (GRA-2235): a migration emptied them, and
+ * nothing writes them, until a later release drops them (GRA-2253).
+ */
+const appVisitorsGone = {
+  none: "emptied when App visitors went, and nothing writes it",
+} as const;
+
 /** Every table of core's and the Brain's databases, by `<database>.<table>`. */
 export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // Core's database.
@@ -298,16 +306,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   // Unused since GRA-2234, kept for a rollback to the release before.
   "core.guest_chats": { company: "guest chats they opened for an App" },
-  // Unused since GRA-2235 and emptied by a migration, kept for a rollback
-  // to the release before.
-  "core.app_visitor_entries": {
-    company: "an App's visitor list, and the builder who listed each",
-  },
-  "core.app_visitor_grants": {
-    company: "the functions builders granted an App's visitors",
-  },
-  "core.app_visitor_codes": { none: "emptied, and nothing writes it" },
-  "core.app_visitor_sessions": { none: "emptied, and nothing writes it" },
+  // Unused since GRA-2235, kept for a rollback to the release before.
+  "core.app_visitor_entries": appVisitorsGone,
+  "core.app_visitor_grants": appVisitorsGone,
+  "core.app_visitor_codes": appVisitorsGone,
+  "core.app_visitor_sessions": appVisitorsGone,
   // An App's webhooks (app-webhooks.ts): the company's settings, naming
   // the builder who added each and the admin who approved its URL, as
   // other settings name who changed them.
