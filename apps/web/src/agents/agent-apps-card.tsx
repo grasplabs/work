@@ -92,7 +92,7 @@ const styles = stylex.create({
     paddingBlock: grasp.space3,
   },
   // The app to add: its select as wide as the row leaves it.
-  pick: { flexGrow: 1, minWidth: "12rem" },
+  pick: { flexGrow: 1, minWidth: "12rem", maxWidth: grasp.controlColumn },
   foot: {
     display: "flex",
     flexWrap: "wrap",
@@ -204,7 +204,7 @@ const ProposedSchedule = ({
               }}
               value={person}
             >
-              <SelectTrigger>
+              <SelectTrigger size="sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent />
@@ -481,7 +481,7 @@ export const AgentApps = ({
               }}
               value={picked === "" ? null : picked}
             >
-              <SelectTrigger aria-label={t`An app to give ${name}`}>
+              <SelectTrigger aria-label={t`An app to give ${name}`} size="sm">
                 <SelectValue placeholder={t`Choose an app`} />
               </SelectTrigger>
               <SelectContent />
