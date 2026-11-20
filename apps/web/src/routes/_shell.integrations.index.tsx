@@ -146,7 +146,7 @@ const Search = ({ q }: { q: string | undefined }) => {
     }
   }
   return (
-    <InputGroup layout={styles.search}>
+    <InputGroup layout={styles.search} size="sm">
       <InputGroupText icon={SearchIcon} />
       <InputGroupInput
         aria-label={t`Search integrations`}
@@ -618,6 +618,7 @@ const Integrations = () => {
                 onClick={() => {
                   setRequesting(true);
                 }}
+                size="sm"
                 variant="quiet"
               >
                 {t`Request app`}

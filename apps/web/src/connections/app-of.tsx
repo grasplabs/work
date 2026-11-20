@@ -5,7 +5,10 @@ import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
 import { formatDate } from "../format.ts";
-import { appIntegrationWords } from "../grasp/blocks/app-integration/app-integration.tsx";
+import {
+  appIntegrationWords,
+  rollUp,
+} from "../grasp/blocks/app-integration/app-integration.tsx";
 import type {
   App,
   AppConnection,
@@ -100,8 +103,14 @@ export const useAppOf = (
   const { t } = useLingui();
   return (integration: Integration, { tools, uses, size }: AppOptions): App => {
     const primary = primaryOf(integration, uses);
+    // Every account counts: one that ran out beside one that works needs someone.
+    const state = rollUp(
+      integration.connections.map((each) =>
+        appStateOf(each, integration, identity)
+      )
+    );
     const connection: AppConnection | undefined =
-      primary === undefined
+      primary === undefined || state === undefined
         ? undefined
         : {
             account: primary.accountName ?? integration.name,
@@ -114,7 +123,7 @@ export const useAppOf = (
                 ? t`You`
                 : (primary.connectedByName ?? t`Someone no longer here`),
             on: formatDate(primary.createdAt),
-            state: appStateOf(primary, integration, identity),
+            state,
           };
     const workflows =
       uses === undefined

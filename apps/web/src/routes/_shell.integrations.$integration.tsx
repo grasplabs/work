@@ -1,5 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { useSettled } from "../connections/app-of.tsx";
 import { IntegrationAppPage } from "../connections/app-page.tsx";
@@ -21,6 +21,7 @@ import { NotFound, PageNotLoaded } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
 import { Cable } from "../grasp/icons/index.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -225,6 +226,11 @@ const IntegrationRoute = () => {
         crumbs={[integrations, { label: t`Not found` }]}
         icon={Cable}
         title={t`App not found`}
+        way={
+          <Button render={<Link to="/integrations" />} variant="quiet">
+            {t`Back to Integrations`}
+          </Button>
+        }
       />
     );
   }

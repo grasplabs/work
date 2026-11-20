@@ -161,22 +161,25 @@ const shown = async (
   return asked;
 };
 
-/** The names of the buttons on the page, dialogs included. */
 /** The buttons that act, by their words: not the card's info mark, which only explains. */
 const buttons = (): string[] =>
   [...document.querySelectorAll("button")]
     .map((each) => each.textContent.trim())
     .filter((words) => words !== "");
 
+/** A button's name: its label where it has one, else its words. */
+const nameOf = (button: HTMLButtonElement): string =>
+  button.getAttribute("aria-label") ?? button.textContent.trim();
+
 const press = async (name: string): Promise<void> => {
   // A dialog's action also holds the words it shows while working or
   // failed, unseen: it is found by the words it starts with.
   const button =
     [...document.querySelectorAll("button")].find(
-      (each) => each.textContent.trim() === name
+      (each) => nameOf(each) === name
     ) ??
     [...document.querySelectorAll("button")].find((each) =>
-      each.textContent.trim().startsWith(name)
+      nameOf(each).startsWith(name)
     );
   await act(async () => {
     button?.click();
@@ -246,7 +249,7 @@ describe(HttpConnections, () => {
     }
 
     expect(seen).toStrictEqual({
-      admin: ["Add HTTP connection", "Revoke"],
+      admin: ["Add", "Revoke"],
       staff: [],
       builder: [],
       user: [],

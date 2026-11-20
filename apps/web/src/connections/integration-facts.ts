@@ -27,7 +27,12 @@ export const useWhyNoConnect = () => {
     if (identity.staff) {
       return t`Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people.`;
     }
-    if (!integration.offered) {
+    // Connected already, or not in the catalog to offer: there is nothing to offer it for.
+    if (
+      !integration.offered &&
+      integration.listed &&
+      integration.connections.length === 0
+    ) {
       return isAdmin(identity.role)
         ? t`It isn't offered to your organization yet: offer it before connecting it.`
         : t`It isn't offered to your organization.`;

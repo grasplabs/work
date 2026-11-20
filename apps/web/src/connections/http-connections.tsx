@@ -194,6 +194,7 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
           <Field>
             <FieldLabel>{t`Name`}</FieldLabel>
             <Input
+              size="sm"
               autoComplete="off"
               maxLength={httpLimits.nameChars}
               onValueChange={setName}
@@ -204,6 +205,7 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
           <Field>
             <FieldLabel>{t`Origin`}</FieldLabel>
             <Input
+              size="sm"
               autoComplete="off"
               onValueChange={setOrigin}
               placeholder="https://api.example.com"
@@ -259,7 +261,7 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
               }}
               value={kind}
             >
-              <SelectTrigger>
+              <SelectTrigger size="sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent />
@@ -269,6 +271,7 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
             <Field>
               <FieldLabel>{t`Header name`}</FieldLabel>
               <Input
+                size="sm"
                 autoComplete="off"
                 maxLength={64}
                 onValueChange={setHeader}
@@ -280,6 +283,7 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
           <Field>
             <FieldLabel>{kind === "bearer" ? t`Token` : t`Secret`}</FieldLabel>
             <Input
+              size="sm"
               autoComplete="off"
               maxLength={httpLimits.secretChars}
               onValueChange={setSecret}
@@ -296,7 +300,7 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
       </DialogBody>
       <DialogFooter>
         <DialogAction>{t`Cancel`}</DialogAction>
-        <Button disabled={busy} form={id} type="submit" variant="ink">
+        <Button disabled={busy} form={id} size="sm" type="submit" variant="ink">
           {t`Add the connection`}
         </Button>
       </DialogFooter>
@@ -317,7 +321,9 @@ const AddHttpConnection = () => {
   const latest = useRef(0);
   return (
     <>
+      {/* "Add" beside the card's title, which says what; its full name for a screen reader. */}
       <Button
+        aria-label={t`Add HTTP connection`}
         icon={Plus}
         onClick={() => {
           latest.current += 1;
@@ -326,7 +332,7 @@ const AddHttpConnection = () => {
         }}
         size="sm"
       >
-        {t`Add HTTP connection`}
+        {t`Add`}
       </Button>
       <Dialog onOpenChange={setOpen} open={open}>
         <DialogContent closeLabel={t`Close`}>
