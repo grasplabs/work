@@ -34,11 +34,12 @@ const afterTurnCheck = { timeout: 30_000 };
  * `turnCheck`), and the chat takes no question meanwhile.
  */
 const askOnceIdle = async (chat: Locator, text: string): Promise<void> => {
-  await expect(
-    chat.getByRole("button", { name: "Send", exact: true })
-  ).toBeVisible({ timeout: 30_000 });
+  const send = chat.getByRole("button", { name: "Send", exact: true });
+  await expect(send).toBeVisible({ timeout: 30_000 });
   const ask = chat.getByRole("textbox", { name: "Ask for a change" });
   await ask.fill(text);
+  // Sent once the models are read, as Send says.
+  await expect(send).toBeEnabled({ timeout: 30_000 });
   await ask.press("Enter");
 };
 
@@ -418,9 +419,10 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
     const { opener } = modelScripts.fixesBrokenTally;
     const chat = dockedChat(page);
     await askOnceIdle(chat, opener);
+    // Two writes, each built, before the answer: longer on a loaded machine.
     await expect(
       chat.getByText("The tally's page doesn't build yet.")
-    ).toBeVisible({ timeout: 30_000 });
+    ).toBeVisible({ timeout: 60_000 });
 
     // Opened afresh on it: the App's latest version's page, its calls on
     // the draft as it is, and a word that the problem is being fixed.
@@ -460,9 +462,10 @@ test("a preview whose first page doesn't build shows it once the agent's next wr
     const { opener } = modelScripts.fixesBrokenTally;
     const chat = dockedChat(page);
     await askOnceIdle(chat, opener);
+    // Two writes, each built, before the answer: longer on a loaded machine.
     await expect(
       chat.getByText("The tally's page doesn't build yet.")
-    ).toBeVisible({ timeout: 30_000 });
+    ).toBeVisible({ timeout: 60_000 });
 
     // Its first build fails: the preview says so in its place, with Fix
     // with Grasp, and takes no updates.
