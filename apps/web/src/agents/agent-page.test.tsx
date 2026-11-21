@@ -910,9 +910,18 @@ const makeInChat = async ({
 
 /** The radio whose row says `words`, in whatever is asked now. */
 const radio = (words: string): HTMLElement => {
-  const found = [
-    ...document.querySelectorAll<HTMLElement>("[role='radio']"),
-  ].find((each) => saysOnItsRow(each, words));
+  // The library's radios, or the setup's cards, each a native radio in its label.
+  const found =
+    [...document.querySelectorAll<HTMLElement>("[role='radio']")].find((each) =>
+      saysOnItsRow(each, words)
+    ) ??
+    [
+      ...document.querySelectorAll<HTMLInputElement>(
+        "fieldset[role='radiogroup'] input[type='radio']"
+      ),
+    ].find(
+      (each) => each.closest("label")?.textContent?.includes(words) === true
+    );
   if (found === undefined) {
     throw new TypeError(`No radio ${words}`);
   }
@@ -1479,7 +1488,11 @@ describe("an agent's page", () => {
     const fake = fakeConnections();
     const { asked } = fake;
     await shown(fake, "new-guided");
-    const offered = radio("Everyone").getAttribute("aria-checked");
+    const everyone = radio("Everyone");
+    const offered =
+      everyone instanceof HTMLInputElement
+        ? String(everyone.checked)
+        : everyone.getAttribute("aria-checked");
     const questions = await setUpByHand("Claire");
     await press(button("Make agent"));
     expect({ offered, questions }).toStrictEqual({

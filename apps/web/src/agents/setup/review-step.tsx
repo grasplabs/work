@@ -5,15 +5,8 @@ import * as stylex from "@stylexjs/stylex";
 import { modelName } from "../../chat/model-names.tsx";
 import { ProviderMark } from "../../connections/provider-mark.tsx";
 import { formatList } from "../../format.ts";
-import {
-  AgentFigure,
-  AgentFigureAura,
-} from "../../grasp/agent-figure/index.ts";
-import { Badge } from "../../grasp/badge/index.ts";
-import { Card, CardDescription } from "../../grasp/card/index.ts";
-import { Heading } from "../../grasp/heading/index.ts";
+import { AgentCard } from "../../grasp/agent-card/index.ts";
 import { KeyValueList } from "../../grasp/key-value/index.ts";
-import { Text } from "../../grasp/text/index.ts";
 import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
 import { lookFromName } from "../figure/look.ts";
 import { abilities } from "./model.ts";
@@ -21,50 +14,32 @@ import type { Schedule, StepProps } from "./model.ts";
 import { Question } from "./question.tsx";
 import { useSetupWords } from "./words.ts";
 
-// The last look before it is made: the agent's card as the Agents page
-// draws it (its night, its figure large and cropped by the corner, its
-// name and job), opened out with everything the setup said, each a row.
+// The last look before it is made (Ruben, 21 November: the summary was
+// cluttered, its edges square; making an agent should feel special): the
+// agent as it will stand on the Agents page, the library's own Agent card
+// with its figure, name, job and whom it answers, beside a short list of
+// what the setup said, in plain words: its apps as their marks, what it
+// can do in one line, how it thinks and when it works. No chips, no box
+// round both.
 
 const styles = stylex.create({
-  // The portrait beside its details; one above the other when narrow.
-  card: {
+  // The card beside its facts; one above the other when narrow.
+  made: {
     display: "grid",
     gridTemplateColumns: {
-      default: "16rem minmax(0, 1fr)",
+      default: "15rem minmax(0, 1fr)",
       "@media (width < 40rem)": "minmax(0, 1fr)",
     },
+    alignItems: "center",
+    gap: grasp.space8,
     textAlign: "start",
   },
-  // As the Agents page's card: the agent's light on the page's own ground.
-  portrait: {
-    position: "relative",
-    display: "grid",
-    alignContent: "start",
-    minHeight: "18rem",
-    padding: grasp.space5,
-    overflow: "hidden",
-    isolation: "isolate",
-  },
-  figure: {
-    position: "absolute",
-    insetBlockEnd: "-3.5rem",
-    insetInlineEnd: "-3.5rem",
-    zIndex: 0,
-  },
-  words: {
-    position: "relative",
-    zIndex: 1,
-    display: "grid",
-    gap: grasp.space2,
-  },
-  details: { padding: grasp.space5 },
   marks: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
     gap: grasp.space2,
   },
-  app: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
 });
 
 /** A weekday's name: a known Sunday (4 Jan 2026) and the days after it. */
@@ -111,97 +86,59 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
       : modelName(setup.model);
   const effort = words.effortNames[setup.effort];
   const own = setup.audience === "me";
+  const can = formatList(
+    abilities
+      .filter((ability) => setup.abilities.has(ability))
+      .map((ability) => words.abilityNames[ability].label)
+  );
+  const who =
+    setup.audience === "teams"
+      ? formatList(chosenTeams.map((team) => team.name))
+      : words.audienceNames[setup.audience];
+  const goal = setup.goal.trim();
   return (
     <Question
       line={t`You can change all of this later.`}
       title={t`Ready to make ${name}?`}
     >
-      <Card padding="none">
-        <div {...stylex.props(styles.card)}>
-          <div {...stylex.props(styles.portrait)}>
-            <AgentFigureAura ground="page" look={look} />
-            <span {...stylex.props(styles.figure)}>
-              <AgentFigure look={look} size="xl" state="done" />
-            </span>
-            <span {...stylex.props(styles.words)}>
-              <Heading level={2} size="md">
-                {name}
-              </Heading>
-              <CardDescription>{setup.job}</CardDescription>
-            </span>
-          </div>
-          <div {...stylex.props(styles.details)}>
-            <KeyValueList
-              items={[
-                {
-                  key: t`Goal`,
-                  value: setup.goal.trim() === "" ? setup.job : setup.goal,
-                },
-                {
-                  key: t`Apps`,
-                  value:
-                    chosenApps.length === 0 ? (
-                      t`None yet`
-                    ) : (
-                      <span {...stylex.props(styles.marks)}>
-                        {chosenApps.map((app) => (
-                          <span key={app.id} {...stylex.props(styles.app)}>
-                            <ProviderMark
-                              id={app.id}
-                              logo={app.logo}
-                              name={app.name}
-                              size="sm"
-                            />
-                            <Text element="span" size="sm">
-                              {app.name}
-                            </Text>
-                          </span>
-                        ))}
-                      </span>
-                    ),
-                },
-                // One of their own has no kinds of work or schedule of its own.
-                ...(own
-                  ? []
-                  : [
-                      {
-                        key: t`Can do`,
-                        value: (
-                          <span {...stylex.props(styles.marks)}>
-                            {abilities
-                              .filter((ability) => setup.abilities.has(ability))
-                              .map((ability) => (
-                                <Badge key={ability} size="sm" tone="neutral">
-                                  {words.abilityNames[ability].label}
-                                </Badge>
-                              ))}
-                          </span>
-                        ),
-                      },
-                    ]),
-                { key: t`Thinking`, value: `${thinksWith} · ${effort}` },
-                ...(own
-                  ? []
-                  : [
-                      {
-                        key: t`Works`,
-                        value: scheduleLine(setup.schedule),
-                      },
-                    ]),
-                {
-                  key: t`Who can use it`,
-                  value:
-                    setup.audience === "teams"
-                      ? formatList(chosenTeams.map((team) => team.name))
-                      : words.audienceNames[setup.audience],
-                },
-              ]}
-              valueAlign="start"
-              variant="inline"
-            />
-          </div>
-        </div>
-      </Card>
+      <div {...stylex.props(styles.made)}>
+        <AgentCard audience={who} job={setup.job} look={look} name={name} />
+        <KeyValueList
+          items={[
+            // Only a goal the job doesn't say already.
+            ...(goal === "" || goal === setup.job.trim()
+              ? []
+              : [{ key: t`Goal`, value: goal }]),
+            {
+              key: t`Apps`,
+              value:
+                chosenApps.length === 0 ? (
+                  t`None yet`
+                ) : (
+                  <span {...stylex.props(styles.marks)}>
+                    {chosenApps.map((app) => (
+                      <ProviderMark
+                        id={app.id}
+                        key={app.id}
+                        logo={app.logo}
+                        name={app.name}
+                        size="sm"
+                      />
+                    ))}
+                  </span>
+                ),
+            },
+            // One of their own has no kinds of work or schedule of its own.
+            ...(own || can === "" ? [] : [{ key: t`Can do`, value: can }]),
+            { key: t`Thinking`, value: `${thinksWith} · ${effort}` },
+            ...(own
+              ? []
+              : [{ key: t`Works`, value: scheduleLine(setup.schedule) }]),
+          ]}
+          valueAlign="start"
+          variant="stacked"
+        />
+      </div>
     </Question>
   );
 };

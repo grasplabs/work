@@ -1,11 +1,11 @@
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
-import { formatList } from "../../format.ts";
 import { AgentMark } from "../../grasp/agent-mark/index.ts";
 import { Badge } from "../../grasp/badge/index.ts";
 import { Heading } from "../../grasp/heading/index.ts";
-import { CalendarIcon } from "../../grasp/icons/index.ts";
+import { IconTile } from "../../grasp/icon-tile/index.ts";
+import { CalendarIcon, Chat, Clock } from "../../grasp/icons/index.ts";
 import {
   Item,
   ItemActions,
@@ -24,11 +24,16 @@ import {
 import { Text } from "../../grasp/text/index.ts";
 import { Toggle, ToggleGroup } from "../../grasp/toggle/index.ts";
 import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
+import { ChoiceCards } from "./choice-cards.tsx";
 import { frequencies } from "./model.ts";
-import type { Frequency, Schedule, StepProps } from "./model.ts";
+import type { Schedule, StepProps } from "./model.ts";
 import { Question } from "./question.tsx";
 import { useSetupWords } from "./words.ts";
 
+// First, as two cards to press (Ruben, 21 November: "just visualize it"),
+// whether it waits to be asked or also works on a schedule; each shows
+// what it means: being asked in a chat, or the next times it works.
+//
 // When it works on its own (Ruben, 19 Nov 2026, after Linear's schedule):
 // the schedule reads as a sentence, its parts nested under it on a tree
 // line: how often, then at what time, on which days (a toggle a day, in
@@ -145,6 +150,7 @@ export const ScheduleStep = ({ setup, change, name }: StepProps) => {
   const { t, i18n } = useLingui();
   const { frequencyNames } = useSetupWords();
   const { schedule } = setup;
+  const asked = schedule.frequency === "asked";
   const { locale } = i18n;
   const set = (next: Partial<Schedule>) => {
     change({ schedule: { ...schedule, ...next } });
@@ -153,19 +159,8 @@ export const ScheduleStep = ({ setup, change, name }: StepProps) => {
   const week = daysOfWeek.map((offset) => (start + offset) % 7);
   const time = timeName(locale, schedule.time);
   const { dayOfMonth } = schedule;
-  const chosenDays = formatList(
-    week
-      .filter((day) => schedule.days.has(day))
-      .map((day) => dayName(locale, day, "long"))
-  );
-  const when: Record<Exclude<Frequency, "asked">, string> = {
-    daily: t`Every day at ${time}, ${name} works on its own and sends you what it found.`,
-    weekly:
-      schedule.days.size === 0
-        ? t`Pick at least one day.`
-        : t`Every ${chosenDays} at ${time}, ${name} works on its own and sends you what it found.`,
-    monthly: t`On day ${dayOfMonth} of every month at ${time}, ${name} works on its own and sends you what it found.`,
-  };
+  // The controls say when it works; only a week with no day picked needs words.
+  const noDays = schedule.frequency === "weekly" && schedule.days.size === 0;
   const runs = nextRuns(schedule, new Date());
   const dated = new Intl.DateTimeFormat(locale, {
     weekday: "long",
@@ -174,116 +169,157 @@ export const ScheduleStep = ({ setup, change, name }: StepProps) => {
   });
   return (
     <Question title={t`When should ${name} work?`}>
-      <div {...stylex.props(styles.sentence)}>
-        <div {...stylex.props(styles.row)}>
-          <Select
-            items={frequencies.map((frequency) => ({
-              value: frequency,
-              label: frequencyNames[frequency],
-            }))}
-            onValueChange={(value) => {
-              const frequency = frequencies.find((each) => each === value);
-              if (frequency !== undefined) {
-                set({ frequency });
-              }
-            }}
-            value={schedule.frequency}
-          >
-            <SelectTrigger aria-label={t`How often`} size="sm" variant="text">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent />
-          </Select>
-        </div>
-        {schedule.frequency === "asked" ? null : (
-          <div {...stylex.props(styles.nested)}>
-            {schedule.frequency === "weekly" ? (
-              <div {...stylex.props(styles.row)}>
-                <Text tone="muted">{t`On`}</Text>
-                <ToggleGroup
-                  aria-label={t`Days`}
-                  multiple
-                  // Level with the 32px selects in the same sentence.
-                  size="sm"
-                  onValueChange={(values) => {
-                    set({ days: new Set(values.map(Number)) });
-                  }}
-                  value={[...schedule.days].map(String)}
-                >
-                  {week.map((day) => (
-                    <Toggle
-                      aria-label={dayName(locale, day, "long")}
-                      key={day}
-                      value={String(day)}
+      <ChoiceCards
+        cards={[
+          {
+            value: "asked",
+            title: t`When someone asks`,
+            description: t`It answers in a chat, whenever it is asked.`,
+            media: (
+              <IconTile icon={Chat} variant={asked ? "gradient" : "raised"} />
+            ),
+          },
+          {
+            value: "scheduled",
+            title: t`On a schedule`,
+            description: t`It also works on its own, at the times you set.`,
+            media: (
+              <IconTile icon={Clock} variant={asked ? "raised" : "gradient"} />
+            ),
+          },
+        ]}
+        label={t`When it works`}
+        onValueChange={(chosen) => {
+          if (chosen === "asked") {
+            set({ frequency: "asked" });
+          } else if (asked) {
+            set({ frequency: "weekly" });
+          }
+        }}
+        value={asked ? "asked" : "scheduled"}
+      />
+      {asked ? null : (
+        <div {...stylex.props(styles.sentence)}>
+          <div {...stylex.props(styles.row)}>
+            <Select
+              items={frequencies
+                .filter((frequency) => frequency !== "asked")
+                .map((frequency) => ({
+                  value: frequency,
+                  label: frequencyNames[frequency],
+                }))}
+              onValueChange={(value) => {
+                const frequency = frequencies.find((each) => each === value);
+                if (frequency !== undefined) {
+                  set({ frequency });
+                }
+              }}
+              value={schedule.frequency}
+            >
+              <SelectTrigger aria-label={t`How often`} size="sm" variant="text">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          </div>
+          {schedule.frequency === "asked" ? null : (
+            <div {...stylex.props(styles.nested)}>
+              {schedule.frequency === "weekly" ? (
+                <div {...stylex.props(styles.row)}>
+                  <Text tone="muted">{t`On`}</Text>
+                  <ToggleGroup
+                    aria-label={t`Days`}
+                    multiple
+                    // Level with the 32px selects in the same sentence.
+                    size="sm"
+                    onValueChange={(values) => {
+                      set({ days: new Set(values.map(Number)) });
+                    }}
+                    value={[...schedule.days].map(String)}
+                  >
+                    {week.map((day) => (
+                      <Toggle
+                        aria-label={dayName(locale, day, "long")}
+                        key={day}
+                        value={String(day)}
+                      >
+                        {dayName(locale, day, "short")}
+                      </Toggle>
+                    ))}
+                  </ToggleGroup>
+                </div>
+              ) : null}
+              {schedule.frequency === "monthly" ? (
+                <div {...stylex.props(styles.row)}>
+                  <Text tone="muted">{t`On day`}</Text>
+                  <Select
+                    items={monthDays.map((day) => ({
+                      value: String(day),
+                      label: String(day),
+                    }))}
+                    onValueChange={(value) => {
+                      if (value !== null) {
+                        set({ dayOfMonth: Number(value) });
+                      }
+                    }}
+                    value={String(dayOfMonth)}
+                  >
+                    <SelectTrigger
+                      aria-label={t`Day of the month`}
+                      size="sm"
+                      variant="text"
                     >
-                      {dayName(locale, day, "short")}
-                    </Toggle>
-                  ))}
-                </ToggleGroup>
-              </div>
-            ) : null}
-            {schedule.frequency === "monthly" ? (
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent />
+                  </Select>
+                </div>
+              ) : null}
               <div {...stylex.props(styles.row)}>
-                <Text tone="muted">{t`On day`}</Text>
+                <Text tone="muted">{t`At`}</Text>
                 <Select
-                  items={monthDays.map((day) => ({
-                    value: String(day),
-                    label: String(day),
+                  items={halfHours.map((each) => ({
+                    value: each,
+                    label: timeName(locale, each),
                   }))}
                   onValueChange={(value) => {
                     if (value !== null) {
-                      set({ dayOfMonth: Number(value) });
+                      set({ time: value });
                     }
                   }}
-                  value={String(dayOfMonth)}
+                  value={schedule.time}
                 >
-                  <SelectTrigger
-                    aria-label={t`Day of the month`}
-                    size="sm"
-                    variant="text"
-                  >
+                  <SelectTrigger aria-label={t`Time`} size="sm" variant="text">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent />
                 </Select>
+                <Text size="sm" tone="muted">
+                  {t`in the company's time zone`}
+                </Text>
               </div>
-            ) : null}
-            <div {...stylex.props(styles.row)}>
-              <Text tone="muted">{t`At`}</Text>
-              <Select
-                items={halfHours.map((each) => ({
-                  value: each,
-                  label: timeName(locale, each),
-                }))}
-                onValueChange={(value) => {
-                  if (value !== null) {
-                    set({ time: value });
-                  }
-                }}
-                value={schedule.time}
-              >
-                <SelectTrigger aria-label={t`Time`} size="sm" variant="text">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent />
-              </Select>
-              <Text size="sm" tone="muted">
-                {t`in the company's time zone`}
-              </Text>
             </div>
-          </div>
-        )}
-      </div>
-      {schedule.frequency === "asked" ? (
+          )}
+        </div>
+      )}
+      {asked ? (
         <div {...stylex.props(styles.preview)}>
-          <Text tone="muted">
-            {t`${name} only works when someone asks it something in a chat.`}
-          </Text>
+          <Item variant="outline">
+            <ItemMedia>
+              <AgentMark name={name} size="md" />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{t`Ask ${name} in any chat`}</ItemTitle>
+              <ItemDescription>
+                {t`Pick ${name} in the chat's box, and it answers there.`}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
         </div>
       ) : (
         <div {...stylex.props(styles.preview)}>
           <span {...stylex.props(styles.part)}>
-            <Text>{when[schedule.frequency]}</Text>
+            {noDays ? <Text>{t`Pick at least one day.`}</Text> : null}
             <Text size="sm" tone="muted">
               {t`It asks you before it sends or changes anything.`}
             </Text>

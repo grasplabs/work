@@ -1067,10 +1067,6 @@ msgstr "{name} mag schrijven. Wijzigen naar Lezen"
 msgid "{name} only works when asked."
 msgstr "{name} werkt alleen als het gevraagd wordt."
 
-#: src/agents/setup/schedule-step.tsx
-msgid "{name} only works when someone asks it something in a chat."
-msgstr "{name} werkt alleen als iemand hem iets vraagt in een chat."
-
 #: src/connections/tool-choice.tsx
 msgid "{name} reads only. Change to Write"
 msgstr "{name} leest alleen. Wijzigen naar Schrijven"
@@ -3484,6 +3480,10 @@ msgstr "Vragen"
 #: src/chat/brain-questions.tsx
 msgid "Ask {0}"
 msgstr "Vraag het aan {0}"
+
+#: src/agents/setup/schedule-step.tsx
+msgid "Ask {name} in any chat"
+msgstr "Vraag {name} in elke chat"
 
 #: src/connections/revocations-by-hand.tsx
 msgid "Ask {owner} to remove Grasp at {link}."
@@ -7120,10 +7120,6 @@ msgstr "Gebeurtenissen in het logboek"
 msgid "Evergreen"
 msgstr "Groenblijvend"
 
-#: src/agents/setup/schedule-step.tsx
-msgid "Every {chosenDays} at {time}, {name} works on its own and sends you what it found."
-msgstr "Elke {chosenDays} om {time} werkt {name} zelfstandig en stuurt je wat hij vond."
-
 #: src/agents/setup/review-step.tsx
 msgid "Every {days} at {time}"
 msgstr "Elke {days} om {time}"
@@ -7145,10 +7141,6 @@ msgstr "Elke dag"
 #: src/agents/setup/review-step.tsx
 msgid "Every day at {time}"
 msgstr "Elke dag om {time}"
-
-#: src/agents/setup/schedule-step.tsx
-msgid "Every day at {time}, {name} works on its own and sends you what it found."
-msgstr "Elke dag om {time} werkt {name} zelfstandig en stuurt je wat hij vond."
 
 #: src/agents/new-agent.tsx
 msgid "Every day at 9:00"
@@ -9465,6 +9457,14 @@ msgstr "Klopt dat?"
 msgctxt "business process"
 msgid "Issue-to-Resolution"
 msgstr "Issue-to-Resolution"
+
+#: src/agents/setup/schedule-step.tsx
+msgid "It also works on its own, at the times you set."
+msgstr "Het werkt ook zelf, op de tijden die je instelt."
+
+#: src/agents/setup/schedule-step.tsx
+msgid "It answers in a chat, whenever it is asked."
+msgstr "Het antwoordt in een chat, wanneer het gevraagd wordt."
 
 #: src/agents/agent-page.tsx
 msgid "It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs."
@@ -12762,6 +12762,10 @@ msgstr "Op {where}"
 msgid "On a later day"
 msgstr "Op een latere dag"
 
+#: src/agents/setup/schedule-step.tsx
+msgid "On a schedule"
+msgstr "Volgens een schema"
+
 #: src/workflows/workflow-rows.tsx
 msgctxt "what starts a workflow"
 msgid "On a schedule"
@@ -12785,10 +12789,6 @@ msgstr "Bij een gebeurtenis"
 #: src/agents/setup/schedule-step.tsx
 msgid "On day"
 msgstr "Op dag"
-
-#: src/agents/setup/schedule-step.tsx
-msgid "On day {dayOfMonth} of every month at {time}, {name} works on its own and sends you what it found."
-msgstr "Op dag {dayOfMonth} van elke maand om {time} werkt {name} zelfstandig en stuurt je wat hij vond."
 
 #: src/onboarding/ai-step.tsx
 msgid "On Grasp’s AI: {grasp}"
@@ -13779,6 +13779,10 @@ msgstr "Telefoon"
 msgctxt "a screen width"
 msgid "Phone"
 msgstr "Telefoon"
+
+#: src/agents/setup/schedule-step.tsx
+msgid "Pick {name} in the chat's box, and it answers there."
+msgstr "Kies {name} in het invoerveld van de chat, en het antwoordt daar."
 
 #: src/frame/part-words.tsx
 msgid "Pick a part of the page. Escape to stop."
@@ -17000,6 +17004,10 @@ msgctxt "status of a workflow run"
 msgid "Starting"
 msgstr "Wordt gestart"
 
+#: src/agents/setup/job-step.tsx
+msgid "Starting points"
+msgstr "Startpunten"
+
 #: src/workflows/item-test.tsx
 #: src/workflows/start-run.tsx
 msgid "Starting…"
@@ -17510,6 +17518,7 @@ msgstr "Teamomvang onbekend"
 msgid "Team size unknown."
 msgstr "Teamomvang onbekend."
 
+#: src/agents/setup/audience-step.tsx
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
 #: src/settings/teams.tsx
@@ -20686,6 +20695,10 @@ msgstr "Wanneer het het laatst is gewijzigd"
 msgid "When it was added"
 msgstr "Wanneer het is toegevoegd"
 
+#: src/agents/setup/schedule-step.tsx
+msgid "When it works"
+msgstr "Wanneer het werkt"
+
 #: src/chat/agent-draft-card.tsx
 msgid "When it works on its own"
 msgstr "Wanneer hij uit zichzelf werkt"
@@ -20693,6 +20706,10 @@ msgstr "Wanneer hij uit zichzelf werkt"
 #: src/agents/setup/schedule-step.tsx
 msgid "When should {name} work?"
 msgstr "Wanneer moet {name} werken?"
+
+#: src/agents/setup/schedule-step.tsx
+msgid "When someone asks"
+msgstr "Als iemand het vraagt"
 
 #: src/apps/field-editor.tsx
 msgid "When the linked record is deleted"
@@ -20845,7 +20862,6 @@ msgid "Who can talk to him"
 msgstr "Wie met hem kan praten"
 
 #: src/agents/setup/audience-step.tsx
-#: src/agents/setup/review-step.tsx
 #: src/frame/part-words.tsx
 msgid "Who can use it"
 msgstr "Wie hem kan gebruiken"
