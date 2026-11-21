@@ -589,6 +589,8 @@ const cast = {
   inbox: { admin: "admin" },
   chatPreview: { builder: "builder" },
   previewParity: { admin: "admin" },
+  appPrint: { builder: "builder" },
+  blueprints: { owner: "builder", maker: "builder" },
   appBuilt: { builder: "builder", user: "user" },
   dataModel: { builder: "builder" },
   workflowDrawnDecides: { builder: "builder", admin: "admin", decider: "user" },
