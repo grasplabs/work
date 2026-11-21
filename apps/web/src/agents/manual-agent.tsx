@@ -14,7 +14,7 @@ import type { ComponentType, SubmitEvent } from "react";
 import { wait } from "../core.ts";
 import { AgentFigure, AgentFigureAura } from "../grasp/agent-figure/index.ts";
 import { Backdrop } from "../grasp/backdrop/index.ts";
-import { useAction } from "../grasp/button/index.ts";
+import { Button, useAction } from "../grasp/button/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { arrive } from "../grasp/motion/arrive.ts";
 import { Shimmer } from "../grasp/shimmer/index.ts";
@@ -164,7 +164,8 @@ const styles = stylex.create({
   },
   // The `hidden` attribute alone loses to the stage's own display.
   away: { display: "none" },
-  // The foot under the answer, as wide as its column.
+  // The foot under the answer: the way on, in its middle.
+  foot: { display: "grid", justifyItems: "center", alignContent: "start" },
   // The bar at the top, as wide as the answer's column.
   bar: { width: "100%", maxWidth: grasp.pageSettingsMeasure },
 });
@@ -237,8 +238,10 @@ export const ManualAgent = ({
   models,
   apps,
   teams,
+  people,
   taken,
   personId,
+  personName,
   company,
   own,
 }: {
@@ -247,10 +250,14 @@ export const ManualAgent = ({
   /** The company's catalog of apps, connected ones marked. */
   apps: readonly CatalogApp[];
   teams: StephenReach["teams"];
+  /** The company's people, by name: their faces show who it reaches. */
+  people: readonly string[];
   /** The names other agents have: core keeps each name to one agent. */
   taken: readonly string[];
   /** The person making it: a schedule chosen here works for them. */
   personId: string;
+  /** Their name, for their own face. */
+  personName: string;
   /** Whether they may make one for the company: its own admins. */
   company: boolean;
   /** Whether the company lets people have agents of their own. */
@@ -454,10 +461,10 @@ export const ManualAgent = ({
         {...stylex.props(styles.stage, phase !== "setup" && styles.away)}
       >
         <div {...stylex.props(styles.top)}>
-          {/* The library's quiet bar at the top of a guided flow (Ruben):
-              ghost Back and Next round the thin progress, "Make agent" on
-              the last step; nothing under the answer. Next submits this
-              form; Enter and Mod+Enter go on, Alt+← goes back. */}
+          {/* The library's quiet bar at the top of a guided flow: ghost
+              Back and Next round the thin progress, "Make agent" on the
+              last step. Next submits this form; Enter and Mod+Enter go on,
+              Alt+← goes back. The same way on stands under the answer. */}
           <StepBar
             disabled={!ready[step]}
             finishLabel={t`Make agent`}
@@ -484,9 +491,23 @@ export const ManualAgent = ({
               nameTaken={nameTaken}
               pick={pick}
               setup={setup}
+              me={personName}
+              people={people}
               teams={teams}
             />
           </div>
+        </div>
+        {/* The way on, under the answer where the eye already is (Ruben,
+            21 November); the bar above keeps its arrows both ways. */}
+        <div {...stylex.props(styles.foot)}>
+          <Button
+            disabled={!ready[step] || making.status.status === "working"}
+            size="lg"
+            type="submit"
+            variant="ink"
+          >
+            {step === "review" ? t`Make ${name}` : t`Next`}
+          </Button>
         </div>
       </form>
     </Backdrop>

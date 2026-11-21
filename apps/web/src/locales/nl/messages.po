@@ -2771,8 +2771,8 @@ msgid "Always light"
 msgstr "Altijd licht"
 
 #: src/agents/setup/thinking-step.tsx
-msgid "Always uses this model."
-msgstr "Gebruikt altijd dit model."
+msgid "Always uses this model"
+msgstr "Gebruikt altijd dit model"
 
 #: src/agents/new-agent.tsx
 msgid "Amber"
@@ -3877,13 +3877,13 @@ msgctxt "note property"
 msgid "Before"
 msgstr "Voorheen"
 
-#: src/agents/agent-templates.ts
-msgid "Before each meeting"
-msgstr "Voor elke vergadering"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Before I reach out, let your team know"
 msgstr "Laat je team het weten voordat ik contact opneem"
+
+#: src/agents/agent-templates.ts
+msgid "Before meetings"
+msgstr "Voor vergaderingen"
 
 #: src/interview/words.ts
 msgid "Before the work: what you told me about AI."
@@ -4002,6 +4002,10 @@ msgstr "Vraag in het Brain"
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Kruimelpad"
+
+#: src/agents/agent-templates.ts
+msgid "Brief you"
+msgstr "Je bijpraten"
 
 #: src/projects/project-dialog.tsx
 msgid "Briefcase"
@@ -7790,6 +7794,10 @@ msgstr "Offertes volgen tot betaling"
 msgid "Follow up on leads"
 msgstr "Leads opvolgen"
 
+#: src/agents/setup/thinking-step.tsx
+msgid "Follows the chat's choice"
+msgstr "Volgt de keuze in de chat"
+
 #: src/frame/part-words.tsx
 msgid "Footnote {number}"
 msgstr "Voetnoot {number}"
@@ -10739,6 +10747,10 @@ msgctxt "the sidebar's main list"
 msgid "Main"
 msgstr "Hoofdmenu"
 
+#: src/agents/manual-agent.tsx
+msgid "Make {name}"
+msgstr "{name} maken"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Make {name} an admin?"
 msgstr "{name} beheerder maken?"
@@ -11511,6 +11523,7 @@ msgstr "Nieuwe versie"
 msgid "Newer"
 msgstr "Nieuwer"
 
+#: src/agents/manual-agent.tsx
 #: src/agents/new-agent.tsx
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
@@ -15920,10 +15933,6 @@ msgctxt "send the question"
 msgid "Send"
 msgstr "Versturen"
 
-#: src/agents/agent-templates.ts
-msgid "Send a briefing"
-msgstr "Briefing sturen"
-
 #: src/settings/event-source-activity.tsx
 msgid "Send a test event"
 msgstr "Een testgebeurtenis sturen"
@@ -18656,6 +18665,7 @@ msgid "They'll find it under Workflows, and run it as it is now."
 msgstr "Ze vinden het onder Workflows en voeren het uit zoals het nu is."
 
 #: src/agents/setup/review-step.tsx
+#: src/agents/setup/thinking-step.tsx
 #: src/chat/thread.tsx
 #: src/frame/part-words.tsx
 msgid "Thinking"
@@ -19683,10 +19693,6 @@ msgstr "Gebruikt"
 #: src/settings/roles.ts
 msgid "Uses the Apps and workflows shared with them, and chats with Grasp."
 msgstr "Gebruikt de Apps en workflows die met hen gedeeld zijn, en chat met Grasp."
-
-#: src/agents/setup/thinking-step.tsx
-msgid "Uses the model the person chose."
-msgstr "Gebruikt het model dat de persoon koos."
 
 #: src/chat/thread.tsx
 msgid "Using {tool}"
@@ -20862,6 +20868,7 @@ msgid "Who can talk to him"
 msgstr "Wie met hem kan praten"
 
 #: src/agents/setup/audience-step.tsx
+#: src/agents/setup/review-step.tsx
 #: src/frame/part-words.tsx
 msgid "Who can use it"
 msgstr "Wie hem kan gebruiken"

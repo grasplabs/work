@@ -2771,8 +2771,8 @@ msgid "Always light"
 msgstr "Toujours clair"
 
 #: src/agents/setup/thinking-step.tsx
-msgid "Always uses this model."
-msgstr "Utilise toujours ce modèle."
+msgid "Always uses this model"
+msgstr "Utilise toujours ce modèle"
 
 #: src/agents/new-agent.tsx
 msgid "Amber"
@@ -3877,13 +3877,13 @@ msgctxt "note property"
 msgid "Before"
 msgstr "Avant"
 
-#: src/agents/agent-templates.ts
-msgid "Before each meeting"
-msgstr "Avant chaque réunion"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Before I reach out, let your team know"
 msgstr "Avant que je prenne contact, prévenez votre équipe"
+
+#: src/agents/agent-templates.ts
+msgid "Before meetings"
+msgstr "Avant les réunions"
 
 #: src/interview/words.ts
 msgid "Before the work: what you told me about AI."
@@ -4002,6 +4002,10 @@ msgstr "Question du Brain"
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Fil d’Ariane"
+
+#: src/agents/agent-templates.ts
+msgid "Brief you"
+msgstr "Vous briefer"
 
 #: src/projects/project-dialog.tsx
 msgid "Briefcase"
@@ -7790,6 +7794,10 @@ msgstr "Suivre les devis jusqu’au paiement"
 msgid "Follow up on leads"
 msgstr "Relancer les prospects"
 
+#: src/agents/setup/thinking-step.tsx
+msgid "Follows the chat's choice"
+msgstr "Suit le choix du chat"
+
 #: src/frame/part-words.tsx
 msgid "Footnote {number}"
 msgstr "Note de bas de page {number}"
@@ -10739,6 +10747,10 @@ msgctxt "the sidebar's main list"
 msgid "Main"
 msgstr "Principal"
 
+#: src/agents/manual-agent.tsx
+msgid "Make {name}"
+msgstr "Créer {name}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Make {name} an admin?"
 msgstr "Faire de {name} un admin ?"
@@ -11511,6 +11523,7 @@ msgstr "Nouvelle version"
 msgid "Newer"
 msgstr "Plus récents"
 
+#: src/agents/manual-agent.tsx
 #: src/agents/new-agent.tsx
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
@@ -15920,10 +15933,6 @@ msgctxt "send the question"
 msgid "Send"
 msgstr "Envoyer"
 
-#: src/agents/agent-templates.ts
-msgid "Send a briefing"
-msgstr "Envoyer un briefing"
-
 #: src/settings/event-source-activity.tsx
 msgid "Send a test event"
 msgstr "Envoyer un événement de test"
@@ -18656,6 +18665,7 @@ msgid "They'll find it under Workflows, and run it as it is now."
 msgstr "Ils le trouveront dans Workflows et l’exécuteront tel qu’il est maintenant."
 
 #: src/agents/setup/review-step.tsx
+#: src/agents/setup/thinking-step.tsx
 #: src/chat/thread.tsx
 #: src/frame/part-words.tsx
 msgid "Thinking"
@@ -19683,10 +19693,6 @@ msgstr "Utilise"
 #: src/settings/roles.ts
 msgid "Uses the Apps and workflows shared with them, and chats with Grasp."
 msgstr "Utilise les Apps et workflows partagés avec eux, et discute avec Grasp."
-
-#: src/agents/setup/thinking-step.tsx
-msgid "Uses the model the person chose."
-msgstr "Utilise le modèle choisi par la personne."
 
 #: src/chat/thread.tsx
 msgid "Using {tool}"
@@ -20862,6 +20868,7 @@ msgid "Who can talk to him"
 msgstr "Qui peut lui parler"
 
 #: src/agents/setup/audience-step.tsx
+#: src/agents/setup/review-step.tsx
 #: src/frame/part-words.tsx
 msgid "Who can use it"
 msgstr "Qui peut l’utiliser"

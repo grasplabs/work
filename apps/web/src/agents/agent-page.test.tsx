@@ -430,7 +430,9 @@ const Page = ({
         company={editable}
         models={models}
         own
+        people={[anna.name]}
         personId={anna.userId}
+        personName={anna.name}
         taken={data.agents.map(({ name }) => name)}
         teams={teams}
       />

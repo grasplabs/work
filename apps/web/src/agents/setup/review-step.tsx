@@ -5,7 +5,12 @@ import * as stylex from "@stylexjs/stylex";
 import { modelName } from "../../chat/model-names.tsx";
 import { ProviderMark } from "../../connections/provider-mark.tsx";
 import { formatList } from "../../format.ts";
-import { AgentCard } from "../../grasp/agent-card/index.ts";
+import {
+  AgentFigure,
+  AgentFigureAura,
+} from "../../grasp/agent-figure/index.ts";
+import { Card, CardDescription } from "../../grasp/card/index.ts";
+import { Heading } from "../../grasp/heading/index.ts";
 import { KeyValueList } from "../../grasp/key-value/index.ts";
 import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
 import { lookFromName } from "../figure/look.ts";
@@ -14,26 +19,49 @@ import type { Schedule, StepProps } from "./model.ts";
 import { Question } from "./question.tsx";
 import { useSetupWords } from "./words.ts";
 
-// The last look before it is made (Ruben, 21 November: the summary was
-// cluttered, its edges square; making an agent should feel special): the
-// agent as it will stand on the Agents page, the library's own Agent card
-// with its figure, name, job and whom it answers, beside a short list of
-// what the setup said, in plain words: its apps as their marks, what it
-// can do in one line, how it thinks and when it works. No chips, no box
-// round both.
+// The last look before it is made (Ruben, 21 November: one wide card, its
+// corners round, less cluttered): the agent's portrait as the Agents page
+// draws it (its light, its figure large and cropped by the corner, its
+// name and job) and, in the same card, what the setup said, each name
+// over its value in plain words: its apps as their marks, what it can do
+// in one line, how it thinks, when it works and who can use it.
 
 const styles = stylex.create({
-  // The card beside its facts; one above the other when narrow.
-  made: {
+  // The portrait beside its facts, clipped to the card's round corners;
+  // one above the other when narrow.
+  card: {
     display: "grid",
     gridTemplateColumns: {
       default: "15rem minmax(0, 1fr)",
       "@media (width < 40rem)": "minmax(0, 1fr)",
     },
-    alignItems: "center",
-    gap: grasp.space8,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    overflow: "clip",
     textAlign: "start",
   },
+  portrait: {
+    position: "relative",
+    display: "grid",
+    alignContent: "start",
+    minHeight: "17rem",
+    padding: grasp.space6,
+    overflow: "hidden",
+    isolation: "isolate",
+  },
+  figure: {
+    position: "absolute",
+    insetBlockEnd: "-3rem",
+    insetInlineEnd: "-3rem",
+    zIndex: 0,
+  },
+  words: {
+    position: "relative",
+    zIndex: 1,
+    display: "grid",
+    gap: grasp.space2,
+  },
+  facts: { alignSelf: "center", padding: grasp.space6 },
   marks: {
     display: "flex",
     flexWrap: "wrap",
@@ -101,44 +129,60 @@ export const ReviewStep = ({ setup, name, apps, teams }: StepProps) => {
       line={t`You can change all of this later.`}
       title={t`Ready to make ${name}?`}
     >
-      <div {...stylex.props(styles.made)}>
-        <AgentCard audience={who} job={setup.job} look={look} name={name} />
-        <KeyValueList
-          items={[
-            // Only a goal the job doesn't say already.
-            ...(goal === "" || goal === setup.job.trim()
-              ? []
-              : [{ key: t`Goal`, value: goal }]),
-            {
-              key: t`Apps`,
-              value:
-                chosenApps.length === 0 ? (
-                  t`None yet`
-                ) : (
-                  <span {...stylex.props(styles.marks)}>
-                    {chosenApps.map((app) => (
-                      <ProviderMark
-                        id={app.id}
-                        key={app.id}
-                        logo={app.logo}
-                        name={app.name}
-                        size="sm"
-                      />
-                    ))}
-                  </span>
-                ),
-            },
-            // One of their own has no kinds of work or schedule of its own.
-            ...(own || can === "" ? [] : [{ key: t`Can do`, value: can }]),
-            { key: t`Thinking`, value: `${thinksWith} · ${effort}` },
-            ...(own
-              ? []
-              : [{ key: t`Works`, value: scheduleLine(setup.schedule) }]),
-          ]}
-          valueAlign="start"
-          variant="stacked"
-        />
-      </div>
+      <Card padding="none">
+        <div {...stylex.props(styles.card)}>
+          <div {...stylex.props(styles.portrait)}>
+            <AgentFigureAura ground="page" look={look} />
+            <span {...stylex.props(styles.figure)}>
+              <AgentFigure look={look} size="xl" state="done" />
+            </span>
+            <span {...stylex.props(styles.words)}>
+              <Heading level={2} size="md">
+                {name}
+              </Heading>
+              <CardDescription>{setup.job}</CardDescription>
+            </span>
+          </div>
+          <div {...stylex.props(styles.facts)}>
+            <KeyValueList
+              items={[
+                // Only a goal the job doesn't say already.
+                ...(goal === "" || goal === setup.job.trim()
+                  ? []
+                  : [{ key: t`Goal`, value: goal }]),
+                {
+                  key: t`Apps`,
+                  value:
+                    chosenApps.length === 0 ? (
+                      t`None yet`
+                    ) : (
+                      <span {...stylex.props(styles.marks)}>
+                        {chosenApps.map((app) => (
+                          <ProviderMark
+                            id={app.id}
+                            key={app.id}
+                            logo={app.logo}
+                            name={app.name}
+                            size="sm"
+                          />
+                        ))}
+                      </span>
+                    ),
+                },
+                // One of their own has no kinds of work or schedule of its own.
+                ...(own || can === "" ? [] : [{ key: t`Can do`, value: can }]),
+                { key: t`Thinking`, value: `${thinksWith} · ${effort}` },
+                ...(own
+                  ? []
+                  : [{ key: t`Works`, value: scheduleLine(setup.schedule) }]),
+                { key: t`Who can use it`, value: who },
+              ]}
+              valueAlign="start"
+              variant="stacked"
+            />
+          </div>
+        </div>
+      </Card>
     </Question>
   );
 };
