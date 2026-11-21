@@ -1,7 +1,7 @@
 /**
  * What the admin's pages read of each organization's core, kept by the
  * page that read it: one router's own (src/router.tsx), so one browser
- * tab's, or one server render's. Every read asks the client's core
+ * tab's. Every read asks the client's core
  * through the router, a round trip staff wait on, which core's audit log
  * records; so a page asks once, and reuses the answer:
  *
@@ -58,6 +58,10 @@ export interface OrgReads {
   settle: (admin: ClientAdmin, now: number) => OrgRead;
   /** Forgets everything of `clientId`, as for one offboarded. */
   forget: (clientId: string) => void;
+  /** Marks client `clientId` as asked anew by staff (Read again): its next page load reads its core over a fresh answer. */
+  askAnew: (clientId: string) => void;
+  /** Whether staff asked client `clientId` anew since its page last loaded; the mark goes with the asking. */
+  takeAskedAnew: (clientId: string) => boolean;
 }
 
 /** A router's reads, empty. */
@@ -66,6 +70,8 @@ export const orgReads = (): OrgReads => {
   const answers = new Map<string, AnsweredAdmin>();
   /** Why the last read failed and when, for a client with an answer kept, until a later one. */
   const failed = new Map<string, NonNullable<OrgRead["stale"]>>();
+  /** Clients staff asked anew (Read again), until their page loads. */
+  const askedAnew = new Set<string>();
 
   const remember = (admin: ClientAdmin): void => {
     if (admin.state !== "answered") {
@@ -124,6 +130,11 @@ export const orgReads = (): OrgReads => {
       underWay.delete(clientId);
       answers.delete(clientId);
       failed.delete(clientId);
+      askedAnew.delete(clientId);
     },
+    askAnew: (clientId) => {
+      askedAnew.add(clientId);
+    },
+    takeAskedAnew: (clientId) => askedAnew.delete(clientId),
   };
 };

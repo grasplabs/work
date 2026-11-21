@@ -9,7 +9,7 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import type { AttentionReason } from "../hosting/attention.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import type { ClientProgress } from "../rollout/progress.ts";
-import type { StaffEvent } from "./platform-data.ts";
+import type { StaffEvent } from "./platform-reads.ts";
 import type { PlatformNeed, Standing } from "./platform.ts";
 
 /** Where a company stands against its channel. */

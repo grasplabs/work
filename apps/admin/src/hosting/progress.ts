@@ -11,9 +11,11 @@
  * has the steps of its install connecting instead, which arrive with
  * GRA-1291: until then they wait, and say so.
  */
+import "@tanstack/react-start/server-only";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { clientSignInSchema } from "../clients/sign-in-schema.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
@@ -23,7 +25,6 @@ import {
   clients,
 } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
-import { clientSignInSchema } from "../deploy/core-config.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import { needsAttentionOf } from "./attention.ts";
 import {

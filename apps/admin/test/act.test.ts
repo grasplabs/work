@@ -4,7 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { act, actIfChanged, adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clientAdminReads, clients } from "../src/db/schema.ts";
-import type { Channel } from "../src/db/schema.ts";
+import type { Channel } from "../src/rollout/channel-ids.ts";
 
 const db = adminDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };

@@ -2,6 +2,7 @@
  * The D1 databases and R2 buckets a client's deployment needs in a
  * destination's account: finding, creating and deleting them.
  */
+import "@tanstack/react-start/server-only";
 import { z } from "zod";
 
 import { CloudflareApiError, isNotFound, listAll } from "./api.ts";

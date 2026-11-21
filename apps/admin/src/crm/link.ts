@@ -7,6 +7,7 @@
  * unlinked) in the same batch as the change, and only when it changes
  * something.
  */
+import "@tanstack/react-start/server-only";
 import { and, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 

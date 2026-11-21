@@ -6,11 +6,11 @@ import {
 import type { ReactNode } from "react";
 
 import { FrameFailure } from "../admin/failure.tsx";
-import { AdminFrame } from "../admin/frame.tsx";
+import { AdminFrame, FrameLoading } from "../admin/frame.tsx";
 import { openClientId, readAdmins } from "../admin/org-loads.ts";
 import { freshMs } from "../admin/org-reads.ts";
 import type { OrgReads } from "../admin/org-reads.ts";
-import { fetchPlatformSidebar } from "../admin/platform-data.ts";
+import { platformCounts } from "../admin/platform.ts";
 import { fetchClientGrid } from "../clients/functions.ts";
 
 import styles from "../styles.css?url";
@@ -52,18 +52,23 @@ const Frame = () => {
  * behind the page shown.
  */
 export const Route = createRootRouteWithContext<AdminContext>()({
+  // Rendered in the browser alone: the Worker answers a page with the
+  // document (`RootDocument`, with `head`) and nothing in it, and every
+  // route below inherits this. A tool behind Access gains nothing from
+  // server rendering. Loaders run in the browser, reading through server
+  // functions, each a request of its own past the Access check.
+  ssr: false,
   // Beside Platform, what the admin recorded alone: no account is read.
+  // Every client's core is asked at once, beside the grid, never after it.
   loader: async ({ context, location }) => {
-    const [clients, platform] = await Promise.all([
-      fetchClientGrid(),
-      fetchPlatformSidebar(),
-    ]);
-    const known = clients.filter(({ status }) => status !== "offboarded");
-    return {
-      clients,
-      platform,
-      admins: readAdmins(context.reads, known, openClientId(location.pathname)),
-    };
+    const grid = fetchClientGrid();
+    const admins = readAdmins(
+      context.reads,
+      grid,
+      openClientId(location.pathname)
+    );
+    const clients = await grid;
+    return { clients, platform: platformCounts(clients), admins };
   },
   staleTime: freshMs,
   head: () => ({
@@ -78,6 +83,13 @@ export const Route = createRootRouteWithContext<AdminContext>()({
     scripts: [{ src: "/theme.js" }],
   }),
   shellComponent: RootDocument,
+  // The document's body until the frame's records are in: also what the
+  // Worker sends, so the first paint is the frame, never a blank page.
+  pendingComponent: FrameLoading,
+  // At once, as the document already shows it, and gone the moment the
+  // records are in: never a blank moment, never a wait for the skeleton.
+  pendingMs: 0,
+  pendingMinMs: 0,
   component: Frame,
   errorComponent: FrameFailure,
 });

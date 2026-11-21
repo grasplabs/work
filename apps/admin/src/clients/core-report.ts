@@ -4,6 +4,7 @@
  * secret, signed with a key both derive from the client's auth secret for
  * that report alone. Core answers what the report's schema says.
  */
+import "@tanstack/react-start/server-only";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";

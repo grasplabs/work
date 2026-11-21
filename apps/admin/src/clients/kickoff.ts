@@ -15,6 +15,7 @@
  * answers, which says which of the ten things it brought and the
  * questions it left, never what was said.
  */
+import "@tanstack/react-start/server-only";
 import {
   adminKickoffAskSchema,
   adminKickoffPath,

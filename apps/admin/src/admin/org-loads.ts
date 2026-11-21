@@ -43,37 +43,41 @@ const readOne = async (
   );
 
 /**
- * Every client in `clients`, as its core answers now, in their order;
- * the open one's (`open`) read on its own, as its page reads it. Null
- * when they couldn't be read at all.
+ * Every client, as its core answers now, in the order of `clients` (the
+ * grid, read beside it rather than before it: neither waits on the
+ * other); the open one's (`open`) read on its own, as its page reads it.
+ * Null when they couldn't be read at all.
  */
 export const readAdmins = async (
   reads: OrgReads,
-  clients: readonly GridRow[],
+  clients: Promise<readonly GridRow[]>,
   open: string | undefined
 ): Promise<ClientAdmin[] | null> => {
-  const opened =
-    open !== undefined && clients.some(({ id }) => id === open)
-      ? open
-      : undefined;
-  const [rest, one] = await Promise.all([
+  const [rest, one, rows] = await Promise.all([
     (async () => {
       try {
         return await fetchClientAdmins({
-          data: { except: opened === undefined ? [] : [opened] },
+          data: { except: open === undefined ? [] : [open] },
         });
       } catch {
         return null;
       }
     })(),
     (async () => {
-      if (opened === undefined) {
+      if (open === undefined) {
         return null;
       }
       try {
-        return await readOne(reads, opened);
+        return await readOne(reads, open);
       } catch {
         return null;
+      }
+    })(),
+    (async () => {
+      try {
+        return await clients;
+      } catch {
+        return [];
       }
     })(),
   ]);
@@ -83,7 +87,7 @@ export const readAdmins = async (
   for (const admin of rest) {
     reads.remember(admin);
   }
-  const order = new Map(clients.map(({ id }, index) => [id, index]));
+  const order = new Map(rows.map(({ id }, index) => [id, index]));
   return [...rest, ...(one === null ? [] : [one])].toSorted(
     (a, b) =>
       (order.get(a.client.id) ?? order.size) -
@@ -140,9 +144,9 @@ const unanswered = (client: GridRow): ClientAdmin => ({
 
 /**
  * Organization `client`'s page as read: an answer the page has while it
- * is fresh, at once (unless staff asked anew over it); otherwise its core
- * asked now, unless only preloaded (undefined: asked once opened). The
- * frame's read (`admins`) counts once it is in.
+ * is fresh, at once (unless staff asked anew over it, `askAnew`);
+ * otherwise its core asked now, unless only preloaded (undefined: asked
+ * once opened). The frame's read (`admins`) counts once it is in.
  */
 export const readOrganization = async ({
   reads,
@@ -154,14 +158,18 @@ export const readOrganization = async ({
   reads: OrgReads;
   client: GridRow;
   admins: Promise<ClientAdmin[] | null>;
+  /** Run again on the page it is on: the load waits for the read, keeping what the page shows. */
   again: boolean;
   /** Only pointed at, not opened: what the page has, its core never asked. */
   preload: boolean;
 }): Promise<{ read: Deferred<OrgRead> | undefined }> => {
-  // Run again where a fresh answer shows: staff asked anew (Read again,
-  // Try again), so the answer isn't reused. Run again without one (it
-  // went stale, or the page opens from a preload): read as on opening.
-  const anew = again && reads.fresh(client.id, Date.now()) !== undefined;
+  // Staff asked anew (Read again, `askAnew`): the fresh answer isn't
+  // reused. Only that: how the router came to run the loader (`again`)
+  // says nothing of who asked, and a navigation it counts as staying put
+  // must still take the frame's read under way.
+  const anew =
+    reads.takeAskedAnew(client.id) &&
+    reads.fresh(client.id, Date.now()) !== undefined;
   if (!anew) {
     const framed = await peek(admins);
     const found =

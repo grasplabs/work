@@ -26,7 +26,7 @@ import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { clientScripts } from "./grasp-account.ts";
-import { callServerFn, page } from "./pages.ts";
+import { callServerFn } from "./pages.ts";
 import {
   deployPlaced,
   livePlacedClient,
@@ -339,33 +339,29 @@ describe("a client's Teams bot", () => {
     }).toStrictEqual({ same: true, without: null });
   });
 
-  it("says on its Setup that its bot's secret needs replacing once it's within a month of expiring, or has expired", async () => {
+  it("reads for its Setup how many days its bot's secret has left, negative once it expired", async () => {
     const acme = await liveClient("Acme Logistics");
-    /** The Setup's words once the secret expires on `day`. */
-    const setupWith = async (day: string): Promise<string> => {
+    /** What the Setup reads once the secret expires on `day`. */
+    const daysLeftWith = async (day: string): Promise<number | null> => {
       await callServerFn(
         setTeamsBotFn,
         { clientId: acme.clientId, bot: { ...newBot(), secretExpiresOn: day } },
         { email: staff.email }
       );
-      const { html } = await page(
-        `/organizations/${acme.clientId}/setup`,
-        staff.email
+      const read = await callServerFn(
+        fetchClientSetup,
+        { clientId: acme.clientId },
+        { email: staff.email }
       );
-      return html.replaceAll("&#x27;", "'");
+      return read?.teamsBotSecretDays ?? null;
     };
 
-    const far = await setupWith(inDays(90));
-    const soon = await setupWith(inDays(20));
-    const expired = await setupWith(inDays(-1));
-
+    // What the Setup says of each is in src/admin/setup.test.tsx.
     expect({
-      far: far.includes("Its Teams bot's secret"),
-      soon: soon.includes("Its Teams bot's secret expires in 20 days."),
-      expired: expired.includes(
-        "Its Teams bot's secret has expired: Stephen can't answer in Teams."
-      ),
-    }).toStrictEqual({ far: false, soon: true, expired: true });
+      far: await daysLeftWith(inDays(90)),
+      soon: await daysLeftWith(inDays(20)),
+      expired: await daysLeftWith(inDays(-1)),
+    }).toStrictEqual({ far: 90, soon: 20, expired: -1 });
   });
 
   it("is set only by staff Access vouches for, refused when it isn't a bot, and audited only when it changes", async () => {

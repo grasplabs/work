@@ -2,8 +2,8 @@ import { env } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { platformData, staffEvents } from "../src/admin/platform-data.ts";
 import { eventWords, needWords } from "../src/admin/platform-parts.tsx";
+import { platformData, staffEvents } from "../src/admin/platform-reads.ts";
 import { companiesOf, platformCounts } from "../src/admin/platform.ts";
 import { clientGrid } from "../src/clients/grid.ts";
 import type { GridRow, LiveStatus } from "../src/clients/grid.ts";

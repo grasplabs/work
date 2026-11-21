@@ -31,6 +31,7 @@
  * its people and deals, when a company is linked and Secrets Store has
  * Attio's key (src/crm/crm.ts).
  */
+import "@tanstack/react-start/server-only";
 import {
   adminSnapshotPath,
   adminSnapshotPurpose,

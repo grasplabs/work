@@ -1,3 +1,4 @@
+import "@tanstack/react-start/server-only";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
