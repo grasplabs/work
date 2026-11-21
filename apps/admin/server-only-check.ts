@@ -3,34 +3,54 @@
  * marked server-only (`import "@tanstack/react-start/server-only";`).
  * Start's import protection then fails the browser's build if any of a
  * marked module's code survives into it, whatever it imports; this check
- * fails it when a module the browser doesn't load is left unmarked, so a
- * new server module can't slip past. The browser's modules are what its
- * build kept code of; every other module under src/ is the Worker's, and
- * must say so. Tests aren't the app's.
+ * fails it when a module the browser's build left out entirely is left
+ * unmarked, so a new server module can't slip past. Tests aren't the app's.
+ *
+ * What it doesn't do: a module the browser keeps any code of is never
+ * required to be marked, so this check protects nothing the browser uses.
+ * What keeps the Worker's code out of those modules is the import
+ * protection's denials alone (vite.config.ts): an import of
+ * `cloudflare:workers`, `drizzle-orm`, `src/db/**`, a `*.server.*` file,
+ * the tests' helpers, or a marked module. A module the browser loads that
+ * holds server logic without any of those passes both.
+ *
+ * Server functions' own files (`*-functions.ts`) are such modules: the
+ * browser keeps them as the functions' stubs, and everything at their
+ * module scope ships with them. They hold nothing but `createServerFn`
+ * definitions and what the browser may see (their input schemas, types):
+ * whatever their handlers need lives in marked modules they import.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { parseSync } from "vite-plus";
 import type { Plugin } from "vite-plus";
 
 /** The marker Start's import protection reads. */
 export const serverOnlyMarker = "@tanstack/react-start/server-only";
 
-/** What isn't a module of the app's: tests, and the generated route tree. */
-const notTheApp = /(?:\.test\.tsx?|\.d\.ts|routeTree\.gen\.ts)$/u;
+/** The app's modules, in any language the build reads. */
+const sourceFile = /\.[cm]?[jt]sx?$/u;
 
-/** Every TypeScript module under `dir`, as absolute paths. */
+/** What isn't a module of the app's: tests, declarations, and the generated route tree. */
+const notTheApp = /(?:\.test\.[cm]?[jt]sx?|\.d\.[cm]?ts|routeTree\.gen\.ts)$/u;
+
+/** Every module under `dir`, as absolute paths. */
 const modulesUnder = (dir: string): string[] =>
   readdirSync(dir, { recursive: true, encoding: "utf-8" })
-    .filter((file) => /\.tsx?$/u.test(file) && !notTheApp.test(file))
+    .filter((file) => sourceFile.test(file) && !notTheApp.test(file))
     .map((file) => path.join(dir, file));
 
 /**
- * Whether `file` imports the marker. The browser's build keeps no code of
- * a marked module, so `kept` never lists one.
+ * Whether `file` imports the marker in a real import declaration, read
+ * by a parser: never a comment or a string that quotes it.
  */
 const isMarked = (file: string): boolean =>
-  readFileSync(file, "utf-8").includes(`import "${serverOnlyMarker}";`);
+  parseSync(file, readFileSync(file, "utf-8")).program.body.some(
+    (statement) =>
+      statement.type === "ImportDeclaration" &&
+      statement.source.value === serverOnlyMarker
+  );
 
 /**
  * The modules the browser's build left out (`kept` holds what it kept code
@@ -64,7 +84,11 @@ export const serverOnlyCheck = (src: string): Plugin => ({
     const unmarked = unmarkedServerModules(src, kept);
     if (unmarked.length > 0) {
       this.error(
-        `These modules never run in the browser but aren't marked server-only: add import "${serverOnlyMarker}"; at the top of each.\n${unmarked.join("\n")}`
+        [
+          "These modules never run in the browser but aren't marked server-only:",
+          ...unmarked,
+          `Each one is either the Worker's: add import "${serverOnlyMarker}"; at its top; or meant for the browser: import it where the browser uses it (a module that moves to the browser loses its marker, or its build fails).`,
+        ].join("\n")
       );
     }
   },
