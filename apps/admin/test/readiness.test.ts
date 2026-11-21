@@ -16,7 +16,7 @@ import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { graspAccount } from "./grasp-account.ts";
 import { db } from "./hosting.ts";
-import { callServerFn, page } from "./pages.ts";
+import { callServerFn } from "./pages.ts";
 import { placedRelease } from "./placed.ts";
 import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
@@ -63,22 +63,14 @@ describe("Platform's Readiness", () => {
     await db.delete(releases);
   });
 
-  it("says what stops onboarding on an admin with nothing set up, and Home says so too", async () => {
+  // What Home and Platform say of it is in src/admin/platform.test.tsx.
+  it("says what stops onboarding on an admin with nothing set up", async () => {
     const read = await withVars(production, readiness);
-    const home = await withVars(production, async () => await page("/"));
-    const platform = await withVars(
-      production,
-      async () => await page("/platform")
-    );
 
     expect({
       statuses: statuses(read),
       blocking: read.blocking,
       release: wordsOf(read, "release"),
-      banner: home.html.includes(
-        "Grasp can&#x27;t onboard an organization yet"
-      ),
-      panel: platform.html.includes("No release is imported yet."),
     }).toStrictEqual({
       statuses: {
         stage: "ready",
@@ -91,8 +83,6 @@ describe("Platform's Readiness", () => {
       blocking: 2,
       release:
         "No release is imported yet. CI publishes one for every merge to main, and the admin imports it within five minutes; Releases lists any it couldn't import, and why.",
-      banner: true,
-      panel: true,
     });
   });
 
@@ -124,18 +114,16 @@ describe("Platform's Readiness", () => {
     });
   });
 
-  it("is ready once a release is imported and the deployer reaches the stage's namespace in Grasp's account, and Home's banner goes", async () => {
+  it("is ready once a release is imported and the deployer reaches the stage's namespace in Grasp's account", async () => {
     graspAccount(cloudflare);
     await placedRelease("feat(core): ready");
 
     const read = await withVars(production, readiness);
-    const home = await withVars(production, async () => await page("/"));
 
     expect({
       statuses: statuses(read),
       blocking: read.blocking,
       deployer: wordsOf(read, "deployer"),
-      banner: home.html.includes("Grasp can&#x27;t onboard"),
     }).toMatchObject({
       statuses: {
         stage: "ready",
@@ -146,7 +134,6 @@ describe("Platform's Readiness", () => {
       },
       blocking: 0,
       deployer: `The deployer's token reaches ${clientsNamespace("production")} in Grasp's account.`,
-      banner: false,
     });
   });
 

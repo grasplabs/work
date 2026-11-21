@@ -1,4 +1,13 @@
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { exports } from "cloudflare:workers";
+import { createElement } from "react";
+import type { ReactElement } from "react";
+import { prerender } from "react-dom/static";
 import { fromCrossJSON, toJSONAsync } from "seroval";
 import { z } from "zod";
 
@@ -114,6 +123,26 @@ export const documentOf = async (
     headers: { "cf-access-jwt-assertion": await accessJwt(email) },
   });
   return { status: response.status, html: await response.text() };
+};
+
+/**
+ * `element`'s markup once everything it waits on is in, rendered inside a
+ * router of its own, as the page would show it: for a section whose words
+ * come from rich records the Worker answers (an organization's Setup),
+ * tested from those real answers rather than copies of them. The pages
+ * themselves render in the browser (src/test-app.tsx).
+ */
+export const rendered = async (element: ReactElement): Promise<string> => {
+  const router = createRouter({
+    routeTree: createRootRoute({ component: () => element }),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  await router.load();
+  const { prelude } = await prerender(
+    createElement(RouterProvider, { router })
+  );
+  const html = await new Response(prelude).text();
+  return html.replaceAll(scripts, "");
 };
 
 /** What TanStack Start's route for server functions answers, deserialized. */

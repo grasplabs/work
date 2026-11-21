@@ -2,11 +2,9 @@ import { adminOrgOf } from "@grasp-os/shared/admin/admin-snapshot-adapter";
 import { adminViewOf } from "@grasp-os/shared/admin/admin-view";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
-import { env } from "cloudflare:workers";
-import { ne } from "drizzle-orm";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 // A small company as core answers for it, with Sales's orders drawn from its
 // interviews: core sends the admin no drawn work yet.
@@ -16,33 +14,6 @@ import {
   orders,
 } from "../../../packages/shared/test/admin/fixtures/bakkerij.ts";
 import { OrgWorkflows } from "../src/admin/workflows.tsx";
-import { adminDatabase } from "../src/db/act.ts";
-import { clients } from "../src/db/schema.ts";
-import { mockAccess } from "./access.ts";
-import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { page } from "./pages.ts";
-import { livePlacedClient, placedRelease } from "./placed.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
-import { emptyAdminSnapshot } from "./snapshots.ts";
-
-const token = "test-deployer-token-admin-workflows-5c2a19";
-const cloudflare = mockCloudflareApi(token);
-// After the fake API: Access's keys are served, the rest goes to the fake.
-mockAccess();
-
-const db = adminDatabase(env.DB);
-
-/** An active client running a new release, as a deploy made it live. */
-const liveClient = async () => {
-  const release = await placedRelease("feat(core): workflows");
-  const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { core } = await livePlacedClient(cloudflare, release, {
-    id: clientId,
-    name: `Acme ${clientId}`,
-    signIn: null,
-  });
-  return { clientId, core };
-};
 
 const day = "2026-10-14";
 
@@ -79,39 +50,6 @@ const textOf = (html: string): string =>
     .trim();
 
 describe("an organization's workflows", () => {
-  useStoreSecrets({ deployer: token });
-  beforeEach(async () => {
-    await db
-      .update(clients)
-      .set({ status: "offboarded" })
-      .where(ne(clients.status, "offboarded"));
-  });
-
-  it("says none is named yet before a lead names the team's work", async () => {
-    const acme = await liveClient();
-    acme.core.admin = { ...emptyAdminSnapshot("Acme"), told: true };
-
-    const { status, html } = await page(
-      `/organizations/${acme.clientId}/workflows`
-    );
-
-    expect({
-      status,
-      title: html.includes("Workflows</h1>"),
-      none: html.includes(
-        "None yet. A team’s work shows up here once its lead has named it."
-      ),
-      toCome: html.includes("This section isn’t in the admin yet."),
-      table: html.includes("<table"),
-    }).toStrictEqual({
-      status: 200,
-      title: true,
-      none: true,
-      toCome: false,
-      table: false,
-    });
-  });
-
   it("lists every piece of work with how far it is known, who talked, the steps described and what is still missing", () => {
     const view = drawnView([]);
     const html = sectionOf(view);

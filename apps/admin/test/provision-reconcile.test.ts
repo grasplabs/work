@@ -31,9 +31,10 @@ import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, onChannel, release, staff } from "./hosting.ts";
-import { callServerFn, page } from "./pages.ts";
+import { callServerFn } from "./pages.ts";
 import { ended, startsOf } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { setupPage } from "./setup-page.ts";
 
 // Provisioning that heals itself (src/hosting/reconcile.ts): the admin's
 // cron resumes a client that isn't getting anywhere, and tells staff only
@@ -140,7 +141,7 @@ const detailsOf = async (clientId: string, action: string) => {
 const standingOf = async (clientId: string) => {
   const view = await getProvisioning(env, clientId);
   const grid = await clientGrid(env);
-  const { html } = await page(`/organizations/${clientId}/setup`, staff.email);
+  const html = (await setupPage(clientId, "status", staff.email)) ?? "";
   return {
     setup: view?.needsAttention?.reason ?? null,
     grid: grid.find(({ id }) => id === clientId)?.setup ?? null,

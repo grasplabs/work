@@ -7,7 +7,7 @@ import {
   readySnapshot,
   toldSnapshot,
 } from "../../test/snapshots.ts";
-import { answeredAdmin, gridRow, openAdmin } from "../test-app.tsx";
+import { answeredAdmin, gridRow, lineOf, openAdmin } from "../test-app.tsx";
 import type { Answers } from "../test-app.tsx";
 import { formatDate } from "./words.ts";
 
@@ -281,5 +281,169 @@ describe("an organization's page", () => {
       notRecorded: part.split("Not recorded yet").length - 1,
       noCouncil: part.includes("No works council"),
     }).toStrictEqual({ description: true, notRecorded: 3, noCouncil: false });
+  });
+});
+
+describe("an organization's overview", () => {
+  it("lists what needs Grasp, the most pressing first, each opening the section it is settled in", async () => {
+    const { container, text } = await openAcme("", readySnapshot("Acme"));
+    const needs = partOf(container, "Needs Grasp");
+    const said = needs?.textContent ?? "";
+    // The go and both agreements; a contract core doesn't hold is nothing to settle.
+    const lines = [
+      "The company comes in once Grasp gives its go.",
+      "The agreement on handling data is not signed yet.",
+      "The company has not signed off its look at the risks yet.",
+    ];
+
+    expect({
+      needs: lines.map((line) => said.includes(line)),
+      mostPressingFirst: lines
+        .map((line) => said.indexOf(line))
+        .every((at, index, all) => index === 0 || at > (all[index - 1] ?? 0)),
+      contract: said.includes("The contract is still being written."),
+      opensSteps:
+        needs?.querySelector('a[href="/organizations/acme/steps"]') !==
+          undefined &&
+        needs?.querySelector('a[href="/organizations/acme/steps"]') !== null,
+      ported: !text().includes("This section isn’t in the admin yet."),
+    }).toStrictEqual({
+      needs: [true, true, true],
+      mostPressingFirst: true,
+      contract: false,
+      opensSteps: true,
+      ported: true,
+    });
+  });
+
+  it("briefs the next call with where the company stands, leaving what to bring up to what needs Grasp beside it", async () => {
+    const { container } = await openAcme("", readySnapshot("Acme"));
+    const brief = partOf(container, "Before the next call")?.textContent ?? "";
+
+    expect({
+      stands: brief.includes("Agreed."),
+      prepares: brief.includes("Prepare the call with Grasp"),
+      // What needs Grasp stands once, in its own list.
+      bringUp: brief.includes("The company comes in once Grasp gives its go."),
+      // Core gives how much is known without its parts, and no drawn work.
+      notKnownYet: brief.includes("Not known yet"),
+      couldDoMore: brief.includes("Where Grasp could do more"),
+    }).toStrictEqual({
+      stands: true,
+      prepares: true,
+      bringUp: false,
+      notKnownYet: false,
+      couldDoMore: false,
+    });
+  });
+
+  it("once the company is open, briefs it as open", async () => {
+    const ready = readySnapshot("Acme");
+    const weekAgo = new Date(Date.parse(ready.now) - 7 * 86_400_000);
+    const { container } = await openAcme("", {
+      ...ready,
+      gate: { ...ready.gate, open: true, openedAt: weekAgo.toISOString() },
+    });
+
+    expect(partOf(container, "Before the next call")?.textContent).toContain(
+      "Open since the go"
+    );
+  });
+
+  it("counts the interviews' days to the company's own plan", async () => {
+    const { text } = await openAcme(
+      "",
+      toldSnapshot("Acme", { days: 21, daysIn: 3, leadTalked: true })
+    );
+
+    expect(text()).toMatch(/Day \d+ of 21/u);
+  });
+});
+
+describe("an organization's details", () => {
+  it("shows the company as core has it, its people counted, and every part core doesn't hold as not known yet", async () => {
+    // Its list of people in: three people in two teams.
+    const { container, main } = await openAcme("/details", {
+      ...emptyAdminSnapshot("Noordkade"),
+      roster: {
+        teams: [
+          { id: "finance", name: "Finance", lead: "eva", does: "", off: false },
+          { id: "sales", name: "Sales", lead: null, does: "", off: false },
+        ],
+        people: [
+          ["eva", "Eva Bakker", "finance", "CFO"],
+          ["ruben", "Ruben de Vries", "finance", ""],
+          ["lotte", "Lotte Jansen", "sales", ""],
+        ].map(([id = "", name = "", team = "", title = ""]) => ({
+          id,
+          name,
+          email: `${id}@noordkade.test`,
+          team,
+          title,
+          away: false,
+        })),
+      },
+    });
+    const page = main();
+
+    expect({
+      title: container.querySelector("main h1")?.textContent,
+      toCome: page.includes("This section isn’t in the admin yet."),
+      // Core holds no website, so there is nothing to open.
+      website: page.includes("in a new tab"),
+      // Nobody is known for any part, so each says what it is for.
+      contacts: [
+        "Wants this to happen, and decides.",
+        "Runs the company’s own onboarding and its workspace.",
+        "Gets the invoices.",
+        "Answers for how the company handles personal data.",
+      ].map((what) => page.includes(what)),
+      writes: container.querySelector('main a[href^="mailto:"]'),
+      calls: page.includes("Once Attio is connected, this fills in by itself."),
+      papers: [
+        "Name on the contract",
+        "Website",
+        "Company register number",
+        "VAT number",
+        "Address",
+      ].map((label) => lineOf(container, label)),
+      // People of the company are counted, never named here.
+      named: ["Eva Bakker", "Ruben de Vries", "Lotte Jansen"].some((person) =>
+        page.includes(person)
+      ),
+    }).toStrictEqual({
+      title: "Details",
+      toCome: false,
+      website: false,
+      contacts: [true, true, true, true],
+      writes: null,
+      calls: true,
+      // Core holds no contract, so the name it stands under there isn't known.
+      papers: Array.from({ length: 5 }, () => "Not known yet"),
+      named: false,
+    });
+  });
+});
+
+describe("an organization's workflows", () => {
+  it("says none is named yet before a lead names the team's work", async () => {
+    const { container, main } = await openAcme("/workflows", {
+      ...emptyAdminSnapshot("Acme"),
+      told: true,
+    });
+
+    expect({
+      title: container.querySelector("main h1")?.textContent,
+      none: main().includes(
+        "None yet. A team’s work shows up here once its lead has named it."
+      ),
+      toCome: main().includes("This section isn’t in the admin yet."),
+      table: container.querySelector("main table"),
+    }).toStrictEqual({
+      title: "Workflows",
+      none: true,
+      toCome: false,
+      table: null,
+    });
   });
 });
