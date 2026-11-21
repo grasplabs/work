@@ -587,9 +587,14 @@ const seedChats = async (
   const now = Date.now();
   for (const chat of chats) {
     const { api } = sessionFor(sessions, chat.by);
+    // One its person archived is still theirs: left as it is, never made
+    // again.
     // oxlint-disable-next-line no-await-in-loop -- one chat at a time
-    const listed = await api.chats.list();
-    if (listed.some(({ title }) => title === chat.title)) {
+    const listed = await Promise.all([
+      api.chats.list(),
+      api.chats.list({ archived: true }),
+    ]);
+    if (listed.flat().some(({ title }) => title === chat.title)) {
       continue;
     }
     const deleted = chat.turns.find(
