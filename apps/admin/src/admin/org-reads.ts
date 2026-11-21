@@ -1,7 +1,7 @@
 /**
  * What the admin's pages read of each organization's core, kept by the
  * page that read it: one router's own (src/router.tsx), so one browser
- * tab's, or one server render's. Every read asks the client's core
+ * tab's. Every read asks the client's core
  * through the router, a round trip staff wait on, which core's audit log
  * records; so a page asks once, and reuses the answer:
  *
