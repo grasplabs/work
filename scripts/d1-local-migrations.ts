@@ -67,7 +67,15 @@ const argumentsOf = (
   return { configs, persistTo };
 };
 
-/** Runs `wrangler d1 execute` on the local state, and returns its output. */
+/**
+ * Runs `wrangler d1 execute` on the local state, and returns its output.
+ *
+ * At Wrangler's own log level, whatever the caller's: `--json` prints its
+ * answer as an ordinary log line, so a quieter `WRANGLER_LOG` (the e2e
+ * stack's is `warn`, playwright.config.ts) prints nothing at all.
+ * Warnings and errors still reach stderr, and the log file
+ * (`WRANGLER_LOG_PATH`) still gets every line.
+ */
 const execute = (
   config: string,
   persistTo: string,
@@ -87,8 +95,37 @@ const execute = (
       persistTo,
       ...args,
     ],
-    { encoding: "utf-8", stdio: ["ignore", "pipe", "inherit"] }
+    {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "inherit"],
+      env: { ...process.env, WRANGLER_LOG: "log" },
+    }
   );
+
+/** The migrations a database has applied, as Wrangler's `--json` says. */
+const appliedMigrations = (
+  config: string,
+  persistTo: string,
+  binding: string
+): Set<string> => {
+  const output = execute(config, persistTo, binding, [
+    "--json",
+    "--command",
+    `${createMigrationsTable} SELECT name FROM "d1_migrations";`,
+  ]);
+  if (output.trim() === "") {
+    throw new Error(
+      `wrangler d1 execute --json printed nothing for ${binding} (${config}): see its output above`
+    );
+  }
+  return new Set(
+    executeAnswerSchema
+      .parse(JSON.parse(output))
+      .flatMap(({ results }) =>
+        results.flatMap(({ name }) => (typeof name === "string" ? [name] : []))
+      )
+  );
+};
 
 const main = (): void => {
   const { configs, persistTo } = argumentsOf(process.argv.slice(2));
@@ -96,22 +133,7 @@ const main = (): void => {
   try {
     for (const config of configs) {
       for (const { binding, migrationsDir } of d1DatabasesOf(config)) {
-        const answer = executeAnswerSchema.parse(
-          JSON.parse(
-            execute(config, persistTo, binding, [
-              "--json",
-              "--command",
-              `${createMigrationsTable} SELECT name FROM "d1_migrations";`,
-            ])
-          )
-        );
-        const applied = new Set(
-          answer.flatMap(({ results }) =>
-            results.flatMap(({ name }) =>
-              typeof name === "string" ? [name] : []
-            )
-          )
-        );
+        const applied = appliedMigrations(config, persistTo, binding);
         const pending = d1MigrationFiles(migrationsDir).filter(
           (name) => !applied.has(name)
         );
