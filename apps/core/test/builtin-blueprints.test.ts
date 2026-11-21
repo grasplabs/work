@@ -6,7 +6,7 @@ import {
   readDefinition,
 } from "@grasp-os/runtime/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, blueprintIdSchema } from "@grasp-os/shared/ids";
 import type {
   DeclaredPermission,
   Authority,
@@ -22,6 +22,7 @@ import type { BuiltinBlueprint } from "#blueprints";
 import {
   createFromBlueprint,
   installBuiltinBlueprint,
+  removeBuiltinBlueprint,
 } from "../src/app-blueprints.ts";
 import { startAppBinding } from "../src/app-workflow-bindings.ts";
 import { blueprintsDigestText } from "../src/builtin-digest.ts";
@@ -617,13 +618,18 @@ describe("the built-in blueprints", () => {
     await expect(helloTrees()).resolves.toStrictEqual([before?.tree]);
   });
 
-  it("are removed by the first release that no longer ships them, once, leaving Apps created from them as they are, and installed again by one that ships them", async () => {
+  it("are removed by the first release that no longer ships them, once, leaving Apps created from them and marked blueprints as they are, and installed again by one that ships them", async () => {
     await reinstall();
     const builder = await signedInApi(idp, "builder");
     const copy = await builder.api.apps.blueprints.create("hello", {
       name: "Kept",
     });
     await builder.api.versions.rollback({ kind: "app", id: copy.app.id }, 1);
+    // A blueprint a builder marked, which no release ships either.
+    const { id: marked } = await builder.api.apps.blueprints.mark(
+      copy.app.id,
+      1
+    );
 
     const events = await auditedDuring(async () => {
       await expect(install(withoutHello())).resolves.toBeTruthy();
@@ -634,10 +640,17 @@ describe("the built-in blueprints", () => {
     const created = await outcome(
       builder.api.apps.blueprints.create("hello", { name: "Too late" })
     );
+    const fromMarked = await outcome(
+      builder.api.apps.blueprints.create(marked, { name: "From the marked" })
+    );
     const removed = {
       audited: helloActions(events),
-      listed: listed.some(({ id }) => id === "hello"),
+      markedAudited: events.filter(({ target }) => target?.id === marked),
+      listed: listed
+        .map(({ id }) => id)
+        .filter((id) => [marked, "hello"].includes(id)),
       created,
+      fromMarked,
       trees: await helloTrees(),
       kept: await builder.api.versions.files(
         { kind: "app", id: copy.app.id },
@@ -655,8 +668,10 @@ describe("the built-in blueprints", () => {
     }).toStrictEqual({
       removed: {
         audited: ["blueprint.removed"],
-        listed: false,
+        markedAudited: [],
+        listed: [marked],
         created: "app.blueprint_not_found",
+        fromMarked: "ok",
         trees: [],
         kept: committed(hello()),
         update: null,
@@ -666,19 +681,28 @@ describe("the built-in blueprints", () => {
     });
   });
 
-  it("aren't recorded as installed while one the release no longer ships fails to be removed, and the next install removes it", async () => {
+  it("keep one whose removal failed whole, for the next install to remove or a release that ships it again to offer", async () => {
     await reinstall();
-    const deletesDown: Env = { ...env, FILES: refusingDeletes(env.FILES) };
+    const builder = await signedInApi(idp, "builder");
+    const before = await helloTrees();
+    const removalDown: Env = {
+      ...env,
+      DB: racingDb(() => {
+        throw new Error("D1 unavailable");
+      }, /^delete from "blueprints"/iu),
+    };
     const logged = vi.spyOn(console, "error").mockReturnValue();
     let partial: boolean;
-    let failures: string[];
+    let failures: number;
     try {
-      partial = await install(withoutHello(), deletesDown);
+      partial = await install(withoutHello(), removalDown);
       // Read before the spy is restored, which forgets its calls.
       failures = logged.mock.calls
         .flat()
         .map((entry) => JSON.stringify(entry))
-        .filter((entry) => entry.includes("builtins.blueprint_remove_failed"));
+        .filter((entry) =>
+          entry.includes("builtins.blueprint_remove_failed")
+        ).length;
     } finally {
       logged.mockRestore();
     }
@@ -686,24 +710,93 @@ describe("the built-in blueprints", () => {
       builtins(env),
       async (_instance, state) => await state.storage.get("installed")
     );
-    const left = await helloRow();
+    const left = {
+      row: (await helloRow()) !== null,
+      trees: await helloTrees(),
+    };
 
-    await expect(install(withoutHello())).resolves.toBeTruthy();
+    // A release that ships it again (a rollback) finds it whole.
+    await reinstall();
+    const created = await builder.api.apps.blueprints.create("hello", {
+      name: "After a failed removal",
+    });
     expect({
       partial,
-      failures: failures.length,
+      failures,
       stamped,
-      left: left !== null,
-      removed: await helloRow(),
-      trees: await helloTrees(),
+      left,
+      created: await builder.api.versions.files(
+        { kind: "app", id: created.app.id },
+        1
+      ),
     }).toStrictEqual({
       partial: false,
       failures: 1,
       stamped: undefined,
-      left: true,
-      removed: null,
-      trees: [],
+      left: { row: true, trees: before },
+      created: committed(hello()),
     });
+  });
+
+  it("are removed though their trees' delete fails, which a release that ships them again rewrites and tidies", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const before = await helloTrees();
+    const deletesDown: Env = { ...env, FILES: refusingDeletes(env.FILES) };
+
+    await expect(install(withoutHello(), deletesDown)).resolves.toBeTruthy();
+    const removed = { row: await helloRow(), trees: await helloTrees() };
+    await reinstall();
+    const created = await builder.api.apps.blueprints.create("hello", {
+      name: "After a failed delete",
+    });
+    expect({
+      removed,
+      trees: await helloTrees(),
+      created: await builder.api.versions.files(
+        { kind: "app", id: created.app.id },
+        1
+      ),
+    }).toStrictEqual({
+      removed: { row: null, trees: before },
+      trees: before,
+      created: committed(hello()),
+    });
+  });
+
+  it("refuse a create that read one just before its removal as gone, not with the missing code", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    // Removed, row and trees, between the create reading its row and its code.
+    const racing: R2Bucket = new Proxy(env.FILES, {
+      get: (target, key) => {
+        if (key === "get") {
+          return async (...args: Parameters<R2Bucket["get"]>) => {
+            if (args[0].startsWith("blueprints/hello/")) {
+              await removeBuiltinBlueprint(
+                env,
+                blueprintIdSchema.parse("hello")
+              );
+            }
+            return await target.get(...args);
+          };
+        }
+        const value: unknown = Reflect.get(target, key);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    const refused = await outcome(
+      createFromBlueprint(
+        { ...env, FILES: racing },
+        await builder.api.whoami(),
+        "hello",
+        { name: "Raced" }
+      )
+    );
+    expect(refused).toBe("app.blueprint_not_found");
 
     await reinstall();
   });

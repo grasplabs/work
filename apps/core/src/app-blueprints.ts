@@ -458,6 +458,27 @@ export const unmarkBlueprint = async (
 };
 
 /**
+ * The code of `blueprint`, read for a create: refused as gone when a
+ * removal (`removeBuiltinBlueprint`) deleted its row and its trees since
+ * the row was read, rather than failing on the missing tree.
+ */
+const readBlueprintCode = async (
+  env: Env,
+  blueprint: Row,
+  appId: AppId | null
+): Promise<Map<string, string>> => {
+  const id = blueprintIdSchema.parse(blueprint.id);
+  try {
+    return await blueprintFiles(env, { id, appId, tree: blueprint.tree });
+  } catch (error) {
+    if (!(await blueprintRow(env, id))) {
+      throw appErrors.create("app.blueprint_not_found");
+    }
+    throw error;
+  }
+};
+
+/**
  * Creates an App of `by`'s own from the blueprint `id`: its code as the
  * App's first version, and requests for what it
  * declares. All of it lands in one batch, or none of it (the files,
@@ -499,11 +520,7 @@ export const createFromBlueprint = async (
     input
   );
   const { definition, text: takenDefinition } = await readStored(blueprint);
-  const files = await blueprintFiles(env, {
-    id: blueprintIdSchema.parse(blueprint.id),
-    appId: source?.id ?? null,
-    tree: blueprint.tree,
-  });
+  const files = await readBlueprintCode(env, blueprint, source?.id ?? null);
   // Its code as its definition generates it, as every version's is: what
   // the blueprint holds already (its version's, or a built-in's, which
   // its build checks).
@@ -1311,20 +1328,24 @@ export const unshippedBuiltins = async (
 };
 
 /**
- * Removes the built-in `id`, which the release no longer ships: its trees
- * first, then its row, in one audited batch, so a failure halfway leaves
- * the row for the next install to remove again. Nobody creates an App
- * from it any more (a create racing the removal is refused, as for any
- * blueprint that is gone), and Apps created from it keep their code and
- * their origin, offered no update since (`pendingUpdate`). A release
- * that ships it again, a rollback too, installs it again. Removing one
- * that is gone already writes nothing, and records nothing.
+ * Removes the built-in `id`, which the release no longer ships: its row
+ * first, in one audited batch, then its trees. A row never names a tree
+ * that is gone, so a release that ships it again (a rollback) finds it
+ * whole; a failed batch leaves both for the next install to remove. A
+ * tree whose delete fails is only logged, as nothing reads it once the
+ * row is gone: a release that ships the built-in again deletes it with
+ * the rest of its replaced trees. Its id is never another built-in's
+ * (`retiredBuiltinIds`, build-blueprints.ts), so no other App's code
+ * ever reaches the Apps created from it as an update. Those keep their
+ * code and their origin, offered no update (`pendingUpdate`). A create
+ * that races the removal is refused as for any blueprint that is gone
+ * (`createFromBlueprint`). Removing one that is gone already writes
+ * nothing, and records nothing.
  */
 export const removeBuiltinBlueprint = async (
   env: Env,
   id: BlueprintId
 ): Promise<void> => {
-  await deleteOtherBlueprintTrees(env, id);
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
@@ -1335,6 +1356,14 @@ export const removeBuiltinBlueprint = async (
       installEntry("blueprint.removed", id, { release: compilerVersion })
     ),
   ]);
+  try {
+    await deleteOtherBlueprintTrees(env, id);
+  } catch (error) {
+    log.warn("builtins.tree_delete_failed", {
+      blueprint: id,
+      ...errorFields(error),
+    });
+  }
 };
 
 /** A signed-in person's `apps.blueprints`. */
