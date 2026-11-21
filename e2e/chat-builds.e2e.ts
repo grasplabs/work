@@ -97,12 +97,20 @@ test("a builder publishes the draft a chat built from the App's workspace, which
     await expect(page.getByText(/^\d+ changes? only you see$/u)).toBeVisible({
       timeout: 20_000,
     });
-    await page
-      .getByRole("button", { name: "Publish", exact: true })
-      .click({ timeout: 20_000 });
-    // Its popover: Publish, once the changes are checked.
-    await page
-      .getByRole("dialog")
+    // The bar folds as the chat beside it takes its width, Publish an icon
+    // of the same name: pressed once the bar has settled.
+    const publishing = page.getByRole("dialog", { name: `Publish ${name}` });
+    await expect(async () => {
+      if ((await publishing.count()) === 0) {
+        await page
+          .getByRole("button", { name: "Publish", exact: true })
+          .filter({ visible: true })
+          .click({ timeout: 2000 });
+      }
+      await expect(publishing).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 20_000 });
+    // Its dialog: Publish, once the changes are checked.
+    await publishing
       .getByRole("button", { name: "Publish", exact: true })
       .click({ timeout: 20_000 });
     await expect(
