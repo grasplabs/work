@@ -475,6 +475,9 @@ describe("chats", () => {
     await dee.chats.setProject(open.id, first.id);
     await dee.chats.setProject(done.id, first.id);
     await dee.chats.archive(done.id);
+    // Archived too, but in no project: never in a project's archived list.
+    const loose = await dee.chats.create("Old notes");
+    await dee.chats.archive(loose.id);
     const inFirst = {
       listed: await dee.chats.list({ project: first.id }),
       archived: await dee.chats.list({ project: first.id, archived: true }),
