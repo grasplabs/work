@@ -232,7 +232,7 @@ export const PlanList = ({
 );
 
 /** The field `field` names in `model`. */
-export const fieldIn = (
+const fieldIn = (
   model: DataModel,
   { table, field }: PlanField
 ): DataModelField | undefined =>

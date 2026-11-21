@@ -1,12 +1,11 @@
 import type { voiceTags } from "@grasp-os/shared/interview-links";
-import { interviewLocaleSchema } from "@grasp-os/shared/onboarding";
 import { speechPath } from "@grasp-os/shared/voice";
 import type { Speaker, SpeechRequestBody } from "@grasp-os/shared/voice";
-import { i18n } from "@lingui/core";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { z } from "zod";
 
 import { wait } from "../core.ts";
+import { bytesOf, fetchTurns, languageNow } from "./speech-fetch.ts";
 import { lengthOf, readingTiming, saidBy, timingOf } from "./timing.ts";
 import type { Timing } from "./timing.ts";
 
@@ -23,14 +22,14 @@ import type { Timing } from "./timing.ts";
 export type Tone = (typeof voiceTags)[number];
 
 /** How a line is said, apart from its words: whose voice, in what tone, and `quick` for a line only known as it is said. */
-export interface Voicing {
+interface Voicing {
   speaker?: Speaker;
   tone?: Tone;
   quick?: boolean;
 }
 
 /** The line being said: its words, how, when each character is said, and whether it is heard. */
-export interface SaidLine {
+interface SaidLine {
   id: number;
   text: string;
   voicing: Voicing;
@@ -38,7 +37,7 @@ export interface SaidLine {
   audible: boolean;
 }
 
-export interface VoiceState {
+interface VoiceState {
   on: boolean;
   /** The browser has not allowed sound yet: one press on the sound button allows it. */
   blocked: boolean;
@@ -55,8 +54,6 @@ const defaultVolume = 0.8;
 const allowWaitMs = 400;
 /** How near the end of a sentence has to be for an answer to wait for it, in seconds; further, it waits for the end of the word. */
 const soonSeconds = 1;
-/** How many lines are fetched ahead at once: the voice refuses many more. The line about to be said never waits. */
-const fetchesAtOnce = 2;
 /** Refusals that hold for the rest of the visit: the words then light up silently, without asking again. */
 const restingCodes = new Set(["speech.unavailable", "speech.limited"]);
 
@@ -186,15 +183,6 @@ const answerSchema = z.object({
 });
 const refusalSchema = z.object({ code: z.string() });
 
-/** The page's language, as the voice takes it. */
-const languageNow = () => {
-  const parsed = interviewLocaleSchema.safeParse(i18n.locale);
-  return parsed.success ? parsed.data : "en";
-};
-
-const bytesOf = (base64: string): Uint8Array<ArrayBuffer> =>
-  Uint8Array.from(atob(base64), (char) => char.codePointAt(0) ?? 0);
-
 /** Has core say a line; without an answer to play, the line is timed at the pace of speech. */
 const fetchLine = async (
   text: string,
@@ -233,51 +221,7 @@ const fetchLine = async (
   }
 };
 
-/** Lines fetched ahead, waiting their turn. */
-const queued: { key: string; start: () => void }[] = [];
-let fetching = 0;
-
-const nextFetch = (): void => {
-  for (const turn of queued.splice(0, Math.max(fetchesAtOnce - fetching, 0))) {
-    turn.start();
-  }
-};
-
-/** Runs `task` in its turn, or at once when `now`. */
-const inTurn = async (
-  key: string,
-  task: () => Promise<Clip>,
-  now: boolean
-): Promise<Clip> => {
-  const { promise, resolve } = Promise.withResolvers<Clip>();
-  const start = async () => {
-    fetching += 1;
-    try {
-      resolve(await task());
-    } finally {
-      fetching -= 1;
-      nextFetch();
-    }
-  };
-  if (now || fetching < fetchesAtOnce) {
-    void start();
-  } else {
-    queued.push({
-      key,
-      start: () => {
-        void start();
-      },
-    });
-  }
-  return await promise;
-};
-
-/** A line waiting its turn to be fetched goes now: it is about to be said. */
-const hurry = (key: string): void => {
-  const at = queued.findIndex((each) => each.key === key);
-  const [turn] = at === -1 ? [] : queued.splice(at, 1);
-  turn?.start();
-};
+const { inTurn, hurry } = fetchTurns<Clip>();
 
 const clips = new Map<string, Promise<Clip>>();
 
@@ -515,14 +459,14 @@ const answerSoon = async (planned: Planned): Promise<void> => {
 };
 
 /** Fetches a line ahead, so it starts at once when it is said. */
-export const prepare = (text: string, voicing: Voicing = {}): void => {
+const prepare = (text: string, voicing: Voicing = {}): void => {
   if (state.on && text.trim() !== "") {
     void clip(text, voicing, false);
   }
 };
 
 /** What `speak` is told besides the line and its voicing. */
-export interface SpeakOptions extends Voicing {
+interface SpeakOptions extends Voicing {
   /** Waits for the line being said, rather than cutting it. */
   after?: boolean;
   /** Answers what was just done: the line being said stops at its next natural break, not mid-word. */

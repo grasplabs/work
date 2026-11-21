@@ -16,7 +16,7 @@ import { useCore } from "../use-core.ts";
 // itself is searched from the events' Filters (activity/audit-log.tsx).
 
 /** How long Grasp keeps events and run details, as core answered: a list of facts. */
-export const RetentionView = ({
+const RetentionView = ({
   retention,
 }: {
   /** Undefined while it is read. */

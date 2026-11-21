@@ -47,7 +47,7 @@ export interface Integration {
 }
 
 /** Where an integration stands, for the person looking at it. */
-export type IntegrationState =
+type IntegrationState =
   | "needs_reauth"
   | "shared"
   | "personal"
@@ -173,7 +173,7 @@ export const stateOf = ({ connections }: Integration): IntegrationState => {
 };
 
 /** What the list shows, as in the prototype: everything, what is connected, or one kind of app. */
-export type IntegrationFilter =
+type IntegrationFilter =
   | { show: "all" }
   | { show: "connected" }
   | { show: "group"; group: CatalogGroup };
@@ -318,17 +318,6 @@ export const find = (
   ];
 };
 
-/** How many integrations each kind of app holds. */
-const countByGroup = (
-  integrations: readonly Integration[]
-): ReadonlyMap<CatalogGroup, number> => {
-  const counts = new Map<CatalogGroup, number>();
-  for (const { group } of integrations) {
-    counts.set(group, (counts.get(group) ?? 0) + 1);
-  }
-  return counts;
-};
-
 /** An HTTP connection, as listed: its summary beside the connection. */
 export interface HttpListed {
   connection: ListedConnection;
@@ -350,42 +339,6 @@ export const httpConnectionsOf = (
       ? [{ connection, http: connection.http }]
       : []
   );
-
-/**
- * How many each filter holds: every integration and every live HTTP
- * connection under All; what is connected, HTTP connections included,
- * under Connected (both list under those filters); and the integrations
- * of each kind of app, which an HTTP connection isn't.
- */
-export const filterCounts = (
-  integrations: readonly Integration[],
-  connections: readonly ListedConnection[]
-): {
-  all: number;
-  connected: number;
-  groups: ReadonlyMap<CatalogGroup, number>;
-} => {
-  const http = httpConnectionsOf(connections).length;
-  return {
-    all: integrations.length + http,
-    connected:
-      integrations.filter((integration) =>
-        keeps({ show: "connected" }, integration)
-      ).length + http,
-    groups: countByGroup(integrations),
-  };
-};
-
-/** A count rounded down to a round number, to say "more than" it: 1,487 is more than 1,400. */
-export const roundedDown = (count: number): number => {
-  let step = 10;
-  if (count >= 1000) {
-    step = 100;
-  } else if (count >= 100) {
-    step = 50;
-  }
-  return Math.floor(count / step) * step;
-};
 
 /** A name as it is compared: letters and digits only, so "Google Sheets" is "google_sheets". */
 export const plain = (name: string): string =>

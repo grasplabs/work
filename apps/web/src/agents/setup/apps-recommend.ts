@@ -46,7 +46,7 @@ const shortest = 4;
 const connectedWeight = 2;
 
 /** At most this many apps are recommended. */
-export const recommendedMost = 4;
+const recommendedMost = 4;
 
 /** The words of `text`, lowercase, long enough to mean something. */
 const wordsOf = (text: string): string[] =>

@@ -124,13 +124,13 @@ export interface LoopState {
 }
 
 /** What happens in the conversation, as it is told on `window` (`loopEventName`). */
-export type LoopEvent =
+type LoopEvent =
   | { happened: Happening }
   | { did: Act }
   | { measured: Measured };
 
 /** The name of the event on `window` that tells each `LoopEvent`. */
-export const loopEventName = "grasp:interview-loop";
+const loopEventName = "grasp:interview-loop";
 
 /** What they said, with what Stephen marked in it, and whether it is still on its way. */
 export interface Said {

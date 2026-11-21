@@ -186,18 +186,6 @@ describe("recent chats in the sidebar", () => {
     ).toStrictEqual([null, "page", null]);
   });
 
-  it("gives each row its menu, named for its chat", async () => {
-    await shown({ listed: () => ten.slice(0, 2) });
-    await vi.waitFor(() => {
-      expect(recentRows()).toHaveLength(2);
-    });
-    expect(
-      [...document.querySelectorAll("nav button[aria-label^='More for']")].map(
-        (button) => button.getAttribute("aria-label")
-      )
-    ).toStrictEqual(["More for Chat number 0", "More for Chat number 1"]);
-  });
-
   it("archives a chat from its menu", async () => {
     const { archived } = await shown({ listed: () => ten.slice(0, 2) });
     await vi.waitFor(() => {

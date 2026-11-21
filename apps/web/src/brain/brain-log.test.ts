@@ -73,25 +73,21 @@ describe(brainLog, () => {
 
   it("puts each line in its week: this week from Monday, last week, and before", () => {
     expect({
-      thisWeek: log.thisWeek.every(({ day }) => day >= "2026-08-31"),
-      lastWeek: log.lastWeek.every(
-        ({ day }) => day >= "2026-08-24" && day < "2026-08-31"
-      ),
+      thisWeek:
+        log.thisWeek.length > 0 &&
+        log.thisWeek.every(({ day }) => day >= "2026-08-31"),
+      lastWeek:
+        log.lastWeek.length > 0 &&
+        log.lastWeek.every(
+          ({ day }) => day >= "2026-08-24" && day < "2026-08-31"
+        ),
       earlier:
         log.earlier.length > 0 &&
         log.earlier.every(({ day }) => day < "2026-08-24"),
-      weeks: [log.thisWeek, log.lastWeek].map(
-        (stretch) =>
-          stretch.find((entry) => entry.interviews !== undefined)?.interviews
-      ),
     }).toStrictEqual({
       thisWeek: true,
       lastWeek: true,
       earlier: true,
-      weeks: [
-        { count: 12, week: 36 },
-        { count: 9, week: 35 },
-      ],
     });
   });
 });

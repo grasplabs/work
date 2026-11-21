@@ -13,7 +13,7 @@ import type { Brain } from "./brain.ts";
 // are the ones the brain, built again without them, no longer has.
 
 /** What goes with it, to say before it is done. */
-export interface ForgetEffect {
+interface ForgetEffect {
   /** How many things that were said go. */
   statements: number;
   /** The notes of the brain that rest on nothing else and go too, by title. */

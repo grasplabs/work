@@ -43,7 +43,7 @@ import { z } from "zod";
 // each answer is checked against the shape core promises.
 
 /** What a call that didn't work tells: its HTTP status (0 when nothing came back), core's code, and words for people. */
-export interface Refused {
+interface Refused {
   refused: true;
   status: number;
   code: string | null;
@@ -76,7 +76,7 @@ const savedSchema = z.union([
     progress: interviewProgressSchema.nullable(),
   }),
 ]);
-export type SaveAnswer = z.output<typeof savedSchema>;
+type SaveAnswer = z.output<typeof savedSchema>;
 
 const deletedSchema = z.object({
   deleted: z.literal(true),
@@ -98,7 +98,7 @@ const approvalSchema = z.union([
     progress: interviewProgressSchema.nullable(),
   }),
 ]);
-export type ApprovalAnswer = z.output<typeof approvalSchema>;
+type ApprovalAnswer = z.output<typeof approvalSchema>;
 
 const withdrawnSchema = z.object({
   withdrawn: z.literal(true),
@@ -370,22 +370,6 @@ export const keepWhileSigningIn = (secret: string): void => {
     // Storage refused: they open their link again from their email.
   }
 };
-
-/** Where this browser keeps what belongs to a link: under a hash of its secret, never the secret itself. */
-const linkName = async (secret: string): Promise<string> => {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(secret)
-  );
-  const hex = Array.from(new Uint8Array(digest).slice(0, 12), (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
-  return `grasp.interview.${hex}`;
-};
-
-/** Where what they typed and did not send is kept, per link. */
-export const draftName = async (secret: string): Promise<string> =>
-  `${await linkName(secret)}.draft`;
 
 /** How long a recording may take to be written down. */
 const hearTimeoutMs = 20_000;

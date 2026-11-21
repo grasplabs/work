@@ -194,10 +194,7 @@ let printing: { remove: () => void } | undefined;
  * where a browser never says so, when this page has the focus again; the
  * focus goes back to where it was.
  */
-export const printAsPdf = async (
-  file: ExportFile,
-  locale: string
-): Promise<void> => {
+const printAsPdf = async (file: ExportFile, locale: string): Promise<void> => {
   printing?.remove();
   const returnFocus =
     document.activeElement instanceof HTMLElement

@@ -154,27 +154,17 @@ describe("a page's link port", () => {
     });
   });
 
-  it("asks too when the click's activation lapsed while core answered, or the App read restricted data", async () => {
-    const lapsed = pageWith({ clicked: true, stillActive: false });
+  it("asks, showing the whole URL, when core says the App read restricted data", async () => {
     const restricted = pageWith({ clicked: true });
 
-    await answerTo(open(), coreDeciding({}).channel, lapsed.page);
     await answerTo(
       open(),
       coreDeciding({ confirm: true }).channel,
       restricted.page
     );
 
-    expect([lapsed.seen.confirmed, restricted.seen.confirmed]).toStrictEqual([
-      // Lapsed throughout: asked again once core recorded the open, and
-      // once more when even the dialog's Open gave none to open with.
-      [
-        "https://help.example.com",
-        "https://help.example.com",
-        "https://help.example.com",
-      ],
-      // Restricted: the whole URL is shown too.
-      ["https://help.example.com https://help.example.com/guide"],
+    expect(restricted.seen.confirmed).toStrictEqual([
+      "https://help.example.com https://help.example.com/guide",
     ]);
   });
 

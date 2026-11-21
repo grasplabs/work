@@ -5,7 +5,7 @@ import type { ChatMessage } from "@grasp-os/shared/chat";
 // lands where a turn seen ending would.
 
 /** What a Build it made: an App or a workflow, by ID. */
-export interface Made {
+interface Made {
   kind: "app" | "workflow";
   id: string;
 }

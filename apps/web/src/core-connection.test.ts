@@ -508,8 +508,8 @@ describe("the tab's one connection to core", () => {
       await refusal(core.api(given)),
     ];
     await vi.advanceTimersByTimeAsync(1999);
-    expect({ refused: refused.length, attempts: opened.length }).toStrictEqual({
-      refused: 2,
+    expect({ refused, attempts: opened.length }).toStrictEqual({
+      refused: [given.reason, given.reason],
       attempts: 2,
     });
   });

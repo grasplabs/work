@@ -18,32 +18,10 @@ interface Paged {
 }
 
 /**
- * Every page `read` answers, newest first, each page read on its own; the
- * first that fails (or is given up on) fails the whole, and no page is
- * asked for after it.
- */
-export const everyPage = async <Item extends Paged>(
-  read: (before?: UnknownOutcomeCursor) => Promise<Item[]>
-): Promise<Item[]> => {
-  const all: Item[] = [];
-  let before: UnknownOutcomeCursor | undefined;
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- each page goes on from the last
-    const page = await read(before);
-    all.push(...page);
-    const last = page.at(-1);
-    if (page.length < unknownOutcomeListLimit || last === undefined) {
-      return all;
-    }
-    before = last.cursor;
-  }
-};
-
-/**
- * `everyPage`, each page loaded as `loadFromCore` loads a page's data,
- * within its own few seconds: ready once every page is, or as the first
- * page that isn't (out of reach, refused), after which no page is asked
- * for. Given `left`, nothing more is asked once the page is left.
+ * Every page `read` answers, newest first, each page loaded as
+ * `loadFromCore` loads a page's data, within its own few seconds: ready
+ * once every page is, or as the first page that isn't (out of reach,
+ * refused), after which no page is asked for. Given `left`, nothing more is asked once the page is left.
  */
 export const loadEveryPage = async <Item extends Paged>(
   core: Pick<CoreConnection, "withSession">,

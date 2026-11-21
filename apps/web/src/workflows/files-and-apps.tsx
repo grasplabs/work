@@ -81,12 +81,6 @@ const styles = stylex.create({
   tab: { display: "flex", flexDirection: "column", gap: grasp.space6 },
   versions: { display: "flex", flexDirection: "column", gap: grasp.space4 },
   version: { display: "flex", flexDirection: "column", gap: grasp.space2 },
-  // A part's own words and lists inside its card.
-  inset: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space4,
-  },
   approved: {
     display: "flex",
     flexWrap: "wrap",

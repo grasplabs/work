@@ -243,7 +243,7 @@ const TitleRow = ({
 };
 
 /** What the workflow's page read, and what changes it, as its sections need. */
-export interface WorkflowRead {
+interface WorkflowRead {
   resource: WorkflowResource;
   /** Its draft, for its builders alone. */
   draft: Loaded<WorkflowDraft> | undefined;

@@ -10,7 +10,7 @@ type Asked = Extract<ChatMessage, { role: "user" }>;
 type Answer = Extract<ChatMessage, { role: "assistant" }>;
 
 /** A question and the replies to it, oldest first. */
-export interface Turn {
+interface Turn {
   asked: Asked;
   replies: Answer[];
 }
@@ -32,7 +32,7 @@ export const turnsOf = (messages: readonly ChatMessage[]): Turn[] => {
  * How many whole seconds a turn took, from its question to its last reply;
  * undefined for a turn with no reply, or one that took under a second.
  */
-export const workedSeconds = ({ asked, replies }: Turn): number | undefined => {
+const workedSeconds = ({ asked, replies }: Turn): number | undefined => {
   const last = replies.at(-1);
   if (last === undefined) {
     return undefined;
@@ -62,11 +62,3 @@ export const workedFor = (
   }
   return worked;
 };
-
-/** A length of time in minutes and the seconds over them, to be said short: "4m 21s". */
-export const minutesAndSeconds = (
-  seconds: number
-): { minutes: number; rest: number } => ({
-  minutes: Math.floor(seconds / 60),
-  rest: seconds % 60,
-});

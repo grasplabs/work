@@ -113,7 +113,7 @@ const referenced = /^(?<sentence>[\s\S]*?)\s*Reference: (?<reference>\S+)$/u;
  * A failure's words and its reference apart: the sentence to read, and the
  * request id to copy for support, where core gave one.
  */
-export const splitReference = (
+const splitReference = (
   reason: string
 ): { sentence: string; reference?: string } => {
   const found = referenced.exec(reason)?.groups;
@@ -151,7 +151,7 @@ export const useCoreReach = (): CoreReach | undefined => {
 /** The level of the page's heading: `h1` where it stands for the page. */
 export type FailedHeading = "h1" | "h2" | "h3";
 
-export interface PageFailedProps {
+interface PageFailedProps {
   /** What failed, as its heading: "This page didn't load". */
   title: string;
   /** Why, in one plain sentence, with its reference if core gave one (split off to copy). */

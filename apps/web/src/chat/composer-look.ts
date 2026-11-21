@@ -16,7 +16,7 @@ export const composerAccents = ["light", "mint", "lavender"] as const;
 export const composerEdges = ["smooth", "dither"] as const;
 
 /** How a person's chat box looks at work. */
-export interface ComposerLook {
+interface ComposerLook {
   accent: (typeof composerAccents)[number] & ComposerAccent;
   edge: (typeof composerEdges)[number] & ComposerEdge;
 }

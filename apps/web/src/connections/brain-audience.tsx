@@ -72,7 +72,7 @@ interface Audiences {
 }
 
 /** What reading the audiences from core came to. */
-export type AudiencesRead =
+type AudiencesRead =
   | { state: "loading" }
   | { state: "refused"; message: string }
   | {

@@ -21,7 +21,7 @@ export const MOST_DOTS = 60_000;
 const SURFACE_KEEP = 0.34;
 
 /** What a frame paints: the camera, how far inside it is, the plane the print stands on, and how many dots it has. */
-export interface DiveFrame {
+interface DiveFrame {
   matrix: Float32Array;
   pose: Pose;
   inside: number;
@@ -30,7 +30,7 @@ export interface DiveFrame {
 }
 
 /** A painter: the dots to fill, how to paint them, and whether it is the 2D canvas, which has no flight. */
-export interface DivePainter {
+interface DivePainter {
   flat: boolean;
   dots: Float32Array;
   paint: (frame: DiveFrame) => void;

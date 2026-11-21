@@ -34,7 +34,7 @@ export interface Mentionable {
  * box is shown; none before. A kind core refused or couldn't read is left
  * out.
  */
-export const useMentionables = (
+const useMentionables = (
   /** Whether this box mentions at all: a guest's never asks core. */
   wanted: boolean
 ): readonly Mentionable[] | undefined => {
@@ -129,7 +129,7 @@ export const mentionedIn = (text: string, label: string): boolean => {
 };
 
 /** What Grasp UI's Composer needs to mention an agent, an App, a workflow or someone. */
-export interface ComposerMentions {
+interface ComposerMentions {
   kinds: ComposerKind[];
   items: ComposerMentionItem[];
   loading: boolean;

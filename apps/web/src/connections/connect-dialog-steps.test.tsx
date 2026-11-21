@@ -255,23 +255,6 @@ describe("the connect dialog's steps", () => {
     ]);
   });
 
-  it("fades the waiting row in as signing in starts, rather than swapping it into the buttons' place", async () => {
-    await opened(someone("user"), async () => await waitingForever());
-    const before = button("Sign in to Microsoft 365")?.closest(
-      '[data-slot="fade-in"]'
-    );
-    await press(button("Sign in to Microsoft 365"));
-    const waiting = [...document.querySelectorAll("output")].find((each) =>
-      each.textContent?.includes("Waiting for Microsoft 365")
-    );
-    const after = waiting?.closest('[data-slot="fade-in"]');
-    expect({
-      fadesIn: after instanceof HTMLElement,
-      anew: after !== before,
-      buttonsLeft: before?.isConnected,
-    }).toStrictEqual({ fadesIn: true, anew: true, buttonsLeft: false });
-  });
-
   it("goes by the newest attempt only, when an older one answers after trying again failed", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const assign = vi

@@ -25,10 +25,10 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 // A layer only ever narrows the one above it; core holds it to that.
 
 /** Who a control may choose: as the layer above, everyone, some teams, or nobody. */
-export type Who = "same" | "everyone" | "teams" | "nobody";
+type Who = "same" | "everyone" | "teams" | "nobody";
 
 /** An audience of any layer, as a control holds it. */
-export interface Chosen {
+interface Chosen {
   who: Who;
   teams: string[];
 }

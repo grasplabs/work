@@ -82,7 +82,7 @@ interface Lines {
 }
 
 /** What these steps read and how they go on. */
-export interface ConnectStepProps {
+interface ConnectStepProps {
   lines: Lines;
   choices: SetupChoices;
   /** The suites the company signs in with: their places come first, and only those connect. */

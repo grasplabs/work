@@ -22,7 +22,7 @@ import type { PendingConfirmation } from "../decision-confirmation.tsx";
 export const cancelPauseMs = 5000;
 
 /** Cancels after which a page asks nothing more until it is reloaded. */
-export const cancelsUntilReload = 2;
+const cancelsUntilReload = 2;
 
 /** A question waiting in the dialog, and how its own dialog ends it. */
 export interface Asked<Review = PendingConfirmation> {
@@ -30,7 +30,7 @@ export interface Asked<Review = PendingConfirmation> {
   settle: (confirmed: boolean) => void;
 }
 
-export interface FrameQuestions<Review = PendingConfirmation> {
+interface FrameQuestions<Review = PendingConfirmation> {
   /**
    * Asks the person to confirm `review`; whether they did. Refused with
    * `paused` (for a decision `decision.asking_paused`) while another

@@ -16,9 +16,6 @@ export interface Turned {
   skipped: readonly string[];
 }
 
-/** A pile nobody went through yet: its first card on top, none skipped. */
-export const untouched: Turned = { at: null, skipped: [] };
-
 /**
  * The pile's order: what waits in core's order, with what was skipped at
  * the back, in the order it was skipped. What no longer waits drops out.
@@ -51,18 +48,6 @@ export const placeIn = (order: readonly string[], at: Place | null): number => {
 /** The place one card on, or one back, going round: after the last comes the first. -1 when nothing waits. */
 export const stepFrom = (count: number, place: number, by: 1 | -1): number =>
   count <= 0 ? -1 : (place + by + count) % count;
-
-/** The pile turned one card on, or one back. */
-export const turn = (
-  ids: readonly string[],
-  turned: Turned,
-  by: 1 | -1
-): Turned => {
-  const order = orderOf(ids, turned.skipped);
-  const next = stepFrom(order.length, placeIn(order, turned.at), by);
-  const id = order[next];
-  return id === undefined ? turned : { ...turned, at: { id, index: next } };
-};
 
 /**
  * The card on top skipped: it goes to the back of the pile, and the one

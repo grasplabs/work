@@ -1,11 +1,8 @@
 import type { ChatConnectionRequest } from "@grasp-os/shared/chat";
-import { messageOf } from "@grasp-os/shared/errors";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 
-import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { Alert } from "../grasp/alert/index.ts";
@@ -18,8 +15,8 @@ import { KeyValueList } from "../grasp/key-value/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { useCore } from "../use-core.ts";
 import { useApprovalWords } from "./approval-words.ts";
+import { useChatRequests } from "./chat-requests.ts";
 
 // The connections the chat's agent asked to use in this chat (core's
 // chat-connections.ts): the person grants or denies their own personal
@@ -27,26 +24,12 @@ import { useApprovalWords } from "./approval-words.ts";
 // admin, said in a quiet note, and they may withdraw it. The card shows the request exactly as stored, and
 // granting names only its ID: what is granted is what it shows.
 
-/** What the page read of the chat's requests. */
-type Requests =
-  | { state: "loading" }
-  | { state: "refused"; message: string }
-  | { state: "ready"; requests: ChatConnectionRequest[] };
-
-/** The chat's requests. Outside the component, as the React Compiler can't compile `try`. */
-const readRequests = async (
-  core: CoreConnection,
+/** The chat's connection requests. */
+const listConnectionRequests = async (
+  session: Session,
   chatId: string
-): Promise<Requests> => {
-  try {
-    const requests = await core.withSession(
-      async (session) => await session.chats.connectionRequests(chatId)
-    );
-    return { state: "ready", requests };
-  } catch (error) {
-    return { state: "refused", message: messageOf(error) };
-  }
-};
+): Promise<ChatConnectionRequest[]> =>
+  await session.chats.connectionRequests(chatId);
 
 const styles = stylex.create({
   list: { display: "grid", gap: grasp.space3 },
@@ -188,24 +171,11 @@ export const ConnectionRequests = ({
   version: number;
 }) => {
   const { t } = useLingui();
-  const [read, setRead] = useState<Requests>({ state: "loading" });
-  const core = useCore();
-  const [reads, setReads] = useState(0);
-  useEffect(() => {
-    let current = true;
-    const load = async (): Promise<void> => {
-      const found = await readRequests(core, chatId);
-      // A read for another chat, or an older one, doesn't show.
-      if (current) {
-        setRead(found);
-      }
-    };
-    void load();
-    return () => {
-      current = false;
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `version` and `reads` say when to read again
-  }, [core, chatId, version, reads]);
+  const { read, again } = useChatRequests(
+    chatId,
+    version,
+    listConnectionRequests
+  );
   if (read.state === "refused") {
     return <ErrorText>{read.message}</ErrorText>;
   }
@@ -218,9 +188,7 @@ export const ConnectionRequests = ({
         <ConnectionRequest
           chatId={chatId}
           key={request.id}
-          onDecided={() => {
-            setReads(reads + 1);
-          }}
+          onDecided={again}
           request={request}
         />
       ))}

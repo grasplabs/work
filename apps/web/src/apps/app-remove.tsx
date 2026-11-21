@@ -26,7 +26,7 @@ import { useCore } from "../use-core.ts";
 // it is gone from then on, so it asks first and then leaves for Apps.
 
 /** Whether `identity` may delete `app`: archived, and theirs or an admin's. */
-export const removesApp = (
+const removesApp = (
   app: Pick<App, "archived" | "owner">,
   identity: Pick<Identity, "userId" | "role" | "staff">
 ): boolean =>

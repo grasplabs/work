@@ -21,7 +21,7 @@ import { useCoreAction } from "../use-core-action.ts";
 // it (app-status.ts); a refusal shows under the buttons.
 
 /** Where an App is: core keeps only `archived` and its live version. */
-export type AppStatus = "draft" | "live" | "archived";
+type AppStatus = "draft" | "live" | "archived";
 
 /** The status of `app`, from whether it is archived and has a live version. */
 export const statusOf = (

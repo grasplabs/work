@@ -45,16 +45,11 @@ import { Route as ShellSettingsAiProvidersRouteImport } from './routes/_shell.se
 import { Route as ShellSettingsAppearanceRouteImport } from './routes/_shell.settings.appearance'
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsBillingRouteImport } from './routes/_shell.settings.billing'
-import { Route as ShellSettingsBrainRouteImport } from './routes/_shell.settings.brain'
 import { Route as ShellSettingsInstructionsRouteImport } from './routes/_shell.settings.instructions'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
-import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
 import { Route as ShellSettingsOnboardingRouteImport } from './routes/_shell.settings.onboarding'
-import { Route as ShellSettingsOutcomesRouteImport } from './routes/_shell.settings.outcomes'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
 import { Route as ShellSettingsSecurityRouteImport } from './routes/_shell.settings.security'
-import { Route as ShellSettingsSpendRouteImport } from './routes/_shell.settings.spend'
-import { Route as ShellSettingsStephenRouteImport } from './routes/_shell.settings.stephen'
 import { Route as ShellSettingsTeamsRouteImport } from './routes/_shell.settings.teams'
 import { Route as ShellSettingsWebhooksRouteImport } from './routes/_shell.settings.webhooks'
 import { Route as ShellSettingsWorkspaceRouteImport } from './routes/_shell.settings.workspace'
@@ -250,11 +245,6 @@ const ShellSettingsBillingRoute = ShellSettingsBillingRouteImport.update({
   path: '/billing',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
-const ShellSettingsBrainRoute = ShellSettingsBrainRouteImport.update({
-  id: '/brain',
-  path: '/brain',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
 const ShellSettingsInstructionsRoute =
   ShellSettingsInstructionsRouteImport.update({
     id: '/instructions',
@@ -266,19 +256,9 @@ const ShellSettingsMembersRoute = ShellSettingsMembersRouteImport.update({
   path: '/members',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
-const ShellSettingsModelsRoute = ShellSettingsModelsRouteImport.update({
-  id: '/models',
-  path: '/models',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
 const ShellSettingsOnboardingRoute = ShellSettingsOnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
-const ShellSettingsOutcomesRoute = ShellSettingsOutcomesRouteImport.update({
-  id: '/outcomes',
-  path: '/outcomes',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
 const ShellSettingsProfileRoute = ShellSettingsProfileRouteImport.update({
@@ -289,16 +269,6 @@ const ShellSettingsProfileRoute = ShellSettingsProfileRouteImport.update({
 const ShellSettingsSecurityRoute = ShellSettingsSecurityRouteImport.update({
   id: '/security',
   path: '/security',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
-const ShellSettingsSpendRoute = ShellSettingsSpendRouteImport.update({
-  id: '/spend',
-  path: '/spend',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
-const ShellSettingsStephenRoute = ShellSettingsStephenRouteImport.update({
-  id: '/stephen',
-  path: '/stephen',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
 const ShellSettingsTeamsRoute = ShellSettingsTeamsRouteImport.update({
@@ -398,16 +368,11 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof ShellSettingsAppearanceRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
-  '/settings/brain': typeof ShellSettingsBrainRoute
   '/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/settings/members': typeof ShellSettingsMembersRoute
-  '/settings/models': typeof ShellSettingsModelsRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
-  '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
-  '/settings/spend': typeof ShellSettingsSpendRoute
-  '/settings/stephen': typeof ShellSettingsStephenRoute
   '/settings/teams': typeof ShellSettingsTeamsRoute
   '/settings/webhooks': typeof ShellSettingsWebhooksRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
@@ -456,16 +421,11 @@ export interface FileRoutesByTo {
   '/settings/appearance': typeof ShellSettingsAppearanceRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
-  '/settings/brain': typeof ShellSettingsBrainRoute
   '/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/settings/members': typeof ShellSettingsMembersRoute
-  '/settings/models': typeof ShellSettingsModelsRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
-  '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
-  '/settings/spend': typeof ShellSettingsSpendRoute
-  '/settings/stephen': typeof ShellSettingsStephenRoute
   '/settings/teams': typeof ShellSettingsTeamsRoute
   '/settings/webhooks': typeof ShellSettingsWebhooksRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
@@ -518,16 +478,11 @@ export interface FileRoutesById {
   '/_shell/settings/appearance': typeof ShellSettingsAppearanceRoute
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/billing': typeof ShellSettingsBillingRoute
-  '/_shell/settings/brain': typeof ShellSettingsBrainRoute
   '/_shell/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
-  '/_shell/settings/models': typeof ShellSettingsModelsRoute
   '/_shell/settings/onboarding': typeof ShellSettingsOnboardingRoute
-  '/_shell/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
   '/_shell/settings/security': typeof ShellSettingsSecurityRoute
-  '/_shell/settings/spend': typeof ShellSettingsSpendRoute
-  '/_shell/settings/stephen': typeof ShellSettingsStephenRoute
   '/_shell/settings/teams': typeof ShellSettingsTeamsRoute
   '/_shell/settings/webhooks': typeof ShellSettingsWebhooksRoute
   '/_shell/settings/workspace': typeof ShellSettingsWorkspaceRoute
@@ -580,16 +535,11 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/audit'
     | '/settings/billing'
-    | '/settings/brain'
     | '/settings/instructions'
     | '/settings/members'
-    | '/settings/models'
     | '/settings/onboarding'
-    | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/security'
-    | '/settings/spend'
-    | '/settings/stephen'
     | '/settings/teams'
     | '/settings/webhooks'
     | '/settings/workspace'
@@ -638,16 +588,11 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/audit'
     | '/settings/billing'
-    | '/settings/brain'
     | '/settings/instructions'
     | '/settings/members'
-    | '/settings/models'
     | '/settings/onboarding'
-    | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/security'
-    | '/settings/spend'
-    | '/settings/stephen'
     | '/settings/teams'
     | '/settings/webhooks'
     | '/settings/workspace'
@@ -699,16 +644,11 @@ export interface FileRouteTypes {
     | '/_shell/settings/appearance'
     | '/_shell/settings/audit'
     | '/_shell/settings/billing'
-    | '/_shell/settings/brain'
     | '/_shell/settings/instructions'
     | '/_shell/settings/members'
-    | '/_shell/settings/models'
     | '/_shell/settings/onboarding'
-    | '/_shell/settings/outcomes'
     | '/_shell/settings/profile'
     | '/_shell/settings/security'
-    | '/_shell/settings/spend'
-    | '/_shell/settings/stephen'
     | '/_shell/settings/teams'
     | '/_shell/settings/webhooks'
     | '/_shell/settings/workspace'
@@ -997,13 +937,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsBillingRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
-    '/_shell/settings/brain': {
-      id: '/_shell/settings/brain'
-      path: '/brain'
-      fullPath: '/settings/brain'
-      preLoaderRoute: typeof ShellSettingsBrainRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
     '/_shell/settings/instructions': {
       id: '/_shell/settings/instructions'
       path: '/instructions'
@@ -1018,25 +951,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsMembersRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
-    '/_shell/settings/models': {
-      id: '/_shell/settings/models'
-      path: '/models'
-      fullPath: '/settings/models'
-      preLoaderRoute: typeof ShellSettingsModelsRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
     '/_shell/settings/onboarding': {
       id: '/_shell/settings/onboarding'
       path: '/onboarding'
       fullPath: '/settings/onboarding'
       preLoaderRoute: typeof ShellSettingsOnboardingRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
-    '/_shell/settings/outcomes': {
-      id: '/_shell/settings/outcomes'
-      path: '/outcomes'
-      fullPath: '/settings/outcomes'
-      preLoaderRoute: typeof ShellSettingsOutcomesRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
     '/_shell/settings/profile': {
@@ -1051,20 +970,6 @@ declare module '@tanstack/react-router' {
       path: '/security'
       fullPath: '/settings/security'
       preLoaderRoute: typeof ShellSettingsSecurityRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
-    '/_shell/settings/spend': {
-      id: '/_shell/settings/spend'
-      path: '/spend'
-      fullPath: '/settings/spend'
-      preLoaderRoute: typeof ShellSettingsSpendRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
-    '/_shell/settings/stephen': {
-      id: '/_shell/settings/stephen'
-      path: '/stephen'
-      fullPath: '/settings/stephen'
-      preLoaderRoute: typeof ShellSettingsStephenRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
     '/_shell/settings/teams': {
@@ -1192,16 +1097,11 @@ interface ShellSettingsRouteChildren {
   ShellSettingsAppearanceRoute: typeof ShellSettingsAppearanceRoute
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsBillingRoute: typeof ShellSettingsBillingRoute
-  ShellSettingsBrainRoute: typeof ShellSettingsBrainRoute
   ShellSettingsInstructionsRoute: typeof ShellSettingsInstructionsRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
-  ShellSettingsModelsRoute: typeof ShellSettingsModelsRoute
   ShellSettingsOnboardingRoute: typeof ShellSettingsOnboardingRoute
-  ShellSettingsOutcomesRoute: typeof ShellSettingsOutcomesRoute
   ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
   ShellSettingsSecurityRoute: typeof ShellSettingsSecurityRoute
-  ShellSettingsSpendRoute: typeof ShellSettingsSpendRoute
-  ShellSettingsStephenRoute: typeof ShellSettingsStephenRoute
   ShellSettingsTeamsRoute: typeof ShellSettingsTeamsRoute
   ShellSettingsWebhooksRoute: typeof ShellSettingsWebhooksRoute
   ShellSettingsWorkspaceRoute: typeof ShellSettingsWorkspaceRoute
@@ -1213,16 +1113,11 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsAppearanceRoute: ShellSettingsAppearanceRoute,
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsBillingRoute: ShellSettingsBillingRoute,
-  ShellSettingsBrainRoute: ShellSettingsBrainRoute,
   ShellSettingsInstructionsRoute: ShellSettingsInstructionsRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
-  ShellSettingsModelsRoute: ShellSettingsModelsRoute,
   ShellSettingsOnboardingRoute: ShellSettingsOnboardingRoute,
-  ShellSettingsOutcomesRoute: ShellSettingsOutcomesRoute,
   ShellSettingsProfileRoute: ShellSettingsProfileRoute,
   ShellSettingsSecurityRoute: ShellSettingsSecurityRoute,
-  ShellSettingsSpendRoute: ShellSettingsSpendRoute,
-  ShellSettingsStephenRoute: ShellSettingsStephenRoute,
   ShellSettingsTeamsRoute: ShellSettingsTeamsRoute,
   ShellSettingsWebhooksRoute: ShellSettingsWebhooksRoute,
   ShellSettingsWorkspaceRoute: ShellSettingsWorkspaceRoute,

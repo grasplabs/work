@@ -142,7 +142,7 @@ const englishDraftWords: DraftWords = {
 };
 
 /** Every installed part's words in English: the library's own. */
-export const englishPartWords: GraspWordsCatalog = {
+const englishPartWords: GraspWordsCatalog = {
   "app-shell-panel": appShellPanelWords,
   agentActivity: agentActivityWords,
   askBar: askBarWords,
@@ -229,7 +229,7 @@ export const englishPartWords: GraspWordsCatalog = {
 };
 
 /** Every installed part's words in the page's language, from its Lingui catalog. */
-export const usePartWords = (): GraspWordsCatalog => {
+const usePartWords = (): GraspWordsCatalog => {
   const { t, i18n } = useLingui();
   const approval = useApprovalWords();
   // Why a file stays out, from what the part says (its reason's code).

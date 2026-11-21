@@ -1443,23 +1443,36 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("opens the App's own chat when the chat handed over can't be followed", async () => {
-    const { askedForApp } = await opened(
-      fakeApps().apps,
-      identityOf(false),
-      "chat-deleted",
-      async () => {
-        await Promise.resolve();
-        // Core's answer for a chat that is gone, or not the person's.
-        throw Object.assign(new Error("There's no such chat."), {
-          code: "agent.chat_not_found",
-        });
+  it.each([
+    {
+      from: "handed over by the route",
+      handed: "chat-deleted",
+      kept: undefined,
+    },
+    { from: "this tab kept", handed: undefined, kept: "chat-kept-gone" },
+  ])(
+    "asks core for the App's own chat when the chat $from can't be followed",
+    async ({ handed, kept }) => {
+      if (kept !== undefined) {
+        setActiveChat(kept, deskSlot);
       }
-    );
-    await settled();
+      const { askedForApp } = await opened(
+        fakeApps().apps,
+        identityOf(false),
+        handed,
+        async () => {
+          await Promise.resolve();
+          // Core's answer for a chat that is gone, or not the person's.
+          throw Object.assign(new Error("There's no such chat."), {
+            code: "agent.chat_not_found",
+          });
+        }
+      );
+      await settled();
 
-    expect(askedForApp).toStrictEqual(["invoice-desk"]);
-  });
+      expect(askedForApp).toStrictEqual(["invoice-desk"]);
+    }
+  );
 
   it("keeps the chat handed over when core won't follow it for now, saying why, rather than opening another", async () => {
     const { askedForApp, router } = await opened(
@@ -1505,24 +1518,6 @@ describe(AppWorkspace, () => {
       says: true,
       openInChat: "/chats/chat-handed-over",
     });
-  });
-
-  it("asks core for the App's chat again when the one this tab kept is gone", async () => {
-    setActiveChat("chat-kept-gone", deskSlot);
-    const { askedForApp } = await opened(
-      fakeApps().apps,
-      identityOf(false),
-      undefined,
-      async () => {
-        await Promise.resolve();
-        throw Object.assign(new Error("There's no such chat."), {
-          code: "agent.chat_not_found",
-        });
-      }
-    );
-    await settled();
-
-    expect(askedForApp).toStrictEqual(["invoice-desk"]);
   });
 
   it("asks core for the App's chat again on Try again, after it gave none", async () => {

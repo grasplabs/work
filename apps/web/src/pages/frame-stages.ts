@@ -27,7 +27,7 @@ import type { PageMounted, PageReady } from "@grasp-os/shared/pages";
  * `previewOpenMs` for a draft's preview's first open), then the frame's two
  * (`pageLimits.stageMs` each).
  */
-export type Stage = "opened" | "ready" | "mounted";
+type Stage = "opened" | "ready" | "mounted";
 
 /** A stage that didn't happen in its time. */
 export class StageTimeoutError extends Error {
@@ -48,7 +48,7 @@ export interface FrameMessage {
 }
 
 /** The frame's window as it is now: a frame taken off the page has none. */
-export type FrameWindow = () => unknown;
+type FrameWindow = () => unknown;
 
 /** The origin of a sandboxed frame without `allow-same-origin`. */
 const opaqueOrigin = "null";

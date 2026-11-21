@@ -30,7 +30,7 @@ const warmth = 0.6;
 const atRest = 0.07;
 
 /** Whose sound the wave shows: the person's, the interviewer's, or nobody's. */
-export type WaveOf = "person" | "interviewer" | "quiet";
+type WaveOf = "person" | "interviewer" | "quiet";
 
 interface Wave {
   of: WaveOf;

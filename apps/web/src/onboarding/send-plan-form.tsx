@@ -101,7 +101,7 @@ const styles = stylex.create({
 // everyone else once their lead has talked.
 
 /** A team as the choice lists it. */
-export interface SendTeam {
+interface SendTeam {
   id: string;
   name: string;
   people: number;
@@ -123,7 +123,7 @@ const isoMonths = [
 ] as const;
 
 /** "6 Oct": an ISO day, without its year, in the page's language. */
-export const formatDay = (iso: string, locale: string): string => {
+const formatDay = (iso: string, locale: string): string => {
   const [year = 0, month = 1, day = 1] = iso.split("-").map(Number);
   if (locale === "en") {
     return `${day} ${isoMonths[month - 1] ?? ""}`;

@@ -1,12 +1,11 @@
 import type { voiceTags } from "@grasp-os/shared/interview-links";
-import { interviewLocaleSchema } from "@grasp-os/shared/onboarding";
 import type { Interviewer } from "@grasp-os/shared/onboarding";
-import { i18n } from "@lingui/core";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { z } from "zod";
 
 import { wait } from "../core.ts";
 import { readingSeconds } from "../onboarding/setup.ts";
+import { bytesOf, fetchTurns, languageNow } from "../voice/speech-fetch.ts";
 import { linkNow } from "./kept.ts";
 import { scheduleOf, wordsOf } from "./spoken.tsx";
 
@@ -42,17 +41,11 @@ const allowWaitMs = 400;
 /** How long one line may take to come. */
 const fetchTimeoutMs = 15_000;
 
-/**
- * How many lines are fetched ahead at once: the voice refuses many more.
- * The line being said never waits behind them.
- */
-const fetchesAtOnce = 2;
-
 /** When each word of a line is reached, in ms from its start, and how far the line is said then. */
 type Schedule = { after: number; reached: number }[];
 
 /** The line being said: whose, its words so far, when each is reached as far as that is known, and whether it is heard. */
-export interface SaidLine {
+interface SaidLine {
   id: number;
   text: string;
   speaker: Interviewer;
@@ -127,15 +120,6 @@ const audio = (): AudioContext | null => {
   return context;
 };
 
-/** The page's language, as the voice takes it. */
-const languageNow = () => {
-  const parsed = interviewLocaleSchema.safeParse(i18n.locale);
-  return parsed.success ? parsed.data : "en";
-};
-
-const bytesOf = (base64: string): Uint8Array<ArrayBuffer> =>
-  Uint8Array.from(atob(base64), (char) => char.codePointAt(0) ?? 0);
-
 /** How long a text takes to read at the pace of speech, in ms. */
 const readingMs = (text: string): number => readingSeconds(text) * 1000;
 
@@ -201,51 +185,7 @@ const fetchClip = async (text: string, voicing: Voicing): Promise<Clip> => {
   }
 };
 
-/** Lines fetched ahead, waiting their turn. */
-const queued: { key: string; start: () => void }[] = [];
-let fetching = 0;
-
-const nextFetch = (): void => {
-  for (const turn of queued.splice(0, Math.max(fetchesAtOnce - fetching, 0))) {
-    turn.start();
-  }
-};
-
-/** Runs `task` in its turn, or at once when `now`. */
-const inTurn = async (
-  key: string,
-  task: () => Promise<Clip>,
-  now: boolean
-): Promise<Clip> => {
-  const { promise, resolve } = Promise.withResolvers<Clip>();
-  const start = async (): Promise<void> => {
-    fetching += 1;
-    try {
-      resolve(await task());
-    } finally {
-      fetching -= 1;
-      nextFetch();
-    }
-  };
-  if (now || fetching < fetchesAtOnce) {
-    void start();
-  } else {
-    queued.push({
-      key,
-      start: () => {
-        void start();
-      },
-    });
-  }
-  return await promise;
-};
-
-/** A line waiting its turn to be fetched goes now: it is about to be said. */
-const hurry = (key: string): void => {
-  const at = queued.findIndex((each) => each.key === key);
-  const [turn] = at === -1 ? [] : queued.splice(at, 1);
-  turn?.start();
-};
+const { inTurn, hurry } = fetchTurns<Clip>();
 
 const clips = new Map<string, Promise<Clip>>();
 
@@ -665,7 +605,7 @@ export const voiceLevel = (): number => {
 };
 
 /** The line being said, if any. */
-export const useSaying = (): SaidLine | null =>
+const useSaying = (): SaidLine | null =>
   useSyncExternalStore(subscribe, lineNow, lineNow);
 
 /** Tells `onReached` how far `being` is said, word by word, from when it began, until stopped. */

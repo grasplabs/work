@@ -6,9 +6,9 @@ import type { ThemeId } from "../grasp/theme/index.ts";
 // here keeps theirs. public/theme.js applies it: `grasp-theme` is the choice
 // applied last, which it reads before first paint.
 
-export const themes = ["light", "dark", "system"] as const;
+const themes = ["light", "dark", "system"] as const;
 
-export type Theme = (typeof themes)[number];
+type Theme = (typeof themes)[number];
 
 /** The choice theme.js applies. */
 const appliedKey = "grasp-theme";
@@ -74,7 +74,7 @@ const appliedIdKey = "grasp-theme-id";
 const personIdKey = (userId: string): string => `grasp-theme-id:${userId}`;
 
 /** Until someone chooses: Grasp as it is. */
-export const defaultThemeId: ThemeId = "evergreen";
+const defaultThemeId: ThemeId = "evergreen";
 
 /** The colours `userId` chose in this browser; Evergreen until they choose. */
 export const readThemeId = (userId: string): ThemeId => {

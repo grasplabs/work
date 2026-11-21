@@ -129,7 +129,7 @@ const styles = stylex.create({
 });
 
 /** When the team was last heard: the date of the newest conversation, so the reader knows how fresh it is. */
-export const LastHeard = ({ date }: { date: string }) => {
+const LastHeard = ({ date }: { date: string }) => {
   const day = formatDay(date);
   return (
     <span {...stylex.props(styles.lastHeard)}>

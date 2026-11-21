@@ -172,7 +172,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   decision: "approvals",
 };
 
-export type Sort = "urgent" | "newest" | "oldest";
+type Sort = "urgent" | "newest" | "oldest";
 
 /** Urgent first, then the newest, then by title: the inbox's own order. */
 const order = (a: InboxItem, b: InboxItem): number =>
@@ -200,7 +200,7 @@ export const listed = (
     });
 
 /** A held write's name: what it does, on which connection. */
-export const heldName = (action: PendingAction): string => {
+const heldName = (action: PendingAction): string => {
   const title = action.description?.title ?? action.action;
   const connection = action.connectionName ?? action.connectionId;
   return t`${title} on ${connection}`;
@@ -277,7 +277,7 @@ const heldStartItems = (
   });
 
 /** What a call of unknown outcome did, and where: its tool's title, or its action. */
-export const outcomeName = (outcome: UnknownOutcome): string => {
+const outcomeName = (outcome: UnknownOutcome): string => {
   const title = outcome.description?.title ?? outcome.key.action;
   const connection = outcome.connectionName ?? outcome.key.connectionId;
   return t`${title} on ${connection}`;

@@ -47,7 +47,6 @@
     "react-is": "catalog:",
     "react-markdown": "catalog:",
     "recharts": "catalog:",
-    "rehype-highlight": "catalog:",
     "remark-gfm": "catalog:",
     "zod": "catalog:"
   },

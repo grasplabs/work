@@ -95,7 +95,7 @@ const useMatches = (query: string): boolean =>
  * The models a question may name, and the efforts each takes, and the
  * company's agents the person may talk to, the first one first.
  */
-export interface Offered {
+interface Offered {
   models: string[];
   efforts: Record<string, ModelEfforts>;
   agents: ChatAgent[];
@@ -162,7 +162,7 @@ const useModelsUnavailable = (
 };
 
 /** What the chat is called and says. */
-export interface ChatWords {
+interface ChatWords {
   title: string;
   placeholder: string;
 }

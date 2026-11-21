@@ -8,7 +8,7 @@ import { seeded } from "./reveal-motion.ts";
  * traced along their lines, so the page stands there in dots before it shows. Ported from the
  * prototype (grasplabs/prototype, packages/grasp: components/onboarding/reveal-targets.ts).
  */
-export interface RevealTargets {
+interface RevealTargets {
   count: number;
   x: Float32Array;
   y: Float32Array;

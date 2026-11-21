@@ -234,10 +234,6 @@ msgstr "{count, plural, =0 {Keine Dokumente} one {# Dokument} other {# Dokumente
 msgid "{count, plural, =0 {No sources} one {# source} other {# sources}}"
 msgstr "{count, plural, =0 {Keine Quellen} one {# Quelle} other {# Quellen}}"
 
-#: src/brain/brain-atlas.ts
-msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
-msgstr "{count, plural, one {{names} arbeiten hier, an # Arbeit, die in dem, was Menschen erzählt haben, vorkam.} other {{names} arbeiten hier, an # Arbeiten, die in dem, was Menschen erzählt haben, vorkamen.}}"
-
 #: src/agents/own-agents-admin.tsx
 msgid "{count, plural, one {# agent} other {# agents}}"
 msgstr "{count, plural, one {# Agent} other {# Agenten}}"
@@ -273,10 +269,6 @@ msgstr "{count, plural, one {# verbunden} other {# verbunden}}"
 #: src/chat/sources.tsx
 msgid "{count, plural, one {# connection} other {# connections}}"
 msgstr "{count, plural, one {# Verbindung} other {# Verbindungen}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{count, plural, one {# conversation came in: with the board, the teams and their people.} other {# conversations came in: with the board, the teams and their people.}}"
-msgstr "{count, plural, one {# Gespräch kam herein: mit der Geschäftsleitung, den Teams und ihren Leuten.} other {# Gespräche kamen herein: mit der Geschäftsleitung, den Teams und ihren Leuten.}}"
 
 #: src/settings/event-source-activity.tsx
 msgid "{count, plural, one {# delivery refused in the last seven days: it was larger than 64 KiB.} other {# deliveries refused in the last seven days: they were larger than 64 KiB.}}"
@@ -323,10 +315,6 @@ msgid "{count, plural, one {# entry} other {# entries}}"
 msgstr "{count, plural, one {# Eintrag} other {# Einträge}}"
 
 #: src/brain/brain.ts
-msgid "{count, plural, one {# gap still open. First: {question}} other {# gaps still open. First: {question}}}"
-msgstr "{count, plural, one {# Lücke noch offen: {question}} other {# Lücken noch offen. Die erste: {question}}}"
-
-#: src/brain/brain.ts
 msgid "{count, plural, one {# goal} other {# goals}}"
 msgstr "{count, plural, one {# Ziel} other {# Ziele}}"
 
@@ -337,10 +325,6 @@ msgstr "{count, plural, one {# Übergabe} other {# Übergaben}}"
 #: src/brain/activity-page.tsx
 msgid "{count, plural, one {# interview in week {week}} other {# interviews in week {week}}}"
 msgstr "{count, plural, one {# Interview in Kalenderwoche {week}} other {# Interviews in Kalenderwoche {week}}}"
-
-#: src/brain/brain.ts
-msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
-msgstr "{count, plural, one {# eingeladenes Team noch nicht interviewt: {teams}.} other {# eingeladene Teams noch nicht interviewt: {teams}.}}"
 
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more thing this chat worked on} other {# more things this chat worked on}}"
@@ -498,10 +482,6 @@ msgstr "{count, plural, one {Startet # Workflow} other {Startet # Workflows}}"
 msgid "{count, plural, one {The # tool} other {All # tools}}"
 msgstr "{count, plural, one {Das # Tool} other {Alle # Tools}}"
 
-#: src/brain/brain-atlas.ts
-msgid "{count, plural, one {The board set # goal for the sprint.} other {The board set # goals for the sprint.}}"
-msgstr "{count, plural, one {Die Geschäftsleitung hat # Ziel für den Sprint gesetzt.} other {Die Geschäftsleitung hat # Ziele für den Sprint gesetzt.}}"
-
 #: src/settings/invitations.tsx
 msgid "{count, plural, one {This is not an email address:} other {These are not email addresses:}} {listed}"
 msgstr "{count, plural, one {Das ist keine E-Mail-Adresse:} other {Das sind keine E-Mail-Adressen:}} {listed}"
@@ -582,10 +562,6 @@ msgstr "{documentKinds}. Verbinden Sie, wo sie liegen, und ich lese nur, was Sie
 #: src/brain/brain-atlas.ts
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# Dokument} other {# Dokumente}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{done, plural, one {# of them is drawn.} other {# of them are drawn.}}"
-msgstr "{done, plural, one {# davon ist gezeichnet.} other {# davon sind gezeichnet.}}"
 
 #: src/settings/stephen-settings.tsx
 msgid "{done} done · {failed} failed · 30 days"
@@ -828,10 +804,6 @@ msgstr "{leads, plural, one {Danke. Ich beginne mit dieser Teamleitung.} other {
 msgid "{leadsHeard} of {leads}"
 msgstr "{leadsHeard} von {leads}"
 
-#: src/brain/brain-atlas.ts
-msgid "{left, plural, one {# team here is not interviewed yet.} other {# teams here are not interviewed yet.}}"
-msgstr "{left, plural, one {# Team hier ist noch nicht interviewt.} other {# Teams hier sind noch nicht interviewt.}}"
-
 #: src/apps/app-code.tsx
 msgid "{lines, plural, one {# line, read only} other {# lines, read only}}"
 msgstr "{lines, plural, one {# Zeile, nur lesbar} other {# Zeilen, nur lesbar}}"
@@ -891,10 +863,6 @@ msgstr "{more, plural, one {# weitere Datei} other {# weitere Dateien}}"
 #: src/drafts/share-with-team.tsx
 msgid "{more, plural, one {and # more} other {and # more}}"
 msgstr "{more, plural, one {und # weiteres} other {und # weitere}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
-msgstr "{moved, plural, one {# davon hat sich später geändert, in einem weiteren Gespräch mit der Geschäftsleitung.} other {# davon haben sich später geändert, in weiteren Gesprächen mit der Geschäftsleitung.}}"
 
 #: src/brain/brain-article/team-work.tsx
 msgctxt "the same pain: these teams told it too"
@@ -1135,10 +1103,6 @@ msgstr "{named}, {current}. Zu {next} wechseln"
 msgid "{names} use it"
 msgstr "{names} nutzen es"
 
-#: src/brain/brain-atlas.ts
-msgid "{names} work here. No work of theirs came up yet."
-msgstr "{names} arbeiten hier. Von ihrer Arbeit kam noch nichts vor."
-
 #: src/apps/app-data-model.tsx
 msgid "{needs, plural, one {# needs you} other {# need you}}"
 msgstr "{needs, plural, one {# braucht Sie} other {# brauchen Sie}}"
@@ -1158,14 +1122,6 @@ msgstr "{number}. {system}: {step}"
 #: src/brain/opportunity-drafts.ts
 msgid "{number}. {system}: {step} (copied from another system)"
 msgstr "{number}. {system}: {step} (aus einem anderen System übertragen)"
-
-#: src/brain/brain-atlas.ts
-msgid "{one} and {other} both name the same handover, each from their own side."
-msgstr "{one} und {other} nennen beide dieselbe Übergabe, jeweils von ihrer Seite."
-
-#: src/brain/brain.ts
-msgid "{oneTeam} and {otherTeam} both name the same handover, each from their own side."
-msgstr "{oneTeam} und {otherTeam} nennen dieselbe Übergabe, jeweils aus ihrer Sicht."
 
 #: src/onboarding/document-drop.tsx
 msgid "{only} isn’t a file I can read."
@@ -1372,10 +1328,6 @@ msgstr "{set, plural, one {Filter, # gesetzt} other {Filter, # gesetzt}}"
 msgid "{share} of questions answered · 30 days"
 msgstr "{share} der Fragen beantwortet · 30 Tage"
 
-#: src/brain/brain-atlas.ts
-msgid "{shared, plural, one {# document was shared or found, and read.} other {# documents were shared or found, and read.}}"
-msgstr "{shared, plural, one {# Dokument wurde geteilt oder gefunden und gelesen.} other {# Dokumente wurden geteilt oder gefunden und gelesen.}}"
-
 #: src/routes/_shell.integrations.index.tsx
 msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {# Integration angezeigt} other {# Integrationen angezeigt}}"
@@ -1436,10 +1388,6 @@ msgstr "{statements, plural, one {# Aussage: {breakdown}} other {# Aussagen: {br
 msgid "{statements, plural, one {# statement} other {# statements}}"
 msgstr "{statements, plural, one {# Aussage} other {# Aussagen}}"
 
-#: src/brain/brain-atlas.ts
-msgid "{statements, plural, one {They brought # statement, each one tagged and kept with its source.} other {They brought # statements, each one tagged and kept with its source.}}"
-msgstr "{statements, plural, one {Sie brachten # Aussage, markiert und bei ihrer Quelle aufbewahrt.} other {Sie brachten # Aussagen, jede markiert und bei ihrer Quelle aufbewahrt.}}"
-
 #: src/brain/brain.ts
 msgid "{status, select, drawn {{workflow} (drawn)} designed {{workflow} (designed)} testing {{workflow} (testing)} other {{workflow} (running)}}"
 msgstr "{status, select, drawn {{workflow} (skizziert)} designed {{workflow} (neu gestaltet)} testing {{workflow} (im Test)} other {{workflow} (live)}}"
@@ -1455,10 +1403,6 @@ msgstr "{step} von {count}"
 #: src/activity/pending.tsx
 msgid "{subject}: {actions} on {object}"
 msgstr "{subject}: {actions} auf {object}"
-
-#: src/brain/brain-atlas.ts
-msgid "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
-msgstr "{sunk, plural, one {# davon ist ein Zeitfresser, wie das Team es sagte.} other {# davon sind Zeitfresser, wie die Teams es sagten.}}"
 
 #: src/brain/opportunities-page.tsx
 msgctxt "a system and a step taken in it"
@@ -1504,10 +1448,6 @@ msgstr "{team} · unsere E-Mail hat sie nicht erreicht"
 msgid "{team} (team)"
 msgstr "{team} (Team)"
 
-#: src/brain/region-edit.tsx
-msgid "{team} has a region of its own"
-msgstr "{team} hat eine eigene Region"
-
 #: src/onboarding/interviews-progress.tsx
 msgid "{team} has been quiet so far. A short message from {lead}, their lead, usually helps. I’ll remind everyone once myself."
 msgstr "{team} ist bisher still. Eine kurze Nachricht von {lead}, der Teamleitung, hilft meist. Ich erinnere alle selbst einmal."
@@ -1515,10 +1455,6 @@ msgstr "{team} ist bisher still. Eine kurze Nachricht von {lead}, der Teamleitun
 #: src/brain/brain.ts
 msgid "{team} interviewed"
 msgstr "{team} interviewt"
-
-#: src/brain/region-edit.tsx
-msgid "{team} moved to {to}"
-msgstr "{team} nach {to} verschoben"
 
 #: src/brain/thinking/use-thinking.ts
 msgid "{team} says the same"
@@ -3390,10 +3326,6 @@ msgstr "Archiviert: Niemand öffnet ihre Seiten und nichts läuft, bis ein Build
 #: src/settings/erasures.tsx
 msgid "Areas finished"
 msgstr "Bereiche abgeschlossen"
-
-#: src/brain/region-edit.tsx
-msgid "Arrange {name}"
-msgstr "{name} einordnen"
 
 #: src/activity/audit-words.ts
 msgid "Arranged the company's groups of teams"
@@ -11146,10 +11078,6 @@ msgstr "{name} nach unten verschieben"
 msgid "Move {name} up"
 msgstr "{name} nach oben verschieben"
 
-#: src/brain/region-edit.tsx
-msgid "Move {team} to"
-msgstr "{team} verschieben nach"
-
 #: src/apps/field-editor.tsx
 msgid "Move {value} down"
 msgstr "{value} nach unten"
@@ -11173,10 +11101,6 @@ msgstr "Nach hinten"
 #: src/frame/part-words.tsx
 msgid "Move the panel"
 msgstr "Bereich verschieben"
-
-#: src/brain/region-edit.tsx
-msgid "Move to"
-msgstr "Verschieben nach"
 
 #: src/frame/part-words.tsx
 msgid "Move up"
@@ -11429,10 +11353,6 @@ msgstr "Neue Option"
 #: src/routes/_shell.projects.index.tsx
 msgid "New project"
 msgstr "Neues Projekt"
-
-#: src/brain/region-edit.tsx
-msgid "New region"
-msgstr "Neue Region"
 
 #: src/apps/app-data-model.tsx
 msgid "New table"
@@ -11745,10 +11665,6 @@ msgstr "Niemand hat diesen Namen"
 msgid "No one yet: open it to add people"
 msgstr "Noch niemand: Öffnen Sie es, um Personen hinzuzufügen"
 
-#: src/people/person-picker.tsx
-msgid "No owner yet"
-msgstr "Noch niemand verantwortlich"
-
 #: src/apps/app-page.tsx
 msgid "No page yet"
 msgstr "Noch keine Seite"
@@ -11918,10 +11834,6 @@ msgstr "Niemand außerhalb kann ihn etwas fragen, weder in Grasp noch in einer C
 #: src/apps/access-view.tsx
 msgid "Nobody sees the records in {table}, Sam included."
 msgstr "Niemand sieht die Datensätze in {table}, auch Sam nicht."
-
-#: src/people/person-picker.tsx
-msgid "Nobody with that name."
-msgstr "Niemand mit diesem Namen."
 
 #: src/agents/agent-facts.tsx
 #: src/agents/new-agent.tsx
@@ -13325,14 +13237,6 @@ msgctxt "who owns what is shared"
 msgid "Owner"
 msgstr "Eigentümer"
 
-#: src/people/person-picker.tsx
-msgid "Owner: {owner}. Change owner"
-msgstr "Verantwortlich: {owner}. Ändern"
-
-#: src/people/person-picker.tsx
-msgid "Owner: nobody yet. Change owner"
-msgstr "Verantwortlich: noch niemand. Ändern"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owns"
@@ -14030,10 +13934,6 @@ msgstr "Pulse"
 msgid "Pulse on company devices. Adds which applications, MCP servers and skills are actually used, AI tools and shadow IT included."
 msgstr "Pulse auf Firmengeräten. Ergänzt, welche Anwendungen, MCP-Server und Skills tatsächlich genutzt werden, KI-Tools und Schatten-IT eingeschlossen."
 
-#: src/brain/brain-atlas.ts
-msgid "Pulse shows what runs on the laptops, AI tools included."
-msgstr "Pulse zeigt, was auf den Laptops läuft, KI-Tools eingeschlossen."
-
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Purchase-to-Pay"
@@ -14319,10 +14219,6 @@ msgstr "Workspace wird gelesen"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "Lesen, was sich bei einer Verbindung geändert hat, ist fehlgeschlagen"
-
-#: src/people/person-picker.tsx
-msgid "Reading who can own it…"
-msgstr "Liest, wer verantwortlich sein kann…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -14695,7 +14591,6 @@ msgstr "Entfernt."
 msgid "Removing"
 msgstr "Wird entfernt"
 
-#: src/brain/region-edit.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx
@@ -14707,10 +14602,6 @@ msgstr "Umbenennen"
 msgctxt "a chat"
 msgid "Rename"
 msgstr "Umbenennen"
-
-#: src/brain/region-edit.tsx
-msgid "Rename {region}"
-msgstr "{region} umbenennen"
 
 #: src/chat/sidebar-chats.tsx
 msgid "Rename {title}"
@@ -14724,7 +14615,6 @@ msgstr "Chat umbenennen"
 msgid "Renamed the organization"
 msgstr "Hat die Organisation umbenannt"
 
-#: src/brain/region-edit.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx
 msgid "Renamed to {name}"
@@ -15642,10 +15532,6 @@ msgstr "Mitglieder suchen"
 msgid "Search models"
 msgstr "Modelle suchen"
 
-#: src/people/person-picker.tsx
-msgid "Search people"
-msgstr "Personen suchen"
-
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
 msgid "Search people and teams"
@@ -16454,10 +16340,6 @@ msgstr "Die Anmeldung hat nicht funktioniert. Versuchen Sie es erneut oder frage
 msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
 msgstr "Die Anmeldung ist für diesen Workspace noch nicht eingerichtet, daher kann sich niemand anmelden. Grasp richtet sie ein."
 
-#: src/brain/brain-atlas.ts
-msgid "Sign-in shows the applications people log in to."
-msgstr "Die Anmeldung zeigt, bei welchen Anwendungen sich Leute anmelden."
-
 #: src/sign-in-errors.ts
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "Die Anmeldung ist abgelaufen oder wurde anderswo gestartet. Versuchen Sie es erneut."
@@ -17032,14 +16914,6 @@ msgstr "Immer noch nichts? Stellen Sie die Lautstärke höher oder prüfen Sie, 
 #: src/brain/brain.ts
 msgid "Still open"
 msgstr "Noch offen"
-
-#: src/brain/brain-atlas.ts
-msgid "Still open: {question}"
-msgstr "Noch offen: {question}"
-
-#: src/brain/brain-atlas.ts
-msgid "Still open: {question} {who} can answer it."
-msgstr "Noch offen: {question} {who} kann sie beantworten."
 
 #: src/connections/revocations-by-hand.tsx
 msgid "Still trying · {tries} tries"
@@ -17829,14 +17703,6 @@ msgstr "Der beste Teil seines Abschnitts"
 msgid "The board"
 msgstr "Die Geschäftsleitung"
 
-#: src/brain/brain-atlas.ts
-msgid "The board confirmed the vision."
-msgstr "Die Geschäftsleitung hat die Vision bestätigt."
-
-#: src/brain/brain-atlas.ts
-msgid "The board has not confirmed the vision yet."
-msgstr "Die Geschäftsleitung hat die Vision noch nicht bestätigt."
-
 #: src/connections/brain-audience.tsx
 msgid "The Brain"
 msgstr "Das Brain"
@@ -17994,10 +17860,6 @@ msgstr "Die Details dieses Laufs wurden entfernt, als seine Aufbewahrungsfrist e
 #: src/brain/brain.ts
 msgid "The directory and sign-in through Microsoft or Google. Adds teams and roles, and the applications people sign in to with their permissions."
 msgstr "Das Verzeichnis und die Anmeldung über Microsoft oder Google. Ergänzt Teams und Rollen sowie die Anwendungen, bei denen sich Personen anmelden, mit ihren Berechtigungen."
-
-#: src/brain/brain-atlas.ts
-msgid "The directory brought in the teams and their roles."
-msgstr "Das Verzeichnis brachte die Teams und ihre Rollen."
 
 #: src/settings/directory-reads.tsx
 msgid "The directory couldn’t be read, last tried {failedAt}."
@@ -18263,10 +18125,6 @@ msgstr "Am schnellsten geht es, wenn Sie Ihre {signIn}-Anmeldung verbinden. Ich 
 #: src/onboarding/setup-steps.tsx
 msgid "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
 msgstr "Am schnellsten geht es, wenn Sie Ihre Microsoft- oder Google-Anmeldung verbinden. Ich sehe nur Namen, Teams und Rollen. Ihre E-Mails, Chats und Kalender bleiben geschlossen."
-
-#: src/brain/region-edit.tsx
-msgid "The regions could not be saved"
-msgstr "Die Regionen konnten nicht gespeichert werden"
 
 #: src/apps/app-access-requests.tsx
 msgid "The request allows nothing until an admin grants it. They see what the app asks for and decide."
@@ -19294,7 +19152,6 @@ msgid "Under Spam, bypass spam filters for an approved senders list, and add {do
 msgstr "Lassen Sie unter „Spam“ die Spamfilter für eine Liste zugelassener Absender umgehen, und fügen Sie {domain} hinzu."
 
 #: src/agents/agent-wakes.tsx
-#: src/brain/region-edit.tsx
 #: src/chat/approval-words.ts
 #: src/chat/saved-memory.tsx
 #: src/drafts/share-with-team.tsx

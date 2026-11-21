@@ -201,73 +201,41 @@ describe("deleting and withdrawing on the interview page", () => {
     vi.useRealTimers();
   });
 
-  it("says what the Brain kept is being removed while core says it still is, never that nothing is used", async () => {
-    await shown({
-      withdrawn: true,
-      at: "2026-11-16T10:00:00.000Z",
-      removing: true,
-    });
-    await choose("Withdraw instead");
-    await until(() => text().includes("You withdrew."), "the withdrawal");
-    expect({
-      removing: text().includes(
-        "You withdrew. What the Brain kept of it is being removed."
-      ),
-      nothingUsed: text().includes("Nothing you said is used from now on."),
-    }).toStrictEqual({ removing: true, nothingUsed: false });
-  });
+  const removed = "What the Brain kept of it is being removed.";
+  const withdrawn = {
+    withdrawn: true,
+    at: "2026-11-16T10:00:00.000Z",
+  };
 
-  it("says nothing they said is used once core removed it all", async () => {
-    await shown({ withdrawn: true, at: "2026-11-16T10:00:00.000Z" });
-    await choose("Withdraw instead");
-    await until(() => text().includes("You withdrew."), "the withdrawal");
-    expect({
-      removing: text().includes("What the Brain kept of it is being removed."),
-      nothingUsed: text().includes(
-        "You withdrew. Nothing you said is used from now on."
-      ),
-    }).toStrictEqual({ removing: false, nothingUsed: true });
-  });
-
-  it("says what the Brain kept is being removed after a delete while core says it still is, never that nothing is kept", async () => {
-    await shown({ deleted: true, removing: true });
-    await choose("Delete it");
-    await until(() => text().includes("Deleted."), "the deletion");
-    expect({
-      removing: text().includes(
-        "Deleted. What the Brain kept of it is being removed."
-      ),
-      nothingKept: text().includes("Nothing you said is kept."),
-    }).toStrictEqual({ removing: true, nothingKept: false });
-  });
-
-  it("says nothing they said is kept once core removed it all", async () => {
-    await shown({ deleted: true });
-    await choose("Delete it");
-    await until(() => text().includes("Deleted."), "the deletion");
-    expect({
-      removing: text().includes("What the Brain kept of it is being removed."),
-      nothingKept: text().includes("Deleted. Nothing you said is kept."),
-    }).toStrictEqual({ removing: false, nothingKept: true });
-  });
-
-  it("still says what the Brain kept is being removed when the page opens again while core says it is", async () => {
-    await reopened(true);
-    expect({
-      removing: text().includes(
-        "You withdrew. What the Brain kept of it is being removed."
-      ),
-      nothingUsed: text().includes("Nothing you said is used from now on."),
-    }).toStrictEqual({ removing: true, nothingUsed: false });
-  });
-
-  it("says nothing they said is used when the page opens again once core removed it all", async () => {
-    await reopened(false);
-    expect({
-      removing: text().includes("What the Brain kept of it is being removed."),
-      nothingUsed: text().includes(
-        "You withdrew. Nothing you said is used from now on."
-      ),
-    }).toStrictEqual({ removing: false, nothingUsed: true });
-  });
+  it.each([
+    [true, "withdrawing"],
+    [false, "withdrawing"],
+    [true, "deleting"],
+    [false, "deleting"],
+    [true, "opening the page again"],
+    [false, "opening the page again"],
+  ] as const)(
+    "says what the Brain kept is being removed, or that nothing is used or kept, as core answers (removing: %s) when %s",
+    async (removing, how) => {
+      const done = how === "deleting" ? "Deleted." : "You withdrew.";
+      const nothing =
+        how === "deleting"
+          ? "Nothing you said is kept."
+          : "Nothing you said is used from now on.";
+      if (how === "withdrawing") {
+        await shown(removing ? { ...withdrawn, removing } : withdrawn);
+        await choose("Withdraw instead");
+      } else if (how === "deleting") {
+        await shown(removing ? { deleted: true, removing } : { deleted: true });
+        await choose("Delete it");
+      } else {
+        await reopened(removing);
+      }
+      await until(() => text().includes(done), done);
+      expect({
+        says: text().includes(`${done} ${removing ? removed : nothing}`),
+        saysTheOther: text().includes(removing ? nothing : removed),
+      }).toStrictEqual({ says: true, saysTheOther: false });
+    }
+  );
 });

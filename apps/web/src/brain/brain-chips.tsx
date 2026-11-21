@@ -82,7 +82,7 @@ const dotOf = (kind: NoteKind) =>
 const tintOf = (kind: NoteKind): (typeof tints)[Group] => tints[groupOf[kind]];
 
 /** The colour dot of a note's kind. */
-export const KindDot = ({ kind }: { kind: NoteKind }) => (
+const KindDot = ({ kind }: { kind: NoteKind }) => (
   <span aria-hidden="true" {...stylex.props(dots.dot, dotOf(kind))} />
 );
 

@@ -16,7 +16,7 @@ import { useCore } from "../use-core.ts";
 // actions and further pages with `useAsk`.
 
 /** The person's memories, as the page reaches them. */
-export type Memories = Session["brainMemories"];
+type Memories = Session["brainMemories"];
 
 /** What an ask came to: core's answer, or why not. */
 type Answer<T> =
@@ -111,7 +111,7 @@ export const useAsk = (key: string, shownFor: string = key) => {
  * A page of a listing, as `usePaged` takes one: its rows, where it goes
  * on, and what the first page says of the whole (an entity's own name).
  */
-export interface Page<T, N, H = undefined> {
+interface Page<T, N, H = undefined> {
   items: readonly T[];
   next: N | null;
   head?: H;

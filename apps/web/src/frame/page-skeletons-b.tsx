@@ -108,7 +108,7 @@ export const SettingsPending = ({
  * then its text, in page-brain's column. No block has a Brain page's shape yet: a page header's
  * own loading and the band's text, without its band, stand in.
  */
-export const NotePending = () => (
+const NotePending = () => (
   <div {...stylex.props(styles.pane, styles.brainPagePane)}>
     <div {...stylex.props(styles.brainPage)}>
       <PageHeader loading title="" />

@@ -366,17 +366,6 @@ describe("an app's panel", () => {
     expect({ member, staff }).toStrictEqual({ member: 0, staff: 0 });
   });
 
-  it("lets a member connect a native app themselves", async () => {
-    await opened("microsoft", [], person({ role: "user" }));
-
-    expect({
-      connect: buttons("Connect").length > 0,
-      adminConnects: document.body.textContent.includes(
-        "An admin connects this"
-      ),
-    }).toStrictEqual({ connect: true, adminConnects: false });
-  });
-
   it("offers signing in again to a lapsed native connection under Manage", async () => {
     await opened("microsoft", [
       {

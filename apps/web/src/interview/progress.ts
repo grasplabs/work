@@ -401,7 +401,7 @@ export const partAt = (progress: InterviewProgress) => {
 };
 
 /** A piece of what someone said: plain words, or words Stephen marked, with what they are. */
-export interface Piece {
+interface Piece {
   /** Where it starts in the line. */
   at: number;
   text: string;

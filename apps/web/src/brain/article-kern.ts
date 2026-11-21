@@ -56,7 +56,7 @@ const trailingNumber = /\d+$/u;
  * interview: Finance assistant 1"), a stakeholder's by role alone. Initials carry the number, so
  * two finance assistants are told apart.
  */
-export const intervieweeOf = (source: Source): Interviewee => {
+const intervieweeOf = (source: Source): Interviewee => {
   const stakeholder = source.interviewee === "stakeholder";
   const role = source.who ?? "";
   const label =

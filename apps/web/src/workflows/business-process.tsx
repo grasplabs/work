@@ -92,8 +92,6 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space1,
   },
-  hint: { display: "flex", flexDirection: "column", gap: grasp.space1 },
-  hintName: { fontWeight: grasp.weightMedium },
   picker: { display: "flex", flexDirection: "column", gap: grasp.space1 },
 });
 
@@ -188,19 +186,6 @@ export const ProcessTile = ({ process }: { process: BusinessProcess }) => (
     <ProcessGlyph process={process} />
   </span>
 );
-
-/** Its name over what it covers: what a process says when pointed at. */
-export const ProcessHint = ({ process }: { process: BusinessProcess }) => {
-  const { i18n } = useLingui();
-  return (
-    <span {...stylex.props(styles.hint)}>
-      <span {...stylex.props(styles.hintName)}>
-        {i18n._(processNames[process])}
-      </span>
-      <span>{i18n._(processCovers[process])}</span>
-    </span>
-  );
-};
 
 /**
  * A process as a badge, its icon and name. What it covers goes beside it,

@@ -49,7 +49,7 @@ const providerName = ({ provider }: SignInProvider): string =>
   provider === "microsoft" ? "Microsoft 365" : "Google Workspace";
 
 /** How people sign in, as core answered an admin, as a row. */
-export const SignInView = ({
+const SignInView = ({
   signIn,
   onRetry,
 }: {

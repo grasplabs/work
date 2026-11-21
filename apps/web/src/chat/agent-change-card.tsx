@@ -82,7 +82,7 @@ const BeforeAfter = ({
 );
 
 /** The drafted change as a card, with `actions` while it waits. */
-export const AgentChangeCard = ({
+const AgentChangeCard = ({
   change,
   actions,
 }: {

@@ -76,7 +76,7 @@ const styles = stylex.create({
 });
 
 /** The project an item was started from, carried along in its address (`?project=`). */
-export type ItemProject = Pick<Project, "id" | "name">;
+type ItemProject = Pick<Project, "id" | "name">;
 
 /**
  * The project `project` names, by its name, for the way back; none without

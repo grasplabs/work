@@ -51,14 +51,14 @@ export type Spot = "known" | "waiting" | "open";
  * The canvas's top left corner, in pixels, for the brain to keep clear: inside a region the small
  * brain is drawn there, to click on; seen whole, nothing is.
  */
-export const LEGEND_CORNER = { width: 160, whole: 0, region: 120 };
+const LEGEND_CORNER = { width: 160, whole: 0, region: 120 };
 
 /** The corner the brain keeps clear: only the small brain's, now the rest is above the canvas. */
 export const legendCorner = (_groups: number): typeof LEGEND_CORNER =>
   LEGEND_CORNER;
 
 /** A region's groups, to narrow it to one: the tools people named, the employee interviews. */
-export interface LegendGroups {
+interface LegendGroups {
   items: RegionGroup[];
   /** How many notes the region shows in all. */
   total: number;

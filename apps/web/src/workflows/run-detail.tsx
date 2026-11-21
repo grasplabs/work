@@ -92,7 +92,7 @@ const readsAgain = (
  * How a run's status stands as a Badge: done is success, failed is
  * danger, anything else a plain fact (nobody need act on it).
  */
-export const runToneOf = (status: WorkflowRunStatus): BadgeTone => {
+const runToneOf = (status: WorkflowRunStatus): BadgeTone => {
   if (status === "completed") {
     return "success";
   }
@@ -137,7 +137,7 @@ export const StartedWithout = ({ run }: { run: WorkflowResourceRun }) => {
  * An opened run's status, and, while a step of it waits for its AI
  * provider, what for: as the runs table says it (`WaitingForAiProvider`).
  */
-export const RunStatusFact = ({ run }: { run: WorkflowResourceRun }) => (
+const RunStatusFact = ({ run }: { run: WorkflowResourceRun }) => (
   <output {...stylex.props(styles.status)}>
     <RunStatusBadge status={run.status} />
     {run.aiProvider === undefined ? null : (

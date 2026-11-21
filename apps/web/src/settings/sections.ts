@@ -25,7 +25,7 @@ import type { IconData } from "../grasp/icons/index.ts";
 // listed: this only keeps out of sight what someone can't use.
 
 /** Where a section lives. */
-export type SettingsHref =
+type SettingsHref =
   | "/settings/workspace"
   | "/settings/members"
   | "/settings/teams"
@@ -45,16 +45,16 @@ export type SettingsHref =
  * people, never Grasp staff (its members and the outside systems that
  * call in).
  */
-export type SettingsAudience = "everyone" | "own" | "admins" | "own-admins";
+type SettingsAudience = "everyone" | "own" | "admins" | "own-admins";
 
-export type SettingsGroupId = "workspace" | "account";
+type SettingsGroupId = "workspace" | "account";
 
-export interface SettingsGroup {
+interface SettingsGroup {
   id: SettingsGroupId;
   title: MessageDescriptor;
 }
 
-export interface SettingsSection {
+interface SettingsSection {
   /** Stable: a rename changes only the label. */
   id: string;
   label: MessageDescriptor;
@@ -69,7 +69,7 @@ export interface SettingsSection {
   wide?: true;
 }
 
-export const settingsGroups: readonly SettingsGroup[] = [
+const settingsGroups: readonly SettingsGroup[] = [
   // The person's own account first: the one group everyone has.
   {
     id: "account",
@@ -81,7 +81,7 @@ export const settingsGroups: readonly SettingsGroup[] = [
   },
 ];
 
-export const settingsSections: readonly SettingsSection[] = [
+const settingsSections: readonly SettingsSection[] = [
   {
     id: "profile",
     label: msg`Profile`,
@@ -177,7 +177,7 @@ export const settingsSections: readonly SettingsSection[] = [
 ];
 
 /** Who is looking: their role, and whether they are Grasp staff. */
-export interface SettingsViewer {
+interface SettingsViewer {
   role: Role;
   staff: boolean;
 }
