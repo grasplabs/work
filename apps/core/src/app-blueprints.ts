@@ -16,7 +16,7 @@ import type {
   CreatedFromBlueprint,
   FromBlueprint,
 } from "@grasp-os/shared/apps";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema, blueprintIdSchema } from "@grasp-os/shared/ids";
@@ -60,7 +60,12 @@ import {
   toVersion,
   versionTree,
 } from "./apps.ts";
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedEventWithDetailWhere,
+  outboxedIfChanged,
+} from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
   appOrigins,
@@ -941,14 +946,19 @@ const pendingUpdate = async (
     return undefined;
   }
   const latestRow = await findVersion(env, found.id, latest);
-  const [base, ours, blueprintNow] = await Promise.all([
+  let blueprintNow: Map<string, string>;
+  try {
+    blueprintNow = await readBlueprintCode(env, blueprint, null);
+  } catch (error) {
+    // Removed since its row was read: no update to offer.
+    if (appErrors.codeOf(error) === "app.blueprint_not_found") {
+      return undefined;
+    }
+    throw error;
+  }
+  const [base, ours] = await Promise.all([
     readTree(env, found.id, origin.code),
     readTree(env, found.id, latestRow.tree),
-    blueprintFiles(env, {
-      id: blueprintIdSchema.parse(blueprint.id),
-      appId: null,
-      tree: blueprint.tree,
-    }),
   ]);
   const [baseDefinition, oursDefinition, theirsDefinition] = await Promise.all([
     readStored(origin),
@@ -1064,7 +1074,11 @@ export const acceptBlueprintUpdate = async (
   // update was worked out from, to the blueprint's as they saw them, over
   // the version they saw (it runs before this batch commits a version):
   // otherwise NULL, which the columns `tree` and `code` refuse, and the
-  // whole batch with them.
+  // whole batch with them. Written as an upsert whose insert is refused
+  // (its `blueprint_id` read from the origin, NULL without one): an
+  // origin a removal of the built-in deleted since
+  // (`removeBuiltinBlueprint`) refuses the batch too, so no version is
+  // committed for an App no longer offered the update.
   const stillSeen = sql`${appOrigins.tree} = ${origin.tree}
     AND ${appOrigins.definition} = ${origin.definition} AND EXISTS (
     SELECT 1 FROM ${blueprints}
@@ -1072,15 +1086,23 @@ export const acceptBlueprintUpdate = async (
       AND ${blueprints.definition} = ${theirs.definition.text})
     AND (SELECT max(${appVersions.version}) FROM ${appVersions}
       WHERE ${appVersions.appId} = ${appId}) = ${latest.version}`;
+  const moved = {
+    tree: sql`CASE WHEN ${stillSeen} THEN ${blueprint.tree} ELSE NULL END`,
+    code: sql`CASE WHEN ${stillSeen} THEN ${base.tree} ELSE NULL END`,
+    definition: theirs.definition.text,
+    blueprintVersion: null,
+  };
   const moveOrigin = db
-    .update(appOrigins)
-    .set({
-      tree: sql`CASE WHEN ${stillSeen} THEN ${blueprint.tree} ELSE NULL END`,
-      code: sql`CASE WHEN ${stillSeen} THEN ${base.tree} ELSE NULL END`,
-      definition: theirs.definition.text,
-      blueprintVersion: null,
+    .insert(appOrigins)
+    .values({
+      appId,
+      // The origin's own, NULL when it is gone: never a row of its own.
+      blueprintId: sql`(SELECT ${appOrigins.blueprintId} FROM ${appOrigins} WHERE ${appOrigins.appId} = ${appId})`,
+      tree: origin.tree,
+      code: origin.code,
+      createdAt: new Date(),
     })
-    .where(eq(appOrigins.appId, appId));
+    .onConflictDoUpdate({ target: appOrigins.appId, set: moved });
   const updated = (version: number) =>
     outboxed(
       db,
@@ -1328,33 +1350,49 @@ export const unshippedBuiltins = async (
 };
 
 /**
- * Removes the built-in `id`, which the release no longer ships: its row
- * first, in one audited batch, then its trees. A row never names a tree
- * that is gone, so a release that ships it again (a rollback) finds it
- * whole; a failed batch leaves both for the next install to remove. A
- * tree whose delete fails is only logged, as nothing reads it once the
- * row is gone: a release that ships the built-in again deletes it with
- * the rest of its replaced trees. Its id is never another built-in's
- * (`retiredBuiltinIds`, build-blueprints.ts), so no other App's code
- * ever reaches the Apps created from it as an update. Those keep their
- * code and their origin, offered no update (`pendingUpdate`). A create
- * that races the removal is refused as for any blueprint that is gone
- * (`createFromBlueprint`). Removing one that is gone already writes
- * nothing, and records nothing.
+ * Removes the built-in `id`, which the release no longer ships: in one
+ * audited batch its row, and the origin (`app_origins`) of every App
+ * created from it, which detaches them: they keep their code, their
+ * versions and their label (`apps.blueprint`), and are offered no update
+ * from it again, whatever a later release ships under the same id. The
+ * event counts the Apps detached. Then its trees. A row never names a
+ * tree that is gone, so a release that ships it again (a rollback) finds
+ * it whole; a failed batch leaves all of it for the next install to
+ * remove. A tree whose delete fails is only logged and stays in R2,
+ * holding the built-in's code as the release shipped it and no client
+ * data: nothing reads it once the row is gone, and it goes only when a
+ * release ships a built-in under the same id again, whose install deletes
+ * every tree of the id but its own (`deleteReplacedTrees`). A create that
+ * races the removal is refused as for any blueprint that is gone
+ * (`createFromBlueprint`), and an update accepted as it lands as a
+ * conflict (`acceptBlueprintUpdate`). Removing one that is gone already
+ * writes nothing, and records nothing.
  */
 export const removeBuiltinBlueprint = async (
   env: Env,
   id: BlueprintId
 ): Promise<void> => {
   const db = drizzle(env.DB);
+  // A built-in's copies' origins: a marked blueprint's name its version.
+  const copies = and(
+    eq(appOrigins.blueprintId, id),
+    isNull(appOrigins.blueprintVersion)
+  );
   await auditedBatch(env, db, [
     db
       .delete(blueprints)
       .where(and(eq(blueprints.id, id), isNull(blueprints.appId))),
-    outboxedIfChanged(
+    // Counted as the event is stored, before the origins go below.
+    outboxedEventWithDetailWhere(
       db,
-      installEntry("blueprint.removed", id, { release: compilerVersion })
+      createAuditEvent(
+        installEntry("blueprint.removed", id, { release: compilerVersion }),
+        "core"
+      ),
+      { detached: sql`(SELECT count(*) FROM ${appOrigins} WHERE ${copies})` },
+      sql`changes() > 0`
     ),
+    db.delete(appOrigins).where(copies),
   ]);
   try {
     await deleteOtherBlueprintTrees(env, id);

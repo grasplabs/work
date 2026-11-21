@@ -21,9 +21,11 @@ import { compilerAssets } from "./src/kit.ts";
 // `heapMb`; then each type-checked in the release's checker alone,
 // as its own isolate checks them. The type chunks took what the compiler
 // needs from 289–320 MB to 193–208 MB, and moving the check to its own
-// isolate took it to 66–105 MB. The checker's memory is mostly tsrs's
-// WebAssembly memory, which `--max-heap-size` doesn't cap: it is counted
-// here beside the heap.
+// isolate took it to 66–105 MB; the same six built-ins measured
+// 36–48 MB in November 2026, so a build's heap is now mostly the compiler
+// and the kit. The checker's memory is mostly tsrs's WebAssembly memory,
+// which `--max-heap-size` doesn't cap: it is counted here beside the
+// heap.
 
 const harness = path.join(import.meta.dirname, "build-heap.ts");
 /** Where core's built-ins are, and its tests' own. */
@@ -34,10 +36,12 @@ const folders = [
 
 /**
  * The heap the compiler's builds must fit in, in MB: a Cloudflare
- * isolate's, whatever it builds. `hello` takes 32–34 MB (November 2026):
- * most of a build's heap is the compiler and the kit, not the App, so
- * this guards what every build carries; a large App's own share is
- * guarded again once the release ships built-ins.
+ * isolate's, whatever it builds. Measured in November 2026, built one
+ * after another as here: `hello` 32–34 MB; the six built-ins shipped
+ * until then 36–48 MB, the largest of them (the workflow map, 30 files,
+ * 160 KB) 42–48 MB. An App's own code adds a few MB to what every build
+ * carries, so `hello` guards the compiler and the kit within about 15 MB
+ * of the largest App the release shipped.
  */
 const heapMb = 128;
 
@@ -45,11 +49,10 @@ const heapMb = 128;
  * What a check may take, heap and WebAssembly together, in MB: above the
  * 128 MB past which Cloudflare replaces an isolate after its call (the
  * checker keeps nothing, so a replaced one costs a start), well below the
- * about 256 MB at which it ends one mid-call. `hello` takes 125–153 MB
- * (November 2026), nearly all of it tsrs's WebAssembly memory for the
- * kit's types, its 80 MiB shadow stack included; the six far larger
- * built-ins shipped until then took 136–162 MB, so an App's own code adds
- * little.
+ * about 256 MB at which it ends one mid-call. Measured in November 2026:
+ * `hello` 125–153 MB, the six built-ins shipped until then 128–159 MB,
+ * nearly all of it tsrs's WebAssembly memory for the kit's types, its
+ * 80 MiB shadow stack included.
  */
 const checkMb = 192;
 

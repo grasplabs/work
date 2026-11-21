@@ -33,10 +33,12 @@ import { ensureReleaseContract } from "./workflow-catalog.ts";
 // A release may ship no built-in blueprint, and its built-ins are the
 // whole set: one an earlier release installed that this one no longer
 // ships is removed, so nobody creates from code no release vouches for
-// any more. Apps created from it stay as they are, offered no update. A
-// rollback to a release that ships it installs it again. The catalog
-// contracts it published stay: a workflow may bind one, and a contract is
-// published once and never changed.
+// any more. Apps created from it keep their code and are detached from it
+// (their origins deleted), so no later built-in under its id offers them
+// an update. A rollback to a release that ships it installs it again; the
+// Apps it detached stay detached, as that release ships the code they took
+// or older. The catalog contracts it published stay: a workflow may bind
+// one, and a contract is published once and never changed.
 //
 // One object does the installing, the `Builtins` singleton. It keeps the
 // fingerprint of the release it last installed completely, a SHA-256 of

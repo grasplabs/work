@@ -148,35 +148,6 @@ describe("the built-in blueprints' build", () => {
     expect(existsSync(path.join(dir, "out.js"))).toBeFalsy();
   });
 
-  it("fails for a built-in named as one an earlier release removed", () => {
-    const dir = fixture("crm", schema);
-    expect(() => build(dir)).toThrow("an earlier release removed");
-    expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
-  });
-
-  it.each([
-    ["no definition.json", { "definition.json": "" }, "definition"],
-    [
-      "a definition.json that isn't a definition",
-      { "definition.json": '{"name":"Fixture"}' },
-      "definition",
-    ],
-    [
-      "a config its definition doesn't generate",
-      {
-        "definition.json": definitionText(emptyDefinition("Another")),
-      },
-      "grasp.config.ts",
-    ],
-  ])("fails for a built-in with %s", (_case, beside, message) => {
-    const dir = fixture("defined", schema, {}, beside);
-    if (beside["definition.json"] === "") {
-      rmSync(path.join(dir, "defined", "definition.json"));
-    }
-    expect(() => build(dir)).toThrow(message);
-    expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
-  });
-
   it("embeds a built-in without what Grasp generates from its server code, which its install generates again", () => {
     const out = build(
       fixture("generated", {

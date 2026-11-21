@@ -20,6 +20,8 @@ import { z } from "zod";
 import type { BuiltinBlueprint } from "#blueprints";
 
 import {
+  acceptBlueprintUpdate,
+  blueprintUpdate,
   createFromBlueprint,
   installBuiltinBlueprint,
   removeBuiltinBlueprint,
@@ -618,19 +620,27 @@ describe("the built-in blueprints", () => {
     await expect(helloTrees()).resolves.toStrictEqual([before?.tree]);
   });
 
-  it("are removed by the first release that no longer ships them, once, leaving Apps created from them and marked blueprints as they are, and installed again by one that ships them", async () => {
+  it("are removed by the first release that no longer ships them, once, detaching Apps created from them, leaving marked blueprints as they are, and installed again by one that ships them", async () => {
     await reinstall();
     const builder = await signedInApi(idp, "builder");
     const copy = await builder.api.apps.blueprints.create("hello", {
       name: "Kept",
     });
     await builder.api.versions.rollback({ kind: "app", id: copy.app.id }, 1);
-    // A blueprint a builder marked, which no release ships either.
+    // A blueprint a builder marked, which no release ships either, and an
+    // App created from it.
     const { id: marked } = await builder.api.apps.blueprints.mark(
       copy.app.id,
       1
     );
+    const ofMarked = await builder.api.apps.blueprints.create(marked, {
+      name: "Of the marked",
+    });
 
+    // Every App created from it so far, this file's earlier tests' too.
+    const copies = await env.DB.prepare(
+      "SELECT count(*) AS count FROM app_origins WHERE blueprint_id = 'hello'"
+    ).first<{ count: number }>();
     const events = await auditedDuring(async () => {
       await expect(install(withoutHello())).resolves.toBeTruthy();
       // Installed again: nothing more is removed, or recorded.
@@ -643,8 +653,20 @@ describe("the built-in blueprints", () => {
     const fromMarked = await outcome(
       builder.api.apps.blueprints.create(marked, { name: "From the marked" })
     );
+    const { results: origins } = await env.DB.prepare(
+      "SELECT app_id AS app FROM app_origins WHERE app_id IN (?, ?)"
+    )
+      .bind(copy.app.id, ofMarked.app.id)
+      .all<{ app: string }>();
+    const label = await env.DB.prepare(
+      "SELECT blueprint FROM apps WHERE id = ?"
+    )
+      .bind(copy.app.id)
+      .first<{ blueprint: string }>();
     const removed = {
-      audited: helloActions(events),
+      audited: events
+        .filter(({ target }) => target?.id === "hello")
+        .map(({ action, detail }) => ({ action, detached: detail.detached })),
       markedAudited: events.filter(({ target }) => target?.id === marked),
       listed: listed
         .map(({ id }) => id)
@@ -652,33 +674,43 @@ describe("the built-in blueprints", () => {
       created,
       fromMarked,
       trees: await helloTrees(),
+      origins: origins.map(({ app }) => app),
+      label: label?.blueprint,
       kept: await builder.api.versions.files(
         { kind: "app", id: copy.app.id },
         1
       ),
-      update: await builder.api.apps.blueprints.update(copy.app.id),
     };
 
     const again = await auditedDuring(reinstall);
     const relisted = await builder.api.apps.blueprints.list();
+    // A later release changes it: the detached App is offered none of it.
+    await expect(install(changedHello())).resolves.toBeTruthy();
+    const update = await builder.api.apps.blueprints.update(copy.app.id);
     expect({
       removed,
       again: helloActions(again),
       listed: relisted.some(({ id }) => id === "hello"),
+      update,
     }).toStrictEqual({
       removed: {
-        audited: ["blueprint.removed"],
+        audited: [{ action: "blueprint.removed", detached: copies?.count }],
         markedAudited: [],
         listed: [marked],
         created: "app.blueprint_not_found",
         fromMarked: "ok",
         trees: [],
+        // The marked blueprint's copy keeps its origin.
+        origins: [ofMarked.app.id],
+        label: "hello",
         kept: committed(hello()),
-        update: null,
       },
       again: ["blueprint.installed"],
       listed: true,
+      update: null,
     });
+
+    await reinstall();
   });
 
   it("keep one whose removal failed whole, for the next install to remove or a release that ships it again to offer", async () => {
@@ -788,17 +820,101 @@ describe("the built-in blueprints", () => {
       },
     });
 
-    const refused = await outcome(
-      createFromBlueprint(
-        { ...env, FILES: racing },
-        await builder.api.whoami(),
-        "hello",
-        { name: "Raced" }
-      )
-    );
-    expect(refused).toBe("app.blueprint_not_found");
+    try {
+      const refused = await outcome(
+        createFromBlueprint(
+          { ...env, FILES: racing },
+          await builder.api.whoami(),
+          "hello",
+          { name: "Raced" }
+        )
+      );
+      expect(refused).toBe("app.blueprint_not_found");
+    } finally {
+      await reinstall();
+    }
+  });
 
+  it("offer no update, and commit none, for one removed while an update is accepted or worked out", async () => {
     await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const by = await builder.api.whoami();
+    const hellos = blueprintIdSchema.parse("hello");
+    /** An App created from `hello`, offered the changed release's update. */
+    const offeredCopy = async () => {
+      const { app } = await builder.api.apps.blueprints.create("hello", {
+        name: `Raced ${unique()}`,
+      });
+      await expect(install(changedHello())).resolves.toBeTruthy();
+      const offered = await builder.api.apps.blueprints.update(app.id);
+      if (!offered) {
+        throw new Error("No update was offered");
+      }
+      return { app: app.id, offered };
+    };
+    try {
+      // Removed, its copies' origins with it, just before the accept's
+      // batch lands.
+      const accepting = await offeredCopy();
+      const removingOnAccept = racingDb(async () => {
+        await removeBuiltinBlueprint(env, hellos);
+      }, /^insert into "app_origins"/iu);
+      const events = await auditedDuring(async () => {
+        const accepted = await outcome(
+          acceptBlueprintUpdate(
+            { ...env, DB: removingOnAccept },
+            by,
+            accepting.app,
+            {
+              to: accepting.offered.to,
+              definition: accepting.offered.definition,
+              over: accepting.offered.over,
+            }
+          )
+        );
+        expect(accepted).toBe("app.conflict");
+      });
+      const versions = await builder.api.versions.list({
+        kind: "app",
+        id: accepting.app,
+      });
+
+      // Removed between reading the built-in's row and its code.
+      await reinstall();
+      const working = await offeredCopy();
+      const removingOnRead: R2Bucket = new Proxy(env.FILES, {
+        get: (target, key) => {
+          if (key === "get") {
+            return async (...args: Parameters<R2Bucket["get"]>) => {
+              if (args[0].startsWith("blueprints/hello/")) {
+                await removeBuiltinBlueprint(env, hellos);
+              }
+              return await target.get(...args);
+            };
+          }
+          const value: unknown = Reflect.get(target, key);
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      });
+      const worked = await blueprintUpdate(
+        { ...env, FILES: removingOnRead },
+        by,
+        working.app
+      );
+      expect({
+        committed: events.filter(
+          ({ action }) =>
+            action === "app.blueprint.updated" || action === "app.committed"
+        ),
+        versions: versions.map(({ version }) => version),
+        worked,
+      }).toStrictEqual({ committed: [], versions: [1], worked: null });
+    } finally {
+      await reinstall();
+    }
   });
 
   it("ask, in each App created from them, for what their release declares, and stop when it no longer does", async () => {

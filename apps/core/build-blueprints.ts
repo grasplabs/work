@@ -32,8 +32,7 @@
  * `.gitkeep` (git keeps no empty folder), and the build embeds none,
  * which the install takes as a release without built-ins, removing those
  * an earlier release installed. A missing folder fails the build, so
- * none is never shipped by accident. An id a removed built-in had is
- * never taken again (`retiredBuiltinIds`).
+ * none is never shipped by accident.
  *
  * Each is checked here as the install would check it, so a bad one fails
  * the build rather than the install: its ID, its manifest (its
@@ -167,25 +166,6 @@ const manifestSchema = fromBlueprintSchema
     { path: ["workflows"], message: "Each binding name once" }
   );
 
-/**
- * The ids of built-ins earlier releases shipped and a later one removed,
- * which no built-in takes again: Apps created from one keep its id as
- * their origin (`app_origins`), and a new built-in under it would be
- * offered to them as an update of the old one, its code merged over
- * theirs. Add a built-in's id here when its folder goes. A list in the
- * repo, not a record the install keeps: a rollback to a release that
- * ships a removed built-in installs it again, as it should, which a
- * record of retired ids in the database would have to refuse or except.
- */
-export const retiredBuiltinIds: ReadonlySet<string> = new Set([
-  "approvals",
-  "crm",
-  "dashboard",
-  "intake",
-  "kanban-board",
-  "workflow-map",
-]);
-
 /** A folder name that is safe in an ID, a URL and an audit event. */
 const idSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
 
@@ -230,11 +210,6 @@ const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
     const where = `Built-in blueprint ${folder}`;
     if (!idSchema.safeParse(name).success) {
       throw new Error(`${where}: name the folder in lowercase-kebab-case`);
-    }
-    if (retiredBuiltinIds.has(name)) {
-      throw new Error(
-        `${where}: ${name} is the id of a built-in an earlier release removed, which Apps created from it keep as their origin: name it another way`
-      );
     }
     const manifest = manifestSchema.safeParse(
       JSON.parse(readFileSync(path.join(folder, "blueprint.json"), "utf-8"))
