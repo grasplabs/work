@@ -257,8 +257,14 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   await confirm.getByRole("button", { name: "Remove" }).click();
   // They had no personal connections, so none is counted.
   await expect(notice).toHaveText("Person is removed.");
-  await expect(actions).toHaveCount(0);
-  // Their row, and the menu that had the focus, are gone: the focus goes on.
+  // They stay in the people's table, a state of their row.
+  await expect(
+    page
+      .getByRole("table", { name: "Members" })
+      .getByRole("row")
+      .filter({ hasText: leaving.email })
+  ).toContainText("Removed");
+  // The menu that had the focus is gone: the focus goes on.
   await expect(
     page.getByRole("searchbox", { name: "Search members" })
   ).toBeFocused();
@@ -291,7 +297,7 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   await rename(renamed);
   await zone.click();
   await page.getByRole("option", { name: /^Amsterdam/u }).click();
-  await expect(zone).toHaveText(/^Amsterdam/u);
+  await expect(zone).toHaveValue(/^Amsterdam/u);
   await expect(card).toContainText("European Union");
 
   // A member sees the new name beside their own, at the sidebar's foot.
@@ -308,7 +314,7 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   // Back to UTC, where every deployment starts.
   await zone.click();
   await page.getByRole("option", { name: "UTC", exact: true }).click();
-  await expect(zone).toHaveText(/^UTC/u);
+  await expect(zone).toHaveValue(/^UTC/u);
 });
 
 test("invites someone with a role, says what each role may do, and withdraws the invitation", async ({
@@ -356,7 +362,9 @@ test("invites someone with a role, says what each role may do, and withdraws the
   await expect(row).toContainText("Builder");
   await members.getByRole("button", { name: `Actions for ${email}` }).click();
   await page.getByRole("menuitem", { name: "Withdraw invitation" }).click();
-  await expect(members.getByText(email)).toHaveCount(0);
+  await expect(
+    members.getByRole("button", { name: `Actions for ${email}` })
+  ).toHaveCount(0);
 });
 
 test("an admin makes a team, puts someone in it and takes them off, renames it and deletes it", async ({
@@ -531,7 +539,7 @@ test("shows the page loading while the members list is slow, then says core can'
   await page.goto("/settings/members");
   // In the frame, as skeletons, while the read is slow.
   await expect(page.getByRole("status", { name: "Loading…" })).toBeVisible();
-  const nav = page.getByRole("navigation", { name: "Settings" });
+  const nav = page.getByRole("complementary", { name: "Sidebar" });
   await expect(nav).toBeVisible();
 
   // Then the members' section says why it didn't load, with a way to ask

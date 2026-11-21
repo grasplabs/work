@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
+import { dialogTitled } from "./dialogs.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
 // An App's data model, end to end, as a builder makes it in the App's
@@ -67,7 +68,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
 
   // A table, named as a person says it, saved as code names it.
   await page.getByRole("button", { name: "New table" }).click();
-  const dialog = page.getByRole("dialog", { name: "New table" });
+  const dialog = dialogTitled(page, "New table");
   await dialog.getByRole("textbox", { name: "Name" }).fill("Tasks");
   await dialog.getByRole("button", { name: "Create table" }).click();
   await expect(page.getByRole("table", { name: "tasks" })).toBeVisible(read);

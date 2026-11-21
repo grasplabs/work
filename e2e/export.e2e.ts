@@ -120,7 +120,7 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
   // The page to print: the Grasp mark, the title, then the text rendered,
   // in a frame of this origin that keeps its policy, styled by the app's
   // own stylesheets: the title (a page's title, 32 px) and the text's
-  // headings in Geist Serif (Markdown's serif headings), the text in Geist.
+  // headings in Newsreader (Markdown's serif headings), the text in Geist.
   // The file's frontmatter is the file's alone: the page leaves it out.
   await countPrints(page);
   await downloadNote(page, "PDF");
@@ -144,7 +144,7 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
     await printed
       .getByRole("heading", { level: 2, name: "Timeline" })
       .evaluate((element) => getComputedStyle(element).fontFamily)
-  ).toMatch(/^"Geist Serif"/u);
+  ).toMatch(/^"Newsreader Variable"/u);
   expect(
     await printed
       .locator("main")

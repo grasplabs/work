@@ -116,7 +116,7 @@ test("someone it is shared with uses the live App and moves between its pages; i
   // no chat about the App.
   await expect(page.getByRole("button", { name: /^Share/u })).toHaveCount(0);
   await expect(
-    page.getByRole("navigation", { name: /'s workspace$/u })
+    page.getByRole("navigation", { name: /s workspace$/u })
   ).toHaveCount(0);
   await expect(
     page.getByRole("textbox", { name: "Ask for a change" })
@@ -146,7 +146,7 @@ test("someone it is shared with uses the live App and moves between its pages; i
 
   // Its settings are a view of the workspace, beside the chat.
   await workspace
-    .getByRole("navigation", { name: /'s workspace$/u })
+    .getByRole("navigation", { name: /s workspace$/u })
     .getByRole("link", { name: "General" })
     .click();
   await expect(workspace).toHaveURL(
@@ -234,7 +234,7 @@ test("someone an App is shared with as a user reads its settings and changes non
   await page.goto(`/apps/${app}`);
   // The live App offers them its settings, never its workspace.
   await expect(
-    page.getByRole("navigation", { name: /'s workspace$/u })
+    page.getByRole("navigation", { name: /s workspace$/u })
   ).toHaveCount(0);
   await page.getByRole("button", { name: `More for ${name}` }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
