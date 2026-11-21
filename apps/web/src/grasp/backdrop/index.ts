@@ -4,6 +4,7 @@ export type { BackdropProgress } from "./field";
 export { BackdropPreview } from "./preview";
 export type { BackdropPreviewProps } from "./preview";
 export { BackdropPicker } from "./picker";
+export { BackdropTile } from "./tile";
 export type { BackdropPickerProps, BackdropPickerWords } from "./picker";
 export {
   backdropKinds,

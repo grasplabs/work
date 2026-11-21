@@ -2,7 +2,7 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
-import { useId, useState } from "react";
+import { useId } from "react";
 
 import { Button } from "../button";
 import { Field, FieldDescription, FieldLabel } from "../field";
@@ -13,7 +13,6 @@ import { grasp } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
 import { defaultScenes } from "./backdrop";
 import type { BackdropLayoutStyle } from "./backdrop";
-import { BackdropField } from "./field";
 import {
   backdropKinds,
   ditherKinds,
@@ -31,6 +30,7 @@ import type {
   BackdropTone,
 } from "./look";
 import { BackdropPreview } from "./preview";
+import { BackdropTile } from "./tile";
 import { backdropPickerWords } from "./words";
 
 /** Every word the picker shows or says, with English defaults. */
@@ -68,7 +68,7 @@ export interface BackdropPickerProps {
   /** @deprecated Use `onValueChange`. */
   onChange?: (look: BackdropLook) => void;
   /**
-   * `fields`: a live preview over three fields. `tiles`: every backdrop as a small live tile to
+   * `fields`: a live preview over three fields. `tiles`: every backdrop as a small still picture to
    * press, a dither's pattern and colour as a row of choices under them, and Randomize.
    * @default "fields"
    */
@@ -93,7 +93,7 @@ const styles = stylex.create({
     gap: grasp.space6,
     width: "100%",
   },
-  // ---- The tiles: each backdrop small and live, a radio over it, at most picker-tile wide ----
+  // ---- The tiles: each backdrop as a small still picture, a radio over it, at most picker-tile wide ----
   group: {
     display: "grid",
     gap: grasp.space2,
@@ -186,12 +186,10 @@ interface ChoiceProps {
   value: string;
   chosen: boolean;
   onChoose: () => void;
-  /** The pointer or the keyboard comes to it (true) or leaves it (false). */
-  onNear?: (near: boolean) => void;
 }
 
 /** A radio over what is drawn inside it: a tile's window and name, or a chip's word. */
-const Choice = ({ group, value, chosen, onChoose, onNear }: ChoiceProps) => (
+const Choice = ({ group, value, chosen, onChoose }: ChoiceProps) => (
   <input
     type="radio"
     name={group}
@@ -199,18 +197,6 @@ const Choice = ({ group, value, chosen, onChoose, onNear }: ChoiceProps) => (
     checked={chosen}
     onChange={() => {
       onChoose();
-    }}
-    onPointerEnter={() => {
-      onNear?.(true);
-    }}
-    onPointerLeave={() => {
-      onNear?.(false);
-    }}
-    onFocus={() => {
-      onNear?.(true);
-    }}
-    onBlur={() => {
-      onNear?.(false);
     }}
     {...stylex.props(styles.native)}
   />
@@ -220,14 +206,11 @@ interface TilesProps {
   value: BackdropLook;
   onChange: (look: BackdropLook) => void;
   said: BackdropPickerWords;
-  scenes: string;
 }
 
-/** Every backdrop as a small live tile, a dither's pattern and colour under them, and Randomize. */
-const Tiles = ({ value, onChange, said, scenes }: TilesProps) => {
+/** Every backdrop as a small still picture, a dither's pattern and colour under them, and Randomize. */
+const Tiles = ({ value, onChange, said }: TilesProps) => {
   const kindsName = useId();
-  // The tile under the pointer or the keyboard draws live with the chosen one; the rest rest still.
-  const [near, setNear] = useState<BackdropKind | null>(null);
   const patternsName = useId();
   const tonesName = useId();
   const randomize = () => {
@@ -261,9 +244,6 @@ const Tiles = ({ value, onChange, said, scenes }: TilesProps) => {
                 onChoose={() => {
                   onChange({ ...value, backdrop: kind });
                 }}
-                onNear={(coming) => {
-                  setNear(coming ? kind : null);
-                }}
               />
               <span
                 aria-hidden="true"
@@ -272,15 +252,7 @@ const Tiles = ({ value, onChange, said, scenes }: TilesProps) => {
                   value.backdrop === kind && styles.chosen
                 )}
               >
-                {kind === "none" ? null : (
-                  <BackdropField
-                    look={{ ...value, backdrop: kind }}
-                    clear={undefined}
-                    scenes={scenes}
-                    small
-                    still={kind !== value.backdrop && kind !== near}
-                  />
-                )}
+                <BackdropTile look={{ ...value, backdrop: kind }} />
               </span>
               <span {...stylex.props(styles.name)}>{said.names[kind]}</span>
             </label>
@@ -417,7 +389,7 @@ export const BackdropPicker = ({
         data-variant="tiles"
         {...stylex.props(styles.picker, layout ?? styleProp)}
       >
-        <Tiles value={value} onChange={onChange} said={said} scenes={scenes} />
+        <Tiles value={value} onChange={onChange} said={said} />
       </div>
     );
   }
