@@ -1,5 +1,3 @@
-import type { Gap } from "@grasp-os/shared/brain";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,8 +8,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
+import type { Gap } from "@grasp-os/shared/brain";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
 

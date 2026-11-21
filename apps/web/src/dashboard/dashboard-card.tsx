@@ -1,4 +1,4 @@
-import { cn } from "@grasp-os/ui/lib/utils";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 

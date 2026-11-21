@@ -1,5 +1,5 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Input } from "@grasp-os/app-kit/components/input";
 
 import { parameterValueMax, parametersMax, shortTextMax } from "./totals";
 import type { Parameter } from "./totals";

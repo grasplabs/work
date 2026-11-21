@@ -1,13 +1,13 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import { Input } from "@grasp-os/ui/components/input";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "@grasp-os/app-kit/components/select";
 import {
   Table,
   TableBody,
@@ -15,7 +15,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
 
 import {
   formatHours,

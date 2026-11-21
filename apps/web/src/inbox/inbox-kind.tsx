@@ -1,4 +1,4 @@
-import { Badge } from "@grasp-os/ui/components/badge";
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";

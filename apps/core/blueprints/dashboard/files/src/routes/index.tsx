@@ -1,21 +1,21 @@
-import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
-import { DataGrid } from "@grasp-os/ui/components/data-grid";
-import { Grid } from "@grasp-os/ui/components/grid";
+} from "@grasp-os/app-kit/components/card";
+import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
+import { Grid } from "@grasp-os/app-kit/components/grid";
 import {
   PageHeader,
   PageHeaderActions,
   PageHeaderContent,
   PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { Stat } from "@grasp-os/ui/components/stat";
+} from "@grasp-os/app-kit/components/page-header";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
+import { Stat } from "@grasp-os/app-kit/components/stat";
+import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 

@@ -1,6 +1,6 @@
+import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
 import { agentFaces } from "@grasp-os/shared/agents";
 import type { AgentFace } from "@grasp-os/shared/agents";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 
 import { SIGN_PITCH, signFigure } from "../chat/sign-figures.ts";
 import type { SignFigure } from "../chat/sign-figures.ts";

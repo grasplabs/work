@@ -1,6 +1,6 @@
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Input } from "@grasp-os/ui/components/input";
+import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Input } from "@grasp-os/app-kit/components/input";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 

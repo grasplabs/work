@@ -2,7 +2,7 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@grasp-os/ui/components/sidebar";
+} from "@grasp-os/app-kit/components/sidebar";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { LayoutDashboardIcon } from "lucide-react";

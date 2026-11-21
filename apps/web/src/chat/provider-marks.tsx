@@ -1,4 +1,4 @@
-import { cn } from "@grasp-os/ui/lib/utils";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { SparklesIcon } from "lucide-react";
 import type { ReactElement, SVGProps } from "react";
 

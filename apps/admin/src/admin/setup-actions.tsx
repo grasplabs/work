@@ -1,3 +1,21 @@
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+} from "@grasp-os/app-kit/components/alert";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { CardContent } from "@grasp-os/app-kit/components/card";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
 /**
  * What someone at Grasp does to a company's own Grasp, in its Setup
  * (src/admin/setup.tsx), as the admin's own client page did before the
@@ -11,24 +29,6 @@
  * drift, shared secrets), as the admin's grid read it.
  */
 import { fromBase64Url } from "@grasp-os/shared/encoding";
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-} from "@grasp-os/ui/components/alert";
-import { Button } from "@grasp-os/ui/components/button";
-import { CardContent } from "@grasp-os/ui/components/card";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
 import { useRouter } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";

@@ -1,3 +1,26 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { CardContent } from "@grasp-os/app-kit/components/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/app-kit/components/collapsible";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@grasp-os/app-kit/components/tabs";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 /**
  * An organization's Setup: the company's own Grasp as the admin runs
  * it, ported from the prototype (grasplabs/prototype
@@ -16,29 +39,6 @@
  * something is off.
  */
 import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { CardContent } from "@grasp-os/ui/components/card";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Await, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { ChevronDownIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { useEffect, useReducer, useState } from "react";

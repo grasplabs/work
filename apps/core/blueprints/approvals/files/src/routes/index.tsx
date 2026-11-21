@@ -4,13 +4,13 @@ import {
   PageHeaderContent,
   PageHeaderDescription,
   PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
+} from "@grasp-os/app-kit/components/page-header";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
+} from "@grasp-os/app-kit/components/tabs";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { NewRequest } from "../components/new-request";

@@ -1,4 +1,3 @@
-import { isAdmin } from "@grasp-os/shared/roles";
 import {
   Select,
   SelectContent,
@@ -7,7 +6,8 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "@grasp-os/app-kit/components/select";
+import { isAdmin } from "@grasp-os/shared/roles";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";

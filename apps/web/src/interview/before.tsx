@@ -1,7 +1,7 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import { interviewerNames, interviewers } from "@grasp-os/shared/onboarding";
 import type { InterviewKind, Interviewer } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";

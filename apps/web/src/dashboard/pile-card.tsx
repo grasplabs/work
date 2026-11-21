@@ -1,4 +1,4 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
@@ -7,14 +7,14 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { PaintedField } from "@grasp-os/ui/components/painted-field";
+} from "@grasp-os/app-kit/components/dialog";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { PaintedField } from "@grasp-os/app-kit/components/painted-field";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
 import { Trans } from "@lingui/react/macro";
 import { useId, useState } from "react";
 import type { ReactNode } from "react";

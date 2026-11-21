@@ -360,7 +360,7 @@ jobs:
           path: ${{ runner.temp }}/test-progress.log
           if-no-files-found: ignore
           retention-days: 14
-      # The UI kit's browser tests (@grasp-os/ui:browser) save a screenshot
+      # The UI kit's browser tests (@grasp-os/app-kit:browser) save a screenshot
       # of each failing page, and what it attached: kept when the shard
       # fails, else lost with the runner. Only the first shard runs them
       # (scripts/test-shards.ts, `runsInFirstShard`).
@@ -369,8 +369,8 @@ jobs:
         with:
           name: ui-browser-failures-${{ matrix.shard }}-of-${{ strategy.job-total }}
           path: |
-            packages/ui/test/__screenshots__
-            packages/ui/.vitest-attachments
+            packages/app-kit/test/__screenshots__
+            packages/app-kit/.vitest-attachments
           if-no-files-found: ignore
           include-hidden-files: true
           retention-days: 7

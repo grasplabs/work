@@ -1,11 +1,4 @@
-import type { Id } from "@grasp-os/sdk";
-import {
-  useClient,
-  useMutation,
-  useQuery,
-  useWorkflow,
-} from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Table,
   TableBody,
@@ -13,7 +6,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import type { Id } from "@grasp-os/sdk";
+import {
+  useClient,
+  useMutation,
+  useQuery,
+  useWorkflow,
+} from "@grasp-os/sdk/react";
 import { api, workflows } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";

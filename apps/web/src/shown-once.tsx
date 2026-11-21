@@ -1,4 +1,4 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
@@ -6,8 +6,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/dialog";
+import { Input } from "@grasp-os/app-kit/components/input";
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 

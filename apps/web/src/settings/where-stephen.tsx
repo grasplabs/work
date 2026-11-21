@@ -1,6 +1,6 @@
+import { Button } from "@grasp-os/app-kit/components/button";
 import type { ChannelReach } from "@grasp-os/shared/channel-accounts";
 import { chatPlatformName } from "@grasp-os/shared/chat";
-import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { MessageSquareIcon } from "lucide-react";
 

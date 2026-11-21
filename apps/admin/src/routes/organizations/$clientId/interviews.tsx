@@ -3,7 +3,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
+} from "@grasp-os/app-kit/components/tabs";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import {

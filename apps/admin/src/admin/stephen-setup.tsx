@@ -1,3 +1,22 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/app-kit/components/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/app-kit/components/toggle-group";
 /**
  * Changing how Stephen and Claire are set up for one company, from its
  * Interviews: the languages they interview in, what they leave alone and
@@ -15,25 +34,6 @@ import {
   stephenTermMaxLength,
   stephenTermsMax,
 } from "@grasp-os/shared/onboarding-staff";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import { PencilIcon, RotateCcwIcon } from "lucide-react";
 import { useId, useState } from "react";
 

@@ -1,19 +1,19 @@
-import { isGeneratedServerFile } from "@grasp-os/runtime/host";
-import type { AppFiles, ViewedApp } from "@grasp-os/shared/apps";
-import type { Draft } from "@grasp-os/shared/drafts";
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from "@grasp-os/ui/components/breadcrumb";
-import { Button } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/breadcrumb";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   FileTree,
   FileTreeFile,
   FileTreeFolder,
-} from "@grasp-os/ui/components/file-tree";
+} from "@grasp-os/app-kit/components/file-tree";
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
+import type { AppFiles, ViewedApp } from "@grasp-os/shared/apps";
+import type { Draft } from "@grasp-os/shared/drafts";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { Fragment, useState } from "react";

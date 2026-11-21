@@ -1,10 +1,10 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import {
   directoryProviderSchema,
   directorySuiteOf,
 } from "@grasp-os/shared/directory";
 import type { DirectoryProvider } from "@grasp-os/shared/directory";
-import { Button } from "@grasp-os/ui/components/button";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans } from "@lingui/react/macro";
 import { useSearch } from "@tanstack/react-router";
 import { useState } from "react";

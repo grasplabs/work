@@ -1,21 +1,21 @@
-import { GraspError, useMutation, useQuery } from "@grasp-os/sdk/react";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardAction,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
+} from "@grasp-os/app-kit/components/card";
 import {
   Item,
   ItemActions,
   ItemContent,
   ItemGroup,
   ItemTitle,
-} from "@grasp-os/ui/components/item";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
+} from "@grasp-os/app-kit/components/item";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
+import { GraspError, useMutation, useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 import type { Doc } from "@server/_generated/dataModel";
 import { ArrowLeftIcon, ArrowRightIcon, XIcon } from "lucide-react";

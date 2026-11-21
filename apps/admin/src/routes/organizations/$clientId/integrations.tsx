@@ -12,7 +12,7 @@
  * say so. What the company skipped in its own onboarding core doesn't
  * send yet.
  */
-import { Badge } from "@grasp-os/ui/components/badge";
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import { createFileRoute } from "@tanstack/react-router";
 
 import {

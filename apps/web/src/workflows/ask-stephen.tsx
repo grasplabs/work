@@ -1,5 +1,5 @@
-import { Label } from "@grasp-os/ui/components/label";
-import { Switch } from "@grasp-os/ui/components/switch";
+import { Label } from "@grasp-os/app-kit/components/label";
+import { Switch } from "@grasp-os/app-kit/components/switch";
 import { Trans } from "@lingui/react/macro";
 import { useId, useState } from "react";
 

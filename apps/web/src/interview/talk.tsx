@@ -1,8 +1,8 @@
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { interviewPhases } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 

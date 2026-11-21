@@ -1,8 +1,8 @@
 /*
  * The docs wear the product's theme: Blume's tokens read the kit's
- * (@grasp-os/ui), so each value still stands once, in the kit.
+ * (@grasp-os/app-kit), so each value still stands once, in the kit.
  */
-@import "@grasp-os/ui/styles.css";
+@import "@grasp-os/app-kit/styles.css";
 
 /*
  * In both themes: Blume sets dark values of its own under `data-theme`,

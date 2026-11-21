@@ -1,11 +1,11 @@
-import type { Blueprint } from "@grasp-os/shared/apps";
 import {
   Item,
   ItemContent,
   ItemDescription,
   ItemGroup,
   ItemTitle,
-} from "@grasp-os/ui/components/item";
+} from "@grasp-os/app-kit/components/item";
+import type { Blueprint } from "@grasp-os/shared/apps";
 import { useLingui } from "@lingui/react/macro";
 
 import { processNames } from "../workflows/business-process.tsx";

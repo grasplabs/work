@@ -1,6 +1,4 @@
-import { appLinkMaxLength, appLinkSchema } from "@grasp-os/shared/apps";
-import type { App } from "@grasp-os/shared/apps";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
@@ -8,19 +6,21 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "@grasp-os/app-kit/components/dialog";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
+} from "@grasp-os/app-kit/components/field";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
   InputGroupText,
-} from "@grasp-os/ui/components/input-group";
+} from "@grasp-os/app-kit/components/input-group";
+import { appLinkMaxLength, appLinkSchema } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";

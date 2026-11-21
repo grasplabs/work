@@ -1621,11 +1621,11 @@ const buildDeclaration = `/**
  * is \`/\`, \`tasks.$taskId.tsx\` is \`/tasks/$taskId\`), each
  * \`export const Route = createFileRoute("/tasks/$taskId")({ component })\`
  * and moving between them with TanStack's \`Link\` and \`useNavigate\`,
- * built on @grasp-os/ui components with their
+ * built on @grasp-os/app-kit components with their
  * variants and sizes and the theme's tokens: no raw colours, arbitrary
  * values or restyled components (the lint names what to use instead).
  * Don't wire tables and forms by hand:
- * - A list of records is a \`DataGrid\` (\`@grasp-os/ui/components/data-grid\`)
+ * - A list of records is a \`DataGrid\` (\`@grasp-os/app-kit/components/data-grid\`)
  *   over a query that takes \`pagination\` and answers pages: it reads them
  *   page by page and hands the query what the person searched, sorted and
  *   filtered, so the query does it over every record. Each cell shows and
@@ -1642,7 +1642,7 @@ const buildDeclaration = `/**
  *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }, { field: "notes", cell: (task) => <RichText value={task.notes} /> }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate({ to: "/tasks/$taskId", params: { taskId: task._id } }) }]} />\`
  *   (\`navigate\` is \`useNavigate()\` from \`@tanstack/react-router\`)
  * - A form is \`useForm\` (a mutation's or action's arguments, or a
- *   \`v.object\`) with the fields of \`@grasp-os/ui/form\`, one per kind of
+ *   \`v.object\`) with the fields of \`@grasp-os/app-kit/form\`, one per kind of
  *   value; each takes \`form\`, \`name\` and \`label\`, and its choices,
  *   bounds and whether it is required come from the schema: \`TextField\`,
  *   \`TextareaField\` (text), \`SelectField\` (\`v.enum\`; \`options\` labels
@@ -1656,7 +1656,7 @@ const buildDeclaration = `/**
  *   files permission declaring \`upload\`, \`permissions.files\` from \`@server/_generated/api\`; the form doesn't submit while it
  *   uploads) and \`RichTextField\` (bold, italic and lists, kept as
  *   Markdown in a \`v.string()\`). Show Markdown with \`RichText\`
- *   (\`@grasp-os/ui/components/rich-text\`), which drops any HTML; given
+ *   (\`@grasp-os/app-kit/components/rich-text\`), which drops any HTML; given
  *   \`links={permissions.links}\` (the App's links permission, from \`@server/_generated/api\`), its
  *   links open through it; otherwise they show their address. Wrap the fields in \`Form\`, with
  *   \`FormError\` and \`SubmitButton\`.

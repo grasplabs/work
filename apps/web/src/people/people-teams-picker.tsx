@@ -1,5 +1,4 @@
-import { roleSchema } from "@grasp-os/shared/roles";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Command,
   CommandEmpty,
@@ -7,13 +6,14 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@grasp-os/ui/components/command";
+} from "@grasp-os/app-kit/components/command";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/popover";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { roleSchema } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { PlusIcon, IdCardIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";

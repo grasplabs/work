@@ -1,4 +1,4 @@
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { useId } from "react";

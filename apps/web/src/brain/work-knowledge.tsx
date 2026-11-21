@@ -1,16 +1,16 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/app-kit/components/tooltip";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type {
   KnownAbout,
   KnownSentence,
   RestsOn,
   WorkKnowledge,
 } from "@grasp-os/shared/work-knowledge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { cn } from "@grasp-os/ui/lib/utils";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

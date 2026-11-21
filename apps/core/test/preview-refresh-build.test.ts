@@ -25,7 +25,7 @@ const files = testApp(
   { name: "Counter", tables: {} },
   {
     "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { useState } from "react";
 
 function Small() {

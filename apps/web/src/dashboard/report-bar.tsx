@@ -1,6 +1,6 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { NextReport } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Plural, Trans } from "@lingui/react/macro";
 import { FileTextIcon } from "lucide-react";
 

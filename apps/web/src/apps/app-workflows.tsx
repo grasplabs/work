@@ -1,11 +1,4 @@
-import type { ViewedApp } from "@grasp-os/shared/apps";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowLabel } from "@grasp-os/shared/workflow-resources";
-import type {
-  AppWorkflowBinding,
-  WorkflowResource,
-} from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
@@ -13,15 +6,15 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+} from "@grasp-os/app-kit/components/dialog";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "@grasp-os/app-kit/components/select";
 import {
   Table,
   TableBody,
@@ -29,7 +22,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import type { ViewedApp } from "@grasp-os/shared/apps";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
+import type {
+  AppWorkflowBinding,
+  WorkflowResource,
+} from "@grasp-os/shared/workflow-resources";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useId, useState } from "react";
 

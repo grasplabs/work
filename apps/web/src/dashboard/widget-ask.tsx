@@ -1,24 +1,24 @@
-import type {
-  CustomWidget,
-  WidgetMade,
-  WidgetProgress,
-} from "@grasp-os/shared/widgets";
-import { Button } from "@grasp-os/ui/components/button";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
 import {
   Popover,
   PopoverContent,
   PopoverHeader,
   PopoverTitle,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+} from "@grasp-os/app-kit/components/popover";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
+import type {
+  CustomWidget,
+  WidgetMade,
+  WidgetProgress,
+} from "@grasp-os/shared/widgets";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { SparklesIcon } from "lucide-react";
 import { useId, useState } from "react";

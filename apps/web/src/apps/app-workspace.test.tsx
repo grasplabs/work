@@ -1,3 +1,6 @@
+import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
+import { Toaster } from "@grasp-os/app-kit/components/toast";
+import { typeInPrompt } from "@grasp-os/app-kit/testing";
 // @vitest-environment happy-dom
 import type { AppReview } from "@grasp-os/shared/app-review";
 import type { App, ViewedApp } from "@grasp-os/shared/apps";
@@ -20,9 +23,6 @@ import type {
   SubjectMember,
   SubjectMemberRef,
 } from "@grasp-os/shared/subject-members";
-import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
-import { Toaster } from "@grasp-os/ui/components/toast";
-import { typeInPrompt } from "@grasp-os/ui/testing";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {

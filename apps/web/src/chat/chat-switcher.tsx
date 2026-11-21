@@ -1,10 +1,10 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Kbd } from "@grasp-os/ui/components/kbd";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Kbd } from "@grasp-os/app-kit/components/kbd";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
 import { useLingui } from "@lingui/react/macro";
 import { MessagesSquareIcon } from "lucide-react";
 import {

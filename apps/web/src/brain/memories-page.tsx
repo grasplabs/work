@@ -1,3 +1,42 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Card, CardContent } from "@grasp-os/app-kit/components/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/app-kit/components/dialog";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/app-kit/components/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+} from "@grasp-os/app-kit/components/item";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
+import {
+  PageHeader,
+  PageHeaderDescription,
+  PageHeaderTitle,
+} from "@grasp-os/app-kit/components/page-header";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import { toast } from "@grasp-os/app-kit/components/toast";
 import type {
   BrainContestedFact,
   BrainEntityKind,
@@ -16,41 +55,6 @@ import {
   brainEntityKinds,
 } from "@grasp-os/shared/brain-memories";
 import { shownVisibly } from "@grasp-os/shared/chat";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent } from "@grasp-os/ui/components/card";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Item, ItemContent, ItemGroup } from "@grasp-os/ui/components/item";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import {
-  PageHeader,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import { toast } from "@grasp-os/ui/components/toast";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createContext, use, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";

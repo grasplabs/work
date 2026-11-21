@@ -1,10 +1,3 @@
-import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
-import { runsPageSize } from "@grasp-os/shared/workflows";
-import type {
-  ListedRun,
-  RunAiProviderWait,
-  RunStatus,
-} from "@grasp-os/shared/workflows";
 import {
   Table,
   TableBody,
@@ -12,7 +5,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
+import { runsPageSize } from "@grasp-os/shared/workflows";
+import type {
+  ListedRun,
+  RunAiProviderWait,
+  RunStatus,
+} from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";

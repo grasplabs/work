@@ -1,4 +1,4 @@
-import type { DockablePlacement } from "@grasp-os/ui/components/dockable-panel";
+import type { DockablePlacement } from "@grasp-os/app-kit/components/dockable-panel";
 import { useMatches } from "@tanstack/react-router";
 
 import { chatPlacement, openChat } from "./chat-layout.ts";

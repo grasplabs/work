@@ -1,14 +1,14 @@
-import type { BoardReport } from "@grasp-os/shared/dashboard";
-import type { NextReport } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/dialog";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import type { BoardReport } from "@grasp-os/shared/dashboard";
+import type { NextReport } from "@grasp-os/shared/onboarding";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await } from "@tanstack/react-router";
 import { FileTextIcon, PrinterIcon } from "lucide-react";

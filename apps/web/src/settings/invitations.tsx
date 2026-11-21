@@ -1,7 +1,4 @@
-import type { Invitation } from "@grasp-os/shared/members";
-import { roleSchema } from "@grasp-os/shared/roles";
-import type { Role } from "@grasp-os/shared/roles";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogClose,
@@ -10,21 +7,24 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "@grasp-os/app-kit/components/dialog";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "@grasp-os/app-kit/components/select";
+import type { Invitation } from "@grasp-os/shared/members";
+import { roleSchema } from "@grasp-os/shared/roles";
+import type { Role } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { MailIcon, PlusIcon } from "lucide-react";

@@ -1,17 +1,17 @@
-import type { AppRelease } from "@grasp-os/shared/apps";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { DropdownMenuItem } from "@grasp-os/ui/components/dropdown-menu";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+} from "@grasp-os/app-kit/components/dialog";
+import { DropdownMenuItem } from "@grasp-os/app-kit/components/dropdown-menu";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import type { AppRelease } from "@grasp-os/shared/apps";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useId, useState } from "react";
 

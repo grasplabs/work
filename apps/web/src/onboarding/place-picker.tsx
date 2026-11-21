@@ -1,9 +1,3 @@
-import { placeErrors } from "@grasp-os/shared/document-places";
-import type {
-  DocumentPlace,
-  PlaceItem,
-  PlacesSuite,
-} from "@grasp-os/shared/document-places";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -11,9 +5,9 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from "@grasp-os/ui/components/breadcrumb";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+} from "@grasp-os/app-kit/components/breadcrumb";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -21,13 +15,19 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "@grasp-os/app-kit/components/dialog";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/input-group";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { placeErrors } from "@grasp-os/shared/document-places";
+import type {
+  DocumentPlace,
+  PlaceItem,
+  PlacesSuite,
+} from "@grasp-os/shared/document-places";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import {

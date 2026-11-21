@@ -7,8 +7,8 @@ import {
   ChartTooltipContent,
   XAxis,
   chartColor,
-} from "@grasp-os/ui/components/chart";
-import type { ChartConfig } from "@grasp-os/ui/components/chart";
+} from "@grasp-os/app-kit/components/chart";
+import type { ChartConfig } from "@grasp-os/app-kit/components/chart";
 import type { Doc } from "@server/_generated/dataModel";
 
 import { formatMoney } from "../lib/money";

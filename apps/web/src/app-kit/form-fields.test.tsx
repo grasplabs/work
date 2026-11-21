@@ -1,7 +1,3 @@
-// @vitest-environment happy-dom
-import { v } from "@grasp-os/runtime/app";
-import type { FilesReference, Id, InferInput } from "@grasp-os/runtime/app";
-import { useForm } from "@grasp-os/runtime/react";
 import {
   CheckboxField,
   DateField,
@@ -17,7 +13,11 @@ import {
   SwitchField,
   TextareaField,
   TextField,
-} from "@grasp-os/ui/form";
+} from "@grasp-os/app-kit/form";
+// @vitest-environment happy-dom
+import { v } from "@grasp-os/runtime/app";
+import type { FilesReference, Id, InferInput } from "@grasp-os/runtime/app";
+import { useForm } from "@grasp-os/runtime/react";
 import { act } from "react";
 import { describe, expect, it } from "vite-plus/test";
 

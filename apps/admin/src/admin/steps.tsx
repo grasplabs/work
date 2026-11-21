@@ -1,18 +1,5 @@
-import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
-import {
-  dateOn,
-  mayInvite,
-  RESEARCH_SOURCES,
-} from "@grasp-os/shared/admin/onboarding-admin";
-import type {
-  OrgView,
-  ResearchSource,
-  Stage,
-  StageStatus,
-} from "@grasp-os/shared/admin/onboarding-admin";
-import type { OnboardingFlow } from "@grasp-os/shared/onboarding-flow";
-import { Button } from "@grasp-os/ui/components/button";
-import { Progress } from "@grasp-os/ui/components/progress";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Progress } from "@grasp-os/app-kit/components/progress";
 /**
  * One organization's onboarding, step by step, ported from the prototype
  * (grasplabs/prototype `components/admin/org-steps.tsx` and the
@@ -33,8 +20,21 @@ import { Progress } from "@grasp-os/ui/components/progress";
  * said is shown: not the first conversation, not what the research
  * found, only what the model counts.
  */
-import { Stat } from "@grasp-os/ui/components/stat";
-import { cn } from "@grasp-os/ui/lib/utils";
+import { Stat } from "@grasp-os/app-kit/components/stat";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
+import {
+  dateOn,
+  mayInvite,
+  RESEARCH_SOURCES,
+} from "@grasp-os/shared/admin/onboarding-admin";
+import type {
+  OrgView,
+  ResearchSource,
+  Stage,
+  StageStatus,
+} from "@grasp-os/shared/admin/onboarding-admin";
+import type { OnboardingFlow } from "@grasp-os/shared/onboarding-flow";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowRightIcon,

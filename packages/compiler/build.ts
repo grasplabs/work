@@ -80,7 +80,7 @@ import { ultraciteConfig } from "./ultracite-config.ts";
 const root = import.meta.dirname;
 const dist = path.join(root, "dist");
 const modules = path.join(root, "node_modules");
-const ui = realpathSync(path.join(modules, "@grasp-os/ui"));
+const appKit = realpathSync(path.join(modules, "@grasp-os/app-kit"));
 const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
 /**
  * The runtime the SDK re-exports, as the SDK depends on it: what every
@@ -99,14 +99,14 @@ const shared = realpathSync(
 const ownPackages: Readonly<Record<string, string>> = {
   "@grasp-os/sdk": sdk,
   "@grasp-os/runtime": runtime,
-  "@grasp-os/ui": ui,
+  "@grasp-os/app-kit": appKit,
   "@grasp-os/shared": shared,
 };
 const require = createRequire(path.join(root, "package.json"));
 
 /** The modules of React and React DOM the kit provides, by specifier. */
 const reactSpecifiers = kitPeers;
-/** What App code may import besides `@grasp-os/ui` and lucide-react icons. */
+/** What App code may import besides `@grasp-os/app-kit` and lucide-react icons. */
 const reactImports = ["react", "react/jsx-runtime"];
 
 // A package.json, as far as the build reads it.
@@ -148,23 +148,23 @@ interface Entry {
 }
 
 /**
- * `@grasp-os/ui`'s exports that are one module each, not a folder of them:
+ * `@grasp-os/app-kit`'s exports that are one module each, not a folder of them:
  * the form helpers (`Form`, `TextField`, …) pages render the SDK's
  * forms with.
  */
-const uiSingleExports: ReadonlySet<string> = new Set(["./form"]);
+const appKitSingleExports: ReadonlySet<string> = new Set(["./form"]);
 
 /**
- * `@grasp-os/ui`: one module per file its exports (`./components/*`, …)
- * cover, and its single-module exports (`uiSingleExports`).
+ * `@grasp-os/app-kit`: one module per file its exports (`./components/*`, …)
+ * cover, and its single-module exports (`appKitSingleExports`).
  */
-const uiEntries = (): Entry[] =>
-  Object.entries(exportsOf(ui)).flatMap(([key, target]) => {
-    if (uiSingleExports.has(key) && typeof target === "string") {
+const appKitEntries = (): Entry[] =>
+  Object.entries(exportsOf(appKit)).flatMap(([key, target]) => {
+    if (appKitSingleExports.has(key) && typeof target === "string") {
       return [
         {
-          specifier: `@grasp-os/ui/${key.slice(2)}`,
-          id: path.join(ui, target),
+          specifier: `@grasp-os/app-kit/${key.slice(2)}`,
+          id: path.join(appKit, target),
         },
       ];
     }
@@ -172,14 +172,14 @@ const uiEntries = (): Entry[] =>
       return [];
     }
     const [prefix = "", suffix = ""] = target.split("*");
-    const dir = path.join(ui, prefix);
+    const dir = path.join(appKit, prefix);
     const files = existsSync(dir)
       ? readdirSync(dir).filter(
           (file) => file.endsWith(suffix) && !notShipped.test(file)
         )
       : [];
     return files.map((file) => ({
-      specifier: `@grasp-os/ui/${key.slice(2, -1)}${file.slice(0, -suffix.length)}`,
+      specifier: `@grasp-os/app-kit/${key.slice(2, -1)}${file.slice(0, -suffix.length)}`,
       id: path.join(dir, file),
     }));
   });
@@ -456,7 +456,7 @@ const reactCompiler: Plugin = {
     if (!/\.tsx?$/u.test(id)) {
       return null;
     }
-    const file = path.relative(ui, id);
+    const file = path.relative(appKit, id);
     const compiled = compileReact(file, code, {
       optOut: kitOptOuts.has(file),
     });
@@ -542,7 +542,7 @@ const assertSinglePackages = (sources: FlatModules["sources"]): void => {
 const candidatesByModule = (
   sources: FlatModules["sources"]
 ): Record<string, string[]> => {
-  const own = new Set(sourcesIn(path.join(ui, "src")));
+  const own = new Set(sourcesIn(path.join(appKit, "src")));
   const placed = new Set<string>();
   const candidates: Record<string, string[]> = {};
   for (const [name, files] of Object.entries(sources)) {
@@ -563,7 +563,7 @@ const candidatesByModule = (
 };
 
 /**
- * The kit's modules: React, `@grasp-os/ui` and lucide-react's icons, built
+ * The kit's modules: React, `@grasp-os/app-kit` and lucide-react's icons, built
  * together so they share one React and one copy of every dependency. Entries
  * and the chunks they share are named flat (`react.js`, `kit~….js`), and
  * import each other by that name instead of by relative path. Returns their
@@ -675,12 +675,16 @@ const buildSdkModules = async (
 
 /** The kit's stylesheet and the ones it imports, by their `style` export. */
 const collectStylesheets = (): Record<string, string> => {
-  const sheet = readText(path.join(ui, "src/styles.css"));
+  const sheet = readText(path.join(appKit, "src/styles.css"));
   const stylesheets: Record<string, string> = { [kitStylesheet]: sheet };
   for (const [, id = ""] of sheet.matchAll(/@import "(?<id>[^"]+)"/gu)) {
     const segments = id.split("/");
     const nameLength = id.startsWith("@") ? 2 : 1;
-    const dir = path.join(ui, "node_modules", ...segments.slice(0, nameLength));
+    const dir = path.join(
+      appKit,
+      "node_modules",
+      ...segments.slice(0, nameLength)
+    );
     const subpath = segments.slice(nameLength).join("/");
     const entry = exportsOf(dir)[subpath === "" ? "." : `./${subpath}`];
     const file = typeof entry === "string" ? entry : entry?.style;
@@ -941,7 +945,7 @@ const collectTypes = (specifiers: string[]): Record<string, string> => {
 /**
  * The type chunks: the platform's own packages as App code type-checks
  * against them, rolled up into one declaration file per module it may
- * import (`@grasp-os/sdk/react`, `@grasp-os/ui/components/button`, the
+ * import (`@grasp-os/sdk/react`, `@grasp-os/app-kit/components/button`, the
  * server and workflow modules, …) and chunks for what those
  * share, with the packages they reach inlined. A check parses only the
  * chunks the modules it imports reach, never the sources of everything
@@ -1695,7 +1699,7 @@ const buildAppCompiler = async (
   // The kit's sources compile on oxc.wasm, as App code does.
   startOxc(await oxcWasmModule());
   const { entries: icons, icons: iconNames } = iconEntries();
-  const components = uiEntries();
+  const components = appKitEntries();
   const react = reactSpecifiers.map((specifier) => ({
     specifier,
     id: `${virtualEntry}${specifier}`,

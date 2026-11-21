@@ -1,12 +1,11 @@
-import { useMutation, usePaginatedQuery, useUser } from "@grasp-os/sdk/react";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
+} from "@grasp-os/app-kit/components/empty";
 import {
   Item,
   ItemActions,
@@ -14,8 +13,9 @@ import {
   ItemDescription,
   ItemGroup,
   ItemTitle,
-} from "@grasp-os/ui/components/item";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/item";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { useMutation, usePaginatedQuery, useUser } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 import type { Doc } from "@server/_generated/dataModel";
 

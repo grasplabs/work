@@ -1,5 +1,5 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { i18n } from "@lingui/core";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";

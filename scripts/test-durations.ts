@@ -23,7 +23,7 @@ import { aloneSeconds, byKey } from "./test-shards.ts";
 /**
  * A project's name in a progress log: Vitest names a browser project's
  * instance after its browser, with a space, as in
- * `@grasp-os/ui:browser (chromium)`.
+ * `@grasp-os/app-kit:browser (chromium)`.
  */
 const projectPattern = String.raw`(?<project>\S+(?: \([^)\s]+\))?)`;
 

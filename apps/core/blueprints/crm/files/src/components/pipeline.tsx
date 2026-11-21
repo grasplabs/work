@@ -1,12 +1,12 @@
-import { useQuery } from "@grasp-os/sdk/react";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
-import { Grid } from "@grasp-os/ui/components/grid";
-import { Stat } from "@grasp-os/ui/components/stat";
+} from "@grasp-os/app-kit/components/card";
+import { Grid } from "@grasp-os/app-kit/components/grid";
+import { Stat } from "@grasp-os/app-kit/components/stat";
+import { useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
 import { stages } from "./stages";

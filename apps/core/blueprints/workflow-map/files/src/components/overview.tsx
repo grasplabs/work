@@ -1,12 +1,11 @@
-import type { Id } from "@grasp-os/sdk";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-} from "@grasp-os/ui/components/card";
+} from "@grasp-os/app-kit/components/card";
 import {
   Table,
   TableBody,
@@ -14,7 +13,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import type { Id } from "@grasp-os/sdk";
 
 import { recordOf } from "./store";
 import type { Team, Workflow } from "./store";

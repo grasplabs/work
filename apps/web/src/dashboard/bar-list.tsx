@@ -1,4 +1,4 @@
-import { Progress } from "@grasp-os/ui/components/progress";
+import { Progress } from "@grasp-os/app-kit/components/progress";
 import type { ReactNode } from "react";
 
 /** A share from nothing to all of it. */
