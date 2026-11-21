@@ -346,7 +346,15 @@ export interface MembersApi {
  * Grasp calls them everywhere. Their sign-in sets it when they first come
  * in, and never again after.
  */
-export const personNameSchema = z.string().trim().min(1).max(100);
+export const personNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  // No control characters or line and paragraph separators: it is shown
+  // as one line. No bidirectional overrides or isolates either, which
+  // make a name read as something else wherever it is shown.
+  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069]*$/u);
 
 /** Why an admin's change to a member was refused or not finished. */
 export const memberErrors = defineErrorFamily({
@@ -356,7 +364,7 @@ export const memberErrors = defineErrorFamily({
   "member.connections_pending":
     "They're removed, but not all their personal connections could be disconnected yet. This is retried automatically, or remove them again.",
   "member.role_invalid": "That isn't a role here.",
-  "member.name_invalid": "Give a name of at most 100 characters.",
+  "member.name_invalid": "Give a name of up to 100 characters, on one line.",
   "member.role_changed":
     "Another admin changed their role at the same time. Check it, and try again.",
   "member.last_admin":
