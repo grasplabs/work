@@ -1,4 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import type { BlueprintId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { CatalogContractDefinition } from "@grasp-os/shared/workflow-resources";
@@ -7,7 +8,11 @@ import { DurableObject } from "cloudflare:workers";
 import type { BuiltinBlueprint } from "#blueprints";
 import blueprintsDigest from "#blueprints-digest";
 
-import { installBuiltinBlueprint } from "./app-blueprints.ts";
+import {
+  installBuiltinBlueprint,
+  removeBuiltinBlueprint,
+  unshippedBuiltins,
+} from "./app-blueprints.ts";
 import { installShippedSkills } from "./brain-skills.ts";
 import coreMigrations from "./db/core/migrations/meta/_journal.json" with { type: "json" };
 import { inJurisdiction } from "./durable-objects.ts";
@@ -25,15 +30,24 @@ import { ensureReleaseContract } from "./workflow-catalog.ts";
 // request core serves after the router's check starts the install, in the
 // background (`installBuiltinsOnce`), once per isolate.
 //
+// A release may ship no built-in blueprint, and its built-ins are the
+// whole set: one an earlier release installed that this one no longer
+// ships is removed, so nobody creates from code no release vouches for
+// any more. Apps created from it stay as they are, offered no update. A
+// rollback to a release that ships it installs it again. The catalog
+// contracts it published stay: a workflow may bind one, and a contract is
+// published once and never changed.
+//
 // One object does the installing, the `Builtins` singleton. It keeps the
 // fingerprint of the release it last installed completely, a SHA-256 of
 // everything the install writes; an unchanged release does nothing beyond
 // comparing it. Callers who arrive while it installs share that install.
 // The fingerprint is stored only once everything is in, so a partial
-// install (a blueprint or a skill that failed, the object evicted
-// halfway) is tried again by the next request that starts one. Each part
-// compares what is stored before it writes (a blueprint its files, a
-// skill its text), so trying again writes only what is still missing.
+// install (a blueprint, a removal or a skill that failed, the object
+// evicted halfway) is tried again by the next request that starts one.
+// Each part compares what is stored before it writes (a blueprint its
+// files, a skill its text; a removal finds only what is still there), so
+// trying again writes only what is still missing.
 //
 // Which release wins while two run side by side, during a gradual
 // rollout: the one the object runs. It installs its own release, never
@@ -79,9 +93,9 @@ export const thisRelease: ReleaseFingerprint = {
 };
 
 /**
- * This release's built-ins. Only the singleton loads the blueprints to
- * install them: a few hundred KB of text (GRA-1349), which nothing else
- * loads.
+ * This release's built-ins. Only the singleton loads the blueprints, to
+ * install them: they can be a few hundred KB of text (GRA-1349), which
+ * nothing else loads.
  */
 export const loadBuiltinRelease = async (): Promise<Release> => {
   const { default: blueprints } = await import("#blueprints");
@@ -109,6 +123,41 @@ const installBlueprints = async (
       complete = false;
       log.error("builtins.blueprint_failed", {
         blueprint: blueprint.id,
+        ...errorFields(error),
+      });
+    }
+  }
+  return complete;
+};
+
+/**
+ * Removes each built-in an earlier release installed that `blueprints`
+ * (the release's) doesn't hold, one at a time. One that fails is logged,
+ * and the others are still removed. Resolves whether all of them are.
+ */
+const removeUnshipped = async (
+  env: Env,
+  blueprints: readonly BuiltinBlueprint[]
+): Promise<boolean> => {
+  let unshipped: BlueprintId[];
+  try {
+    unshipped = await unshippedBuiltins(
+      env,
+      blueprints.map(({ id }) => id)
+    );
+  } catch (error) {
+    log.error("builtins.unshipped_failed", errorFields(error));
+    return false;
+  }
+  let complete = true;
+  for (const id of unshipped) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
+      await removeBuiltinBlueprint(env, id);
+    } catch (error) {
+      complete = false;
+      log.error("builtins.blueprint_remove_failed", {
+        blueprint: id,
         ...errorFields(error),
       });
     }
@@ -175,9 +224,10 @@ export const installBuiltins = async (
     return true;
   }
   const blueprints = await installBlueprints(env, of.blueprints);
+  const removed = await removeUnshipped(env, of.blueprints);
   const contracts = await installContracts(env, of.contracts);
   const skills = await installShippedSkills(env, of.skills);
-  const complete = blueprints && contracts && skills;
+  const complete = blueprints && removed && contracts && skills;
   if (complete) {
     await storage.put(installedKey, fingerprint);
   }

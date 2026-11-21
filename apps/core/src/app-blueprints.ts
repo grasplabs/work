@@ -1292,6 +1292,51 @@ export const installBuiltinBlueprint = async (
   await deleteReplacedTrees(env, id, tree.tree);
 };
 
+/**
+ * The built-ins an earlier release installed that `shipped` (the ids of
+ * the release's own) doesn't hold: those the release no longer ships.
+ */
+export const unshippedBuiltins = async (
+  env: Env,
+  shipped: readonly string[]
+): Promise<BlueprintId[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: blueprints.id })
+    .from(blueprints)
+    .where(isNull(blueprints.appId))
+    .orderBy(asc(blueprints.id));
+  return rows
+    .filter(({ id }) => !shipped.includes(id))
+    .map(({ id }) => blueprintIdSchema.parse(id));
+};
+
+/**
+ * Removes the built-in `id`, which the release no longer ships: its trees
+ * first, then its row, in one audited batch, so a failure halfway leaves
+ * the row for the next install to remove again. Nobody creates an App
+ * from it any more (a create racing the removal is refused, as for any
+ * blueprint that is gone), and Apps created from it keep their code and
+ * their origin, offered no update since (`pendingUpdate`). A release
+ * that ships it again, a rollback too, installs it again. Removing one
+ * that is gone already writes nothing, and records nothing.
+ */
+export const removeBuiltinBlueprint = async (
+  env: Env,
+  id: BlueprintId
+): Promise<void> => {
+  await deleteOtherBlueprintTrees(env, id);
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .delete(blueprints)
+      .where(and(eq(blueprints.id, id), isNull(blueprints.appId))),
+    outboxedIfChanged(
+      db,
+      installEntry("blueprint.removed", id, { release: compilerVersion })
+    ),
+  ]);
+};
+
 /** A signed-in person's `apps.blueprints`. */
 export class AppBlueprintsRpc
   extends CoreRpcTarget

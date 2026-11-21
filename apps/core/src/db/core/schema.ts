@@ -1281,8 +1281,9 @@ export const pagePolicies = sqliteTable("screen_policies", {
  * from it asks for. One is a version of an App a builder marked (`app_id`
  * and `version`, at most one per version), or one the release ships
  * (`blueprints/` in core), which has neither and is changed only by the
- * install. Unmarking deletes the row; who marked, unmarked or installed
- * which is in the audit log.
+ * install, which deletes it once a release no longer ships it. Unmarking
+ * deletes the row; who marked, unmarked, installed or removed which is in
+ * the audit log.
  */
 export const blueprints = sqliteTable(
   "blueprints",

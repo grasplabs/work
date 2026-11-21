@@ -55,10 +55,12 @@ import { testBinding } from "./test-env.ts";
 // writes again; a failure halfway is recorded as done; someone who builds
 // can't find or copy it, or a user can; a copy doesn't ask for what the
 // release declares, or keeps asking once it no longer does; and a
-// built-in the release ships doesn't build.
+// built-in the release ships doesn't build; and one the release no
+// longer ships stays offered, takes Apps created from it along when it
+// goes, or is recorded as gone while it stays.
 //
 // The global setup embeds the tests' own built-in, `hello`
-// (test/fixtures/blueprints/), with the release's. The tests of a file
+// (test/fixtures/blueprints/), with the release's, which may be none. The tests of a file
 // share their storage, so each test that changes the built-in starts from
 // the release, installed again, and ends by installing it again.
 
@@ -98,25 +100,32 @@ const committed = (
 const ensureInstalled = async (): Promise<boolean> =>
   await builtins(env).ensureInstalled(await fingerprintOf(release));
 
+/** A release of these blueprints, as this one but for them, with the digest its build would embed. */
+const releaseOf = (blueprints: readonly BuiltinBlueprint[]): Release => ({
+  ...release,
+  blueprints,
+  blueprintsDigest: createHash("sha256")
+    .update(blueprintsDigestText(blueprints))
+    .digest("hex"),
+});
+
 /**
  * This release, with each built-in changed as `change` says of it: another
  * release, with the digest its build would embed.
  */
 const releaseChanging = (
   change: (blueprint: BuiltinBlueprint) => Partial<BuiltinBlueprint>
-): Release => {
-  const blueprints = release.blueprints.map((blueprint) => ({
-    ...blueprint,
-    ...change(blueprint),
-  }));
-  return {
-    ...release,
-    blueprints,
-    blueprintsDigest: createHash("sha256")
-      .update(blueprintsDigestText(blueprints))
-      .digest("hex"),
-  };
-};
+): Release =>
+  releaseOf(
+    release.blueprints.map((blueprint) => ({
+      ...blueprint,
+      ...change(blueprint),
+    }))
+  );
+
+/** This release without `hello`: a later one that no longer ships it. */
+const withoutHello = (): Release =>
+  releaseOf(release.blueprints.filter(({ id }) => id !== "hello"));
 
 /**
  * This release, with `hello` changed as `change` says: another release,
@@ -606,6 +615,97 @@ describe("the built-in blueprints", () => {
 
     await reinstall();
     await expect(helloTrees()).resolves.toStrictEqual([before?.tree]);
+  });
+
+  it("are removed by the first release that no longer ships them, once, leaving Apps created from them as they are, and installed again by one that ships them", async () => {
+    await reinstall();
+    const builder = await signedInApi(idp, "builder");
+    const copy = await builder.api.apps.blueprints.create("hello", {
+      name: "Kept",
+    });
+    await builder.api.versions.rollback({ kind: "app", id: copy.app.id }, 1);
+
+    const events = await auditedDuring(async () => {
+      await expect(install(withoutHello())).resolves.toBeTruthy();
+      // Installed again: nothing more is removed, or recorded.
+      await expect(install(withoutHello())).resolves.toBeTruthy();
+    });
+    const listed = await builder.api.apps.blueprints.list();
+    const created = await outcome(
+      builder.api.apps.blueprints.create("hello", { name: "Too late" })
+    );
+    const removed = {
+      audited: helloActions(events),
+      listed: listed.some(({ id }) => id === "hello"),
+      created,
+      trees: await helloTrees(),
+      kept: await builder.api.versions.files(
+        { kind: "app", id: copy.app.id },
+        1
+      ),
+      update: await builder.api.apps.blueprints.update(copy.app.id),
+    };
+
+    const again = await auditedDuring(reinstall);
+    const relisted = await builder.api.apps.blueprints.list();
+    expect({
+      removed,
+      again: helloActions(again),
+      listed: relisted.some(({ id }) => id === "hello"),
+    }).toStrictEqual({
+      removed: {
+        audited: ["blueprint.removed"],
+        listed: false,
+        created: "app.blueprint_not_found",
+        trees: [],
+        kept: committed(hello()),
+        update: null,
+      },
+      again: ["blueprint.installed"],
+      listed: true,
+    });
+  });
+
+  it("aren't recorded as installed while one the release no longer ships fails to be removed, and the next install removes it", async () => {
+    await reinstall();
+    const deletesDown: Env = { ...env, FILES: refusingDeletes(env.FILES) };
+    const logged = vi.spyOn(console, "error").mockReturnValue();
+    let partial: boolean;
+    let failures: string[];
+    try {
+      partial = await install(withoutHello(), deletesDown);
+      // Read before the spy is restored, which forgets its calls.
+      failures = logged.mock.calls
+        .flat()
+        .map((entry) => JSON.stringify(entry))
+        .filter((entry) => entry.includes("builtins.blueprint_remove_failed"));
+    } finally {
+      logged.mockRestore();
+    }
+    const stamped = await runInDurableObject(
+      builtins(env),
+      async (_instance, state) => await state.storage.get("installed")
+    );
+    const left = await helloRow();
+
+    await expect(install(withoutHello())).resolves.toBeTruthy();
+    expect({
+      partial,
+      failures: failures.length,
+      stamped,
+      left: left !== null,
+      removed: await helloRow(),
+      trees: await helloTrees(),
+    }).toStrictEqual({
+      partial: false,
+      failures: 1,
+      stamped: undefined,
+      left: true,
+      removed: null,
+      trees: [],
+    });
+
+    await reinstall();
   });
 
   it("ask, in each App created from them, for what their release declares, and stop when it no longer does", async () => {
