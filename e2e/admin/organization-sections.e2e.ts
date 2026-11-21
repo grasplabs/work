@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import type { APIRequestContext, Page } from "@playwright/test";
+import type {
+  APIRequestContext,
+  Page,
+  Request as PlaywrightRequest,
+} from "@playwright/test";
 import { z } from "zod";
 
 /** Every section of an organization, by its path under the organization's own, and its title. */
@@ -255,37 +259,31 @@ test("a frame that can't be read says so with Try again, which brings the admin 
 const isCall = (url: string): boolean => url.includes("/_serverFn/");
 
 /**
- * How many of the page's server function calls are unanswered right now,
- * counted from when this is called.
+ * How many of the page's server function calls started from now on are
+ * unanswered: each tracked by its request, so a call already under way
+ * when this is called never counts.
  */
 const unansweredCalls = (page: Page): (() => number) => {
-  let unanswered = 0;
+  const unanswered = new Set<PlaywrightRequest>();
   page.on("request", (sent) => {
     if (isCall(sent.url())) {
-      unanswered += 1;
+      unanswered.add(sent);
     }
   });
-  const answered = (sent: { url: () => string }): void => {
-    if (isCall(sent.url())) {
-      unanswered -= 1;
-    }
+  const answered = (sent: PlaywrightRequest): void => {
+    unanswered.delete(sent);
   };
   page.on("requestfinished", answered);
   page.on("requestfailed", answered);
-  return () => unanswered;
+  return () => unanswered.size;
 };
 
 /**
- * Waits until the router has preloaded `path`, as pointing at a link to it
- * does (the router shares the preload under way), and every server
- * function call the page made since has been answered.
+ * Keeps every preload the page's router starts from now on, as pointing
+ * at a link starts one, so a journey can wait on the real one.
  */
-const preloaded = async (
-  page: Page,
-  path: string,
-  unanswered: () => number
-): Promise<void> => {
-  await page.evaluate(async (to) => {
+const watchPreloads = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
     // The router the page made: TanStack Router keeps it on the window.
     const router: unknown = Reflect.get(globalThis, "__TSR_ROUTER__");
     if (typeof router !== "object" || router === null) {
@@ -295,8 +293,34 @@ const preloaded = async (
     if (typeof preloadRoute !== "function") {
       throw new TypeError("The page's router can't preload");
     }
-    await Reflect.apply(preloadRoute, router, [{ to }]);
-  }, path);
+    const started: Promise<unknown>[] = [];
+    Reflect.set(globalThis, "__preloadsStarted", started);
+    Reflect.set(router, "preloadRoute", (...args: unknown[]): unknown => {
+      const preload: unknown = Reflect.apply(preloadRoute, router, args);
+      started.push(Promise.resolve(preload).catch(() => null));
+      return preload;
+    });
+  });
+};
+
+/**
+ * Waits until pointing at a link started its preload, that preload is
+ * done, and every server function call made since is answered.
+ */
+const preloaded = async (
+  page: Page,
+  unanswered: () => number
+): Promise<void> => {
+  const started = async (): Promise<number> =>
+    await page.evaluate(() => {
+      const preloads: unknown = Reflect.get(globalThis, "__preloadsStarted");
+      return Array.isArray(preloads) ? preloads.length : 0;
+    });
+  await expect.poll(started).toBeGreaterThan(0);
+  await page.evaluate(async () => {
+    const preloads: unknown = Reflect.get(globalThis, "__preloadsStarted");
+    await Promise.all(Array.isArray(preloads) ? preloads : []);
+  });
   await expect.poll(unanswered).toBe(0);
 };
 
@@ -416,10 +440,11 @@ test("pointing at another organization's link asks its core nothing, and opening
     .getByRole("navigation", { name: "Organizations" })
     .getByRole("link", { name: "Answering Acme" });
   const unanswered = unansweredCalls(page);
+  await watchPreloads(page);
   await link.hover();
   await link.focus();
   // Its preload done, and any read it would have started answered.
-  await preloaded(page, sectionPath(answered, ""), unanswered);
+  await preloaded(page, unanswered);
   // Its core's audit log records a read only when staff open it.
   expect(await core(request, answered)).toBe(before);
 
@@ -536,10 +561,11 @@ test("pointing at an organization's Setup asks its core nothing, and opening it 
     .locator(`a[href="${sectionPath(answered, "setup")}"]`)
     .last();
   const unanswered = unansweredCalls(page);
+  await watchPreloads(page);
   await setup.hover();
   await setup.focus();
   // Its preload done, and any read it would have started answered.
-  await preloaded(page, sectionPath(answered, "setup"), unanswered);
+  await preloaded(page, unanswered);
   // Its quota policy and spend are read from its core only once it is opened.
   const pointed = await coreAsked(request, answered);
   expect(pointed.slice(before)).toStrictEqual([]);
