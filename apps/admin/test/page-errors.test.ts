@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  pageErrorsPerMinute,
-  reportPageErrorFn,
-} from "../src/admin/page-error-functions.ts";
+import { reportPageErrorFn } from "../src/admin/page-error-functions.ts";
+import { pageErrorsPerMinute } from "../src/admin/page-error-limit.ts";
 import { mockAccess } from "./access.ts";
 import { callServerFn } from "./pages.ts";
 

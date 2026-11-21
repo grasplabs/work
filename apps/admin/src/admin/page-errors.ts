@@ -20,25 +20,35 @@ const build = import.meta.env.VITE_GRASP_BUILD.slice(
   errorReportLimits.build
 );
 
+/**
+ * What became of a report: logged, refused as past the staff member's
+ * limit for the minute, or not answered (offline, or the Worker failed).
+ */
+type Sent = "logged" | "refused" | "failed";
+
 /** Errors reported since the page loaded, by message and stack. */
-const reported = new Map<string, Promise<boolean>>();
+const reported = new Map<string, Promise<Sent>>();
+
+/** How long until the Worker's minute turns, when it takes reports again. */
+const untilTheMinuteTurns = (): number => 60_000 - (Date.now() % 60_000);
 
 /** Where the page is: its route's pattern, never the URL itself. */
 let routeNow = (): string => "unknown";
 
-/** Sends `report`: whether the Worker logged it (not past its limit). */
-const send = async (report: ErrorReport): Promise<boolean> => {
+/** Sends `report`: what became of it. */
+const send = async (report: ErrorReport): Promise<Sent> => {
   try {
     const { logged } = await reportPageErrorFn({ data: report });
-    return logged;
+    return logged ? "logged" : "refused";
   } catch {
-    return false;
+    return "failed";
   }
 };
 
 /**
- * Reports `error`, once per page load for the same message and stack.
- * Never rejects.
+ * Reports `error`, once per page load for the same message and stack,
+ * and one the Worker refused as past the limit not again within its
+ * minute. Never rejects.
  */
 export const reportPageError = async (
   kind: ErrorReport["kind"],
@@ -62,9 +72,15 @@ export const reportPageError = async (
       build,
     });
     reported.set(seen, sent);
-    if (!(await sent)) {
-      // Not taken: the next time the error comes, it is reported again.
+    const outcome = await sent;
+    if (outcome === "failed") {
+      // Not answered: the next time the error comes, it is reported again.
       reported.delete(seen);
+    } else if (outcome === "refused") {
+      // Past the limit: not sent again until the Worker would take it.
+      setTimeout(() => {
+        reported.delete(seen);
+      }, untilTheMinuteTurns());
     }
   } catch {
     // Something thrown that can't even be read as text: let it go.

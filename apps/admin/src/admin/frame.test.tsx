@@ -75,3 +75,43 @@ describe("the admin's frame in the browser", () => {
     });
   });
 });
+
+/** Throws `message` where nothing catches it, as the browser reports it to the page, `times` times. */
+const throwUncaught = async (message: string, times: number) => {
+  const error = new Error(message);
+  for (let time = 0; time < times; time += 1) {
+    window.dispatchEvent(new ErrorEvent("error", { error }));
+    // oxlint-disable-next-line no-await-in-loop -- each report answered before the next comes
+    await settle();
+  }
+};
+
+describe("the page's error reports", () => {
+  it("sends an error the Worker refused as past its limit no second time within the minute", async () => {
+    const { calls } = await openAdmin("/platform/offboarded", {
+      fetchOffboardedClients: [],
+      reportPageErrorFn: { logged: false },
+    });
+
+    await throwUncaught("refused while past the limit", 3);
+
+    expect(calls.filter(({ fn }) => fn === "reportPageErrorFn")).toHaveLength(
+      1
+    );
+  });
+
+  it("sends an error again when its report wasn't answered", async () => {
+    const { calls } = await openAdmin("/platform/offboarded", {
+      fetchOffboardedClients: [],
+      reportPageErrorFn: () => {
+        throw new FailedError();
+      },
+    });
+
+    await throwUncaught("not answered", 2);
+
+    expect(calls.filter(({ fn }) => fn === "reportPageErrorFn")).toHaveLength(
+      2
+    );
+  });
+});
