@@ -266,21 +266,24 @@ const monthRunsOf = async (
   );
 };
 
-/** What a person's chat turn is called for (chat-harness.ts, workspace.ts). */
-const chatPurpose = "chat.turn";
+/**
+ * What a person's chat turn is called for (chat-harness.ts,
+ * workspace.ts): the month's spend counts chat by it.
+ */
+export const chatTurnPurpose = "chat.turn";
 
 /** Milliseconds in a day. */
 const dayMs = 86_400_000;
 
 /**
  * How many days of UTC month `month` have begun by `now`: up to today in
- * the month it is, and all of any other (tests count in months from 2200).
+ * the month it is, all of one that is over, none of one to come.
  */
 const daysSoFar = (month: string, now: Date): number => {
   const { from, until } = monthBounds(month);
-  return now >= from && now < until
-    ? now.getUTCDate()
-    : Math.round((until.getTime() - from.getTime()) / dayMs);
+  const length = Math.round((until.getTime() - from.getTime()) / dayMs);
+  const begun = Math.floor((now.getTime() - from.getTime()) / dayMs) + 1;
+  return Math.min(length, Math.max(0, begun));
 };
 
 /**
@@ -292,7 +295,8 @@ const daysSoFar = (month: string, now: Date): number => {
  */
 export const monthSpend = async (
   env: Pick<Env, "DB">,
-  month: string
+  month: string,
+  now = new Date()
 ): Promise<ModelMonthSpend> => {
   const db = drizzle(env.DB);
   const spent = sql<number>`sum(${modelUsage.cost})`;
@@ -306,7 +310,7 @@ export const monthSpend = async (
       .select({
         day,
         amount: spent,
-        chat: sql<number>`sum(case when ${modelUsage.purpose} = ${chatPurpose} then ${modelUsage.cost} else 0 end)`,
+        chat: sql<number>`sum(case when ${modelUsage.purpose} = ${chatTurnPurpose} then ${modelUsage.cost} else 0 end)`,
       })
       .from(modelUsage)
       .where(organizationIn(month))
@@ -335,12 +339,13 @@ export const monthSpend = async (
     workflowNamesOf(db, workflows),
     monthRunsOf(db, workflows, month),
   ]);
-  // Every day so far, and any later one a call was recorded on (a clock
-  // ahead of this one), so the days always add up to the total.
+  // Every day so far, and on to the latest a call was recorded on, if
+  // later (a clock ahead of `now`'s), so the days always add up to the
+  // total.
   const days: number[] = Array.from(
     {
       length: Math.max(
-        daysSoFar(month, new Date()),
+        daysSoFar(month, now),
         ...byDay.map(({ day: of }) => Number(of))
       ),
     },

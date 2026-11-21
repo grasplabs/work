@@ -217,6 +217,7 @@ import {
 } from "./history-access.ts";
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
+import { chatTurnPurpose } from "./model-spend.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
 import type { WorkContext } from "./restricted.ts";
 import { retireUnseen } from "./unseen-memories.ts";
@@ -2675,7 +2676,7 @@ export class Workspace extends DurableObject<Env> {
         {
           model: asked,
           effort: parsed.data.effort,
-          purpose: "chat.turn",
+          purpose: chatTurnPurpose,
           trigger: delegateActorOf(authority, via),
           provenance: this.#sources(chat.id),
           work: { authority, context: work },

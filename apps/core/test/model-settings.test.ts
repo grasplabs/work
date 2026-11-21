@@ -262,18 +262,28 @@ describe("model settings", { timeout: 60_000 }, () => {
     const { session } = await signedInWithRole(idp, "admin");
     const { core } = await openRpc(session, { coreEnv });
     const spend = await core.authenticate().models.spend();
+    const readOn = new Date().getUTCDate();
     expect(spend.workflows).toHaveLength(modelSpendListed);
-    // Each day of the month so far, today's all of it, and nothing missing:
-    // the days add up to the total, and chat is the person's one turn.
-    const today = new Date().getUTCDate();
+    // The UTC days the month's calls were recorded on, as they were: a run
+    // that crosses midnight records on two.
+    const { results } = await env.DB.prepare(
+      "SELECT created_at AS at FROM model_usage WHERE period = ?1"
+    )
+      .bind(month)
+      .all<{ at: number }>();
+    const recordedOn = [
+      ...new Set(results.map(({ at }) => new Date(at).getUTCDate())),
+    ].toSorted((one, other) => one - other);
+    // Each day of the month so far, spent on the days calls were recorded
+    // on, nothing missing: the days add up to the total, and chat is the
+    // person's one turn.
     const { days, chat, ...rest } = spend;
     expect({
       ...rest,
       days: {
-        length: days.length,
+        soFar: days.length >= (recordedOn.at(-1) ?? 0) && days.length <= readOn,
         sum: micros(days.reduce((sum, each) => sum + each, 0)),
-        today: micros(days[today - 1] ?? 0),
-        others: days.filter((_, at) => at !== today - 1),
+        spentOn: days.flatMap((each, at) => (each > 0 ? [at + 1] : [])),
       },
       chat: micros(chat),
       total: Math.round(spend.total * 1_000_000),
@@ -304,10 +314,9 @@ describe("model settings", { timeout: 60_000 }, () => {
       ],
       more: true,
       days: {
-        length: today,
+        soFar: true,
         sum: micros(spend.total),
-        today: micros(spend.total),
-        others: Array.from({ length: today - 1 }, () => 0),
+        spentOn: recordedOn,
       },
       chat: 4500,
     });
@@ -319,8 +328,9 @@ describe("model settings", { timeout: 60_000 }, () => {
     ).resolves.toBe("role.forbidden");
   });
 
-  it("count each call on the UTC day it was answered, all of a month that isn't this one, and as chat only people's chat turns", async () => {
-    // February of a year that isn't a leap year: 28 days.
+  it("count each call on the UTC day it was answered, the days running on to the latest call dated after now, and as chat only people's chat turns", async () => {
+    // February of a year that isn't a leap year, 28 days, still to come:
+    // no day of it has begun, so the days run to the last one spent on.
     const month = "2300-02";
     const coreEnv: Env = { ...env, SPEND_MONTH: month };
     /** A call of `month`'s, answered `at`, costing `dollars`. */
