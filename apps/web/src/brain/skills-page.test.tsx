@@ -775,14 +775,14 @@ describe("the skills page", () => {
     await click("Save");
     const kept = {
       own: document.body.textContent?.includes("quote-a-tender"),
-      said: document.body.textContent?.includes("Out of reach."),
+      said: document.body.textContent?.includes("Grasp can't be reached"),
     };
     await click("Try again");
 
     expect({
       kept,
       calls,
-      said: document.body.textContent?.includes("Out of reach."),
+      said: document.body.textContent?.includes("Grasp can't be reached"),
       offered: buttons("Try again").length,
     }).toStrictEqual({
       kept: { own: true, said: true },
@@ -794,7 +794,9 @@ describe("the skills page", () => {
 
   it("offers Try again when the page can't be read at first, and shows it once it can", async () => {
     const { calls } = await shown({ admin: false, overviewRefusals: [1] });
-    const refused = document.body.textContent?.includes("Out of reach.");
+    const refused = document.body.textContent?.includes(
+      "Grasp can't be reached"
+    );
     await click("Try again");
 
     expect({

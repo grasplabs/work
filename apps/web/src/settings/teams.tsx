@@ -10,6 +10,7 @@ import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { formatList } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,7 +57,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { DirectoryPlacementSections } from "./directory-placement.tsx";
-import { LoadingLines, RowNote, SectionNotLoaded } from "./section.tsx";
+import { LoadingLines, RowNote } from "./section.tsx";
 import { createTeam, deleteTeam } from "./team-changes.ts";
 import { isTaken, TeamDialog } from "./team-members-dialog.tsx";
 import { useTeamChange } from "./use-team-change.ts";
@@ -473,10 +474,11 @@ export const TeamsPanel = () => {
     <TeamsList data={loaded.data} onChanged={reload} />
   ) : (
     <SectionCard variant="grouped" density="compact" title={t`Teams`}>
-      <SectionNotLoaded
-        onRetry={() => {
+      <NotLoadedState
+        again={() => {
           void reload();
         }}
+        heading="h3"
         page={loaded}
       />
     </SectionCard>

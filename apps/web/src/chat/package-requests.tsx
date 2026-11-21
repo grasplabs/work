@@ -10,7 +10,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   ApprovalRequest,
   ApprovalRequestApprove,
@@ -194,15 +194,18 @@ export const PackageRequests = ({
 }) => {
   const { t } = useLingui();
   const { read, again } = useChatRequests(chatId, version, listPackageRequests);
-  if (read.state === "refused") {
-    return <ErrorText>{read.message}</ErrorText>;
+  if (read === undefined) {
+    return null;
   }
-  if (read.state === "loading" || read.requests.length === 0) {
+  if (read.state !== "ready") {
+    return <NotLoadedState again={again} heading="h3" page={read} />;
+  }
+  if (read.data.length === 0) {
     return null;
   }
   return (
     <section aria-label={t`Package requests`} {...stylex.props(styles.list)}>
-      {read.requests.map((request) => (
+      {read.data.map((request) => (
         <PackageRequest
           key={request.id}
           onApproved={onApproved}

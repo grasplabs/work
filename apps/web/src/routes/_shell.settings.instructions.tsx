@@ -2,15 +2,12 @@ import { isAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
-import {
-  SectionNotLoaded,
-  SettingsError,
-  SettingsStack,
-} from "../settings/section.tsx";
+import { SettingsError, SettingsStack } from "../settings/section.tsx";
 
 // Settings → Instructions: what every chat starts with (core's
 // instruction-files.ts). Everyone writes their own, which only their own
@@ -40,7 +37,7 @@ const Instructions = () => {
             saved={own.data}
           />
         ) : (
-          <SectionNotLoaded page={own} />
+          <NotLoadedState heading="h3" page={own} />
         )}
       </SectionCard>
       {company === undefined ? null : (
@@ -65,7 +62,7 @@ const Instructions = () => {
               />
             </SettingsStack>
           ) : (
-            <SectionNotLoaded page={company} />
+            <NotLoadedState heading="h3" page={company} />
           )}
         </SectionCard>
       )}

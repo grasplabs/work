@@ -188,6 +188,9 @@ const opened = async (
         connections: typeof connections;
       }) => Promise<T>
     ): Promise<T> => await action({ apps, pages, permissions, connections }),
+    // A section that didn't load reads again once core is back: never, here.
+    connected: false,
+    onConnected: () => () => {},
   };
   const rootRoute = createRootRoute({
     loader: async () => await apps.get(),

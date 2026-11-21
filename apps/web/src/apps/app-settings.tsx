@@ -31,7 +31,7 @@ import { DraftHistory } from "../drafts/draft-history.tsx";
 import { Sharing } from "../drafts/sharing.tsx";
 import { StatusBadge } from "../drafts/status-badge.tsx";
 import { formatDateTime } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
@@ -152,7 +152,8 @@ export const Read = <T,>({
     return <LoadingLines />;
   }
   if (read.state !== "ready") {
-    return <NotLoaded page={read} />;
+    // The section reads again as the router does (useAppRead): Try again's own.
+    return <NotLoadedState heading="h3" page={read} />;
   }
   return (
     <>
@@ -899,7 +900,7 @@ const OptionsSection = ({
       {t`This App offers no options.`}
     </Text>
   ) : (
-    <NotLoaded page={options} />
+    <NotLoadedState heading="h3" page={options} />
   );
 };
 

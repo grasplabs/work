@@ -12,6 +12,7 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,7 +41,7 @@ import { toast } from "../grasp/toast/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChatLink } from "./chat-link.ts";
-import { RowNote, SectionNotLoaded } from "./section.tsx";
+import { RowNote } from "./section.tsx";
 
 // Settings › Security: the person's accounts on chat platforms that are
 // linked to them, so Grasp knows it is them writing there, as quiet rows in
@@ -349,7 +350,7 @@ const LinkedChatAccounts = ({ accounts }: { accounts: ChannelAccount[] }) => {
  */
 const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
   if (chat.state !== "ready") {
-    return <SectionNotLoaded page={chat} />;
+    return <NotLoadedState heading="h3" page={chat} />;
   }
   const { pending } = chat.data;
   if (pending === undefined) {

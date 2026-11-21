@@ -7,6 +7,7 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { Combobox } from "../grasp/combobox/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -14,7 +15,7 @@ import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { OrgCard, OrgCardLoading } from "../settings/org-card.tsx";
-import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
+import { SettingsError } from "../settings/section.tsx";
 import { SignInRow } from "../settings/sign-in-settings.tsx";
 import { StaffAccessSection } from "../settings/staff-access.tsx";
 import {
@@ -238,7 +239,7 @@ const StaffAccess = ({
       density="compact"
       title={t`Grasp staff access`}
     >
-      <SectionNotLoaded page={read} />
+      <NotLoadedState heading="h3" page={read} />
     </SectionCard>
   );
 };
@@ -258,7 +259,7 @@ const Workspace = () => {
           density="compact"
           title={t`Organization`}
         >
-          <SectionNotLoaded page={page} />
+          <NotLoadedState heading="h3" page={page} />
         </SectionCard>
       )}
       {staff === undefined ? null : (

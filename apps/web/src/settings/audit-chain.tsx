@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
 import { formatDateTime } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -31,7 +32,6 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { SectionNotLoaded } from "./section.tsx";
 
 const styles = stylex.create({
   running: { display: "flex", alignItems: "center", gap: grasp.space2 },
@@ -231,7 +231,7 @@ export const IntegrityDialog = ({
         <DialogBody>
           <div aria-live="polite">
             {own === null && !busy && last.state !== "ready" ? (
-              <SectionNotLoaded page={last} />
+              <NotLoadedState heading="h3" page={last} />
             ) : (
               <div {...stylex.props(styles.facts)}>
                 {failure === undefined ? null : (

@@ -16,7 +16,7 @@ import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatCompact } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -74,7 +74,6 @@ import {
 } from "../grasp/sheet/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import { AccessView } from "./access-view.tsx";
 import { TableRecords } from "./app-data.tsx";
 import { PlanList, planLines, useModelChanges } from "./data-model-changes.tsx";
@@ -83,7 +82,7 @@ import { FieldsView } from "./field-editor.tsx";
 import { identifierOf } from "./identifier.ts";
 import { IndexesView } from "./indexes-view.tsx";
 import { ResetTestData } from "./reset-test-data.tsx";
-import { useCoreRead } from "./use-core-read.ts";
+import { useCoreRead, useHeldCoreRead } from "./use-core-read.ts";
 
 // An App's data model in its workspace's Data view, as a database studio
 // shows one: the tables in a column, each with how many records it holds,
@@ -456,7 +455,7 @@ export const AppDataModel = ({
   onTestDataReset?: () => void;
 }) => {
   const { t } = useLingui();
-  const read = useCoreRead(
+  const { loaded: read, again } = useHeldCoreRead(
     `${app}/${revision}`,
     async (session) => await session.apps.dataModel(app)
   );
@@ -492,10 +491,10 @@ export const AppDataModel = ({
   if (shown === undefined) {
     return (
       <div {...stylex.props(styles.padded)}>
-        {read === undefined ? (
+        {read === undefined || read.state === "ready" ? (
           <LoadingLines lines={6} />
         ) : (
-          <NotLoaded page={read} />
+          <NotLoadedState again={again} heading="h2" page={read} />
         )}
       </div>
     );

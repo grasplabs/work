@@ -1,18 +1,12 @@
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useRouter, useRouterState } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { isFileGone } from "../error-reports.ts";
 import { ErrorState } from "../frame/page-states.tsx";
-import { Alert } from "../grasp/alert/index.ts";
-import { Button } from "../grasp/button/index.ts";
-import { Retry } from "../grasp/icons/index.ts";
 import { Skeleton } from "../grasp/skeleton/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { notLoadedText } from "../load-from-core.tsx";
-import type { Loaded } from "../load-from-core.tsx";
 import { useRouteErrorReason } from "../route-error.tsx";
 
 // Settings' own small parts, beside the library's: a Settings page is its
@@ -23,8 +17,9 @@ import { useRouteErrorReason } from "../route-error.tsx";
 // - SettingsStack: a section's fields and facts, one under the other.
 // - RowNote: a row's line, or why its action failed.
 // - TitleLine: an Item's title with a quieter detail beside it.
-// - LoadingLines, SectionNotLoaded and SettingsError: a section that is
-//   loading, didn't load, or failed as it rendered.
+// - LoadingLines and SettingsError: a section that is loading, or failed
+//   as it rendered. One that didn't load is NotLoadedState
+//   (frame/page-states.tsx), as everywhere.
 
 const styles = stylex.create({
   titleLine: {
@@ -53,12 +48,6 @@ const styles = stylex.create({
     maxWidth: grasp.formWidth,
   },
   lines: { display: "flex", flexDirection: "column", gap: grasp.space3 },
-  failed: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-start",
-    gap: grasp.space3,
-  },
 });
 
 /** A section's fields and facts, one under the other. */
@@ -108,42 +97,6 @@ export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
         <Skeleton key={line} />
       ))}
     </output>
-  );
-};
-
-/**
- * Why a part of a page did not load, in the section it is part of: core's
- * reason, with the reference to quote, or that Grasp is out of reach.
- */
-export const SectionNotLoaded = ({
-  page,
-  onRetry,
-}: {
-  page: Exclude<Loaded<unknown>, { state: "ready" }>;
-  /** Reads it again; the page's own read when left out. */
-  onRetry?: () => void;
-}) => {
-  const { t, i18n } = useLingui();
-  const router = useRouter();
-  const trying = useRouterState({ select: (state) => state.isLoading });
-  return (
-    <div {...stylex.props(styles.failed)}>
-      <Alert tone="danger">{notLoadedText(page, i18n)}</Alert>
-      <Button
-        disabled={onRetry === undefined && trying}
-        icon={Retry}
-        onClick={() => {
-          if (onRetry === undefined) {
-            void router.invalidate();
-            return;
-          }
-          onRetry();
-        }}
-        size="sm"
-      >
-        {onRetry === undefined && trying ? t`Trying again…` : t`Try again`}
-      </Button>
-    </div>
   );
 };
 

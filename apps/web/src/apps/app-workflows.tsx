@@ -11,7 +11,7 @@ import { useEffect, useId, useState } from "react";
 
 import { useDraft } from "../drafts/use-draft.ts";
 import { formatDateTime } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -42,7 +42,7 @@ import {
 } from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -313,6 +313,8 @@ export const AppWorkflows = ({
     0
   );
   const [read, setRead] = useState<Loaded<Read>>();
+  // Counts the tries, so Try again reads them again.
+  const [tried, setTried] = useState(0);
   useEffect(() => {
     const left = new AbortController();
     const load = async (): Promise<void> => {
@@ -338,7 +340,8 @@ export const AppWorkflows = ({
     return () => {
       left.abort();
     };
-  }, [app.id, builds, core]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `tried` says when to read again
+  }, [app.id, builds, core, tried]);
   if (!builds) {
     return null;
   }
@@ -346,7 +349,15 @@ export const AppWorkflows = ({
     return <LoadingLines lines={2} />;
   }
   if (read.state !== "ready") {
-    return <NotLoaded page={read} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          setTried(tried + 1);
+        }}
+        heading="h3"
+        page={read}
+      />
+    );
   }
   return (
     <BindingsView

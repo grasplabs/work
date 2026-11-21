@@ -10,6 +10,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
 import { formatDollars } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   Chart,
   ChartArea,
@@ -25,7 +26,6 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { monthEnd } from "./money.ts";
-import { SectionNotLoaded } from "./section.tsx";
 
 // Settings › AI and spend, its last card: what the models cost this month
 // on the organization's keys (core's `models.spend()` and the Apps' model
@@ -184,7 +184,7 @@ export const SpendCard = ({
   if (spend.state !== "ready") {
     return (
       <SectionCard variant="grouped" density="compact" title={t`Spend`}>
-        <SectionNotLoaded page={spend} />
+        <NotLoadedState heading="h3" page={spend} />
       </SectionCard>
     );
   }
