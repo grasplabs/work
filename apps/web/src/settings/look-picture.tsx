@@ -3,12 +3,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 
 import { onThemeChange } from "../frame/theme.ts";
 import { BackdropField } from "../grasp/backdrop/field.tsx";
-import {
-  defaultScenes,
-  isDither,
-  isSand,
-  isScene,
-} from "../grasp/backdrop/index.ts";
+import { defaultScenes, isDither, isScene } from "../grasp/backdrop/index.ts";
 import type { BackdropLook as Look } from "../grasp/backdrop/index.ts";
 
 // Still pictures of looks, for choosing one by sight (look-tiles.tsx). A
@@ -25,12 +20,12 @@ const pictureWidth = 160;
 const pictureHeight = 90;
 
 /**
- * The longest a look draws before its picture is taken anyway. It is taken
- * as soon as it stands: a dither or sand once it has drawn, a scene once
- * its picture has come. Waiting these out for every look, the tiles took
- * nine seconds to fill.
+ * The longest a look draws before its picture is taken anyway: it is taken
+ * as soon as it stands, a dither or sand once it has drawn, a scene once its
+ * picture has come. Waiting a fixed time for every look, the tiles took
+ * eight seconds to fill.
  */
-const settleMs = { scene: 900, dither: 260, sand: 60 } as const;
+const longestMs = 2000;
 
 /** How long a scene waits, once its picture has come and its field has started, for the field to draw it. */
 const sceneDrawMs = 150;
@@ -117,14 +112,6 @@ const styles = stylex.create({
   },
 });
 
-/** How a look is drawn, for how long it draws before its picture. */
-const familyOf = ({ backdrop }: Look): keyof typeof settleMs => {
-  if (isScene(backdrop)) {
-    return "scene";
-  }
-  return isSand(backdrop) ? "sand" : "dither";
-};
-
 /** The first look waiting for its picture. */
 const first = () => queue.at(0);
 
@@ -153,14 +140,14 @@ export const LookPictureStage = () => {
       queue.shift();
       changed();
     };
-    const family = familyOf(next.look);
-    const timers = [setTimeout(take, settleMs[family])];
+    const scene = isScene(next.look.backdrop);
+    const timers = [setTimeout(take, longestMs)];
     // A scene's picture, fetched here too: once it has come, the field's
     // own copy comes from the cache at once.
-    let came = family !== "scene";
+    let came = !scene;
     const ready = (): void => {
       if (came && canvas?.dataset.drawn !== undefined) {
-        timers.push(setTimeout(take, family === "scene" ? sceneDrawMs : 0));
+        timers.push(setTimeout(take, scene ? sceneDrawMs : 0));
       }
     };
     const watch = new MutationObserver(ready);
@@ -170,7 +157,7 @@ export const LookPictureStage = () => {
         attributeFilter: ["data-drawn"],
       });
     }
-    if (isScene(next.look.backdrop)) {
+    if (scene) {
       const picture = new Image();
       picture.addEventListener(
         "load",
@@ -184,6 +171,8 @@ export const LookPictureStage = () => {
     }
     ready();
     return () => {
+      // A picture that comes after this is not this stage's to take.
+      taken = true;
       watch.disconnect();
       for (const timer of timers) {
         clearTimeout(timer);

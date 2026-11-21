@@ -1876,7 +1876,14 @@ const scanSliceMs = 4;
  */
 const afterPageTurn = (next: () => void): void => {
   const channel = new MessageChannel();
-  channel.port1.addEventListener("message", next, { once: true });
+  channel.port1.addEventListener(
+    "message",
+    () => {
+      channel.port1.close();
+      next();
+    },
+    { once: true }
+  );
   channel.port1.start();
   channel.port2.postMessage(null);
 };
