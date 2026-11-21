@@ -3,7 +3,7 @@ import {
   organizationLogoMaxPixels,
 } from "@grasp-os/shared/organization";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
 import {
@@ -73,85 +73,101 @@ const png = ({ width = 64, height = 64, size = 88, fill = 1 } = {}) =>
     fill
   );
 
+/** `count` bytes of `value`. */
+const run = (count: number, value = 0) =>
+  Array.from({ length: count }, () => value);
+
 /**
- * A JPEG's SOI, an APP0 segment for the walk to step over, then a frame
- * header (`sof`: SOF0 baseline, SOF2 progressive) of `width` by `height`.
+ * A JPEG: its SOI, `before` (by default an APP0 segment for the walk to
+ * step over), then a frame header (`sof`: SOF0 baseline, SOF2
+ * progressive) of `width` by `height` with three components, whose
+ * length is `frameLength`.
  */
-const jpeg = ({ width = 64, height = 64, sof = 0xc0 } = {}) =>
+const jpeg = ({
+  width = 64,
+  height = 64,
+  sof = 0xc0,
+  frameLength = 17,
+  before = [0xff, 0xe0, ...be16(16), ...ascii("JFIF"), ...run(10)],
+}: {
+  width?: number;
+  height?: number;
+  sof?: number;
+  frameLength?: number;
+  before?: number[];
+} = {}) =>
   bytesOf([
-    // SOI.
     0xff,
     0xd8,
-    // APP0, 16 bytes long: "JFIF", its version, density and no thumbnail.
-    0xff,
-    0xe0,
-    ...be16(16),
-    ...ascii("JFIF"),
-    ...Array.from({ length: 10 }, () => 0),
-    // The frame header: precision, height, width, three components.
+    ...before,
     0xff,
     sof,
-    ...be16(17),
+    ...be16(frameLength),
     8,
     ...be16(height),
     ...be16(width),
     3,
-    ...Array.from({ length: 9 }, () => 1),
+    ...run(9, 1),
   ]);
 
 /** A JPEG whose scan starts before any frame header. */
 const scanFirst = bytesOf([0xff, 0xd8, 0xff, 0xda, ...be16(8)]);
 
-const riff = (fourcc: string) => [
-  ...ascii("RIFF"),
-  ...le32(56),
-  ...ascii(fourcc),
+/**
+ * A WebP of one chunk, `fourcc` holding `payload`; the chunk's and the
+ * RIFF's sizes are what they hold unless given.
+ */
+const webp = (
+  fourcc: string,
+  payload: number[],
+  { chunkSize = payload.length, riffSize = 12 + payload.length } = {}
+) =>
+  new Uint8Array([
+    ...ascii("RIFF"),
+    ...le32(riffSize),
+    ...ascii("WEBP"),
+    ...ascii(fourcc),
+    ...le32(chunkSize),
+    ...payload,
+  ]);
+
+/** A VP8 frame's first ten bytes, then some of its data. */
+const vp8Payload = (width: number, height: number, keyFrame = true) => [
+  // The frame tag, its lowest bit clear for a key frame, then the start code.
+  keyFrame ? 0 : 1,
+  0,
+  0,
+  0x9d,
+  0x01,
+  0x2a,
+  ...le16(width),
+  ...le16(height),
+  ...run(10, 1),
 ];
 
 /** A simple lossy WebP ("VP8 "), `width` by `height`. */
 const vp8 = (width = 64, height = 64) =>
-  bytesOf([
-    ...riff("WEBP"),
-    ...ascii("VP8 "),
-    ...le32(40),
-    // A frame tag, then the start code.
-    0,
-    0,
-    0,
-    0x9d,
-    0x01,
-    0x2a,
-    ...le16(width),
-    ...le16(height),
-  ]);
+  webp("VP8 ", vp8Payload(width, height));
 
 /** A lossless WebP ("VP8L"), `width` by `height`. */
 const vp8l = (width = 64, height = 64) =>
-  bytesOf([
-    ...riff("WEBP"),
-    ...ascii("VP8L"),
-    ...le32(40),
+  webp("VP8L", [
     0x2f,
     ...le32(width - 1 + (height - 1) * 0x40_00),
+    ...run(7, 1),
   ]);
 
 /** An extended WebP ("VP8X"), its canvas `width` by `height`. */
 const vp8x = (width = 64, height = 64) =>
-  bytesOf([
-    ...riff("WEBP"),
-    ...ascii("VP8X"),
-    ...le32(10),
+  webp("VP8X", [
     // Flags, then three reserved bytes.
-    0,
-    0,
-    0,
-    0,
+    ...run(4),
     ...le24(width - 1),
     ...le24(height - 1),
   ]);
 
 /** A RIFF file, but a sound: not a WebP. */
-const wave = bytesOf(riff("WAVE"));
+const wave = bytesOf([...ascii("RIFF"), ...le32(56), ...ascii("WAVE")]);
 
 const svg = new TextEncoder().encode(
   '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
@@ -275,26 +291,61 @@ describe("the organization's logo", { timeout: 60_000 }, () => {
   it("is refused to an admin demoted since their session was checked, and leaves nothing of theirs behind", async () => {
     const admin = await signedInApi(idp, "admin");
     // The connection's reading of who they are holds for a few seconds
-    // (session-check.ts): these calls come within it, so only the write's
-    // own check of their role stands in the way.
-    const { logo } = await admin.api.organization.setLogo(png({ fill: 4 }));
-    await setRole(admin.userId, "user");
+    // (session-check.ts `sessionRecheckMs`). With the clock held still it
+    // doesn't run out, so they still read as an admin to the call, and
+    // only the write's own check of their role stands in the way.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let refused: string[] = [];
+    let kept = "";
+    let stored = 0;
+    let logo: string | null = null;
+    try {
+      ({ logo } = await admin.api.organization.setLogo(png({ fill: 4 })));
+      await setRole(admin.userId, "user");
+      refused = [
+        await outcome(admin.api.organization.setLogo(png({ fill: 5 }))),
+        await outcome(admin.api.organization.removeLogo()),
+      ];
+      const after = await admin.api.organization.get();
+      kept = after.logo ?? "";
+      stored = await logosKept();
+      await setRole(admin.userId, "admin");
+      await admin.api.organization.removeLogo();
+    } finally {
+      vi.useRealTimers();
+    }
 
-    const refused = [
-      await outcome(admin.api.organization.setLogo(png({ fill: 5 }))),
-      await outcome(admin.api.organization.removeLogo()),
-    ];
-    const kept = await admin.api.organization.get();
-    const stored = await logosKept();
-    await setRole(admin.userId, "admin");
-    await admin.api.organization.removeLogo();
-
-    expect({ refused, kept: kept.logo, stored }).toStrictEqual({
+    expect({ refused, kept, stored }).toStrictEqual({
       refused: ["role.forbidden", "role.forbidden"],
       kept: logo,
       stored: 1,
     });
     await expect(logosKept()).resolves.toBe(0);
+  });
+
+  it("lets go of an upload whose write the database refused, and answers that refusal", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { logo } = await admin.api.organization.setLogo(png({ fill: 6 }));
+    // The database refuses every change to the organization, as one that
+    // is failing would.
+    await env.DB.prepare(
+      "CREATE TRIGGER organization_down BEFORE UPDATE ON organizations BEGIN SELECT RAISE(ABORT, 'down'); END"
+    ).run();
+    let refused = "";
+    try {
+      refused = await outcome(admin.api.organization.setLogo(png({ fill: 7 })));
+    } finally {
+      await env.DB.prepare("DROP TRIGGER organization_down").run();
+    }
+    const after = await admin.api.organization.get();
+    const stored = await logosKept();
+    await admin.api.organization.removeLogo();
+
+    expect({ refused, kept: after.logo, stored }).toStrictEqual({
+      refused: "internal.unexpected",
+      kept: logo,
+      stored: 1,
+    });
   });
 
   it("takes only a PNG, JPEG or WebP of at most 512 KB and 4096 pixels a side, told by its header", async () => {
@@ -309,6 +360,27 @@ describe("the organization's logo", { timeout: 60_000 }, () => {
         bytesOf(pngSignature),
         png({ width: 0 }),
         scanFirst,
+        // JPEG segments no decoder takes before the frame: a second SOI,
+        // a stuffed byte, a reserved marker, a restart marker, a segment
+        // shorter than its own length, one running past the end.
+        jpeg({ before: [0xff, 0xd8] }),
+        jpeg({ before: [0xff, 0x00] }),
+        jpeg({ before: [0xff, 0x02, ...be16(4), 0, 0] }),
+        jpeg({ before: [0xff, 0xd0] }),
+        jpeg({ before: [0xff, 0xe0, ...be16(0)] }),
+        jpeg({ before: [0xff, 0xe1, ...be16(1), 0] }),
+        jpeg().slice(0, 12),
+        // A frame header too short to hold its sizes, one whose length
+        // isn't its components', and one running past the end.
+        jpeg({ frameLength: 2 }),
+        jpeg({ frameLength: 16 }),
+        jpeg().slice(0, 30),
+        // A WebP larger than its file, a chunk larger than its RIFF, a VP8
+        // that doesn't start with a key frame, and a VP8X of the wrong size.
+        webp("VP8 ", vp8Payload(64, 64), { riffSize: 34 }),
+        webp("VP8 ", vp8Payload(64, 64), { chunkSize: 22 }),
+        webp("VP8 ", vp8Payload(64, 64, false)),
+        webp("VP8X", [...run(4), ...le24(63), ...le24(63), 0, 0]),
       ].map(
         async (image) => await outcome(admin.api.organization.setLogo(image))
       )
@@ -336,6 +408,8 @@ describe("the organization's logo", { timeout: 60_000 }, () => {
     for (const image of [
       png({ width: most, height: most, size: organizationLogoMaxBytes }),
       jpeg({ width: most, height: most, sof: 0xc2 }),
+      // TEM, which stands alone, and a fill byte before the frame's marker.
+      jpeg({ before: [0xff, 0x01, 0xff] }),
       vp8(most, most),
       vp8l(most, most),
       vp8x(most, most),
@@ -354,12 +428,13 @@ describe("the organization's logo", { timeout: 60_000 }, () => {
       kept: kept.logo,
       taken,
     }).toStrictEqual({
-      invalid: Array.from({ length: 6 }, () => "organization.logo_invalid"),
+      invalid: Array.from({ length: 20 }, () => "organization.logo_invalid"),
       tooLarge: "organization.logo_too_large",
       tooWide: Array.from({ length: 7 }, () => "organization.logo_too_wide"),
       kept: null,
       taken: [
         "image/png",
+        "image/jpeg",
         "image/jpeg",
         "image/webp",
         "image/webp",

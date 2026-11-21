@@ -50,12 +50,13 @@ import { routeMember } from "./staff-audit.ts";
 //   changed.
 // - A logo kept after it is replaced or removed: the object goes from the
 //   bucket once the organization no longer names it, and an upload whose
-//   write failed goes too. Each delete first reads which logo is named,
-//   and keeps that one. Two admins changing the logo at the very same
-//   moment can still leave an object behind, unseen; and a change that
-//   lands between that read and the delete just after it can still take
-//   away the logo it names, and the initials stand in until it is set
-//   again.
+//   write failed goes too, unless the database can't be read either: then
+//   it stays, unseen, and the caller hears the write's own error. Each
+//   delete first reads which logo is named, and keeps that one. Two admins
+//   changing the logo at the very same moment can still leave an object
+//   behind, unseen; and a change that lands between that read and the
+//   delete just after it can still take away the logo it names: its route
+//   then answers 404 until the logo is set again.
 // Stored in the files bucket (EU, as every bucket of core's), under the
 // image's own SHA-256, so the address changes with the image and a
 // browser may keep each one for good.
@@ -113,10 +114,12 @@ const pngHeader = (bytes: Uint8Array): LogoHeader | undefined => {
 
 /**
  * A WebP's size (RFC 9649): "RIFF", its size, "WEBP", then its first
- * chunk. A simple lossy file's "VP8 " frame header holds 14-bit sizes
- * after its start code; a lossless one's "VP8L" header holds each size
- * less one in 14 bits after its signature byte; an extended one's "VP8X"
- * holds the canvas's sizes less one in 24 bits.
+ * chunk, its FourCC and size, all within the RIFF size, and that within
+ * the file. A simple lossy file's "VP8 " chunk starts with a key frame
+ * (RFC 6386 §9.1: its frame tag's lowest bit clear, then the start code)
+ * holding 14-bit sizes; a lossless one's "VP8L" holds each size less one
+ * in 14 bits after its signature byte; an extended one's "VP8X" holds the
+ * canvas's sizes less one in 24 bits.
  */
 const webpHeader = (bytes: Uint8Array): LogoHeader | undefined => {
   if (
@@ -129,14 +132,30 @@ const webpHeader = (bytes: Uint8Array): LogoHeader | undefined => {
     return undefined;
   }
   const view = viewOf(bytes);
-  if (holds(bytes, ascii("VP8 "), 12) && holds(bytes, [0x9d, 0x01, 0x2a], 23)) {
+  const riffEnd = 8 + view.getUint32(4, true);
+  const chunkEnd = 20 + view.getUint32(16, true);
+  if (riffEnd > bytes.length || chunkEnd > riffEnd) {
+    return undefined;
+  }
+  // Each header must lie within its chunk: VP8's sizes end at byte 30,
+  // VP8L's at 25, and VP8X's chunk is ten bytes long.
+  if (
+    holds(bytes, ascii("VP8 "), 12) &&
+    chunkEnd >= 30 &&
+    view.getUint8(20) % 2 === 0 &&
+    holds(bytes, [0x9d, 0x01, 0x2a], 23)
+  ) {
     return {
       type: "image/webp",
       width: low14(view.getUint16(26, true)),
       height: low14(view.getUint16(28, true)),
     };
   }
-  if (holds(bytes, ascii("VP8L"), 12) && holds(bytes, [0x2f], 20)) {
+  if (
+    holds(bytes, ascii("VP8L"), 12) &&
+    chunkEnd >= 25 &&
+    holds(bytes, [0x2f], 20)
+  ) {
     const sizes = view.getUint32(21, true);
     return {
       type: "image/webp",
@@ -144,7 +163,7 @@ const webpHeader = (bytes: Uint8Array): LogoHeader | undefined => {
       height: low14(Math.floor(sizes / 0x40_00)) + 1,
     };
   }
-  if (holds(bytes, ascii("VP8X"), 12)) {
+  if (holds(bytes, ascii("VP8X"), 12) && chunkEnd === 30) {
     return {
       type: "image/webp",
       width: u24le(view, 24) + 1,
@@ -154,9 +173,17 @@ const webpHeader = (bytes: Uint8Array): LogoHeader | undefined => {
   return undefined;
 };
 
-/** JPEG's markers that stand alone, with no length after them (T.81 B.1.1.3). */
-const isStandalone = (marker: number): boolean =>
-  marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7);
+/**
+ * JPEG's markers no segment before the first frame header may be (T.81
+ * B.1.1.3, Table B.1): `FF 00`, which only stuffs entropy-coded data;
+ * the reserved 0x02 to 0xBF; RST0 to RST7, which only sit in a scan; a
+ * second SOI; and EOI and SOS, which end the file or start a scan before
+ * any frame was declared. TEM (0x01) stands alone and is stepped over.
+ */
+const isRefusedBeforeFrame = (marker: number): boolean =>
+  marker === 0x00 ||
+  (marker >= 0x02 && marker <= 0xbf) ||
+  (marker >= 0xd0 && marker <= 0xda);
 
 /** JPEG's start-of-frame markers, SOF0 to SOF15 but DHT, JPG and DAC. */
 const isStartOfFrame = (marker: number): boolean =>
@@ -167,18 +194,43 @@ const isStartOfFrame = (marker: number): boolean =>
   marker !== 0xcc;
 
 /**
+ * A JPEG's frame header at `at` (T.81 B.2.2): its length, which is 8 and
+ * three bytes a component and fits in the file, the precision, then the
+ * height and width as two-byte big-endian numbers, then the count of
+ * components.
+ */
+const jpegFrame = (
+  bytes: Uint8Array,
+  view: DataView,
+  at: number
+): LogoHeader | undefined => {
+  if (at + 10 > bytes.length) {
+    return undefined;
+  }
+  const length = view.getUint16(at + 2);
+  const components = view.getUint8(at + 9);
+  return length === 8 + 3 * components && at + 2 + length <= bytes.length
+    ? {
+        type: "image/jpeg",
+        height: view.getUint16(at + 5),
+        width: view.getUint16(at + 7),
+      }
+    : undefined;
+};
+
+/**
  * A JPEG's size, from its frame header (ITU T.81 B.1.1, B.2.2): the
- * segments after SOI are walked by their lengths to the first SOF, which
- * holds a length, the precision, then the height and width as two-byte
- * big-endian numbers. None when the scan or the end comes first.
+ * segments after SOI are walked by their lengths, each at least 2 and
+ * within the file, to the first SOF. None when a marker that can't come
+ * before it, or the end, comes first.
  */
 const jpegHeader = (bytes: Uint8Array): LogoHeader | undefined => {
-  if (!holds(bytes, [0xff, 0xd8, 0xff])) {
+  if (!holds(bytes, [0xff, 0xd8])) {
     return undefined;
   }
   const view = viewOf(bytes);
   let at = 2;
-  while (at + 4 <= bytes.length) {
+  while (at + 2 <= bytes.length) {
     if (bytes[at] !== 0xff) {
       return undefined;
     }
@@ -186,20 +238,18 @@ const jpegHeader = (bytes: Uint8Array): LogoHeader | undefined => {
     if (marker === 0xff) {
       // A fill byte before the marker.
       at += 1;
-    } else if (isStandalone(marker)) {
+    } else if (marker === 0x01) {
       at += 2;
-    } else if (isStartOfFrame(marker)) {
-      return at + 9 <= bytes.length
-        ? {
-            type: "image/jpeg",
-            height: view.getUint16(at + 5),
-            width: view.getUint16(at + 7),
-          }
-        : undefined;
-    } else if (marker === 0xda || marker === 0xd9) {
+    } else if (isRefusedBeforeFrame(marker)) {
       return undefined;
+    } else if (isStartOfFrame(marker)) {
+      return jpegFrame(bytes, view, at);
     } else {
-      at += 2 + view.getUint16(at + 2);
+      const length = at + 4 <= bytes.length ? view.getUint16(at + 2) : 0;
+      if (length < 2 || at + 2 + length > bytes.length) {
+        return undefined;
+      }
+      at += 2 + length;
     }
   }
   return undefined;
@@ -219,15 +269,18 @@ const currentHash = async (env: Env): Promise<string | null> => {
 };
 
 /**
- * Lets go of the logo `hash`, unless the organization names it (again):
- * a failure only leaves it behind.
+ * Lets go of the logo `hash`, unless the organization names it (again).
+ * It never fails: should the database or the bucket fail, the object is
+ * only left behind.
  */
 const forget = async (env: Env, hash: string | null): Promise<void> => {
-  if (hash === null || (await currentHash(env)) === hash) {
+  if (hash === null) {
     return;
   }
   try {
-    await env.FILES.delete(keyOf(hash));
+    if ((await currentHash(env)) !== hash) {
+      await env.FILES.delete(keyOf(hash));
+    }
   } catch (error) {
     log.warn("organization.logo_forget_failed", {
       message: error instanceof Error ? error.message : String(error),
@@ -298,6 +351,8 @@ export const setOrganizationLogo = async (
       }),
     ]);
   } catch (error) {
+    // The upload goes, unless the database can't be read now either; the
+    // caller hears the write's own error.
     await forget(env, hash);
     throw error;
   }
