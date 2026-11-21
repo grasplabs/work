@@ -5,7 +5,6 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { dialogTitled } from "./dialogs.ts";
 import { dockedChat } from "./docked-chat.ts";
 import { approvalDrawn, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
@@ -169,7 +168,7 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   // The builder starts a run with Run, naming the approver.
   await page.reload();
   await page.getByRole("button", { name: "Run", exact: true }).click(pageRead);
-  const start = dialogTitled(page, "Start a run");
+  const start = page.getByRole("dialog", { name: "Start a run" });
   await start.getByLabel("invoice").fill("INV-42");
   // Picked from the organization's people, never typed as an ID. Everyone
   // the stack signs in is called Person, and a starter sees names, not

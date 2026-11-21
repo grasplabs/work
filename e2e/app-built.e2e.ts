@@ -2,7 +2,6 @@ import { expect } from "@playwright/test";
 import type { WebSocketRoute } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { dialogTitled } from "./dialogs.ts";
 import { dockedChat } from "./docked-chat.ts";
 import { appPlanned, appReady, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
@@ -169,13 +168,15 @@ test("a builder makes an App from what they want done, shares it with their team
     .getByRole("dialog")
     .getByRole("button", { name: "Manage" })
     .click();
-  const sharing = dialogTitled(page, `Share ${appPlanned}`);
+  const sharing = page.getByRole("dialog", { name: `Share ${appPlanned}` });
   await sharing.getByLabel("Add people, teams or projects").click();
   await page
     .getByRole("option", { name: "Person" })
     .filter({ hasText: userIdEnd })
     .click(built);
   blip.sharing = true;
+  // The picker stays open for more: Escape closes it, and the dialog stays.
+  await sharing.getByLabel("Add people, teams or projects").press("Escape");
   await sharing.getByRole("button", { name: "Add", exact: true }).click();
   // Its read again after sharing lost its connection: Grasp can't be
   // reached, until a connection answers again, when the page reads the
@@ -200,10 +201,16 @@ test("a builder makes an App from what they want done, shares it with their team
   ).toBeAttached(built);
   await expect(unreachable).toHaveCount(0);
   expect(uncaught).toStrictEqual([]);
-  // The share held: Share lists them, its one Person.
-  // Beside the docked chat, the bar folds Share into its More menu.
-  await page.getByRole("button", { name: "More", exact: true }).click(built);
-  await page.getByRole("menuitem", { name: "Share" }).click();
+  // The share held: Share lists them, its one Person. The bar may be folded
+  // by now, Publish an icon of the same name.
+  await page
+    .getByRole("button", { name: "Publish", exact: true })
+    .filter({ visible: true })
+    .click(built);
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Manage" })
+    .click();
   await expect(
     sharing
       .getByRole("list", { name: "Shared with" })

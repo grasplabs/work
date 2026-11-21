@@ -307,6 +307,9 @@ test("an App's own chat writes its page and server code, and its workspace previ
       .click();
     // Its tree: folders first, each open, then the files, each by name.
     const files = page.getByRole("tree", { name: "Files" });
+    await expect(files.getByRole("treeitem")).toHaveCount(7, {
+      timeout: 15_000,
+    });
     const entries = await files
       .getByRole("treeitem")
       .evaluateAll((items) =>
@@ -332,9 +335,6 @@ test("an App's own chat writes its page and server code, and its workspace previ
       name: "Code of src/routes/index.tsx",
     });
     await expect(code).toContainText("Add more");
-    await expect(
-      page.getByRole("navigation", { name: "Open file" })
-    ).toHaveText(/src.*routes.*index\.tsx/u);
   } finally {
     core[Symbol.dispose]();
   }

@@ -2,7 +2,6 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { dialogTitled } from "./dialogs.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
 // An App's data model, end to end, as a builder makes it in the App's
@@ -68,7 +67,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
 
   // A table, named as a person says it, saved as code names it.
   await page.getByRole("button", { name: "New table" }).click();
-  const dialog = dialogTitled(page, "New table");
+  const dialog = page.getByRole("dialog", { name: "New table" });
   await dialog.getByRole("textbox", { name: "Name" }).fill("Tasks");
   await dialog.getByRole("button", { name: "Create table" }).click();
   await expect(page.getByRole("table", { name: "tasks" })).toBeVisible(read);
@@ -76,19 +75,33 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   // Its fields, added in its Fields view, each from its kind: a required
   // text, then a choice whose options are put in order from the keyboard,
   // as the field itself is put before the first.
-  await page.getByRole("button", { name: "Fields", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const fieldsView = page.getByRole("button", { name: "Fields", exact: true });
+  await fieldsView.click();
+  await expect(fieldsView).toHaveAttribute("aria-pressed", "true");
   const kinds = page.getByRole("list", { name: "Kinds of field" });
+  // A kind is picked by its row: the row takes the press.
+  const kindOf = (kind: string) =>
+    kinds
+      .getByRole("listitem")
+      .filter({ has: page.getByRole("button", { name: kind, exact: true }) });
   const fields = page.getByRole("list", { name: "Fields" });
-  await kinds.getByRole("button", { name: /^Text/u }).click();
-  await page.getByLabel("Field name").fill("title");
+  await kindOf("Text").click();
+  await page
+    .getByRole("form", { name: "New field" })
+    .getByRole("textbox", { name: "Name" })
+    .fill("title");
   await page.getByRole("switch", { name: "Required" }).click();
   await page.getByRole("button", { name: "Add field" }).last().click();
   await expect(fields.getByRole("button", { name: /^title/u })).toBeVisible(
     read
   );
   await page.getByRole("button", { name: "Add field" }).first().click();
-  await kinds.getByRole("button", { name: /^Choice/u }).click();
-  await page.getByLabel("Field name").fill("status");
+  await kindOf("Choice").click();
+  await page
+    .getByRole("form", { name: "New field" })
+    .getByRole("textbox", { name: "Name" })
+    .fill("status");
   await page.getByLabel("New option").fill("Open");
   await page.getByLabel("New option").press("Enter");
   await page.getByLabel("New option").fill("Done");
