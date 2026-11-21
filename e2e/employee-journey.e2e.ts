@@ -68,7 +68,7 @@ test("an employee has their interview by typing on a phone, agrees to it, and de
 
   // The interview, typed.
   await expect(page.getByText(first)).toBeVisible();
-  const answer = page.getByLabel("Your answer");
+  const answer = page.getByRole("textbox", { name: "Your answer" });
   await answer.fill(said);
   await answer.press("Enter");
 
