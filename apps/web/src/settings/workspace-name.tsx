@@ -1,3 +1,4 @@
+import { failureText } from "@grasp-os/shared/errors";
 import {
   organizationLogoMaxBytes,
   organizationLogoTypes,
@@ -159,9 +160,17 @@ export const useOrganizationLogo = (logo: string | null) => {
   };
   const upload = async (file: File): Promise<string | undefined> => {
     const image = new Uint8Array(await file.arrayBuffer());
-    const organization = await core.withSession(
-      async (session) => await session.organization.setLogo(image)
-    );
+    let organization: Organization;
+    try {
+      organization = await core.withSession(
+        async (session) => await session.organization.setLogo(image)
+      );
+    } catch (error) {
+      // Core's own words for why (an image it can't read, too large or too
+      // wide): the well alone says only that it wasn't saved.
+      toast.error(failureText(error));
+      throw error;
+    }
     kept(organization);
     return organization.logo ?? undefined;
   };

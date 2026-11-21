@@ -452,7 +452,12 @@ const useSearching = (archived: boolean) => {
       ];
     }
     const byId = new Map(chats.map((chat) => [chat.id, chat]));
+    // Core finds archived chats too (`hit.chat.archived`); they are searched
+    // in the archived view, by title, so this list keeps to the others.
     return search.hits.flatMap((hit) => {
+      if (hit.chat.archived) {
+        return [];
+      }
       const chat = byId.get(hit.chat.id);
       return chat === undefined ? [] : [rowOf(chat, hit)];
     });
