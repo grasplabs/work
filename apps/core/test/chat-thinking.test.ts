@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { resolverOf, showThinking } from "../src/agent-thinking.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { personalChatsOf, says, transcript } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { aloneInTheStore, answering, onLink } from "./interview-link.ts";
 import type { Answer } from "./model-provider.ts";
@@ -78,15 +77,8 @@ const teamInTheBrain = async (): Promise<Ids> => {
  * answered by `replies`; with what the brain shows them of the team.
  */
 const askedWithBrain = async (ids: Ids, ...replies: Answer[]) => {
-  const admin = await signedInApi(idp, "admin");
   const member = await signedInApi(idp, "user");
   const chats = await personalChatsOf(member.userId, ...replies);
-  await requestGranted(idp, admin, {
-    subject: chats.agent,
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
   const brain = await member.api.brain.read();
   const teamId = ids.team;
   const said = brain.statements.find(({ teamIds }) => teamIds.includes(teamId));

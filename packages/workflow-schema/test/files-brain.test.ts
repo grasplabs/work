@@ -245,6 +245,36 @@ describe("calls on the run's files and the Brain", () => {
     });
   });
 
+  it("reads the Brain by its own alias with nothing declared under it, and refuses it once anything is, an App's permission too", () => {
+    const byDefault = { ...recalled, brain: "brain" };
+    const withApp = withFiles(byDefault);
+    expect(
+      codesOf({
+        declaringNothing: withFiles(byDefault),
+        appUnderIt: {
+          ...withApp,
+          permissions: {
+            ...withApp.permissions,
+            apps: {
+              brain: { app: "app-notes", functions: { fn_1: "notes.list" } },
+            },
+          },
+        },
+        filesUnderIt: {
+          ...withApp,
+          permissions: {
+            ...withApp.permissions,
+            files: { brain: { contract: "files" } },
+          },
+        },
+      })
+    ).toStrictEqual({
+      declaringNothing: "ok",
+      appUnderIt: { "/steps/5/brain": "workflow.permission_kind" },
+      filesUnderIt: { "/steps/5/brain": "workflow.permission_kind" },
+    });
+  });
+
   it("refuses a sensitive parameter anywhere but a connection call's arguments", () => {
     expect(
       codesOf({

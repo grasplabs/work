@@ -351,21 +351,6 @@ const typeRules: readonly {
   { action: "app.webhook.approved", type: "decision" },
   { action: "app.webhook.undeliverable", type: "action" },
   { action: "webhook.call", type: "action" },
-  // Visitors of a published App (core's src/app-visitors.ts): who may
-  // visit, a visitor signing in and out, and each refusal, are who gets
-  // in; a code mailed is something done for them.
-  { action: "app.visitor_listed", type: "permission" },
-  { action: "app.visitor_unlisted", type: "permission" },
-  { action: "app.visitor_signed_in", type: "permission" },
-  { action: "app.visitor_signed_out", type: "permission" },
-  { action: "app.visitor_refused", type: "permission" },
-  { action: "app.visitor_code_sent", type: "action" },
-  // The functions a version grants visitors (core's
-  // src/app-visitor-grants.ts) are who may do what; a visitor's call of
-  // one runs it.
-  { action: "app.visitor_granted", type: "permission" },
-  { action: "app.visitor_ungranted", type: "permission" },
-  { action: "app.visitor_called", type: "action" },
   { action: "app", type: "config" },
   // A person linking a chat platform account to themselves, so the agent
   // knows them there, or unlinking it: who they are on that door.
@@ -453,13 +438,6 @@ const typeRules: readonly {
   { action: "store.cascade_batch", type: "action" },
   { action: "store.cascade_finished", type: "action" },
   { action: "store.cascade_failed", type: "action" },
-  // Guest chats (core's src/guests.ts): an App inviting someone, revoking
-  // the link, and reading back what they wrote; the guest opening the
-  // chat, sending a message and finishing it.
-  { action: "guest.read", type: "read" },
-  { action: "guest.invited", type: "permission" },
-  { action: "guest.revoked", type: "permission" },
-  { action: "guest", type: "action" },
   // The log's own events, each named, so an `audit` action added later has
   // no type until it gets a rule: retention moving events out and purging
   // them, gaps (outbox rows the log can't take, moved aside), then reading
@@ -504,8 +482,6 @@ const actorTypes = [
   "app",
   "workflow",
   "staff",
-  "guest",
-  "visitor",
   "system",
 ] as const satisfies readonly AuditActor["type"][];
 

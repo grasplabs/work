@@ -112,7 +112,10 @@ export interface OAuthProviderConfig {
    * `allowed`, or less than `required`, are refused
    * (`connection.scopes_refused`). For a connection that must hold no
    * more than it asks for, as the directory's and the documents'; none
-   * for the rest.
+   * for the rest. A renewal (`renewedAsGranted`) must hold all its
+   * connection held before, and nothing beyond `allowed`: a scope added
+   * to `required` later is asked of connecting only, so a connection made
+   * before it goes on with what it was granted.
    */
   granted?: {
     allowed: ReadonlySet<string>;
@@ -406,6 +409,12 @@ const microsoftDirectoryScopes = [
   // Everyone's department, job title and manager: `User.ReadBasic.All`
   // holds names and addresses only.
   "User.Read.All",
+  // The groups an admin maps to teams, and their members, nested groups'
+  // included (GRA-2056, directory-groups.ts): asked of every company when
+  // it connects, so mapping a group never needs a second consent.
+  // `GroupMember.ReadBasic.All` reads members only, not the groups
+  // themselves, which a search and a group's properties need.
+  "Group.ReadBasic.All",
 ] as const;
 
 /**
@@ -429,7 +438,7 @@ const microsoftDirectory: OAuthProviderConfig = {
     allowed: new Set(
       microsoftDirectoryScopes.map((scope) => scope.toLowerCase())
     ),
-    required: ["User.Read.All"],
+    required: ["User.Read.All", "Group.ReadBasic.All"],
   },
   sharedOnly: true,
   client: (env) =>
@@ -781,13 +790,52 @@ export const grantedAsAsked = (
   );
 };
 
-/** The OpenID scopes, which a provider's answer may name or leave out. */
+/**
+ * The OpenID scopes, which a provider's answer may name or leave out:
+ * Google's answer names email and profile by their full URIs.
+ */
 const signInScopes: ReadonlySet<string> = new Set([
   "openid",
   "profile",
   "email",
   "offline_access",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
 ]);
+
+/**
+ * Whether a renewal's `tokens` hold what their connection was granted,
+ * where it must hold no more (`granted`): nothing beyond what is allowed,
+ * and nothing less than the connection's earlier grant (`before`, its
+ * token answer's scope, as kept), the OpenID scopes aside, which an
+ * answer may leave out. A grant that predates a scope asked for since is
+ * no change; one that lost a scope it had, or gained one unasked, is. An
+ * answer that lists none is refused.
+ */
+export const renewedAsGranted = (
+  { granted }: OAuthProviderConfig,
+  { scope }: TokenSet,
+  before: string | null
+): boolean => {
+  if (granted === undefined) {
+    return true;
+  }
+  // Connect keeps no connection with a restricted grant whose answer said
+  // nothing of it (`grantedAsAsked`): an unknown either way is refused.
+  if (scope === undefined || before === null) {
+    return false;
+  }
+  const scopes = scopesOf(scope);
+  const held = [...scopesOf(before)];
+  return (
+    [...scopes].every((each) => granted.allowed.has(each)) &&
+    held.every((each) => signInScopes.has(each) || scopes.has(each))
+  );
+};
+
+/** Whether a grant of `scope` (a token answer's, as kept) holds `wanted`. */
+export const grantHolds = (scope: string, wanted: string): boolean =>
+  scopesOf(scope).has(wanted.toLowerCase());
 
 /**
  * The scopes `provider` asks for now that a grant of `scope` (a token

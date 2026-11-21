@@ -526,7 +526,8 @@ export const syncPlaceChoices = async (
  * Sets the places a shared connection's sync reads to `places`, as one of
  * the company's admins picked them, from the picks their page started
  * from (`from`): the whole set, replacing the one before, with one audit
- * event (how many places, how many came and went) in the same batch, and
+ * event (how many places, how many came and went, and the Brain audience
+ * core says reads them, `audience`) in the same batch, and
  * only while the picks held are still `from`; else refused
  * (`sync.picks_changed`), with nothing changed. The same set again
  * changes and records nothing. A place no longer picked is refused from
@@ -541,11 +542,8 @@ export const pickSyncPlaces = async (
   env: Env,
   request: unknown
 ): Promise<{ places: string[]; version: number }> => {
-  const { person, connectionId, feed, from, places } = syncErrors.parse(
-    "sync.invalid",
-    pickSyncPlacesSchema,
-    request
-  );
+  const { person, connectionId, feed, from, places, audience } =
+    syncErrors.parse("sync.invalid", pickSyncPlacesSchema, request);
   await refuseUnlessAdmin(env, person, connectionId, feed);
   await pickableOrRefused(env, person, connectionId, feed);
   const db = drizzle(env.DB);
@@ -595,6 +593,11 @@ export const pickSyncPlaces = async (
       places: places.length,
       added: 0,
       removed: 0,
+      // Who reads everything in the places picked, whatever the source's
+      // permissions, as core held it at the save: what a save that picks
+      // a place was confirmed for (core's sync-picks.ts, GRA-2207).
+      who: audience.kind,
+      ...(audience.kind === "team" ? { team: audience.teamId } : {}),
     }),
     "connect"
   );

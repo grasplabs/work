@@ -31,6 +31,7 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
+import { signInCodeOf } from "./auth/guest-codes.ts";
 import { eraseGapAnswerer } from "./brain-gaps.ts";
 import {
   erasePerson as eraseFromBrain,
@@ -42,8 +43,6 @@ import { endHandOversOf } from "./brain-sources.ts";
 import { personalWorkspaceId } from "./chats-rpc.ts";
 import {
   accounts,
-  appVisitorCodes,
-  appVisitorSessions,
   appWebhookDeliveries,
   brainUploads,
   erasedSubjects,
@@ -56,7 +55,6 @@ import {
   notifications,
   chatAudiences,
   businessStores,
-  knowledgeSignals,
   personErasureAreas,
   personErasures,
   sessions,
@@ -76,6 +74,7 @@ import {
   brainSyncSources,
   runChatSources,
   runStateWriters,
+  verifications,
   workflowState,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -85,12 +84,12 @@ import {
   emailHashOf,
   emailKeyVersion,
   erasedAddress,
+  normalizedEmail,
   subjectHashOf,
   subjectKeyVersion,
   subjectsOf,
 } from "./erased-people.ts";
 import { dropHeldStarts } from "./held-starts.ts";
-import { eraseUploadsOf, uploadsOf } from "./knowledge-uploads.ts";
 import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
@@ -191,10 +190,8 @@ const erasedEmail = (userId: string): string =>
 /**
  * Their identity: their email (the address `users` keeps becomes one that
  * reaches nobody, and names nobody), whether it was verified, their
- * picture, every sign-in account and every session, and the codes and
- * sessions an App's visitor had under the address that was theirs (an App
- * may list a member's address, or their domain, app-visitors.ts). Their
- * name and ID stay.
+ * picture, every sign-in account and every session, and a guest's
+ * sign-in code. Their name and ID stay.
  * What each account named them by stays as a keyed hash, written in the
  * batch that deletes the accounts, so there is never a moment when neither
  * keeps them out. Only the accounts whose subjects were hashed go: one
@@ -273,16 +270,12 @@ const identity: ErasureStep = {
     const hashes = await Promise.all(
       [...subjects].map(async (subject) => await subjectHashOf(env, subject))
     );
-    // Their address as `users` has it still: the visitor rows go before it
-    // does, in the same batch, so a retry after it finds none left.
+    // Their address as `users` has it still: their sign-in code's row goes
+    // before it does, in the same batch, so a retry after it finds none left.
     const theirAddress = sql`(SELECT lower(${users.email}) FROM ${users} WHERE ${users.id} = ${userId})`;
     await db.batch([
-      db
-        .delete(appVisitorCodes)
-        .where(eq(appVisitorCodes.address, theirAddress)),
-      db
-        .delete(appVisitorSessions)
-        .where(eq(appVisitorSessions.address, theirAddress)),
+      // A guest's sign-in code, keyed by their address (auth/guest-codes.ts).
+      db.delete(verifications).where(signInCodeOf(theirAddress)),
       db
         .update(users)
         .set({
@@ -328,10 +321,9 @@ const identity: ErasureStep = {
 /**
  * What core holds of them for the Brain beside their own store (the
  * `brain_sources` area): their skill shares, who answered a gap if it was
- * them (the answers stay, as the company's, said by no one), and every
- * file they once uploaded into Knowledge, with its original
- * (knowledge-uploads.ts). Knowledge itself is gone (GRA-1941): what its
- * databases held of them goes with them, deleted in the account.
+ * them (the answers stay, as the company's, said by no one). Knowledge
+ * itself is gone (GRA-1941): what its databases held of them went with
+ * them, deleted in the account.
  * Complete only once each returned: a failure leaves the area pending,
  * and the clock runs it again.
  */
@@ -368,7 +360,6 @@ const brain: ErasureStep = {
       { type: "person", userId: erasure.requestedBy },
       userId
     );
-    await eraseUploadsOf(env, userId);
     await completed(db, userId, "brain");
   },
 };
@@ -482,13 +473,15 @@ const runs: ErasureStep = {
  * its person's own request (`deleteOnRequest`): what they said and agreed
  * to, every drawing it was in, the Brain's records resting on it, and
  * everything the voice said in it; and everything the voice said for them
- * as an admin, on their onboarding. Found by the account their interview
- * belongs to (GRA-1790), whatever the list says now; and on the list by
- * the address that was theirs, through its keyed hash, so whichever area
- * ran first; once an admin released the address, or under an older key, it
- * is found by address no more.
- * Their entry on the list is the company's (Nick's D5): it stays, removed
- * only by an admin.
+ * as an admin, on their onboarding. And their address, everywhere the
+ * onboarding keeps one (GRA-2111): erasure is final. Their entries on the
+ * list are found by the account their interview belongs to (GRA-1790),
+ * whatever the list says now, and by the address that was theirs, through
+ * its keyed hash; each stays, the company's (Nick's D5), without the
+ * address, its link closed for good (`eraseEntries`). Those addresses of
+ * theirs stay out of the list until an admin releases them, which waits
+ * for this area (`releaseAddress`, GRA-2189). Once an admin released the
+ * address, or under an older key, it is found by address no more.
  */
 const interview: ErasureStep = {
   area: "interview",
@@ -498,26 +491,19 @@ const interview: ErasureStep = {
       .select({
         emailHash: personErasures.emailHash,
         keyVersion: personErasures.emailKeyVersion,
-        requestedAt: personErasures.requestedAt,
       })
       .from(personErasures)
       .where(eq(personErasures.userId, userId));
     if (erasure === undefined) {
       return;
     }
+    const store = onboardingStore(env);
     // What the voice said for them as an admin, on their onboarding, goes
     // from its cache, whoever they were on the list (GRA-1897).
-    await onboardingStore(env).forgetSpokenForAdmin(userId);
-    // The interview that belongs to their account now (GRA-1790),
-    // whatever address the list has for them: found by the account it
-    // opened under, and deleted, its link closed, only while that account
-    // holds it (`eraseInterviewOf`).
-    const store = onboardingStore(env);
-    const sentBy = erasure.requestedAt.toISOString();
-    const owned = await store.personOfAccount(userId);
-    if (owned !== null) {
-      await store.eraseInterviewOf(owned, userId, sentBy);
-    }
+    await store.forgetSpokenForAdmin(userId);
+    const hash =
+      erasure.keyVersion === emailKeyVersion ? erasure.emailHash : null;
+    const found = await store.eraseEntries(userId, hash);
     // Whatever the Brain holds under their account, from any link, also
     // one it no longer holds (a new start gave it to someone else), goes
     // before this area is done: keyed by the account alone, so the link's
@@ -525,29 +511,15 @@ const interview: ErasureStep = {
     // is tried again.
     await eraseOnboardingAccount(env, userId);
     // Their address released, or hashed under an older key: they can't be
-    // found on the list by it, and whatever interview they have is left.
+    // found on the list by it, and whatever entry has it is left.
     // Recorded as skipped, never as done.
-    if (erasure.emailHash === null || erasure.keyVersion !== emailKeyVersion) {
+    if (hash === null) {
       await marked(db, userId, "interview", "skipped");
       return;
     }
-    let found = 0;
-    for (const { id, email } of await store.rosterEmails()) {
-      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
-      if ((await emailHashOf(env, email)) === erasure.emailHash) {
-        // Only an interview from a link sent before the erasure was asked
-        // for (the address may have been released, and a link sent to the
-        // entry since, as this ran), and held by them or by nobody: never
-        // the interview of whoever holds that link now (`eraseInterviewOf`).
-        // A link nobody holds has nothing in the Brain; theirs went above.
-        // oxlint-disable-next-line no-await-in-loop -- one entry at a time
-        await store.eraseInterviewOf(id, userId, sentBy);
-        found += 1;
-      }
-    }
     if (found === 0) {
-      // Not on the list by the address they signed in with: an interview
-      // under another address is left. IDs only.
+      // Not on the list by their account or the address they signed in
+      // with. IDs only.
       log.warn("member.erasure_interview_unmatched", { userId });
     }
     await completed(db, userId, "interview");
@@ -566,7 +538,6 @@ const interview: ErasureStep = {
  * of it went.
  * Removing them took out their chat accounts, notifications and teams
  * already; this takes them out again, in case any came back since.
- * Guest chats they opened for an App are the company's, naming them.
  */
 const channels: ErasureStep = {
   area: "channels",
@@ -720,11 +691,7 @@ const workspaceArea: ErasureStep = {
  * what App preferences kept of them in every App's store
  * (`sdk_preferences`, which nothing writes since they were removed, until
  * GRA-1550 drops it), what the forms they sent held in each
- * store's outbox for its webhooks, and the usage signals computed for them as
- * the owner of
- * Knowledge collections (what others asked there, counted, and what they
- * haven't read or reviewed), which the daily computation no longer makes
- * for anyone erased (knowledge/signals.ts), and the deliveries of the
+ * store's outbox for its webhooks, and the deliveries of the
  * forms they sent to the Apps' webhooks (app-webhooks.ts): one still
  * waiting carries what they sent out of the company, so it goes unsent,
  * and one settled names them by ID only, so it goes too. None is queued
@@ -762,7 +729,6 @@ const apps: ErasureStep = {
       await appPreview(env, appIdSchema.parse(id)).forgetPerson(userId);
     }
     await db.batch([
-      db.delete(knowledgeSignals).where(eq(knowledgeSignals.owner, userId)),
       db
         .delete(appWebhookDeliveries)
         .where(eq(appWebhookDeliveries.personId, userId)),
@@ -902,7 +868,7 @@ const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
 /**
  * Where the erasure of `userId` from the Brain stands, as core records it,
  * across its Brain areas: `brain` (what core holds of them for the
- * Brain: skill shares, gap answers, old uploads), `brain_sources` (the new
+ * Brain: skill shares, gap answers), `brain_sources` (the new
  * Brain: pending until its call returned, which is only once their own
  * store was erased whole, files included) and `brain_shared` (what the new
  * Brain derived about them where others may read it). In the areas' own
@@ -1101,6 +1067,44 @@ const addressKeptOut = async (env: Env, userId: string): Promise<boolean> => {
 };
 
 /**
+ * Whether `typed` confirms erasing `person` (`userId`): their name exactly
+ * as it stands. A guest has no name (guest-members.ts), so their address
+ * confirms them, never kept: as `users` has it until their erasure is
+ * recorded, then by the keyed hash the erasure keeps of it
+ * (`emailHashOf`), since the erasure rewrites `users.email`, so asking
+ * again still answers where it stands. Once the address is released (no
+ * hash kept), nothing confirms a guest again; the clock still finishes
+ * their erasure.
+ */
+const confirms = async (
+  env: Env,
+  userId: string,
+  person: { name: string; email: string },
+  typed: unknown
+): Promise<boolean> => {
+  if (typeof typed !== "string") {
+    return false;
+  }
+  if (person.name !== "") {
+    return typed === person.name;
+  }
+  const [recorded] = await drizzle(env.DB)
+    .select({ hash: personErasures.emailHash })
+    .from(personErasures)
+    .where(eq(personErasures.userId, userId));
+  if (recorded === undefined) {
+    return typed === person.email;
+  }
+  return (
+    recorded.hash !== null &&
+    typed !== "" &&
+    // Exactly as it was shown: the hash would take any case or spacing.
+    typed === normalizedEmail(typed) &&
+    (await emailHashOf(env, typed)) === recorded.hash
+  );
+};
+
+/**
  * What erasing `userId` would do, or where their erasure stands, for one of
  * the client's admins.
  */
@@ -1129,7 +1133,8 @@ export const erasurePreview = async (
 
 /**
  * Erases the removed person `userId`, as one of the client's admins asked,
- * confirming them by `name` exactly as it stands now: records the erasure
+ * confirming them by `name` exactly as it stands now (a guest, who has no
+ * name, by their address): records the erasure
  * and each of its areas pending, once, while the admin still is one and the
  * person is still removed, then runs it (`runErasure`). Asking again only
  * runs what is still pending, and answers where it stands.
@@ -1149,7 +1154,7 @@ export const erasePerson = async (
   if (!(await isRemoved(env, target))) {
     throw memberErrors.create("member.erase_not_removed");
   }
-  if (typeof name !== "string" || name !== person.name) {
+  if (!(await confirms(env, target, person, name))) {
     throw memberErrors.create("member.erase_name_mismatch");
   }
   const db = drizzle(env.DB);
@@ -1164,14 +1169,8 @@ export const erasePerson = async (
     actor: actorOf(by),
     action: "member.erasure.requested",
     target: { type: "member", id: target },
-    // How many files they once uploaded into Knowledge it forgets (the
-    // `brain` area, knowledge-uploads.ts), counted here, in its one event:
-    // nothing uploads into Knowledge any more, so these are the ones it
-    // erases, and `member.erased` is often written in a later run, once
-    // they are gone.
     detail: {
       userId: target,
-      knowledgeUploads: await uploadsOf(env, target),
     },
   };
   await auditedBatch(env, db, [
@@ -1208,11 +1207,77 @@ export const erasePerson = async (
 };
 
 /**
+ * That `userId`'s erasure has its `interview` area pending, not yet run
+ * or failed and waiting for the clock, as SQL: no release of an address
+ * of theirs while it is, as that area takes their addresses off the list.
+ */
+const erasingFromTheList = (userId: string) =>
+  and(
+    eq(personErasureAreas.userId, userId),
+    eq(personErasureAreas.area, "interview"),
+    eq(personErasureAreas.state, "pending")
+  );
+
+/**
+ * Lets in on the staff list an address core keeps no erasure under: one
+ * only the onboarding keeps out (another address of an erased person's,
+ * GRA-2165), or one whose release's store call failed after core's own.
+ * Not while the erasure it is kept out for has its step for the list
+ * pending, as `releaseAddress` holds for the address core keeps (that
+ * step can't be pending again once done). Only while `by` still is an
+ * admin, read now, after every wait: the store can't read core's database
+ * in its transaction, so one call remains between this read and the
+ * store's transaction, as one remains between the statement that releases
+ * in `releaseAddress` and its own call to the store. Kept out for nobody
+ * when asked, there is nothing to release and the store isn't asked
+ * again: an erasure that keeps it out after that answer is one this
+ * release doesn't cover, and its block stands. The store releases it only
+ * while it is still kept out for the person checked. Recorded by the
+ * store when it held the address. Whether it did.
+ */
+const releaseOnTheList = async (
+  env: Env,
+  by: Identity,
+  hash: string
+): Promise<boolean> => {
+  const store = onboardingStore(env);
+  const keptFor = await store.keptOutFor(hash);
+  if (keptFor === null) {
+    return false;
+  }
+  const db = drizzle(env.DB);
+  const [[admin], [erasing]] = await db.batch([
+    db
+      .select({ userId: users.id })
+      .from(users)
+      .where(and(eq(users.id, by.userId), activeMember(by.userId, ["admin"]))),
+    db
+      .select({ userId: personErasureAreas.userId })
+      .from(personErasureAreas)
+      .where(erasingFromTheList(keptFor)),
+  ]);
+  if (admin === undefined) {
+    throw roleErrors.create("role.forbidden");
+  }
+  if (erasing !== undefined) {
+    throw memberErrors.create("member.release_erasing");
+  }
+  return await store.releaseAddress(hash, keptFor, actorOf(by));
+};
+
+/**
  * Lets the address `email` in again, as one of the client's admins asked:
  * the company gave the address that was an erased person's to someone
  * else. Only the hash goes, while the admin still is one, recorded with
- * the erased person's ID only, never the address. Answers whether an
- * erased person's address it was.
+ * the erased person's ID only, never the address; then the onboarding's
+ * copy, kept released (GRA-2189), so the staff list takes the address
+ * again and an attempt of their erasure still under way writes nothing by
+ * it. Never while their erasure's `interview` area is pending, not yet run
+ * or failed and waiting for the clock, checked by the statement that
+ * releases: that area takes their addresses off the list, so a release is
+ * never what leaves one there. A release whose store call failed is
+ * finished by asking again. Answers whether an erased person's address it
+ * was.
  */
 export const releaseAddress = async (
   env: Env,
@@ -1230,8 +1295,14 @@ export const releaseAddress = async (
     .from(personErasures)
     .where(erasedAddress(hash));
   if (erased === undefined) {
-    return { released: false };
+    return { released: await releaseOnTheList(env, by, hash) };
   }
+  const stepDone = sql`NOT EXISTS (
+    SELECT 1 FROM ${personErasureAreas}
+    WHERE ${personErasureAreas.userId} = ${erased.userId}
+      AND ${personErasureAreas.area} = 'interview'
+      AND ${personErasureAreas.state} = 'pending'
+  )`;
   const [released] = await auditedBatch(env, db, [
     db
       .update(personErasures)
@@ -1240,7 +1311,8 @@ export const releaseAddress = async (
         and(
           eq(personErasures.userId, erased.userId),
           erasedAddress(hash),
-          activeMember(by.userId, ["admin"])
+          activeMember(by.userId, ["admin"]),
+          stepDone
         )
       )
       .returning({ userId: personErasures.userId }),
@@ -1252,8 +1324,15 @@ export const releaseAddress = async (
     }),
   ]);
   if (released.length === 0) {
-    throw roleErrors.create("role.forbidden");
+    const [pending] = await db
+      .select({ userId: personErasureAreas.userId })
+      .from(personErasureAreas)
+      .where(erasingFromTheList(erased.userId));
+    throw pending === undefined
+      ? roleErrors.create("role.forbidden")
+      : memberErrors.create("member.release_erasing");
   }
+  await onboardingStore(env).releaseAddress(hash, erased.userId, null);
   return { released: true };
 };
 

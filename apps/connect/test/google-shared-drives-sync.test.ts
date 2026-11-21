@@ -337,6 +337,7 @@ const pick = async (
     feed,
     from: await heldPicks(connectionId, feed),
     places,
+    audience: { kind: "everyone" },
   });
 
 const read = async (

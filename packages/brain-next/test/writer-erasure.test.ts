@@ -897,6 +897,31 @@ describe("a writer's erasure", () => {
       // the retiring change, no removals (removal.ts, a later migration),
       // every migration after the release before's not yet run, and a row
       // that points at the erasure.
+      /** What the release before's store holds none of: made by a later migration. */
+      const laterThanBefore = [
+        "memories_writer_idx",
+        "erasures_writer_idx",
+        "memory_erase_failures",
+        "removed_sources",
+        // Made by a migration after the release before's, as those are.
+        "unembeddable_hash_idx",
+        "work_items_key_idx",
+        "memory_outs",
+        "memory_ins",
+        "current_versions_unjudged_idx",
+        "chunk_days_chunk_idx",
+        "chunk_days_day_chunk_idx",
+        "chunk_blocks",
+        "person_erasure_subjects",
+        "restore_cards",
+        "memories_speaker_idx",
+        "memory_confirmations_person_idx",
+        "extractors_calls_unique",
+        "proposal_sources",
+        "ON `events`",
+        "ON `closed_event_tags`",
+        "memory_replacements",
+      ];
       const before: Copy = {
         // The table of memories that failed to delete is the release's own,
         // and so are the quotes' (migration 0022, quotes.ts), the days
@@ -906,8 +931,9 @@ describe("a writer's erasure", () => {
         // drew memories (migration 0028, extractors.ts), a person's
         // skill proposals and what they name (migration 0029, skill-proposals.ts)
         // and the events of people's steps, the tags an erasure closed and
-        // the key they are made under (migration 0030, events.ts), and the
-        // events a person's erasure took (migration 0031, erasure.ts).
+        // the key they are made under (migration 0030, events.ts), the
+        // events a person's erasure took (migration 0031, erasure.ts), and
+        // which memory replaces which (migration 0033, remember.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
@@ -932,6 +958,7 @@ describe("a writer's erasure", () => {
                 "closed_event_tags",
                 "event_key",
                 "person_erasure_events",
+                "memory_replacements",
               ].includes(name)
           )
           .map((table) => {
@@ -1026,28 +1053,7 @@ describe("a writer's erasure", () => {
             }
           }),
         others: now.others.filter(
-          (made) =>
-            !made.includes("memories_writer_idx") &&
-            !made.includes("erasures_writer_idx") &&
-            !made.includes("memory_erase_failures") &&
-            !made.includes("removed_sources") &&
-            // Made by a migration after the release before's, as those are.
-            !made.includes("unembeddable_hash_idx") &&
-            !made.includes("work_items_key_idx") &&
-            !made.includes("memory_outs") &&
-            !made.includes("memory_ins") &&
-            !made.includes("current_versions_unjudged_idx") &&
-            !made.includes("chunk_days_chunk_idx") &&
-            !made.includes("chunk_days_day_chunk_idx") &&
-            !made.includes("chunk_blocks") &&
-            !made.includes("person_erasure_subjects") &&
-            !made.includes("restore_cards") &&
-            !made.includes("memories_speaker_idx") &&
-            !made.includes("memory_confirmations_person_idx") &&
-            !made.includes("extractors_calls_unique") &&
-            !made.includes("proposal_sources") &&
-            !made.includes("ON `events`") &&
-            !made.includes("ON `closed_event_tags`")
+          (made) => !laterThanBefore.some((part) => made.includes(part))
         ),
       };
       expect(

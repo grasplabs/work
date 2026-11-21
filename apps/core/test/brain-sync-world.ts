@@ -171,8 +171,16 @@ export const connectSampleFeed = async (
   return { connectionId: connection.id, post, world, fetchedOf };
 };
 
-/** A file of a shared site, its readers unread (as a shared drive's are), as a sync item. */
-const siteFileOf = (id: string, text: string, version: string) => ({
+/**
+ * A file of a shared site, as a sync item, with who may open it at the
+ * source (`readers`; null: unread, as a shared drive's are).
+ */
+const siteFileOf = (
+  id: string,
+  text: string,
+  version: string,
+  readers: readonly unknown[] | null
+) => ({
   gone: false,
   id,
   kind: "file",
@@ -180,20 +188,22 @@ const siteFileOf = (id: string, text: string, version: string) => ({
   changedAt: "2026-11-18T09:00:00.000Z",
   title: id,
   content: { type: "text", text },
-  readers: null,
+  readers,
   changedBy: null,
   partOf: null,
 });
 
 /**
  * Has the account `subject` hold the sites `sites` to pick, each one file
- * with its marker, in its `version`, as the sample sync connector's sync
- * of picked places (`sites`) reads them (test/sample-sync-fake.ts).
+ * with its marker, in its `version`, which `readers` may open at the
+ * source (unread unless named), as the sample sync connector's sync of
+ * picked places (`sites`) reads them (test/sample-sync-fake.ts).
  */
 export const sitesHeld = async (
   subject: string,
   sites: Record<string, string>,
-  version = "1"
+  version = "1",
+  readers: readonly unknown[] | null = null
 ): Promise<void> => {
   const providers = testBinding("CONNECT_PROVIDERS");
   if (!isFetcher(providers)) {
@@ -209,7 +219,9 @@ export const sitesHeld = async (
           site,
           {
             "": {
-              changes: [siteFileOf(`${site}-plan`, `Plan ${marker}`, version)],
+              changes: [
+                siteFileOf(`${site}-plan`, `Plan ${marker}`, version, readers),
+              ],
               next: "1",
               more: false,
             },
@@ -237,17 +249,14 @@ export const sitesFailing = async (
 };
 
 /**
- * A Microsoft 365 account `admin` connects for the company (GRA-1719),
- * read by the sample sync connector, whose sites to pick are `sites`
- * (`sitesHeld`): its connection, one of the test's own, and the account's
- * subject.
+ * `admin` signs in to the Microsoft 365 account `subject` for the company:
+ * a new shared connection, or the one of that account again when it needs
+ * someone to sign in again. The connection of that account.
  */
-export const connectSharedSites = async (
+export const signInShared = async (
   admin: Person,
-  sites: Record<string, string>
-): Promise<{ connectionId: string; subject: string }> => {
-  const subject = `shared-${unique()}`;
-  await sitesHeld(subject, sites);
+  subject: string
+): Promise<{ id: string; status: string }> => {
   const { url } = await admin.api.connections.start({
     provider: "microsoft",
     scope: "shared",
@@ -272,6 +281,23 @@ export const connectSharedSites = async (
   if (connection === undefined) {
     throw new Error("Expected the shared Microsoft connection");
   }
+  return { id: connection.id, status: connection.status };
+};
+
+/**
+ * A Microsoft 365 account `admin` connects for the company (GRA-1719),
+ * read by the sample sync connector, whose sites to pick are `sites`
+ * (`sitesHeld`, their files opened at the source by `readers`): its
+ * connection, one of the test's own, and the account's subject.
+ */
+export const connectSharedSites = async (
+  admin: Person,
+  sites: Record<string, string>,
+  readers: readonly unknown[] | null = null
+): Promise<{ connectionId: string; subject: string }> => {
+  const subject = `shared-${unique()}`;
+  await sitesHeld(subject, sites, "1", readers);
+  const connection = await signInShared(admin, subject);
   // Read by the sample sync connector instead of the suite's own.
   await connectDb()
     .prepare("UPDATE connections SET server = 'sample-sync' WHERE id = ?")
@@ -369,6 +395,8 @@ export const docFile = (
   modifiedTime: "2026-11-10T09:00:00.000Z",
   version: "1",
   ownedByMe: true,
+  // At the top of their My Drive (drive-sync-fake.ts).
+  parents: ["my-drive"],
   lastModifyingUser: { emailAddress: owner },
   permissions: [{ type: "user", role: "owner", emailAddress: owner }],
   ...more,

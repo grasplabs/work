@@ -629,16 +629,20 @@ export const recoverableNow = async (env: Env, row: Row): Promise<boolean> => {
 };
 
 /**
- * Refuses a side effect of work that may only read (`readOnly`), before it
- * is held or run: a read can't turn into a change further on, whatever
- * the code that called it asks. Refuses one of a turn nobody was there for
+ * Refuses a tool that isn't a read for work that may only read
+ * (`readOnly`), before it is held or run: a read can't turn into a change
+ * further on, whatever the code that called it asks. A read it holds only
+ * because of where it was asked (`restricted`: its input leaves for a
+ * third party, policy.ts) is still a read, and waits for its person
+ * (GRA-1928). Refuses a side effect of a turn nobody was there for
  * (`unattended`) that carries no end for what is held.
  */
 const requireAllowedEffect = (
   { readOnly, unattended, heldUntil }: CapabilityClaims,
+  tool: McpTool,
   sideEffect: boolean
 ): void => {
-  if (sideEffect && readOnly) {
+  if (readOnly && !tool.readOnly) {
     throw connectErrors.create("connect.read_only");
   }
   // What nobody was there to ask for ends with the company's day: one
@@ -1060,7 +1064,7 @@ export const carryOut = async (
     claims.restricted
   );
   progress.sideEffect = sideEffect;
-  requireAllowedEffect(claims, sideEffect);
+  requireAllowedEffect(claims, tool, sideEffect);
   checkResourceScope(resource, tool, input);
   requirePointedMailbox(claims, connection, call.action, tool, input);
   requirePointedResource(claims, connection, call.action, input);

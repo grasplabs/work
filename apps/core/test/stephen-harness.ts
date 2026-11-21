@@ -347,16 +347,6 @@ const granted = async (
   await grantReviewed(admin.api, id);
 };
 
-/** Grants `agentId` reading the Brain, as its person may. */
-const grantBrain = async (admin: Person, agentId: string): Promise<void> => {
-  await granted(admin, {
-    subject: { type: "agent", agentId },
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
-};
-
 /** Puts the register, the budget and the files on Graph: Lisa's OneDrive, and Excel's workbooks. */
 const setMicrosoftFiles = async (clock: StephenClock): Promise<void> => {
   await setApp("microsoft", { drive: lisaDrive, files: lisaFiles });
@@ -547,8 +537,6 @@ export const setUpStephenCompany = async (
     );
     const id = workspaceIdSchema.parse(crypto.randomUUID());
     placed.set(persona, { stub: workspace(env, id), agentId: id });
-    // oxlint-disable-next-line no-await-in-loop -- one person at a time
-    await grantBrain(admin, id);
   }
   const places: StephenCompany["places"] = {
     lisa: held(placed, "lisa"),

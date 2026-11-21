@@ -1,4 +1,7 @@
-import { composioConsentText } from "@grasp-os/shared/connect";
+import {
+  composioConsentText,
+  composioKeyConsentText,
+} from "@grasp-os/shared/connect";
 import {
   readRelayRequest,
   relayStateValid,
@@ -9,7 +12,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { hubspotLogo } from "./composio-api.ts";
+import { acmeCrmKey, hubspotLogo } from "./composio-api.ts";
 import { consentCode, tokensFor } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, clientOrigin, otherTenant } from "./sign-in-config.ts";
@@ -423,6 +426,12 @@ describe("the catalog", () => {
         group: "Other",
         auth: "own",
       },
+      {
+        entry: "composio:acme_crm",
+        description: null,
+        group: "CRM",
+        auth: "key",
+      },
     ]);
   });
 
@@ -550,6 +559,44 @@ describe("connecting a Composio toolkit", () => {
     ]);
   });
 
+  it("connects a toolkit that takes a key from Grasp's own form, and sends the browser back to its page here", async () => {
+    const admin = await signedInAdmin();
+    await expect(
+      admin.connections.keyFields("acme_crm")
+    ).resolves.toMatchObject([
+      { name: "generic_api_key", label: "API key", secret: true },
+    ]);
+    const wrong = await outcome(
+      admin.connections.connectToolkitWithKey({
+        toolkit: "acme_crm",
+        tools: ["ACME_CRM_LIST_DEALS"],
+        consent: composioKeyConsentText,
+        values: { generic_api_key: "not-the-key" },
+        returnTo: "/integrations/composio:acme_crm",
+      })
+    );
+    const { url } = await admin.connections.connectToolkitWithKey({
+      toolkit: "acme_crm",
+      tools: ["ACME_CRM_LIST_DEALS"],
+      consent: composioKeyConsentText,
+      values: { generic_api_key: acmeCrmKey },
+      returnTo: "/integrations/composio:acme_crm",
+    });
+    const listed = await admin.connections.list();
+    const connection = listed.find(({ provider }) => provider === "acme_crm");
+    expect({ wrong, url, connection }).toMatchObject({
+      wrong: "connection.key_rejected",
+      url: `${clientOrigin}/integrations/composio:acme_crm?connection=${connection?.id}`,
+      connection: {
+        source: "composio",
+        scope: "shared",
+        connectedBy: admin.userId,
+        tools: ["ACME_CRM_LIST_DEALS"],
+      },
+    });
+    expect(JSON.stringify(await allEvents())).not.toContain(acmeCrmKey);
+  });
+
   it("sends the browser back nowhere but this origin", async () => {
     const admin = await signedInAdmin();
     await expect(
@@ -608,8 +655,9 @@ describe("offering catalog entries", () => {
         "google:false",
         "hubspot:false",
         "acme_erp:true",
+        "acme_crm:true",
       ],
-      anna: ["native:microsoft", "composio:acme_erp"],
+      anna: ["native:microsoft", "composio:acme_erp", "composio:acme_crm"],
     });
     const refused = await auditedDuring(async () => {
       await expect(
@@ -703,6 +751,7 @@ describe("offering catalog entries", () => {
       "native:google",
       "composio:hubspot",
       "composio:acme_erp",
+      "composio:acme_crm",
     ]);
     await expect(
       outcome(admin.connections.connectToolkit(toolkitRequest))
@@ -819,5 +868,43 @@ describe("the revokes to make by hand", () => {
       user: "role.forbidden",
       removed: [{ ownerName: owner.name, ownerIsMember: false }],
     });
+  });
+
+  it("shows a guest's stuck revoke as no member's (GRA-2235)", async () => {
+    const admin = await person("admin");
+    const owner = await person();
+    const connectionId = `connection-${crypto.randomUUID()}`;
+    const now = Date.now();
+    await connectDb().batch([
+      connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, account_id, account_email, created_at, updated_at) VALUES (?, 'sample-oauth', 'personal', ?, 'disconnected', 'native', 'sample-oauth', ?, ?, ?, ?)"
+        )
+        .bind(
+          connectionId,
+          owner.userId,
+          `acct-${connectionId}`,
+          "their@app.test",
+          now,
+          now
+        ),
+      connectDb()
+        .prepare(
+          "INSERT INTO token_revocations (id, connection_id, sealed, reason, attempts, retry_at, created_at) VALUES (?, ?, 'sealed', 'disconnected', 9, ?, ?)"
+        )
+        .bind(crypto.randomUUID(), connectionId, now + 3_600_000, now),
+    ]);
+    // A guest's membership: nobody becomes one from a member, so set by hand.
+    await env.DB.prepare("UPDATE members SET role = 'guest' WHERE user_id = ?")
+      .bind(owner.userId)
+      .run();
+
+    const toDo = await admin.connections.revocationsByHand();
+
+    expect(
+      toDo
+        .filter((each) => each.connectionId === connectionId)
+        .map(({ ownerIsMember }) => ownerIsMember)
+    ).toStrictEqual([false]);
   });
 });

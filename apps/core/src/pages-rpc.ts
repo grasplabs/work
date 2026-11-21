@@ -19,6 +19,7 @@ import {
   pageProblemSchema,
 } from "@grasp-os/shared/pages";
 import type {
+  OpenableApp,
   PageDelivery,
   AppErrorLog,
   AppVersionPush,
@@ -38,12 +39,12 @@ import {
   appFor,
   findVersion,
   getApp,
-  hasPages,
   listApps,
   usableApp,
   versionFiles,
 } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
+import type { GuestRpc } from "./guest-access.ts";
 import { isStub } from "./page-callbacks.ts";
 import type { PageCallback } from "./page-callbacks.ts";
 import {
@@ -207,46 +208,6 @@ const openPage = async (
     artifact,
     frameToken: await frameAccess(env, artifact),
     lease: await leaseFor(env, by.userId, id, { kind: "release", build }),
-  };
-};
-
-/**
- * The pages of a published App's current version, for a visitor
- * (app-visitors.ts), which open at `/`: built and staged as `openPage`
- * does, once their build gets the App's data now, and leased to `visitor`
- * (`visitor:<session>`), a name no member's session has, so it opens the
- * App's functions only as that visitor, with their session's token
- * (page-calls.ts). Null while the App runs no version or has no pages.
- */
-export const visitorPage = async (
-  env: Env,
-  found: Pick<App, "id" | "name" | "currentVersion">,
-  visitor: string
-): Promise<PageBundle | null> => {
-  const { id, name: appName, currentVersion: version } = found;
-  if (version === null) {
-    return null;
-  }
-  const raw = await versionFiles(env, id, version);
-  if (!hasPages(new Map(Object.entries(raw)))) {
-    return null;
-  }
-  const built = await versionPageCodes(env, id, version, raw, {
-    unsealed: "refuse",
-  });
-  const { artifact } = built;
-  const build = { artifact, version };
-  if (deliveryOf(await standingOf(env, id, build)) !== "open") {
-    throw pageErrors.create("page.revoked");
-  }
-  await stageFrame(env, artifact, built.code);
-  return {
-    app: id,
-    name: appName,
-    version,
-    artifact,
-    frameToken: await frameAccess(env, artifact),
-    lease: await leaseFor(env, visitor, id, { kind: "release", build }),
   };
 };
 
@@ -480,6 +441,29 @@ const hasRoleNow = async (
     }
     throw error;
   }
+};
+
+/**
+ * The live Apps `by` may open now (`PagesApi.opensApps`): each App they
+ * have a role in that is live, checked as opening it is (`usableApp`),
+ * so one they would be refused (one they can't read, or for a guest one
+ * that holds a source) isn't listed. Counted as the
+ * sidebar's reads are.
+ */
+const openableApps = async (env: Env, by: Identity): Promise<OpenableApp[]> => {
+  if (!sidebarReads.take(by.userId)) {
+    throw rateLimited();
+  }
+  const found = await listApps(env, by);
+  const live = found.filter(
+    ({ currentVersion, archived }) => currentVersion !== null && !archived
+  );
+  const opens = await Promise.all(
+    live.map(async ({ id }) => await hasRoleNow(env, by, id, "user"))
+  );
+  return live
+    .filter((_, at) => opens[at] === true)
+    .map(({ id, name, description }) => ({ app: id, name, description }));
 };
 
 /** Where in the App a problem happened, as the page reports it. */
@@ -797,6 +781,8 @@ export class PageFrameRpc extends CoreRpcTarget implements PageFrameApi {
 export class PagesRpc extends CoreRpcTarget implements PagesApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
+  /** The connection's check for a method a guest may call too (guest-access.ts). */
+  readonly #open: (method: GuestRpc) => SessionCheck;
 
   /** This connection's version subscriptions that haven't been released. */
   readonly #versionSubscriptions = new Set<Disposable>();
@@ -804,13 +790,23 @@ export class PagesRpc extends CoreRpcTarget implements PagesApi {
   /** This connection's live queries (query-subscriptions.ts). */
   readonly #queries: QuerySubscriptions;
 
-  constructor(env: Env, check: SessionCheck) {
+  constructor(
+    env: Env,
+    check: SessionCheck,
+    /**
+     * The check for `method`, which lets a guest through for what
+     * guest-access.ts opens to them; `check` refuses them.
+     */
+    open: (method: GuestRpc) => SessionCheck
+  ) {
     super();
     this.#env = env;
     this.#check = check;
+    this.#open = open;
+    // A frame's live queries, pushed as the frame's person.
     this.#queries = new QuerySubscriptions(
       env,
-      pageReads(env, check, async (by, app, lease) => {
+      pageReads(env, open("pages.frame"), async (by, app, lease) => {
         // A draft's preview is its builder's alone, and reaches none of
         // the App's data, so nothing else is read for it.
         if (lease?.kind === "draft") {
@@ -829,7 +825,7 @@ export class PagesRpc extends CoreRpcTarget implements PagesApi {
 
   async open(app: string): Promise<PageBundle> {
     return await withPerson(
-      this.#check,
+      this.#open("pages.open"),
       async (by) => await openPage(this.#env, by, app)
     );
   }
@@ -848,15 +844,23 @@ export class PagesRpc extends CoreRpcTarget implements PagesApi {
     );
   }
 
+  async opensApps(): Promise<OpenableApp[]> {
+    return await withPerson(
+      this.#open("pages.opensApps"),
+      async (by) => await openableApps(this.#env, by)
+    );
+  }
+
   async frame(app: string, lease: string): Promise<PageFrameRpc> {
-    return await withPerson(this.#check, async (by) => {
+    const check = this.#open("pages.frame");
+    return await withPerson(check, async (by) => {
       const { id } = await usableApp(this.#env, by, app);
       // Core's own lease names the build and what it runs on, never the
       // page or the frame; a lease core didn't sign for them and this App
       // names none, and is decided as code core didn't serve.
       return new PageFrameRpc({
         env: this.#env,
-        check: this.#check,
+        check,
         userId: by.userId,
         app: id,
         lease: await readLease(this.#env, by.userId, id, lease),
@@ -869,7 +873,8 @@ export class PagesRpc extends CoreRpcTarget implements PagesApi {
     app: string,
     onVersion: (push: AppVersionPush) => void
   ): Promise<Subscription> {
-    return await withPerson(this.#check, async (by) => {
+    const check = this.#open("pages.watchVersion");
+    return await withPerson(check, async (by) => {
       // Following is a request like any other: a page that follows and
       // lets go over and over is held to what a person may ask.
       const id = await admitted(this.#env, by, app);
@@ -881,7 +886,7 @@ export class PagesRpc extends CoreRpcTarget implements PagesApi {
       }
       return followVersion(
         this.#env,
-        this.#check,
+        check,
         by,
         id,
         onVersion,
@@ -896,7 +901,7 @@ export class PagesRpc extends CoreRpcTarget implements PagesApi {
     at: { version: number; path: string },
     problem: unknown
   ): Promise<void> {
-    await withPerson(this.#check, async (by) => {
+    await withPerson(this.#open("pages.report"), async (by) => {
       await reportProblem(this.#env, by, app, at, problem);
     });
   }

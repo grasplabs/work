@@ -102,6 +102,12 @@ export const brainModules = {
   // alone, the names of the connections their agent may use (GRA-1873):
   // its grants, nothing of the Brain's, probed in turn-recall.test.ts.
   "apps/core/src/turn-recall.ts": "core",
+  // A chat's one search of the Brain (GRA-2203), which the recall before
+  // a question and the model's own search (`searchBrain`) both make: hands
+  // the model what core's recallOwnedAs gave the chat's own person, read
+  // as the turn reads, as data, and nothing more; probed in
+  // turn-recall.test.ts and agent-brain.test.ts.
+  "apps/core/src/brain-search.ts": "core",
   // Checks what a chat once handed over with core's readableVersionsAs and
   // readableMemoriesAs, and hands on only which of those it may still
   // send, never what they say.

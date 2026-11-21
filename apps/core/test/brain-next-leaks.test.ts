@@ -69,7 +69,6 @@ import {
   add,
   answerOf,
   textsFor,
-  chatAgentReadsBrainOnce,
 } from "./brain-next-leaks-harness.ts";
 import type { Finding } from "./brain-next-leaks-harness.ts";
 import { brainModules } from "./brain-next-modules.ts";
@@ -82,7 +81,7 @@ import { saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import { carrying } from "./platform-providers.ts";
-import { acmeTenant } from "./sign-in-config.ts";
+import { acmeTenant, otherTenant } from "./sign-in-config.ts";
 import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import { holdsNothing } from "./stored-skills.ts";
 import {
@@ -134,9 +133,6 @@ const accountOf = (claims: Claims): SourceReader => ({
   tenant: acmeTenant,
   account: String(claims.oid),
 });
-
-/** Grants the chat agent the Brain permission, once for the file. */
-const chatAgentReadsBrain = chatAgentReadsBrainOnce(idp);
 
 teamsWatched();
 
@@ -373,7 +369,7 @@ describe(
         "the holder's own source": markerWord(),
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
-        "a file shared with a group the outsider proved they were in over a day ago":
+        "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
           markerWord(),
         "the holder's interview": markerWord(),
         "a source narrowed away from the outsider": markerWord(),
@@ -447,7 +443,7 @@ describe(
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
-        "a file shared with a group the outsider proved they were in over a day ago":
+        "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
           staleGroupMarker,
         "the holder's interview": interviewMarker,
         "a source narrowed away from the outsider": narrowedMarker,
@@ -1094,6 +1090,33 @@ describe(
           readAtNow
         )
         .run();
+      // And with Entra groups the company's directory lists the outsider in
+      // (GRA-2146), tied to them by their object ID: one by a read over a
+      // day old, which proves nothing any more; and one read now, but named
+      // by the file in another tenant, which is another group.
+      const [directoryStaleGroup, directoryOtherTenantGroup] = [
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+      ];
+      const outsiderOid = String(outsiderPerson.oid).toLowerCase();
+      const directoryTenant = acmeTenant.toLowerCase();
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO directory_people (provider, tenant, account_id, department, enabled, user_id) VALUES ('microsoft-directory', ?, ?, '', 1, ?)"
+        ).bind(directoryTenant, outsiderOid, outsider),
+        env.DB.prepare(
+          "INSERT INTO directory_group_members (provider, tenant, group_id, account_id, read_at) VALUES ('microsoft-directory', ?, ?, ?, ?), ('microsoft-directory', ?, ?, ?, ?)"
+        ).bind(
+          directoryTenant,
+          directoryStaleGroup,
+          outsiderOid,
+          Date.now() - readerProofMaxAgeMs - 60_000,
+          directoryTenant,
+          directoryOtherTenantGroup,
+          outsiderOid,
+          Date.now()
+        ),
+      ]);
       const staleGroupId = await add(
         `Lease annex ${sharedWord} ${staleGroupMarker}`,
         {
@@ -1104,6 +1127,18 @@ describe(
               provider: "microsoft",
               tenant: acmeTenant,
               group: staleGroup,
+            },
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: acmeTenant,
+              group: directoryStaleGroup,
+            },
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: otherTenant,
+              group: directoryOtherTenantGroup,
             },
           ],
         }
@@ -1787,15 +1822,18 @@ describe(
 
       // What was sent to a model while planting: only the holder's own
       // chat turn, which carries their question and what their chat is
-      // given (their instruction file, their skill, their team's skill).
-      // The passes count prompts from there, so this is where any other
-      // marker in a prompt then must fail.
+      // given (their instruction file, their skill, their team's skill),
+      // and what the recall before it found as them, which every agent
+      // makes in their own chat (GRA-2203): their own source, which shares
+      // the question's word. The passes count prompts from there, so this
+      // is where any other marker in a prompt then must fail.
       const chat = promptedAtPlanting["a question in the holder's chat"] ?? [];
       const ownChat = new Set([
         "a question in the holder's chat",
         "the holder's instruction file",
         "the holder's own skill",
         "a team's skill the outsider isn't in",
+        "the holder's own source",
       ]);
 
       expect({
@@ -2273,7 +2311,7 @@ describe(
         },
         {
           "a source nobody is known to read": world.noneMarker,
-          "a file shared with a group the outsider proved they were in over a day ago":
+          "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
             world.staleGroupMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           "another agent's instruction file": world.agentFileMarker,
@@ -2341,7 +2379,7 @@ describe(
           "a memory shared with a team, though the holder is in the team":
             world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
-          "a file shared with a group the outsider proved they were in over a day ago":
+          "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
             world.staleGroupMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
@@ -2429,7 +2467,7 @@ describe(
           "a memory shared with a team the grant doesn't name, though the holder is in it":
             world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
-          "a file shared with a group the outsider proved they were in over a day ago":
+          "a file shared with groups the outsider was proved in over a day ago, or by the directory in another tenant":
             world.staleGroupMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
@@ -2812,7 +2850,6 @@ describe(
       // workspace.ts `answersAlone`). Never in a thread others read, even
       // one whose roster holds them alone: no instruction file of theirs,
       // and none of their own chat's tools, their connections first.
-      await chatAgentReadsBrain();
       const depot = `d${unique()}`;
       const marker = markerWord();
       const userMarker = markerWord();
@@ -2986,7 +3023,6 @@ describe(
       // recalled. A team she and Ben are both in, and one of hers alone,
       // are never recalled where others read the answer (GRA-1820); her
       // direct message is her own chat, as in Grasp (GRA-1821).
-      await chatAgentReadsBrain();
       const ann = await teamsMember(
         idp,
         ...Array.from({ length: 8 }, () => says("Noted."))
@@ -3145,7 +3181,6 @@ describe(
       // next turn in the shared chat must no longer carry it. Her direct
       // message is her own chat (GRA-1821): her memories, read as her,
       // there and when history is read again.
-      await chatAgentReadsBrain();
       const ann = await teamsMember(
         idp,
         ...Array.from({ length: 4 }, () => says("Noted."))
@@ -3283,7 +3318,6 @@ describe(
       // company, as a woken turn in Grasp does (workspace.ts
       // `answersAlone`). Its first turn there asks nothing the Brain holds,
       // so the woken turn's history carries none of her own.
-      await chatAgentReadsBrain();
       const ann = await teamsMember(
         idp,
         says("Hi."),
@@ -3388,7 +3422,6 @@ describe(
       // ranks it for them alone: only where the answer reaches them alone,
       // their direct message now too (GRA-1821). A group chat recalls as
       // the company (`brain-company-memory:`), which counts no use.
-      await chatAgentReadsBrain();
       const ann = await teamsMember(idp, says("Noted."), says("Noted."));
       const ben = await memberAnsweredBy(idp, ann.provider);
       const [inGroup, inDirect] = [`d${unique()}`, `d${unique()}`];
@@ -3448,7 +3481,6 @@ describe(
       // chat in Grasp (GRA-1920): their word, in their own store, which
       // nobody else reads, a team-mate in their own direct message
       // included.
-      await chatAgentReadsBrain();
       const depot = `d${unique()}`;
       const word = markerWord();
       const statement = `Depot ${depot} opens at ${word}`;

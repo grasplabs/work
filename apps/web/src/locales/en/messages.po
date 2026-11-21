@@ -402,6 +402,14 @@ msgstr "{count, plural, one {# test} other {# tests}}"
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
 msgstr "{count, plural, one {# time waster} other {# time wasters}}"
 
+#: src/settings/directory-placement.tsx
+msgid "{count, plural, one {# to check} other {# to check}}"
+msgstr "{count, plural, one {# to check} other {# to check}}"
+
+#: src/settings/directory-placement.tsx
+msgid "{count, plural, one {# to place} other {# to place}}"
+msgstr "{count, plural, one {# to place} other {# to place}}"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{count, plural, one {# tool allowed} other {# tools allowed}}"
 msgstr "{count, plural, one {# tool allowed} other {# tools allowed}}"
@@ -679,6 +687,10 @@ msgstr "{kind} ({what})"
 msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
 
+#: src/connections/connect-dialog.tsx
+msgid "{label} (optional)"
+msgstr "{label} (optional)"
+
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
@@ -841,6 +853,10 @@ msgstr "{name} answers in this chat"
 msgid "{name} couldn't be deleted. Try again."
 msgstr "{name} couldn't be deleted. Try again."
 
+#: src/settings/directory-reconnect.tsx
+msgid "{name} couldn’t be reached just now. Try again in a moment."
+msgstr "{name} couldn’t be reached just now. Try again in a moment."
+
 #: src/settings/teams.tsx
 msgid "{name} couldn't be renamed. Try again."
 msgstr "{name} couldn't be renamed. Try again."
@@ -857,9 +873,17 @@ msgstr "{name} edited it"
 msgid "{name} has no documents."
 msgstr "{name} has no documents."
 
+#: src/settings/directory-reads.tsx
+msgid "{name} hasn’t been read yet."
+msgstr "{name} hasn’t been read yet."
+
 #: src/settings/stephen-settings.tsx
 msgid "{name} in {appName}"
 msgstr "{name} in {appName}"
+
+#: src/settings/directory-reconnect.tsx
+msgid "{name} is connected again. Grasp reads it at its next daily read."
+msgstr "{name} is connected again. Grasp reads it at its next daily read."
 
 #: src/onboarding/connect-steps.tsx
 msgid "{name} is connected. I’ll only read what you share with me."
@@ -1020,6 +1044,10 @@ msgstr "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} o
 #: src/onboarding/interviews-progress.tsx
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
 msgstr "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
+
+#: src/settings/directory-reads.tsx
+msgid "{people, plural, one {{name} was last read {readAt}, listing # person.} other {{name} was last read {readAt}, listing # people.}}"
+msgstr "{people, plural, one {{name} was last read {readAt}, listing # person.} other {{name} was last read {readAt}, listing # people.}}"
 
 #: src/brain/brain.ts
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
@@ -1446,6 +1474,11 @@ msgstr "{who} can't be granted later: it has to ask again."
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} consented to this before connecting it:"
 
+#: src/settings/directory-placement.tsx
+msgid "{who} couldn't be added to the team. Try again."
+msgstr "{who} couldn't be added to the team. Try again."
+
+#: src/settings/directory-placement.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "{who} couldn't be taken off {name}. Try again."
 msgstr "{who} couldn't be taken off {name}. Try again."
@@ -1623,22 +1656,6 @@ msgstr "A former member"
 #: src/brain/sources-page.tsx
 msgid "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp."
 msgstr "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp."
-
-#: src/activity/audit-words.ts
-msgid "A guest chat changed"
-msgstr "A guest chat changed"
-
-#: src/activity/audit-words.ts
-msgid "A guest finished their chat"
-msgstr "A guest finished their chat"
-
-#: src/activity/audit-words.ts
-msgid "A guest opened their chat"
-msgstr "A guest opened their chat"
-
-#: src/activity/audit-words.ts
-msgid "A guest wrote a message"
-msgstr "A guest wrote a message"
 
 #: src/workflows/resource-params.tsx
 msgid "A JSON value"
@@ -1837,10 +1854,6 @@ msgstr "A type the App's code declares"
 msgid "A version's definition and source"
 msgstr "A version's definition and source"
 
-#: src/apps/app-data.tsx
-msgid "A visitor"
-msgstr "A visitor"
-
 #: src/dashboard/widget-board.tsx
 msgid "A widget Grasp made"
 msgstr "A widget Grasp made"
@@ -2018,6 +2031,7 @@ msgstr "Actor ID"
 #: src/chat/composer-menu.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/directory-placement.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "Add"
 msgstr "Add"
@@ -2489,6 +2503,10 @@ msgstr "An admin changes it, in Members and roles."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "An admin connects this for everyone."
 msgstr "An admin connects this for everyone."
+
+#: src/settings/directory-placement.tsx
+msgid "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is."
+msgstr "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "An admin refused or took back its reading of these events: it hears nothing."
@@ -2985,6 +3003,10 @@ msgstr "Apps it uses"
 msgid "Apps it works in"
 msgstr "Apps it works in"
 
+#: src/routes/guest.tsx
+msgid "Apps shared with you"
+msgstr "Apps shared with you"
+
 #: src/chat/agent-change-card.tsx
 msgid "Apps taken off"
 msgstr "Apps taken off"
@@ -3102,6 +3124,10 @@ msgstr "Ask for {app}"
 #: src/chat/chat-subject.ts
 msgid "Ask for a change"
 msgstr "Ask for a change"
+
+#: src/guest-sign-in.tsx
+msgid "Ask for a new code"
+msgstr "Ask for a new code"
 
 #: src/apps/app-access-requests.tsx
 msgid "Ask for access"
@@ -3292,6 +3318,7 @@ msgstr "Available, via Composio"
 #: src/brain/back-button.tsx
 #: src/chat/asked-questions.tsx
 #: src/chat/composer-menu.tsx
+#: src/guest-sign-in.tsx
 #: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
@@ -4043,6 +4070,10 @@ msgstr "Choose a model"
 msgid "Choose a source."
 msgstr "Choose a source."
 
+#: src/settings/directory-placement.tsx
+msgid "Choose a team"
+msgstr "Choose a team"
+
 #: src/apps/app-workflows.tsx
 msgid "Choose a workflow"
 msgstr "Choose a workflow"
@@ -4174,6 +4205,7 @@ msgstr "Closing the books and producing the numbers leadership looks at."
 
 #: src/chat/answer-markdown.tsx
 #: src/chat/thread.tsx
+#: src/guest-sign-in.tsx
 msgid "Code"
 msgstr "Code"
 
@@ -4327,6 +4359,10 @@ msgstr "Confirmed by the board"
 msgid "Confirmed by you"
 msgstr "Confirmed by you"
 
+#: src/chat/chat-panel.tsx
+msgid "Confirmed. Carry on."
+msgstr "Confirmed. Carry on."
+
 #: src/chat/plan-card.tsx
 #: src/connections/integration-row.tsx
 #: src/connections/request-app-dialog.tsx
@@ -4344,6 +4380,10 @@ msgstr "Connect {app}"
 #: src/onboarding/hr-leads.tsx
 msgid "Connect {name}"
 msgstr "Connect {name}"
+
+#: src/settings/directory-reconnect.tsx
+msgid "Connect {name} again"
+msgstr "Connect {name} again"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect accounts of their own"
@@ -4497,6 +4537,10 @@ msgstr "Connections in use"
 msgid "Connections to sign in to again"
 msgstr "Connections to sign in to again"
 
+#: src/connections/integration-row.tsx
+msgid "Connects with a key"
+msgstr "Connects with a key"
+
 #: src/connections/connection-list.tsx
 msgid "Consent"
 msgstr "Consent"
@@ -4504,6 +4548,10 @@ msgstr "Consent"
 #: src/connections/connect-dialog.tsx
 msgid "Consent and connect"
 msgstr "Consent and connect"
+
+#: src/connections/connect-dialog.tsx
+msgid "Consent and enter the key"
+msgstr "Consent and enter the key"
 
 #: src/connections/connect-dialog.tsx
 msgid "Consent and sign in"
@@ -5140,6 +5188,7 @@ msgid "Didn't start a workflow from a webhook event"
 msgstr "Didn't start a workflow from a webhook event"
 
 #: src/brain/brain-atlas.ts
+#: src/settings/directory-reads.tsx
 msgid "Directory"
 msgstr "Directory"
 
@@ -5495,6 +5544,10 @@ msgstr "Email and calendar"
 msgid "Email and sign-ins"
 msgstr "Email and sign-ins"
 
+#: src/guest-sign-in.tsx
+msgid "Email me a code"
+msgstr "Email me a code"
+
 #: src/workflows/trigger-description.ts
 msgid "Email trigger"
 msgstr "Email trigger"
@@ -5606,6 +5659,7 @@ msgstr "Erase your teams from your Brain?"
 msgid "Erase…"
 msgstr "Erase…"
 
+#: src/onboarding/setup-steps.tsx
 #: src/settings/erasures.tsx
 msgid "Erased"
 msgstr "Erased"
@@ -5767,8 +5821,8 @@ msgid "Everyone in {project}"
 msgstr "Everyone in {project}"
 
 #: src/connections/brain-audience.tsx
-msgid "Everyone in {team} will be able to find what agents read through {label}, including what was kept before."
-msgstr "Everyone in {team} will be able to find what agents read through {label}, including what was kept before."
+msgid "Everyone in {team} will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats."
+msgstr "Everyone in {team} will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats."
 
 #: src/drafts/sharing.tsx
 msgid "Everyone in a project you aren’t in"
@@ -5784,12 +5838,28 @@ msgid "Everyone in the company"
 msgstr "Everyone in the company"
 
 #: src/connections/brain-audience.tsx
-msgid "Everyone in the company will be able to find what agents read through {label}, including what was kept before. Choose a team if not everyone should see it."
-msgstr "Everyone in the company will be able to find what agents read through {label}, including what was kept before. Choose a team if not everyone should see it."
+msgid "Everyone in the company will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats. Choose a team if not everyone should have this."
+msgstr "Everyone in the company will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats. Choose a team if not everyone should have this."
+
+#: src/connections/sync-places.tsx
+msgid "Everyone in the company will be able to read everything in the places you pick, whatever their permissions in {label}."
+msgstr "Everyone in the company will be able to read everything in the places you pick, whatever their permissions in {label}."
 
 #: src/settings/team-members-dialog.tsx
 msgid "Everyone in the organization is in this team."
 msgstr "Everyone in the organization is in this team."
+
+#: src/connections/sync-places.tsx
+msgid "Everyone in the team {team} will be able to read everything in the places you pick, whatever their permissions in {label}."
+msgstr "Everyone in the team {team} will be able to read everything in the places you pick, whatever their permissions in {label}."
+
+#: src/connections/brain-audience.tsx
+msgid "Everyone in this team will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats."
+msgstr "Everyone in this team will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats."
+
+#: src/connections/sync-places.tsx
+msgid "Everyone in this team will be able to read everything in the places you pick, whatever their permissions in {label}."
+msgstr "Everyone in this team will be able to read everything in the places you pick, whatever their permissions in {label}."
 
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
@@ -5809,10 +5879,6 @@ msgstr "Everyone with Grasp"
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
 msgstr "Everyone with the {name} role"
-
-#: src/connections/sync-places.tsx
-msgid "Everyone you let read {label} in the Brain will be able to read everything in the places you pick, because the permissions in {label} are not copied."
-msgstr "Everyone you let read {label} in the Brain will be able to read everything in the places you pick, because the permissions in {label} are not copied."
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
@@ -6151,10 +6217,6 @@ msgstr "Find a record by its ID"
 #: src/settings/where-stephen.tsx
 msgid "Find Stephen under Apps in your Slack workspace."
 msgstr "Find Stephen under Apps in your Slack workspace."
-
-#: src/routes/guest.tsx
-msgid "Finish"
-msgstr "Finish"
 
 #: src/onboarding/setup-steps.tsx
 msgid "First I need your staff list."
@@ -6649,7 +6711,6 @@ msgstr "Grasp asks"
 
 #: src/chat/global-chat.tsx
 #: src/core.ts
-#: src/guest/api.ts
 #: src/interview/api.ts
 #: src/load-from-core.tsx
 #: src/routes/_shell.tsx
@@ -6661,6 +6722,10 @@ msgstr "Grasp can't be reached right now. Try again in a moment."
 #: src/onboarding/review-parts.tsx
 msgid "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
 msgstr "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
+
+#: src/settings/directory-reads.tsx
+msgid "Grasp can’t read the directory with the connection it has. Connect it again, signing in with an account that administers your directory."
+msgstr "Grasp can’t read the directory with the connection it has. Connect it again, signing in with an account that administers your directory."
 
 #: src/settings/erasures.tsx
 msgid "Grasp can’t say how far it got just now. It goes on all the same."
@@ -6747,6 +6812,10 @@ msgstr "Grasp is still working out a proposal."
 msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 msgstr "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 
+#: src/guest-sign-in.tsx
+msgid "Grasp isn't open yet. Try again later."
+msgstr "Grasp isn't open yet. Try again later."
+
 #: src/apps/draft-changes.tsx
 msgid "Grasp itself"
 msgstr "Grasp itself"
@@ -6804,6 +6873,10 @@ msgstr "Grasp proposes"
 msgid "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
 msgstr "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
 
+#: src/settings/directory-reads.tsx
+msgid "Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says."
+msgstr "Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says."
+
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 msgstr "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
@@ -6850,6 +6923,10 @@ msgstr "Grasp staff work from the admin dashboard"
 #: src/settings/ai-providers.tsx
 msgid "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
 msgstr "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
+
+#: src/settings/directory-reads.tsx
+msgid "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
+msgstr "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
 
 #: src/route-error.tsx
 msgid "Grasp was updated while this page was open. Try again to load the new version."
@@ -6919,19 +6996,17 @@ msgstr "Group the apps and workflows of a process, a team or a goal in a project
 msgid "Groups of teams"
 msgstr "Groups of teams"
 
+#: src/people/person-picker.tsx
+#: src/settings/erasures.tsx
+#: src/settings/guests.tsx
+msgid "Guest"
+msgstr "Guest"
+
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Guest accounts can't sign in. Use your organization's own account."
 
-#: src/activity/pending.tsx
-msgid "Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-msgstr "Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-
-#: src/activity/audit-log.tsx
-msgid "Guest of {app}, invited for {person}"
-msgstr "Guest of {app}, invited for {person}"
-
-#: src/apps/resource-bindings.tsx
+#: src/settings/guests.tsx
 msgid "Guests"
 msgstr "Guests"
 
@@ -7015,10 +7090,6 @@ msgstr "Hey, great to have you here. This can all be a little overwhelming, so I
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Hi {admin}, I’m Stephen"
-
-#: src/routes/guest.tsx
-msgid "Hi {name}"
-msgstr "Hi {name}"
 
 #: src/interview/sound-check.tsx
 msgid "Hi {name}, I’m {who}, an AI. Can you hear me?"
@@ -7400,6 +7471,10 @@ msgstr "If it lasts, switch provider."
 msgid "If the rest of the month goes like the days so far"
 msgstr "If the rest of the month goes like the days so far"
 
+#: src/guest-sign-in.tsx
+msgid "If you were invited, a code is on its way to you. It works for five minutes."
+msgstr "If you were invited, a code is on its way to you. It works for five minutes."
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Import"
@@ -7420,6 +7495,10 @@ msgstr "Import or export"
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 
+#: src/settings/directory-placement.tsx
+msgid "In {team} from the directory."
+msgstr "In {team} from the directory."
+
 #: src/agents/agent-page.tsx
 msgid "In Grasp's chat"
 msgstr "In Grasp's chat"
@@ -7435,6 +7514,10 @@ msgstr "In my own words"
 #: src/dashboard/pile-cards.tsx
 msgid "In one chat only, for {requester}"
 msgstr "In one chat only, for {requester}"
+
+#: src/chat/saved-memory.tsx
+msgid "In place of: {replaced}"
+msgstr "In place of: {replaced}"
 
 #: src/settings/erasures.tsx
 msgid "In progress"
@@ -7581,9 +7664,17 @@ msgstr "Invited a guest"
 msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 msgstr "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 
+#: src/routes/sign-in.tsx
+msgid "Invited as a guest? Sign in with a code"
+msgstr "Invited as a guest? Sign in with a code"
+
 #: src/brain/brain.ts
 msgid "Invited for step 2"
 msgstr "Invited for step 2"
+
+#: src/settings/guests.tsx
+msgid "Invited on {date}"
+msgstr "Invited on {date}"
 
 #: src/activity/audit-words.ts
 msgid "Invited someone"
@@ -8107,6 +8198,14 @@ msgstr "Kept between runs"
 msgid "Kept for 24 hours after the event came. Opening it is recorded in the audit trail."
 msgstr "Kept for 24 hours after the event came. Opening it is recorded in the audit trail."
 
+#: src/settings/directory-placement.tsx
+msgid "Kept in {team} by hand since {date}."
+msgstr "Kept in {team} by hand since {date}."
+
+#: src/settings/directory-placement.tsx
+msgid "Kept out of {team} by hand since {date}."
+msgstr "Kept out of {team} by hand since {date}."
+
 #: src/activity/audit-words.ts
 msgid "Kept something the chat can no longer read from the model"
 msgstr "Kept something the chat can no longer read from the model"
@@ -8290,10 +8389,6 @@ msgid "Let an App's data go to a webhook"
 msgstr "Let an App's data go to a webhook"
 
 #: src/activity/audit-words.ts
-msgid "Let an App's visitors use one of its functions"
-msgstr "Let an App's visitors use one of its functions"
-
-#: src/activity/audit-words.ts
 msgid "Let an erased member's old address in again"
 msgstr "Let an erased member's old address in again"
 
@@ -8321,9 +8416,13 @@ msgstr "Let people ask Stephen to start it"
 msgid "Let people make agents of their own"
 msgstr "Let people make agents of their own"
 
-#: src/activity/audit-words.ts
-msgid "Let someone visit an App"
-msgstr "Let someone visit an App"
+#: src/settings/directory-placement.tsx
+msgid "Let the directory decide"
+msgstr "Let the directory decide"
+
+#: src/settings/directory-placement.tsx
+msgid "Let the directory decide whether {who} is in {team}"
+msgstr "Let the directory decide whether {who} is in {team}"
 
 #: src/settings/erasures.tsx
 msgid "Let the old address of {who} in again"
@@ -8721,7 +8820,6 @@ msgid "Mentioned"
 msgstr "Mentioned"
 
 #: src/chat/thread.tsx
-#: src/routes/guest.tsx
 msgid "Messages"
 msgstr "Messages"
 
@@ -9004,6 +9102,10 @@ msgctxt "workflow stage"
 msgid "Needs a check"
 msgstr "Needs a check"
 
+#: src/connections/integration-row.tsx
+msgid "Needs an app Grasp hasn't registered"
+msgstr "Needs an app Grasp hasn't registered"
+
 #: src/dashboard/widget-board.tsx
 msgid "Needs attention"
 msgstr "Needs attention"
@@ -9028,10 +9130,6 @@ msgstr "Needs you"
 msgctxt "tab listing the workflows that need a person"
 msgid "Needs you"
 msgstr "Needs you"
-
-#: src/connections/integration-row.tsx
-msgid "Needs your own sign-in app"
-msgstr "Needs your own sign-in app"
 
 #: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
@@ -9520,6 +9618,10 @@ msgstr "Nobody by that name"
 msgid "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
 msgstr "Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it."
 
+#: src/connections/brain-audience.tsx
+msgid "Nobody can find what the Brain kept from {label} until someone signs in again. None of it is erased."
+msgstr "Nobody can find what the Brain kept from {label} until someone signs in again. None of it is erased."
+
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody can make one, and those people have don't answer until you turn this back on."
 msgstr "Nobody can make one, and those people have don't answer until you turn this back on."
@@ -9699,6 +9801,14 @@ msgstr "Not good"
 msgctxt "inbox item kind: a mailbox or drive connect stopped hearing"
 msgid "Not hearing"
 msgstr "Not hearing"
+
+#: src/settings/directory-placement.tsx
+msgid "Not in a team"
+msgstr "Not in a team"
+
+#: src/settings/directory-placement.tsx
+msgid "Not in the directory."
+msgstr "Not in the directory."
 
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
@@ -9933,6 +10043,14 @@ msgstr "Nothing is sent or changed on {connection}."
 #: src/projects/project-people.tsx
 msgid "Nothing is shared with the project, so they lose no access."
 msgstr "Nothing is shared with the project, so they lose no access."
+
+#: src/guest-sign-in.tsx
+msgid "Nothing is shared with you yet"
+msgstr "Nothing is shared with you yet"
+
+#: src/routes/guest.tsx
+msgid "Nothing is shared with you yet."
+msgstr "Nothing is shared with you yet."
 
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
@@ -10569,10 +10687,6 @@ msgstr "Open: {open}"
 msgid "Opening Grasp"
 msgstr "Opening Grasp"
 
-#: src/routes/guest.tsx
-msgid "Opening the chat…"
-msgstr "Opening the chat…"
-
 #: src/brain/note-reveal.tsx
 msgid "Opening the note"
 msgstr "Opening the note"
@@ -10985,6 +11099,10 @@ msgstr "People one by one are off"
 msgid "People outside it can't ask it anything, in Grasp or in a chat app."
 msgstr "People outside it can't ask it anything, in Grasp or in a chat app."
 
+#: src/settings/guests.tsx
+msgid "People outside your organization, invited to what is shared with them. They reach nothing else."
+msgstr "People outside your organization, invited to what is shared with them. They reach nothing else."
+
 #: src/dashboard/signals.tsx
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
@@ -11025,10 +11143,6 @@ msgstr "Permission {permission}"
 #: src/apps/resource-bindings.tsx
 msgid "Permission for the platform's statistics"
 msgstr "Permission for the platform's statistics"
-
-#: src/apps/resource-bindings.tsx
-msgid "Permission to invite guests"
-msgstr "Permission to invite guests"
 
 #: src/apps/resource-bindings.tsx
 msgid "Permission to read the Brain"
@@ -11091,6 +11205,10 @@ msgstr "Place a legal hold on version {label}?"
 #: src/apps/release-controls.tsx
 msgid "Place hold"
 msgstr "Place hold"
+
+#: src/settings/directory-placement.tsx
+msgid "Placed by hand"
+msgstr "Placed by hand"
 
 #: src/onboarding/place-picker.tsx
 msgid "Places"
@@ -11455,10 +11573,6 @@ msgid "Read their own"
 msgstr "Read their own"
 
 #: src/activity/audit-words.ts
-msgid "Read what a guest wrote"
-msgstr "Read what a guest wrote"
-
-#: src/activity/audit-words.ts
 msgid "Read what changed at a connection"
 msgstr "Read what changed at a connection"
 
@@ -11519,10 +11633,6 @@ msgstr "Reading the workspace"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "Reading what changed at a connection failed"
-
-#: src/routes/guest.tsx
-msgid "Reading what you wrote"
-msgstr "Reading what you wrote"
 
 #: src/people/person-picker.tsx
 msgid "Reading who can own it…"
@@ -11698,6 +11808,7 @@ msgstr "Reload"
 #: src/onboarding/document-drop.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/guests.tsx
 msgid "Remove"
 msgstr "Remove"
 
@@ -11706,6 +11817,10 @@ msgstr "Remove"
 msgctxt "take out of a project"
 msgid "Remove"
 msgstr "Remove"
+
+#: src/settings/guests.tsx
+msgid "Remove {email}?"
+msgstr "Remove {email}?"
 
 #: src/agents/agent-documents.tsx
 #: src/onboarding/document-drop.tsx
@@ -11786,6 +11901,10 @@ msgstr "Remove spaces at the start and end"
 #: src/apps/app-data-model.tsx
 msgid "Remove table"
 msgstr "Remove table"
+
+#: src/settings/guests.tsx
+msgid "Remove the guest {email}"
+msgstr "Remove the guest {email}"
 
 #: src/apps/indexes-view.tsx
 msgid "Remove the index {indexName}"
@@ -13240,6 +13359,7 @@ msgid "Sidebar"
 msgstr "Sidebar"
 
 #: src/connections/connect-dialog.tsx
+#: src/guest-sign-in.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Sign in"
 msgstr "Sign in"
@@ -13297,7 +13417,9 @@ msgid "Sign in with your organization's account."
 msgstr "Sign in with your organization's account."
 
 #: src/frame/person-menu.tsx
+#: src/guest-sign-in.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
 msgid "Sign out"
@@ -13346,6 +13468,10 @@ msgid "Signed in {time}"
 msgstr "Signed in {time}"
 
 #: src/activity/audit-words.ts
+msgid "Signed in as a guest"
+msgstr "Signed in as a guest"
+
+#: src/activity/audit-words.ts
 msgid "Signed in for the first time, after joining from the directory"
 msgstr "Signed in for the first time, after joining from the directory"
 
@@ -13353,17 +13479,9 @@ msgstr "Signed in for the first time, after joining from the directory"
 msgid "Signed in to a connection again"
 msgstr "Signed in to a connection again"
 
-#: src/activity/audit-words.ts
-msgid "Signed in to an App as a visitor"
-msgstr "Signed in to an App as a visitor"
-
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in with"
 msgstr "Signed in with"
-
-#: src/activity/audit-words.ts
-msgid "Signed out of an App as a visitor"
-msgstr "Signed out of an App as a visitor"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -13381,6 +13499,10 @@ msgstr "Signing in is recorded by your company's sign-in, as every sign-in is."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "Signing out didn't work"
+
+#: src/guest-sign-in.tsx
+msgid "Signing out didn't work. Try again."
+msgstr "Signing out didn't work. Try again."
 
 #: src/settings/member-suspension.tsx
 msgid "Since {date}: the directory turned their account off."
@@ -13876,10 +13998,6 @@ msgid "Stopped a schedule that kept failing"
 msgstr "Stopped a schedule that kept failing"
 
 #: src/activity/audit-words.ts
-msgid "Stopped an App's visitors using one of its functions"
-msgstr "Stopped an App's visitors using one of its functions"
-
-#: src/activity/audit-words.ts
 msgid "Stopped following what changes at a connection"
 msgstr "Stopped following what changes at a connection"
 
@@ -13887,10 +14005,6 @@ msgstr "Stopped following what changes at a connection"
 msgctxt "inbox item kind"
 msgid "Stopped schedule"
 msgstr "Stopped schedule"
-
-#: src/activity/audit-words.ts
-msgid "Stopped someone visiting an App"
-msgstr "Stopped someone visiting an App"
 
 #: src/activity/audit-words.ts
 msgid "Stopped the Brain using someone's workflow results, as they lost the workflow"
@@ -14008,6 +14122,10 @@ msgstr "Take back what you shared: {statement}"
 msgid "Take off"
 msgstr "Take off"
 
+#: src/settings/directory-placement.tsx
+msgid "Take off {name}"
+msgstr "Take off {name}"
+
 #: src/dashboard/widget-board.tsx
 msgid "Take off the dashboard"
 msgstr "Take off the dashboard"
@@ -14120,6 +14238,14 @@ msgstr "Team {team} can read this upload."
 #: src/brain/sources-page.tsx
 msgid "Team {teamName}"
 msgstr "Team {teamName}"
+
+#: src/settings/directory-placement.tsx
+msgid "Team doesn’t match the directory"
+msgstr "Team doesn’t match the directory"
+
+#: src/settings/directory-placement.tsx
+msgid "Team for {who}"
+msgstr "Team for {who}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
@@ -14281,10 +14407,17 @@ msgstr "That account's email address isn't verified."
 msgid "That address wasn’t kept out."
 msgstr "That address wasn’t kept out."
 
-#: src/guest/api.ts
+#: src/guest-sign-in.tsx
+msgid "That code didn't work. Check it, or ask for a new one."
+msgstr "That code didn't work. Check it, or ask for a new one."
+
 #: src/interview/api.ts
 msgid "That didn't work. Try again in a moment."
 msgstr "That didn't work. Try again in a moment."
+
+#: src/guest-sign-in.tsx
+msgid "That didn't work. Try again."
+msgstr "That didn't work. Try again."
 
 #: src/sign-in-errors.ts
 msgid "That email address already signs in with another account."
@@ -14394,10 +14527,6 @@ msgstr "The answer was cut off at the model's limit."
 #: src/brain/gap-actions.tsx
 msgid "The answer, and who gave it, are taken away for good. The question stays closed."
 msgstr "The answer, and who gave it, are taken away for good. The question stays closed."
-
-#: src/apps/resource-bindings.tsx
-msgid "The App has no permission to invite guests. Grant one first."
-msgstr "The App has no permission to invite guests. Grant one first."
 
 #: src/apps/resource-bindings.tsx
 msgid "The App has no permission to read the Brain. Grant one first."
@@ -14700,6 +14829,38 @@ msgstr "The directory and sign-in through Microsoft or Google. Adds teams and ro
 msgid "The directory brought in the teams and their roles."
 msgstr "The directory brought in the teams and their roles."
 
+#: src/settings/directory-reads.tsx
+msgid "The directory couldn’t be read, last tried {failedAt}."
+msgstr "The directory couldn’t be read, last tried {failedAt}."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory gives no department."
+msgstr "The directory gives no department."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory gives the department “{department}”, which is linked to {team}."
+msgstr "The directory gives the department “{department}”, which is linked to {team}."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory gives the department “{department}”, which no team is linked to."
+msgstr "The directory gives the department “{department}”, which no team is linked to."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory holds more people than Grasp can read at once. Ask Grasp’s support to help."
+msgstr "The directory holds more people than Grasp can read at once. Ask Grasp’s support to help."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory put them in a team their department there no longer fills. Its daily read moves someone only into the team their department fills, so they stay until you take them off or add them to the right team."
+msgstr "The directory put them in a team their department there no longer fills. Its daily read moves someone only into the team their department fills, so they stay until you take them off or add them to the right team."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
+msgstr "The directory refused to list them, so nobody was suspended for an account deleted there; everything else was read. The account that connected the directory may lack the right to list them: ask Grasp’s support."
+
+#: src/settings/directory-reads.tsx
+msgid "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
+msgstr "The directory’s list of them didn’t answer as a list, so nobody was suspended for an account deleted there; everything else was read. Grasp tries again at its next daily read. If this stays, ask Grasp’s support."
+
 #: src/agents/agent-documents.tsx
 msgid "The documents couldn't be loaded. Reload the page."
 msgstr "The documents couldn't be loaded. Reload the page."
@@ -14776,6 +14937,10 @@ msgstr "The interviews are over."
 msgid "The interviews aren’t planned yet. You plan them at the end of your onboarding."
 msgstr "The interviews aren’t planned yet. You plan them at the end of your onboarding."
 
+#: src/settings/directory-reads.tsx
+msgid "The last read couldn’t list the accounts deleted in the directory."
+msgstr "The last read couldn’t list the accounts deleted in the directory."
+
 #: src/workflows/resource-runs.tsx
 #: src/workflows/traces.tsx
 msgid "The latest runs, newest first."
@@ -14788,10 +14953,6 @@ msgstr "The line is deleted now, and so is what I marked in it. What I wrote dow
 #: src/pages/page-links.ts
 msgid "The link wasn't opened."
 msgstr "The link wasn't opened."
-
-#: src/routes/guest.tsx
-msgid "The link works until {until}."
-msgstr "The link works until {until}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "The message"
@@ -14861,6 +15022,10 @@ msgstr "The person in {field}"
 #: src/apps/access-view.tsx
 msgid "the person who added it"
 msgstr "the person who added it"
+
+#: src/settings/directory-placement.tsx
+msgid "The pin on {who} couldn't be released. Try again."
+msgstr "The pin on {who} couldn't be released. Try again."
 
 #: src/connections/sync-places.tsx
 msgid "The places picked from {label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them."
@@ -15147,9 +15312,17 @@ msgstr "These notes rest on nothing else and go too: {named}."
 msgid "They appear once your teams' interviews describe how their work runs."
 msgstr "They appear once your teams' interviews describe how their work runs."
 
+#: src/settings/guests.tsx
+msgid "They are signed out everywhere and cannot sign in again."
+msgstr "They are signed out everywhere and cannot sign in again."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
+
+#: src/settings/directory-placement.tsx
+msgid "They can use Grasp, but nothing shared with a team reaches them. Add each to a team: the directory’s daily read leaves a team you chose as it is."
+msgstr "They can use Grasp, but nothing shared with a team reaches them. Add each to a team: the directory’s daily read leaves a team you chose as it is."
 
 #: src/settings/team-members-dialog.tsx
 msgid "They couldn't be added to {name}. Try again."
@@ -15261,25 +15434,9 @@ msgstr "This changes the App's data in a way that needs a migration in code. Ask
 msgid "This chat account is linked to someone else. They need to unlink it first."
 msgstr "This chat account is linked to someone else. They need to unlink it first."
 
-#: src/routes/guest.tsx
-msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
-msgstr "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
-
-#: src/routes/guest.tsx
-msgid "This chat can't be opened"
-msgstr "This chat can't be opened"
-
-#: src/routes/guest.tsx
-msgid "This chat has been closed by whoever sent you the link."
-msgstr "This chat has been closed by whoever sent you the link."
-
-#: src/routes/guest.tsx
-msgid "This chat has reached its length. Press Finish to end it."
-msgstr "This chat has reached its length. Press Finish to end it."
-
 #: src/chat/held-writes.tsx
-msgid "This chat read restricted data: this may send it out"
-msgstr "This chat read restricted data: this may send it out"
+msgid "This chat read private or restricted data: this may send it out"
+msgstr "This chat read private or restricted data: this may send it out"
 
 #: src/onboarding/place-picker.tsx
 msgid "This connection needs to be connected again."
@@ -15353,7 +15510,6 @@ msgstr "This is your new App, with example data."
 msgid "This link can’t be used"
 msgstr "This link can’t be used"
 
-#: src/routes/guest.tsx
 #: src/routes/interview.tsx
 msgid "This link doesn't work. Ask whoever sent it for a new one."
 msgstr "This link doesn't work. Ask whoever sent it for a new one."
@@ -15361,10 +15517,6 @@ msgstr "This link doesn't work. Ask whoever sent it for a new one."
 #: src/settings/chat-accounts.tsx
 msgid "This link has been used already. Each link works once."
 msgstr "This link has been used already. Each link works once."
-
-#: src/routes/guest.tsx
-msgid "This link has expired. Ask whoever sent it for a new one."
-msgstr "This link has expired. Ask whoever sent it for a new one."
 
 #: src/settings/chat-accounts.tsx
 msgid "This link has expired. Write to Grasp in the chat app for a new one."
@@ -15670,13 +15822,13 @@ msgstr "Too large to read"
 msgid "Too many files are moving at once. Try again shortly."
 msgstr "Too many files are moving at once. Try again shortly."
 
+#: src/guest-sign-in.tsx
+msgid "Too many tries. Wait a minute, then try again."
+msgstr "Too many tries. Wait a minute, then try again."
+
 #: src/activity/audit-words.ts
 msgid "Took a reply to a run's email"
 msgstr "Took a reply to a run's email"
-
-#: src/activity/audit-words.ts
-msgid "Took back a guest's link"
-msgstr "Took back a guest's link"
 
 #: src/activity/audit-words.ts
 msgid "Took back the approval of a page's code"
@@ -15973,6 +16125,10 @@ msgstr "Unshare"
 msgid "Until"
 msgstr "Until"
 
+#: src/settings/directory-reads.tsx
+msgid "Until a read succeeds, nobody joins, moves or is suspended through the directory."
+msgstr "Until a read succeeds, nobody joins, moves or is suspended through the directory."
+
 #: src/onboarding/no-sender.tsx
 msgid "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."
 msgstr "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."
@@ -16089,10 +16245,6 @@ msgstr "Used {tool}"
 #: src/activity/audit-words.ts
 msgid "Used a connected tool"
 msgstr "Used a connected tool"
-
-#: src/activity/audit-words.ts
-msgid "Used an App's function as a visitor"
-msgstr "Used an App's function as a visitor"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -16261,10 +16413,6 @@ msgstr "Vision page"
 msgid "Vision page confirmed"
 msgstr "Vision page confirmed"
 
-#: src/activity/audit-log.tsx
-msgid "Visitor of {app}"
-msgstr "Visitor of {app}"
-
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volume"
@@ -16423,16 +16571,12 @@ msgid "Was refused approving packages that couldn't be checked"
 msgstr "Was refused approving packages that couldn't be checked"
 
 #: src/activity/audit-words.ts
-msgid "Was refused as an App's visitor"
-msgstr "Was refused as an App's visitor"
-
-#: src/activity/audit-words.ts
 msgid "Was refused packages known as malware"
 msgstr "Was refused packages known as malware"
 
 #: src/activity/audit-words.ts
-msgid "Was sent a code to visit an App"
-msgstr "Was sent a code to visit an App"
+msgid "Was sent a code to sign in as a guest"
+msgstr "Was sent a code to sign in as a guest"
 
 #: src/brain/brain.ts
 msgid "Was the {role}"
@@ -17273,8 +17417,8 @@ msgid "Who may read it"
 msgstr "Who may read it"
 
 #: src/connections/brain-audience.tsx
-msgid "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
-msgstr "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
+msgid "Who may read it, in the Brain and through their assistant in their own chat, is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should have it."
+msgstr "Who may read it, in the Brain and through their assistant in their own chat, is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should have it."
 
 #: src/connections/brain-audience.tsx
 msgid "Who may read what agents read through {label} was changed in the meantime. This is who may read it now: choose again if you still want to change it."
@@ -17323,6 +17467,10 @@ msgstr "Who’s who at your company?"
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
 msgstr "whoever added the row"
+
+#: src/connections/sync-places.tsx
+msgid "Whoever you let read {label} in the Brain will be able to read everything in the places you pick, whatever their permissions in {label}."
+msgstr "Whoever you let read {label} in the Brain will be able to read everything in the places you pick, whatever their permissions in {label}."
 
 #: src/chat/agent-draft-card.tsx
 msgid "Whose it is"
@@ -17617,10 +17765,6 @@ msgstr "Write"
 msgid "Write a skill"
 msgstr "Write a skill"
 
-#: src/routes/guest.tsx
-msgid "Write your answer"
-msgstr "Write your answer"
-
 #: src/workflows/workflow-settings.tsx
 msgid "Writes a model may steer:"
 msgstr "Writes a model may steer:"
@@ -17772,10 +17916,6 @@ msgstr "You decide. You can stop when you want, skip any question, and delete ev
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "You don't have access to this organization. Ask an admin."
 
-#: src/routes/guest.tsx
-msgid "You finished this chat. Thank you for your time."
-msgstr "You finished this chat. Thank you for your time."
-
 #: src/brain/sources-page.tsx
 msgid "You have no connections yet."
 msgstr "You have no connections yet."
@@ -17818,7 +17958,6 @@ msgid "You withdrew. What the Brain kept of it is being removed."
 msgstr "You withdrew. What the Brain kept of it is being removed."
 
 #: src/interview/transcript.tsx
-#: src/routes/guest.tsx
 msgid "You:"
 msgstr "You:"
 
@@ -17829,6 +17968,10 @@ msgstr "You’re about to visit an external website."
 #: src/drafts/share-with-team.tsx
 msgid "You’re seeing your version."
 msgstr "You’re seeing your version."
+
+#: src/guest-sign-in.tsx
+msgid "You’re signed in as a guest with {email}. What someone shares with you shows here."
+msgstr "You’re signed in as a guest with {email}. What someone shares with you shows here."
 
 #: src/frame/person-menu.tsx
 msgid "You're still signed in. Try again in a moment."
@@ -17941,6 +18084,10 @@ msgstr "Your conversations in chat apps"
 msgid "Your correction is kept as your own word, for you alone, and shown beside what the Brain holds. What others read stays as it is."
 msgstr "Your correction is kept as your own word, for you alone, and shown beside what the Brain holds. What others read stays as it is."
 
+#: src/guest-sign-in.tsx
+msgid "Your email address"
+msgstr "Your email address"
+
 #: src/settings/ai-providers.tsx
 msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
 msgstr "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
@@ -17960,10 +18107,6 @@ msgstr "Your export's files"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
 msgstr "Your instructions"
-
-#: src/routes/guest.tsx
-msgid "Your message"
-msgstr "Your message"
 
 #: src/frame/person-menu.tsx
 msgid "Your onboarding"

@@ -359,7 +359,12 @@ export const InterviewsProgress = ({
   const teams = progress?.teams.filter((team) => !team.off) ?? [];
   const leadOf = (team: string) => {
     const lead = roster?.teams.find((each) => each.id === team)?.lead ?? null;
-    return roster?.people.find((person) => person.id === lead) ?? null;
+    // An erased lead has no name to give, and can't help: as if none.
+    return (
+      roster?.people.find(
+        (person) => person.id === lead && person.name !== ""
+      ) ?? null
+    );
   };
   // Once the days are well under way, a team of five or more far behind is named, with the lead who can help.
   const quiet =

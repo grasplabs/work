@@ -133,13 +133,16 @@ describe("wrangler config rules", () => {
   it("refuse an env that leaves out a rate limit the top level binds, or binds it to another limit, as an env inherits none", () => {
     const withLimits = (staging: unknown[]) =>
       configWith({
-        ratelimits: [limit("AUTH", "1001", 300), limit("VISITOR", "1007", 20)],
+        ratelimits: [
+          limit("AUTH", "1001", 300),
+          limit("INTERVIEW", "1003", 20),
+        ],
         env: { staging: { ratelimits: staging } },
       });
     expect({
       same: wranglerConfigErrors(
         file,
-        withLimits([limit("AUTH", "2001", 300), limit("VISITOR", "2007", 20)])
+        withLimits([limit("AUTH", "2001", 300), limit("INTERVIEW", "2003", 20)])
       ),
       missing: wranglerConfigErrors(
         file,
@@ -147,7 +150,10 @@ describe("wrangler config rules", () => {
       ),
       other: wranglerConfigErrors(
         file,
-        withLimits([limit("AUTH", "2001", 300), limit("VISITOR", "2007", 200)])
+        withLimits([
+          limit("AUTH", "2001", 300),
+          limit("INTERVIEW", "2003", 200),
+        ])
       ),
       none: wranglerConfigErrors(
         file,
@@ -159,10 +165,10 @@ describe("wrangler config rules", () => {
     }).toStrictEqual({
       same: [],
       missing: [
-        `${file} (env staging): bind rate limit VISITOR as the top level does (20 a 60 s), with its own namespace_id.`,
+        `${file} (env staging): bind rate limit INTERVIEW as the top level does (20 a 60 s), with its own namespace_id.`,
       ],
       other: [
-        `${file} (env staging): bind rate limit VISITOR as the top level does (20 a 60 s), with its own namespace_id.`,
+        `${file} (env staging): bind rate limit INTERVIEW as the top level does (20 a 60 s), with its own namespace_id.`,
       ],
       none: [
         `${file} (env staging): bind rate limit AUTH as the top level does (300 a 60 s), with its own namespace_id.`,

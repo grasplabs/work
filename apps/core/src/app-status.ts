@@ -14,11 +14,7 @@ import {
   outboxedEventWhere,
   storedEvent,
 } from "./audit-outbox.ts";
-import {
-  apps,
-  appVisitorSessions,
-  appWorkflowBindings,
-} from "./db/core/schema.ts";
+import { apps, appWorkflowBindings } from "./db/core/schema.ts";
 import { requireNotStaff } from "./sharing.ts";
 import {
   stopRetryMs,
@@ -136,8 +132,8 @@ const cancelledBeforeRestore = async (env: Env, app: App): Promise<void> => {
 /**
  * Archives the App `input` names (`archived`), or restores it, for one of
  * its builders: answered as it is when it is so already (nothing written
- * or audited). Archiving tells the App's people their access changed,
- * ends its visitors' sessions and stops its unfinished runs; a restore
+ * or audited). Archiving tells the App's people their access changed
+ * and stops its unfinished runs; a restore
  * waits for those stops first.
  */
 export const setArchived = async (
@@ -211,12 +207,6 @@ export const setArchived = async (
     outboxedEventWhere(db, event, sql`changes() > 0`),
     // Everyone loses an archived App, its builders included.
     revocationsOf(db, eq(apps.id, found.id), null, done),
-    // Every visitor's session ends with it (app-visitors.ts), in the same
-    // batch and only if the archive won: an archive with sessions left
-    // over would let a restore revive them.
-    db
-      .delete(appVisitorSessions)
-      .where(and(eq(appVisitorSessions.appId, found.id), done)),
     // A restored App's bindings keep no contract, only if the restore
     // won: what it declares was checked against no workflow version made
     // live while it was archived, so it holds no workflow back until its

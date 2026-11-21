@@ -60,7 +60,9 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import { initials } from "../frame/person-menu.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { DirectoryReads } from "../settings/directory-reads.tsx";
 import { RemovedPeople } from "../settings/erasures.tsx";
+import { Guests } from "../settings/guests.tsx";
 import { InvitationRow, InviteButton } from "../settings/invitations.tsx";
 import { MemberSuspension } from "../settings/member-suspension.tsx";
 import { MembersTabs } from "../settings/members-tabs.tsx";
@@ -507,6 +509,7 @@ const Members = () => {
   const { identity } = Route.useRouteContext();
   return (
     <>
+      <DirectoryReads />
       <Roles />
       {page.state === "ready" ? (
         <>
@@ -515,6 +518,7 @@ const Members = () => {
             me={identity.userId}
             members={page.data.members}
           />
+          <Guests guests={page.data.guests} />
           <RemovedPeople page={page.data.removed} />
         </>
       ) : (
@@ -539,11 +543,12 @@ export const Route = createFileRoute("/_shell/settings/members")({
   component: MembersPage,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [members, invitations, removed] = await Promise.all([
+      const [members, invitations, guests, removed] = await Promise.all([
         session.members.list(),
         session.members.invitations(),
+        session.members.guests(),
         session.members.removed(),
       ]);
-      return { members, invitations, removed };
+      return { members, invitations, guests, removed };
     }),
 });

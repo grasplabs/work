@@ -1285,7 +1285,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     await handOverNow();
     // A member of no team on the list reads it as the team does (GRA-1748);
     // someone an admin removed, and someone who never was a member (a
-    // guest, an App's visitor, an interview's own session), read nothing.
+    // guest, an interview's own session), read nothing.
     const outsider = await signsIn(`outsider-${unique()}@acme.test`);
     const former = await signsIn(`former-${unique()}@acme.test`);
     const admin = await signedInApi(idp, "admin");

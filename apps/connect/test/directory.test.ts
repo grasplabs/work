@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import { connectionTokens } from "../src/db/schema.ts";
+import { connections, connectionTokens } from "../src/db/schema.ts";
 import {
   addConnection,
   agentFor,
@@ -41,6 +41,8 @@ interface Directories {
   google: Record<string, unknown>[];
   /** Graph's deleted users. */
   deleted?: Record<string, unknown>[];
+  /** Google's deleted users (`showDeleted=true`). */
+  googleDeleted?: Record<string, unknown>[];
   /** Answers every page instead, when set. */
   answer?: () => Response;
   /** The next link each Graph page hands back, instead of its own. */
@@ -106,7 +108,9 @@ const internet = fakeInternet((_request, url) => {
     url.pathname === "/admin/directory/v1/users"
   ) {
     const { page, next } = slice(
-      directories.google,
+      url.searchParams.get("showDeleted") === "true"
+        ? (directories.googleDeleted ?? [])
+        : directories.google,
       Number(url.searchParams.get("pageToken") ?? "0"),
       Number(url.searchParams.get("maxResults") ?? "100")
     );
@@ -142,7 +146,7 @@ const internet = fakeInternet((_request, url) => {
 /** Exactly what each directory's app asks for, as the provider answers it. */
 const asAsked: Record<DirectoryProvider, string> = {
   "microsoft-directory":
-    "openid profile email https://graph.microsoft.com/User.Read https://graph.microsoft.com/User.Read.All",
+    "openid profile email https://graph.microsoft.com/User.Read https://graph.microsoft.com/User.Read.All https://graph.microsoft.com/Group.ReadBasic.All",
   "google-directory":
     "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/admin.directory.user.readonly",
 };
@@ -183,18 +187,25 @@ const directoryAccount = (
   ...(granted === null ? {} : { granted }),
 });
 
-/** Connects the directory of `provider` for `admin`, granted `granted`. */
+/**
+ * Connects the directory of `provider` for `admin`, granted `granted`.
+ * What connecting sent (the first read a new connection makes before it
+ * replaces an earlier one, oauth.ts) is none of what a test reads after.
+ */
 const connectDirectory = async (
   admin: ConnectionPerson,
   provider: DirectoryProvider = "microsoft-directory",
   granted: string | null = asAsked[provider]
-): Promise<string> =>
-  await connectAccount(
+): Promise<string> => {
+  const connectionId = await connectAccount(
     providers,
     admin,
     directoryAccount(admin, provider, granted),
     { provider, scope: "shared", tenant: tenantOf(provider) }
   );
+  internet.sent.length = 0;
+  return connectionId;
+};
 
 const read = async (connectionId: string, cursor: string | null = null) =>
   await exports.default.readDirectory({ connectionId, cursor });
@@ -302,6 +313,7 @@ describe("the directory's connection", () => {
                 "offline_access",
                 "User.Read",
                 "User.Read.All",
+                "Group.ReadBasic.All",
               ]
             : [
                 "openid",
@@ -439,6 +451,50 @@ describe("a directory read", () => {
     expect(renewed).toBe("ok");
   });
 
+  it("of a Google directory is kept on renewal only as granted before: one that gains a scope, loses its read, or says nothing of it needs an admin to connect it again; one that leaves out the sign-in scopes is fine", async () => {
+    const renewedWith = async (granted: string | null) => {
+      const connectionId = await connectDirectory(
+        someone("admin"),
+        "google-directory"
+      );
+      await drizzle(env.DB)
+        .update(connectionTokens)
+        .set({ accessExpiresAt: new Date(0) })
+        .where(eq(connectionTokens.connectionId, connectionId));
+      providers.state.refreshGranted = granted;
+      const people = await codeOf(read(connectionId));
+      providers.state.refreshGranted = undefined;
+      const [row] = await drizzle(env.DB)
+        .select({ status: connections.status })
+        .from(connections)
+        .where(eq(connections.id, connectionId));
+      return { people, status: row?.status };
+    };
+    const asked = asAsked["google-directory"];
+    const refused = { people: "directory.inactive", status: "needs_reauth" };
+    expect({
+      asAsked: await renewedWith(asked),
+      gained: await renewedWith(`${asked} ${mailToo["google-directory"]}`),
+      lost: await renewedWith(
+        asked.replace(
+          " https://www.googleapis.com/auth/admin.directory.user.readonly",
+          ""
+        )
+      ),
+      unsaid: await renewedWith(null),
+      // Google names email and profile by their full URIs.
+      signInLeftOut: await renewedWith(
+        "https://www.googleapis.com/auth/admin.directory.user.readonly"
+      ),
+    }).toStrictEqual({
+      asAsked: { people: "ok", status: "active" },
+      gained: refused,
+      lost: refused,
+      unsaid: refused,
+      signInLeftOut: { people: "ok", status: "active" },
+    });
+  });
+
   it("of Graph answers people as a roster needs them, and nothing more: planted names cut, guests, disabled accounts and IDs that aren't Entra's left out", async () => {
     const connectionId = await connectDirectory(someone("admin"));
     const lead = guid();
@@ -542,9 +598,8 @@ describe("a directory read", () => {
     });
   });
 
-  it("of Entra's deleted users answers their IDs alone, lower case, guests and IDs that aren't Entra's left out, and is no Google connection's", async () => {
+  it("of Entra's deleted users answers their IDs alone, lower case, guests and IDs that aren't Entra's left out", async () => {
     const microsoft = await connectDirectory(someone("admin"));
-    const google = await connectDirectory(someone("admin"), "google-directory");
     const left = guid();
     directories.deleted = [
       { id: left.toUpperCase(), userType: "Member" },
@@ -554,9 +609,6 @@ describe("a directory read", () => {
     const answer = await readDeleted(microsoft);
     const [sent] = internet.sent;
     const asked = new URL(`https://${sent?.host ?? ""}${sent?.path ?? ""}`);
-    const requests = internet.sent.length;
-    // A Google connection's token is never sent to Graph.
-    const ofGoogle = await codeOf(readDeleted(google));
     directories.deleted = [];
 
     expect({
@@ -564,15 +616,68 @@ describe("a directory read", () => {
       host: sent?.host,
       path: asked.pathname,
       select: asked.searchParams.get("$select"),
-      ofGoogle,
-      sentForGoogle: internet.sent.length - requests,
     }).toStrictEqual({
       answer: { tenant: acmeTenant, deleted: [left], next: null },
       host: "graph.microsoft.com",
       path: "/v1.0/directory/deletedItems/microsoft.graph.user",
       select: "id,userType",
-      ofGoogle: "directory.not_found",
-      sentForGoogle: 0,
+    });
+  });
+
+  it("of Google's deleted users answers their IDs alone, every page, from Google's own users endpoint", async () => {
+    const google = await connectDirectory(someone("admin"), "google-directory");
+    const deleted = Array.from({ length: 150 }, () => googleUser());
+    directories.googleDeleted = [...deleted, googleUser({ id: "not-google" })];
+    const first = await readDeleted(google);
+    const [sent] = internet.sent;
+    const asked = new URL(`https://${sent?.host ?? ""}${sent?.path ?? ""}`);
+    const second = await exports.default.readDeletedDirectoryUsers({
+      connectionId: google,
+      cursor: first.next,
+    });
+    directories.googleDeleted = [];
+
+    expect({
+      host: sent?.host,
+      path: asked.pathname,
+      customer: asked.searchParams.get("customer"),
+      showDeleted: asked.searchParams.get("showDeleted"),
+      fields: asked.searchParams.get("fields"),
+      tenant: first.tenant,
+      ids: [...first.deleted, ...second.deleted],
+      last: second.next,
+    }).toStrictEqual({
+      host: "admin.googleapis.com",
+      path: "/admin/directory/v1/users",
+      customer: "my_customer",
+      showDeleted: "true",
+      fields: "nextPageToken,users(id)",
+      tenant: acmeDomain,
+      ids: deleted.map(({ id }) => id),
+      last: null,
+    });
+  });
+
+  it("of Google's directory says an admin must connect it when Google refuses a member's token, and Entra's as before", async () => {
+    const google = await connectDirectory(someone("admin"), "google-directory");
+    const microsoft = await connectDirectory(someone("admin"));
+    const refusing = async (connectionId: string, status: number) => {
+      directories.answer = answeredWith(status);
+      try {
+        return await codeOf(read(connectionId));
+      } finally {
+        delete directories.answer;
+      }
+    };
+
+    expect({
+      googleForbidden: await refusing(google, 403),
+      googleUnauthorized: await refusing(google, 401),
+      entraForbidden: await refusing(microsoft, 403),
+    }).toStrictEqual({
+      googleForbidden: "directory.not_admin",
+      googleUnauthorized: "directory.inactive",
+      entraForbidden: "directory.inactive",
     });
   });
 

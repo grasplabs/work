@@ -46,6 +46,8 @@ import m0043 from './0043_team_work_from_the_first_teller.sql';
 import m0044 from './0044_drawings_by_work.sql';
 import m0045 from './0045_cooing_fabian_cortez.sql';
 import m0046 from './0046_team_minted.sql';
+import m0047 from './0047_spicy_typhoid_mary.sql';
+import m0048 from './0048_married_havok.sql';
 
   export default {
     journal,
@@ -96,7 +98,9 @@ m0042,
 m0043,
 m0044,
 m0045,
-m0046
+m0046,
+m0047,
+m0048
     }
   }
   

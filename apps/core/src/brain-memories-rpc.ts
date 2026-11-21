@@ -46,7 +46,7 @@ import type { SessionCheck } from "./session-check.ts";
 // notice undoes one the agent saved for them (`forget`), and the Brain's
 // Memories page (GRA-1746) lists the entities they may see, what the
 // Brain remembers about one, history included, and the facts sources
-// disagree on, and takes their confirmation or correction, and their
+// disagree on, and takes their settling of one or correction, and their
 // share of a memory of their own with a team or the company, the list of
 // what they shared, and its take-back (GRA-1815): the one way a memory
 // widens, the person's own act on what they were shown. Each call acts

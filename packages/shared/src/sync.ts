@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import { connectionPersonSchema } from "./connect.ts";
+import {
+  connectionBrainAudienceSchema,
+  connectionPersonSchema,
+} from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 
 // Native sync (GRA-1758, GRA-1759): what one synced item is, whichever
@@ -308,6 +311,12 @@ export const pickSyncPlacesSchema = z.strictObject({
    */
   from: syncPicksSchema,
   places: syncPicksSchema,
+  /**
+   * The connection's Brain audience the save was made under, as core
+   * holds it: who will read everything in the places picked, whatever
+   * the source's permissions (GRA-2207). For the save's audit event.
+   */
+  audience: connectionBrainAudienceSchema,
 });
 export type PickSyncPlaces = z.input<typeof pickSyncPlacesSchema>;
 export const syncErrors = defineErrorFamily({
@@ -319,6 +328,8 @@ export const syncErrors = defineErrorFamily({
     "That place isn't the connection's own account or a place picked on it.",
   "sync.picks_changed":
     "The places picked were changed in the meantime: look at them again.",
+  "sync.unacknowledged":
+    "Confirm who will read everything in the places you pick before saving them.",
   "sync.not_shared":
     "Places are picked only on a connection shared with the company.",
   "sync.restart":

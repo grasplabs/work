@@ -6,11 +6,10 @@
 // or a generic argument, and an undeclared one isn't a member; the
 // platform's functions are members of their namespace
 // (`ctx.grasp.statistics.read(args)`), typed by what `permission.grasp()`
-// declares of them; `ctx.ai`, `ctx.brain`,
-// `ctx.grasp` and `ctx.guests` are there only for an action of an App
-// that declares them. This file is type-checked by
-// `vp check` and never run: every `@ts-expect-error` below must stay an
-// error.
+// declares of them; `ctx.ai`, `ctx.brain` and `ctx.grasp` are there
+// only for an action of an App that declares them. This file is
+// type-checked by `vp check` and never run: every `@ts-expect-error`
+// below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
 import { defineApp, permission } from "../src/index.ts";
@@ -280,10 +279,9 @@ expectTypeOf(
   })
 ).resolves.toEqualTypeOf<{ tags: string[] }>();
 
-// The Brain and guest chats: the operations each declares, and no other.
+// The Brain: the operations it declares, and no other.
 const brain = permission.brain({ operations: ["recall"] });
-const guests = permission.guests({ operations: ["list", "revoke"] });
-declare const brainCtx: ActionCtx<typeof brain | typeof guests>;
+declare const brainCtx: ActionCtx<typeof brain>;
 expectTypeOf(
   brainCtx.brain.recall({ question: "leave", budget: { tokens: 800 } })
 ).resolves.toEqualTypeOf<BrainPack>();
@@ -334,14 +332,15 @@ await entitiesCtx.brain.entities.get({
 });
 expectTypeOf(entitiesCtx.brain).not.toHaveProperty("recall");
 expectTypeOf(entitiesCtx.brain.entities).not.toHaveProperty("find");
-// Only the operations each declares.
-await brainCtx.guests.revoke("chat");
-expectTypeOf(brainCtx.guests).not.toHaveProperty("invite");
 
-// An action that lists none of them reaches none of them.
+// An action that lists none of them reaches none of them, save the
+// Brain's reads, which every App has (GRA-2218).
 declare const bare: ActionCtx;
 expectTypeOf(bare).not.toHaveProperty("ai");
-expectTypeOf(bare).not.toHaveProperty("brain");
-expectTypeOf(bare).not.toHaveProperty("guests");
+expectTypeOf(bare.brain).toHaveProperty("recall");
+expectTypeOf(bare.brain.skills).toHaveProperty("select");
+expectTypeOf(bare.brain.entities).toHaveProperty("find");
+expectTypeOf(bare.brain).not.toHaveProperty("remember");
+expectTypeOf(bare.brain).not.toHaveProperty("forget");
 expectTypeOf(bare.connections).not.toHaveProperty("mail");
 expectTypeOf(bare).not.toHaveProperty("grasp");

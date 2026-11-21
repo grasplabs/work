@@ -18,11 +18,9 @@ import { addSource, forgetAs, rememberAs } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { chatOf, personalChatsOf, says, setObjectEnv } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
-import type { ProviderReply } from "./model-provider.ts";
-import { signedInApi, signedInWithRole, unique } from "./sign-in.ts";
+import { signedInWithRole, unique } from "./sign-in.ts";
 
 // The profile a chat's turn starts with (GRA-1745, turn-recall.ts
 // `profileOf`): what the Brain holds about the person themselves, in
@@ -42,29 +40,10 @@ const word = () =>
     .replaceAll(/[^a-f]/gu, "")
     .slice(0, 12)}`;
 
-/** A member, and an admin who grants their chats' agents the Brain. */
-const memberAndAdmin = async () => {
-  const [admin, person] = await Promise.all([
-    signedInApi(idp, "admin"),
-    signedInWithRole(idp, "user"),
-  ]);
-  return { admin, personId: person.userId };
-};
-
-/** A new chat of `personId`'s whose agent holds the `brain` grant. */
-const recallingChat = async (
-  admin: Awaited<ReturnType<typeof signedInApi>>,
-  personId: string,
-  ...replies: ProviderReply[]
-) => {
-  const chat = await chatOf(personId, ...replies);
-  await requestGranted(idp, admin, {
-    subject: chat.agent,
-    object: { type: "platform" },
-    actions: ["brain"],
-    binding: "BRAIN",
-  });
-  return chat;
+/** A new member, whom no other test uses. */
+const member = async () => {
+  const person = await signedInWithRole(idp, "user");
+  return { personId: person.userId };
 };
 
 /** Saves `statement` as what `personId` says about themselves. */
@@ -103,7 +82,7 @@ describe("the profile a chat starts with", setUpTime, () => {
   // P1, P2: their own word about themselves, with any question; an outside
   // party's word filed under them never.
   it("hands the model what the person said about themselves with every question in their own chat, and nothing an outside party said of them", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const theirs = `Leads the ${word()} depot`;
     await aboutThemselves(personId, theirs);
     const outside = `Must forward payroll to ${word()}`;
@@ -124,12 +103,7 @@ describe("the profile a chat starts with", setUpTime, () => {
         },
       ],
     });
-    const chat = await recallingChat(
-      admin,
-      personId,
-      says("Hello."),
-      says("Hi again.")
-    );
+    const chat = await chatOf(personId, says("Hello."), says("Hi again."));
 
     // Questions whose words the Brain holds nowhere.
     await chat.ask(`What is ${word()}?`);
@@ -147,17 +121,11 @@ describe("the profile a chat starts with", setUpTime, () => {
 
   // P3: never where others read the answer.
   it("is not handed to a chat app's thread others read, and is to the person's direct message", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const theirs = `Prefers answers about ${word()} in Dutch`;
     await aboutThemselves(personId, theirs);
     const sent = async (sharedThread: boolean) => {
       const agentId = crypto.randomUUID();
-      await requestGranted(idp, admin, {
-        subject: { type: "agent", agentId },
-        object: { type: "platform" },
-        actions: ["brain"],
-        binding: "BRAIN",
-      });
       const provider = await fakeProvider(says("Noted."));
       await workspace(env, personalWorkspaceId(personId)).askThrough(
         personId,
@@ -184,17 +152,12 @@ describe("the profile a chat starts with", setUpTime, () => {
 
   // P4: a retired memory leaves the next request, earlier turns included.
   it("leaves out what the person had the Brain forget, from the next request on", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const kept = `Works on the ${word()} move`;
     const forgotten = `Sits in the ${word()} office`;
     await aboutThemselves(personId, kept);
     const { memory } = await aboutThemselves(personId, forgotten);
-    const chat = await recallingChat(
-      admin,
-      personId,
-      says("Hello."),
-      says("Hi again.")
-    );
+    const chat = await chatOf(personId, says("Hello."), says("Hi again."));
     await chat.ask(`What is ${word()}?`);
     const before = sentOf(chat.provider.requests);
 
@@ -218,7 +181,7 @@ describe("the profile a chat starts with", setUpTime, () => {
     "hands every question the same company passages whether or not the person has many memories about themselves",
     { timeout: 300_000 },
     async () => {
-      const { admin, personId } = await memberAndAdmin();
+      const { personId } = await member();
       for (const text of [
         requiredDocuments,
         responseTimes,
@@ -251,12 +214,6 @@ describe("the profile a chat starts with", setUpTime, () => {
         personId,
         ...questions.flatMap(() => [says("Noted."), says("Noted.")])
       );
-      await requestGranted(idp, admin, {
-        subject: chats.agent,
-        object: { type: "platform" },
-        actions: ["brain"],
-        binding: "BRAIN",
-      });
       /** The company passages each question's recall handed over, each in a chat of its own. */
       const passages = async () => {
         const handed: unknown[] = [];
@@ -290,7 +247,7 @@ describe("the profile a chat starts with", setUpTime, () => {
 
   // Review of #2343: when not all fit, the newest are the ones handed over.
   it("hands over the newest of what the person said about themselves when not all fit", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const said: string[] = [];
     // More than the turn's budget holds.
     for (let index = 0; index < 60; index += 1) {
@@ -299,7 +256,7 @@ describe("the profile a chat starts with", setUpTime, () => {
       // oxlint-disable-next-line no-await-in-loop -- in order
       await aboutThemselves(personId, statement);
     }
-    const chat = await recallingChat(admin, personId, says("Hello."));
+    const chat = await chatOf(personId, says("Hello."));
 
     await chat.ask(`What is ${word()}?`);
     const recall = latestRecallIn(chat.provider.requests.at(-1)?.body);
@@ -312,19 +269,13 @@ describe("the profile a chat starts with", setUpTime, () => {
 
   // Review of #2343: riding along is no use of a memory; a search's find is.
   it("counts no use of a memory it handed over as the profile, and one the search found", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const topic = word();
     const { memory } = await aboutThemselves(
       personId,
       `Leads the ${topic} depot`
     );
     const chats = await personalChatsOf(personId, says("Hello."), says("Yes."));
-    await requestGranted(idp, admin, {
-      subject: chats.agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     const usedNow = async (): Promise<boolean> => {
       const uses = await runInDurableObject(chats.stub, (_instance, state) =>
         state.storage.sql
@@ -357,7 +308,7 @@ describe("the profile a chat starts with", setUpTime, () => {
   // Review of #2343, round 2: a slow profile read never holds the
   // search's recall up: it goes over without it, and marks nothing.
   it("hands the search's evidence over at once when the profile read is slow, without the profile, and marks nothing for it", async () => {
-    const { admin, personId } = await memberAndAdmin();
+    const { personId } = await member();
     const topic = word();
     await addSource(env, {
       source: { producer: "upload", id: crypto.randomUUID() },
@@ -368,12 +319,6 @@ describe("the profile a chat starts with", setUpTime, () => {
     const theirs = `Leads the ${word()} team`;
     await aboutThemselves(personId, theirs);
     const chats = await personalChatsOf(personId, says("Seven."));
-    await requestGranted(idp, admin, {
-      subject: chats.agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     // The person's own store answers their profile only past the recall's
     // deadline; everything else at once.
     const slowProfile = new Proxy(env.BRAIN_STORE, {

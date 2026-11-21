@@ -38,7 +38,7 @@ import type { AppCall } from "./resource-calls.ts";
 //   stops a call already running. An App starts with no grant at all.
 // - Reaching outside systems through the App. A workflow calls an App's
 //   queries and mutations, never its actions: only an action reaches
-//   connections, models, the Brain or guest chats (the SDK's
+//   connections, models or the Brain (the SDK's
 //   `isActionPermission`), and a workflow's own calls of those are
 //   approved per version, as catalog bindings. A mutation may still
 //   start the workflows the App holds a grant to start, or notify

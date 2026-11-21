@@ -196,8 +196,11 @@ describe("Make something", { timeout: 120_000 }, () => {
     await make(builder, chat.id, "Make me an app for the month-end close.");
     const messages = await messagesOf(stub, chat.id, builder.userId);
     const last = messages.findLast(({ role }) => role === "assistant");
+    // The code step's result, never the recall's before the question.
     const results = messages.flatMap((message) =>
-      message.role === "result" ? [message] : []
+      message.role === "result" && !message.callId.startsWith("recall_")
+        ? [message]
+        : []
     );
     const { title } = await builder.api.chats.summary(chat.id);
 
@@ -289,7 +292,14 @@ describe("Make something", { timeout: 120_000 }, () => {
       // What the person was left to answer: the questions the tool took,
       // in the reply after the refused one.
       waiting: (() => {
-        const reply = messages.filter(({ role }) => role === "assistant").at(1);
+        // The replies' words, never the recall before each question.
+        const reply = messages
+          .filter(
+            (message) =>
+              message.role === "assistant" &&
+              !message.tools.some(({ callId }) => callId.startsWith("recall_"))
+          )
+          .at(1);
         return reply?.role === "assistant"
           ? reply.asked?.questions.length
           : undefined;

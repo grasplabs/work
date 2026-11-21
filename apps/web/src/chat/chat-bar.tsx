@@ -85,7 +85,6 @@ export const ChatBar = () => {
         describedBy={undefined}
         editor={editor}
         label={words.title}
-        maxLength={undefined}
         mentions={composer.mentions}
         onBackspaceEmpty={undefined}
         onMentions={(mentions) => {

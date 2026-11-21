@@ -5,7 +5,6 @@ import {
   call,
   valueOf,
   codeOf,
-  idSchema,
   savedSchema,
   interview,
   draftsOf,
@@ -19,23 +18,18 @@ import {
   memberIn,
   connected,
 } from "./intake-harness.ts";
-import type { Person } from "./intake-harness.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // The intake, the built-in App (apps/core/blueprints/intake/): drafts of
-// a source and its statements, typed in or taken out of notes or a
-// stakeholder's chat by a model, reviewed, and saved as a source and its
-// statements, all in the App's own store, which only its builders reach.
-// What can go wrong, tried below: a draft saved without anyone reviewing
-// it, saved twice, or saved halfway; someone who isn't one of the App's
-// builders reading or writing drafts, or inviting, listing or reading
-// stakeholder chats through its actions; edits written over someone
-// else's; a draft that doesn't fit kept or saved; and a source taken from
-// a stakeholder's chat saved without the mark of their untrusted words,
-// or one typed in saved with it.
+// a source and its statements, typed in or taken out of notes by a model,
+// reviewed, and saved as a source and its statements, all in the App's
+// own store, which only its builders reach. What can go wrong, tried
+// below: a draft saved without anyone reviewing it, saved twice, or saved
+// halfway; someone who isn't one of the App's builders reading or writing
+// drafts; edits written over someone else's; and a draft that doesn't fit
+// kept or saved.
 //
-// Here: drafts and saving them; reading notes in intake-notes.test.ts,
-// stakeholder chats in intake-chats.test.ts.
+// Here: drafts and saving them; reading notes in intake-notes.test.ts.
 
 const idp = mockIdp();
 const memberOf = memberIn(idp);
@@ -100,7 +94,6 @@ describe("the intake", { timeout: 60_000 }, () => {
       listedSource: listedSource && {
         id: listedSource.id,
         title: listedSource.title,
-        guest: listedSource.guest,
       },
       source: {
         title: source.title,
@@ -108,7 +101,6 @@ describe("the intake", { timeout: 60_000 }, () => {
         date: source.date,
         from: source.from,
         notes: source.notes,
-        guest: source.guest,
       },
       statements: await statementsOf(admin, app, saved.source),
       draft: await draftOf(admin, app, id),
@@ -135,14 +127,13 @@ describe("the intake", { timeout: 60_000 }, () => {
       before: [],
       saved: 1,
       // Listed without its notes.
-      listedSource: { id: saved.source, title, guest: false },
+      listedSource: { id: saved.source, title },
       source: {
         title,
         medium: "interview",
         date: "2026-09-21",
         from: "Anna, controller",
         notes: "Edited notes.",
-        guest: false,
       },
       statements: [
         {
@@ -151,7 +142,6 @@ describe("the intake", { timeout: 60_000 }, () => {
           quote: "",
           source: saved.source,
           date: "2026-09-21",
-          guest: false,
         },
       ],
       // Saved, the draft is gone.
@@ -186,7 +176,6 @@ describe("the intake", { timeout: 60_000 }, () => {
         await call(admin, app, "drafts.propose", "mutation", {
           ...draft,
           source: { ...draft.source, date: "2026-13-01" },
-          guest: false,
         })
       ),
       keptDate: await kept({ source: { ...draft.source, date: "21-09-2026" } }),
@@ -276,15 +265,13 @@ describe("the intake", { timeout: 60_000 }, () => {
     });
   });
 
-  it("is only for the App's builders: no one else reads or writes a draft, or reaches a chat through it", async () => {
+  it("is only for the App's builders: no one else reads or writes a draft", async () => {
     const admin = await signedInApi(idp, "admin");
-    const app = await copyOf(admin, { guests: true });
+    const app = await copyOf(admin);
     const draft = interview(`Theirs ${unique()}`);
     const id = await created(admin, app, draft);
     const member = await memberOf(admin, app, "user", "user");
     const builder = await memberOf(admin, app, "builder", "builder");
-    const overviewOf = async (person: Person) =>
-      valueOf(await call(person, app, "chats.overview", "action"));
     const by = async (
       path: string,
       kind: "query" | "mutation" | "action",
@@ -297,10 +284,7 @@ describe("the intake", { timeout: 60_000 }, () => {
         get: await by("drafts.get", "query", { id }),
         saved: await by("drafts.saved", "query"),
         create: await by("drafts.create", "mutation", draft),
-        propose: await by("drafts.propose", "mutation", {
-          ...draft,
-          guest: false,
-        }),
+        propose: await by("drafts.propose", "mutation", draft),
         keep: await by("drafts.keep", "mutation", {
           id,
           ...draft,
@@ -312,15 +296,10 @@ describe("the intake", { timeout: 60_000 }, () => {
           id,
           ...draft,
         }),
-        overview: await overviewOf(member),
-        invite: await by("chats.invite", "action", { name: "Ann" }),
-        revoke: await by("chats.revoke", "action", { id: "chat" }),
-        notes: await by("chats.notes", "action", { chat: "chat" }),
+        reviewer: await by("drafts.reviewer", "query"),
       },
-      // Nobody was invited for them.
-      chats: await overviewOf(admin),
       builder: {
-        overview: await overviewOf(builder),
+        reviewer: valueOf(await call(builder, app, "drafts.reviewer", "query")),
         drafts: await draftsOf(builder, app).then((drafts) =>
           drafts.map(({ id: shown }) => shown)
         ),
@@ -338,13 +317,9 @@ describe("the intake", { timeout: 60_000 }, () => {
         discard: "data.write_denied",
         // It reads the draft first.
         save: "data.access_denied",
-        overview: { writable: false, chats: null },
-        invite: "data.access_denied",
-        revoke: "data.access_denied",
-        notes: "data.access_denied",
+        reviewer: "data.access_denied",
       },
-      chats: { writable: true, chats: [] },
-      builder: { overview: { writable: true, chats: [] }, drafts: [id] },
+      builder: { reviewer: true, drafts: [id] },
       draft: id,
     });
   });
@@ -379,55 +354,5 @@ describe("the intake", { timeout: 60_000 }, () => {
         notes: 30_000,
       }
     );
-  });
-
-  it("marks a source a stakeholder's only when it saves their draft, however it was edited", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const app = await copyOf(admin);
-    const draft = interview(`Marked ${unique()}`);
-    const theirs = idSchema.parse(
-      valueOf(
-        await call(admin, app, "drafts.propose", "mutation", {
-          ...draft,
-          guest: true,
-        })
-      )
-    );
-    const ours = await created(admin, app, draft);
-    // Edited before it is saved: still theirs.
-    valueOf(
-      await call(admin, app, "drafts.keep", "mutation", {
-        id: theirs,
-        ...draft,
-        source: { ...draft.source, medium: "chat" },
-      })
-    );
-    const savedOf = async (id: string) =>
-      savedSchema.parse(
-        valueOf(
-          await call(admin, app, "drafts.save", "mutation", {
-            id,
-            ...draft,
-          })
-        )
-      );
-    const marks = async ({ source }: { source: string }) => {
-      const sources = await sourcesOf(admin, app);
-      return {
-        source: sources.find(({ id }) => id === source)?.guest,
-        statements: await statementsOf(admin, app, source).then((found) =>
-          found.map(({ guest }) => guest)
-        ),
-      };
-    };
-    const savedTheirs = await savedOf(theirs);
-    const savedOurs = await savedOf(ours);
-    expect({
-      theirs: await marks(savedTheirs),
-      ours: await marks(savedOurs),
-    }).toStrictEqual({
-      theirs: { source: true, statements: [true, true] },
-      ours: { source: false, statements: [false, false] },
-    });
   });
 });

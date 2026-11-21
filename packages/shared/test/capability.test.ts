@@ -232,6 +232,33 @@ describe("capabilities", () => {
     ).resolves.toBe("scope");
   });
 
+  it("with no grant, are accepted only for work that may only read", async () => {
+    const grantless: CapabilityScope = {
+      ...scope,
+      idempotencyKey: undefined,
+      origin: { ...scope.origin, permissionId: null },
+    };
+    const verified = async (readOnly: boolean) =>
+      await refusal(
+        async () =>
+          await verifyCapability(
+            [key],
+            await signCapability(
+              key,
+              authority,
+              { ...grantless, readOnly },
+              now
+            ),
+            grantless,
+            now
+          )
+      );
+    expect({
+      reads: await verified(true),
+      mayWrite: await verified(false),
+    }).toStrictEqual({ reads: "none", mayWrite: "scope" });
+  });
+
   it("are each unique", async () => {
     const tokens = await Promise.all(
       [1, 2, 3].map(

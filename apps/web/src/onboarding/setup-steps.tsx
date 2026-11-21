@@ -617,6 +617,26 @@ const companyStep = "/setup?step=company";
 type DirectoryProblem = "large" | "empty" | "inactive" | "failed";
 
 /**
+ * What core's refusal of a directory read means for the company step: too
+ * large, a connection an admin's account must make again ("inactive",
+ * whose sentence asks for one), or a failure of the moment.
+ */
+export const directoryProblemOf = (
+  error: unknown
+): Exclude<DirectoryProblem, "empty"> => {
+  const code = directoryErrors.codeOf(error);
+  if (code === "directory.too_large") {
+    return "large";
+  }
+  // Each asks for the directory connected again by an admin's account.
+  return code === "directory.inactive" ||
+    code === "directory.not_admin" ||
+    code === "directory.not_connected"
+    ? "inactive"
+    : "failed";
+};
+
+/**
  * Who works where, from the connected directory, as a roster with what the
  * admin set on the one saved before kept: the same path a staff list
  * takes, so everyone keeps their id and their link. Or why it could not be.
@@ -640,13 +660,7 @@ const readDirectoryRoster = async (
     if (error instanceof StaffListError) {
       return error.reason === "empty" ? "empty" : "large";
     }
-    const code = directoryErrors.codeOf(error);
-    if (code === "directory.too_large") {
-      return "large";
-    }
-    return code === "directory.inactive" || code === "directory.not_connected"
-      ? "inactive"
-      : "failed";
+    return directoryProblemOf(error);
   }
 };
 
@@ -1551,9 +1565,10 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
       <Onward>
         <div className="setup-org-list flex w-full flex-col overflow-auto rounded-xl border text-left">
           {teams.map(({ team, people }) => {
+            // Someone erased stays in their team, without a name.
             const options = people.map((person) => ({
               value: person.id,
-              label: person.name,
+              label: person.name === "" ? t`Erased` : person.name,
             }));
             const { name } = team;
             const count = people.length;

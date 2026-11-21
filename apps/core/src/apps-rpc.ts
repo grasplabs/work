@@ -1,9 +1,5 @@
 import type { AppReview } from "@grasp-os/shared/app-review";
 import type {
-  AppVisitorEntry,
-  AppVisitorGrants,
-} from "@grasp-os/shared/app-visitors";
-import type {
   App,
   AppAnswerer,
   AppChanges,
@@ -32,11 +28,6 @@ import { defineDraft, draftDataModel, reviewChanges } from "./app-review.ts";
 import { resetAppData } from "./app-schema.ts";
 import { appAnswerers, updateApp } from "./app-settings.ts";
 import { setArchived } from "./app-status.ts";
-import {
-  appVisitorGrantsOf,
-  setAppVisitorGrants,
-} from "./app-visitor-grants.ts";
-import { appVisitors, setAppVisitors } from "./app-visitors.ts";
 import { AppWebhooksRpc } from "./app-webhooks.ts";
 import {
   appContents,
@@ -196,40 +187,6 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await setAppLink(this.#env, by, app, link)
-    );
-  }
-
-  async visitors(app: string): Promise<AppVisitorEntry[]> {
-    return await withPerson(
-      this.#check,
-      async (by) => await appVisitors(this.#env, by, app)
-    );
-  }
-
-  async setVisitors(
-    app: string,
-    list: AppVisitorEntry[]
-  ): Promise<AppVisitorEntry[]> {
-    return await withPerson(
-      this.#check,
-      async (by) => await setAppVisitors(this.#env, by, app, list)
-    );
-  }
-
-  async visitorGrants(app: string): Promise<AppVisitorGrants> {
-    return await withPerson(
-      this.#check,
-      async (by) => await appVisitorGrantsOf(this.#env, by, app)
-    );
-  }
-
-  async setVisitorGrants(
-    app: string,
-    functions: string[]
-  ): Promise<AppVisitorGrants> {
-    return await withPerson(
-      this.#check,
-      async (by) => await setAppVisitorGrants(this.#env, by, app, functions)
     );
   }
 

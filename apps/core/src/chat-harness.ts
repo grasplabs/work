@@ -42,7 +42,7 @@ import { z } from "zod";
 import { apisFor } from "./agent-apis.ts";
 import { turnCheck } from "./agent-builds.ts";
 import { isMessage, showThinkingName } from "./agent-messages.ts";
-import { rememberTool } from "./agent-remember.ts";
+import { lastWordsOf, rememberTool } from "./agent-remember.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
 import { showThinking } from "./agent-thinking.ts";
@@ -141,8 +141,6 @@ export interface TurnRequest {
    * a chat app, in a turn they started (workspace.ts, `answersAlone`).
    */
   personal: boolean;
-  /** Whether the chat's agent holds the brain permission. */
-  readsBrain: boolean;
   context: TurnContext;
   /** What the turn's capture for the Brain records besides how it ended. */
   capture: {
@@ -605,6 +603,13 @@ export class ChatHarness {
   #active: string | undefined;
   /** The rebase under way (`rebase`): a note waits for it. */
   #rebasing: Promise<void> | undefined;
+  /**
+   * The agent's last words before the turn's question, from the context
+   * as rebased for it (`#submit`): what its `remember` checks a short
+   * answer against (agent-remember.ts), never what the chat may no longer
+   * read. None for a turn a restart set up again.
+   */
+  #answering: string | undefined;
   /** Whether pi runs the agent now (`pi.live.run`). */
   #running = false;
   /** The answer streaming in, as `pi.live` has it now. */
@@ -1067,15 +1072,17 @@ export class ChatHarness {
       turn.answerId = null;
       turn.captureOwed = false;
     }, context);
+    this.#answering = undefined;
     const turn = await this.#setUp(request);
     await this.#rebaseIfNeeded(request);
+    // Read from the context as rebased, as the turn's model is given it.
+    const { messages } = await this.#conversation.context(context);
+    this.#answering = lastWordsOf(messages);
     // At least once: should the object reset before the submit below, the
     // turn asked again sets up and recalls again, a second recall run
     // audited as the first was. Who reads the answer decides what it may
     // hand over (turn-recall.ts).
-    const recall = request.readsBrain
-      ? await this.#recall(turn, request)
-      : undefined;
+    const recall = await this.#recall(turn, request);
     try {
       return await this.#conversation.submit(
         {
@@ -1361,7 +1368,7 @@ export class ChatHarness {
     /** The lines the turn's runs sent the Workspace, one after another. */
     let logged: Promise<void> = Promise.resolve();
     const turn: CodeTurn = {
-      apis: apisFor(request.shared, request.readsBrain),
+      apis: apisFor(request.shared),
       scope,
       runs: {
         open: async (opening) =>
@@ -1408,18 +1415,27 @@ export class ChatHarness {
       // each of which shows a notice of every memory with its Undo
       // (agent-remember.ts; channels/remembered.ts). What they said there
       // is the only word of theirs it may keep. Never a chat others share,
-      // nor a turn nobody started (a wake), which has no word of theirs.
-      ...(request.personal
-        ? { remember: rememberTool(env, scope, request.question.text) }
-        : {}),
-      // Only in a person's own chat, by an agent that may read the brain.
-      ...(request.readsBrain && !request.shared
+      // nor a turn nobody started (a wake), which has no word of theirs,
+      // nor a next agent's turn of a question addressed to several
+      // (`followUp`), which starts from core's words, never theirs.
+      ...(request.personal && request.question.followUp !== true
         ? {
-            thinking: showThinking(
-              async () => await brainOf(env, scope.personId)
+            remember: rememberTool(
+              env,
+              scope,
+              request.question.text,
+              () => this.#answering
             ),
           }
         : {}),
+      // Only in a person's own chat.
+      ...(request.shared
+        ? {}
+        : {
+            thinking: showThinking(
+              async () => await brainOf(env, scope.personId)
+            ),
+          }),
       withheld: async () => {
         const checked = await this.#guard(scope);
         this.#sources = checked.sources;

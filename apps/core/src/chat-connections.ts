@@ -75,8 +75,6 @@ import { mustConfirmForOthers } from "./private-reads.ts";
 //   grants or revokes a personal one.
 // - The agent grants itself: its code reaches only its env's stubs; the
 //   decision is on `/rpc` alone, behind the person's session.
-// - A guest chat: guests have no agent, no code and no session; nothing
-//   here is in their reach.
 // - A card replayed or forged: a decision names a request by ID only, and
 //   only a waiting request of that very chat and person changes, in one
 //   conditional update; anything else is refused as if there were none,
@@ -191,7 +189,7 @@ const actionsOf = async (
  */
 const scopePerson = async (
   env: Env,
-  scope: AgentScope
+  scope: Pick<AgentScope, "personId">
 ): Promise<ConnectionPerson> => {
   const [member, user] = await Promise.all([
     memberOf(env.DB, scope.personId),
@@ -205,6 +203,23 @@ const scopePerson = async (
     throw permissionErrors.create("permission.person_inactive");
   }
   return await personOf(env, { ...member, email: user.email });
+};
+
+/**
+ * The person's own connections and the shared ones that need someone to
+ * sign in again (`needs_reauth`, GRA-2227), as connect lists them for the
+ * person, of entries an admin hasn't hidden (`offeredAmong`): those that
+ * can be connected again. Never an outside API, which the chat never
+ * calls.
+ */
+export const waitingConnections = async (
+  env: Env,
+  scope: Pick<AgentScope, "personId">
+): Promise<ConnectionSummary[]> => {
+  const listed = await env.CONNECT.listConnections(
+    await scopePerson(env, scope)
+  );
+  return await offeredAmong(env, listed, "needs_reauth");
 };
 
 /**
@@ -230,7 +245,7 @@ const waitingChanged = async (env: Env, scope: AgentScope): Promise<void> => {
  */
 export const askableConnections = async (
   env: Env,
-  scope: AgentScope
+  scope: Pick<AgentScope, "personId">
 ): Promise<AskableConnection[]> => {
   const person = await scopePerson(env, scope);
   // Connect asked once: what it lists is both what the chat is offered

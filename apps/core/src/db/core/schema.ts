@@ -5,6 +5,16 @@ import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { ChatFileType } from "@grasp-os/shared/chat";
 import type { DependencyFinding } from "@grasp-os/shared/dependencies";
 import { modelRoles } from "@grasp-os/shared/deployment-config";
+import type {
+  DirectoryDeletedFailure,
+  DirectoryProvider,
+  DirectoryReadFailure,
+} from "@grasp-os/shared/directory";
+import {
+  directoryGroupHelds,
+  directoryGroupKinds,
+  directoryGroupMembersFrom,
+} from "@grasp-os/shared/directory";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
 import type {
@@ -25,6 +35,7 @@ import type { RunFailure } from "@grasp-os/shared/workflows";
 import { sql } from "drizzle-orm";
 import {
   check,
+  foreignKey,
   index,
   integer,
   primaryKey,
@@ -71,6 +82,12 @@ export const sessions = sqliteTable(
      * nothing else of Grasp, and the gate's opening ends it.
      */
     interview: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * A guest's session (roles.ts `guestRole`), made by a code mailed to
+     * them (auth/guest-codes.ts): it tells their browser they are one.
+     * What they reach is decided by their membership, never by this.
+     */
+    guest: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("sessions_user_id_idx").on(table.userId)]
 );
@@ -135,6 +152,12 @@ export const accounts = sqliteTable(
     index("accounts_provider_oid_lower_idx").on(
       table.providerId,
       sql`lower(${table.oid})`
+    ),
+    // Google's directory people by the sign-in's own ID (its `sub`), as
+    // directory-ties.ts compares it: through `lower()`, like Entra's.
+    index("accounts_provider_account_lower_idx").on(
+      table.providerId,
+      sql`lower(${table.accountId})`
     ),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
@@ -703,6 +726,93 @@ export const teamPins = sqliteTable(
 );
 
 /**
+ * The directory's groups an admin mapped to a members' team (GRA-2056,
+ * directory-groups.ts): the daily read places each group's members in its
+ * team. One team per group, by the group's Entra object ID, so a rename
+ * changes only the name kept here. Goes with the team. Holds no person:
+ * who mapped it is in the audit log.
+ */
+export const directoryGroupTeams = sqliteTable(
+  "directory_group_teams",
+  {
+    /** The directory read (`microsoft-directory`). */
+    provider: text().notNull(),
+    /** The group's Entra object ID, lower case. */
+    groupId: text("group_id").notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    /** The group's name, kind and who decides its members, as Microsoft last answered. */
+    name: text().notNull(),
+    kind: text({ enum: directoryGroupKinds }).notNull(),
+    membersFrom: text("members_from", {
+      enum: directoryGroupMembersFrom,
+    }).notNull(),
+    mappedAt: timestamp("mapped_at").notNull(),
+    /**
+     * When the daily read last read the group whole: until it has, since
+     * the group was mapped to this team, the mapping places nobody.
+     */
+    readAt: timestamp("read_at"),
+    /**
+     * Why the last read left the group as it was, null when it didn't:
+     * `gone` (Microsoft has no such group), `refused` (Microsoft refused
+     * to read it), `not_mappable` (it can't be a team's now) or `empty`.
+     */
+    held: text({ enum: directoryGroupHelds }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.groupId] }),
+    index("directory_group_teams_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The members of each group mapped to a team (GRA-2056,
+ * directory-group-reads.ts) or named by a copied reader list (GRA-2146,
+ * directory-reader-groups.ts), nested groups' included, as the last read
+ * that read the group whole listed them: one row per group and person the
+ * read keeps (`directory_people`), by the provider's ID. Goes with the
+ * person's row, so with them leaving the directory or being erased; and
+ * once the group is neither mapped nor named (`unneededGroupRows`).
+ */
+export const directoryGroupMembers = sqliteTable(
+  "directory_group_members",
+  {
+    provider: text().notNull(),
+    tenant: text().notNull(),
+    groupId: text("group_id").notNull(),
+    accountId: text("account_id").notNull(),
+    /**
+     * When the read that last listed them in the group started: a proof
+     * of the group for a reader list counts a day from it
+     * (source-readers.ts `provedGroupsOf`). 0 proves nothing.
+     */
+    readAt: timestamp("read_at")
+      .notNull()
+      .default(sql`0`),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.provider, table.groupId, table.tenant, table.accountId],
+    }),
+    index("directory_group_members_person_idx").on(
+      table.provider,
+      table.tenant,
+      table.accountId
+    ),
+    foreignKey({
+      columns: [table.provider, table.tenant, table.accountId],
+      foreignColumns: [
+        directoryPeople.provider,
+        directoryPeople.tenant,
+        directoryPeople.accountId,
+      ],
+    }).onDelete("cascade"),
+  ]
+);
+
+/**
  * Where each provider's daily read of the directory stands (GRA-2056,
  * directory-people.ts), for the admin: the read last applied, what it
  * counted, and the last failure since. `run` and `startedAt` are the
@@ -711,7 +821,7 @@ export const teamPins = sqliteTable(
  * lands after a newer one.
  */
 export const directoryReads = sqliteTable("directory_reads", {
-  provider: text().primaryKey(),
+  provider: text().$type<DirectoryProvider>().primaryKey(),
   /** The directory connection last read or tried. */
   connectionId: text("connection_id").notNull(),
   tenant: text().notNull(),
@@ -723,7 +833,7 @@ export const directoryReads = sqliteTable("directory_reads", {
   people: integer(),
   disabled: integer(),
   /** The last read's failure since `readAt`, as a directory error code. */
-  failure: text(),
+  failure: text().$type<DirectoryReadFailure>(),
   failedAt: timestamp("failed_at"),
   /**
    * Why the last applied read went on without the deleted accounts, as a
@@ -731,7 +841,7 @@ export const directoryReads = sqliteTable("directory_reads", {
    * `directory.deleted_unsupported`): nobody was suspended for having
    * left. Null when it read them.
    */
-  deletedFailure: text("deleted_failure"),
+  deletedFailure: text("deleted_failure").$type<DirectoryDeletedFailure>(),
 });
 
 /**
@@ -2186,7 +2296,7 @@ export const appResourceBindings = sqliteTable(
       .references(() => apps.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["model", "connector", "brain", "grasp", "guests"],
+      enum: ["model", "connector", "brain", "grasp"],
     }).notNull(),
     target: text().notNull(),
     declarationHash: text("declaration_hash").notNull(),
@@ -2768,11 +2878,9 @@ export const brainCaptureIntents = sqliteTable(
 );
 
 /**
- * What a run's recalls of today's Brain cited (GRA-299). Nothing writes or
- * reads it since runs recall from the new Brain (`runBrainVersions`);
- * retention still removes its rows with the run (workflows/retention.ts).
- * Kept until a later release drops it, so a core still serving during a
- * rollout keeps working (expand, then contract).
+ * What a run's recalls of the old Brain cited (GRA-299). Nothing writes or
+ * reads it since GRA-1941; it stays for a rollback to the release before, which
+ * still does, and the next contract migration drops it (expand, then contract).
  */
 export const runBrainEvidence = sqliteTable(
   "run_brain_evidence",
@@ -2810,6 +2918,24 @@ export const runBrainEvidence = sqliteTable(
       ],
     }),
   ]
+);
+
+/**
+ * Each App that read the Brain by default, declaring no permission to
+ * (resource-brain.ts, GRA-2218), from the first such read on: written
+ * before what it read is handed over, never removed, as what it read may
+ * stay in its data. Counted as a grant to read the Brain is
+ * (app-provenance.ts `holdsAnySource`): such an App takes no guests.
+ * `subject_type` leaves room for a workflow's.
+ */
+export const brainDefaultReads = sqliteTable(
+  "brain_default_reads",
+  {
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    firstReadAt: timestamp("first_read_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.subjectType, table.subjectId] })]
 );
 
 /**
@@ -4520,61 +4646,50 @@ export const notifications = sqliteTable(
 );
 
 /**
- * A guest chat (src/guests.ts): someone who isn't a member, invited by an
- * App for one of its people, chatting with a model through a link. The
- * link's secret is never stored, only its SHA-256 (`token_hash`). A chat
- * takes one turn at a time: `busy_until` is set while one is under way,
- * and a turn claims it only when it is unset or past.
+ * A chat an App once opened, through a link, for someone who wasn't a
+ * member, with a model.
+ *
+ * Unused since that feature went (GRA-2234): nothing reads or writes it.
+ * Kept so a rollback to the release before still has it; a later release
+ * drops it (expand, then contract).
  */
 export const guestChats = sqliteTable(
   "guest_chats",
   {
     id: text().primaryKey(),
     appId: text("app_id").notNull(),
-    /** The permission it was made under: each turn needs it still active. */
     permissionId: text("permission_id").notNull(),
-    /** The member it was made for: its turns spend their model budget. */
     invitedBy: text("invited_by").notNull(),
     name: text().notNull(),
     skill: text().notNull(),
-    /** The model it talks with, the deployment's first when invited. */
     model: text().notNull(),
     tokenHash: text("token_hash").notNull(),
     turns: integer().notNull(),
     busyUntil: timestamp("busy_until"),
     createdAt: timestamp("created_at").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
-    /** When the guest first opened it. */
     openedAt: timestamp("opened_at"),
-    /** When the guest finished it, or it was revoked. */
     endedAt: timestamp("ended_at"),
     ended: text({ enum: ["finished", "revoked"] }),
-    /**
-     * The alias of the guests binding a sealed function invited it through
-     * (resource-guests.ts): its link works only while an active binding of
-     * that alias still names its permission. Null for one an App's v1
-     * server invited, under its permission alone.
-     */
     bindingAlias: text("binding_alias"),
   },
   (table) => [
     uniqueIndex("guest_chats_token_idx").on(table.tokenHash),
-    // An App's chats, newest first.
     index("guest_chats_app_idx").on(table.appId, table.createdAt, table.id),
-    // An App's chats that haven't ended, newest first: listed first, and
-    // counted as it invites. Expired ones stay in it until they are swept.
     index("guest_chats_open_idx")
       .on(table.appId, table.createdAt, table.id)
       .where(sql`ended IS NULL`),
-    // What the retention sweep deletes, oldest first.
     index("guest_chats_expires_idx").on(table.expiresAt),
   ]
 );
 
 /**
- * Who may open a published App without being a member (app-visitors.ts):
- * each address its builders listed, and each domain whose every address
- * may. Only these can ask for a code.
+ * Who could open a published App without being a member: each address
+ * its builders listed, and each domain whose every address could.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
  */
 export const appVisitorEntries = sqliteTable(
   "app_visitor_entries",
@@ -4583,7 +4698,6 @@ export const appVisitorEntries = sqliteTable(
       .notNull()
       .references(() => apps.id, { onDelete: "cascade" }),
     kind: text({ enum: ["address", "domain"] }).notNull(),
-    /** Lower case, ASCII (`appVisitorEntrySchema`). */
     value: text().notNull(),
     addedBy: text("added_by").notNull(),
     addedAt: timestamp("added_at").notNull(),
@@ -4592,10 +4706,11 @@ export const appVisitorEntries = sqliteTable(
 );
 
 /**
- * The functions each version of an App grants its visitors
- * (app-visitor-grants.ts), as its builders chose them: the App's own
- * queries and mutations, by path. A version starts with none, so a new
- * current version grants nothing until a builder grants it again.
+ * The functions each version of an App granted its visitors, by path.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
  */
 export const appVisitorGrants = sqliteTable(
   "app_visitor_grants",
@@ -4614,10 +4729,11 @@ export const appVisitorGrants = sqliteTable(
 );
 
 /**
- * The codes sent to visitors (app-visitors.ts), each kept as its SHA-256
- * only, with how many tries it took. A row outlives its code (signed in,
- * used up or expired) for an hour, so the hour's codes per address and
- * per App are counted from it, then the sweep deletes it.
+ * The sign-in codes mailed to an App's visitors, each as its SHA-256.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
  */
 export const appVisitorCodes = sqliteTable(
   "app_visitor_codes",
@@ -4635,23 +4751,22 @@ export const appVisitorCodes = sqliteTable(
     expiresAt: timestamp("expires_at").notNull(),
   },
   (table) => [
-    // An address's codes for an App, newest first: the one to check, and
-    // the hour's count.
     index("app_visitor_codes_address_idx").on(
       table.appId,
       table.address,
       table.sentAt
     ),
-    // The hour's count for the App.
     index("app_visitor_codes_sent_idx").on(table.appId, table.sentAt),
-    // What the sweep deletes, oldest first.
     index("app_visitor_codes_sweep_idx").on(table.sentAt),
   ]
 );
 
 /**
- * Signed-in visitors (app-visitors.ts): each session opens one App, until
- * it expires or the visitor signs out. Kept as its token's SHA-256 only.
+ * The sessions of an App's signed-in visitors, each as its token's SHA-256.
+ *
+ * Unused since App visitors went (GRA-2235): nothing reads or writes it,
+ * and a migration emptied it. Kept so a rollback to the release before
+ * still has it; a later release drops it (expand, then contract).
  */
 export const appVisitorSessions = sqliteTable(
   "app_visitor_sessions",
@@ -4667,12 +4782,14 @@ export const appVisitorSessions = sqliteTable(
   },
   (table) => [
     uniqueIndex("app_visitor_sessions_token_idx").on(table.tokenHash),
-    // What the sweep deletes.
     index("app_visitor_sessions_expires_idx").on(table.expiresAt),
   ]
 );
 
-/** A guest chat's messages, in order: the guest's, and the model's answers. */
+/**
+ * The messages of a chat in `guest_chats`. Unused since GRA-2234, and kept
+ * for a rollback to the release before, as that table is.
+ */
 export const guestMessages = sqliteTable(
   "guest_messages",
   {
@@ -6561,34 +6678,13 @@ export const brainGapStates = sqliteTable("brain_gap_states", {
   answeredBy: text("answered_by"),
 });
 
-// Knowledge's host tables: Grasp's own records about Knowledge, kept here
-// and not in Knowledge's database, which holds only the Brain's own
-// (collections, documents, versions, sections, links, payloads, search).
-// They name Knowledge's collections and documents by ID, with no foreign
-// key: no batch holds both databases.
+// What is left of Knowledge's host tables: Grasp's own records about the
+// old Brain's Knowledge database, gone since GRA-1941.
 
 /**
- * Which version of each App its entry in Knowledge's Apps collection held,
- * while core indexed Apps there. Nothing writes it any more; it is dropped
- * in a later release.
- */
-export const appEntries = sqliteTable("app_entries", {
-  appId: text("app_id").primaryKey(),
-  version: integer().notNull(),
-  /**
-   * The SHA-256 of the name and description the entry holds; null for
-   * none read yet, which is indexed again.
-   */
-  described: text(),
-  indexedAt: timestamp("indexed_at").notNull(),
-});
-
-/**
- * A file once uploaded into a Knowledge collection: its original, kept in
- * R2, and where extracting its text into the document at `path` stood.
- * Nothing uploads into Knowledge any more; a person's erasure and the
- * clock forget them (knowledge-uploads.ts), and the table is dropped in a
- * later release.
+ * A file once uploaded into a Knowledge collection. Nothing writes or reads it
+ * since GRA-1941; it stays for a rollback to the release before, which still
+ * does, and the next contract migration drops it (expand, then contract).
  */
 export const uploads = sqliteTable(
   "uploads",
@@ -6606,10 +6702,6 @@ export const uploads = sqliteTable(
     uploadedBy: text("uploaded_by").notNull(),
     /** JSON: the audit log's actor for the person who uploaded it. */
     actor: text().notNull(),
-    /**
-     * `saving`: claimed for the save of its text, when uploads into
-     * Knowledge still saved one (knowledge-uploads.ts).
-     */
     status: text({
       enum: ["pending", "extracting", "saving", "ready", "failed"],
     }).notNull(),
@@ -6633,8 +6725,9 @@ export const uploads = sqliteTable(
 );
 
 /**
- * Originals to delete from R2 (knowledge-uploads.ts), by key: recorded as
- * their uploads are forgotten, and deleted by the cleanup after.
+ * Originals of `uploads` to delete from R2. Nothing writes or reads it since
+ * GRA-1941; it stays for a rollback to the release before, which still does,
+ * and the next contract migration drops it (expand, then contract).
  */
 export const uploadCleanups = sqliteTable("upload_cleanups", {
   /** The original's key in R2. */
@@ -6649,9 +6742,9 @@ export const uploadCleanups = sqliteTable("upload_cleanups", {
 });
 
 /**
- * The daily computations of Knowledge's usage signals, one row per
- * attempt, while core computed them. Nothing writes it any more; it is
- * dropped in a later release.
+ * The daily computations of Knowledge's usage signals. Nothing writes or
+ * reads it; `knowledge_signals` references it, and the next contract
+ * migration drops both (expand, then contract).
  */
 export const knowledgeSignalComputations = sqliteTable(
   "knowledge_signal_computations",
@@ -6672,17 +6765,9 @@ export const knowledgeSignalComputations = sqliteTable(
 );
 
 /**
- * The usage signals of a computation: one per kind, collection and subject
- * (a search's key, or a document's ID), for the collection's owner, with
- * an ID derived from those three, the same in every computation. Readers
- * take only the finished computation started last, so a computation's
- * signals show all at once when it finishes, and never those of one that
- * doesn't. Written under the computation's ID: one that outlived its lease
- * and lost its row fails on the foreign key. `evidence` is JSON, IDs and
- * counts only; `evidence_at` is when its latest evidence was seen (a
- * question's latest search), null for a document's. Reads check the
- * collection (and the document) in Knowledge, and so never show a signal
- * about one that's gone.
+ * Knowledge's usage signals. Nothing writes or reads it since GRA-1941; it
+ * stays for a rollback to the release before, which still does, and the next
+ * contract migration drops it (expand, then contract).
  */
 export const knowledgeSignals = sqliteTable(
   "knowledge_signals",
@@ -6720,26 +6805,6 @@ export const knowledgeSignals = sqliteTable(
       table.value,
       table.id
     ),
-  ]
-);
-
-/**
- * Signals an owner dismissed, by kind, collection and subject, so they
- * outlast the computations: a signal is hidden while it has no evidence
- * newer than its dismissal. A computation's finish removes those whose
- * signal it no longer has, or has with newer evidence, so a signal that
- * went away and came back shows again.
- */
-export const knowledgeSignalDismissals = sqliteTable(
-  "knowledge_signal_dismissals",
-  {
-    kind: text({ enum: knowledgeSignalKinds }).notNull(),
-    collectionId: text("collection_id").notNull(),
-    subject: text().notNull(),
-    dismissedAt: timestamp("dismissed_at").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.kind, table.collectionId, table.subject] }),
   ]
 );
 
@@ -7268,7 +7333,46 @@ export const sourceReaderTokens = sqliteTable(
  */
 export const sourceReaderGroups = sqliteTable("source_reader_groups", {
   name: text().primaryKey(),
+  /**
+   * When the last whole read of an Entra group's members that was kept
+   * started (GRA-2146), by either read that keeps them: the daily read of
+   * a group mapped to a team (directory-group-reads.ts) or the read of
+   * the groups reader lists name (directory-reader-groups.ts); null while
+   * none was. No older read's rows land after it, and the second read
+   * paces itself by it. What proves a group is
+   * `directory_group_members.read_at`.
+   */
+  directoryReadAt: timestamp("directory_read_at"),
+  /**
+   * The clock's slot of the directory's last try of the group, whether it
+   * read it whole or not: the reads take groups the longest untried
+   * first, so one that keeps failing holds up no other.
+   */
+  directoryTriedAt: timestamp("directory_tried_at"),
 });
+
+/**
+ * No longer read or written (GRA-2207): what a place picked on a shared
+ * connection holds is read by the connection's audience, not by the
+ * readers its source names, so no pair of a place and a reader is kept.
+ * The table stays until a later release drops it (expand, then contract),
+ * so a release before this one, after a rollback, finds it as it left it.
+ * It held pairs of a place's group and a reader as the Brain names them
+ * (an account's token, a tenant, a group), never an address or an object
+ * ID.
+ */
+export const sourceReaderPairs = sqliteTable(
+  "source_reader_pairs",
+  {
+    place: text().notNull(),
+    principal: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.place, table.principal] }),
+    // A read finds a person's pairs by the readers they proved.
+    index("source_reader_pairs_principal_idx").on(table.principal, table.place),
+  ]
+);
 
 /**
  * What Grasp proposes for a team's routine (opportunities.ts, GRA-1750),

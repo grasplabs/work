@@ -159,6 +159,12 @@ export const connections = sqliteTable(
      */
     composioServerId: text("composio_server_id"),
     composioAuthConfigId: text("composio_auth_config_id"),
+    /**
+     * How a Composio connection was made, and so which consent the admin
+     * gave: signing in with Composio's app (`managed`), or with a key they
+     * typed in (`key`). Null where it wasn't recorded.
+     */
+    composioAuth: text("composio_auth", { enum: ["managed", "key"] }),
     tools: text(),
     /**
      * Sends of a tool list to Composio, counted: the count goes up before
@@ -193,6 +199,13 @@ export const connections = sqliteTable(
       .on(table.provider, table.accountId)
       .where(
         sql`${table.accountId} IS NOT NULL AND ${table.status} <> 'disconnected'`
+      ),
+    // One live key connection per toolkit (composio-connections.ts
+    // `serveAndStore`): of two connects at once, the second fails whole.
+    uniqueIndex("connections_key_toolkit_idx")
+      .on(table.provider)
+      .where(
+        sql`${table.composioAuth} = 'key' AND ${table.status} <> 'disconnected'`
       ),
     // Offboarding disconnects a removed person's personal connections.
     index("connections_owner_user_id_idx").on(table.ownerUserId),
@@ -367,7 +380,8 @@ export const pendingActions = sqliteTable(
     idempotencyKey: text("idempotency_key").notNull(),
     input: text().notNull(),
     inputHash: text("input_hash").notNull(),
-    permissionId: text("permission_id").notNull(),
+    /** Null for a read that needs no grant (core's ungranted-reads.ts). */
+    permissionId: text("permission_id"),
     context: text().notNull(),
     /** Asked for by a chat, App or run that had read restricted data. */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
@@ -564,6 +578,24 @@ export const connectionTokens = sqliteTable("connection_tokens", {
   generation: integer().notNull(),
   refreshUntil: timestamp("refresh_until"),
   grantedScopes: text("granted_scopes"),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
+ * No longer read or written (GRA-2207): a shared connection's places are
+ * read by its Brain audience, not by the readers SharePoint names, so no
+ * token for a company's SharePoint host is asked for. The table stays
+ * until a later release drops it (expand, then contract), so a release
+ * before this one, after a rollback, finds it as it left it. A row still
+ * in it goes with its grant's `connection_tokens` row (ON DELETE CASCADE).
+ */
+export const connectionTenantTokens = sqliteTable("connection_tenant_tokens", {
+  connectionId: text("connection_id")
+    .primaryKey()
+    .references(() => connectionTokens.connectionId, { onDelete: "cascade" }),
+  host: text().notNull(),
+  sealed: text().notNull(),
+  accessExpiresAt: timestamp("access_expires_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
 

@@ -281,7 +281,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     expect({
       undeclared: await refusal({ alias: "mailer" }),
       otherKind: await refusal({
-        target: { kind: "guests", permissionId: crypto.randomUUID() },
+        target: { kind: "grasp", permissionId: crypto.randomUUID() },
       }),
       notAllowed: await refusal({
         target: { kind: "model", model: "openai/gpt-5.4" },
@@ -585,6 +585,37 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       outcome: outcomeOf(answered.result),
       sent: provider.requests.length,
     }).toStrictEqual({ outcome: "first|app.not_found", sent: 1 });
+  });
+
+  it("serve a guest the App is shared with as its user, through the same binding", async () => {
+    const sealed = await sealedApp(modelFiles());
+    await approveModel(sealed);
+    // A guest (GRA-2235): from outside the company, an App's user only
+    // through a share; their identity only the routes open to guests
+    // make (guest-access.ts).
+    const outsider = await person("user");
+    await env.DB.prepare("UPDATE members SET role = 'guest' WHERE user_id = ?")
+      .bind(outsider.userId)
+      .run();
+    await drizzle(env.DB).insert(appMembers).values({
+      appId: sealed.app,
+      memberType: "person",
+      memberId: outsider.userId,
+      role: "user",
+      addedBy: sealed.owner.userId,
+      addedAt: new Date(),
+    });
+    const { providerEnv: withProvider } = await providerEnv([
+      answer("A short draft."),
+    ]);
+    const guest = { ...outsider, guest: true as const };
+    const { result } = await callAppFunction(
+      withProvider,
+      guest,
+      sealed.app,
+      requestFor(sealed.release, "assist.draft", { prompt: "Hi" })
+    );
+    expect(outcomeOf(result)).toBe("A short draft.");
   });
 
   it("stop a call once what admitted its caller no longer holds, between two requests", async () => {

@@ -15,6 +15,7 @@ import type { DashboardApi } from "./dashboard.ts";
 import type { DataPolicyApi } from "./data-policy.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
+import type { DirectoryGroupsApi } from "./directory.ts";
 import type { DraftsApi, VersionsApi } from "./drafts.ts";
 import type { HeldStartsApi } from "./held-starts.ts";
 import type { InstructionsApi } from "./instruction-files.ts";
@@ -64,6 +65,13 @@ export interface Identity {
    * every staff session.
    */
   onboardingOnly?: true;
+  /**
+   * A guest (roles.ts `guestRole`): someone outside the company, who
+   * reaches only the Apps shared with them, as their user, and nothing
+   * else of the platform (core's guest-access.ts). Their `role` is
+   * `user` and they are in no team.
+   */
+  guest?: true;
   /** When the session ends (ISO 8601). */
   expiresAt: string;
 }
@@ -181,6 +189,8 @@ export interface SessionApi {
   readonly dataPolicy: DataPolicyApi;
   /** The organization's members: offboarding. Admins only. */
   readonly members: MembersApi;
+  /** The directory's groups, mapped to teams. Admins only. */
+  readonly directoryGroups: DirectoryGroupsApi;
   /**
    * The organization's name, time zone and where its data lives: everyone
    * reads them, its own admins change them.

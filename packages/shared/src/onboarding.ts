@@ -102,6 +102,14 @@ export const teamNameKey = (name: string): string =>
   name.trim().normalize("NFC").toLowerCase();
 
 /**
+ * The id of the staff list's team for the people it gives no team, in
+ * every language under whatever name the admin reads (GRA-2248). Only the
+ * list and its interviews have that team: it is never a team in Settings ›
+ * Members, which no directory ever fills.
+ */
+export const noTeamId = "no-team";
+
+/**
  * What Settings › Members answers a team change the staff list stops
  * (GRA-2055), as Better Auth's error `code`: deleting a team the saved or
  * confirmed list names, or making one under a name the list gives a team
@@ -136,7 +144,11 @@ export type RosterTeam = z.output<typeof rosterTeamSchema>;
 /** Someone who works there. */
 export const rosterPersonSchema = z.strictObject({
   id: idSchema,
-  name: nameSchema,
+  /**
+   * Empty once core erased them: their entry stays in its team, for the
+   * counts, without their name, job or address.
+   */
+  name: z.string().trim().max(80),
   /**
    * Empty when they have none: their link can be handed to them on paper,
    * and opens once the list has an address they sign in with (GRA-1790).

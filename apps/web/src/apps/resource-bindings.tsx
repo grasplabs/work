@@ -66,7 +66,6 @@ const kindLabels: Readonly<
   connector: msg`Integration`,
   brain: msg`Brain`,
   grasp: msg`The platform's statistics`,
-  guests: msg`Guests`,
 };
 
 const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
@@ -124,7 +123,7 @@ const BoundTo = ({
       </Trans>
     );
   }
-  // The platform's statistics, guests or the Brain: one of the App's
+  // The platform's statistics or the Brain: one of the App's
   // platform permissions.
   const { permissionId: permission } = target;
   return <Trans>Permission {permission}</Trans>;
@@ -196,11 +195,6 @@ const NothingToChoose = ({
       <Trans>
         The App has no permission to read the platform&apos;s statistics. Grant
         one first.
-      </Trans>
-    ),
-    guests: (
-      <Trans>
-        The App has no permission to invite guests. Grant one first.
       </Trans>
     ),
   };
@@ -284,19 +278,6 @@ const BindForm = ({
       {choices.kind === "grasp" ? (
         <Choice
           label={t`Permission for the platform's statistics`}
-          onChange={setPicked}
-          value={picked}
-        >
-          {choices.permissions.map(({ permissionId: permission }) => (
-            <NativeSelectOption key={permission} value={permission}>
-              {t`Permission ${permission}`}
-            </NativeSelectOption>
-          ))}
-        </Choice>
-      ) : null}
-      {choices.kind === "guests" ? (
-        <Choice
-          label={t`Permission to invite guests`}
           onChange={setPicked}
           value={picked}
         >

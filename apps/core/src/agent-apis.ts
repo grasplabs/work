@@ -293,22 +293,11 @@ const sharedApis = [
   sharedSkillsApi,
 ];
 
-/** A person's own chat's APIs, its agent without the brain permission. */
-const withoutBrain = agentApis.filter(({ name }) => name !== "brain");
-
 /**
  * The APIs a chat's turn gets: a shared chat's (`sharedApis`), or all of
- * the agent's, but `env.brain` (and its `searchBrain` tool, agent-tools.ts)
- * only while its agent holds the brain permission, read before the turn:
- * the Brain refuses every read without it (`hasBrainGrant`), so
- * the model is never offered a tool that would be refused.
+ * the agent's, `env.brain` (and its `searchBrain` tool, agent-tools.ts)
+ * included: every agent reads the Brain, as far as where the turn reads
+ * as lets it (brain-recall.ts).
  */
-export const apisFor = (
-  shared: boolean,
-  readsBrain: boolean
-): readonly AgentApi[] => {
-  if (shared) {
-    return sharedApis;
-  }
-  return readsBrain ? agentApis : withoutBrain;
-};
+export const apisFor = (shared: boolean): readonly AgentApi[] =>
+  shared ? sharedApis : agentApis;

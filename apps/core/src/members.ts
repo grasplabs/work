@@ -10,8 +10,11 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
   DirectoryAccount,
+  DirectoryPlacement,
+  DirectoryRead,
   Erasure,
   ErasurePreview,
+  Guest,
   Invitation,
   Member,
   MembersApi,
@@ -49,11 +52,13 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
+import { signInCodeOf } from "./auth/guest-codes.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
   channelAccounts,
   directoryPeople,
+  directoryReads,
   invitations,
   memberRemovals,
   members,
@@ -64,10 +69,13 @@ import {
   teamMembers,
   teamPins,
   users,
+  verifications,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { directoryPlacementOf } from "./directory-placement.ts";
 import { directoryKinds } from "./directory-ties.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
+import { guestsOf, inviteGuest } from "./guest-members.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
   erasePerson,
@@ -277,6 +285,33 @@ const listTeams = async (
 };
 
 /**
+ * Where the daily read of each directory stands (directory-people.ts), for
+ * admins: what an admin can act on when it fails, or goes without the
+ * deleted accounts. Nothing about any person.
+ */
+const listDirectoryReads = async (
+  env: Env,
+  by: Identity
+): Promise<DirectoryRead[]> => {
+  requireMemberAdmin(by);
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(directoryReads)
+    .orderBy(asc(directoryReads.provider));
+  return rows.map((row) => ({
+    provider: row.provider,
+    readAt: row.readAt?.toISOString() ?? null,
+    people: row.people,
+    disabled: row.disabled,
+    failure:
+      row.failure === null || row.failedAt === null
+        ? null
+        : { code: row.failure, at: row.failedAt.toISOString() },
+    deletedFailure: row.deletedFailure,
+  }));
+};
+
+/**
  * Records that `userId` is removed and deletes their membership, their team
  * memberships, every session and notification they have, with the audit
  * event, in one
@@ -340,6 +375,18 @@ const recordRemoval = async (
         )
       ),
     db.delete(sessions).where(and(eq(sessions.userId, userId), removed)),
+    // A sign-in code a guest still holds (auth/guest-codes.ts): its row
+    // names their address.
+    db
+      .delete(verifications)
+      .where(
+        and(
+          signInCodeOf(
+            sql`(SELECT lower(${users.email}) FROM ${users} WHERE ${users.id} = ${userId})`
+          ),
+          removed
+        )
+      ),
     // Their chat accounts too: the agent no longer knows them on any platform.
     db
       .delete(channelAccounts)
@@ -539,6 +586,18 @@ const releaseTeamPin = async (
 };
 
 /**
+ * Who the directory leaves for an admin to place, and the hand pins
+ * (directory-placement.ts). For admins.
+ */
+const directoryPlacement = async (
+  env: Env,
+  by: Identity
+): Promise<DirectoryPlacement> => {
+  requireMemberAdmin(by);
+  return await directoryPlacementOf(env);
+};
+
+/**
  * Gives the member `userId` `role`, the admin themselves included. One
  * conditional update: it changes the role only while it still is the one
  * read here, so the event records the role it replaced, while the admin
@@ -564,7 +623,15 @@ const setMemberRole = async (
   const membership = target.success
     ? await membershipOf(env, target.data)
     : undefined;
-  if (!(target.success && membership)) {
+  // A guest's membership holds no member role: no role change makes a
+  // guest a member (roles.ts `guestRole`).
+  if (
+    !(
+      target.success &&
+      membership &&
+      roleSchema.safeParse(membership.role).success
+    )
+  ) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
   const newRole = parsedRole.data;
@@ -978,6 +1045,13 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     );
   }
 
+  async directoryReads(): Promise<DirectoryRead[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listDirectoryReads(this.#env, person)
+    );
+  }
+
   async remove(userId: string): Promise<{ connectionsDisconnected: number }> {
     return await withPerson(
       this.#check,
@@ -1017,6 +1091,20 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     });
   }
 
+  async guests(): Promise<Guest[]> {
+    return await withPerson(this.#check, async (person) => {
+      requireMemberAdmin(person);
+      return await guestsOf(this.#env);
+    });
+  }
+
+  async inviteGuest(email: string): Promise<{ userId: string }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await inviteGuest(this.#env, person, email)
+    );
+  }
+
   async erasure(userId: string): Promise<ErasurePreview> {
     return await withPerson(
       this.#check,
@@ -1045,6 +1133,13 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await releaseTeamPin(this.#env, person, userId, teamId)
+    );
+  }
+
+  async directoryPlacement(): Promise<DirectoryPlacement> {
+    return await withPerson(
+      this.#check,
+      async (person) => await directoryPlacement(this.#env, person)
     );
   }
 

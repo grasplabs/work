@@ -38,7 +38,8 @@ import { apisHost, googleFailure, googleUrl } from "./google.ts";
 // reader list only an owner sees (Google gives readers and commenters no
 // detailed permissions). Shared drives come only through a shared
 // connection's picked places (shared-drive-sync.ts), which read one shared
-// drive each through the same steps, scoped to that drive (`Scope`).
+// drive each through the same steps, scoped to that drive (`Scope`), with
+// no readers: the connection's audience reads them (GRA-2207).
 //
 // How it reads (Google's "Manage changes"): first the change feed's start
 // token, then the listing of every owned file, then the change feed from
@@ -95,7 +96,17 @@ const permissionSchema = z.object({
   domain: z.string().nullish(),
   allowFileDiscovery: z.boolean().nullish(),
   deleted: z.boolean().nullish(),
+  role: z.string().nullish(),
+  permissionDetails: z
+    .array(
+      z.object({
+        inherited: z.boolean().nullish(),
+        inheritedFrom: z.string().nullish(),
+      })
+    )
+    .nullish(),
 });
+type Permission = z.infer<typeof permissionSchema>;
 
 const fileSchema = z.object({
   id: z.string(),
@@ -109,6 +120,8 @@ const fileSchema = z.object({
   trashed: z.boolean().nullish(),
   ownedByMe: z.boolean().nullish(),
   driveId: z.string().nullish(),
+  /** Its folder: "A file can only have one parent folder". */
+  parents: z.array(z.string()).nullish(),
   lastModifyingUser: z.object({ emailAddress: z.string().nullish() }).nullish(),
   permissions: z.array(permissionSchema).nullish(),
 });
@@ -116,18 +129,15 @@ export type DriveFile = z.infer<typeof fileSchema>;
 
 /** A file's fields every read asks Drive for. */
 const baseFields =
-  "id,name,mimeType,size,modifiedTime,version,trashed,ownedByMe,driveId,lastModifyingUser(emailAddress)";
+  "id,name,mimeType,size,modifiedTime,version,trashed,ownedByMe,driveId,parents,lastModifyingUser(emailAddress)";
 
-/** The permissions a read that names readers asks Drive for, too. */
+/** A permission's fields that say who it lets open a file (`readersUnder`). */
 const permissionFields =
-  "permissions(type,emailAddress,domain,allowFileDiscovery,deleted)";
+  "type,emailAddress,domain,allowFileDiscovery,deleted,role,permissionDetails(inherited)";
 
-/**
- * A file's fields as `scope` reads them: its permissions only when the
- * scope names readers from them, nothing it doesn't use.
- */
+/** A file's fields as `scope` reads them: nothing it doesn't use. */
 const fileFieldsOf = (scope: Scope): string =>
-  scope.readers === null ? baseFields : `${baseFields},${permissionFields}`;
+  scope.fields === undefined ? baseFields : `${baseFields},${scope.fields}`;
 
 const startSchema = z.object({ startPageToken: z.string().min(1) });
 
@@ -167,13 +177,22 @@ export interface Scope {
   file: Readonly<Record<string, string>>;
   /** Whether a file is one this read syncs; else it comes as gone. */
   holds: (file: DriveFile) => boolean;
+  /** The fields of a file it asks for besides every read's (`baseFields`). */
+  fields?: string;
   /**
-   * Who may open a file, from its permissions; null when this read names
-   * no readers (its items' readers are null, and no permissions are
-   * asked for), as for a shared connection's picked drive, which its
-   * Brain audience reads.
+   * Who may open a file, read before its content, with the folders it is
+   * in (`readersUnder`), each read once a read (`folders`): null when they
+   * can't be read whole, "late" when the read had no room or time left
+   * for them. A file passed over without its content (the kit's
+   * `passOver`) has none: nobody reads it. None for a scope whose files
+   * carry no readers (a shared drive's: its connection's audience reads
+   * them).
    */
-  readers: ((file: DriveFile) => SyncReader[] | null) | null;
+  readersRead?: (
+    room: SyncRoom,
+    file: DriveFile,
+    folders: Folders
+  ) => Promise<SyncReader[] | null | "late">;
 }
 
 /**
@@ -239,12 +258,16 @@ const getJson = async <Schema extends z.ZodType>(
   return schema.parse(await response.json());
 };
 
-/** Who may open a file, as its permissions say; null without them. */
-const readersOf = (file: DriveFile): SyncReader[] | null => {
-  if (file.permissions === null || file.permissions === undefined) {
-    return null;
-  }
-  return file.permissions.flatMap((permission): SyncReader[] => {
+/**
+ * Who `permissions` let open a file: a user or a group by address; a
+ * domain as the tenant only when its people can find the file in their
+ * own search, else as a link, like "anyone with the link": a link counts
+ * for nobody.
+ */
+const readersOfPermissions = (
+  permissions: readonly Permission[]
+): SyncReader[] =>
+  permissions.flatMap((permission): SyncReader[] => {
     if (permission.deleted === true) {
       return [];
     }
@@ -269,7 +292,138 @@ const readersOf = (file: DriveFile): SyncReader[] | null => {
     }
     return [];
   });
+
+/**
+ * A folder of a file's chain, as read once a read: its ID, whether it has
+ * limited access (`inheritedPermissionsDisabled`) and its own folder;
+ * null when it can't be read.
+ */
+type Folder = { id: string; limited: boolean; parent: string | null } | null;
+
+/** The folders a read has read, by ID. */
+export type Folders = Map<string, Folder>;
+
+const folderSchema = z.object({
+  id: z.string(),
+  inheritedPermissionsDisabled: z.boolean().nullish(),
+  parents: z.array(z.string()).nullish(),
+});
+
+/**
+ * The folder `id`, once a read (`folders`): whether it has limited
+ * access ("Whether this file has inherited permissions disabled") and its
+ * own folder; null when Drive refuses it or no longer has it; "late"
+ * when the read has no room left. Throttled, the page waits.
+ * https://developers.google.com/workspace/drive/api/reference/rest/v3/files
+ */
+const folderOf = async (
+  room: SyncRoom,
+  scope: Scope,
+  id: string,
+  folders: Folders
+): Promise<Folder | "late"> => {
+  const known = folders.get(id);
+  if (known !== undefined) {
+    return known;
+  }
+  if (!mayRequest(room)) {
+    return "late";
+  }
+  const response = await fetchInRoom(
+    room,
+    googleUrl(apisHost, `${files}/${segment(id)}`, {
+      ...scope.file,
+      fields: "id,inheritedPermissionsDisabled,parents",
+    })
+  );
+  if (response === "late") {
+    return "late";
+  }
+  let folder: Folder = null;
+  if (response.ok) {
+    const read = folderSchema.parse(await response.json());
+    folder = {
+      id: read.id,
+      limited: read.inheritedPermissionsDisabled === true,
+      parent: read.parents?.[0] ?? null,
+    };
+  } else {
+    const failure = await googleFailure(response);
+    if (
+      failure.details?.code === "throttled" ||
+      (response.status !== 403 && response.status !== 404)
+    ) {
+      throw failure;
+    }
+  }
+  folders.set(id, folder);
+  return folder;
 };
+
+/**
+ * The folders `file` is in, from its own up to the person's My Drive root
+ * (`root`), each with whether it has limited access: null when the chain
+ * doesn't reach that root, whether a folder can't be read (Drive refuses
+ * it, or no longer has it) or has nothing above it short of the root, or
+ * the file names no folder; "late" when the read has no room left. Never
+ * part of a chain.
+ */
+const chainOf = async (
+  room: SyncRoom,
+  scope: Scope,
+  file: DriveFile,
+  folders: Folders,
+  root: string
+): Promise<{ id: string; limited: boolean }[] | null | "late"> => {
+  const chain: { id: string; limited: boolean }[] = [];
+  const seen = new Set<string>();
+  let next = file.parents?.[0] ?? null;
+  while (next !== root) {
+    if (next === null || seen.has(next)) {
+      return null;
+    }
+    seen.add(next);
+    // oxlint-disable-next-line no-await-in-loop -- up the chain, one folder at a time, each once a read
+    const folder = await folderOf(room, scope, next, folders);
+    if (folder === "late") {
+      return "late";
+    }
+    if (folder !== null) {
+      chain.push({ id: next, limited: folder.limited });
+    }
+    next = folder?.parent ?? null;
+  }
+  return chain;
+};
+
+/**
+ * Who `permissions` let open a file in the folders `chain` (its own
+ * first), as Google documents folders with limited access
+ * (https://developers.google.com/workspace/drive/api/guides/limited-expansive-access):
+ * under none, everyone they name; under one ("Only users you directly add
+ * to the folder's permissions can open it and access its content";
+ * "Users with inherited access ... can see the restricted folder in Drive
+ * but can't open it"), only the owner ("The `owner` role in My Drive ...
+ * can always access folders with limited access") and a permission added
+ * on the file itself (`inherited` false). Google names where an inherited
+ * one comes from only in shared drives (`inheritedFrom`, "only populated
+ * for items in shared drives"), so in My Drive no inherited one counts.
+ */
+const readersUnder = (
+  permissions: readonly Permission[],
+  chain: readonly { id: string; limited: boolean }[]
+): SyncReader[] =>
+  chain.some(({ limited }) => limited)
+    ? readersOfPermissions(
+        permissions.filter(
+          ({ role, permissionDetails }) =>
+            role === "owner" ||
+            (permissionDetails ?? []).some(
+              ({ inherited }) => inherited === false
+            )
+        )
+      )
+    : readersOfPermissions(permissions);
 
 /** Whether a file is one this connection syncs: owned, in My Drive, not in the bin. */
 const isOwned = (file: DriveFile): boolean =>
@@ -287,7 +441,25 @@ const ownDrive: Scope = {
   changes: {},
   file: {},
   holds: isOwned,
-  readers: readersOf,
+  fields: `permissions(${permissionFields})`,
+  // A file of the person's own carries its permissions: the folders above
+  // it are read, up to My Drive's own root, by the alias Google gives it
+  // ("The alias root can be used to refer to the root folder anywhere a
+  // file ID is provided"), once a read. A root that can't be read ends no
+  // chain: nobody's.
+  readersRead: async (room, file, folders) => {
+    const top = await folderOf(room, ownDrive, "root", folders);
+    if (top === null || top === "late") {
+      return top;
+    }
+    const chain = await chainOf(room, ownDrive, file, folders, top.id);
+    if (chain === null || chain === "late") {
+      return chain;
+    }
+    return file.permissions === null || file.permissions === undefined
+      ? null
+      : readersUnder(file.permissions, chain);
+  },
 };
 
 /** How a file's content is read: exported, its own bytes, or not at all. */
@@ -448,9 +620,12 @@ const contentOf = async (
   if (how === null) {
     return { content: null };
   }
-  // Out of requests or time before it starts: the next read takes it.
+  // Out of requests or time before it starts, its readers having taken
+  // what was left: late, so a file whose readers always take a whole read
+  // is passed over on the next (the kit's `fillPage`), never a page that
+  // stops before it again and again.
   if (!mayRequest(room)) {
-    return { full: true };
+    return { late: true };
   }
   // Base64 is a third larger than the bytes.
   if ("media" in how && (Number(file.size ?? 0) * 4) / 3 > room.bytes) {
@@ -473,12 +648,13 @@ const contentOf = async (
   return takeContent(room, content) ?? { full: true };
 };
 
-/** A file that is there, as an item, with `content`. */
+/** A file that is there, as an item, with `content`, read by `readers`. */
 const itemOf = (
   scope: Scope,
   file: DriveFile,
   changedAt: string,
-  content: SyncContent | null
+  content: SyncContent | null,
+  readers: SyncReader[] | null = null
 ): SyncItem => ({
   gone: false,
   id: file.id,
@@ -487,7 +663,7 @@ const itemOf = (
   changedAt,
   title: file.name,
   content,
-  readers: scope.readers === null ? null : scope.readers(file),
+  readers,
   changedBy: file.lastModifyingUser?.emailAddress?.toLowerCase() ?? null,
   partOf: null,
 });
@@ -517,11 +693,21 @@ const fileItem = async (
   room: SyncRoom,
   scope: Scope,
   file: DriveFile,
-  changedAt: string
+  changedAt: string,
+  folders: Folders
 ): Promise<EntryItems> => {
   const known = withoutContent(scope, file, changedAt);
   if (known.length === 0 || known[0]?.gone === true) {
     return known;
+  }
+  // Its readers first: an entry left for the next read loses only those,
+  // never content it read.
+  const readers =
+    scope.readersRead === undefined
+      ? null
+      : await scope.readersRead(room, file, folders);
+  if (readers === "late") {
+    return "late";
   }
   const read = await contentOf(room, scope, file);
   if ("full" in read) {
@@ -535,14 +721,15 @@ const fileItem = async (
   }
   return "gone" in read
     ? [goneOf(file.id)]
-    : [itemOf(scope, file, changedAt, read.content)];
+    : [itemOf(scope, file, changedAt, read.content, readers)];
 };
 
 /** One page of the listing of every file the scope holds. */
 const listPage = async (
   room: SyncRoom,
   scope: Scope,
-  position: Extract<Position, { phase: "list" }>
+  position: Extract<Position, { phase: "list" }>,
+  folders: Folders
 ): Promise<SyncPage> => {
   const listed = await getJson(
     room,
@@ -567,7 +754,7 @@ const listPage = async (
     at: position.at,
     keyOf: (file) => file.id,
     itemsFor: async (file) =>
-      await fileItem(room, scope, file, file.modifiedTime),
+      await fileItem(room, scope, file, file.modifiedTime, folders),
     passOver: (file) => withoutContent(scope, file, file.modifiedTime),
   });
   if (!done) {
@@ -617,17 +804,19 @@ const changeWithoutContent = (scope: Scope, change: Change): SyncItem[] => {
 const changeItem = async (
   room: SyncRoom,
   scope: Scope,
-  change: Change
+  change: Change,
+  folders: Folders
 ): Promise<EntryItems> =>
   change.file === null || change.file === undefined || change.removed === true
     ? changeWithoutContent(scope, change)
-    : await fileItem(room, scope, change.file, change.time);
+    : await fileItem(room, scope, change.file, change.time, folders);
 
 /** One page of the change feed. */
 const changesPage = async (
   room: SyncRoom,
   scope: Scope,
-  position: Extract<Position, { phase: "changes" }>
+  position: Extract<Position, { phase: "changes" }>,
+  folders: Folders
 ): Promise<SyncPage> => {
   const changed = await getJson(
     room,
@@ -644,7 +833,7 @@ const changesPage = async (
     entries: changed.changes ?? [],
     at: position.at,
     keyOf: changeKey,
-    itemsFor: async (change) => await changeItem(room, scope, change),
+    itemsFor: async (change) => await changeItem(room, scope, change, folders),
     passOver: (change) => changeWithoutContent(scope, change),
   });
   if (!done) {
@@ -694,6 +883,8 @@ export const readFiles = async (
   cursor: string | null,
   room: SyncRoom
 ): Promise<SyncPage> => {
+  // Each folder above the page's files read once a read.
+  const folders: Folders = new Map();
   if (cursor === null) {
     // Where the change feed stands before anything is listed.
     const { startPageToken } = await getJson(
@@ -701,17 +892,22 @@ export const readFiles = async (
       googleUrl(apisHost, `${changes}/startPageToken`, scope.start),
       startSchema
     );
-    return await listPage(room, scope, {
-      phase: "list",
-      start: startPageToken,
-      token: null,
-      at: startOfPage,
-    });
+    return await listPage(
+      room,
+      scope,
+      {
+        phase: "list",
+        start: startPageToken,
+        token: null,
+        at: startOfPage,
+      },
+      folders
+    );
   }
   const position = positionOf(cursor);
   return position.phase === "list"
-    ? await listPage(room, scope, position)
-    : await changesPage(room, scope, position);
+    ? await listPage(room, scope, position, folders)
+    : await changesPage(room, scope, position, folders);
 };
 
 /** The person's own Drive: every file they own, its changes and its readers. */

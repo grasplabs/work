@@ -1,16 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { requestGranted } from "./apps.ts";
 import { actingFor, envOf } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
-// The Brain's permission (`brain`, a platform action): the one grant Apps,
-// runs and agents share for reading the company Brain. Agents and Apps
-// start without it. Of the platform's offers it is the only one an agent
-// or an independent workflow may be granted; the others stay an App's.
-// Until the Brain's adapters exist (GRA-296) a grant gives no stub at
-// all, and never another offer's.
+// The Brain's permission (`brain`, a platform action): the grant Apps and
+// runs read the company Brain under. An agent reads the Brain with none
+// (GRA-2203), so it is never granted one, nor any other of the platform's
+// offers, which stay an App's.
 
 const idp = mockIdp();
 
@@ -23,28 +20,25 @@ const newAgent = () => ({
 });
 
 describe("the Brain's permission", setUpTime, () => {
-  it("can be granted to an agent, unlike the platform's other offers, and gives it no other offer's stub", async () => {
+  it("is never granted to an agent, which reads the Brain with none, and nor is any other offer of the platform", async () => {
     const admin = await signedInApi(idp, "admin");
     const agent = newAgent();
-    const statistics = await outcome(
-      admin.api.permissions.request({
-        subject: agent,
-        object: { type: "platform" },
-        actions: ["statistics"],
-        binding: "PLATFORM",
-      })
-    );
-    await requestGranted(idp, admin, {
-      subject: agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
+    const asked = async (action: "brain" | "statistics") =>
+      await outcome(
+        admin.api.permissions.request({
+          subject: agent,
+          object: { type: "platform" },
+          actions: [action],
+          binding: "PLATFORM",
+        })
+      );
     const env = await envOf(actingFor(agent, admin.userId));
     expect({
-      statistics,
+      brain: await asked("brain"),
+      statistics: await asked("statistics"),
       stubs: Object.keys(env),
     }).toStrictEqual({
+      brain: "permission.invalid",
       statistics: "permission.invalid",
       stubs: [],
     });

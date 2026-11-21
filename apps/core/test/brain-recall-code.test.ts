@@ -12,7 +12,10 @@ import {
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowCandidateRun,
+  WorkflowResourceRun,
+} from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -40,7 +43,12 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
-import { recallFor } from "../src/brain-recall.ts";
+import {
+  entitiesCallFor,
+  recallFor,
+  skillsCallFor,
+  whoKnowsFor,
+} from "../src/brain-recall.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { uploadToBrain } from "../src/brain-uploads.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -56,9 +64,14 @@ import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
 import { shareWorkflowResource } from "../src/workflow-members.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import {
+  candidateRunFor,
+  startCandidateRun,
+} from "../src/workflows/candidate-runs.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
@@ -76,9 +89,9 @@ import { publishDefinition } from "./workflow-publishing.ts";
 // (`ctx.brain.<alias>.recall`) and a chat's code (`env.brain.recall`)
 // send the same request and get the same pack, from core's
 // brain-recall.ts. How it can fail, and what each test holds it to:
-// 1. Code without the grant to read the Brain recalls: a declaration, a
-//    workflow's step or an agent with no active grant gets nothing, and a
-//    revoked grant stops the next recall.
+// 1. Code without the grant to read the Brain recalls: a declaration or
+//    a workflow's step with no active grant gets nothing, and a revoked
+//    grant stops the next recall. A chat's agent needs none (GRA-2203).
 // 2. What an App or a workflow recalls reaches someone who couldn't read
 //    it at the source: it may end up in App data, a run's output, a
 //    decision or an App a run writes to, which any member may read. So it
@@ -279,6 +292,14 @@ const teamOf = async (...members: Member[]): Promise<string> => {
  * `word`, which nothing else does. An App's or a workflow's recall reads
  * the note for everyone alone; a chat's code its person's teams' notes.
  */
+/** "read" when `read` answers, else the code it was refused with. */
+const readOutcome = async (read: Promise<unknown>) =>
+  await read.then(
+    () => "read",
+    (error: unknown) =>
+      error instanceof Error && "code" in error ? error.code : "thrown"
+  );
+
 const company = async () => {
   const word = `leave${unique().replaceAll(/\W/gu, "")}`;
   const admin = await person("admin");
@@ -338,8 +359,12 @@ const refusal = z.object({ failed: z.unknown() });
 
 // An App.
 
-/** An App whose action recalls what its caller asks, as asked. */
-const askApp = () =>
+/**
+ * An App whose action recalls what its caller asks, as asked: through its
+ * declared permission to read the Brain, or, `declared` false, declaring
+ * none (GRA-2218).
+ */
+const askApp = (declared = true) =>
   testApp(
     {
       name: "Ask",
@@ -349,7 +374,9 @@ const askApp = () =>
           access: { read: "owner", write: "owner" },
         },
       },
-      permissions: ['permission.brain({ operations: ["recall"] })'],
+      permissions: declared
+        ? ['permission.brain({ operations: ["recall"] })']
+        : [],
     },
     {
       "server/brain.ts": `import { v } from "@grasp-os/sdk";
@@ -369,8 +396,8 @@ export const ask = action({
   );
 
 /** The Ask App, sealed and current; its users `users`. */
-const askOf = async (owner: Member, users: Member[]) => {
-  const fixture: Fixture = await appWith(askApp(), "Ask", owner);
+const askOf = async (owner: Member, users: Member[], declared = true) => {
+  const fixture: Fixture = await appWith(askApp(declared), "Ask", owner);
   const release: Release = await seal(fixture);
   await rollback(env, appKind, fixture.owner, fixture.app, 1);
   for (const user of users) {
@@ -442,11 +469,16 @@ const holdStep = { id: "hold", type: "wait", for: "3 seconds" };
 const recallingWorkflow = async (
   by: Member,
   admin: Member,
-  { hold }: { hold?: "before" | "after" } = {}
+  {
+    hold,
+    byDefault = false,
+    alias = byDefault ? "brain" : "docs",
+  }: { hold?: "before" | "after"; byDefault?: boolean; alias?: string } = {}
 ) => {
   const key = `brain-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "brain" });
   const workflow = await createWorkflowResource(env, by, `recall-${unique()}`);
+  // Declaring no permission, it reads by the Brain's own alias (GRA-2228).
   await publishDefinition(
     env,
     by,
@@ -459,7 +491,9 @@ const recallingWorkflow = async (
       },
       returns: packDescriptor,
       result: { $expr: "recalled" },
-      permissions: { brain: { docs: { contract: key } } },
+      ...(byDefault
+        ? {}
+        : { permissions: { brain: { [alias]: { contract: key } } } }),
       steps: [
         // A pause before the recall or the run's output, for a test to act
         // in.
@@ -467,7 +501,7 @@ const recallingWorkflow = async (
         {
           id: "recalled",
           type: "call",
-          brain: "docs",
+          brain: alias,
           action: "recall",
           args: {
             question: { $expr: "args.question" },
@@ -478,13 +512,16 @@ const recallingWorkflow = async (
       ],
     })
   );
+  if (byDefault) {
+    return { workflow, permissionId: null };
+  }
   const permissionId = await granted(
     by,
     admin,
     brainGrant({ type: "workflow", workflowId: workflow.id })
   );
   await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "docs",
+    alias,
     target: { kind: "brain", permissionId },
     reviewed: { version: 1 },
   });
@@ -599,12 +636,11 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     const { workflow } = await recallingWorkflow(ada, admin);
     // The chat: its code, the turn's own recall before the question
     // being no code run of it.
-    const { stub, chat, ask, agent } = await chatOf(
+    const { stub, chat, ask } = await chatOf(
       ada.userId,
       recallCode(request),
       says("Done.")
     );
-    await granted(ada, admin, brainGrant(agent));
     await ask("What about leave?");
     const [fromCode] = await codeResults(stub, chat.id);
 
@@ -818,26 +854,16 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     // A workflow whose grant is revoked after its binding was approved.
     const run = await recallingWorkflow(ada, admin);
     await revokePermission(env, admin, run.permissionId);
-    // A chat whose agent holds no grant: no `env.brain` at all.
-    const { stub, chat, ask } = await chatOf(
-      ada.userId,
-      recallCode(requestOf(word)),
-      says("Done.")
-    );
-    await ask("What about leave?");
-    const [fromCode] = await codeResults(stub, chat.id);
     expect({
       unbound: await askedOf(unbound, ada, asks),
       before: before.length,
       revoked: await askedOf(app, ada, asks),
       run: await ranOf(ada, run.workflow.id, asks),
-      chat: fromCode?.text.includes("no API named env.brain"),
     }).toStrictEqual({
       unbound: { failed: "permission.unavailable" },
       before: 1,
       revoked: { failed: "permission.unavailable" },
       run: { failed: "workflow.binding_unapproved" },
-      chat: true,
     });
   });
 
@@ -865,12 +891,11 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       { question: word, budget: { tokens: 800 }, asOf: `${word} at noon` },
       { question: word, budget: { tokens: 800 }, reader: ada.userId },
     ];
-    const { stub, chat, ask, agent } = await chatOf(
+    const { stub, chat, ask } = await chatOf(
       ada.userId,
       ...asked.map((request) => recallCode(request)),
       says("Done.")
     );
-    await granted(ada, admin, brainGrant(agent));
     await ask("Go on.");
     const results = await codeResults(stub, chat.id);
     const fromCode = results.map(({ text }) => returnedOf(text));
@@ -1089,7 +1114,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
   });
 
   it("withholds what a chat's code recalled from its later requests once its person's teams may no longer read it", async () => {
-    const { admin, ada } = await company();
+    const { ada } = await company();
     const team = await teamOf(ada);
     /**
      * Whether a chat whose code recalled a plan of the team's still sends
@@ -1102,13 +1127,12 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       const word = `route${unique().replaceAll(/\W/gu, "")}`;
       const text = `Route plan: ${word} departs at noon.`;
       const source = await added(text, { kind: "team", teamId: team });
-      const { ask, agent, provider } = await chatOf(
+      const { ask, provider } = await chatOf(
         ada.userId,
         recallCode(requestOf(word)),
         says("Read it."),
         says("And now.")
       );
-      await granted(ada, admin, brainGrant(agent));
       await ask(word);
       await change(source, word);
       const before = provider.requests.length;
@@ -1139,9 +1163,8 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
   });
 
   it("answers nothing when the audit log can't take the recall", async () => {
-    const { word, admin, ada } = await company();
+    const { word, ada } = await company();
     const { agent, chat, id } = await chatOf(ada.userId);
-    const permissionId = await granted(ada, admin, brainGrant(agent));
     // The failed append is logged as an error: that's what it is.
     const logged = vi.spyOn(console, "error").mockReturnValue();
     const answered = await recallFor(
@@ -1153,7 +1176,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
           mode: "interactive",
         }),
         context: { type: "chat", workspaceId: id, chatId: chat.id },
-        permissionId: permissionIdSchema.parse(permissionId),
+        permissionId: null,
         actor: { type: "system" },
       },
       requestOf(word)
@@ -1163,6 +1186,69 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     );
     logged.mockRestore();
     expect(answered).toBe("refused");
+  });
+
+  it("asks a chat's agent no grant, only that its person may still act: each read refused while they are suspended", async () => {
+    const { word, ada } = await company();
+    /** How each read a chat's code makes answers its agent acting for `userId`, with no grant. */
+    const answeredFor = async (userId: string) => {
+      const { agent, chat, id } = await chatOf(userId);
+      const caller = {
+        authority: authoritySchema.parse({
+          subject: agent,
+          onBehalfOf: userId,
+          mode: "interactive",
+        }),
+        context: { type: "chat", workspaceId: id, chatId: chat.id },
+        permissionId: null,
+        actor: { type: "system" },
+      } as const;
+      return {
+        recall: await readOutcome(recallFor(env, caller, requestOf(word))),
+        whoKnows: await readOutcome(
+          whoKnowsFor(
+            env,
+            {
+              ...caller,
+              keep: async () => {
+                await Promise.resolve();
+              },
+            },
+            requestOf(word)
+          )
+        ),
+        entities: await readOutcome(
+          entitiesCallFor(env, caller, "entities.find", { name: word })
+        ),
+        skills: await readOutcome(
+          skillsCallFor(env, caller, "skills.select", { task: word })
+        ),
+      };
+    };
+    const suspended = await person("user");
+    await env.DB.prepare(
+      "UPDATE members SET suspended_at = ?, suspended_by = 'directory' WHERE user_id = ?"
+    )
+      .bind(Date.now(), suspended.userId)
+      .run();
+
+    expect({
+      active: await answeredFor(ada.userId),
+      suspended: await answeredFor(suspended.userId),
+    }).toStrictEqual({
+      active: {
+        recall: "read",
+        whoKnows: "read",
+        entities: "read",
+        skills: "read",
+      },
+      suspended: {
+        recall: "permission.unavailable",
+        whoKnows: "permission.unavailable",
+        entities: "permission.unavailable",
+        skills: "permission.unavailable",
+      },
+    });
   });
 
   it("gives a run that would keep more than 1,000 recalled versions no pack, refused and audited so", async () => {
@@ -1380,6 +1466,181 @@ const recallingThen = async (
   });
   return workflow;
 };
+
+describe(
+  "an App that declares no permission to read the Brain",
+  setUpTime,
+  () => {
+    it("recalls what everyone in the company may read with no grant, never a team's nor anyone's own, marked from its first read on, a refused one too", async () => {
+      const { word, ada } = await company();
+      const app = await askOf(ada, [], false);
+      /** Whether the App is marked as having read the Brain by default. */
+      const marked = async () =>
+        (await env.DB.prepare(
+          "SELECT 1 FROM brain_default_reads WHERE subject_type = 'app' AND subject_id = ?"
+        )
+          .bind(app.app)
+          .first()) !== null;
+      const before = await marked();
+      // Refused by the recall itself, after the mark.
+      const refused = await askedOf(app, ada, { question: word, tokens: 0 });
+      const afterRefused = await marked();
+      const pack = await askedOf(app, ada, { question: word, tokens: 800 });
+      const [event] = await recallEvents(ada.userId, 2);
+
+      expect({
+        before,
+        refused,
+        afterRefused,
+        // Of this company's notes, each holding `word`: the one for everyone.
+        texts: textsOf(pack).filter((text) => text.includes(word)),
+        audited: event?.target,
+      }).toStrictEqual({
+        before: false,
+        refused: { failed: "permission.invalid_args" },
+        afterRefused: true,
+        texts: [`For everyone: ${word} is in the handbook.`],
+        audited: { type: "app", id: app.app },
+      });
+    });
+  }
+);
+
+describe(
+  "a workflow that declares no permission to read the Brain",
+  setUpTime,
+  () => {
+    it("recalls what everyone in the company may read by the Brain's alias with no grant, marked first, its result withheld once that is erased", async () => {
+      const { word, admin, ada } = await company();
+      const erasedWord = `band${unique().replaceAll(/\W/gu, "")}`;
+      const erased = await forEveryone(`Salary band: ${erasedWord} is 70k.`);
+      const { workflow } = await recallingWorkflow(ada, admin, {
+        byDefault: true,
+      });
+      /** Whether the workflow is marked as having read the Brain by default. */
+      const marked = async () =>
+        (await env.DB.prepare(
+          "SELECT 1 FROM brain_default_reads WHERE subject_type = 'workflow' AND subject_id = ?"
+        )
+          .bind(workflow.id)
+          .first()) !== null;
+      const before = await marked();
+      const pack = await ranOf(ada, workflow.id, {
+        question: word,
+        tokens: 800,
+      });
+      const later = await startedRun(ada, workflow.id, {
+        question: erasedWord,
+        tokens: 800,
+      });
+      const recalledLater = await endOf(ada, workflow.id, later);
+      await eraseSourceNoLongerEveryones(env, {
+        source: erased,
+        readers: { kind: "none" },
+        reason: "deleted",
+      });
+      const record = await resourceRunFor(env, ada, workflow.id, later);
+
+      expect({
+        before,
+        marked: await marked(),
+        texts: textsOf(pack).filter((text) => text.includes(word)),
+        recalledLater: textsOf(recalledLater).filter((text) =>
+          text.includes(erasedWord)
+        ),
+        withheld: { result: record.result ?? null, error: record.error?.code },
+      }).toStrictEqual({
+        before: false,
+        marked: true,
+        texts: [`For everyone: ${word} is in the handbook.`],
+        recalledLater: [`Salary band: ${erasedWord} is 70k.`],
+        withheld: { result: null, error: "brain.revoked" },
+      });
+    });
+
+    it("reads through a permission declared under the Brain's alias, never by default: unmarked, its reads pinned under its grant", async () => {
+      const { word, admin, ada } = await company();
+      const { workflow, permissionId } = await recallingWorkflow(ada, admin, {
+        alias: "brain",
+      });
+      const runId = await startedRun(ada, workflow.id, {
+        question: word,
+        tokens: 800,
+      });
+      const pack = await endOf(ada, workflow.id, runId);
+      const pins = await env.DB.prepare(
+        "SELECT DISTINCT permission_id AS permission FROM run_brain_versions WHERE run_id = ?"
+      )
+        .bind(runId)
+        .all<{ permission: string }>();
+      const marked = await env.DB.prepare(
+        "SELECT 1 FROM brain_default_reads WHERE subject_type = 'workflow' AND subject_id = ?"
+      )
+        .bind(workflow.id)
+        .first();
+
+      expect({
+        texts: textsOf(pack).filter((text) => text.includes(word)),
+        pinnedUnder: pins.results.map(({ permission }) => permission),
+        marked,
+      }).toStrictEqual({
+        texts: [`For everyone: ${word} is in the handbook.`],
+        pinnedUnder: [permissionId],
+        marked: null,
+      });
+    });
+
+    it("answers a draft's test run of the Brain's alias from its fixtures, as a real run's call", async () => {
+      const ada = await person("builder");
+      const workflow = await createWorkflowResource(
+        env,
+        ada,
+        `test-${unique()}`
+      );
+      const { revision } = await workflowDraft(env, ada, workflow.id);
+      const saved = await editWorkflowDraft(env, ada, workflow.id, {
+        revision,
+        source: JSON.stringify({
+          $schema: workflowSchemaUrl,
+          args: { kind: "object", fields: {} },
+          returns: packDescriptor,
+          result: { $expr: "recalled" },
+          steps: [
+            {
+              id: "recalled",
+              type: "call",
+              brain: "brain",
+              action: "recall",
+              args: { question: "leave", budget: { tokens: 100 } },
+            },
+          ],
+        }),
+      });
+      const answer = { items: [], notFound: ["leave"], truncated: false };
+      const { runId } = await startCandidateRun(env, ada, workflow.id, {
+        revision: saved.revision,
+        args: {},
+        fixtures: { brain: { result: answer } },
+      });
+      const run: WorkflowCandidateRun = await vi.waitFor(
+        async () => {
+          const read = await candidateRunFor(env, ada, workflow.id, runId);
+          if (read.status === "starting" || read.status === "running") {
+            throw new Error(`Test run ${runId} is ${read.status}`);
+          }
+          return read;
+        },
+        { timeout: 20_000, interval: 100 }
+      );
+
+      expect({
+        problems: saved.problems,
+        status: run.status,
+        result: run.result,
+      }).toStrictEqual({ problems: [], status: "completed", result: answer });
+    });
+  }
+);
 
 describe("what code recalls, passed on", setUpTime, () => {
   it("reaches a shared App as what everyone in the company may read: never the team text of the person the run was for", async () => {
@@ -2201,14 +2462,13 @@ describe("code's recall beside team claims", setUpTime, () => {
       reviewed: { version: 1 },
     });
     const { workflow } = await recallingWorkflow(ada, admin);
-    const { stub, chat, ask, agent } = await chatOf(
+    const { stub, chat, ask } = await chatOf(
       ada.userId,
       recallCode(request),
       says("Done."),
       recallCode(request),
       says("Done.")
     );
-    await granted(ada, admin, brainGrant(agent));
     const asked = { question: request.question, tokens: request.budget.tokens };
     const codeRecalls = async () => ({
       app: await askedOf(app, ada, asked),

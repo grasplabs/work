@@ -1,7 +1,9 @@
 import { createAuditEvent } from "@grasp-os/shared/audit";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { guestRole } from "@grasp-os/shared/roles";
+import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
+import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 
@@ -35,6 +37,25 @@ import type { DirectoryKind } from "./directory-ties.ts";
 //   matters. When every admin would go, none does, and that is recorded.
 // - An admin's own decision undone: the read lifts only the suspensions it
 //   made (`suspended_by = 'directory'`), and never touches a removal.
+
+/**
+ * The user IDs of those who hold a membership but may not act now, as
+ * `mayAct` has it: members suspended, and guests (roles.ts `guestRole`),
+ * who are never someone in the company. Whose own connections connect reads
+ * nothing of in the background (clock.ts, GRA-2143).
+ */
+export const pausedUserIds = async (env: Env): Promise<string[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ userId: members.userId })
+    .from(members)
+    .where(
+      and(
+        eq(members.organizationId, organizationId),
+        or(isNotNull(members.suspendedAt), eq(members.role, guestRole))
+      )
+    );
+  return rows.map(({ userId }) => userId);
+};
 
 /** What a suspension the daily read makes is marked as made by. */
 const byDirectory = "directory";

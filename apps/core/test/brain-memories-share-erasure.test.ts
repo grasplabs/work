@@ -17,7 +17,6 @@ import {
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { personalChatsOf, says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { mockIdp } from "./idp.ts";
 import { noProducers } from "./no-producers.ts";
@@ -165,12 +164,6 @@ describe("erasing a member who shared memories", { timeout: 180_000 }, () => {
       says("Noted."),
       says("Ok.")
     );
-    await requestGranted(idp, admin, {
-      subject: chats.agent,
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     const { chat, ask } = await chats.newChat();
     await ask(`What about ${toTeam.name}?`);
     const citedBefore = resultsOf(await opened(ben, chat.id)).some((text) =>

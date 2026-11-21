@@ -143,8 +143,8 @@ export interface FrameCode {
 // immutable cache key and no secret.
 //
 // That holds because every page today is for signed-in people alone: a
-// member, or a visitor signed in with a code mailed to them
-// (app-visitors.ts). A page for anyone, signed in or not, would have
+// member, or a guest signed in with a code mailed to them. A page for
+// anyone, signed in or not, would have
 // browser code as public as any website's, so its scope would be served
 // with no token and `public, immutable`, for a CDN to keep, while its data
 // stays behind its server functions' own checks. The token check and the

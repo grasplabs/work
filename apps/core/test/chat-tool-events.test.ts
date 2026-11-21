@@ -67,6 +67,12 @@ const answered = async (follower: Follower) => {
   );
 };
 
+/**
+ * Whether `callId` is a code step's, never the recall before a question
+ * that every turn runs (turn-recall.ts names its calls `recall_…`).
+ */
+const ofCode = (callId: string): boolean => !callId.startsWith("recall_");
+
 /** What a page shows of a call: everything but when. */
 const line = ({ at: _at, ...event }: ChatToolEvent) => event;
 
@@ -96,9 +102,9 @@ describe("a chat's tool lines", () => {
 
     const result = follower
       .messages()
-      .find((message) => message.role === "result");
+      .find((message) => message.role === "result" && ofCode(message.callId));
     const callId = result?.role === "result" ? result.callId : "none";
-    const tools = follower.tools();
+    const tools = follower.tools().filter((tool) => tool.callId === callId);
     expect({
       result: result?.text,
       lines: tools.map(line),
@@ -174,18 +180,23 @@ describe("a chat's tool lines", () => {
     await ann.chats.send(chat.id, { text: "Anything attached?", model });
     await answered(first);
     await ann.chats.send(chat.id, { text: "Any workflows?", model });
+    /** The lines of `follower`'s code steps. */
+    const codeLines = (tools: readonly ChatToolEvent[] = []) =>
+      tools.filter(({ callId }) => ofCode(callId));
     await vi.waitFor(
       () => {
-        expect(first.tools()).toHaveLength(2);
+        expect(codeLines(first.tools())).toHaveLength(2);
       },
       { timeout: 10_000 }
     );
     await answered(first);
-    const streamed = first.tools();
+    const streamed = codeLines(first.tools());
     const steps = first
       .messages()
       .flatMap((message) =>
-        message.role === "result" ? [message.callId] : []
+        message.role === "result" && ofCode(message.callId)
+          ? [message.callId]
+          : []
       );
 
     // Opened later, it comes in the first update with the messages.
@@ -211,8 +222,8 @@ describe("a chat's tool lines", () => {
 
     expect({
       methods: streamed.map(({ method, callId }) => [method, callId]),
-      later: later.updates[0]?.tools,
-      restarted: restarted.updates[0]?.tools,
+      later: codeLines(later.updates[0]?.tools),
+      restarted: codeLines(restarted.updates[0]?.tools),
     }).toStrictEqual({
       methods: [
         ["chat.files", steps[0]],

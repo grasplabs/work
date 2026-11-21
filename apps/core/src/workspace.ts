@@ -124,7 +124,7 @@ import { builtNoteText, resultRunId, withheldResult } from "./agent.ts";
 import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
-import { memberRole } from "./auth/identity.ts";
+import { accountNameOf, memberRole } from "./auth/identity.ts";
 import { loneNotesPerDrain } from "./brain-hand-overs.ts";
 import { chatTurnSource, eraseChat } from "./brain-next-origins.ts";
 import { skillsFor, skillsReachOf } from "./brain-skills.ts";
@@ -218,7 +218,6 @@ import {
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
-import { hasBrainGrant } from "./permissions.ts";
 import type { WorkContext } from "./restricted.ts";
 import { retireUnseen } from "./unseen-memories.ts";
 
@@ -774,6 +773,22 @@ const traceKeyPrefix = "trace:";
  * proposed them (`takePlan`), so each is made once.
  */
 const builtKeyPrefix = "built:";
+
+/**
+ * The person a turn talks with, by their account's name, when it has one:
+ * only where the answer reaches them alone (`personal`).
+ */
+const namedPerson = async (
+  env: Env,
+  personId: string,
+  personal: boolean
+): Promise<Pick<TurnContext, "person">> => {
+  if (!personal) {
+    return {};
+  }
+  const name = await accountNameOf(env.DB, personId);
+  return name === undefined ? {} : { person: { name } };
+};
 
 /**
  * Which agents a turn may draft for its person (`TurnContext.drafts`):
@@ -2686,7 +2701,6 @@ export class Workspace extends DurableObject<Env> {
         shared,
         audience,
         personal,
-        readsBrain: await hasBrainGrant(this.env, authority),
         context,
         capture: { attended: !unattended },
       });
@@ -3121,6 +3135,7 @@ export class Workspace extends DurableObject<Env> {
       agent === undefined ? [] : await documentsOf(this.env, agent.id);
     const documents = kept.map(({ id, name, type }) => ({ id, name, type }));
     return {
+      ...(await namedPerson(this.env, scope.personId, personal)),
       instructions: instructions.map(({ file, text }) => ({ file, text })),
       skills,
       channel,
@@ -5292,11 +5307,13 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Tells the agent of `personId`'s own chat how a write it had held for
-   * them ended (pending-actions.ts), which it otherwise never learns: a
-   * notice in its context (`ChatSession.note`), which the turn under way
-   * reads before its next request, or else the next turn. The person isn't
-   * shown it: they decided it. No turn starts.
+   * Tells the agent of `personId`'s own chat how a call it had held for
+   * them ended (pending-actions.ts), a write or a read (GRA-1928), which
+   * it otherwise never learns: a notice in its context
+   * (`ChatSession.note`), which the turn under way reads before its next
+   * request, or else the next turn. The person isn't shown it: they
+   * decided it. No turn starts here: confirmed in the chat, its page goes
+   * on in a turn the person's own message starts (GRA-2224).
    */
   async heldDecided(
     chatId: unknown,
@@ -5308,7 +5325,7 @@ export class Workspace extends DurableObject<Env> {
     const { id, action } = heldSchema.parse(held);
     await this.#note(
       chat.id,
-      `The change you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`
+      `The call you asked for, "${action}" (pending ID ${id}), was decided. ${heldOutcomes[outcome]} Read how it ended, with what it returned, with \`env.connections.outcome("${id}")\`.`
     );
   }
 

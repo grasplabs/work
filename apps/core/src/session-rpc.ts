@@ -12,7 +12,9 @@ import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DataPolicyRpc } from "./data-policy-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
+import { DirectoryGroupsRpc } from "./directory-groups.ts";
 import { DraftsRpc } from "./drafts-rpc.ts";
+import { membersOnly, openToGuests } from "./guest-access.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
 import { InstructionsRpc } from "./instructions-rpc.ts";
 import { MembersRpc } from "./members.ts";
@@ -55,7 +57,7 @@ import { WorkflowsRpc } from "./workflows/rpc.ts";
  * RPC, so each keeps its env and check in private fields.
  */
 export class SessionRpc extends CoreRpcTarget implements SessionApi {
-  readonly #check: SessionCheck;
+  readonly #whoami: SessionCheck;
   readonly #apps: AppsRpc;
   readonly #drafts: DraftsRpc;
   readonly #versions: VersionsRpc;
@@ -77,6 +79,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #pages: PagesRpc;
   readonly #dataPolicy: DataPolicyRpc;
   readonly #members: MembersRpc;
+  readonly #directoryGroups: DirectoryGroupsRpc;
   readonly #organization: OrganizationRpc;
   readonly #orgSettings: OrgSettingsRpc;
   readonly #stephenRequests: StephenRequestsRpc;
@@ -100,8 +103,11 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     super();
     // Every view and action of Grasp's staff, on every namespace, is in
     // the client's audit log (staff-audit.ts): the one check they all ask.
-    const check = staffAudited(env, connectionCheck);
-    this.#check = check;
+    const audited = staffAudited(env, connectionCheck);
+    // A guest's connection is answered as nobody's everywhere but where
+    // guest-access.ts opens it to them (`openToGuests`).
+    const check = membersOnly(audited);
+    this.#whoami = openToGuests(audited, "whoami");
     // Everything but the onboarding refuses Grasp staff (session-check.ts).
     const full = fullAccess(check);
     this.#apps = new AppsRpc(env, full);
@@ -122,9 +128,12 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#decisions = new DecisionsRpc(env, full);
     this.#heldStarts = new HeldStartsRpc(env, full);
     this.#dependencies = new DependenciesRpc(env, full);
-    this.#pages = new PagesRpc(env, full);
+    this.#pages = new PagesRpc(env, full, (method) =>
+      fullAccess(openToGuests(audited, method))
+    );
     this.#dataPolicy = new DataPolicyRpc(env, full);
     this.#members = new MembersRpc(env, full);
+    this.#directoryGroups = new DirectoryGroupsRpc(env, full);
     this.#organization = new OrganizationRpc(env, full);
     this.#orgSettings = new OrgSettingsRpc(env, full);
     this.#stephenRequests = new StephenRequestsRpc(env, full);
@@ -278,6 +287,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#members;
   }
 
+  get directoryGroups(): DirectoryGroupsRpc {
+    return this.#directoryGroups;
+  }
+
   get organization(): OrganizationRpc {
     return this.#organization;
   }
@@ -315,6 +328,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   }
 
   async whoami(): Promise<Identity> {
-    return await withPerson(this.#check, (identity) => identity);
+    return await withPerson(this.#whoami, (identity) => identity);
   }
 }

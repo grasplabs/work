@@ -10,6 +10,7 @@ import {
   appErrorDetailsOf,
   declaredPermission,
   declaredPermissions,
+  defaultPermission,
   descriptorFromText,
   schemaFromDescriptor,
   schemaHash,
@@ -236,7 +237,7 @@ import type { WorkflowEventSends } from "./workflow-event-sends.ts";
 //   (`peopleAlias`, an alias no App can declare) goes through
 //   `Invocation.notifyPeople` alone, after the one gate (`admit`), which decides
 //   whom it reaches and holds the App's limits (app-notifications.ts); a
-//   call with none (a visitor's, a run's) is refused. A mutation's is
+//   call with none (a run's) is refused. A mutation's is
 //   staged as an intent of its commit, in the commit's bound with its
 //   starts; an action's is keyed by its place among its sends, so a call
 //   made again under the same key tells nobody twice.
@@ -274,7 +275,7 @@ export interface Invocation {
   readonly principal: string;
   /**
    * Who the audit log names as making the call: the person, an agent for
-   * them, a visitor, a workflow run, or the App. Each commit names them,
+   * them, a workflow run, or the App. Each commit names them,
    * in the store's change history of every record it writes.
    */
   readonly actor: AuditActor;
@@ -326,7 +327,7 @@ export interface Invocation {
   /**
    * How core tells people for this call (`ctx.notifyPeople`, of an action
    * or a mutation, app-notifications.ts); none
-   * told without it: a visitor's call and a workflow run's have none.
+   * told without it: a workflow run's call has none.
    */
   readonly notifyPeople?: PeopleNotifications;
   /**
@@ -1678,10 +1679,13 @@ export interface BoundResource {
 /**
  * How core binds a declared resource for an invocation, under the App's
  * grants: the bound resource, or undefined when there is no approved
- * binding. A declaration alone grants nothing.
+ * binding. A declaration alone grants nothing. `byDefault`: the Brain's
+ * reads an App that declares no `brain` permission reaches with no
+ * binding (`defaultPermission`, GRA-2218), never anything it declares.
  */
 export type ResourceBindings = (
-  declaration: AnyPermission
+  declaration: AnyPermission,
+  byDefault: boolean
 ) => Promise<BoundResource | undefined>;
 
 /** A model request. */
@@ -1696,58 +1700,6 @@ const notAllowed = () => functionErrors.create("permission.not_allowed");
 /** An answer a resource's contract doesn't allow. */
 const invalidResult = () =>
   functionErrors.create("contract.invalid_permission_result");
-
-/**
- * Whether `method` with `args` is one of the operations a guests
- * `declaration` declares, with what it takes: an invitation's object, a
- * chat's ID, or nothing for a list.
- */
-const allowsGuests = (
-  declaration: Extract<AnyPermission, { "~permission": "guests" }>,
-  method: unknown,
-  args: readonly Json[]
-): boolean => {
-  const [first] = args;
-  if (!declaration.operations.some((operation) => operation === method)) {
-    return false;
-  }
-  if (method === "list") {
-    return args.length === 0;
-  }
-  return (
-    args.length === 1 &&
-    (method === "invite" ? isRecord(first) : typeof first === "string")
-  );
-};
-
-/** A guest chat, as a guests resource answers it. */
-const guestChatSchema = z.strictObject({
-  id: z.string(),
-  name: z.string(),
-  skill: z.string(),
-  status: z.enum(["open", "finished", "revoked", "expired"]),
-  invitedBy: z.string(),
-  turns: z.number(),
-  createdAt: z.string(),
-  expiresAt: z.string(),
-  endedAt: z.string().nullable(),
-});
-
-/** What each guests operation answers. */
-const guestResults = {
-  invite: guestChatSchema.extend({ link: z.string() }),
-  list: z.array(guestChatSchema).max(100),
-  read: guestChatSchema.extend({
-    messages: z.array(
-      z.strictObject({
-        role: z.enum(["guest", "agent"]),
-        text: z.string(),
-        at: z.string(),
-      })
-    ),
-  }),
-  revoke: guestChatSchema,
-} as const;
 
 /**
  * Whether `method` with `args` is a `call` of one name `declares`, with an
@@ -1811,8 +1763,8 @@ const isAiRequest = (args: readonly Json[]): boolean => {
  * The request `method` with `args` makes of `declaration`, if the
  * declaration allows it: a connection one of its declared actions with an
  * object of arguments, the Brain one of its declared operations, AI a
- * prompt, another App one of its declared functions, guests one of its
- * operations. `permission.not_allowed` otherwise.
+ * prompt, another App one of its declared functions.
+ * `permission.not_allowed` otherwise.
  */
 const allowedRequest = (
   declaration: AnyPermission,
@@ -1827,8 +1779,6 @@ const allowedRequest = (
     allowed = allowsBrain(declaration, method, args);
   } else if (declaration["~permission"] === "ai") {
     allowed = method === "generate" && isAiRequest(args);
-  } else if (declaration["~permission"] === "guests") {
-    allowed = allowsGuests(declaration, method, args);
   } else {
     const { functions } = declaration;
     allowed = isNamedCall(method, args, (path) =>
@@ -1882,8 +1832,8 @@ const brainResults: Readonly<Record<string, z.ZodType>> = {
 
 /**
  * What a permission answered, if its contract allows it: AI's text, or the
- * value the request asked for; the Brain's hits or document; a guest
- * chat; the platform's function's return, as it declares it. A
+ * value the request asked for; the Brain's hits or document; the
+ * platform's function's return, as it declares it. A
  * connection's answer is checked as JSON here; its action's own descriptor
  * comes with generated connector contracts.
  */
@@ -1904,13 +1854,6 @@ const checkedResourceResult = (
     valid =
       Object.hasOwn(brainResults, method) &&
       brainResults[method]?.safeParse(result).success === true;
-  } else if (declaration["~permission"] === "guests") {
-    valid =
-      (method === "invite" ||
-        method === "list" ||
-        method === "read" ||
-        method === "revoke") &&
-      guestResults[method].safeParse(result).success;
   } else if (declaration["~permission"] === "grasp") {
     valid = returnsDeclared(declaration.functions, args, result);
   } else {
@@ -2111,11 +2054,17 @@ const resourceCall = async (
   const { alias, method } = request;
   // Only an action reaches outside the App (its channel alone routes here,
   // checked again), and only through a permission the App declares for
-  // it: never a workflow, a pages' permission or `people`.
-  const declaration =
+  // it: never a workflow, a pages' permission or `people`; or, declaring
+  // none under the Brain's alias, the Brain's reads (GRA-2218).
+  const declared =
     fn.kind === "action"
       ? actionPermission(run.app.manifest, alias)
       : undefined;
+  const byDefault =
+    fn.kind === "action" && declared === undefined
+      ? defaultPermission(run.app.manifest.permissions, alias)
+      : undefined;
+  const declaration = declared ?? byDefault;
   const resourceName = sealedName(run.app.manifest.permissions, alias);
   if (declaration === undefined) {
     throw refusingUse(functionErrors.create("permission.not_allowed"), {
@@ -2154,7 +2103,8 @@ const resourceCall = async (
   await admit(run.invocation);
   // Core's own resolution: what it refuses with is the host's.
   const bound = await trusted(
-    async () => await run.invocation.resources?.(declaration)
+    async () =>
+      await run.invocation.resources?.(declaration, byDefault !== undefined)
   );
   const contract =
     declaration["~permission"] === "connections" ? declaration.contract : null;

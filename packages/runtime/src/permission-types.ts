@@ -11,12 +11,7 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 
 /** The kinds of permission an action reaches through `ctx`. */
-export type PermissionKind =
-  | "ai"
-  | "connections"
-  | "brain"
-  | "grasp"
-  | "guests";
+export type PermissionKind = "ai" | "connections" | "brain" | "grasp";
 
 /**
  * The fixed alias of each permission an App holds at most once: what the
@@ -26,7 +21,6 @@ export const permissionAliases = Object.freeze({
   ai: "ai",
   brain: "brain",
   grasp: "grasp",
-  guests: "guests",
   files: "files",
   links: "links",
   people: "people",
@@ -78,9 +72,6 @@ export interface BrainConfig<Operations extends readonly BrainOperation[]> {
   readonly operations: Operations;
 }
 
-/** What a `guests` permission may do with the App's guest chats. */
-export type GuestsOperation = "invite" | "list" | "read" | "revoke";
-
 /** One of the platform's functions as a declaration holds it: data only. */
 interface GraspFunctionShape {
   readonly kind: "query";
@@ -120,13 +111,6 @@ export interface ConnectionPermission<
 export interface BrainPermission<
   Operations extends readonly BrainOperation[] = readonly BrainOperation[],
 > extends DeclarationBase<"brain", "brain"> {
-  readonly operations: Operations;
-}
-
-/** A `guests` permission. */
-export interface GuestsPermission<
-  Operations extends readonly GuestsOperation[] = readonly GuestsOperation[],
-> extends DeclarationBase<"guests", "guests"> {
   readonly operations: Operations;
 }
 
@@ -259,7 +243,6 @@ export type AnyPermission =
   | AiPermission
   | ConnectionPermission
   | BrainPermission
-  | GuestsPermission
   | GraspPermission;
 
 /** Any permission an App declares, as its manifest holds it by alias. */

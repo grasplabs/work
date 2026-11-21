@@ -130,6 +130,19 @@ const pageOf = async (cookie: string) => {
 };
 
 /** Follows a chat, keeping every update. */
+/**
+ * Whether `message` is the recall before a question (turn-recall.ts names
+ * its calls `recall_…`): a step of its own every turn shows, which these
+ * tests of how a chat streams leave aside (turn-recall.test.ts holds it).
+ */
+const ofRecall = (message: ChatMessage): boolean =>
+  (message.role === "result" && message.callId.startsWith("recall_")) ||
+  (message.role === "assistant" &&
+    message.text === "" &&
+    message.code.length === 0 &&
+    message.tools.length > 0 &&
+    message.tools.every(({ callId }) => callId.startsWith("recall_")));
+
 const follow = async (
   chats: Person["chats"],
   chatId: string,
@@ -147,8 +160,11 @@ const follow = async (
   return {
     updates,
     subscription,
-    /** Every message it was sent, in the order they came. */
-    messages: () => updates.flatMap(({ messages }) => messages),
+    /** Every message it was sent, in the order they came, but the recall's. */
+    messages: () =>
+      updates.flatMap(({ messages }) =>
+        messages.filter((message) => !ofRecall(message))
+      ),
     /** The chat as the updates so far show it. */
     now: () => {
       const last = updates.at(-1);

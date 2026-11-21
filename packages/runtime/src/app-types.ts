@@ -7,7 +7,6 @@ import type {
   ConnectionPermission,
   FilesPermission,
   GraspPermission,
-  GuestsPermission,
   LinksPermission,
   WorkflowPermission,
 } from "./permission-types.ts";
@@ -79,8 +78,6 @@ export interface AppPermissions {
   readonly people?: boolean;
   /** What its pages may do with files. */
   readonly files?: FilesPermission;
-  /** Guest chats (`ctx.guests`). */
-  readonly guests?: GuestsPermission;
   /** The exact HTTPS origins its pages may link to; no network access. */
   readonly links?: LinksPermission;
 }

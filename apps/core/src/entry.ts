@@ -2,7 +2,6 @@ import { adminCommandPath } from "@grasp-os/shared/admin-command";
 import { adminKickoffPath } from "@grasp-os/shared/admin-kickoff";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { aiStatusReportPath } from "@grasp-os/shared/ai-status-report";
-import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import {
   brainActionPath,
@@ -13,7 +12,6 @@ import { channelPlatformOf } from "@grasp-os/shared/channels";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
-import { guestApiPath } from "@grasp-os/shared/guests";
 import { requestIdHeader } from "@grasp-os/shared/http";
 import { interviewHearPath } from "@grasp-os/shared/interview-hear";
 import {
@@ -40,7 +38,6 @@ import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { aiStatusReportResponse } from "./ai-status-report.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
-import { appVisitorResponse } from "./app-visitors.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -68,7 +65,6 @@ import {
 import { docsResponse } from "./docs.ts";
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
-import { guestResponse } from "./guests.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
 import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
@@ -204,11 +200,10 @@ const frontendResponse = async (
 };
 
 /**
- * The pages a link opens, with the link's secret in the body. A guest's
- * (src/guests.ts) has no session: the secret is all it has. Someone's own
- * interview needs the session of the account it belongs to too, which only
- * these routes read for it (src/onboarding/links.ts, interview-caller.ts);
- * its lines are said at the speech endpoint, also for an admin signed in
+ * The pages a link opens, with the link's secret in the body. Someone's
+ * own interview needs the session of the account it belongs to too, which
+ * only these routes read for it (src/onboarding/links.ts,
+ * interview-caller.ts); its lines are said at the speech endpoint, also for an admin signed in
  * (src/onboarding/speech.ts), and what they say is written down over a
  * WebSocket, which also takes a member's dictation
  * (src/onboarding/transcription.ts).
@@ -220,12 +215,6 @@ const linkResponse = async (
   requestId: string,
   ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response | undefined> => {
-  if (pathname === guestApiPath) {
-    return await guestResponse(request, env, requestId);
-  }
-  if (pathname === appVisitorApiPath) {
-    return await appVisitorResponse(request, env, requestId, ctx);
-  }
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);
   }
@@ -439,7 +428,7 @@ const route = async (
     return frameCode;
   }
   if (isUnder(pathname, authBasePath)) {
-    return await handleAuthRequest(request, env, requestId);
+    return await handleAuthRequest(request, env, requestId, ctx);
   }
   const connection = await connectionRouteResponse(
     request,

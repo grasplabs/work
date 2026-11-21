@@ -971,7 +971,7 @@ describe("the Brain's memories, as a person reads them", () => {
     ]).toStrictEqual([null, null]);
   });
 
-  it("retires the person's own wrong word on a retry when retiring failed, one audit outcome per attempt", async () => {
+  it("ends the person's own wrong word in the correction's own save, before a step that fails, and confirms it on a retry, one audit outcome per attempt", async () => {
     const anna = await signedInApi(idp, "user");
     const said = await rememberAs(env, anna.userId, {
       change: crypto.randomUUID(),
@@ -990,7 +990,7 @@ describe("the Brain's memories, as a person reads them", () => {
     const change = crypto.randomUUID();
     await expect(
       correctFor(
-        withFailingOnce("retireMemory"),
+        withFailingOnce("confirmMemory"),
         {
           person: anna.userId,
           actor: { type: "person", userId: anna.userId },
@@ -998,6 +998,11 @@ describe("the Brain's memories, as a person reads them", () => {
         { wrong, right: "Needs SOC 2", change }
       )
     ).rejects.toThrow(failedCall);
+    // Ended with the save, though the confirmation after it failed.
+    const failed = await memoriesAbout(anna.api, {
+      store: "own",
+      id: said.entity,
+    });
     const saved = await anna.api.brainMemories.correct({
       wrong,
       right: "Needs SOC 2",
@@ -1008,9 +1013,11 @@ describe("the Brain's memories, as a person reads them", () => {
       id: said.entity,
     });
     expect({
+      failed: failed.find(({ id }) => id === said.memory)?.endedAt !== null,
       kept: kept.map(({ id, endedAt }) => ({ id, ended: endedAt !== null })),
       audited: await auditedOf(anna.userId, "brain.memory.corrected"),
     }).toStrictEqual({
+      failed: true,
       kept: [
         { id: saved?.memory, ended: false },
         { id: said.memory, ended: true },
@@ -1020,82 +1027,6 @@ describe("the Brain's memories, as a person reads them", () => {
         step(said.memory, "refused"),
         step(said.memory, "attempted"),
         { ...step(said.memory, "done", "done"), saved: saved?.memory },
-      ]),
-    });
-  });
-
-  it("shows a correction a retry can no longer reach, saved before the source was narrowed, for the person to confirm themselves", async () => {
-    const anna = await signedInApi(idp, "user");
-    const [sales, other] = await Promise.all([teamOf(anna.userId), teamOf()]);
-    const { id, cited } = await sourceOf(sales, "Initech renews");
-    const added = await remember(
-      sales,
-      { kind: "customer", names: ["Initech"] },
-      [statusFrom(cited, "Renewing")]
-    );
-    const wrong = {
-      store: "shared" as const,
-      entity: added.entities.c ?? "",
-      memory: added.memories[0] ?? "",
-    };
-    const change = crypto.randomUUID();
-    const caller = {
-      person: anna.userId,
-      actor: { type: "person" as const, userId: anna.userId },
-    };
-    // Saved, then the confirmation fails: to the page, a lost reply.
-    await expect(
-      correctFor(withFailingOnce("confirmMemory"), caller, {
-        wrong,
-        right: "Churned",
-        change,
-      })
-    ).rejects.toThrow(failedCall);
-    // The source is narrowed away from her before she saves again.
-    await addSource(env, {
-      source: { producer: "upload", id },
-      change: crypto.randomUUID(),
-      text: "Initech renews, for others",
-      readers: { kind: "team", teamId: other },
-    });
-    const retried = await anna.api.brainMemories.correct({
-      wrong,
-      right: "Churned",
-      change,
-    });
-    const { entities } = await allEntities(anna.api);
-    const own = entities.find(({ entity }) => entity.store === "own");
-    const ref = { store: "own" as const, id: own?.entity.id ?? "" };
-    const [kept] = await memoriesAbout(anna.api, ref);
-    // Not confirmed: she confirms her own word herself.
-    const confirmed = await anna.api.brainMemories.confirm({
-      store: "own",
-      memory: kept?.id ?? "",
-    });
-    const [after] = await memoriesAbout(anna.api, ref);
-    expect({
-      retried,
-      own: { name: own?.name, unreadable: own?.unreadable },
-      kept: { value: kept?.value, confirmed: kept?.confirmed ?? null },
-      confirmed,
-      after: after?.confirmed?.byYou,
-      corrected: await auditedOf(anna.userId, "brain.memory.corrected"),
-      confirmations: await auditedOf(anna.userId, "brain.memory.confirmed"),
-    }).toStrictEqual({
-      retried: null,
-      own: { name: null, unreadable: true },
-      kept: { value: "Churned", confirmed: null },
-      confirmed: "done",
-      after: true,
-      corrected: unordered([
-        step(wrong.memory, "attempted"),
-        step(wrong.memory, "refused"),
-        step(wrong.memory, "attempted"),
-        step(wrong.memory, "done", "nothing"),
-      ]),
-      confirmations: unordered([
-        step(kept?.id ?? "", "attempted"),
-        step(kept?.id ?? "", "done", "done"),
       ]),
     });
   });

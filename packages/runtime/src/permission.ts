@@ -24,7 +24,6 @@ import {
   declaredForBrowser,
   declaredWorkflow,
   filesOperations,
-  guestsOperations,
   known,
   refuse,
 } from "./permission-checks.ts";
@@ -39,8 +38,6 @@ import type {
   ConnectionPermission,
   FilesPermission,
   GraspPermission,
-  GuestsOperation,
-  GuestsPermission,
   LinksPermission,
   WorkflowConfig,
   WorkflowPermission,
@@ -70,7 +67,6 @@ import { workflowReferenceLimits } from "./workflow-references.ts";
 // - `people`: the organization's members (`ctx.people`), a flag on the
 //   App's `permissions`, never a declaration;
 // - `files`: what the App's pages may do with files;
-// - `guests`: guest chats (`ctx.guests`).
 //
 // and `links`, the exact origins the App's pages may link to, which
 // grants no network access at all.
@@ -334,29 +330,6 @@ export const permission = Object.freeze({
         )
       ),
     }) as GraspPermission,
-  /**
-   * Guest chats, under a permission an admin binds: inviting a guest for
-   * the person the call acts for, and listing, reading back and revoking
-   * the App's chats. An App holds one (`ctx.guests`).
-   */
-  guests: <
-    const Operations extends readonly [GuestsOperation, ...GuestsOperation[]],
-  >(config: {
-    readonly operations: Operations;
-  }): GuestsPermission<Operations> => {
-    const checked = checkedConfig(config, ["operations"]);
-    // SAFETY: built from what was checked of the arguments the type is
-    // inferred from: the operations given, in order.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return declared({
-      "~permission": "guests",
-      alias: permissionAliases.guests,
-      operations: known(
-        checkedList(checked.operations, "operations", guestsOperations),
-        guestsOperations
-      ),
-    }) as GuestsPermission<Operations>;
-  },
   /**
    * What the App's pages may do with files through the host: upload,
    * read, attach, delete. Never a function's.

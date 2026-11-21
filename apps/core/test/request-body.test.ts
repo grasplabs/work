@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { boundedText } from "../src/request-body.ts";
 
-// The unauthenticated routes' body (guest chats, interview links): the
+// The unauthenticated routes' body (interview links): the
 // most exposed to a client that sends its body slowly, or never ends it.
 
 /** What `read` settled with, or the code it refused with. */

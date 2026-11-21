@@ -601,6 +601,9 @@ export const hold = async (
   }
 ): Promise<PendingReference> => {
   const { authority, origin } = claims;
+  // Null for a read with no grant, held because of where it was asked
+  // (`restricted`): core decides it by the same rule as the read.
+  const { permissionId } = origin;
   const db = drizzle(env.DB);
   const { subject } = authority;
   const subjectType = subject.type;
@@ -657,7 +660,7 @@ export const hold = async (
           ),
           input: value(JSON.stringify(input), "input"),
           inputHash: value(inputHash, "input_hash"),
-          permissionId: value(origin.permissionId, "permission_id"),
+          permissionId: value(permissionId, "permission_id"),
           context: value(context, "context"),
           restricted: value(claims.restricted ? 1 : 0, "restricted"),
           createdAt: value(heldAt, "created_at"),

@@ -89,7 +89,6 @@ export {
   pageLimits,
   pageModulePath,
   pagePersonHeader,
-  pageVisitorHeader,
   streamCallActions,
 } from "./page-limits.ts";
 
@@ -139,6 +138,13 @@ export const pageHrefSchema = z
   .refine((href) => !dotSegment.test(href.split(/[?#]/u, 1)[0] ?? ""), {
     message: "a path without . or .. segments",
   });
+
+/** An App someone may open, as `PagesApi.opensApps` lists it. */
+export interface OpenableApp {
+  app: string;
+  name: string;
+  description: string;
+}
 
 /** An App's sidebar entries (spec 34.1): its surfaces of kind `sidebar`. */
 export interface SidebarApp {
@@ -494,6 +500,11 @@ export interface PagesApi {
    * with surfaces of kind `sidebar`, with those.
    */
   sidebar: () => Promise<SidebarApp[]>;
+  /**
+   * The live Apps the person may open now, by name: what a guest's home
+   * lists (guests reach no other list of Apps).
+   */
+  opensApps: () => Promise<OpenableApp[]>;
   /**
    * One frame's own way to the App (`PageFrameApi`), for the build the
    * lease `open` gave it: how frames that share a connection each get

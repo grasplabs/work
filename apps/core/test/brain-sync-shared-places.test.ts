@@ -20,8 +20,8 @@ import { personOf } from "../src/connections.ts";
 import { completeOwedErasures } from "../src/shared-reads.ts";
 import { pickSyncPlaces } from "../src/sync-picks.ts";
 import { allEvents } from "./audit-events.ts";
-import { chooseAudience } from "./brain-audiences.ts";
-import { newTeam } from "./brain-next-leaks-harness.ts";
+import { audienceNow, chooseAudience } from "./brain-audiences.ts";
+import { leave, newTeam } from "./brain-next-leaks-harness.ts";
 import { inStoreOf } from "./brain-next-out-reads.ts";
 import {
   claimStatement,
@@ -35,6 +35,7 @@ import {
   parkWorkerSources,
   pollMs,
   setUpTime,
+  signInShared,
   sitesFailing,
   sitesHeld,
   syncOn,
@@ -72,7 +73,10 @@ const takeListingStatement =
 const erasureEndStatement =
   /^update "connection_brain_erasures" set "erasing" = \?/u;
 
-/** `admin` picks `places` on `connectionId`, from the picks held now. */
+/**
+ * `admin` picks `places` on `connectionId`, from the picks held now,
+ * confirming the audience held now reads everything in them.
+ */
 const pick = async (
   admin: Person,
   connectionId: string,
@@ -84,6 +88,7 @@ const pick = async (
     feed,
     from: held?.picks ?? [],
     places,
+    acknowledged: await audienceNow(admin.api, connectionId),
   });
 };
 
@@ -133,7 +138,7 @@ describe("native sync of a shared connection's picked places", () => {
   });
 
   it(
-    "keeps a picked place for the connection's audience alone, never for whoever connected it, nothing while the audience is nobody, and no one's steps",
+    "keeps a picked place for the connection's audience, whatever the source lets each open, never for whoever connected it, nothing while the audience is nobody, and no one's steps",
     setUpTime,
     async () => {
       const [admin, seller, outsider] = await Promise.all([
@@ -145,10 +150,13 @@ describe("native sync of a shared connection's picked places", () => {
       const [picked, unpicked] = [markerOf(), markerOf()];
       const site = `site-${unique()}`;
       const other = `site-${unique()}`;
-      const { connectionId } = await connectSharedSites(admin, {
-        [site]: picked,
-        [other]: unpicked,
-      });
+      // At the source, only the outsider may open the files: the seller
+      // may not, and reads them all the same, as one of the audience.
+      const { connectionId } = await connectSharedSites(
+        admin,
+        { [site]: picked, [other]: unpicked },
+        [{ kind: "account", id: String(outsider.person.oid) }]
+      );
       await pick(admin, connectionId, [site]);
 
       // Nobody may read it yet: nothing is read or kept.
@@ -181,6 +189,116 @@ describe("native sync of a shared connection's picked places", () => {
         admin: false,
         outsider: false,
         unpicked: false,
+      });
+    }
+  );
+
+  it(
+    "takes a picked place from those outside a narrowed audience, and from whoever leaves its team, from the next read",
+    setUpTime,
+    async () => {
+      const [admin, seller, other] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      const sales = await newTeam(seller.userId);
+      const marker = markerOf();
+      const site = `site-${unique()}`;
+      const { connectionId } = await connectSharedSites(admin, {
+        [site]: marker,
+      });
+      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+      await pick(admin, connectionId, [site]);
+      await syncAll();
+      /** Whether the seller and the other colleague find the place's file. */
+      const seen = async () => ({
+        seller: await finds(seller.userId, marker),
+        other: await finds(other.userId, marker),
+      });
+      const everyone = await seen();
+
+      await chooseAudience(admin.api, connectionId, {
+        kind: "team",
+        teamId: sales,
+      });
+      const narrowed = await seen();
+      await leave(sales, seller.userId);
+      const left = await seen();
+
+      expect({
+        everyone,
+        narrowed,
+        left,
+        // Still picked: kept, for whoever is in the audience.
+        kept: await heldBy(connectionId),
+      }).toStrictEqual({
+        everyone: { seller: true, other: true },
+        narrowed: { seller: true, other: false },
+        left: { seller: false, other: false },
+        kept: { [site]: 1 },
+      });
+    }
+  );
+
+  it(
+    "hides a picked place from everyone while the provider's grant is refused, erases nothing, and shows it again once the same account signs in again",
+    setUpTime,
+    async () => {
+      const [admin, member] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "user"),
+      ]);
+      const marker = markerOf();
+      const site = `site-${unique()}`;
+      const { connectionId, subject } = await connectSharedSites(admin, {
+        [site]: marker,
+      });
+      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+      await pick(admin, connectionId, [site]);
+      await syncAll();
+      const before = await finds(member.userId, marker);
+
+      // The provider refused the grant: connect lets its tokens go and
+      // marks the connection as needing someone to sign in again
+      // (connect's tokens.ts `markDead`).
+      await connectDb().batch([
+        connectDb()
+          .prepare("DELETE FROM connection_tokens WHERE connection_id = ?")
+          .bind(connectionId),
+        connectDb()
+          .prepare(
+            "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
+          )
+          .bind(connectionId),
+      ]);
+      const whileRefused = {
+        member: await finds(member.userId, marker),
+        admin: await finds(admin.userId, marker),
+      };
+      // Signing in to another account is another connection: the hidden
+      // one stays hidden.
+      const other = await signInShared(admin, `shared-${unique()}`);
+      const afterOther = await finds(member.userId, marker);
+      const again = await signInShared(admin, subject);
+
+      expect({
+        before,
+        whileRefused,
+        otherIsNew: other.id !== connectionId,
+        afterOther,
+        again,
+        after: await finds(member.userId, marker),
+        // Nothing erased meanwhile.
+        kept: await heldBy(connectionId),
+      }).toStrictEqual({
+        before: true,
+        whileRefused: { member: false, admin: false },
+        otherIsNew: true,
+        afterOther: false,
+        again: { id: connectionId, status: "active" },
+        after: true,
+        kept: { [site]: 1 },
       });
     }
   );
@@ -371,7 +489,7 @@ describe("native sync of a shared connection's picked places", () => {
   );
 
   it(
-    "erases a shared connection's copies once it is disconnected, hidden from the drain on",
+    "erases a shared connection's copies once it is disconnected, hidden from the moment the disconnect answers",
     setUpTime,
     async () => {
       const [admin, member] = await Promise.all([
@@ -389,6 +507,8 @@ describe("native sync of a shared connection's picked places", () => {
       const before = await finds(member.userId, marker);
 
       await admin.api.connections.disconnect(connectionId);
+      // Before connect's events reach core: nothing to find meanwhile.
+      const atDisconnect = await finds(member.userId, marker);
       await drainAuditOutboxes(env);
       const atDrain = await finds(member.userId, marker);
       await sync();
@@ -400,12 +520,14 @@ describe("native sync of a shared connection's picked places", () => {
 
       expect({
         before,
+        atDisconnect,
         atDrain,
         after: await finds(member.userId, marker),
         kept: await heldBy(connectionId),
         closed,
       }).toStrictEqual({
         before: true,
+        atDisconnect: false,
         atDrain: false,
         after: false,
         kept: {},
@@ -714,6 +836,17 @@ describe("native sync of a shared connection's picked places", () => {
       });
     };
     try {
+      // Connections connect holds, shared and active: one it doesn't know,
+      // or one waiting for a sign-in, gives nobody anything.
+      await connectDb().batch(
+        [first, last].map((connectionId) =>
+          connectDb()
+            .prepare(
+              "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'microsoft', 'shared', NULL, 'active', 'native', 'sample-sync', ?, ?)"
+            )
+            .bind(connectionId, now, now)
+        )
+      );
       for (const connectionId of [last, first]) {
         // oxlint-disable-next-line no-await-in-loop -- one connection at a time
         await env.DB.batch([
@@ -808,6 +941,10 @@ describe("native sync of a shared connection's picked places", () => {
           "DELETE FROM brain_sync_sources WHERE connection_id IN (?, ?)"
         ).bind(first, last),
       ]);
+      await connectDb()
+        .prepare("DELETE FROM connections WHERE id IN (?, ?)")
+        .bind(first, last)
+        .run();
     }
   });
 

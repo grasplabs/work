@@ -24,6 +24,7 @@ import {
   identifierSchema,
   instructionsTextSchema,
   memoriesCursorSchema,
+  memoriesPerAddMax,
   memoryIdSchema,
   versionChangeCursorSchema,
   writtenCursorSchema,
@@ -169,7 +170,11 @@ import {
   largeEnoughAudiences,
   teamsOfAtLeast,
 } from "./brain-share-audiences.ts";
-import { audiencesRead, sharedPlacesRead } from "./connection-audiences.ts";
+import {
+  activeAudiences,
+  audiencesRead,
+  sharedPlacesRead,
+} from "./connection-audiences.ts";
 import type { ConnectionAudience } from "./connection-audiences.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
@@ -191,6 +196,7 @@ import type { SkillCardText } from "./skill-cards.ts";
 import { skillNeedsOf } from "./skill-needs.ts";
 import type { SkillNeeds } from "./skill-needs.ts";
 import {
+  directoryGroupsRead,
   heldPrincipalsOf,
   plainPrincipalOf,
   readerPrincipalsOf,
@@ -932,8 +938,8 @@ const accessFor = async (
  * the company (`person`); those teams and the company, as no person
  * (`teams`); or the company alone, as no person and no team (`company`),
  * which reads only what every member may. Every reach of a current member
- * holds the company: what everyone may read, each of them may. A guest or
- * a visitor is never a member, so never a reader here.
+ * holds the company: what everyone may read, each of them may. A guest is
+ * never a member, so never a reader here.
  */
 export type Reach = "person" | "teams" | "company";
 
@@ -994,24 +1000,32 @@ const memberGroupsOf = async (
 }> => {
   const id = checked(idSchema, personId);
   // One snapshot: their teams, the audiences, the places picked on the
-  // connections and their sign-in accounts, as one batch reads them.
+  // connections, their sign-in accounts and the groups the directory
+  // lists them in, as one batch reads them.
   const db = drizzle(env.DB);
-  const [[membership, memberTeams, audiences, places, signIns], connected] =
-    await Promise.all([
-      db.batch([
-        ...memberReads(db, id),
-        audiencesRead(db),
-        sharedPlacesRead(db),
-        signInAccountsRead(db, id),
-      ]),
-      asThemselves ? env.CONNECT.personalAccounts(id) : [],
-    ]);
+  const [
+    [membership, memberTeams, audiences, places, signIns, directory],
+    connected,
+  ] = await Promise.all([
+    db.batch([
+      ...memberReads(db, id),
+      audiencesRead(db),
+      sharedPlacesRead(db),
+      signInAccountsRead(db, id),
+      directoryGroupsRead(db, id),
+    ]),
+    asThemselves ? env.CONNECT.personalAccounts(id) : [],
+  ]);
   const member = memberFrom(id, membership, memberTeams);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
   const held = asThemselves
-    ? await heldPrincipalsOf(env, member.userId, signIns, connected)
+    ? await heldPrincipalsOf(env, member.userId, {
+        signIns,
+        connected,
+        directory,
+      })
     : { accounts: [], groups: [] };
   return {
     person: member.userId,
@@ -1020,7 +1034,7 @@ const memberGroupsOf = async (
       companyGroup,
       membersGroup,
     ],
-    audiences: await withPlaces(audiences, places),
+    audiences: await withPlaces(await activeAudiences(env, audiences), places),
     accountGroups: held.accounts,
     sourceGroups: held.groups,
   };
@@ -4930,6 +4944,7 @@ export const memoryChoices = {
   valueMaxLength,
   statementMaxLength,
   quoteMaxLength,
+  replacesMax: memoriesPerAddMax,
 } as const;
 
 /** A text of a memory: some text, at most `max` characters (the Brain's bounds). */
@@ -4957,6 +4972,9 @@ const rememberedSchema = z.strictObject({
   type: z.enum(memoryTypes),
   statement: memoryText(statementMaxLength),
   quote: memoryText(quoteMaxLength),
+  // Their own earlier memories this one replaces (`ownWordAs`), as the
+  // Brain takes them (contract.ts `NewMemory.replaces`).
+  replaces: z.array(memoryIdSchema).min(1).max(memoriesPerAddMax).optional(),
 });
 
 /** A memory a person said, to save for them (`rememberAs`), as its schema takes it. */
@@ -5073,6 +5091,49 @@ export const rememberAs = async (
     entity,
     kept: { type, attribute, value, statement },
   };
+};
+
+/**
+ * The statements of the member `personId`'s own memories `ids` (distinct)
+ * about `entity`, in their own store, in their own word (written by them,
+ * never drawn from a source), current or history (a replay of a save
+ * still finds what its first try ended), in the order asked: what a save
+ * of theirs that replaces them is checked against (agent-remember.ts).
+ * Null when any isn't one: alike for none, one in another store, one
+ * drawn from a source and one an erasure hides. Every page of the
+ * entity's memories read at one moment, until each is found. Refused once
+ * they are no longer a member.
+ */
+export const ownWordAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  entity: string,
+  ids: readonly string[]
+): Promise<string[] | null> => {
+  const reader = await personReaderOf(env, personId);
+  const store = ownBrain(env, reader.person);
+  const asked = new Set(ids);
+  const found = new Map<string, string>();
+  let after: MemoriesCursor | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- each page after the last
+    const page = await store.readMemories({
+      entity: checked(entityIdSchema, entity),
+      reader,
+      history: true,
+      ...(after === undefined ? {} : { after }),
+    });
+    for (const memory of page.memories) {
+      // Their own word alone: written by them (one drawn from a source
+      // has no writer).
+      if (asked.has(memory.id) && memory.writer === reader.person) {
+        found.set(memory.id, memory.statement);
+      }
+    }
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined && found.size < asked.size);
+  const statements = ids.flatMap((id) => found.get(id) ?? []);
+  return statements.length === ids.length ? statements : null;
 };
 
 /** The names and identifiers of `entity` that `reader` may see in `store`, each page read. */
@@ -5218,12 +5279,17 @@ export const profileAs = async (
 };
 
 /**
- * Retires one of the member `personId`'s own memories (`rememberAs`),
- * current or ended by a newer one of theirs: it never becomes current
- * again, and stays as history; `done` again for one they retired before,
- * so a retry never reads as not found. `nothing` alike when there is no
- * such memory (an erased one included), when it isn't theirs, and when it
- * has expired. Refused once they are no longer a member.
+ * Undoes the save of one of the member `personId`'s own memories
+ * (`rememberAs`), current, ended by a newer one of theirs, or retired
+ * before: it never becomes current again, and stays as history; what the
+ * save replaced is current again, whatever happened since (the Brain's
+ * `RetireRequest.undo`). Only a save's own Undo calls it: the
+ * notice's in Grasp and on a chat app, and the retirement of a save whose
+ * notice nobody saw (unseen-memories.ts). `done` again for one they
+ * retired before, so a retry never reads as not found. `nothing` alike
+ * when there is no such memory (an erased one included), when it isn't
+ * theirs, and when it has expired. Refused once they are no longer a
+ * member.
  */
 export const forgetAs = async (
   env: BrainEnv & ReaderEnv,
@@ -5240,6 +5306,7 @@ export const forgetAs = async (
       // Their own store holds only their own word, so one forget of a
       // memory is theirs: a retry is the same change.
       change: `forget:${id}`,
+      undo: true,
     });
     return retired === null ? "nothing" : "done";
   } catch (error) {
@@ -5701,11 +5768,13 @@ const memoryPlaceSchema = memoryRefSchema.omit({ entity: true });
 export type StoredMemoryPlace = z.infer<typeof memoryPlaceSchema>;
 
 /**
- * The member `personId` confirms memory `memory`, current and one they may
- * read, over the current memories they may read that say otherwise, as
- * their own word (the Brain's `confirmMemory`): `nothing` alike for one
- * there isn't, they may not read, or that isn't current. Refused once
- * they are no longer a member.
+ * The member `personId` settles a fact sources disagree on: confirms
+ * memory `memory`, current and one they may read, over the current
+ * memories they may read that say otherwise, as their own word (the
+ * Brain's `confirmMemory`): `nothing` alike for one there isn't, they may
+ * not read, that isn't current, or that nothing they may read contests (a
+ * saved memory is taken as correct). Refused once they are no longer a
+ * member.
  */
 export const confirmAs = async (
   env: BrainEnv & ReaderEnv,
@@ -5745,8 +5814,10 @@ export type Correction = z.input<typeof correctionSchema>;
  * correction with no name of its own (`liveNamed` names it). Under the same
  * attribute when it holds a value, so a newer correction of a one-value
  * attribute ends the one before. A wrong memory that is their own word is
- * retired too, as `forgetAs` retires it: on a many-value attribute the
- * correction would otherwise stand beside it.
+ * one the correction replaces (`NewMemory.replaces`): ended, kept as
+ * history, whatever its attribute (on a many-value one the correction
+ * would otherwise stand beside it), and current again once the
+ * correction's own save is undone, never what it replaced in turn.
  *
  * The shared store is left as it is: a correction others may read would
  * widen what the person read, theirs to publish, not this. What is saved
@@ -5754,11 +5825,10 @@ export type Correction = z.input<typeof correctionSchema>;
  * and kind, the memory's attribute and type, the text), so the same
  * `change` again answers what it saved while the wrong memory is one they
  * may still read, whatever else has happened to it since (ended by it, or
- * retired), and confirms and retires again, each a repeat that records
- * nothing new. Once they may no longer read it (its source narrowed or
+ * retired), and confirms again, a repeat that records nothing new. Once they may no longer read it (its source narrowed or
  * erased), a retry answers null, as for any memory they may not read: a
  * correction an earlier try saved stays in their own store, where the
- * page shows it and they can confirm it themselves. The same `change`
+ * page shows it. The same `change`
  * with other text is refused (`brain.correction_reused`). Null alike when
  * the memory isn't one they may read and when it is a relation. Refused
  * once they are no longer a member.
@@ -5789,6 +5859,9 @@ export const correctAs = async (
       ? { id: entity.id, kind: entity.kind }
       : { kind: entity.kind, identifiers: [sharedEntityRefOf(entity.id)] };
   const attribute = read.attribute ?? undefined;
+  // Their own word it replaces (`NewMemory.replaces`): ended, kept as
+  // history, and current again once the correction's save is undone.
+  const theirs = wrong.store === "own" && read.writer === reader.person;
   let saved: RememberedMemory;
   try {
     saved = await rememberAs(env, personId, {
@@ -5798,6 +5871,7 @@ export const correctAs = async (
       type: read.type,
       statement: right,
       quote: right,
+      ...(theirs ? { replaces: [read.id] } : {}),
     });
   } catch (error) {
     if (error instanceof Error && error.message === changeReused) {
@@ -5805,17 +5879,14 @@ export const correctAs = async (
     }
     throw error;
   }
-  const own = ownBrain(env, reader.person);
   try {
-    await own.confirmMemory({ memory: saved.memory, reader });
-    if (wrong.store === "own" && read.writer === reader.person) {
-      await own.retireMemory({
-        memory: read.id,
-        reader,
-        writer: reader.person,
-        change: `correct:${change}`,
-      });
-    }
+    // A correction takes a side against what it corrects: confirmed as
+    // it is saved, whatever contests it in their own store.
+    await ownBrain(env, reader.person).confirmMemory({
+      memory: saved.memory,
+      reader,
+      correction: true,
+    });
   } catch (error) {
     throw erasedAs(error);
   }

@@ -2296,6 +2296,18 @@ const isPersonsOwnWordOnly = (
  * relation (what one-value attributes are compared by, folded as search
  * folds words); its type, statement, world clock (`validUntil` after
  * `validFrom`), whose word it is, and what it rests on.
+ *
+ * `replaces` names memories its writer says it replaces (GRA-2184): each
+ * one, of its own lineage, entity and readers, ends from this one's start
+ * for a reader who may read this one, retired or not, until an undo of
+ * this one's save (`RetireRequest.undo`): then what it named is current
+ * again. Forgetting it never brings anything back.
+ * Erased, it is as if it never was: what only it ended is current again.
+ * Only a writer's memory names any: one drawn from a source ends
+ * by its source's versions. At most as many as an add's memories: the add
+ * checks each one inside its one synchronous transaction, which holds the
+ * store for every other call meanwhile, so the bound is what keeps that
+ * hold as short as an add of its most memories.
  */
 export const newMemorySchema = z
   .strictObject({
@@ -2309,7 +2321,15 @@ export const newMemorySchema = z
     validUntil: z.date().optional(),
     speaker: speakerSchema,
     basis: memoryBasisSchema,
+    replaces: z.array(memoryIdSchema).min(1).max(memoriesPerAddMax).optional(),
   })
+  .refine(
+    ({ replaces, basis }) => replaces === undefined || basis.kind === "writer",
+    {
+      message: "Only a writer's memory replaces memories",
+      path: ["replaces"],
+    }
+  )
   .refine(
     ({ validFrom, validUntil }) =>
       validFrom === undefined ||
@@ -2703,6 +2723,17 @@ export const retireRequestSchema = z.strictObject({
    * so a repeat tells the call that retired the memory from another.
    */
   change: changeKeySchema,
+  /**
+   * An undo of the memory's own save, as a host that offers one sets it
+   * (the notice of a save, with its Undo): retired whatever its dates (one
+   * valid only from tomorrow, or expired), and what it replaced
+   * (`NewMemory.replaces`) is current again, whatever happened since (a
+   * late undo, after something newer replaced the memory, brings it back
+   * beside that). Without it, a retirement never brings anything back:
+   * forgetting is not undoing. The Brain learns nothing of where the save
+   * was made.
+   */
+  undo: z.literal(true).optional(),
 });
 export type RetireRequest = z.infer<typeof retireRequestSchema>;
 
@@ -2769,10 +2800,15 @@ export const retireWrittenRequestSchema = z.strictObject({
 });
 export type RetireWrittenRequest = z.infer<typeof retireWrittenRequestSchema>;
 
-/** A memory the reader confirms, as their own word. */
+/**
+ * A memory the reader confirms, as their own word: a side of a fact sources
+ * disagree on, or, as a `correction`, their own word as it is saved (the
+ * host's correction of a memory), whatever contests it.
+ */
 export const confirmRequestSchema = z.strictObject({
   memory: memoryIdSchema,
   reader: personReaderSchema,
+  correction: z.literal(true).optional(),
 });
 export type ConfirmRequest = z.infer<typeof confirmRequestSchema>;
 
@@ -3606,7 +3642,12 @@ export interface Brain {
    * object or names one of another kind, a value is missing or given to a
    * relation, a source version isn't one this store holds (erased ones
    * included), a person's own store is given anyone else's readers, or the
-   * change was added before with other memories. An identifier a person's
+   * change was added before with other memories, or a memory names in
+   * `replaces` one it may not: one that isn't of its own lineage, about
+   * its entity (which it names by id or as the store's own), of its
+   * readers, and readable by the add's `reader` (which `replaces` needs),
+   * all refused alike, as one there isn't, judged on the add as asked,
+   * before anything below is left out of it. An identifier a person's
    * erasure closed is left out (`erasePersonShared`); when the add is
    * drawn from a source, so is that person's card with what is about it
    * or relates to it, which the answer then doesn't name. The same change
@@ -3694,7 +3735,9 @@ export interface Brain {
    * change.
    * Null alike when there is no such memory, when it is another writer's
    * (retired or not), when the reader may not read it, and when it
-   * expired before it was retired: nothing tells another writer's memory
+   * expired before it was retired, unless the call is an undo of its save
+   * (`RetireRequest.undo`), which retires it whatever its dates: nothing
+   * tells another writer's memory
    * from one there isn't. One this writer retired that expired afterwards
    * still answers its time on a repeat.
    */
@@ -3722,12 +3765,16 @@ export interface Brain {
     request: RetireWrittenRequest
   ) => Promise<RetiredMemory | null>;
   /**
-   * The reader confirms a current memory they may read, over the current
-   * memories of other lineages they may read that say something else of
-   * the same entity and attribute: recorded as the reader's own word,
-   * and read first among them by a reader who may read the memory and
-   * each one it was confirmed over, and no current rival besides. A
-   * repeat by the same person over the same rivals records nothing new.
+   * The reader settles a fact sources disagree on: confirms a current
+   * memory they may read, over the current memories of other lineages
+   * they may read that say something else of the same entity and
+   * attribute: recorded as the reader's own word, and read first among
+   * them by a reader who may read the memory and each one it was
+   * confirmed over, and no current rival besides. A repeat by the same
+   * person over the same rivals records nothing new. `nothing` for a
+   * memory no current memory they may read contests (a saved memory is
+   * taken as correct, so there is nothing to confirm), unless it is a
+   * `correction` of theirs: their own word, confirmed as it is saved.
    */
   confirmMemory: (request: ConfirmRequest) => Promise<MemoryChangeOutcome>;
   /**

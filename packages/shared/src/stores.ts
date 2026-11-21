@@ -314,7 +314,7 @@ export const callerTeamsMax = 1000;
  * The IDs of the teams the person a commit or a read is for is in, as
  * core read them for the invocation, from its own records (never from
  * what App code sends): what a table's `team` row rules match. None for a
- * visitor, and when left out.
+ * guest, who is in no team, and when left out.
  */
 export const callerTeamsSchema = z
   .array(identifierSchema)
@@ -380,7 +380,7 @@ export const commitSchema = z
     principal: z.strictObject({ userId: identifierSchema }),
     /**
      * Who the audit log names as making the commit (the person, an agent
-     * acting for them, a visitor, a workflow run or the App), as core
+     * acting for them, a workflow run or the App), as core
      * resolved it for the invocation: whom the store's change history of
      * each record it writes names.
      */

@@ -1,3 +1,4 @@
+import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { MemberRole } from "@grasp-os/shared/subject-members";
 import { sql } from "drizzle-orm";
@@ -27,7 +28,12 @@ import type {
 import { audienceOf } from "./chat-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { personErasures } from "./db/core/schema.ts";
-import { grantedPermissions, hasBrainGrant } from "./permissions.ts";
+import { grantedPermissions } from "./permissions.ts";
+import {
+  readsWithoutGrant,
+  sharedFor,
+  ungrantedReadOf,
+} from "./ungranted-reads.ts";
 
 // What a chat's earlier code results may still send to the model (GRA-690).
 // A result rests on what its run read, each recorded with the run: each
@@ -42,21 +48,13 @@ import { grantedPermissions, hasBrainGrant } from "./permissions.ts";
 // stays), an App deleted. A source no check here names (one an earlier
 // release recorded, a Knowledge collection or document say) is never
 // readable: its run is withheld.
-//
-// What a run read under the agent's `brain` grant is pinned with that
-// grant (`brainGrantRead`), so its results are withheld once the grant is
-// revoked.
-
-/** The source a run's read of the Brain under the agent's `brain` grant is recorded as. */
-export const brainGrantRead = "brain-grant";
 
 // What a chat's recall before a question read of the new Brain
 // (turn-recall.ts) is pinned too: each version it handed over, by its
 // source as its producer names it and its number. A version never changes
 // and an erased source's key is never added again, so a pin means the same
 // text for as long as it is kept; it is withheld once the person may no
-// longer read that version (`readableVersionsAs`), and with the agent's
-// `brain` grant (`brainGrantRead`).
+// longer read that version (`readableVersionsAs`).
 
 const brainVersionPrefix = "brain-version:";
 
@@ -274,7 +272,7 @@ const readableBrainCompanyVersions = async (
 // reach. It is withheld, as a passage is, once that reach may no longer
 // read it (erased, its source narrowed, the person out of the team, or,
 // as the company, anyone unnamed in the chat), or its writer retired it
-// (`readableMemoriesAs`), and with the agent's `brain` grant. A newer
+// (`readableMemoriesAs`). A newer
 // memory that replaced it withholds nothing: the next recall brings that.
 
 // A pin carries what its memory rests on as the recall read it
@@ -469,20 +467,6 @@ const readableBrainCompanyMemories = async (
     : [];
 };
 
-/**
- * Of the Brain reads in `sources`, the agent's `brain` grant, while it
- * holds it (`hasBrainGrant`), as the Brain's recall decides it.
- */
-const readableBrain = async (
-  env: Env,
-  scope: Omit<AgentScope, "runId">,
-  sources: readonly string[]
-): Promise<string[]> =>
-  sources.includes(brainGrantRead) &&
-  (await hasBrainGrant(env, chatAuthority(scope)))
-    ? [brainGrantRead]
-    : [];
-
 // Who a chat's code was told knows about a topic (`env.brain.whoKnows`,
 // brain-recall.ts `whoKnowsFor`): each person named is pinned by their
 // member id beside the version cited for them, and withheld once they are
@@ -594,7 +578,6 @@ type WithheldKind =
   | "people"
   | "memories"
   | "passages"
-  | "grants"
   | "connections"
   | "apps"
   | "unknown";
@@ -621,10 +604,10 @@ const withheldKindOf = (source: string): WithheldKind => {
   ) {
     return "passages";
   }
-  if (source === brainGrantRead) {
-    return "grants";
-  }
-  if (connectionReadOf(source) !== undefined) {
+  if (
+    connectionReadOf(source) !== undefined ||
+    ungrantedReadOf(source) !== undefined
+  ) {
     return "connections";
   }
   return appReadOf(source) === undefined ? "unknown" : "apps";
@@ -686,6 +669,19 @@ const covers = (
 };
 
 /**
+ * Whether what was read through `owner` is still readable: a disconnected
+ * one is gone, whoever owned it. A shared one waiting for someone to sign
+ * in again shows nobody what was read through it until then, as the Brain
+ * shows nobody what it kept of it (GRA-2227); a person's own one waiting
+ * so changes nobody's access.
+ */
+const stillReadable = ({
+  status,
+  ownerUserId,
+}: Pick<ConnectionOwner, "status" | "ownerUserId">): boolean =>
+  status === "active" || (status === "needs_reauth" && ownerUserId !== null);
+
+/**
  * Of the connection reads in `sources`, those the agent may make for its
  * person now: a grant it holds in this chat now covers the read
  * (`covers`), and the connection is not disconnected and is one the
@@ -716,17 +712,51 @@ const readableConnections = async (
     ...new Set(covered.map(({ connectionId }) => connectionId)),
   ]);
   const usable = new Set(
-    owners.flatMap(({ id, ownerUserId, status }) =>
-      // A disconnected one is gone, whoever owned it; one waiting to be
-      // signed in again changes nobody's access.
-      status !== "disconnected" &&
-      (ownerUserId === null || ownerUserId === scope.personId)
-        ? [id]
+    owners.flatMap((owner) =>
+      stillReadable(owner) &&
+      (owner.ownerUserId === null || owner.ownerUserId === scope.personId)
+        ? [owner.id]
         : []
     )
   );
   return covered.flatMap(({ source, connectionId }) =>
     usable.has(connectionId) ? [source] : []
+  );
+};
+
+/**
+ * Of the reads with no grant in `sources` (ungranted-reads.ts), those the
+ * person still reads so: a connection not disconnected that is still
+ * their own, or shared with an audience that holds them now, as
+ * `readableConnections` holds a granted one.
+ */
+const readableUngrantedReads = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  sources: readonly string[]
+): Promise<string[]> => {
+  const reads = sources.flatMap((source) => {
+    const connectionId = ungrantedReadOf(source);
+    return connectionId === undefined ? [] : [{ source, connectionId }];
+  });
+  if (reads.length === 0) {
+    return [];
+  }
+  const [owners, shared] = await Promise.all([
+    connectionOwnersOf(env, [
+      ...new Set(reads.map(({ connectionId }) => connectionId)),
+    ]),
+    sharedFor(env, scope.personId),
+  ]);
+  const readable = new Set(
+    owners.flatMap((owner) =>
+      stillReadable(owner) && readsWithoutGrant(owner, scope.personId, shared)
+        ? [owner.id]
+        : []
+    )
+  );
+  return reads.flatMap(({ source, connectionId }) =>
+    readable.has(connectionId) ? [source] : []
   );
 };
 
@@ -770,15 +800,27 @@ const readableApps = async (
 };
 
 /**
+ * The pin of the agent's `brain` grant that releases before every agent
+ * read the Brain with no grant (GRA-2203) recorded with a run that read
+ * it. Nothing writes it now, but a release before this one still may,
+ * while a client can roll back to it: so it is accepted without a check,
+ * and goes, with its rows, in the next release (GRA-2205).
+ */
+const obsoleteBrainGrantPin = "brain-grant";
+
+/**
  * Of `sourceIds`, those the chat's agent may read for its person now: a
  * connection call a grant the agent holds in this chat now covers, on a
- * connection not disconnected that the person may use themselves; an App
- * read the agent's grants and the person's role in the App allow now; the
- * agent's `brain` grant, while it holds it; a version of the Brain, while the person may read it (their teams and
+ * connection still readable (`stillReadable`) that the person may use
+ * themselves; an App read the agent's grants and the person's role in the
+ * App allow now; a read with no grant, while the person still reads its
+ * connection so and it is still readable; a
+ * version of the Brain, while the person may read it (their teams and
  * the company, for what code's recall handed over); a memory of the new
  * Brain, while the person (or, as the company read it, the company) may
  * read it and its writer has not retired it, replaced or expired or not;
- * a person a run was told of, while they are an active member.
+ * a person a run was told of, while they are an active member; the
+ * obsolete pin of the Brain grant, always (`obsoleteBrainGrantPin`).
  * Anything else, an unknown source or a bare connection included, is
  * not. With why the chat's audience cuts what a recall as the company
  * handed over, when it holds any (`audience`). Throws what the reads
@@ -798,7 +840,7 @@ export const readableSources = async (
   const [
     apps,
     connections,
-    brain,
+    ungrantedReads,
     versions,
     teamVersions,
     companyVersions,
@@ -808,7 +850,7 @@ export const readableSources = async (
   ] = await Promise.all([
     readableApps(env, scope, sourceIds),
     readableConnections(env, scope, sourceIds),
-    readableBrain(env, scope, sourceIds),
+    readableUngrantedReads(env, scope, sourceIds),
     readableBrainVersions(env, scope, sourceIds),
     readableAt(env, scope, sourceIds, brainTeamVersionPrefix, "teams"),
     readableBrainCompanyVersions(env, scope, sourceIds, cut),
@@ -820,13 +862,14 @@ export const readableSources = async (
   const readable = new Set([
     ...apps,
     ...connections,
-    ...brain,
+    ...ungrantedReads,
     ...versions,
     ...teamVersions,
     ...companyVersions,
     ...memories,
     ...companyMemories,
     ...people,
+    ...sourceIds.filter((source) => source === obsoleteBrainGrantPin),
   ]);
   return audience === undefined ? { readable } : { readable, audience };
 };

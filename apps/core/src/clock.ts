@@ -9,7 +9,6 @@ import { retryAccessRevocations } from "./access-revocations.ts";
 import { startDueAgentWakes } from "./agent-wakes.ts";
 import { cancelArchivedRuns } from "./app-status.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
-import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
 import { expireEvents, workBrain } from "./brain-next.ts";
@@ -23,9 +22,10 @@ import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { readDirectories } from "./directory-people.ts";
+import { readReaderGroups } from "./directory-reader-groups.ts";
+import { pausedUserIds } from "./directory-suspensions.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
-import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
@@ -222,6 +222,8 @@ export const clockTasks: readonly ClockTask<Env>[] = [
       await env.CONNECT.readReaderGroups({
         requests: readerGroupRequestsPerTick,
         queries: readerGroupQueriesPerTick,
+        // Whose own connections connect reads nothing of now (GRA-2143).
+        paused: await pausedUserIds(env),
       });
     },
   },
@@ -243,8 +245,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: deleteExpiredEmail,
   },
-  { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
-  { name: "visitors.sweep", period: "quarterHour", run: sweepAppVisitors },
   // Connector triggers' holds and tombstones of events long settled or no
   // longer coming (src/workflows/connector-triggers.ts).
   {
@@ -331,6 +331,14 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // provider's IDs of its people, tied to the members who signed in
   // (src/directory-people.ts, GRA-2056).
   { name: "directory.people", period: "quarterHour", run: readDirectories },
+  // The members of the Entra groups reader lists name, through the same
+  // directory, each read again every half day (src/directory-reader-groups.ts,
+  // GRA-2146).
+  {
+    name: "directory.reader_groups",
+    period: "quarterHour",
+    run: readReaderGroups,
+  },
   // Model usage past its retention (src/model-usage.ts).
   { name: "models.usage", period: "quarterHour", run: sweepModelUsage },
   {

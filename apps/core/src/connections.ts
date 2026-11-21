@@ -42,17 +42,23 @@ import type {
   SharedSyncPlaces,
   ConnectionBrainAudienceSetting,
   ToolClassSetting,
+  ToolkitKeyField,
 } from "@grasp-os/shared/connect";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { httpConnectionSchema } from "@grasp-os/shared/http-connections";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
+import {
+  guestRole,
+  isAdmin,
+  requireAdmin,
+  roleErrors,
+} from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { waitUntil } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -152,6 +158,9 @@ const connectToolkitRequestSchema = z.object({
   returnTo: z.string().default("/"),
 });
 type ConnectToolkitRequest = Parameters<ConnectionsApi["connectToolkit"]>[0];
+type ConnectToolkitWithKeyRequest = Parameters<
+  ConnectionsApi["connectToolkitWithKey"]
+>[0];
 
 /** What the frontend sends to start: checked here, as it came over the wire. */
 const startRequestSchema = z.strictObject({
@@ -352,22 +361,25 @@ const isHidden = async (
 };
 
 /**
- * The `offeredConnections` among `listed`, what connect lists for the
- * person: for a caller that needs that list itself too, so connect is
- * asked once.
+ * The connections among `listed`, what connect lists for the person, with
+ * status `status`, of entries an admin hasn't hidden: `active` ones are
+ * the `offeredConnections`; `needs_reauth` ones are those that can be
+ * connected again, which a hidden entry's can't (above). For a caller
+ * that needs that list itself too, so connect is asked once.
  */
 export const offeredAmong = async (
   env: Env,
-  listed: readonly ConnectionSummary[]
+  listed: readonly ConnectionSummary[],
+  status: "active" | "needs_reauth" = "active"
 ): Promise<ConnectionSummary[]> => {
   const hidden = await hiddenEntries(env);
   // An HTTP connection is Apps' and workflows' alone: a chat's agent
   // never asks for one (tool-classes.ts).
   return listed.filter(
-    ({ status, source, provider }) =>
-      status === "active" &&
-      source !== "http" &&
-      !hidden.has(entryKey(source, provider))
+    (connection) =>
+      connection.status === status &&
+      connection.source !== "http" &&
+      !hidden.has(entryKey(connection.source, connection.provider))
   );
 };
 
@@ -553,6 +565,58 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   }
 
   /**
+   * What an admin types to connect a toolkit with a key, as Composio
+   * describes it: connect checks the role and the toolkit.
+   */
+  async keyFields(toolkit: string): Promise<ToolkitKeyField[]> {
+    const person = await this.#person();
+    return await this.#env.CONNECT.toolkitKeyFields({ person, toolkit });
+  }
+
+  /**
+   * Connecting a toolkit with a key the admin typed: core passes it on to
+   * connect and keeps nothing of it, as connect does on to Composio; connect
+   * checks the rest (the role, the toolkit, the fields, the tools, the
+   * consent). The answer is the page to send the browser to, as a sign-in's
+   * is the provider's.
+   */
+  async connectToolkitWithKey(
+    request: ConnectToolkitWithKeyRequest
+  ): Promise<{ url: string }> {
+    const person = await this.#person();
+    const parsed = connectToolkitRequestSchema.safeParse(request);
+    const config = signInConfig(this.#env);
+    if (config === undefined) {
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
+    const back = parsed.success
+      ? onOrigin(config.origin, parsed.data.returnTo)
+      : undefined;
+    if (back === undefined) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    const { toolkit, tools, consent, values } = request;
+    const slug = composioToolkitSchema.safeParse(toolkit);
+    if (slug.success) {
+      await requireOffered(this.#env, person, {
+        source: "composio",
+        id: slug.data,
+        scope: "shared",
+      });
+    }
+    const { connectionId } = await this.#env.CONNECT.connectToolkitWithKey({
+      person,
+      toolkit,
+      tools,
+      consent,
+      values,
+      origin: config.origin,
+    });
+    back.searchParams.set("connection", connectionId);
+    return { url: back.href };
+  }
+
+  /**
    * Changes which tools a shared Composio connection allows, as the
    * signed-in person: connect checks the rest (the role, the connection,
    * the tools), and audits it (GRA-993).
@@ -625,14 +689,17 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
             .where(inList(users.id, ids));
     const names = new Map(people.map(({ id, name }) => [id, name]));
     // A removed member keeps their user row and name: only a membership
-    // says they are still here.
+    // says they are still here. A guest's is no member's (roles.ts
+    // `guestRole`); someone suspended is still one.
     const current =
       ids.length === 0
         ? []
         : await drizzle(this.#env.DB)
             .select({ userId: members.userId })
             .from(members)
-            .where(inList(members.userId, ids));
+            .where(
+              and(inList(members.userId, ids), ne(members.role, guestRole))
+            );
     const memberIds = new Set(current.map(({ userId }) => userId));
     // A personal connection's owner by name, as admins see members.
     return listed.map((each) => ({
@@ -824,7 +891,8 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async setBrainAudience(
     connectionId: unknown,
     audience: unknown,
-    from: unknown
+    from: unknown,
+    acknowledged?: unknown
   ): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await setConnectionAudience(
@@ -832,7 +900,8 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
         identity,
         connectionId,
         audience,
-        from
+        from,
+        acknowledged
       );
     });
   }

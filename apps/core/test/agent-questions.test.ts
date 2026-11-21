@@ -98,7 +98,8 @@ describe(
       await ask("Weekly");
       const answered = await messagesOf(stub, chat.id, personId);
 
-      const reply = asked.find(({ role }) => role === "assistant");
+      // The answer that asked, after the recall before the question.
+      const reply = asked.findLast(({ role }) => role === "assistant");
       expect({
         afterAsking,
         offered: offersAsking(provider.requests[0]?.body),
@@ -129,7 +130,8 @@ describe(
 
       await ask("Set up the sales report for me.");
       const asked = await messagesOf(stub, chat.id, personId);
-      const reply = asked.find(({ role }) => role === "assistant");
+      // The answer that asked, after the recall before the question.
+      const reply = asked.findLast(({ role }) => role === "assistant");
 
       expect(
         reply?.role === "assistant" ? reply.asked?.questions : undefined

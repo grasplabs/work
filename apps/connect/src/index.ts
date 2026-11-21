@@ -49,6 +49,9 @@ import type {
   StartConnection,
   ConnectWithKey,
   StartToolkitConnection,
+  ToolkitKeyField,
+  ToolkitKeyFieldsRequest,
+  ConnectToolkitWithKey,
   ChangeToolkitTools,
   UnknownOutcome,
   UnknownOutcomeListing,
@@ -56,6 +59,8 @@ import type {
 import type {
   DirectoryConnection,
   DirectoryDeletedRead,
+  DirectoryGroupRead,
+  DirectoryGroupSearch,
   DirectoryLookup,
   DirectoryRead,
 } from "@grasp-os/shared/directory";
@@ -109,7 +114,9 @@ import { clock } from "./clock.ts";
 import {
   finishToolkitFlow,
   changeToolkitTools,
+  connectToolkitWithKey,
   startToolkitConnection,
+  toolkitKeyFields,
 } from "./composio-connections.ts";
 import { connectionOwners, personalAccounts } from "./connections.ts";
 import {
@@ -119,6 +126,10 @@ import {
   nativeOperation,
 } from "./contracts.ts";
 import { requireDecision } from "./decisions.ts";
+import {
+  readDirectoryGroup,
+  searchDirectoryGroups,
+} from "./directory-groups.ts";
 import {
   directoryConnections,
   lookUpInDirectory,
@@ -478,6 +489,21 @@ export default class Connect
     return await startToolkitConnection(this.env, request);
   }
 
+  // Connecting one that takes a key, with what the admin typed: no flow,
+  // nothing kept of the key (src/composio-connections.ts).
+
+  async toolkitKeyFields(
+    request: ToolkitKeyFieldsRequest
+  ): Promise<ToolkitKeyField[]> {
+    return await toolkitKeyFields(this.env, request);
+  }
+
+  async connectToolkitWithKey(
+    request: ConnectToolkitWithKey
+  ): Promise<{ connectionId: string }> {
+    return await connectToolkitWithKey(this.env, request);
+  }
+
   async changeToolkitTools(
     request: ChangeToolkitTools
   ): Promise<{ tools: string[] }> {
@@ -612,6 +638,17 @@ export default class Connect
 
   async lookUpInDirectory(request: unknown): Promise<DirectoryLookup> {
     return await lookUpInDirectory(this.env, request);
+  }
+
+  // The directory's groups (src/directory-groups.ts): for an admin to map
+  // one to a team, and for the daily read to place its members.
+
+  async searchDirectoryGroups(request: unknown): Promise<DirectoryGroupSearch> {
+    return await searchDirectoryGroups(this.env, request);
+  }
+
+  async readDirectoryGroup(request: unknown): Promise<DirectoryGroupRead> {
+    return await readDirectoryGroup(this.env, request);
   }
 
   // The HR platform (src/hr.ts): for the onboarding, in core, only.

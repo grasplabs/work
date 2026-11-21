@@ -2,16 +2,19 @@ import { httpContract } from "@grasp-os/shared/http-contract";
 import { isPlainObject } from "@grasp-os/shared/json";
 
 import type { FunctionChannel } from "./function-channel.ts";
-import { isActionPermission } from "./manifest-permissions.ts";
+import {
+  defaultPermission,
+  isActionPermission,
+} from "./manifest-permissions.ts";
 import { memberName, membersOf } from "./member-names.ts";
 import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 
 // The clients an action reaches the App's permissions through
-// (`ctx.ai`, `ctx.brain`, `ctx.connections.<alias>`, `ctx.grasp`,
-// `ctx.guests`), built from the App's sealed declarations as frozen
-// objects with no prototype: each declared action, operation or function
-// a member, and nothing else. Never a `Proxy`, so a name is a member only
+// (`ctx.ai`, `ctx.brain`, `ctx.connections.<alias>`, `ctx.grasp`),
+// built from the App's sealed declarations as frozen objects with no
+// prototype: each declared action, operation or function a member, and
+// nothing else. Never a `Proxy`, so a name is a member only
 // if it was declared.
 //
 // What can go wrong, and what holds:
@@ -203,11 +206,6 @@ const clientOf = (
   if (kind === "brain") {
     return brainOf(permission.operations, call);
   }
-  if (kind === "guests") {
-    return membersOf(
-      permission.operations.map((method) => [method, call(method)])
-    );
-  }
   if (kind === "grasp") {
     return graspOf(Object.keys(permission.functions), call("call"));
   }
@@ -219,8 +217,9 @@ const clientOf = (
 
 /**
  * The App's permissions as an action's context holds them: `ai`,
- * `brain`, `grasp` and `guests` when declared, and the connections by
- * alias.
+ * `brain` and `grasp` when declared, and the connections by
+ * alias; and the Brain's reads when it declares none
+ * (`defaultPermission`).
  */
 export const permissionsOf = (
   permissions: readonly AppPermission[],
@@ -228,6 +227,13 @@ export const permissionsOf = (
 ): Record<string, unknown> => {
   const connections: [string, unknown][] = [];
   const clients: Record<string, unknown> = {};
+  const byDefault = defaultPermission(
+    Object.fromEntries(permissions.map((declared) => [declared.alias, true])),
+    "brain"
+  );
+  if (byDefault !== undefined) {
+    clients.brain = clientOf(byDefault, channel);
+  }
   for (const declared of permissions) {
     if (!isActionPermission(declared)) {
       continue;

@@ -23,7 +23,8 @@ import type {
 // A person's memories for a caller acting for them (GRA-1743, threat model
 // on the issue): their own chat saving what they said (agent-remember.ts)
 // and their undo (brain-memories-rpc.ts), and on the Brain's Memories page
-// (GRA-1746) their confirmation of a memory and their correction of one. What is saved is the person's
+// (GRA-1746) their settling of a fact sources disagree on and their
+// correction of a memory. What is saved is the person's
 // own word, readable by them alone (brain-next.ts says why), unless they
 // share it with a team of theirs or the company themselves (GRA-1815):
 // a new memory in the shared store, theirs staying as it is. Core sets
@@ -50,6 +51,12 @@ const fieldOf = (value: unknown, name: string): unknown =>
     ? Reflect.get(value, name)
     : undefined;
 
+/** How many memories `remembered` replaces, when it names any: never which. */
+const replacesOf = (remembered: unknown): Detail => {
+  const replaces = fieldOf(remembered, "replaces");
+  return Array.isArray(replaces) ? { replaces: replaces.length } : {};
+};
+
 /** `value` if it is a string, else null. */
 const stringOf = (value: unknown): string | null =>
   typeof value === "string" ? value : null;
@@ -69,6 +76,8 @@ export const rememberFor = async (
     "brain.memory.remembered",
     {
       change: stringOf(fieldOf(remembered, "change")),
+      // How many of their memories it replaces, never which.
+      ...replacesOf(remembered),
     },
     async () => await rememberAs(env, caller.person, remembered),
     ({ memory, entity }) => ({ memory, entity })
@@ -109,8 +118,9 @@ const placeOf = (memory: unknown) => {
 };
 
 /**
- * `caller`'s person confirms a memory they may read (`confirmAs`): `done`,
- * or `nothing` alike for none, one they may not read, or one not current.
+ * `caller`'s person settles a fact sources disagree on, confirming one
+ * side they may read (`confirmAs`): `done`, or `nothing` alike for none,
+ * one they may not read, one not current, or one nothing contests.
  * Audited as `brain.memory.confirmed`.
  */
 export const confirmFor = async (

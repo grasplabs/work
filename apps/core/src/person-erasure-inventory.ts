@@ -54,6 +54,14 @@ export type ErasureClass =
 /** A table that holds no person at all. */
 export const noPerson = { none: "holds no person" } as const;
 
+/**
+ * The tables App visitors left (GRA-2235): a migration emptied them, and
+ * nothing writes them, until a later release drops them (GRA-2253).
+ */
+const appVisitorsGone = {
+  none: "emptied when App visitors went, and nothing writes it",
+} as const;
+
 /** Every table of core's and the Brain's databases, by `<database>.<table>`. */
 export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // Core's database.
@@ -71,12 +79,23 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // The groups copied reader lists name (source-readers.ts, GRA-1761): a
   // provider's group IDs, which name no person.
   "core.source_reader_groups": noPerson,
+  // No longer written (GRA-2207), kept until a later release drops it:
+  // pairs of a picked shared place and a reader, an account by its random
+  // token (`core.source_reader_tokens`), never by an address or an object
+  // ID, as the Brain's sets do (`brainStore.reader_set_members`): an
+  // erased person's token goes with their accounts, and a pair names one
+  // nobody holds again.
+  "core.source_reader_pairs": {
+    company: "who a picked place's documents are shared with, by token",
+  },
   // Every address a person's sign-ins proved, for their erasure alone
   // (source-readers.ts): forgotten with their accounts.
   "core.sign_in_addresses": { erased: "identity" },
   "core.members": { erased: "removal" },
   "core.member_removals": { kept: "keeps someone removed out" },
-  "core.person_erasures": { kept: "the erasure's own record, by ID" },
+  "core.person_erasures": {
+    kept: "the erasure's own record, by ID, with the name they had; a guest has none, and their address is never kept",
+  },
   "core.person_erasure_areas": { kept: "the erasure's own record, by ID" },
   "core.erased_subjects": {
     kept: "keeps someone erased out, as keyed hashes of their sign-in subjects",
@@ -114,6 +133,18 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // What an admin pinned of a member's teams: deleted with their removal,
   // and again by the erasure's channels step.
   "core.team_pins": { erased: "removal" },
+  // The directory's groups admins mapped to teams (directory-groups.ts):
+  // a group and a team, no person; who mapped it is in the audit log.
+  "core.directory_group_teams": {
+    none: "a directory group's id and name and a team's id, no person",
+  },
+  // The members of each mapped group, by the provider's ID of them: each
+  // row goes with the person's `directory_people` row, which erasure
+  // deletes.
+  "core.directory_group_members": {
+    erased: "identity",
+    via: "directory_people",
+  },
   // Where the daily read stands: a connection, a tenant and counts.
   "core.directory_reads": {
     none: "a connection, its tenant and counts, no person",
@@ -255,17 +286,17 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.org_settings": {
     none: "the organization's billing and Pulse settings",
   },
-  // Written only by an older core (rows from before, or during a rollout or
-  // after a rollback), and removed with the run by retention until a later
-  // contract migration drops it; this entry goes with the table.
   "core.run_brain_evidence": {
-    company: "what a run recalled, as runs are (D3)",
+    none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
   },
   "core.run_brain_versions": {
     company:
       "which Brain versions a run recalled, identifiers only, as runs are (D3)",
   },
   "core.kept_run_evidence": noPerson,
+  "core.brain_default_reads": {
+    none: "which App or workflow read the Brain by default: its subject is one of those, by id, never a person",
+  },
   "core.run_state_writers": {
     none: "which runs a run started from the kept state of: its writer is a run, by id, never a person",
   },
@@ -273,28 +304,13 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company:
       "which Brain memories a run's entity reads rested on, identifiers only, no person's, as runs are (D3)",
   },
+  // Unused since GRA-2234, kept for a rollback to the release before.
   "core.guest_chats": { company: "guest chats they opened for an App" },
-  // An App's visitor list (app-visitors.ts): the company's, as its builders
-  // keep it, with the builder who listed each entry (`added_by`). An entry
-  // may be a member's own address; it stays, the list's to change, never
-  // the erasure's (a decision for Nick: see the PR).
-  "core.app_visitor_entries": {
-    company: "an App's visitor list, and the builder who listed each",
-  },
-  // The App functions a version grants its visitors (app-visitor-grants.ts),
-  // with the builder who granted each (`granted_by`): the App's own
-  // settings, as other settings a builder changed are.
-  "core.app_visitor_grants": {
-    company: "the functions builders granted an App's visitors",
-  },
-  // A visitor's codes and sessions name them only by address, mostly an
-  // outside visitor's, and are short-lived: a code works 10 minutes and
-  // its row goes an hour after, a session lasts 8 hours at most, and the
-  // sweep deletes both. A member's own address may be listed (or their
-  // domain), so the rows under the address that was theirs go with their
-  // email, in the identity area's batch.
-  "core.app_visitor_codes": { erased: "identity" },
-  "core.app_visitor_sessions": { erased: "identity" },
+  // Unused since GRA-2235, kept for a rollback to the release before.
+  "core.app_visitor_entries": appVisitorsGone,
+  "core.app_visitor_grants": appVisitorsGone,
+  "core.app_visitor_codes": appVisitorsGone,
+  "core.app_visitor_sessions": appVisitorsGone,
   // An App's webhooks (app-webhooks.ts): the company's settings, naming
   // the builder who added each and the admin who approved its URL, as
   // other settings name who changed them.
@@ -364,13 +380,14 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company:
       "who uploaded which file into the Brain for a team or everyone, by ID and the file's name; their uploads for themselves alone, by ID with no name, go with brain_sources once the Brain erased them; a file's text is the Brain's",
   },
-  "core.uploads": { erased: "brain" },
-  "core.knowledge_signals": { erased: "apps" },
-  "core.knowledge_signal_dismissals": {
-    none: "subject is a search or document",
+  "core.uploads": {
+    none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
+  },
+  "core.knowledge_signals": {
+    none: "nothing writes or reads it since GRA-1941; dropped by the next contract migration",
   },
   "core.verifications": {
-    kept: "a sign-in's state for its minutes, by a random identifier",
+    kept: "a sign-in's state for its minutes, by a random identifier; a guest's codes sent, by their ID; a guest's outstanding code, by their address, deleted with their removal and erasure",
   },
   "core.audit_outbox": { kept: "audit events on their way to the log (D2)" },
   "core.audit_outbox_rejected": { kept: "audit events the log refused (D2)" },
@@ -395,6 +412,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.brain_records": {
     company: "agreed facts naming roles; a gap's answer names who gave it",
   },
+  // Unused since GRA-2234, kept for a rollback to the release before.
   "core.guest_messages": { company: "guest chats they opened for an App" },
   "core.app_statistics": { company: "an App's aggregates, by its dimensions" },
   "core.app_statistic_steps": {
@@ -408,7 +426,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_run_file_chunks": { company: "files of runs (D3)" },
   "core.app_candidate_reports": noPerson,
   "core.app_default_stores": noPerson,
-  "core.app_entries": noPerson,
   "core.app_origins": noPerson,
   "core.app_test_fixtures": noPerson,
   "core.build_receipts": noPerson,
@@ -514,7 +531,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.preview_releases": { erased: "workspace" },
   "workspace.preview_stores": { erased: "workspace" },
   // The onboarding: their interview, by its own deletion.
-  "onboarding.people": { company: "the company's roster (D5)" },
+  // The company's roster (D5): their entry stays, without their address.
+  "onboarding.people": { erased: "interview" },
   "onboarding.links": { erased: "interview" },
   "onboarding.link_codes": { erased: "interview" },
   "onboarding.interviews": { erased: "interview" },
@@ -542,9 +560,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // The roster's and the onboarding's own: who did what, by ID (D5).
   "onboarding.teams": { company: "the company's roster: a team's lead (D5)" },
   "onboarding.works": { company: "the company's roster: who does what (D5)" },
-  "onboarding.mail_outbox": {
-    company: "mail to the roster (D5), which keeps the address anyway",
-  },
+  "onboarding.mail_outbox": { erased: "interview" },
   "onboarding.events": { kept: "the onboarding's log, IDs only" },
   "onboarding.counted_works": { company: "who counted a work (D5)" },
   "onboarding.documents": { company: "documents the admin shared" },
@@ -574,6 +590,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.team_counts": noPerson,
   "onboarding.usage": noPerson,
   "onboarding.referrals": { erased: "interview" },
+  // An entry's addresses kept under the account its link belonged to when
+  // it left the list: an erasure moves them into `erased_addresses`.
+  "onboarding.left_addresses": { erased: "interview" },
+  "onboarding.erased_addresses": {
+    kept: "keeps someone erased off the staff list, as keyed hashes of their addresses, by ID",
+  },
   "onboarding.more_voices": {
     none: "work to hear more about; who asked is the audit log's",
   },
@@ -727,6 +749,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // Their confirmations stand, their id replaced (`erasedConfirmer`).
   "brainStore.memory_confirmations": { erased: "brain_shared" },
   "brainStore.memory_confirmed_over": noPerson,
+  // Which memory replaces which, by row: deleted with either memory.
+  "brainStore.memory_replacements": noPerson,
   "brainStore.memory_extractions": {
     company: "marks of the versions fully drawn from",
   },
@@ -795,6 +819,7 @@ export const reviewedPersonColumns: Readonly<
   "core.access_revocations": ["user_ids"],
   "core.accounts": ["user_id", "verified_email", "verified_email_at"],
   "core.source_reader_tokens": ["person"],
+  "core.source_reader_pairs": ["principal"],
   "core.sign_in_addresses": ["user_id"],
   "core.action_invocations": ["person_id"],
   "core.agent_held_starts": ["person_id"],
@@ -828,6 +853,8 @@ export const reviewedPersonColumns: Readonly<
   "core.app_workflow_bindings": ["bound_by", "removed_by"],
   "core.apps": ["archived_by", "owner_id", "removed_by", "status_changed_by"],
   "core.blueprints": ["marked_by"],
+  // An App or a workflow, never a person (`brain_default_reads` above).
+  "core.brain_default_reads": ["subject_id", "subject_type"],
   "core.brain_gap_states": ["answered_by"],
   "core.business_store_members": ["added_by", "member_id", "member_type"],
   "core.brain_run_sources": ["person_id"],
@@ -870,7 +897,6 @@ export const reviewedPersonColumns: Readonly<
   "core.hidden_connectors": ["hidden_by"],
   "core.improvement_signals": ["subject"],
   "core.invitations": ["email", "inviter_id"],
-  "core.knowledge_signal_dismissals": ["subject"],
   "core.knowledge_signals": ["owner", "subject"],
   "core.member_removals": ["user_id"],
   // `suspended_by` names what suspended the member (the directory's read),
@@ -974,6 +1000,8 @@ export const reviewedPersonColumns: Readonly<
   "onboarding.link_codes": ["person"],
   "onboarding.links": ["person", "sent_to_email", "user_id"],
   "onboarding.participations": ["person"],
+  "onboarding.erased_addresses": ["user_id"],
+  "onboarding.left_addresses": ["user_id"],
   "onboarding.people": ["email"],
   "onboarding.readbacks": ["person"],
   "onboarding.referrals": ["person"],

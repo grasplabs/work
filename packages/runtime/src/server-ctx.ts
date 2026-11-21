@@ -12,12 +12,13 @@ import type {
   FunctionReturn,
   SingleAnswer,
 } from "./function-references.ts";
+import type { brainReads } from "./manifest-permissions.ts";
 import type { PeopleDirectory, User } from "./people.ts";
 import type {
   AiClient,
+  BrainClient,
   BrainClientOf,
   ConnectionClientOf,
-  GuestsClientOf,
   GraspClient,
 } from "./permission-clients.ts";
 import type {
@@ -25,7 +26,6 @@ import type {
   BrainPermission,
   ConnectionPermission,
   GraspPermission,
-  GuestsPermission,
 } from "./permission-types.ts";
 import type { AnyTables } from "./server-function.ts";
 
@@ -56,8 +56,8 @@ export interface NotifyReceipt {
  * at most 50 people a send, and an App sends at most 200 notifications an
  * hour, all its calls together (`permission.limit_reached` past it, the
  * whole send refused). Each send is audited, with how many it told and
- * skipped, never what it said. A call a visitor makes, or one from a
- * workflow's run, tells nobody (`permission.unavailable`).
+ * skipped, never what it said. A call from a workflow's run tells nobody
+ * (`permission.unavailable`).
  */
 type NotifyPeople<Told> = (
   to: string,
@@ -101,9 +101,22 @@ type AiOf<Grants extends Grant> = [Extract<Grants, AiPermission>] extends [
   : AiClient;
 
 /**
- * What an action reaches through the App's permissions (`Grants`), each
- * only when declared: `ai`, `brain`, `grasp` (the platform's own
- * functions) and `guests`, and the connections by alias.
+ * `ctx.brain`: the declared `brain` permission's operations, or the
+ * Brain's reads when `Grants` declare none (`brainByDefault`).
+ */
+type BrainOf<Grants extends Grant> = Readonly<
+  Record<
+    "brain",
+    [Extract<Grants, BrainPermission>] extends [never]
+      ? BrainClient<typeof brainReads>
+      : BrainClientOf<Extract<Grants, BrainPermission>>
+  >
+>;
+
+/**
+ * What an action reaches through the App's permissions (`Grants`): `ai`,
+ * `grasp` (the platform's own functions) when declared, the connections
+ * by alias, and `brain` always (`BrainOf`).
  */
 type PermissionClients<Grants extends Grant> = {
   /** Each of the App's connections, by alias. */
@@ -117,17 +130,15 @@ type PermissionClients<Grants extends Grant> = {
     "grasp",
     [Extract<Grants, GraspPermission>] extends [never] ? never : GraspClient
   > &
-  Present<"brain", BrainClientOf<Extract<Grants, BrainPermission>>> &
-  Present<"guests", GuestsClientOf<Extract<Grants, GuestsPermission>>>;
+  BrainOf<Grants>;
 
 /** `ctx.auth`: who the call is for, as Convex's `ctx.auth` answers it. */
 export interface Auth {
   /**
    * Who the call is for (`User`): their ID, name, address and roles in
-   * the App (`builder`, `user`; none for a visitor the App was shared
-   * with, whose `id` is their session's: key a visitor by `email`). A
-   * workflow run's call is for the person the run acts for. Read once as
-   * the call starts, from core's own record of who is signed in.
+   * the App (`builder`, `user`). A workflow run's call is for the person
+   * the run acts for. Read once as the call starts, from core's own
+   * record of who is signed in.
    */
   readonly getUser: () => Promise<User>;
 }
@@ -143,8 +154,8 @@ export interface CallerCtx {
    * The organization's members, read-only, for an App that declares it
    * (`app({ permissions: { people: true } })`; `permission.denied` otherwise): by ID, by
    * name or email, or by team, at most 100 a read, each with only their
-   * name, email and teams. A visitor's call is refused it
-   * (`visitor.not_granted`).
+   * name, email and teams. A guest's call is refused it
+   * (`permission.denied`).
    */
   readonly people: PeopleDirectory;
 }

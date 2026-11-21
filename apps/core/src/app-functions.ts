@@ -38,10 +38,7 @@ import {
   isPeoplePath,
   memberPeople,
   peopleReadOf,
-  visitorPeople,
 } from "./app-people.ts";
-import type { PeopleAccess } from "./app-people.ts";
-import { recallsTheBrain } from "./app-provenance.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import {
@@ -115,23 +112,17 @@ interface FunctionCaller {
   readonly refusalsKept?: Set<string>;
 }
 
-/** A signed-in visitor as the audit log names them: by their session. */
-type VisitorActor = Extract<AuditActor, { type: "visitor" }> & {
-  readonly sessionId: string;
-};
-
 /**
- * Whose call a refused use's evidence names (`keptUseRefusals`): a
- * member's as the App's server code acting for `person`; a visitor's as
- * the visitor, by their session, as the log names them for their other
- * actions (app-visitors.ts), with no person, nor anything else of them.
+ * Whose call a refused use's evidence names (`keptUseRefusals`): the
+ * App's server code acting for `person`.
  */
-type UseRefusalContext = {
+interface UseRefusalContext {
   readonly app: AppId;
   readonly version: number;
   readonly requestId: string;
   readonly runId: string | null;
-} & ({ readonly person: string } | { readonly visitor: VisitorActor });
+  readonly person: string;
+}
 
 /** Writes `refusal` as `app.use.refused` for `context`; never throws (`keepAuditEvent`). */
 const writeUseRefusal = async (
@@ -139,18 +130,15 @@ const writeUseRefusal = async (
   context: UseRefusalContext,
   refusal: UseRefusal
 ): Promise<void> => {
-  const { app, version, requestId, runId } = context;
-  const member = "person" in context;
+  const { app, version, requestId, runId, person } = context;
   await keepAuditEvent(env, drizzle(env.DB), {
-    actor: member
-      ? { type: "app", appId: app, part: "server" }
-      : context.visitor,
+    actor: { type: "app", appId: app, part: "server" },
     action: "app.use.refused",
     target: { type: "app", id: app },
     requestId,
     detail: {
       version,
-      ...(member ? { person: context.person } : {}),
+      person,
       runId,
       function: refusal.function,
       useKind: refusal.use.kind,
@@ -995,194 +983,6 @@ export const callAppFunctionById = async (
     refused,
   });
   return { ...answer, path: resolved.path, requestId };
-};
-
-/**
- * Who a visitor's call runs for (app-visitor-grants.ts): never a person.
- * The App's version is the one it was granted on.
- */
-export interface VisitorCaller {
-  readonly app: AppId;
-  readonly version: number;
-  /**
-   * `visitor:<session>`, a name no member's ID has: it owns what the call
-   * inserts, and keys its receipts, so no two visitors share either.
-   */
-  readonly principal: string;
-  /** The address they signed in with, as their session holds it. */
-  readonly email: string;
-  /** The visitor, by their session, as the audit log names them. */
-  readonly actor: VisitorActor;
-  /**
-   * Throws unless the visitor may still call `path`: their session live,
-   * the App published at this version, their address listed, and `path`
-   * still granted. Read before the call and before each commit.
-   */
-  readonly stillAllowed: (path: string) => Promise<void>;
-  /**
-   * Refuses the call of `path` as not granted, recorded: for what no grant
-   * can open (an action, core's own queries) as for what isn't granted.
-   */
-  readonly notGranted: (path: string) => Promise<never>;
-  /** Told the function the call runs, once it is admitted. */
-  readonly admitted: (path: string) => Promise<void>;
-}
-
-/**
- * What a visitor is told of people: who they are, and no directory, each
- * read of which is refused as a function no grant opens, and recorded.
- */
-const visitorPeopleOf = (caller: VisitorCaller): PeopleAccess =>
-  visitorPeople({
-    principal: caller.principal,
-    email: caller.email,
-    refuse: async (name) => await caller.notGranted(`people.${name}`),
-  });
-
-/**
- * The invocation of `release`'s function `path` for a visitor: the App's
- * store, as no member (no `appMembers` or `appBuilders` table opens to it,
- * and an `owner` table shows only the visitor's own rows), with nothing
- * else bound. No resource (no connection, Knowledge, model, store, other
- * App or template), no workflow started or sent an event, no one told: a
- * function that asks for any of them is refused (`permission.unavailable`),
- * whatever the App holds for its members.
- */
-export const visitorInvocation = async (
-  env: Env,
-  release: Release,
-  caller: VisitorCaller,
-  path: string,
-  requestId: string,
-  deadline: number
-): Promise<Invocation> => {
-  const store =
-    release.store === null
-      ? noStore()
-      : await openStore(env, release.store.storeId);
-  return {
-    principal: caller.principal,
-    actor: caller.actor,
-    sensitiveReads: keptSensitiveReads(env, {
-      actor: caller.actor,
-      target: { type: "app", id: caller.app },
-      version: release.manifest.resourceVersion,
-      principal: caller.principal,
-      requestId,
-      runId: null,
-    }),
-    consumer: {
-      resourceId: caller.app,
-      resourceVersion: release.manifest.resourceVersion,
-    },
-    store,
-    requestId,
-    deadline,
-    runId: null,
-    authorize: async () => {
-      await requireNotRevoked(env, caller.app, caller.version);
-      await caller.stillAllowed(path);
-      return { appMember: false, appBuilder: false };
-    },
-    // What the App's store or the host refuses them, kept as a member's
-    // is, at most once a call, naming them by their session alone: no
-    // person, no address. Each call was counted against the visitor's
-    // and the App's limits before it ran, so a visitor repeating refused
-    // calls adds no more to the log than those limits let through.
-    refusedUse: keptUseRefusals(env, {
-      app: caller.app,
-      version: release.manifest.resourceVersion,
-      visitor: caller.actor,
-      requestId,
-      runId: null,
-    }),
-    people: visitorPeopleOf(caller),
-  };
-};
-
-/**
- * Calls a function of a published App for a visitor (app-visitor-grants.ts),
- * as the App itself: only a public query or mutation of the version the
- * visitor's grant is on, never an action (which reaches resources) and
- * never core's own workflow queries, which are a member's.
- * `request` is the call as the page client wrote it, as text.
- */
-export const callVisitorFunction = async (
-  env: Env,
-  caller: VisitorCaller,
-  request: unknown,
-  deadline: number
-): Promise<FunctionAnswer> => {
-  const requestId = crypto.randomUUID();
-  const refused = (error: unknown): FunctionAnswer => ({
-    result: { ok: false, error: refusalOf(error, requestId) },
-    provenance: null,
-    manifestHash: null,
-  });
-  try {
-    const call = callAllowed(request);
-    const { name: contractId } = call.reference;
-    // Who they are, and nothing of the directory (app-people.ts): no grant
-    // opens it to a visitor.
-    if (isPeoplePath(contractId)) {
-      const read = peopleReadOf(call.reference);
-      // Their session was found live, the App published and their address
-      // listed before this call was taken: that is all telling them who
-      // they are needs. Every directory read is refused, and recorded.
-      return {
-        result: {
-          ok: true,
-          value: await answerPeople(visitorPeopleOf(caller), read, call.args),
-        },
-        provenance: null,
-        manifestHash: null,
-      };
-    }
-    // Never granted, whatever the grants say: refused, and recorded, before
-    // anything of the release is read.
-    if (
-      call.reference.kind === "action" ||
-      isWorkflowQueryPath(contractId) ||
-      isWorkflowMutationPath(contractId)
-    ) {
-      return refused(await caller.notGranted(contractId));
-    }
-    // An App that may hold what the Brain recalled answers no visitor:
-    // recall reads what everyone in the company may, and a visitor is
-    // outside it. Checked on every call, so visitors let in before the
-    // Brain reached the App are held to it too.
-    if (await recallsTheBrain(env, caller.app)) {
-      return refused(await caller.notGranted(contractId));
-    }
-    const release = await loadRelease(env, caller.app, caller.version);
-    const { path } = referenceIn(release, call.reference);
-    await caller.stillAllowed(path);
-    await caller.admitted(path);
-    const invocation = await visitorInvocation(
-      env,
-      release,
-      caller,
-      path,
-      requestId,
-      deadline
-    );
-    const result = await hostFunctionCall(
-      hostedRelease(env, release),
-      invocation,
-      { path, kind: call.reference.kind },
-      call.args,
-      call.idempotencyKey === undefined
-        ? {}
-        : { idempotencyKey: call.idempotencyKey }
-    );
-    return {
-      result,
-      provenance: null,
-      manifestHash: release.manifestHash,
-    };
-  } catch (error) {
-    return refused(error);
-  }
 };
 
 /**

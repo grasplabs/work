@@ -55,7 +55,7 @@ import type {
   ResourceAdapter,
   ServedBinding,
 } from "./resource-adapter.ts";
-import { brainAdapter } from "./resource-brain.ts";
+import { brainAdapter, brainByDefault } from "./resource-brain.ts";
 import { connectorAdapter, contractReader } from "./resource-connector.ts";
 import type {
   ConnectionGrantRow,
@@ -63,7 +63,6 @@ import type {
 } from "./resource-connector.ts";
 import { declarationHash } from "./resource-declarations.ts";
 import { graspAdapter } from "./resource-grasp.ts";
-import { guestsAdapter } from "./resource-guests.ts";
 import { modelAdapter, modelAnswers } from "./resource-model.ts";
 import { platformGrantsOf } from "./resource-platform.ts";
 import type { PlatformAction } from "./resource-platform.ts";
@@ -71,9 +70,8 @@ import type { PlatformAction } from "./resource-platform.ts";
 // Approved resource bindings (spec 12, 16.1, 32.3): what lets an action of
 // an App of spec 8's layout reach what its permissions declare: a model
 // (`ctx.ai`), a connection (`ctx.connections.<alias>`), the Brain
-// (`ctx.brain`), the platform's own functions (`ctx.grasp`) and
-// guest chats (`ctx.guests`). Threat model, and
-// how each is closed:
+// (`ctx.brain`) and the platform's own functions (`ctx.grasp`). Threat
+// model, and how each is closed:
 //
 // - A declaration self-grants: a declaration is App code's requirement and
 //   nothing more. An alias resolves only through an active row here, which
@@ -123,7 +121,6 @@ const adapters: {
   brain: brainAdapter,
   connector: connectorAdapter,
   grasp: graspAdapter,
-  guests: guestsAdapter,
 };
 
 /**
@@ -588,7 +585,6 @@ const reviewContractAsksMax = 50;
  */
 const platformActionOf = {
   grasp: "statistics",
-  guests: "guests",
   brain: "brain",
 } as const satisfies Record<string, PlatformAction>;
 
@@ -633,8 +629,7 @@ interface ReviewGrants {
   /**
    * The App's own active `{ type: "platform" }` permissions of `action`,
    * newest first, at most `choicesMax`: read once for each action, when
-   * the platform's functions (`grasp`), a guests or a brain permission
-   * asks.
+   * the platform's functions (`grasp`) or a brain permission asks.
    */
   readonly platform: (
     action: PlatformAction
@@ -710,7 +705,7 @@ const choicesFor = async (
     };
   }
   // The rest are bound to one of the App's platform permissions.
-  const platformKind = kind === "brain" || kind === "guests" ? kind : "grasp";
+  const platformKind = kind === "brain" ? kind : "grasp";
   const granted = await grants.platform(platformActionOf[platformKind]);
   return {
     kind: platformKind,
@@ -779,14 +774,11 @@ const targetLabels = async (
 };
 
 /**
- * The Brain's or guests' declared operations, or the platform's functions,
- * by path; none for other kinds.
+ * The Brain's declared operations, or the platform's functions, by path;
+ * none for other kinds.
  */
 const operationsOf = (declaration: AnyPermission): string[] => {
-  if (
-    declaration["~permission"] === "brain" ||
-    declaration["~permission"] === "guests"
-  ) {
+  if (declaration["~permission"] === "brain") {
     return [...declaration.operations];
   }
   return declaration["~permission"] === "grasp"
@@ -907,8 +899,13 @@ export const resourceBindingsFor = (
     counts: given.counts ?? new Map<string, number>(),
   };
   return async (
-    declaration: AnyPermission
+    declaration: AnyPermission,
+    byDefault: boolean
   ): Promise<BoundResource | undefined> => {
+    // The Brain's reads of an App that declares none: no binding to find.
+    if (byDefault) {
+      return brainByDefault(env, caller);
+    }
     const row = await activeRow(env, caller.app, declaration.alias);
     if (row === undefined) {
       return undefined;

@@ -12,11 +12,9 @@ import {
   settleRequest,
   sweepStephenRequests,
 } from "../src/channels/stephen-requests.ts";
-import { chatAgentId } from "../src/chats-rpc.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { sendStephenSummaries } from "../src/stephen-summary.ts";
 import { says } from "./agent-chat.ts";
-import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
 import {
@@ -333,12 +331,6 @@ describe("sorting a request", setUpTime, () => {
     // So the call that names a topic, a question and a role is never sent
     // his answer, for any request; only the call judging whether he
     // answered reads it, and says that alone (request-sorting.ts).
-    await requestGranted(idp, await signedInApi(idp, "admin"), {
-      subject: { type: "agent", agentId: chatAgentId },
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
     const [depot, own] = [`d${unique()}`, `m${unique()}`];
     const ann = await member(
       idp,
