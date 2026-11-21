@@ -43,6 +43,7 @@ import { z } from "zod";
 import { usableModels } from "../src/ai-model-choice.ts";
 import { modelUsage } from "../src/db/core/schema.ts";
 import { graspAiMonth, monthSpend, spendMonth } from "../src/model-spend.ts";
+import { usageRecorded } from "../src/model-usage.ts";
 import { modelFailureOf, models, modelSettings } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -101,7 +102,11 @@ const carrying = async (text: string): Promise<ProviderRequest[]> => {
   return await response.json();
 };
 
-/** `promise`, and whether it has settled yet. */
+/**
+ * `promise`, whether it has settled yet, and `done`, which settles with it
+ * and never rejects: awaited in a test's `finally`, its failure is never
+ * left unhandled, whatever ends the test.
+ */
 const watched = <T>(promise: Promise<T>) => {
   const state = { settled: false };
   const settling = async (): Promise<T> => {
@@ -111,7 +116,12 @@ const watched = <T>(promise: Promise<T>) => {
       state.settled = true;
     }
   };
-  return { promise: settling(), settled: () => state.settled };
+  const settled = settling();
+  return {
+    promise: settled,
+    done: outcome(settled),
+    settled: () => state.settled,
+  };
 };
 
 /** Once the beginning of the held answer to `key`'s request was sent on. */
@@ -1736,12 +1746,15 @@ describe("AI providers", { timeout: 60_000 }, () => {
 
     it("waits out an answer that pauses mid-stream, and records its usage, cost and route in the audit log and its usage", async () => {
       const key = await connected(each);
-      const [begun = "", rest = ""] = streamParts(each.api, {
+      const parts = streamParts(each.api, {
         text: "Hello, Ada.",
         inputTokens: 1000,
         outputTokens: 100,
         pause: { at: 5, until: Promise.resolve() },
       });
+      // Split at its pause: nothing else would pause it.
+      expect(parts).toHaveLength(2);
+      const [begun = "", rest = ""] = parts;
       const paused = crypto.randomUUID();
       await plan(key, [{ hold: begun, resume: { release: paused, rest } }]);
       const trigger = newPerson();
@@ -1750,13 +1763,21 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const call = watched(
         models(env).call(await callOf(each.model, { trigger }))
       );
-      await answerBegun(key);
-      const pausedThen = call.settled();
-      await release(paused);
+      let pausedThen = true;
+      try {
+        await answerBegun(key);
+        pausedThen = call.settled();
+      } finally {
+        // Let go of the held answer however this ends, and wait for it.
+        await release(paused);
+        await call.done;
+      }
 
       const answer = await call.promise;
       const [event] = await auditedFor(trigger.userId, 1);
-      // Written in the same batch as its audit event: all there is.
+      // Written in the background after its audit event: once it is, all
+      // there is.
+      await usageRecorded();
       const rows = await usageRows(spendMonth(env), {
         personId: trigger.userId,
       });
@@ -1848,9 +1869,15 @@ describe("AI providers", { timeout: 60_000 }, () => {
           )
         )
       );
-      await answerBegun(key);
-      const pausedThen = call.settled();
-      cancel.abort();
+      let pausedThen = true;
+      try {
+        await answerBegun(key);
+        pausedThen = call.settled();
+      } finally {
+        // Cancelled however this ends, and waited for.
+        cancel.abort();
+        await call.done;
+      }
 
       expect({ pausedThen, cancelled: await call.promise }).toStrictEqual({
         pausedThen: false,
