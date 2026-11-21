@@ -792,9 +792,11 @@ const stillCanvasFor = (scene: boolean): StillCanvas | undefined => {
     return stillCanvas;
   }
   letStillCanvasGo();
-  const gl = document
-    .createElement("canvas")
-    .getContext("webgl2", { alpha: !scene, antialias: false });
+  const gl = document.createElement("canvas").getContext("webgl2", {
+    alpha: !scene,
+    antialias: false,
+    preserveDrawingBuffer: true,
+  });
   if (gl === null) {
     return undefined;
   }
