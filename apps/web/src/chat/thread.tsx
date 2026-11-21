@@ -31,7 +31,6 @@ import {
   ChatMessageAction,
 } from "../grasp/chat-message/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
-import { Markdown } from "../grasp/markdown/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Thread } from "../grasp/thread/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -1025,10 +1024,10 @@ const AnswerRow = ({
         thinkingLabel={context.workingLabel}
         thoughts={
           thought.thoughts === undefined ? undefined : (
-            <Markdown
+            <AnswerWords
               size="sm"
-              source={thought.thoughts}
-              streaming={status === "thinking"}
+              text={thought.thoughts}
+              writing={status === "thinking"}
             />
           )
         }

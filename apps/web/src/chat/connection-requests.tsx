@@ -99,7 +99,7 @@ const ConnectionRequest = ({
     onDecided();
     // Core notes the decision in the chat, which moves it up the chat
     // list: the list is read again so it shows under its new time.
-    await router.invalidate();
+    await router.invalidate({ sync: true });
     if (done !== true) {
       throw new Error("The decision was not taken");
     }

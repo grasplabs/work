@@ -2537,6 +2537,7 @@ msgid "Agent not found"
 msgstr "Agent nicht gefunden"
 
 #: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/shell-pending.tsx
@@ -2591,7 +2592,7 @@ msgstr "KI-Tool"
 msgid "All"
 msgstr "Alle"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Alle"
@@ -3085,7 +3086,7 @@ msgstr "Anwendungen"
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Lassen Sie sie greifen, wenn die Domain des Absenders {domain} ist."
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Approvals"
 msgstr "Freigaben"
@@ -3558,7 +3559,7 @@ msgstr "Auf dieser Seite gefragt"
 msgid "Asked of the {owner}"
 msgstr "An {owner} gestellt"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Asked of you"
 msgstr "An Sie gestellt"
@@ -3899,7 +3900,7 @@ msgstr "Gebunden an"
 msgid "Brain"
 msgstr "Gehirn"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "Brain"
 msgstr "Brain"
@@ -4473,7 +4474,7 @@ msgstr "Änderungen angefragt"
 msgid "Changes only you see"
 msgstr "Änderungen, die nur Sie sehen"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Changes we couldn’t confirm"
 msgstr "Änderungen, die wir nicht bestätigen konnten"
@@ -5257,7 +5258,7 @@ msgctxt "a kind of thing the Brain remembers"
 msgid "Connections"
 msgstr "Verbindungen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Verbindungen"
@@ -5467,6 +5468,7 @@ msgstr "URL von {name} kopieren"
 #: src/brain/note-actions.tsx
 #: src/chat/chat-more.tsx
 #: src/copy.ts
+#: src/drafts/share-with-team.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Copying didn't work"
 msgstr "Kopieren hat nicht geklappt"
@@ -7992,7 +7994,7 @@ msgctxt "a workflow's settings section"
 msgid "General"
 msgstr "Allgemein"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "General"
 msgstr "Allgemein"
@@ -8661,7 +8663,7 @@ msgctxt "a workflow's settings section"
 msgid "History"
 msgstr "Verlauf"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Verlauf"
@@ -11144,7 +11146,7 @@ msgctxt "your microphone is off for a moment"
 msgid "Muted"
 msgstr "Stumm"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 msgid "My agents"
 msgstr "Meine Agenten"
 
@@ -13081,7 +13083,7 @@ msgstr "Option {place}"
 msgid "Options"
 msgstr "Optionen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Optionen"
@@ -13106,7 +13108,7 @@ msgstr "Kugel"
 msgid "Order"
 msgstr "Reihenfolge"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/org-card.tsx
 msgid "Organization"
@@ -16058,7 +16060,7 @@ msgctxt "a workflow's settings section"
 msgid "Sharing"
 msgstr "Freigabe"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Freigabe"
@@ -17785,7 +17787,12 @@ msgstr "Die veröffentlichten Änderungen konnten nicht als Entwurf zurückgehol
 msgid "The chat adds indexes as it writes the App’s queries."
 msgstr "Der Chat fügt Indizes hinzu, während er die Abfragen der App schreibt."
 
+#: src/chat/sidebar-chats.tsx
+msgid "The chat couldn't be archived. Try again."
+msgstr "Der Chat konnte nicht archiviert werden. Versuchen Sie es erneut."
+
 #: src/chat/chat-more.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "The chat couldn't be renamed. Try again."
 msgstr "Der Chat konnte nicht umbenannt werden. Versuchen Sie es erneut."
 
@@ -19888,7 +19895,7 @@ msgstr "Webhook-Auslöser"
 msgid "Webhooks"
 msgstr "Webhooks"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Webhooks"
 msgstr "Webhooks"

@@ -2537,6 +2537,7 @@ msgid "Agent not found"
 msgstr "Agent niet gevonden"
 
 #: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/shell-pending.tsx
@@ -2591,7 +2592,7 @@ msgstr "AI-tool"
 msgid "All"
 msgstr "Alles"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Alles"
@@ -3085,7 +3086,7 @@ msgstr "Applicaties"
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Laat hem gelden als het domein van de afzender {domain} is."
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Approvals"
 msgstr "Goedkeuringen"
@@ -3558,7 +3559,7 @@ msgstr "Gevraagd op deze pagina"
 msgid "Asked of the {owner}"
 msgstr "Gevraagd aan {owner}"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Asked of you"
 msgstr "Aan jou gevraagd"
@@ -3899,7 +3900,7 @@ msgstr "Gekoppeld aan"
 msgid "Brain"
 msgstr "Brein"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "Brain"
 msgstr "Brain"
@@ -4473,7 +4474,7 @@ msgstr "Wijzigingen gevraagd"
 msgid "Changes only you see"
 msgstr "Wijzigingen die alleen jij ziet"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Changes we couldn’t confirm"
 msgstr "Wijzigingen die we niet konden bevestigen"
@@ -5257,7 +5258,7 @@ msgctxt "a kind of thing the Brain remembers"
 msgid "Connections"
 msgstr "Verbindingen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Verbindingen"
@@ -5467,6 +5468,7 @@ msgstr "URL van {name} kopiëren"
 #: src/brain/note-actions.tsx
 #: src/chat/chat-more.tsx
 #: src/copy.ts
+#: src/drafts/share-with-team.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Copying didn't work"
 msgstr "Kopiëren is niet gelukt"
@@ -7992,7 +7994,7 @@ msgctxt "a workflow's settings section"
 msgid "General"
 msgstr "Algemeen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "General"
 msgstr "Algemeen"
@@ -8661,7 +8663,7 @@ msgctxt "a workflow's settings section"
 msgid "History"
 msgstr "Geschiedenis"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Geschiedenis"
@@ -11144,7 +11146,7 @@ msgctxt "your microphone is off for a moment"
 msgid "Muted"
 msgstr "Gedempt"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 msgid "My agents"
 msgstr "Mijn agents"
 
@@ -13081,7 +13083,7 @@ msgstr "Optie {place}"
 msgid "Options"
 msgstr "Opties"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Opties"
@@ -13106,7 +13108,7 @@ msgstr "Bol"
 msgid "Order"
 msgstr "Volgorde"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/org-card.tsx
 msgid "Organization"
@@ -16058,7 +16060,7 @@ msgctxt "a workflow's settings section"
 msgid "Sharing"
 msgstr "Delen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Delen"
@@ -17785,7 +17787,12 @@ msgstr "De gepubliceerde wijzigingen konden niet als concept worden teruggezet. 
 msgid "The chat adds indexes as it writes the App’s queries."
 msgstr "De chat voegt indexen toe terwijl hij de query’s van de App schrijft."
 
+#: src/chat/sidebar-chats.tsx
+msgid "The chat couldn't be archived. Try again."
+msgstr "De chat kon niet worden gearchiveerd. Probeer het opnieuw."
+
 #: src/chat/chat-more.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "The chat couldn't be renamed. Try again."
 msgstr "De chat kon niet worden hernoemd. Probeer het opnieuw."
 
@@ -19888,7 +19895,7 @@ msgstr "Webhooktrigger"
 msgid "Webhooks"
 msgstr "Webhooks"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Webhooks"
 msgstr "Webhooks"

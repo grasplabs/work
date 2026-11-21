@@ -145,7 +145,7 @@ const WordingDialog = ({
     if (done === undefined) {
       return false;
     }
-    await router.invalidate();
+    await router.invalidate({ sync: true });
     return true;
   };
   return (
@@ -254,7 +254,7 @@ const WorkflowsDialog = ({
       // The dialog stays open, with core's reason above the buttons.
       throw new Error("The workflows weren't linked.");
     }
-    await router.invalidate();
+    await router.invalidate({ sync: true });
   };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>

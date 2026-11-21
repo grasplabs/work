@@ -2537,6 +2537,7 @@ msgid "Agent not found"
 msgstr "Agente no encontrado"
 
 #: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/shell-pending.tsx
@@ -2591,7 +2592,7 @@ msgstr "Herramienta de IA"
 msgid "All"
 msgstr "Todo"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Todo"
@@ -3085,7 +3086,7 @@ msgstr "Aplicaciones"
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Aplícala si el dominio del remitente es {domain}."
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Approvals"
 msgstr "Aprobaciones"
@@ -3558,7 +3559,7 @@ msgstr "Preguntado en esta página"
 msgid "Asked of the {owner}"
 msgstr "Preguntada a {owner}"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Asked of you"
 msgstr "Te la han preguntado"
@@ -3899,7 +3900,7 @@ msgstr "Vinculado a"
 msgid "Brain"
 msgstr "Cerebro"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "Brain"
 msgstr "Brain"
@@ -4473,7 +4474,7 @@ msgstr "Cambios pedidos"
 msgid "Changes only you see"
 msgstr "Cambios que solo ves tú"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Changes we couldn’t confirm"
 msgstr "Cambios que no pudimos confirmar"
@@ -5257,7 +5258,7 @@ msgctxt "a kind of thing the Brain remembers"
 msgid "Connections"
 msgstr "Conexiones"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Conexiones"
@@ -5467,6 +5468,7 @@ msgstr "Copiar la URL de {name}"
 #: src/brain/note-actions.tsx
 #: src/chat/chat-more.tsx
 #: src/copy.ts
+#: src/drafts/share-with-team.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Copying didn't work"
 msgstr "No se ha podido copiar"
@@ -7992,7 +7994,7 @@ msgctxt "a workflow's settings section"
 msgid "General"
 msgstr "General"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "General"
 msgstr "General"
@@ -8661,7 +8663,7 @@ msgctxt "a workflow's settings section"
 msgid "History"
 msgstr "Historial"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Historial"
@@ -11144,7 +11146,7 @@ msgctxt "your microphone is off for a moment"
 msgid "Muted"
 msgstr "En silencio"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 msgid "My agents"
 msgstr "Mis agentes"
 
@@ -13081,7 +13083,7 @@ msgstr "Opción {place}"
 msgid "Options"
 msgstr "Opciones"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Opciones"
@@ -13106,7 +13108,7 @@ msgstr "Esfera"
 msgid "Order"
 msgstr "Orden"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/org-card.tsx
 msgid "Organization"
@@ -16058,7 +16060,7 @@ msgctxt "a workflow's settings section"
 msgid "Sharing"
 msgstr "Compartir"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Compartir"
@@ -17785,7 +17787,12 @@ msgstr "Los cambios que publicaste no se pudieron recuperar como borrador. Está
 msgid "The chat adds indexes as it writes the App’s queries."
 msgstr "El chat añade índices mientras escribe las consultas de la App."
 
+#: src/chat/sidebar-chats.tsx
+msgid "The chat couldn't be archived. Try again."
+msgstr "No se pudo archivar el chat. Inténtalo de nuevo."
+
 #: src/chat/chat-more.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "The chat couldn't be renamed. Try again."
 msgstr "No se pudo cambiar el nombre del chat. Inténtalo de nuevo."
 
@@ -19888,7 +19895,7 @@ msgstr "Disparador de webhook"
 msgid "Webhooks"
 msgstr "Webhooks"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Webhooks"
 msgstr "Webhooks"

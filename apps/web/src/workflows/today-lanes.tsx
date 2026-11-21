@@ -756,7 +756,7 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
         // Answered, or refused because the decision changed since Today
         // was read (what it asks withheld since): Today reads it again and
         // shows it as it is now, with why.
-        await router.invalidate();
+        await router.invalidate({ sync: true });
       })();
     },
     // Gone before the seconds were over: the answer was confirmed, so it
@@ -788,7 +788,7 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
       // Recorded already, or refused: the decision may have changed since
       // Today was read (what it asks withheld since), so Today reads it
       // again and shows it as it is now, with why.
-      await router.invalidate();
+      await router.invalidate({ sync: true });
     }
   };
   if (held !== null) {

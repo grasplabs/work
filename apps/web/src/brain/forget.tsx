@@ -220,7 +220,7 @@ export const useForget = (
         return;
       }
       setGoing(null);
-      await router.invalidate();
+      await router.invalidate({ sync: true });
       gone.current?.(target);
     };
     // A second at a time; after the last one it is taken out.

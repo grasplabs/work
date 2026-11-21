@@ -71,7 +71,10 @@ const report: BoardReport = {
 const ready = Promise.resolve({ state: "ready" as const, data: report });
 
 /** The report's item on a page of its own, against a fake core. */
-const shown = async (shownProgramme: Programme = programme) => {
+const shown = async (
+  shownProgramme: Programme = programme,
+  company = "Acme"
+) => {
   const core = {
     withSession: async <T,>(
       action: (session: {
@@ -82,7 +85,7 @@ const shown = async (shownProgramme: Programme = programme) => {
         organization: {
           get: async () => {
             await Promise.resolve();
-            return { name: "Acme" };
+            return { name: company };
           },
         },
       }),
@@ -127,8 +130,8 @@ describe("the weekly report in the inbox", () => {
     document.body.replaceChildren();
   });
 
-  it("opens in the artifact viewer as one HTML file, named by its week", async () => {
-    await shown();
+  it("opens in the artifact viewer as one HTML file, named by its week, the company's name in it as text", async () => {
+    await shown(programme, "R&D <Labs>");
     await act(async () => {
       document
         .querySelector<HTMLButtonElement>(
@@ -153,7 +156,7 @@ describe("the weekly report in the inbox", () => {
     expect(link?.download).toBe("weekly-report-week-06.html");
     expect(file).toContain("<!doctype html>");
     expect(file).toContain("75% of this week's 4 runs needed nobody.");
-    expect(file).toContain("<title>Acme week 7</title>");
+    expect(file).toContain("<title>R&amp;D &lt;Labs&gt; week 7</title>");
     expect(file).toContain('<meta name="color-scheme" content="light dark">');
   });
 

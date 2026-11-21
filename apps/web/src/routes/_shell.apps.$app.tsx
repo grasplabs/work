@@ -152,10 +152,11 @@ export const Route = createFileRoute("/_shell/apps/$app")({
   component: AppRoute,
   validateSearch,
   loaderDeps: ({ search: { project } }) => ({ project }),
-  // Moving between the App's own routes (`pages/`), or the workspace's
-  // views, reads nothing again: the frame routes them. Loading the App
-  // again (`invalidate`) still does.
-  shouldReload: false,
+  // No `shouldReload`: the router's own rule is the one wanted. Moving
+  // between the App's own routes (`pages/`) or the workspace's views reads
+  // nothing again (the frame routes them); opening the App, another App,
+  // or another project reads it again, in the background over what was
+  // read; so does `invalidate`.
   loader: async ({ context: { core }, params, deps: { project } }) =>
     await loadFromCore(core, async (session) => {
       const [app, contents, inProject] = await Promise.all([

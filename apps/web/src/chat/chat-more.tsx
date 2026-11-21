@@ -56,7 +56,7 @@ export const useRenameChat = (
       }));
     if (renamed === true && parsed.success) {
       onRenamed?.(parsed.data);
-      await router.invalidate();
+      await router.invalidate({ sync: true });
       return;
     }
     toast.error(t`The chat couldn't be renamed. Try again.`);

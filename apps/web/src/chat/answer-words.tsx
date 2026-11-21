@@ -86,20 +86,27 @@ const AnswerLink = ({ link }: { link: MarkdownLink }) =>
     <span>{link.children}</span>
   );
 
-/** One answer's words. While it is `writing`, they come in paced. */
+/**
+ * One answer's words, or its thinking (`size` sm): a link the model wrote
+ * in either is held to the same rule. While it is `writing`, they come in
+ * paced.
+ */
 export const AnswerWords = ({
   text,
   writing,
   cut = false,
+  size,
 }: {
   text: string;
   writing: boolean;
   /** Stopped part way: a link it was still writing goes, an open mark closes. */
   cut?: boolean;
+  size?: "sm";
 }) => (
   <Markdown
     renderLink={(link) => <AnswerLink link={link} />}
     cut={cut}
+    {...(size === undefined ? {} : { size })}
     source={text}
     streaming={writing}
   />

@@ -2537,6 +2537,7 @@ msgid "Agent not found"
 msgstr "Agent not found"
 
 #: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/brain/sources-page.tsx
 #: src/chat/mentions.tsx
 #: src/frame/shell-pending.tsx
@@ -2591,7 +2592,7 @@ msgstr "AI tool"
 msgid "All"
 msgstr "All"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "All"
 msgstr "All"
@@ -3085,7 +3086,7 @@ msgstr "Applications"
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Apply it if the sender’s domain is {domain}."
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Approvals"
 msgstr "Approvals"
@@ -3558,7 +3559,7 @@ msgstr "Asked in this page"
 msgid "Asked of the {owner}"
 msgstr "Asked of the {owner}"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Asked of you"
 msgstr "Asked of you"
@@ -3899,7 +3900,7 @@ msgstr "Bound to"
 msgid "Brain"
 msgstr "Brain"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter, short"
 msgid "Brain"
 msgstr "Brain"
@@ -4473,7 +4474,7 @@ msgstr "Changes asked"
 msgid "Changes only you see"
 msgstr "Changes only you see"
 
-#: src/inbox/inbox-page.tsx
+#: src/inbox/groups.ts
 msgctxt "inbox filter"
 msgid "Changes we couldn’t confirm"
 msgstr "Changes we couldn’t confirm"
@@ -5257,7 +5258,7 @@ msgctxt "a kind of thing the Brain remembers"
 msgid "Connections"
 msgstr "Connections"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Connections"
@@ -5467,6 +5468,7 @@ msgstr "Copy the URL of {name}"
 #: src/brain/note-actions.tsx
 #: src/chat/chat-more.tsx
 #: src/copy.ts
+#: src/drafts/share-with-team.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Copying didn't work"
 msgstr "Copying didn't work"
@@ -7992,7 +7994,7 @@ msgctxt "a workflow's settings section"
 msgid "General"
 msgstr "General"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "General"
 msgstr "General"
@@ -8661,7 +8663,7 @@ msgctxt "a workflow's settings section"
 msgid "History"
 msgstr "History"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "History"
@@ -11144,7 +11146,7 @@ msgctxt "your microphone is off for a moment"
 msgid "Muted"
 msgstr "Muted"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 msgid "My agents"
 msgstr "My agents"
 
@@ -13081,7 +13083,7 @@ msgstr "Option {place}"
 msgid "Options"
 msgstr "Options"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Options"
@@ -13106,7 +13108,7 @@ msgstr "Orb"
 msgid "Order"
 msgstr "Order"
 
-#: src/agents/agents-overview.tsx
+#: src/agents/tabs.tsx
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/org-card.tsx
 msgid "Organization"
@@ -16058,7 +16060,7 @@ msgctxt "a workflow's settings section"
 msgid "Sharing"
 msgstr "Sharing"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Sharing"
@@ -17785,7 +17787,12 @@ msgstr "The changes you published couldn't be put back as the draft. They're in 
 msgid "The chat adds indexes as it writes the App’s queries."
 msgstr "The chat adds indexes as it writes the App’s queries."
 
+#: src/chat/sidebar-chats.tsx
+msgid "The chat couldn't be archived. Try again."
+msgstr "The chat couldn't be archived. Try again."
+
 #: src/chat/chat-more.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "The chat couldn't be renamed. Try again."
 msgstr "The chat couldn't be renamed. Try again."
 
@@ -19888,7 +19895,7 @@ msgstr "Webhook trigger"
 msgid "Webhooks"
 msgstr "Webhooks"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Webhooks"
 msgstr "Webhooks"
