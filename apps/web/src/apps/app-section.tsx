@@ -23,15 +23,15 @@ import type {
 } from "../grasp/sidebar/index.ts";
 import { ProcessTile } from "../workflows/business-process.tsx";
 import { buildsApp } from "./app-role.ts";
+import type { WorkspaceView } from "./app-workspace.tsx";
+import { previewWidthOrder, usePreviewWidth } from "./preview-controls.tsx";
 import {
   optionsOf,
   readSurfaces,
   sectionLabels,
   shownSections,
-} from "./app-settings.tsx";
-import type { AppSettingsSection } from "./app-settings.tsx";
-import type { WorkspaceView } from "./app-workspace.tsx";
-import { previewWidthOrder, usePreviewWidth } from "./preview-controls.tsx";
+} from "./settings-sections.ts";
+import type { AppSettingsSection } from "./settings-sections.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
 // An App's workspace as the sidebar's section, while one who builds it has

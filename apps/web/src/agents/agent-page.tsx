@@ -94,6 +94,7 @@ import { AgentForm } from "./agent-form.tsx";
 import type { Part, Typed } from "./agent-form.tsx";
 import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes, useLast } from "./agent-wakes.tsx";
+import type { AgentTab } from "./tabs.tsx";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 // One agent's page, for the company's admins, or a person's own agent's,
@@ -129,19 +130,6 @@ import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
-
-/** An agent's tabs, by the names its address carries. */
-export const agentTabs = [
-  "overview",
-  "instructions",
-  "access",
-  "schedule",
-] as const;
-export type AgentTab = (typeof agentTabs)[number];
-
-/** The tab an address names; Overview for any other. */
-export const agentTabOf = (value: unknown): AgentTab =>
-  agentTabs.find((tab) => tab === value) ?? "overview";
 
 const styles = stylex.create({
   actions: {

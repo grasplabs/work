@@ -25,11 +25,24 @@ interface Colours {
   accent: string;
 }
 
-/** How much the plate moves at a point: the sand rests where this is nought. */
-type Plate = (x: number, y: number, now: Scene) => number;
+/**
+ * How much the plate moves at a point, for the scene as it is this frame: the sand rests where
+ * this is nought. What is the same at every point (the tone, the tables) is worked out once a
+ * frame, not once a grain.
+ */
+type Plate = (now: Scene) => (x: number, y: number) => number;
 
 /** How far out from what they keep clear of the grains come back in. */
 const clearSoft = 150;
+
+/**
+ * A vector's length. Math.hypot guards against overflow these sizes never reach and is several
+ * times slower, and the sand asks for a length several times a grain at every frame.
+ */
+const length = (x: number, y: number): number => {
+  const squares = x * x + y * y;
+  return Math.sqrt(squares);
+};
 
 const smooth = (value: number): number => {
   const k = Math.min(1, Math.max(0, value));
@@ -44,7 +57,7 @@ const shownAt = (scene: Scene, x: number, y: number): number => {
   }
   const dx = Math.max(clear.left - x, 0, x - clear.right);
   const dy = Math.max(clear.top - y, 0, y - clear.bottom);
-  return smooth(Math.hypot(dx, dy) / clearSoft);
+  return smooth(length(dx, dy) / clearSoft);
 };
 
 /** The plate's tones, as the pairs of a Chladni figure, played in turn. */
@@ -62,27 +75,145 @@ const toneSeconds = 14;
 const toneAt = (index: number): readonly [number, number] =>
   tones[index % tones.length] ?? [1, 3];
 
+/** The highest number in a tone's pair. */
+const highestTone = 5;
+
+/**
+ * Samples a CSS pixel along each side of the plate's tables, for a scene this tall: the plate
+ * spans the scene's height, so a short scene needs more of them to be read as closely.
+ */
+const tableSamplesFor = (height: number): number =>
+  Math.max(2, Math.ceil(1800 / height));
+
+/**
+ * cos(kπu) along each side of a scene, for every k a tone has, sampled finely enough for its size:
+ * three plate readings a grain at every frame, each four Math.cos, were most of the sand's time
+ * (and half a second of settling as the page opened). Read between samples, a table is off by
+ * less than 1e-4, which no grain shows.
+ */
+interface PlateTables {
+  width: number;
+  height: number;
+  samples: number;
+  across: Float64Array[];
+  down: Float64Array[];
+}
+
+const tablesOf = new WeakMap<Scene, PlateTables>();
+
+/** One side's table for k: `at(sample)` is the plate's u (or v) at that sample. */
+const sideTable = (
+  samples: number,
+  k: number,
+  at: (sample: number) => number
+): Float64Array => {
+  const table = new Float64Array(samples);
+  for (let sample = 0; sample < samples; sample += 1) {
+    table[sample] = Math.cos(k * Math.PI * at(sample));
+  }
+  return table;
+};
+
+const plateTables = (now: Scene): PlateTables => {
+  const kept = tablesOf.get(now);
+  if (kept?.width === now.width && kept.height === now.height) {
+    return kept;
+  }
+  const samples = tableSamplesFor(now.height);
+  // Past each edge too: a grain's slope is read two pixels on.
+  const across = Math.ceil((now.width + 3) * samples) + 1;
+  const down = Math.ceil((now.height + 3) * samples) + 1;
+  const tables: PlateTables = {
+    width: now.width,
+    height: now.height,
+    samples,
+    across: [],
+    down: [],
+  };
+  for (let k = 0; k <= highestTone; k += 1) {
+    tables.across.push(
+      sideTable(
+        across,
+        k,
+        (sample) => ((sample / samples - now.width / 2) / now.height) * 1.2
+      )
+    );
+    tables.down.push(
+      sideTable(
+        down,
+        k,
+        (sample) => ((sample / samples - now.height / 2) / now.height) * 1.2
+      )
+    );
+  }
+  tablesOf.set(now, tables);
+  return tables;
+};
+
+/** A table's value at `place` CSS pixels, between its two nearest samples; NaN off it. */
+const sampled = (
+  table: Float64Array | undefined,
+  samples: number,
+  place: number
+): number => {
+  const at = place * samples;
+  const below = Math.floor(at);
+  const low = table?.[below];
+  const high = table?.[below + 1];
+  if (low === undefined || high === undefined) {
+    return Number.NaN;
+  }
+  return low + (high - low) * (at - below);
+};
+
 /** A square plate's figure for the pair n, m: cos(nπu)cos(mπv) − cos(mπu)cos(nπv). */
 const chladni = (u: number, v: number, n: number, m: number): number =>
   Math.cos(n * Math.PI * u) * Math.cos(m * Math.PI * v) -
   Math.cos(m * Math.PI * u) * Math.cos(n * Math.PI * v);
 
-const plate: Plate = (x, y, now) => {
-  const u = ((x - now.width / 2) / now.height) * 1.2;
-  const v = ((y - now.height / 2) / now.height) * 1.2;
+/** One tone's figure at a point, from the tables' sides for it; worked out where they don't reach. */
+const chladniAt = (
+  tables: PlateTables,
+  n: number,
+  m: number
+): ((x: number, y: number) => number) => {
+  const acrossN = tables.across[n];
+  const acrossM = tables.across[m];
+  const downN = tables.down[n];
+  const downM = tables.down[m];
+  const { samples } = tables;
+  return (x, y) => {
+    const value =
+      sampled(acrossN, samples, x) * sampled(downM, samples, y) -
+      sampled(acrossM, samples, x) * sampled(downN, samples, y);
+    if (!Number.isNaN(value)) {
+      return value;
+    }
+    const u = ((x - tables.width / 2) / tables.height) * 1.2;
+    const v = ((y - tables.height / 2) / tables.height) * 1.2;
+    return chladni(u, v, n, m);
+  };
+};
+
+const plate: Plate = (now) => {
+  const tables = plateTables(now);
   const turn = now.time / toneSeconds;
   const index = Math.floor(turn);
   const blend = smooth((turn - index - 0.75) * 4);
   const [n, m] = toneAt(index);
-  const first = chladni(u, v, n, m);
+  const first = chladniAt(tables, n, m);
   if (blend <= 0) {
     return first;
   }
   const [n2, m2] = toneAt(index + 1);
-  return first + (chladni(u, v, n2, m2) - first) * blend;
+  const next = chladniAt(tables, n2, m2);
+  return (x, y) => {
+    const was = first(x, y);
+    return was + (next(x, y) - was) * blend;
+  };
 };
 
-const dunes: Plate = (x, y, now) => {
+const dunes: Plate = (now) => (x, y) => {
   const u = (x / now.height) * 1.2;
   const v = (y / now.height) * 1.2;
   return Math.sin(
@@ -93,15 +224,19 @@ const dunes: Plate = (x, y, now) => {
   );
 };
 
-const rings: Plate = (x, y, now) => {
+const rings: Plate = (now) => {
   const { clear } = now;
   const cx =
     clear === undefined ? now.width / 2 : (clear.left + clear.right) / 2;
   const cy =
     clear === undefined ? now.height / 2 : (clear.top + clear.bottom) / 2;
-  // Wider than tall, as what they stand round is.
-  const away = Math.hypot((x - cx) * 0.78, y - cy);
-  return Math.sin(away * 0.034 - now.time * 0.22);
+  return (x, y) => {
+    // Wider than tall, as what they stand round is.
+    const ax = (x - cx) * 0.78;
+    const ay = y - cy;
+    const away = length(ax, ay);
+    return Math.sin(away * 0.034 - now.time * 0.22);
+  };
 };
 
 const plates: Record<BackdropSand, Plate> = {
@@ -147,13 +282,14 @@ const sandOn = (scene: Scene, field: Plate, pixel: boolean) => {
   const step = (now: Scene, rate = 1): void => {
     const walk = Math.sqrt(rate);
     const lamp = now.press > 0.01 ? now.pointer : undefined;
+    const at = field(now);
     for (const grain of grains) {
       // Down the slope of how much the plate moves, faster where it moves more, with the shake of
       // the plate on top.
-      const value = field(grain.x, grain.y, now);
-      const dx = field(grain.x + 2, grain.y, now) - value;
-      const dy = field(grain.x, grain.y + 2, now) - value;
-      const slope = Math.hypot(dx, dy);
+      const value = at(grain.x, grain.y);
+      const dx = at(grain.x + 2, grain.y) - value;
+      const dy = at(grain.x, grain.y + 2) - value;
+      const slope = length(dx, dy);
       const moving = Math.min(1, Math.abs(value) * 1.5);
       const pull = slope > 0 ? (Math.sign(value) * moving * 3.6) / slope : 0;
       const shake = (0.5 + moving * 1.5) * walk;
@@ -165,7 +301,7 @@ const sandOn = (scene: Scene, field: Plate, pixel: boolean) => {
       if (lamp !== undefined) {
         const px = grain.x - lamp.x;
         const py = grain.y - lamp.y;
-        const away = Math.hypot(px, py);
+        const away = length(px, py);
         if (away < partReach && away > 0) {
           const near = 1 - away / partReach;
           const push = (near * near * partPush * now.press * rate) / away;
@@ -246,12 +382,59 @@ const colourFrames = 30;
 /** The most canvas pixels to a CSS pixel: a grain is a dot of 1 to 1.6px, crisp at 2. */
 const mostRatio = 2;
 
-/** Draws sand of `kind` on `element`, run and held by Backdrop. */
-export const startSand = (
+/**
+ * Runs `next` once the page has had its turn: a message, not a timer, which browsers hold back
+ * to 4 ms once timers nest, and so would leave the page idle as long as the sand settles.
+ */
+const afterPageTurn = (next: () => void): void => {
+  const channel = new MessageChannel();
+  channel.port1.addEventListener(
+    "message",
+    () => {
+      channel.port1.close();
+      next();
+    },
+    { once: true }
+  );
+  channel.port1.start();
+  channel.port2.postMessage(null);
+};
+
+/** How long a slice of the first settling runs before the page gets its turn, in ms. */
+const settleSliceMs = 4;
+
+/**
+ * Settles new sand a few steps at a time between the page's own work: settled at once, it held
+ * the page still for a quarter of a second as it opened. The still under the canvas shows meanwhile.
+ */
+const settle = async (
+  sand: ReturnType<typeof sandOn>,
+  scene: Scene
+): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<number>();
+  let done = 0;
+  const slice = (): void => {
+    const until = performance.now() + settleSliceMs;
+    while (done < settleFrames && performance.now() < until) {
+      sand.step(scene);
+      done += 1;
+    }
+    if (done < settleFrames) {
+      afterPageTurn(slice);
+    } else {
+      resolve(done);
+    }
+  };
+  slice();
+  await promise;
+};
+
+/** Draws sand of `kind` on `element`, run and held by Backdrop, once it has settled. */
+export const startSand = async (
   element: HTMLCanvasElement,
   kind: BackdropSand,
   options: DrawOptions
-): Drawing => {
+): Promise<Drawing> => {
   const ctx = element.getContext("2d");
   if (ctx === null) {
     return nothingDrawn;
@@ -265,8 +448,6 @@ export const startSand = (
     press: 0,
     clear: undefined,
   };
-  const pixel = kind === "pixels";
-  let sand: ReturnType<typeof sandOn> | undefined;
   const begun = performance.now();
   let last = begun;
   let frame = 0;
@@ -302,8 +483,16 @@ export const startSand = (
             bottom: kept.bottom - box.top,
           };
   };
+  // The settled picture: all there is with less motion, and the first frame otherwise, so the
+  // sand is never seen as a plain scatter.
+  const first = element.getBoundingClientRect();
+  scene.width = Math.max(1, first.width);
+  scene.height = Math.max(1, first.height);
+  place();
+  const sand = sandOn(scene, plates[kind], kind === "pixels");
+  await settle(sand, scene);
   const paint = (): void => {
-    sand?.draw(ctx, scene, colours());
+    sand.draw(ctx, scene, colours());
     drawn(element);
   };
   const fit = (): void => {
@@ -316,18 +505,9 @@ export const startSand = (
     scene.width = Math.max(1, box.width);
     scene.height = Math.max(1, box.height);
     place();
-    if (sand === undefined) {
-      sand = sandOn(scene, plates[kind], pixel);
-      // The settled picture: all there is with less motion, and the first frame otherwise, so the
-      // sand is never seen as a plain scatter.
-      for (let done = 0; done < settleFrames; done += 1) {
-        sand.step(scene);
-      }
-    } else {
-      // Resized (the sidebar folding, say): the same sand, moved with the field, so it is never
-      // scattered and settled again.
-      sand.stretch(scene.width / before.width, scene.height / before.height);
-    }
+    // Resized (the sidebar folding, say, or while it settled): the same sand, moved with the
+    // field, so it is never scattered and settled again.
+    sand.stretch(scene.width / before.width, scene.height / before.height);
     // Sizing the canvas clears it: drawn again at once, so no frame is bare.
     paint();
   };
@@ -340,7 +520,7 @@ export const startSand = (
     scene.time = (now - begun) / 1000;
     const ease = 1 - (1 - pressEase) ** rate;
     scene.press += ((pointing ? 1 : 0) - scene.press) * ease;
-    sand?.step(scene, rate);
+    sand.step(scene, rate);
     paint();
   };
   const point = (event: PointerEvent): void => {

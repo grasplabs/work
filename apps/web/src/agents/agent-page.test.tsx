@@ -39,10 +39,12 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { AgentPage, agentTabOf } from "./agent-page.tsx";
-import type { AgentTab, FirstAgentAccess } from "./agent-page.tsx";
+import { AgentPage } from "./agent-page.tsx";
+import type { FirstAgentAccess } from "./agent-page.tsx";
 import { ManualAgent } from "./manual-agent.tsx";
 import { NewAgent } from "./new-agent.tsx";
+import { agentTabOf } from "./tabs.tsx";
+import type { AgentTab } from "./tabs.tsx";
 import { agentInstructionsFor } from "./unsaved-instructions.ts";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 

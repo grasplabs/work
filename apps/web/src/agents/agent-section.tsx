@@ -5,9 +5,9 @@ import { AgentFigure } from "../grasp/agent-figure/index.ts";
 import { CalendarIcon, Lock, Note } from "../grasp/icons/index.ts";
 import type { SidebarSection } from "../grasp/sidebar/index.ts";
 import { wakesOn } from "./agent-facts.tsx";
-import { agentTabOf } from "./agent-page.tsx";
-import type { AgentTab } from "./agent-page.tsx";
 import { lookOf } from "./figure/look.ts";
+import { agentTabOf } from "./tabs.tsx";
+import type { AgentTab } from "./tabs.tsx";
 
 // One agent as the sidebar's section while an admin is on its page, as
 // Settings is (grasp/frame/grasp-sidebar.tsx): the agent's figure and name

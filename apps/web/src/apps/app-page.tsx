@@ -32,13 +32,13 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { pageHref, useAppAddress } from "../pages/app-address.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
 import { buildsApp } from "./app-role.ts";
-import type { AppSettingsSection } from "./app-settings.tsx";
 import { AppWorkspace } from "./app-workspace.tsx";
 import type {
   ReadOnlyShown,
   WorkspaceEnv,
   WorkspaceView,
 } from "./app-workspace.tsx";
+import type { AppSettingsSection } from "./settings-sections.ts";
 
 // An App at its address (/apps/$app): its workspace for who builds it
 // (app-workspace.tsx); for anyone else the live App, its current version,

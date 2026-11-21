@@ -44,6 +44,8 @@ import { FilesAndApps } from "./files-and-apps.tsx";
 import { KeptState } from "./kept-state.tsx";
 import { ResourceParams } from "./resource-params.tsx";
 import { SavedAgo } from "./saved-ago.tsx";
+import { workflowSettingsSections } from "./settings-sections.ts";
+import type { WorkflowSettingsSection } from "./settings-sections.ts";
 import { VersionSource } from "./version-source.tsx";
 import { WorkflowTriggers } from "./workflow-triggers.tsx";
 
@@ -56,25 +58,6 @@ import { WorkflowTriggers } from "./workflow-triggers.tsx";
 // its Flow, for its builders (Definition), and its changes and published
 // versions, as an App's History has them (drafts/draft-history.tsx). Each
 // section is an address of its own (`?section=`).
-
-/** The sections, in the order the list shows them. */
-const workflowSettingsSections = [
-  "general",
-  "sharing",
-  "triggers",
-  "files",
-  "parameters",
-  "definition",
-  "history",
-] as const;
-
-export type WorkflowSettingsSection = (typeof workflowSettingsSections)[number];
-
-/** A section named in an address, or none for anything else. */
-export const workflowSettingsSectionOf = (
-  value: unknown
-): WorkflowSettingsSection | undefined =>
-  workflowSettingsSections.find((section) => section === value);
 
 const sectionLabels: Record<WorkflowSettingsSection, MessageDescriptor> = {
   general: msg({

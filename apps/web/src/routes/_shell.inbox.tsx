@@ -8,7 +8,8 @@ import {
   PageSkeletonDetail,
   PageSkeletonListDetail,
 } from "../grasp/blocks/page-skeleton-list-detail/page-skeleton-list-detail.tsx";
-import { InboxPage, groupOrder } from "../inbox/inbox-page.tsx";
+import { groupOrder } from "../inbox/groups.ts";
+import { InboxPage } from "../inbox/inbox-page.tsx";
 import { inboxItems, unread } from "../inbox/items.ts";
 import { readWaiting } from "../inbox/read-waiting.ts";
 import { ReportItem } from "../inbox/report-row.tsx";

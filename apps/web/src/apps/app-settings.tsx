@@ -10,8 +10,6 @@ import type { SurfaceSummary } from "@grasp-os/shared/pages";
 import { canBuild, isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { SubjectMember } from "@grasp-os/shared/subject-members";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter } from "@tanstack/react-router";
@@ -75,6 +73,13 @@ import { AppWorkflows } from "./app-workflows.tsx";
 import { SaveAsBlueprint } from "./blueprints.tsx";
 import { ResourceBindings } from "./resource-bindings.tsx";
 import type { ResourcesPage } from "./resource-bindings.tsx";
+import {
+  optionsOf,
+  readSurfaces,
+  sectionLabels,
+  shownSections,
+} from "./settings-sections.ts";
+import type { AppSettingsSection } from "./settings-sections.ts";
 import { useAppRead } from "./use-app-read.ts";
 import type { AppRead } from "./use-app-read.ts";
 
@@ -88,39 +93,6 @@ import type { AppRead } from "./use-app-read.ts";
 // App, from the live App's bar (_shell.apps.$app_.settings.tsx). Each
 // section reads what it shows as it opens (use-app-read.ts), so one
 // that is slow or refused leaves the others; core checks every change.
-
-/** The sections, in the order the list shows them. */
-const appSettingsSections = [
-  "general",
-  "sharing",
-  "history",
-  "connections",
-  "webhooks",
-  "options",
-] as const;
-
-export type AppSettingsSection = (typeof appSettingsSections)[number];
-
-/** A section named in an address, or none for anything else. */
-export const settingsSectionOf = (
-  value: unknown
-): AppSettingsSection | undefined =>
-  appSettingsSections.find((section) => section === value);
-
-export const sectionLabels: Record<AppSettingsSection, MessageDescriptor> = {
-  general: msg({ message: "General", context: "an app's settings section" }),
-  sharing: msg({ message: "Sharing", context: "an app's settings section" }),
-  history: msg({ message: "History", context: "an app's settings section" }),
-  connections: msg({
-    message: "Connections",
-    context: "an app's settings section",
-  }),
-  webhooks: msg({ message: "Webhooks", context: "an app's settings section" }),
-  options: msg({
-    message: "Options",
-    context: "the settings an app offers itself",
-  }),
-};
 
 /**
  * That a section shows what was read before, a latest re-read of one of
@@ -887,17 +859,6 @@ const Webhooks = ({
 
 // --- Options -------------------------------------------------------------
 
-export const readSurfaces = async (session: Session, app: string) =>
-  await session.pages.surfaces(app);
-
-/** The App's settings surface (spec 34.1), if it declares one. */
-export const optionsOf = (
-  surfaces: Loaded<SurfaceSummary[]> | undefined
-): SurfaceSummary | undefined =>
-  surfaces?.state === "ready"
-    ? surfaces.data.find(({ kind }) => kind === "settings")
-    : undefined;
-
 /**
  * The App's own settings: its pages, at its settings surface's route,
  * with the person's own access and no more. Its router moves within the
@@ -916,25 +877,6 @@ const Options = ({
 );
 
 // --- The settings --------------------------------------------------------
-
-/** The sections `identity` sees of `app`, with Options once core says it declares them. */
-export const shownSections = (
-  app: ViewedApp,
-  identity: Identity,
-  { options }: { options: boolean }
-): AppSettingsSection[] => {
-  const builder = app.role === "builder";
-  const shown: Record<AppSettingsSection, boolean> = {
-    general: true,
-    sharing: true,
-    // Core lists versions and webhooks to its builders alone.
-    history: builder,
-    connections: canBuild(identity.role),
-    webhooks: builder,
-    options,
-  };
-  return appSettingsSections.filter((section) => shown[section]);
-};
 
 /** Options: the App's own settings page, once core says it declares one. */
 const OptionsSection = ({

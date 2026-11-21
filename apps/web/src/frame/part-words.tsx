@@ -29,8 +29,8 @@ import {
 } from "../grasp/backdrop/words.ts";
 import { badgeWords } from "../grasp/badge/words.ts";
 import { appIntegrationWords } from "../grasp/blocks/app-integration/words.ts";
-import { connectAppWords } from "../grasp/blocks/connect-app/connect-app.tsx";
-import { connectServiceWords } from "../grasp/blocks/connect-service/connect-service.tsx";
+import { connectAppWords } from "../grasp/blocks/connect-app/words.ts";
+import { connectServiceWords } from "../grasp/blocks/connect-service/words.ts";
 import { breadcrumbWords } from "../grasp/breadcrumb/words.ts";
 import { buttonWords } from "../grasp/button/words.ts";
 import { calendarWords } from "../grasp/calendar/words.ts";

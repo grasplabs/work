@@ -6,7 +6,8 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import type { ComponentType } from "react";
 
 import { ChatBar } from "../chat/chat-bar.tsx";
 import { useChatPanels } from "../chat/chat-panel.tsx";
@@ -51,8 +52,44 @@ const sidebarPages = [
   "/_shell/integrations/",
 ] as const;
 
-const useSidebarPagesFetched = () => {
+/**
+ * The Brain's atlas's dots, made between frames once the frame stands:
+ * made as the Brain opened, they held the page still for a second.
+ */
+const makeBrainCloud = async () => {
+  try {
+    const { brainCloudReady } = await import("../brain/dot-shapes.ts");
+    await brainCloudReady();
+  } catch {
+    // Made as the atlas opens instead.
+  }
+};
+
+/** The Appearance tiles' pictures, drawn by the shell (settings/look-pictures-warm.tsx). */
+const LookPicturesWarm = lazy(
+  async (): Promise<{
+    default: ComponentType<{ userId: string; ahead: boolean }>;
+  }> => {
+    try {
+      const { LookPicturesWarm: Warm } =
+        await import("../settings/look-pictures-warm.tsx");
+      return { default: Warm };
+    } catch {
+      // Not fetched (a deploy since this page loaded): nothing is drawn
+      // ahead, and the shell stands.
+      return { default: () => null };
+    }
+  }
+);
+
+/**
+ * Fetches the sidebar's pages and makes the Brain's dots once the frame
+ * stands; true once that is done, when the shell has the Appearance tiles
+ * drawn ahead.
+ */
+const useSidebarPagesFetched = (): boolean => {
   const router = useRouter();
+  const [settled, setSettled] = useState(false);
   useEffect(() => {
     const fetchCode = async (id: (typeof sidebarPages)[number]) => {
       try {
@@ -64,7 +101,13 @@ const useSidebarPagesFetched = () => {
     for (const id of sidebarPages) {
       void fetchCode(id);
     }
+    const settle = async () => {
+      await makeBrainCloud();
+      setSettled(true);
+    };
+    void settle();
   }, [router]);
+  return settled;
 };
 
 /**
@@ -84,7 +127,7 @@ const ShellFrame = () => {
   const chatStart = useMatchLatest()({ to: "/" }) !== false;
   // A page that takes someone through a task of its own has no chat box.
   const docked = usePageDock();
-  useSidebarPagesFetched();
+  const settled = useSidebarPagesFetched();
   return (
     <AppFrame
       bar={chatStart ? "none" : "page"}
@@ -96,6 +139,9 @@ const ShellFrame = () => {
       panels={panels}
     >
       <Outlet />
+      <Suspense fallback={null}>
+        <LookPicturesWarm ahead={settled} userId={identity.userId} />
+      </Suspense>
     </AppFrame>
   );
 };
