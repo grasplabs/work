@@ -459,6 +459,8 @@ interface PeopleWords {
   invitedShort: (date: string) => string;
   invitedOn: (date: string, by: string) => string;
   removedOn: (date: string) => string;
+  removed: string;
+  erased: string;
 }
 
 /** The role a row's person has or would join as, in words: for search and sorting. */
@@ -481,7 +483,22 @@ const usePeopleWords = (): PeopleWords => {
     invitedShort: (date) => t`Invited ${date}`,
     invitedOn: (date, by) => t`${date} by ${by}`,
     removedOn: (date) => t`Removed ${date}`,
+    removed: t`Removed`,
+    erased: t`Erased`,
   };
+};
+
+/** A row's state in words, so the search finds people by it: invited, removed or erased. */
+const stateOf = (row: PersonRow, words: PeopleWords): string => {
+  if (row.kind === "invited") {
+    return words.invited;
+  }
+  if (row.kind === "member") {
+    return "";
+  }
+  return (row.removed?.erasure?.completedAt ?? null) === null
+    ? words.removed
+    : words.erased;
 };
 
 /** The people's columns: who, since when, and their role with what can be done. */
@@ -501,7 +518,7 @@ const peopleColumns = ({
       header: words.name,
       // While the people are read, a person's box: their circle, name and email.
       placeholder: "person",
-      value: (row) => `${row.name} ${row.email}`,
+      value: (row) => `${row.name} ${row.email} ${stateOf(row, words)}`,
       cell: (row) => {
         const date = formatDate(row.at);
         // On a phone Since steps aside: an invited or removed person's state stands under the name.
