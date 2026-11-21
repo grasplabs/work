@@ -22,11 +22,11 @@ const questionOf = (opener: string): string =>
 /** Asks `question` from Chat's start; the chat's messages. */
 const askFromStart = async (page: Page, question: string) => {
   await page.goto("/");
-  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("textbox", { name: "Your question" }).fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/\/chats\/[^/]+$/u);
   const messages = page.getByRole("log", { name: "Messages" });
-  await expect(messages.getByRole("article").first()).toHaveText(question);
+  await expect(messages.getByRole("article").first()).toContainText(question);
   return messages;
 };
 
@@ -148,7 +148,7 @@ test("a question core never confirms says it wasn't sent, and keeps it in the bo
   });
   const question = questionOf(modelScripts.answers.opener);
   await page.goto("/");
-  const box = page.getByLabel("Your question");
+  const box = page.getByRole("textbox", { name: "Your question" });
   await box.fill(question);
 
   await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -158,7 +158,7 @@ test("a question core never confirms says it wasn't sent, and keeps it in the bo
     timeout: 20_000,
   });
   await expect(
-    page.getByText("Grasp hasn't confirmed your question yet.", {
+    page.getByText("so your question wasn't sent. It's kept here", {
       exact: false,
     })
   ).toBeVisible();
@@ -171,11 +171,16 @@ test("the chat beside a page floats, moves, docks again, goes full screen and ba
   const { user } = peopleIn("chatPanel");
   const page = await pageOf(user, { viewport: { width: 1440, height: 900 } });
   await page.goto("/apps");
-  await page.getByRole("button", { name: /^Open the chat/u }).click();
+  await page.getByRole("button", { name: "Show or hide the chat" }).click();
   const head = page.locator("[data-slot=app-shell-panel-head]");
   await expect(head).toBeVisible();
 
-  await head.getByRole("button", { name: "Float over the page" }).click();
+  // Where it stands is in the head's menu.
+  const place = async (label: string): Promise<void> => {
+    await head.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("menuitem", { name: label }).click();
+  };
+  await place("Float over the page");
   await expect(head).toHaveAttribute("data-floating", "");
   // Moved by its head.
   const before = await head.boundingBox();
@@ -200,8 +205,8 @@ test("the chat beside a page floats, moves, docks again, goes full screen and ba
   await page.getByRole("textbox", { name: "Ask Grasp" }).fill(draft);
   const placed = await head.boundingBox();
   await head.getByRole("button", { name: "Close" }).click();
-  await expect(head).toHaveCount(0);
-  await page.getByRole("button", { name: /^Open the chat/u }).click();
+  await expect(head).toBeHidden();
+  await page.getByRole("button", { name: "Show or hide the chat" }).click();
   await expect(head).toBeVisible();
   expect(await head.boundingBox()).toStrictEqual(placed);
   await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toHaveText(
@@ -209,7 +214,7 @@ test("the chat beside a page floats, moves, docks again, goes full screen and ba
   );
 
   // Docked again by the switch.
-  await head.getByRole("button", { name: "Dock beside the page" }).click();
+  await place("Dock beside the page");
   await expect(head).not.toHaveAttribute("data-floating", "");
 });
 
@@ -229,7 +234,8 @@ test("the shell's own button opens and closes the chat at every width, open or c
   await toggle.click();
   await expect(head).toBeVisible();
   await toggle.click();
-  await expect(head).toHaveCount(0);
+  // Closed, the panel stays in the page, out of sight and out of reach.
+  await expect(head).toBeHidden();
 });
 
 test("a person renames a chat where its name stands: in the page's bar, and in the chat beside a page", async ({
@@ -261,7 +267,7 @@ test("a person renames a chat where its name stands: in the page's bar, and in t
   // Beside another page, in the chat's own head.
   const renamed = `Weekly sales ${tag}`;
   await page.goto("/apps");
-  await page.getByRole("button", { name: /^Open the chat/u }).click();
+  await page.getByRole("button", { name: "Show or hide the chat" }).click();
   await page.locator("[data-slot=app-shell-panel-title]").dblclick();
   await page.getByRole("textbox", { name: "Name" }).fill(renamed);
   await page.getByRole("textbox", { name: "Name" }).press("Enter");

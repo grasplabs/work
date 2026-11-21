@@ -75,11 +75,11 @@ for (const [answer, gone] of Object.entries(answers)) {
     // The new release's files are there: trying again loads Grasp anew.
     await page.unroute(brainFiles);
     await page.getByRole("button", { name: "Try again" }).click();
-    // A fresh load reads the brain before its navigation shows, as on any
-    // first open of it (brain.e2e.ts).
-    await expect(
-      page.getByRole("complementary", { name: "The brain" })
-    ).toBeVisible({ timeout: 15_000 });
+    // A fresh load reads the brain before the sidebar lists its parts, as
+    // on any first open of it (brain.e2e.ts).
+    await expect(page.getByRole("tree", { name: "In the brain" })).toBeVisible({
+      timeout: 15_000,
+    });
     expect(await sameDocument(page)).toBe(false);
   });
 }
@@ -101,8 +101,6 @@ test("a start without its words says so in English, and tries again", async ({
   await page.unroute(words);
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(
-    page.getByText(
-      "Melden Sie sich mit dem Konto Ihrer Organisation an, um fortzufahren."
-    )
+    page.getByRole("heading", { level: 1, name: "Anmelden" })
   ).toBeVisible();
 });

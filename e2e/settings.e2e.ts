@@ -28,24 +28,29 @@ test("an admin opens Settings on the workspace, and each section from the sideba
 
   // The name and time zone are the admin's to change (e2e/web.e2e.ts
   // changes them, so this test doesn't pin their values).
-  const workspace = sectionOf(page, "Workspace");
-  await expect(workspace.getByLabel("Name")).toBeEnabled();
-  await expect(sectionOf(page, "Region")).toContainText("European Union");
+  const organization = sectionOf(page, "Organization");
   await expect(
-    sectionOf(page, "Region").getByRole("combobox", { name: "Time zone" })
+    organization.getByRole("button", { name: "Edit the name" })
+  ).toBeEnabled();
+  await expect(organization).toContainText("European Union");
+  await expect(
+    sectionOf(page, "Settings").getByRole("combobox", { name: "Time zone" })
   ).toBeEnabled();
 
   await nav.getByRole("link", { name: "Billing" }).click();
   await expect(page).toHaveURL(/\/settings\/billing$/u);
-  await expect(page.getByText("Stripe is not linked yet")).toBeVisible();
   await expect(sectionOf(page, "Plan")).toContainText("Current plan");
-  // The billing details are the admin's to keep, as each field is left.
-  const details = sectionOf(page, "Billing details");
-  await details.getByLabel("VAT number").fill("nl123456789b01");
-  await details.getByLabel("Billing email").fill("finance@acme.test");
-  await details.getByLabel("VAT number").focus();
-  // Each field is saved as it is left, one after the other: once core
-  // keeps both, the page reads them again as saved.
+  // The billing details are the admin's to keep, saved whole from their
+  // card's dialog.
+  const billing = sectionOf(page, "Billing information");
+  await billing
+    .getByRole("button", { name: "Edit billing information" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Billing information" });
+  await dialog.getByLabel("VAT number").fill("nl123456789b01");
+  await dialog.getByLabel("Billing email").fill("finance@acme.test");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toBeHidden();
   {
     const { core, api } = apiOf(admin);
     try {
@@ -62,12 +67,10 @@ test("an admin opens Settings on the workspace, and each section from the sideba
       core[Symbol.dispose]();
     }
   }
+  // As core keeps them, on the card.
   await page.reload();
-  const saved = sectionOf(page, "Billing details");
-  await expect(saved.getByLabel("VAT number")).toHaveValue("NL123456789B01");
-  await expect(saved.getByLabel("Billing email")).toHaveValue(
-    "finance@acme.test"
-  );
+  await expect(billing).toContainText("NL123456789B01");
+  await expect(billing).toContainText("finance@acme.test");
 
   await nav.getByRole("link", { name: "Security" }).click();
   await expect(page).toHaveURL(/\/settings\/security$/u);

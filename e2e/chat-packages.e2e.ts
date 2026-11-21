@@ -34,15 +34,15 @@ test("the App's builder approves the packages its chat's agent asked for, on the
 
     const page = await pageOf(builder);
     await page.goto(`/chats/${chat.id}`);
-    const card = page
-      .getByRole("region", { name: "Package requests" })
-      .filter({ hasText: `The agent asks for npm packages for ${name}` });
+    const card = page.getByRole("region", {
+      name: `Add npm packages to ${name}`,
+    });
     await expect(card).toBeVisible(pageRead);
     await expect(card).toContainText("date-fns@3.6.0");
+    // Why the agent asks is folded under its details.
+    await card.getByRole("button", { name: "Details" }).click();
     await expect(card).toContainText("Format the report's dates.");
-    await card
-      .getByRole("button", { name: `Approve the packages for ${name}` })
-      .click();
+    await card.getByRole("button", { name: "Approve the packages" }).click();
 
     await expect(card).toHaveCount(0);
     await expect
@@ -51,7 +51,10 @@ test("the App's builder approves the packages its chat's agent asked for, on the
         return approved?.id;
       })
       .toBe(request.id);
-    await expect(page.getByRole("alert")).toHaveCount(0);
+    // Nothing said in the page's alerts.
+    await expect(
+      page.getByRole("alert").filter({ hasText: /\S/u })
+    ).toHaveCount(0);
   } finally {
     core[Symbol.dispose]();
   }

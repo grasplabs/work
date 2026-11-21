@@ -19,7 +19,7 @@ test("a reload keeps the frame on screen while core says who is in, and shows th
   await page.goto("/apps");
   const nav = page.getByRole("navigation", { name: "Main" });
   // Everyone signed in on the stack is called Person.
-  const person = page.getByRole("button", { name: "Person", exact: true });
+  const person = page.getByRole("button", { name: /^Person\b/u });
   await expect(person).toBeVisible();
 
   whoIsIn.hold();
@@ -29,7 +29,8 @@ test("a reload keeps the frame on screen while core says who is in, and shows th
   // bar, before core has said who this is.
   await expect(nav.getByRole("link", { name: "Apps" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Integrations" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toBeVisible();
+  // The chat's box waits too, out of reach until the shell is in.
+  await expect(page.locator('[data-slot="composer"]')).toBeVisible();
   // Nothing of the person: their name and menu wait for core.
   await expect(person).toHaveCount(0);
 
@@ -48,7 +49,7 @@ test("after signing out, a reload paints no frame, and the browser keeps nothing
   // status the shell waits for holds on its other answer.
   const whoIsIn = await callGate(page, '"signInOptions"');
   await page.goto("/apps");
-  await page.getByRole("button", { name: "Person", exact: true }).click();
+  await page.getByRole("button", { name: /^Person\b/u }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page.getByRole("heading", { name: "Log in" })).toBeVisible();
 

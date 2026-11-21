@@ -103,9 +103,9 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   // sign-in (the stack's stand-in for Entra) brings them back to it.
   await page.goto("/setup?step=welcome");
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible();
-  await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
+  await page.getByRole("button", { name: "Continue with Microsoft" }).click();
   await expect(page.getByLabel("Email")).toHaveValue(localAdmin);
   await page.getByRole("button", { name: "Sign in" }).click();
   // Back from signing in, the onboarding opens where core says they are:

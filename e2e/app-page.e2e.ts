@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 import { testApp } from "../apps/core/test/app-definitions.ts";
 import type { TestSource } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
+import { dockedChat } from "./docked-chat.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 
@@ -115,7 +116,7 @@ test("someone it is shared with uses the live App and moves between its pages; i
   // no chat about the App.
   await expect(page.getByRole("button", { name: /^Share/u })).toHaveCount(0);
   await expect(
-    page.getByRole("navigation", { name: "Workspace views" })
+    page.getByRole("navigation", { name: /'s workspace$/u })
   ).toHaveCount(0);
   await expect(
     page.getByRole("textbox", { name: "Ask for a change" })
@@ -138,18 +139,18 @@ test("someone it is shared with uses the live App and moves between its pages; i
   await expect(
     workspace.getByRole("region", { name: "Changes only you see" })
   ).toHaveCount(0);
-  const chat = workspace.getByRole("region", { name: "Chat" });
+  const chat = dockedChat(workspace);
   await expect(
     chat.getByRole("textbox", { name: "Ask for a change" })
   ).toBeVisible();
 
   // Its settings are a view of the workspace, beside the chat.
   await workspace
-    .getByRole("navigation", { name: "Workspace views" })
-    .getByRole("link", { name: "Settings" })
+    .getByRole("navigation", { name: /'s workspace$/u })
+    .getByRole("link", { name: "General" })
     .click();
   await expect(workspace).toHaveURL(
-    new RegExp(`/apps/${app}\\?view=settings$`, "u")
+    new RegExp(`/apps/${app}\\?view=settings&section=general$`, "u")
   );
   await expect(workspace.getByLabel("Name", { exact: true })).toHaveValue(name);
 });
@@ -233,7 +234,7 @@ test("someone an App is shared with as a user reads its settings and changes non
   await page.goto(`/apps/${app}`);
   // The live App offers them its settings, never its workspace.
   await expect(
-    page.getByRole("navigation", { name: "Workspace views" })
+    page.getByRole("navigation", { name: /'s workspace$/u })
   ).toHaveCount(0);
   await page.getByRole("button", { name: `More for ${name}` }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
@@ -271,9 +272,7 @@ test("an App with nothing built yet asks its builder what it should do, in its w
     page.getByRole("textbox", { name: "Describe the App" })
   ).toBeVisible();
   await expect(
-    page
-      .getByRole("region", { name: "Chat" })
-      .getByRole("textbox", { name: "Ask for a change" })
+    dockedChat(page).getByRole("textbox", { name: "Ask for a change" })
   ).toBeVisible();
 
   // With no version live yet, it is its builders' alone: anyone else

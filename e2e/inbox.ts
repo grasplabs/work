@@ -21,7 +21,7 @@ export const toItem = async (
 ): Promise<Locator> => {
   await inboxList(page)
     .getByRole("link")
-    .filter({ hasText: row })
+    .filter({ has: page.getByText(row) })
     .first()
     .click({ timeout: 20_000 });
   const opened = page.getByRole("region", { name: card });

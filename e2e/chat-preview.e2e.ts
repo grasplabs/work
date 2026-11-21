@@ -3,6 +3,7 @@ import type { FrameLocator, Locator, Page } from "@playwright/test";
 
 import { publishApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
+import { dockedChat } from "./docked-chat.ts";
 import { writeDraft } from "./draft-writes.ts";
 import { modelScripts } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
@@ -125,7 +126,8 @@ test("a chat building an App offers its workspace, whose preview changes none of
     // address lets it go.
     await expect(page).toHaveURL(new RegExp(`/apps/${app.id}$`, "u"));
     const chatName = page.getByRole("button", {
-      name: `Chat name: Build ${tag}`,
+      name: `Build ${tag}`,
+      exact: true,
     });
     await expect(chatName).toBeVisible();
     // There, the draft this chat builds is the preview, not the live App.
@@ -145,9 +147,14 @@ test("a chat building an App offers its workspace, whose preview changes none of
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("2 in the preview");
     // It stays this chat's as the person moves between the views.
-    const views = page.getByRole("navigation", { name: "Workspace views" });
+    const views = page.getByRole("navigation", { name: /'s workspace$/u });
     await views.getByRole("link", { name: "Code" }).click();
-    await views.getByRole("link", { name: "App" }).click();
+    // The App itself, by its name over the views.
+    await page
+      .getByRole("complementary", { name: "Sidebar" })
+      .getByRole("heading")
+      .getByRole("link")
+      .click();
     await expect(chatName).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Publish", exact: true })
@@ -189,7 +196,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     });
 
     const { opener } = modelScripts.buildsTally;
-    const chat = page.getByRole("region", { name: "Chat" });
+    const chat = dockedChat(page);
     const ask = chat.getByRole("textbox", { name: "Ask for a change" });
     await askOnceIdle(chat, opener);
     await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
@@ -295,7 +302,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     // published: the App's project as the agent wrote it, its last write
     // too.
     await page
-      .getByRole("navigation", { name: "Workspace views" })
+      .getByRole("navigation", { name: /'s workspace$/u })
       .getByRole("link", { name: "Code" })
       .click();
     // Its tree: folders first, each open, then the files, each by name.
@@ -356,7 +363,7 @@ test("an App's workspace previews the App before its chat changes anything, then
     // Asked for one: the builder's own version shows it, on a store of the
     // preview's own.
     const { opener } = modelScripts.buildsTally;
-    const chat = page.getByRole("region", { name: "Chat" });
+    const chat = dockedChat(page);
     await askOnceIdle(chat, opener);
     await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
       timeout: 30_000,
@@ -398,7 +405,7 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
     const frame = preview.frameLocator("iframe");
 
     const { opener } = modelScripts.fixesBrokenTally;
-    const chat = page.getByRole("region", { name: "Chat" });
+    const chat = dockedChat(page);
     await askOnceIdle(chat, opener);
     await expect(
       chat.getByText("The tally's page doesn't build yet.")
@@ -440,7 +447,7 @@ test("a preview whose first page doesn't build shows it once the agent's next wr
     ).toBeVisible();
 
     const { opener } = modelScripts.fixesBrokenTally;
-    const chat = page.getByRole("region", { name: "Chat" });
+    const chat = dockedChat(page);
     await askOnceIdle(chat, opener);
     await expect(
       chat.getByText("The tally's page doesn't build yet.")

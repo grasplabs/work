@@ -65,7 +65,7 @@ const resourceOn = async (page: Page, app: string, alias: string) => {
   await page.goto(`/apps/${app}/settings?section=connections`);
   return page
     .getByRole("region", { name: "Resources" })
-    .getByRole("article", { name: alias });
+    .getByRole("region", { name: alias });
 };
 
 const unbound = "The App's actions can't use it until an admin binds it.";
@@ -110,6 +110,6 @@ test("an admin binds an App's AI to a model, with no budget of its own, and revo
   await expect(
     building
       .getByRole("region", { name: "Resources" })
-      .getByRole("article", { name: "ai" })
+      .getByRole("region", { name: "ai" })
   ).toContainText(unbound);
 });
