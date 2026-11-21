@@ -2,9 +2,11 @@ import { env, exports } from "cloudflare:workers";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { fetchClientGrid } from "../src/clients/functions.ts";
 import worker from "../src/server.ts";
 import { accessTeam } from "./access-config.ts";
 import { accessJwt, mockAccess } from "./access.ts";
+import { callServerFn } from "./pages.ts";
 
 mockAccess();
 
@@ -25,12 +27,15 @@ const statusOf = async (request: Request, changes: Partial<Env> = {}) => {
 };
 
 describe("the Access JWT", () => {
-  it("lets a staff member with a valid JWT in", async () => {
+  it("lets a staff member with a valid JWT in, to the page and to the server functions it reads with", async () => {
     const response = await exports.default.fetch(
       asStaff("/", await accessJwt(staffEmail))
     );
     expect(response.status).toBe(200);
-    await expect(response.text()).resolves.toContain("Organizations");
+    await expect(response.text()).resolves.toContain(
+      "<title>Grasp admin</title>"
+    );
+    await expect(callServerFn(fetchClientGrid)).resolves.toBeInstanceOf(Array);
   });
 
   it("refuses every path without one, server functions and unknown pages included", async () => {

@@ -52,6 +52,12 @@ const Frame = () => {
  * behind the page shown.
  */
 export const Route = createRootRouteWithContext<AdminContext>()({
+  // Rendered in the browser alone: the Worker answers a page with the
+  // document (`RootDocument`, with `head`) and nothing in it, and every
+  // route below inherits this. A tool behind Access gains nothing from
+  // server rendering. Loaders run in the browser, reading through server
+  // functions, each a request of its own past the Access check.
+  ssr: false,
   // Beside Platform, what the admin recorded alone: no account is read.
   loader: async ({ context, location }) => {
     const [clients, platform] = await Promise.all([

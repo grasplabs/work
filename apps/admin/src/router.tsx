@@ -19,7 +19,7 @@ export const getRouter = () =>
   createRouter({
     routeTree,
     scrollRestoration: true,
-    // This router's own reads of clients' cores: one tab's, or one server render's.
+    // This router's own reads of clients' cores: one tab's.
     context: { reads: orgReads() },
     // A link's page is read as the pointer rests on it, or it takes focus:
     // a section switch then shows at once.
