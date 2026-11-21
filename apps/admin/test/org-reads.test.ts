@@ -61,6 +61,7 @@ describe("an organization's page as read", () => {
     // Read again: its core times out (the page's read joins the one under way).
     const failing = Promise.withResolvers<ClientAdmin | null>();
     const underWay = reads.read(client.id, async () => await failing.promise);
+    reads.askAnew(client.id);
     const readAgain = opened(reads, true);
     failing.resolve(timedOut);
     await underWay;
@@ -80,6 +81,38 @@ describe("an organization's page as read", () => {
       afterFailure: [first, "timeout"],
       reopened: [first, afterFailure?.stale],
       afterAnswer: [later, null],
+    });
+  });
+});
+
+describe("an organization's page loaded again", () => {
+  it("asks its core only when staff asked anew, never because the router ran it again over a fresh answer", async () => {
+    const reads = orgReads();
+    const fresh = answered(1000);
+    reads.remember(fresh);
+    let asked = 0;
+    const ask = async (): Promise<ClientAdmin | null> => {
+      asked += 1;
+      return await Promise.resolve(answered(0));
+    };
+
+    const rerun = await opened(reads, true);
+    const askedOnRerun = asked;
+    reads.askAnew(client.id);
+    const underWay = reads.read(client.id, ask);
+    const readAgain = await opened(reads, true);
+    await underWay;
+
+    expect({
+      rerun: rerun?.admin,
+      askedOnRerun,
+      readAgain: readAgain?.admin.state,
+      asked,
+    }).toStrictEqual({
+      rerun: fresh,
+      askedOnRerun: 0,
+      readAgain: "answered",
+      asked: 1,
     });
   });
 });
