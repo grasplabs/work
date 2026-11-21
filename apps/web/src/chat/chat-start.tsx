@@ -15,8 +15,6 @@ import { examplesFor } from "../make/examples.ts";
 import type { MakeExample } from "../make/examples.ts";
 import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
 import { MakeSomethingLink } from "../make/make-link.tsx";
-import { TourOffer } from "../tour/tour-layer.tsx";
-import { useTour } from "../tour/tour-state.ts";
 import { agentModelOf } from "./agent-choice.tsx";
 import { openChat } from "./chat-layout.ts";
 import { ChatSwitcherButton } from "./chat-switcher.tsx";
@@ -28,9 +26,8 @@ import { useAsk } from "./use-ask.ts";
 
 // Chat's own page (routes/_shell.index.tsx): where to start. Grasp's buddy
 // and the question "What should we look at today?", centred, with the box
-// to ask in and questions to start from under it (the first time,
-// Stephen's offer of his tour stands in the question's place,
-// tour/tour-layer.tsx), and Make something for who builds. Make something
+// to ask in and questions to start from under it, and Make something for
+// who builds. Make something
 // comes here too (`make`, from `?make=app` or `?make=workflow` and
 // `&project=`): what to get done, and ideas to start from in place of the
 // questions (make/make-ideas.tsx), the blueprints for an App, a few
@@ -164,13 +161,6 @@ export const ChatStart = ({
       onText(briefOf(read, kind, i18n));
     }
   });
-  // Offered the tour, his question stands in the greeting's place, and
-  // nothing to start from under the box until it is answered. Never to
-  // who came to make something: they came for that, not a tour.
-  const invited = useTour().phase === "invited";
-  const offeredTour = invited && make === undefined;
-  // Where focus goes once the offer is turned down: the box to ask in.
-  const page = useRef<HTMLDivElement>(null);
   return (
     <>
       <SiteHeader
@@ -189,25 +179,10 @@ export const ChatStart = ({
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto text-sm"
       >
         <div className="flex min-h-full items-center justify-center px-6 py-12">
-          <div
-            className="flex w-full max-w-3xl flex-col gap-8 pb-10"
-            ref={page}
-          >
+          <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
             <div className="flex flex-col items-center gap-6 text-center">
               <GraspBuddy />
-              {offeredTour ? (
-                <TourOffer
-                  headingId="new-chat"
-                  onDeclined={() => {
-                    page.current
-                      ?.querySelector<HTMLElement>('[role="textbox"]')
-                      ?.focus();
-                  }}
-                  userId={identity.userId}
-                />
-              ) : (
-                <Greeting making={make !== undefined} />
-              )}
+              <Greeting making={make !== undefined} />
             </div>
             <Composer
               actions={<RecentsButton />}
@@ -215,7 +190,7 @@ export const ChatStart = ({
               running={false}
               {...composer}
             />
-            {offeredTour || ideas === undefined ? null : (
+            {ideas === undefined ? null : (
               <Ideas
                 ideas={ideas}
                 onPick={(text) => {
@@ -223,7 +198,7 @@ export const ChatStart = ({
                 }}
               />
             )}
-            {offeredTour || make !== undefined ? null : (
+            {make === undefined ? (
               <StartingQuestions
                 disabled={composer.busy || (composer.models?.length ?? 0) === 0}
                 onPick={(question) => {
@@ -233,7 +208,7 @@ export const ChatStart = ({
                   void ask(`${prefix}${question}`, [], agentsMentioned);
                 }}
               />
-            )}
+            ) : null}
           </div>
         </div>
       </section>

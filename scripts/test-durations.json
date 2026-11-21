@@ -959,7 +959,6 @@
   "@grasp-os/web src/settings/staff-access.test.tsx": 1.2,
   "@grasp-os/web src/settings/stephen-settings.test.tsx": 4.4,
   "@grasp-os/web src/settings/where-stephen.test.tsx": 0.4,
-  "@grasp-os/web src/tour/tour-script.test.ts": 0.1,
   "@grasp-os/web src/use-grace.test.tsx": 0.2,
   "@grasp-os/web src/voice/timing.test.ts": 0.1,
   "@grasp-os/web src/workflows/delete-workflow.test.tsx": 1,

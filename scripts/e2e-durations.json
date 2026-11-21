@@ -119,7 +119,6 @@
   "[chromium] › setup-voice.e2e.ts › the admin connects SharePoint, notes Confluence and Personio, skips Pulse, and the bar moves by their weights": 49.7,
   "[chromium] › setup-voice.e2e.ts › the admin goes through empty steps and back, with the sound on and off": 14.3,
   "[chromium] › setup-voice.e2e.ts › the story plays through in Dutch, with the sound on and off, and goes on to who's who": 36.7,
-  "[chromium] › tour.e2e.ts › offers the tour on first sign-in, takes it to its end, and starts it again from the person menu": 7.6,
   "[chromium] › web.e2e.ts › a sign-out core doesn't carry out is said in a toast on a decision page, and the person stays signed in": 2.5,
   "[chromium] › web.e2e.ts › a sign-out core doesn't carry out is said in a toast on a shell page, and the person stays signed in": 2.3,
   "[chromium] › web.e2e.ts › an admin changes a member's role, and the controls wait for the list to show it": 3,

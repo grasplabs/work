@@ -1048,10 +1048,6 @@ msgstr "{person}, {date}"
 msgid "{place} of {count}"
 msgstr "{place} of {count}"
 
-#: src/tour/tour-layer.tsx
-msgid "{position} of {count}"
-msgstr "{position} of {count}"
-
 #: src/apps/indexes-view.tsx
 msgid "{query} (on {routes})"
 msgstr "{query} (on {routes})"
@@ -3185,7 +3181,6 @@ msgstr "Available, via Composio"
 #: src/chat/composer-menu.tsx
 #: src/guest-sign-in.tsx
 #: src/onboarding/setup-frame.tsx
-#: src/tour/tour-layer.tsx
 msgid "Back"
 msgstr "Back"
 
@@ -5144,11 +5139,6 @@ msgctxt "inbox tab: what someone dealt with"
 msgid "Done"
 msgstr "Done"
 
-#: src/tour/tour-layer.tsx
-msgctxt "tour"
-msgid "Done"
-msgstr "Done"
-
 #: src/brain/work-knowledge.tsx
 msgctxt "what something known rests on: it happened in a run"
 msgid "Done"
@@ -5419,10 +5409,6 @@ msgstr "End Grasp staff access now?"
 #: src/settings/staff-access.tsx
 msgid "End staff access now"
 msgstr "End staff access now"
-
-#: src/tour/tour-layer.tsx
-msgid "End the tour"
-msgstr "End the tour"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -6853,10 +6839,6 @@ msgstr "Here’s the plan"
 msgid "Here's what Grasp will make"
 msgstr "Here's what Grasp will make"
 
-#: src/tour/tour-script.ts
-msgid "Hey, great to have you here. This can all be a little overwhelming, so I’ll bring you up to speed in just one minute. Are you ready?"
-msgstr "Hey, great to have you here. This can all be a little overwhelming, so I’ll bring you up to speed in just one minute. Are you ready?"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Hi {admin}, I’m Stephen"
@@ -7192,10 +7174,6 @@ msgstr "I’m {firstName}."
 #: src/onboarding/forget-teams.tsx
 msgid "I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself."
 msgstr "I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself."
-
-#: src/tour/tour-script.ts
-msgid "I’m ready"
-msgstr "I’m ready"
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ve handled everything else."
@@ -8949,7 +8927,6 @@ msgid "Newest item first. Nothing was sent or changed: every call was answered f
 msgstr "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
 
 #: src/chat/asked-questions.tsx
-#: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Next"
 
@@ -9527,7 +9504,6 @@ msgid "Not named by the provider"
 msgstr "Not named by the provider"
 
 #: src/onboarding/hr-leads.tsx
-#: src/tour/tour-script.ts
 msgid "Not now"
 msgstr "Not now"
 
@@ -10012,10 +9988,6 @@ msgstr "On the way"
 msgctxt "links: drawn workflows, opened on the Workflows page"
 msgid "On the Workflows page"
 msgstr "On the Workflows page"
-
-#: src/tour/tour-script.ts
-msgid "On this page you connect the applications your organization works in. They are the platform’s instruments to build what you need."
-msgstr "On this page you connect the applications your organization works in. They are the platform’s instruments to build what you need."
 
 #: src/make/examples.ts
 msgid "Onboard a new hire"
@@ -13354,10 +13326,6 @@ msgstr "Start by typing"
 msgid "Start the run"
 msgstr "Start the run"
 
-#: src/tour/tour-script.ts
-msgid "Start the tour"
-msgstr "Start the tour"
-
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -13741,14 +13709,6 @@ msgstr "Take the leads from {name}"
 msgid "Take the offer back"
 msgstr "Take the offer back"
 
-#: src/frame/person-menu.tsx
-msgid "Take the tour"
-msgstr "Take the tour"
-
-#: src/frame/person-menu.tsx
-msgid "Take the tour again"
-msgstr "Take the tour again"
-
 #: src/workflows/definition-editor.tsx
 msgid "Take theirs"
 msgstr "Take theirs"
@@ -14032,10 +13992,6 @@ msgstr "That’s everything from you. Now I’ll talk to your team."
 #: src/onboarding/connect-steps.tsx
 msgid "That’s plenty to start with. Let’s move on."
 msgstr "That’s plenty to start with. Let’s move on."
-
-#: src/tour/tour-script.ts
-msgid "That’s the tour. Ask me anything, on any page. You’ll find me right here."
-msgstr "That’s the tour. Ask me anything, on any page. You’ll find me right here."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "The {top} that spent most; more spent less."
@@ -14861,10 +14817,6 @@ msgstr "There is nobody in this list."
 msgid "There was nothing to undo: Grasp no longer uses this."
 msgstr "There was nothing to undo: Grasp no longer uses this."
 
-#: src/tour/tour-script.ts
-msgid "These are your Apps. Each one is made for a team or a person, with its own pages, data and people, standing on your workflows."
-msgstr "These are your Apps. Each one is made for a team or a person, with its own pages, data and people, standing on your workflows."
-
 #: src/settings/ai-providers.tsx
 msgid "These features always use Grasp's own provider keys, whichever providers you connect above."
 msgstr "These features always use Grasp's own provider keys, whichever providers you connect above."
@@ -15047,17 +14999,9 @@ msgstr "This interview went on in another window. You now see that one."
 msgid "This is right"
 msgstr "This is right"
 
-#: src/tour/tour-script.ts
-msgid "This is the Brain. Everything I learn about your company comes together here. Every answer and every workflow is built on it."
-msgstr "This is the Brain. Everything I learn about your company comes together here. Every answer and every workflow is built on it."
-
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
-
-#: src/tour/tour-script.ts
-msgid "This is the work itself, one workflow for each piece of work. You see where the time goes, and what I can take off your hands."
-msgstr "This is the work itself, one workflow for each piece of work. You see where the time goes, and what I can take off your hands."
 
 #: src/frame/ai-key-banner.tsx
 msgid "This is usually an outage on their side; Grasp keeps retrying."
@@ -15422,10 +15366,6 @@ msgstr "Tools allowed: none recorded"
 #: src/connections/connect-dialog.tsx
 msgid "Tools to allow"
 msgstr "Tools to allow"
-
-#: src/tour/tour-layer.tsx
-msgid "Tour of Grasp"
-msgstr "Tour of Grasp"
 
 #: src/make/examples.ts
 msgid "Track the month-end close"
@@ -16204,10 +16144,6 @@ msgstr "Week {week} of {weeks}"
 #: src/dashboard/report.ts
 msgid "Week {week} of {weeks} · {stage}"
 msgstr "Week {week} of {weeks} · {stage}"
-
-#: src/tour/tour-script.ts
-msgid "Welcome to Grasp. Shall I show you around? It takes about a minute."
-msgstr "Welcome to Grasp. Shall I show you around? It takes about a minute."
 
 #: src/workflows/today-lanes.tsx
 msgid "went to people"
