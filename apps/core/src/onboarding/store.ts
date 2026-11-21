@@ -283,7 +283,7 @@ import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 //   was in (drawn again from who is left, or emptied), every claim and
 //   drawing of the new Brain that no longer stands without it (out of use
 //   before the change commits, `#recountStanding`), and Stephen's lines
-//   kept from it (spoken-lines.ts). A drawing or an intake under way when
+//   kept from it (speech-cache.ts). A drawing or an intake under way when
 //   it goes is thrown away, or what it noted forgotten, as it ends.
 // - A mail going twice, or a link's secret kept or logged: mail goes
 //   through the outbox (mail-outbox.ts), once by its key, the link filled

@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 
 import { platformAi } from "../src/platform-ai.ts";
 import { keptLine } from "../src/speech-cache.ts";
-import { speechModelOf } from "../src/speech.ts";
+import { speechModel } from "../src/speech.ts";
 import { routed } from "./sign-in.ts";
 
 // The interviewer's voice as the pages ask for it (GRA-1897): through the
@@ -52,9 +52,7 @@ export const sayForAdmin = async (
 export const stillKept = async (text: string): Promise<boolean> =>
   (await keptLine(env, {
     text,
-    // Asked without a tone: said bare (`spokenOf`).
-    spoken: text,
     voice: platformAi.speech.voices.stephen,
-    model: speechModelOf(),
+    model: speechModel,
     language: "en",
   })) !== undefined;

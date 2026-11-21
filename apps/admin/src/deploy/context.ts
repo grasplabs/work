@@ -39,7 +39,7 @@ const platformKeySecrets = [
   "ANTHROPIC_API_KEY",
   "MISTRAL_API_KEY",
   "OPENROUTER_API_KEY",
-  "ELEVENLABS_API_KEY",
+  "KUGELAUDIO_API_KEY",
 ] as const;
 type PlatformKeySecret = (typeof platformKeySecrets)[number];
 
