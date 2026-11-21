@@ -17099,10 +17099,6 @@ msgid "Table"
 msgstr "Tabelle"
 
 #: src/apps/app-data-model.tsx
-msgid "Table name"
-msgstr "Tabellenname"
-
-#: src/apps/app-data-model.tsx
 #: src/brain/sources-page.tsx
 msgid "Tables"
 msgstr "Tabellen"
