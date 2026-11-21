@@ -329,8 +329,7 @@ const sessionShape = {
       /**
        * Core's own sorting of a request someone made of Stephen in a chat
        * app (channels/request-sorting.ts), from their words and his
-       * answer, into the company's topics; and its proposals for what an
-       * owner could fix (stephen-requests.ts), counted for the person it is
+       * answer, into the company's topics, counted for the person it is
        * for. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("stephen_requests") }),

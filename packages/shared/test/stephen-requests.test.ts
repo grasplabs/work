@@ -2,18 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   brainTool,
-  defaultMinutesSaved,
   elsewhere,
   fewestPeople,
-  growth,
-  lastWeeks,
-  minutesSaved,
-  paceToEnd,
-  quietTeams,
   rangeSpan,
   requestsReport,
-  runningTotal,
-  spanBefore,
 } from "../src/stephen-requests.ts";
 import type { StephenRequest } from "../src/stephen-requests.ts";
 
@@ -66,18 +58,6 @@ const asked = (
   Array.from({ length: n }, (_, index) =>
     request("2026-10-08", `${question}-${index}`, "t", { question, ...extra })
   );
-
-/** A month of requests: every weekday, `perDay` people each ask once. */
-const steady = (perDay: number) => {
-  const all: StephenRequest[] = [];
-  for (let day = 1; day <= 27; day += 1) {
-    const at = `2026-10-${String(day).padStart(2, "0")}`;
-    for (let index = 0; index < perDay; index += 1) {
-      all.push(request(at, `p${index}`, "t"));
-    }
-  }
-  return all;
-};
 
 describe("Stephen's requests", () => {
   it("cover whole calendar months: the month so far, the one before, and twelve up to this one", () => {
@@ -239,24 +219,6 @@ describe("Stephen's requests", () => {
     expect(shown.spread[0]).toStrictEqual({ least: 1, most: 2, people: 2 });
   });
 
-  it("count the time saved by the minutes a request of each kind saves, the company's own where it set them", () => {
-    const report = requestsReport(
-      [
-        request("2026-10-08", "a", "t"),
-        request("2026-10-08", "b", "t", { kind: "workflow" }),
-        request("2026-10-08", "c", "t", { outcome: "failed" }),
-      ],
-      month,
-      { perPerson: false, reach: noReach }
-    );
-    expect(minutesSaved(report)).toBe(
-      defaultMinutesSaved.answered + defaultMinutesSaved.workflow
-    );
-    expect(minutesSaved(report, { workflow: 45 })).toBe(
-      defaultMinutesSaved.answered + 45
-    );
-  });
-
   it("call a question's answers poor once five people rated them, four or more and a quarter of the thumbs down", () => {
     const report = requestsReport(
       [
@@ -308,84 +270,5 @@ describe("Stephen's requests", () => {
       { topic: "policies", question: "bonus", requests: 6, people: 6 },
     ]);
     expect(report.total.billed).toBe(0);
-  });
-
-  it("hold this month against as many days of the last, and say what is new or grew by a fifth", () => {
-    expect(spanBefore("month", today)).toStrictEqual({
-      from: "2026-09-01",
-      to: "2026-09-27",
-      by: "day",
-    });
-    expect(spanBefore("month", "2026-03-31")).toStrictEqual({
-      from: "2026-02-01",
-      to: "2026-02-28",
-      by: "day",
-    });
-    expect(spanBefore("lastMonth", today)).toStrictEqual({
-      from: "2026-08-01",
-      to: "2026-08-31",
-      by: "day",
-    });
-    expect(spanBefore("year", today)).toBeNull();
-    expect([
-      growth(12, 0),
-      growth(30, 20),
-      growth(22, 20),
-      growth(3, 0),
-      growth(8, 5),
-    ]).toStrictEqual(["new", 0.5, null, null, null]);
-  });
-
-  it("sum up the last whole week against the one before it", () => {
-    expect(lastWeeks(today)).toStrictEqual({
-      week: { from: "2026-10-19", to: "2026-10-25", by: "day" },
-      before: { from: "2026-10-12", to: "2026-10-18", by: "day" },
-    });
-  });
-
-  it("point at the teams that have hardly found him, folded counts and all", () => {
-    const reach = new Map([
-      ["busy", 10],
-      ["quiet", 20],
-      ["tiny", 3],
-    ]);
-    const report = requestsReport(
-      [
-        ...Array.from({ length: 8 }, (_, index) =>
-          request("2026-10-08", `a${index}`, "busy")
-        ),
-        request("2026-10-08", "b0", "quiet"),
-      ],
-      month,
-      { perPerson: false, reach }
-    );
-    expect(quietTeams(report, reach)).toStrictEqual([
-      { teamId: "quiet", asked: null, reach: 20 },
-    ]);
-  });
-
-  it("give the month's pace from the last week, run the line up to today, and none for a month that is over", () => {
-    const report = requestsReport(steady(3), month, {
-      perPerson: false,
-      reach: noReach,
-    });
-    // Three a day, the last week as every other: 81 so far, 4 days left.
-    expect(paceToEnd(report, today)).toBe(81 + 3 * 4);
-    const line = runningTotal(report, today);
-    expect(line.find(({ at }) => at === today)).toStrictEqual({
-      at: today,
-      total: 81,
-      pace: 81,
-    });
-    expect(line.at(-1)).toStrictEqual({
-      at: "2026-10-31",
-      total: null,
-      pace: 93,
-    });
-    const september = requestsReport(steady(3), rangeSpan("lastMonth", today), {
-      perPerson: false,
-      reach: noReach,
-    });
-    expect(paceToEnd(september, today)).toBeNull();
   });
 });

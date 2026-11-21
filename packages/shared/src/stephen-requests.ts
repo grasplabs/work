@@ -566,189 +566,6 @@ export const requestsReport = (
   };
 };
 
-/**
- * A report of one person's requests as an owner may see it: counts only.
- * How many they made and were billed, each day's or month's billed and
- * not billed, and where; never what kind each was, what it was about, the
- * tools he called for them, their thumbs, or why one wasn't billed.
- */
-export const countsOnly = (report: RequestsReport): RequestsReport => ({
-  from: report.from,
-  to: report.to,
-  by: report.by,
-  total: report.total,
-  notBilled: { unanswered: 0, notPossible: 0, stopped: 0, failed: 0 },
-  bars: report.bars.map((bar) => ({
-    at: bar.at,
-    kinds: emptyKinds(),
-    places: bar.places,
-    notBilled: bar.notBilled,
-  })),
-  byKind: [],
-  byPlace: [],
-  byTeam: [],
-  byTopic: [],
-  questions: [],
-  thumbs: { up: 0, down: 0 },
-  poorAnswers: [],
-  notPossible: [],
-  unanswered: [],
-  byTool: [],
-  weeks: [],
-  spread: [],
-  byPerson: null,
-});
-
-const billedIn = (bar: RequestBar): number =>
-  Object.values(bar.kinds).reduce((sum, each) => sum + each, 0);
-
-/**
- * Where the billed requests of a month will end if the rest of it goes as
- * the last week went: a pace, not a promise. Only for the month today is
- * in; a month that is over has its count.
- */
-export const paceToEnd = (
-  report: Pick<RequestsReport, "by" | "from" | "to" | "bars" | "total">,
-  today: string
-): number | null => {
-  if (report.by !== "day" || today < report.from || today > report.to) {
-    return null;
-  }
-  const week = report.bars.filter(
-    (bar) => bar.at > dayFrom(today, -7) && bar.at <= today
-  );
-  const aDay =
-    week.reduce((sum, bar) => sum + billedIn(bar), 0) /
-    Math.max(1, week.length);
-  const left = report.bars.filter((bar) => bar.at > today).length;
-  return Math.round(report.total.billed + aDay * left);
-};
-
-/** Minutes a request of each kind saves the person who asked, unless the company set its own. */
-export const defaultMinutesSaved: Readonly<Record<RequestKind, number>> = {
-  answered: 4,
-  lookedUp: 3,
-  changed: 6,
-  workflow: 20,
-};
-
-/** The minutes the billed requests of a report saved; from the bars, which fold no small group away. */
-export const minutesSaved = (
-  report: Pick<RequestsReport, "bars">,
-  minutes: Partial<Record<RequestKind, number>> = {}
-): number =>
-  report.bars.reduce(
-    (sum, bar) =>
-      sum +
-      requestKinds.reduce(
-        (each, kind) =>
-          each + bar.kinds[kind] * (minutes[kind] ?? defaultMinutesSaved[kind]),
-        0
-      ),
-    0
-  );
-
-/**
- * The span to hold a range against: as many days of the month before as
- * have gone of this one, the whole month before last month, and nothing
- * for twelve months.
- */
-export const spanBefore = (
-  range: RequestRange,
-  today: string
-): RequestSpan | null => {
-  if (range === "year") {
-    return null;
-  }
-  const span = rangeSpan(range, today);
-  const from = monthFrom(span.from, -1);
-  const end = dayFrom(span.from, -1);
-  if (range === "lastMonth") {
-    return { from, to: end, by: "day" };
-  }
-  const to = dayFrom(from, Number(today.slice(8, 10)) - 1);
-  return { from, to: to < end ? to : end, by: "day" };
-};
-
-/** How something grew against the span before: `new` when nobody asked it then, the growth when it grew by a fifth or more of at least ten, otherwise null. */
-export const growth = (now: number, before: number): "new" | number | null => {
-  if (now < fewestPeople) {
-    return null;
-  }
-  if (before === 0) {
-    return "new";
-  }
-  if (before < 10) {
-    return null;
-  }
-  const change = now / before - 1;
-  return change >= 0.2 ? change : null;
-};
-
-/** The last whole week, Monday to Sunday, before the week `today` is in, and the one before it. */
-export const lastWeeks = (
-  today: string
-): { week: RequestSpan; before: RequestSpan } => {
-  const monday = dayFrom(weekOf(today), -7);
-  return {
-    week: { from: monday, to: dayFrom(monday, 6), by: "day" },
-    before: { from: dayFrom(monday, -7), to: dayFrom(monday, -1), by: "day" },
-  };
-};
-
-/**
- * Teams that have hardly found him: five or more of their people can
- * reach him, and fewer than a third of them asked him anything in the
- * span. A team with fewer than five who asked is folded away in the
- * report, so says only that (`asked` is null).
- */
-export const quietTeams = (
-  report: Pick<RequestsReport, "byTeam">,
-  reach: ReadonlyMap<string, number>
-): { teamId: string; asked: number | null; reach: number }[] =>
-  [...reach]
-    .map(([teamId, people]) => {
-      const row = report.byTeam.find(({ key }) => key === teamId);
-      return {
-        teamId,
-        asked: row === undefined ? null : row.people,
-        reach: people,
-      };
-    })
-    .filter(
-      (team) =>
-        team.reach >= fewestPeople && (team.asked ?? 0) / team.reach < 1 / 3
-    )
-    .toSorted((a, b) => (a.asked ?? 0) / a.reach - (b.asked ?? 0) / b.reach);
-
-/** The billed requests up to and with each day, from the first of the span, and the pace on from today: the line the plan block draws. */
-export const runningTotal = (
-  report: Pick<RequestsReport, "by" | "from" | "to" | "bars" | "total">,
-  today: string
-): { at: string; total: number | null; pace: number | null }[] => {
-  let total = 0;
-  const left = report.bars.filter((bar) => bar.at > today).length;
-  const pace = paceToEnd(report, today);
-  const aDay =
-    pace === null || left === 0 ? 0 : (pace - report.total.billed) / left;
-  return report.bars.map((bar) => {
-    if (bar.at > today) {
-      const ahead =
-        report.total.billed +
-        aDay *
-          report.bars.filter((each) => each.at > today && each.at <= bar.at)
-            .length;
-      return { at: bar.at, total: null, pace: Math.round(ahead) };
-    }
-    total += billedIn(bar);
-    return {
-      at: bar.at,
-      total,
-      pace: bar.at === today && pace !== null ? total : null,
-    };
-  });
-};
-
 /* ── Over RPC ─────────────────────────────────────────────────────────── */
 
 /** The requests a plan includes each month. */
@@ -808,135 +625,13 @@ export const noRequestSettings: StephenRequestSettings = {
   requestsPerPerson: false,
 };
 
-/** What a page may narrow the report to. */
-export const requestsFilterSchema = z.strictObject({
-  range: z.enum(requestRanges),
-  place: z.string().min(1).max(64).nullable().default(null),
-  team: z.string().min(1).max(128).nullable().default(null),
-  /** One row's panel: a topic, a question, or a person (where people one by one may be seen). */
-  topic: z.string().min(1).max(128).nullable().default(null),
-  question: z.string().min(1).max(128).nullable().default(null),
-  person: z.string().min(1).max(128).nullable().default(null),
-});
-export type RequestsFilter = z.input<typeof requestsFilterSchema>;
-
-/** A name for an id the report holds: a topic, a team, a person, a question. */
-export interface Named {
-  id: string;
-  name: string;
-}
-
-/** The report a page reads, with the names its ids stand for. */
-export interface RequestsPage {
-  today: string;
-  range: RequestRange;
-  /**
-   * Whether the filter narrowed it to fewer than five people, so it holds
-   * nothing: a team or a place that few would point at them.
-   */
-  tooFew: boolean;
-  report: RequestsReport;
-  /** The same over the span before (`spanBefore`), for growth; null for twelve months. */
-  before: Pick<RequestsReport, "byTopic" | "questions" | "total"> | null;
-  settings: StephenRequestSettings;
-  /** The month's pace, for the month today is in. */
-  pace: number | null;
-  /** The topics the report names: only those five or more people asked about. */
-  topics: Named[];
-  /** The questions the report names: only those five or more people asked. */
-  questions: (Named & { role: string | null })[];
-  teams: (Named & { reach: number })[];
-  /** The people `byPerson` names; empty unless the viewer may see them. */
-  people: Named[];
-  places: string[];
-  /** Whether the viewer may turn people one by one on or off: an owner. */
-  canSetPerPerson: boolean;
-}
-
-/** One thing Needs you lists: what to fix. */
-export const needKinds = [
-  "notPossible",
-  "poorAnswer",
-  "unanswered",
-  "quietTeam",
-] as const;
-export type NeedKind = (typeof needKinds)[number];
-
-export const needStatuses = ["working", "fixed", "leftAsIs"] as const;
-export type NeedStatus = (typeof needStatuses)[number];
-
-/** The id a need is kept by: its kind and what it is about. */
-export const needKeySchema = z
-  .string()
-  .min(3)
-  .max(300)
-  .regex(/^(?:notPossible|poorAnswer|unanswered|quietTeam):[^\s]+$/u);
-
-export interface Need {
-  key: string;
-  kind: NeedKind;
-  /** The topic and question it is about, or the team. */
-  topic: string | null;
-  question: string | null;
-  teamId: string | null;
-  /** What it is about, as a page names it: the question in Grasp's wording, or the team's name. */
-  label: string;
-  /** How many people and requests it stands for; `reach` for a quiet team. */
-  people: number | null;
-  requests: number;
-  reach: number | null;
-  /** The thumbs, for a poor answer. */
-  thumbs: Thumbs | null;
-  /** The tools it would take and why they aren't there, for what he cannot do. */
-  missing: MissingTool[];
-  /** The role best placed to answer, for what he did not know. */
-  role: string | null;
-  /** Grasp's proposal, in the viewer's language; null until one could be made. */
-  proposal: string | null;
-  /** Whether Grasp is making the proposal it lacks: false with one, or with no model to make it. */
-  proposing: boolean;
-  status: { status: NeedStatus; at: string; by: string } | null;
-  /**
-   * What happened since its status was set: the requests about it since,
-   * how many of them he did, the thumbs they got, and how many people
-   * asked (null under five).
-   */
-  since: {
-    requests: number;
-    done: number;
-    up: number;
-    down: number;
-    people: number | null;
-  } | null;
-}
-
-export const summaryVias = ["teams", "email"] as const;
-export type SummaryVia = (typeof summaryVias)[number];
-
-/** The weekly summary as it goes out, for a page to show before it does. */
-export interface WeeklySummary {
-  week: RequestSpan;
-  billed: number;
-  billedBefore: number;
-  minutes: number;
-  /** Needs new this week, up to three; and those fixed in the last four weeks, up to two. */
-  fresh: Need[];
-  fixed: Need[];
-  pace: number | null;
-  included: number | null;
-  /** Where it goes to the viewer: off (null), Teams or mail. */
-  via: SummaryVia | null;
-  /** Whether Teams can carry it: the viewer has a chat with Stephen there. */
-  teamsOpen: boolean;
-}
-
 /** The requests billed this month, the whole company's, against what the plan includes (null without a plan that counts them). */
 export interface MonthBilled {
   billed: number;
   included: number | null;
 }
 
-/** Stephen's week, for the card on top of Settings › Stephen. */
+/** Stephen's week, for the card on the first agent's Access tab. */
 export interface StephenWeek {
   /** People who asked him something these seven days, and people who may reach him. */
   asked: number;
@@ -960,8 +655,6 @@ export interface StephenWeek {
 
 /** Stephen's requests over `/rpc`, on `stephenRequests`: owners and admins only. */
 export interface StephenRequestsApi {
-  /** The report of a range, narrowed to a place or a team. */
-  report: (filter: RequestsFilter) => Promise<RequestsPage>;
   /** What the company set: the plan's requests, minutes saved, people one by one. */
   settings: () => Promise<StephenRequestSettings>;
   /**
@@ -971,18 +664,7 @@ export interface StephenRequestsApi {
   updateSettings: (
     change: StephenRequestSettingsChange
   ) => Promise<StephenRequestSettings>;
-  /**
-   * What to fix, with Grasp's proposal in `locale` and each item's status.
-   * Proposals not made yet are made after it answers (`proposing`).
-   */
-  needs: (locale: string) => Promise<Need[]>;
-  /** Sets, or clears (null), what is being done about a need. */
-  setNeedStatus: (key: string, status: NeedStatus | null) => Promise<void>;
-  /** The weekly summary as it would go to the viewer now. */
-  summary: () => Promise<WeeklySummary>;
-  /** Where the viewer's weekly summary goes: off (null), Teams or mail. */
-  setSummary: (via: SummaryVia | null) => Promise<void>;
-  /** Stephen's week, for Settings › Stephen. */
+  /** Stephen's week, for the first agent's Access tab. */
   week: () => Promise<StephenWeek>;
   /** The requests billed this month and what the plan includes, for Settings › Billing. */
   billed: () => Promise<MonthBilled>;
@@ -992,9 +674,4 @@ export interface StephenRequestsApi {
 export const stephenRequestErrors = defineErrorFamily({
   "stephen_requests.settings_invalid":
     "Those aren't settings for Stephen's requests: a whole number of requests, minutes from 0 to 600 per kind.",
-  "stephen_requests.filter_invalid":
-    "That isn't a filter of Stephen's requests: this month, last month or twelve months, and a place or a team.",
-  "stephen_requests.need_not_found": "There's nothing like that to fix.",
-  "stephen_requests.teams_closed":
-    "Stephen can only send it in Microsoft Teams once you've had a chat with him there.",
 });
