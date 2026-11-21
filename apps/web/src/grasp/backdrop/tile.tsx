@@ -5,6 +5,8 @@
 // dither's glow in its tone). A scene, and a dither in a run of colours, is its picture. A dither in a flat tone and sand
 // are where their ink lies: the tile lays the theme's own colour through it, as the canvas draws in
 // it, so one picture serves light and dark. Filled to its box, each cell crisp, as the canvas is.
+// A tile is a sample of the look, not a page with words on it, so it never carries the dither's
+// fade behind the words (grasp.backdropDitherMask): every cell shows at full strength.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -27,10 +29,6 @@ const styles = stylex.create({
   crisp: {
     imageRendering: "pixelated",
   },
-  // As the canvas: strongest in the far corners, thinning all the way in.
-  dithered: {
-    maskImage: grasp.backdropDitherMask,
-  },
   // Sand's colours, as the canvas draws in them: its grains, and its sparks.
   grain: { color: grasp.backdropGrain },
   spark: { color: grasp.backdropSpark },
@@ -43,11 +41,17 @@ type Tiles = Readonly<Record<string, string>>;
 /** The pictures once loaded, and their one load, shared by every tile on the page. */
 let loaded: Tiles | undefined;
 let loading: Promise<{ backdropTiles: Tiles }> | undefined;
-const loadTiles = async (): Promise<Tiles> => {
+/** The pictures, or undefined if their chunk failed to load: the tile keeps its still, and the next tile to mount tries again. */
+const loadTiles = async (): Promise<Tiles | undefined> => {
   loading ??= import("./tiles");
-  const { backdropTiles } = await loading;
-  loaded = backdropTiles;
-  return backdropTiles;
+  try {
+    const { backdropTiles } = await loading;
+    loaded = backdropTiles;
+    return backdropTiles;
+  } catch {
+    loading = undefined;
+    return undefined;
+  }
 };
 
 /** The pictures: at once if a tile has loaded them, else after this tile loads them. */
@@ -57,7 +61,7 @@ const useTiles = (): Tiles | undefined => {
     let gone = false;
     const arrive = async (): Promise<void> => {
       const arrived = await loadTiles();
-      if (!gone) {
+      if (!gone && arrived !== undefined) {
         setTiles(arrived);
       }
     };
@@ -81,13 +85,13 @@ interface Ink {
 }
 
 /** Each picture's ink in its colour, one over the other. */
-const Tinted = ({ inks, dithered }: { inks: Ink[]; dithered: boolean }) => {
+const Tinted = ({ inks }: { inks: Ink[] }) => {
   const id = useId().replaceAll(/[^\w-]/gu, "");
   return (
     <svg
       aria-hidden="true"
       data-slot="backdrop-tile-picture"
-      {...stylex.props(styles.fill, dithered && styles.dithered)}
+      {...stylex.props(styles.fill)}
     >
       {inks.map(({ picture, colour }, index) => (
         <g key={picture ?? index}>
@@ -147,7 +151,6 @@ export const BackdropTile = ({ look }: { look: BackdropLook }) => {
   if (isDither(backdrop)) {
     return (
       <Tinted
-        dithered={false}
         inks={[
           {
             picture: backdropTiles[`${backdrop}:${pattern}`],
@@ -160,7 +163,6 @@ export const BackdropTile = ({ look }: { look: BackdropLook }) => {
   if (isSand(backdrop)) {
     return (
       <Tinted
-        dithered={false}
         inks={[
           { picture: backdropTiles[backdrop], colour: styles.grain },
           {
