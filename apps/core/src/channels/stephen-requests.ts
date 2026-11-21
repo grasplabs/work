@@ -8,7 +8,7 @@ import type {
   RequestRating,
   RequestToolCall,
 } from "@grasp-os/shared/stephen-requests";
-import { and, asc, eq, lt, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -22,8 +22,6 @@ import {
   stephenRequestTopics,
   stephenRequests,
   stephenSummaries,
-  teamMembers,
-  teams,
 } from "../db/core/schema.ts";
 import { statementsWithin } from "../db/d1.ts";
 import { readOrganization } from "../organization.ts";
@@ -40,17 +38,15 @@ import type { Sorted } from "./request-sorting.ts";
 // each.
 //
 // - What they asked, or what he answered: never kept. A record holds a
-//   day, a place, the person and their team, labels for what he did (its
+//   day, a place, the person, labels for what he did (its
 //   kind, its outcome, the tools he called and whether each worked, what
 //   was off or missing), a topic's and a question's id from the company's
 //   lists (request-sorting.ts), and a thumb. No words, no values.
 // - When they asked, to the minute: only the day is kept, in the
 //   company's time zone; never the time.
 // - What they asked, read off its question: a question is Grasp's general
-//   wording (request-sorting.ts), and a page shows it only once five or
-//   more people asked it, every split folded the same way, and people one
-//   by one only as counts, and only once an owner turned that on
-//   (stephen-requests.ts).
+//   wording (request-sorting.ts), and Stephen's week shows it only once
+//   five or more people asked it (stephen-requests.ts).
 // - A record outliving its use, or its person: kept thirteen months (a
 //   year's report and the month it is in), then swept; erasing a person
 //   takes theirs (person-erasure.ts), and a question no record points at
@@ -241,18 +237,6 @@ export const outcomeOf = (
   return "done";
 };
 
-/** The team a person is counted in: the first of theirs by name, if any. */
-const teamOf = async (env: Env, userId: string): Promise<string | null> => {
-  const [team] = await drizzle(env.DB)
-    .select({ id: teams.id })
-    .from(teamMembers)
-    .innerJoin(teams, eq(teams.id, teamMembers.teamId))
-    .where(eq(teamMembers.userId, userId))
-    .orderBy(asc(teams.name), asc(teams.id))
-    .limit(1);
-  return team?.id ?? null;
-};
-
 /**
  * Takes in the request `messageId` of `userId` in `platform`, once: its
  * id when this took it, null when it was taken before (the platform sent
@@ -270,14 +254,13 @@ export const takeRequest = async (
 ): Promise<string | null> => {
   const id = `${platform}:${messageId}`;
   try {
-    const [day, teamId] = await Promise.all([
-      companyDay(env),
-      teamOf(env, userId),
-    ]);
+    const day = await companyDay(env);
+    // No team: nothing counts requests by team since Workflows › Requests
+    // went, and the column is dropped in a later release.
     const written = await drizzle(env.DB).run(
       sql`INSERT INTO ${stephenRequests}
-        (id, day, place, person_id, team_id, kind, outcome, tools, missing)
-        SELECT ${id}, ${day}, ${platform}, ${userId}, ${teamId}, 'answered',
+        (id, day, place, person_id, kind, outcome, tools, missing)
+        SELECT ${id}, ${day}, ${platform}, ${userId}, 'answered',
           'stopped', '[]', '[]'
         WHERE ${activeMember(userId)}
         ON CONFLICT (id) DO NOTHING`
@@ -533,8 +516,8 @@ export const rateRequest = async (
 /**
  * Deletes requests past their thirteen months, the questions and topics
  * nothing points at any more that are older than a day (a name just made
- * waits for the request that made it), and Grasp's proposals for, and
- * owners' statuses of, a question that is gone.
+ * waits for the request that made it), Grasp's proposals for, and
+ * owners' statuses of, a question that is gone, and every weekly summary.
  */
 export const sweepStephenRequests = async (
   env: Env,
@@ -586,10 +569,8 @@ export const sweepStephenRequests = async (
         AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
           WHERE ${stephenRequests.id} = ${stephenRequestCards.requestId})`
   );
-  // Weekly summaries sent or failed a quarter ago.
-  await db
-    .delete(stephenSummaries)
-    .where(
-      sql`${stephenSummaries.state} <> 'queued' AND ${stephenSummaries.queuedAt} < ${now.getTime() - 90 * 86_400_000}`
-    );
+  // Weekly summaries, whatever their state: nothing sends them since
+  // Workflows › Requests went, and one left queued would go out stale
+  // after a rollback to a release that still sends them.
+  await db.delete(stephenSummaries);
 };

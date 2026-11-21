@@ -6824,6 +6824,7 @@ export const stephenRequests = sqliteTable(
     day: text().notNull(),
     place: text().notNull(),
     personId: text("person_id").notNull(),
+    /** Written by no release since Workflows › Requests went; dropped in a later one. */
     teamId: text("team_id"),
     /**
      * The person's chat it was answered in, only to find the request a

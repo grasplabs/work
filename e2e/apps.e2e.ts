@@ -259,7 +259,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
-    await page.goto("/workflows");
+    await page.goto("/");
     const links = page
       .getByRole("navigation", { name: "Main" })
       .getByRole("link");

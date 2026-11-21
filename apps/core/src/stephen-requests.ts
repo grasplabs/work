@@ -4,12 +4,11 @@ import {
   dayFrom,
   elsewhere,
   fewestPeople,
-  rangeSpan,
+  monthSpan,
   requestsReport,
   weekOf as weekStart,
 } from "@grasp-os/shared/stephen-requests";
 import type {
-  MissingTool,
   MonthBilled,
   StephenRequest,
   StephenRequestsApi,
@@ -17,7 +16,6 @@ import type {
 } from "@grasp-os/shared/stephen-requests";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
 import { mayAct, organizationId } from "./auth/auth.ts";
 import { companyDay, toolsIn } from "./channels/stephen-requests.ts";
@@ -41,10 +39,9 @@ import { readStephenReach } from "./stephen-reach.ts";
 //
 // Threat model: re-identifying a person through small groups.
 //
-// - A group that points at a few people: the week folds its groups of
-//   fewer than five people into one (`requestsReport`), a question is
-//   named only once five or more people asked it, and an app only once he
-//   called it for five or more. A name follows the week it is shown with,
+// - A group that points at a few people: a question is named only once
+//   five or more people asked it (`requestsReport`), and an app only once
+//   he called it for five or more, the rest folded into one. A name follows the week it is shown with,
 //   never the whole list: it goes again when its people fall under five,
 //   an erased person's requests going with them.
 // - Anyone else reading it: admins only, Grasp staff's every view audited
@@ -57,14 +54,8 @@ const requireReader = (by: Identity): void => {
   }
 };
 
-/** The people who may reach Stephen, per team, and how many in all. */
-interface Reach {
-  byTeam: Map<string, number>;
-  people: number;
-}
-
-/** Who may reach Stephen at all now: the active members his audience holds, counted per team. */
-const reachOf = async (env: Env): Promise<Reach> => {
+/** How many people may reach Stephen at all now: the active members his audience holds. */
+const reachOf = async (env: Env): Promise<number> => {
   const reach = await readStephenReach(env);
   const db = drizzle(env.DB);
   const rows = await db
@@ -80,8 +71,6 @@ const reachOf = async (env: Env): Promise<Reach> => {
     (audience.who === "teams" &&
       teamId !== null &&
       audience.teams.includes(teamId));
-  const reaching = new Set<string>();
-  const byTeam = new Map<string, Set<string>>();
   const teamsOf = new Map<string, string[]>();
   for (const { userId, teamId } of rows) {
     teamsOf.set(userId, [
@@ -89,36 +78,9 @@ const reachOf = async (env: Env): Promise<Reach> => {
       ...(teamId === null ? [] : [teamId]),
     ]);
   }
-  for (const [userId, theirs] of teamsOf) {
-    if (!(theirs.length === 0 ? inAudience(null) : theirs.some(inAudience))) {
-      continue;
-    }
-    reaching.add(userId);
-    for (const teamId of theirs) {
-      byTeam.set(teamId, (byTeam.get(teamId) ?? new Set()).add(userId));
-    }
-  }
-  return {
-    byTeam: new Map(
-      [...byTeam].map(([teamId, people]) => [teamId, people.size])
-    ),
-    people: reaching.size,
-  };
-};
-
-const missingSchema = z.array(
-  z.object({
-    id: z.string(),
-    why: z.enum(["appOff", "actionOff", "workflowClosed", "noApp", "noAction"]),
-  })
-);
-
-const missingIn = (stored: string): MissingTool[] => {
-  try {
-    return missingSchema.parse(JSON.parse(stored));
-  } catch {
-    return [];
-  }
+  return [...teamsOf.values()].filter((theirs) =>
+    theirs.length === 0 ? inAudience(null) : theirs.some(inAudience)
+  ).length;
 };
 
 /** The requests of the days from `from` to `to`. */
@@ -129,34 +91,17 @@ const requestsIn = async (
 ): Promise<StephenRequest[]> => {
   const rows = await drizzle(env.DB)
     .select({
-      id: stephenRequests.id,
       day: stephenRequests.day,
-      place: stephenRequests.place,
       personId: stephenRequests.personId,
-      teamId: stephenRequests.teamId,
-      kind: stephenRequests.kind,
       outcome: stephenRequests.outcome,
       topic: stephenRequests.topicId,
       question: stephenRequests.questionId,
       tools: stephenRequests.tools,
-      missing: stephenRequests.missing,
-      rating: stephenRequests.rating,
     })
     .from(stephenRequests)
     .where(and(gte(stephenRequests.day, from), lte(stephenRequests.day, to)));
-  return rows.map((row) => ({
-    ...row,
-    tools: toolsIn(row.tools),
-    missing: missingIn(row.missing),
-  }));
+  return rows.map((row) => ({ ...row, tools: toolsIn(row.tools) }));
 };
-
-/**
- * The names of the topics `ids` names. A name rests on one person's
- * message (channels/request-sorting.ts), so it is held to a question's
- * floor: only topics a report shows as a group of their own, five or more
- * people (`topicsIn`), are ever named.
-
 
 /** The wording and role of the questions `ids` names. */
 const questionsNamed = async (
@@ -176,6 +121,7 @@ const questionsNamed = async (
     .where(inList(stephenRequestQuestions.id, [...new Set(ids)]));
   return rows;
 };
+
 /** The app (pack) a tool is of: the brain, workflows, an App, or the connection it called. */
 const packOf = (tool: string): string => {
   if (tool.startsWith("workflow:")) {
@@ -193,7 +139,7 @@ const packOf = (tool: string): string => {
  * for Settings › Billing, without the report.
  */
 const billedOf = async (env: Env): Promise<MonthBilled> => {
-  const month = rangeSpan("month", await companyDay(env));
+  const month = monthSpan(await companyDay(env));
   const counted = await drizzle(env.DB)
     .select({ billed: sql<number>`count(*)` })
     .from(stephenRequests)
@@ -201,7 +147,7 @@ const billedOf = async (env: Env): Promise<MonthBilled> => {
       and(
         gte(stephenRequests.day, month.from),
         lte(stephenRequests.day, month.to),
-        // Billed: what he finished (`requestsReport`'s billed).
+        // Billed: what he finished.
         eq(stephenRequests.outcome, "done")
       )
     )
@@ -219,22 +165,14 @@ const weekOf = async (env: Env): Promise<StephenWeek> => {
     requestsIn(env, eightWeeks < from ? eightWeeks : from, today),
   ]);
   const requests = all.filter(({ day }) => day >= from);
-  const { weeks } = requestsReport(
-    all.filter(({ day }) => day >= eightWeeks),
-    { from: eightWeeks, to: today, by: "day" },
-    { reach: new Map() }
-  );
+  const { weeks } = requestsReport(all, { from: eightWeeks, to: today });
   const weekFrom = dayFrom(today, -6);
   const asked = new Set(
     requests
       .filter(({ day }) => day >= weekFrom)
       .map(({ personId }) => personId)
   ).size;
-  const report = requestsReport(
-    requests,
-    { from, to: today, by: "day" },
-    { reach: reach.byTeam }
-  );
+  const { unanswered } = requestsReport(requests, { from, to: today });
   const answered = requests.filter(({ outcome }) => outcome === "done").length;
   const packs = new Map<
     string,
@@ -265,17 +203,17 @@ const weekOf = async (env: Env): Promise<StephenWeek> => {
   );
   const questions = await questionsNamed(
     env,
-    report.unanswered.map(({ question }) => question)
+    unanswered.map(({ question }) => question)
   );
   const named = new Map(questions.map((row) => [row.id, row]));
   return {
     asked,
-    reach: reach.people,
+    reach,
     weeks,
     answeredShare: requests.length === 0 ? null : answered / requests.length,
     answered,
     questions: requests.length,
-    unanswered: report.unanswered.flatMap(({ question, people }) => {
+    unanswered: unanswered.flatMap(({ question, people }) => {
       const row = named.get(question);
       return row === undefined
         ? []
