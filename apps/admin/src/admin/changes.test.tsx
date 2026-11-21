@@ -88,6 +88,7 @@ const onAcme = async (
     held,
     framed,
     frameMisses,
+    gridHeld,
   }: {
     /** Whether the command changes what Acme's core answers. */
     applies?: boolean | { onCommand: number };
@@ -97,6 +98,8 @@ const onAcme = async (
     framed?: Record<number, Promise<unknown>>;
     /** The frame's reads that fail outright, or answer without Acme (its core past its deadline), by which. */
     frameMisses?: Record<number, "fails" | "without acme">;
+    /** The grid's reads held back until each promise settles, by which (1 is the first). */
+    gridHeld?: Record<number, Promise<unknown>>;
   } = {}
 ) => {
   const empty = emptyAdminSnapshot("Acme");
@@ -117,6 +120,7 @@ const onAcme = async (
   );
   let reads = 0;
   let frameReads = 0;
+  let gridReads = 0;
   let commands = 0;
   let down = false;
   /** What Acme's core holds when asked, stamped as the Worker stamps it: when its answer came in. */
@@ -128,7 +132,11 @@ const onAcme = async (
     return { ...answer, at: new Date().toISOString() };
   };
   const page = await openAdmin(acmeContract, {
-    fetchClientGrid: [acme, globex],
+    fetchClientGrid: async () => {
+      gridReads += 1;
+      await gridHeld?.[gridReads];
+      return [acme, globex];
+    },
     fetchClientAdmin: async (data: unknown) => {
       if (
         typeof data === "object" &&
@@ -206,6 +214,16 @@ const agreementsForm = (): HTMLFormElement | undefined =>
   [...document.querySelectorAll("form")].find((form) =>
     form.textContent?.includes("Works council")
   );
+
+/** Lets what is under way come in: answers, and what the page does with them. */
+const aMoment = async (): Promise<void> => {
+  await act(async () => {
+    // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form here
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+  });
+};
 
 /** Opens the dialog and submits what was agreed, without waiting for it to go through. */
 const giveAgreements = async (page: Element): Promise<void> => {
@@ -869,6 +887,50 @@ describe("a change on an organization's page", () => {
       vi.useRealTimers();
     }
   });
+
+  it.each([
+    ["its core answers before the grid", "core first"],
+    ["the grid answers before its core", "grid first"],
+  ] as const)(
+    "reads the open organization's core once in a reload after a change, whichever answers first: %s",
+    async (_, order) => {
+      const grid = Promise.withResolvers<null>();
+      const core = Promise.withResolvers<null>();
+      const { container, calls, asked } = await onAcme(
+        async () => {},
+        undefined,
+        {
+          // In the reload after the change: the grid's second read, Acme's second.
+          gridHeld: order === "core first" ? { 2: grid.promise } : {},
+          held:
+            order === "grid first"
+              ? { call: 2, until: core.promise }
+              : undefined,
+        }
+      );
+      const askedBefore = asked();
+      await giveAgreements(container);
+      if (order === "core first") {
+        await until(() => asked() === askedBefore + 1);
+        // Its answer in and kept before the grid's, then the grid's.
+        await aMoment();
+        grid.resolve(null);
+      } else {
+        await until(
+          () => calls.filter(({ fn }) => fn === "fetchClientGrid").length === 2
+        );
+        await aMoment();
+        core.resolve(null);
+      }
+      await settle();
+
+      expect({
+        agreed: agreedOn(container).includes("In place since 2 Sep 2026"),
+        // One read of its core in the reload, as its audit log records it.
+        askedAgain: asked() - askedBefore,
+      }).toStrictEqual({ agreed: true, askedAgain: 1 });
+    }
+  );
 
   it("shows both of two changes given at once from two parts of the page", async () => {
     const customerId = "cus_Acme1";

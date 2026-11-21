@@ -51,8 +51,9 @@ export interface OrgReads {
    * Client `clientId`'s read under way, else a new one with `read`, shared
    * until it settles. Asked `anew`, only a read begun in the router's
    * load under way counts as under way: one begun before it may have
-   * been answered before the change that load shows. Asked for one
-   * `after` a number of reads, only a read asked after those counts.
+   * been answered before the change that load shows, and an answer to
+   * one asked in that load is taken as its read. Asked for one `after` a
+   * number of reads, only a read asked after those counts.
    */
   read: (
     clientId: string,
@@ -140,12 +141,18 @@ export const orgReads = (): OrgReads => {
 
   return {
     read: async (clientId, read, { anew = false, after = 0 } = {}) => {
+      const since = Math.max(after, anew ? loadFrom : 0);
       const pending = underWay.get(clientId);
-      if (
-        pending !== undefined &&
-        pending.asked > Math.max(after, anew ? loadFrom : 0)
-      ) {
+      if (pending !== undefined && pending.asked > since) {
         return await pending.answer;
+      }
+      // Asked anew, an answer to a read asked in this same load (and after
+      // `after`, the last change) is that load's read, already in: the
+      // frame's read of the open one can answer before the page's load
+      // asks. One that failed kept nothing, so it is read again.
+      const kept = answers.get(clientId);
+      if (anew && kept !== undefined && kept.asked > since) {
+        return kept.admin;
       }
       const asked = ask();
       const answer = (async () => {
