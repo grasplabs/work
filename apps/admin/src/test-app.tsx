@@ -169,6 +169,18 @@ export const settle = async (): Promise<void> => {
   }
 };
 
+/** Waits until `shown` holds, as the page goes on: a page that never comes to rest. */
+export const until = async (shown: () => boolean): Promise<void> => {
+  const deadline = Date.now() + restMs;
+  while (!shown()) {
+    if (Date.now() > deadline) {
+      throw new Error("The page never showed it");
+    }
+    // oxlint-disable-next-line no-await-in-loop -- each turn waits on what the last one started
+    await tick();
+  }
+};
+
 /**
  * The admin opened at `path`, its server functions answered from
  * `answers` over a frame with no organizations: what the page shows
