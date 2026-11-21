@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { resolveObjectURL } from "node:buffer";
 
-import type { BoardReport } from "@grasp-os/shared/dashboard";
+import type { BoardReport } from "@grasp-os/shared/board-report";
 import type { Programme } from "@grasp-os/shared/onboarding";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";

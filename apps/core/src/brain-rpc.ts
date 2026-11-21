@@ -942,7 +942,7 @@ const onboardingHeld = async (env: Env): Promise<OnboardingHeld> => {
  * (`listWorkflowResources`), none of them deleted. The rest are left out,
  * so a goal never names a workflow its reader couldn't open.
  */
-export const goalsFor = async (
+const goalsFor = async (
   env: Env,
   person: Identity,
   goals: readonly Goal[]
@@ -1342,13 +1342,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
       this.#check,
       async (person) => await readThinkingGround(this.#env, person)
     );
-  }
-
-  async goals(): Promise<Goal[]> {
-    return await withPerson(this.#check, async (person) => {
-      const { goals } = await readBrainRecords(this.#env);
-      return await goalsFor(this.#env, person, goals);
-    });
   }
 
   async addRecords(records: BrainRecordInput[]): Promise<BrainRecordsAdded> {

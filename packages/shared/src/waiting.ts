@@ -222,8 +222,6 @@ export interface WaitingFeed {
   items: WaitingItem[];
   /** The parts that couldn't be read, with why: the feed may be missing their items. */
   unread: { part: WaitingPart; code: string }[];
-  /** Whether older notifications follow those listed (`NotificationsApi.list`). */
-  moreNotifications: boolean;
   /** How many of the person's notifications are unread, of all they can see. */
   unreadNotifications: number;
 }

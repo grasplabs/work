@@ -6,9 +6,9 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 
-// The board's weekly weekly, read in one call (`dashboard.report()` in
-// src/board-weekly.ts). The ways it can fail, tried here: a report on
-// another week than the one the dashboard's line says, or of days its
+// The board's weekly report, read in one call (`boardReport.read()` in
+// src/board-report.ts). The ways it can fail, tried here: a report on
+// another week than the one the programme's line says, or of days its
 // week doesn't hold; a member reading what only admins may (how many the
 // interviews heard); and one part that can't be read taking the rest
 // with it, or a part's refusal failing the weekly.
@@ -38,7 +38,7 @@ describe("the board's weekly report", slow, () => {
   it("has no programme without a plan, and still says what ran", async () => {
     const member = await signedInApi(idp, "user");
 
-    const weekly = await member.api.dashboard.report();
+    const weekly = await member.api.boardReport.read();
     expect({
       programme: weekly.programme,
       runs: weekly.runs.state,
@@ -55,7 +55,7 @@ describe("the board's weekly report", slow, () => {
     await admin.api.onboarding.saveRoster(roster);
     await planToday();
 
-    const weekly = await admin.api.dashboard.report();
+    const weekly = await admin.api.boardReport.read();
     const { progress } = await admin.api.onboarding.view();
     expect({
       states: [

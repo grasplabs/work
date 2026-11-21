@@ -1,4 +1,4 @@
-import type { BoardReport } from "@grasp-os/shared/dashboard";
+import type { BoardReport } from "@grasp-os/shared/board-report";
 import type { Programme } from "@grasp-os/shared/onboarding";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";

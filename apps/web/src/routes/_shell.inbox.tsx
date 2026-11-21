@@ -101,7 +101,7 @@ export const Route = createFileRoute("/_shell/inbox")({
         ? undefined
         : loadFromCore(
             core,
-            async (session) => await session.dashboard.report()
+            async (session) => await session.boardReport.read()
           );
     return {
       waiting,

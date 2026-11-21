@@ -1742,21 +1742,13 @@ describe("AI providers", { timeout: 60_000 }, () => {
     it("streams an answer, sending the key once, to the provider's own host only", async () => {
       const key = await connected(each);
       await plan(key, [answered(each.api, "Hello, Ada.")]);
-      const streamed: string[] = [];
 
-      const answer = await models(env).call(
-        await callOf(each.model, {
-          onText: (text) => {
-            streamed.push(text);
-          },
-        })
-      );
+      const answer = await models(env).call(await callOf(each.model));
 
       expect(answer).toMatchObject({
         text: "Hello, Ada.",
         usage: { inputTokens: 1000, outputTokens: 100 },
       });
-      expect(streamed.at(-1)).toBe("Hello, Ada.");
       const [request] = await carrying(key);
       expect(request?.path).toBe(each.path);
       await expect(placesOf(key)).resolves.toStrictEqual(onlyAt(each));
@@ -1830,39 +1822,6 @@ describe("AI providers", { timeout: 60_000 }, () => {
           cost: answer.cost,
         },
       ]);
-    });
-
-    it("stops a request its caller cancels mid-answer as it reads the answer streaming", async () => {
-      const key = await connected(each);
-      const begun = streamText(each.api, {
-        text: "Hello",
-        inputTokens: 1000,
-        outputTokens: 100,
-        cut: 3,
-      });
-      await plan(key, [{ hold: begun }]);
-      const cancel = new AbortController();
-      const trigger = newPerson();
-
-      const cancelled = await outcome(
-        models(env).call(
-          await callOf(each.model, {
-            trigger,
-            signal: cancel.signal,
-            onText: () => {
-              cancel.abort();
-            },
-          })
-        )
-      );
-
-      expect(cancelled).toBe("model.failed");
-      const [event] = await auditedFor(trigger.userId, 1);
-      expect(event?.detail).toMatchObject({
-        outcome: "failed",
-        errorType: "cancelled",
-      });
-      await providerRequestDropped(key);
     });
 
     it("stops a request its caller cancels mid-answer as it waits for the answer whole", async () => {

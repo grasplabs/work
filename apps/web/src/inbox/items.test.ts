@@ -218,7 +218,6 @@ const waiting = (ranOut = true) =>
             },
           ],
           unread: 4,
-          more: false,
         },
         accounts: new Map([
           [

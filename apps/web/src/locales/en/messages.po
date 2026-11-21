@@ -4569,14 +4569,14 @@ msgctxt "a group of an app's tools"
 msgid "Chats"
 msgstr "Chats"
 
+#: src/settings/erasures.tsx
+msgid "Chats and drafts"
+msgstr "Chats and drafts"
+
 #. Folder of the chats people had with a Grasp agent
 #: src/brain/brain.ts
 msgid "Chats with Grasp"
 msgstr "Chats with Grasp"
-
-#: src/settings/erasures.tsx
-msgid "Chats, drafts and dashboard"
-msgstr "Chats, drafts and dashboard"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -8183,10 +8183,6 @@ msgstr "Grasp"
 msgid "Grasp access"
 msgstr "Grasp access"
 
-#: src/chat/thread.tsx
-msgid "Grasp added a widget to your dashboard."
-msgstr "Grasp added a widget to your dashboard."
-
 #: src/chat/asked-questions.tsx
 msgid "Grasp asks"
 msgstr "Grasp asks"
@@ -8222,10 +8218,6 @@ msgstr "Grasp can’t read the directory with the connection it has. Connect it 
 #: src/settings/erasures.tsx
 msgid "Grasp can’t say how far it got just now. It goes on all the same."
 msgstr "Grasp can’t say how far it got just now. It goes on all the same."
-
-#: src/chat/thread.tsx
-msgid "Grasp changed a widget on your dashboard."
-msgstr "Grasp changed a widget on your dashboard."
 
 #: src/connections/request-app-dialog.tsx
 msgctxt "“Requested” is the name of a section on the Integrations page."

@@ -69,7 +69,6 @@ const feedOf = (items: WaitingFeed["items"]): WaitingFeed => ({
   readAt: at,
   items,
   unread: [],
-  moreNotifications: false,
   unreadNotifications: items.filter((item) => item.kind === "openQuestion")
     .length,
 });

@@ -25,8 +25,7 @@ import "./test-thread-room.ts";
 // An answer's steps as one trace in the thread. What the model thought:
 // while it thinks, its words stream in, open under "Thinking"; once the
 // answer is kept, a quiet line says how long it thought, folded, and opens
-// to what it thought. How long Grasp worked is the trace's first line. And
-// what an answer's code did to the dashboard, under the step that did it.
+// to what it thought. How long Grasp worked is the trace's first line.
 // While an answer is written, the words of the block being written fade
 // in where they land, the blocks before it done; a kept one stands still.
 
@@ -604,57 +603,6 @@ describe(ChatThread, () => {
         .map((line) => said(line))
         .includes("Thinking"),
     }).toStrictEqual({ working: "Working on it", thinking: false });
-  });
-
-  it("says under a code step each widget it made or changed on the dashboard", async () => {
-    const at = "2026-10-27T09:00:05.000Z";
-    await thread(
-      [
-        asked,
-        {
-          id: 2,
-          role: "assistant",
-          text: "",
-          code: [{ callId: "step", code: "await env.dashboard.makeWidget()" }],
-          tools: [],
-          end: "done",
-          at,
-        },
-        {
-          id: 3,
-          role: "result",
-          callId: "step",
-          text: "done",
-          failed: false,
-          at,
-        },
-      ],
-      null,
-      [
-        {
-          id: 1,
-          callId: "step",
-          method: "dashboard.makeWidget",
-          target: null,
-          summary: {},
-          outcome: "ok",
-          reason: null,
-          at,
-        },
-      ]
-    );
-    const line = [...document.querySelectorAll("p")].find((each) =>
-      each.textContent.startsWith("Grasp added a widget")
-    );
-    await openSteps();
-
-    expect({
-      said: said(line),
-      steps: stepLines(),
-    }).toStrictEqual({
-      said: "Grasp added a widget to your dashboard.",
-      steps: ["Ran a code step, Done"],
-    });
   });
 
   it("says what each call of Grasp's tools did in one line, and unfolds what it was given and what came of it", async () => {

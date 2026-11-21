@@ -58,7 +58,6 @@ import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { turnsOf, workedFor } from "./turns.ts";
-import { widgetLinesOf } from "./widget-lines.ts";
 
 /**
  * An answer's thinking as a card (thinking-card.tsx), loaded once an
@@ -415,26 +414,6 @@ const useWorkingLabel = (): ((
   };
 };
 
-/** Under a code step's answer: each widget it made or changed. */
-const WidgetLines = ({
-  tools,
-  callIds,
-}: {
-  tools: readonly ChatToolEvent[];
-  callIds: readonly string[];
-}) =>
-  callIds
-    .flatMap((callId) => widgetLinesOf(tools, callId))
-    .map(({ id, done }) => (
-      <Text element="p" key={id} size="sm" tone="muted">
-        {done === "made" ? (
-          <Trans>Grasp added a widget to your dashboard.</Trans>
-        ) : (
-          <Trans>Grasp changed a widget on your dashboard.</Trans>
-        )}
-      </Text>
-    ));
-
 /**
  * The codes that mean no model can be reached until an AI provider is
  * connected: models not set up at all, or none connected yet.
@@ -714,7 +693,6 @@ const Question = ({
 /** Everything an answer is drawn from, beyond its own replies. */
 interface AnswerContext extends Omit<StepContext, "writing"> {
   chatId: string;
-  tools: readonly ChatToolEvent[];
   /** What Grasp does on this answer while it works on it. */
   doing: WorkState | undefined;
   /** What the line over it says while Grasp works on it. */
@@ -897,12 +875,6 @@ const AnswerBody = ({
             : [<SavedMemoryLine key={callId} saved={saved} />];
         })
       )}
-      <WidgetLines
-        callIds={stepped.flatMap(({ code }) =>
-          code.map(({ callId }) => callId)
-        )}
-        tools={context.tools}
-      />
       {context.card}
       {context.again === undefined ? null : (
         <SeeInBrain chatId={context.chatId} thinking={context.again} />
@@ -1114,8 +1086,7 @@ export const ChatThread = ({
   /** Whether its turn checks the drafts it wrote now, past its answer. */
   checking?: boolean;
   /**
-   * The calls the chat's code made: what it did to the dashboard, under its
-   * step, and what it reads, while it reads it.
+   * The calls the chat's code made: what it reads, while it reads it.
    */
   tools?: readonly ChatToolEvent[];
   /** Asks the last question again. */
@@ -1215,7 +1186,6 @@ export const ChatThread = ({
       id === undefined ? undefined : answerThinking.byReply.get(id);
     return {
       chatId,
-      tools,
       results,
       recovered,
       output,

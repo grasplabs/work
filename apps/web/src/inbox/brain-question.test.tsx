@@ -74,7 +74,7 @@ const shown = async (
     outcomes: { state: "ready", data: [] },
     notifications: {
       state: "ready",
-      data: { page: { notifications, unread: 1, more: false } },
+      data: { page: { notifications, unread: 1 } },
     },
     reconnect: { state: "ready", data: [] },
     requests: undefined,

@@ -93,7 +93,6 @@ export const readWaiting = async (
       page: {
         notifications: listed,
         unread: read.unreadNotifications,
-        more: read.moreNotifications,
       },
       accounts,
     };

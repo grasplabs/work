@@ -9,7 +9,7 @@ import { frameChanged } from "../frame/frame-read.ts";
 
 /** The latest page of the person's notifications, as the feed read it. */
 export interface NotificationsPage {
-  page: NotificationPage;
+  page: Omit<NotificationPage, "more">;
   /**
    * The accounts of the connections the page's stopped sources are at,
    * by connection ID, as the feed named them; none where it couldn't.

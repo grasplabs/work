@@ -53,7 +53,6 @@ export interface SpendInput {
     | {
         platform:
           | "brain_upkeep"
-          | "dashboard_widgets"
           | "stephen_requests"
           | "provider_test"
           | "agent_builder"
