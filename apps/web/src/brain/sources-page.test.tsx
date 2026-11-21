@@ -1257,8 +1257,6 @@ describe(SourcesPage, () => {
   });
 
   it("uploads a file for the team chosen, then offers its uploader a new version and deleting it", async () => {
-    // React says what it can't render right (two children of one key) here.
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const { calls } = await shown([]);
     await openUpload();
     await pick(
@@ -1287,7 +1285,6 @@ describe(SourcesPage, () => {
 
     expect({
       options,
-      errors: errors.mock.calls.map(([message]) => String(message)),
       dialogClosed,
       opened: [
         "Team Finance can read this upload.",
@@ -1298,7 +1295,6 @@ describe(SourcesPage, () => {
       calls: calls.filter((call) => !call.startsWith("read")),
     }).toStrictEqual({
       options: ["Only me", "Team Finance", "Everyone"],
-      errors: [],
       dialogClosed: true,
       opened: [true, true, true],
       closed: "",

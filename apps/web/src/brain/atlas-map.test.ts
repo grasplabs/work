@@ -194,10 +194,6 @@ describe(neuronMap, () => {
     (room, id) => {
       const map = neuronMap(id, atlas, brain, room);
       expect(map.fits).toBeTruthy();
-      // A name that needs a second line has it.
-      expect(
-        map.cell.lines + map.cell.short >= 2 ? map.cell.lines : 2
-      ).toBeGreaterThanOrEqual(2);
       expect(
         neuronMap(id, atlas, brain, room).neurons.map((neuron) => [
           neuron.x,

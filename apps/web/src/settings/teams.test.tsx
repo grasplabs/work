@@ -16,8 +16,8 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { TeamsPanel } from "./teams.tsx";
 
-// Settings › Members › Teams: renaming a team in its dialog and deleting
-// one, as the admin hears why Better Auth refused it (core's auth.ts,
+// Settings › Members › Teams: creating a team and renaming one in its
+// dialog, and deleting one, as the admin hears why Better Auth refused it (core's auth.ts,
 // GRA-2055): in the dialog they are in, while it stays open. Core answers
 // the reads; Better Auth's routes answer every change as `refusing` says.
 
@@ -133,6 +133,23 @@ const click = async (element: HTMLElement): Promise<void> => {
   await settled();
 };
 
+/** The name typed into the open team dialog. */
+const typedName = async (name: string): Promise<void> => {
+  const input = document.querySelector<HTMLInputElement>(
+    '[role="dialog"] input:not([type="search"])'
+  );
+  await act(async () => {
+    if (input !== null) {
+      Reflect.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )?.set?.call(input, name);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await Promise.resolve();
+  });
+};
+
 /** What the open dialog of `role` says. */
 const dialogText = (role: "dialog" | "alertdialog"): string =>
   document.querySelector(`[role="${role}"]`)?.textContent ?? "";
@@ -152,19 +169,7 @@ describe("Settings › Members › Teams", () => {
     const asked = refusing(staffListTeamRefusals.notMadeYet);
 
     await click(found("button", "Sales"));
-    const input = document.querySelector<HTMLInputElement>(
-      '[role="dialog"] input:not([type="search"])'
-    );
-    await act(async () => {
-      if (input !== null) {
-        Reflect.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value"
-        )?.set?.call(input, "Support");
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-      await Promise.resolve();
-    });
+    await typedName("Support");
     await click(found("button", "Save changes"));
 
     expect({
@@ -176,6 +181,38 @@ describe("Settings › Members › Teams", () => {
       asked: ["/api/auth/organization/update-team"],
       said: true,
     });
+  });
+
+  it("says in the open dialog why a new team was refused: a name the staff list gives a team not made yet", async () => {
+    await shown();
+    const asked = refusing(staffListTeamRefusals.notMadeYet);
+
+    await click(found("button", "New team"));
+    await typedName("Support");
+    await click(found("button", "Create team"));
+
+    expect({
+      asked,
+      said: dialogText("dialog").includes(
+        "A team on the staff list has this name. It appears here once the staff list is confirmed."
+      ),
+    }).toStrictEqual({
+      asked: ["/api/auth/organization/create-team"],
+      said: true,
+    });
+  });
+
+  it("says a new team couldn't be created, for any other conflict", async () => {
+    await shown();
+    refusing("SOMETHING_ELSE");
+
+    await click(found("button", "New team"));
+    await typedName("Support");
+    await click(found("button", "Create team"));
+
+    expect(dialogText("dialog")).toContain(
+      "The team couldn't be created. Try again."
+    );
   });
 
   it("says in the open delete dialog why core kept the team: it is on the staff list", async () => {

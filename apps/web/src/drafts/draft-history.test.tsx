@@ -492,7 +492,10 @@ describe("An App's History", () => {
   });
 
   it("lets a builder roll back, over the draft as read, only once they confirm", async () => {
-    const { session, asked } = fakeApps({ role: "builder" });
+    const { session, asked } = fakeApps({
+      role: "builder",
+      changed: ["server/notes.ts"],
+    });
     await shown(session, person("user-owner", "builder"));
 
     await press(button("Actions for 26.10.1"));
@@ -507,11 +510,13 @@ describe("An App's History", () => {
     expect({
       afterCancel,
       titled: said.includes("Go back to 26.10.1?"),
+      discards: said.includes("The changes only you see are dropped"),
       asked,
       listed: titles("draft-published"),
     }).toStrictEqual({
       afterCancel: [],
       titled: true,
+      discards: true,
       asked: [["rollback", appId, 1, 7, 2]],
       listed: ["26.10.3", "26.10.2", "26.10.1Your team has this one"],
     });
@@ -537,26 +542,6 @@ describe("An App's History", () => {
       listed: ["26.10.2Your team has this one", "Not shared yet"],
       created: true,
       titled: true,
-    });
-  });
-
-  it("says a roll back discards the draft's unpublished changes, and goes over that draft", async () => {
-    const { session, asked } = fakeApps({
-      role: "builder",
-      changed: ["server/notes.ts"],
-    });
-    await shown(session, person("user-owner", "admin"));
-
-    await press(button("Actions for 26.10.1"));
-    await press(menuItem("Go back to this version"));
-    const said = document.body.textContent.includes(
-      "The changes only you see are dropped"
-    );
-    await press(button("Go back"));
-
-    expect({ said, asked }).toStrictEqual({
-      said: true,
-      asked: [["rollback", appId, 1, 7, 2]],
     });
   });
 

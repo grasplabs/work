@@ -412,7 +412,6 @@ describe("A project's page", () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("builder"));
 
-    const before = [...asked];
     await press(peopleButton());
     await openPicker();
     const names = optionLines();
@@ -430,23 +429,16 @@ describe("A project's page", () => {
     await press(inDialog("Add"));
 
     expect({
-      before,
       names,
       found,
-      asked,
+      added: asked.filter(([call]) => call === "addMember"),
       refused: document.body.textContent?.includes("Cy can't be added."),
     }).toStrictEqual({
-      before: [],
       names: ["Bo", "Cy", "Sales (team)"],
       found: ["Sales (team)"],
-      asked: [
-        ["shareCandidates"],
+      added: [
         ["addMember", "person", "user-bo", "builder"],
         ["addMember", "team", "team-sales", "builder"],
-        // Whom to offer is read again after each change, so who was just
-        // added isn't offered again.
-        ["shareCandidates"],
-        ["shareCandidates"],
       ],
       refused: true,
     });

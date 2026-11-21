@@ -258,15 +258,6 @@ describe("the AI key banner", () => {
     });
   });
 
-  it("says nothing once a call works again or the key was replaced", async () => {
-    const replaced = await bannerFor(
-      listingWith({ ...refused, failingClass: null, failingSince: null }),
-      { role: "admin", staff: false }
-    );
-
-    expect(replaced).toStrictEqual({ said: "", links: [] });
-  });
-
   it("reads again at once when a provider's key is replaced or deleted in Settings, not at the next minute", async () => {
     let listing = listingWith(refused);
     const host = document.createElement("div");

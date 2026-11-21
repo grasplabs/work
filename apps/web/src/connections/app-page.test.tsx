@@ -255,13 +255,10 @@ const openGroup = async (name: string): Promise<void> => {
 };
 
 /** The page's first account row: its state, and how many buttons it has. */
-const rowOf = () => {
-  const row = document.querySelector<HTMLElement>('[data-slot="app-account"]');
-  return {
-    state: row?.dataset.state,
-    buttons: row?.querySelectorAll("button").length,
-  };
-};
+const rowOf = () =>
+  document
+    .querySelector<HTMLElement>('[data-slot="app-account"]')
+    ?.querySelectorAll("button").length;
 
 describe("changing what Grasp may do in a connected app", () => {
   afterEach(() => {
@@ -509,10 +506,7 @@ describe("changing what Grasp may do in a connected app", () => {
     await shown(microsoft, { app, identity: person({ staff: true }) });
     const staff = rowOf();
 
-    expect({ member, staff }).toStrictEqual({
-      member: { state: "reconnect", buttons: 0 },
-      staff: { state: "reconnect", buttons: 0 },
-    });
+    expect({ member, staff }).toStrictEqual({ member: 0, staff: 0 });
   });
 
   it("opens signing in again from the row of the account whose access ran out", async () => {

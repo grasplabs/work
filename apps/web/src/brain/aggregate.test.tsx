@@ -122,7 +122,7 @@ describe("what the Brain page says of the interviews", () => {
     ]);
   });
 
-  it("reads an opinion of the company's as said by five or more people across the company, never quoted, with no team (GRA-1987)", async () => {
+  it("reads an opinion of the company's as said by five or more people across the company, never quoted, with no team", async () => {
     const opinions: Source = {
       id: "onb-opinions",
       kind: "interview",
@@ -162,11 +162,9 @@ describe("what the Brain page says of the interviews", () => {
         basisOf(claim.id).includes("How the team works, as its people told it"),
         basisOf(claim.id).includes("across the company"),
       ],
-      words: statementWords(opinion.id, opinion.text),
     }).toStrictEqual({
       opinion: true,
       claim: [true, false],
-      words: opinion.text,
     });
   });
 

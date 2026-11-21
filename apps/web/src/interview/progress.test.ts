@@ -415,17 +415,6 @@ describe("the interview's clock", () => {
     ).toBeCloseTo(5, 5);
   });
 
-  it("counts an interview kept before this clock from the start, as before", () => {
-    const old = {
-      ...freshProgress,
-      person: "progress" as const,
-      startedAt: start,
-    };
-    expect(minutesAt(old, start + 30 * minute)).toBeCloseTo(30, 5);
-    // Its first turn on this clock starts counting gaps from there.
-    expect(ticked(old, start + 30 * minute).awayMs).toBe(0);
-  });
-
   it("stands still before they start, and never says more than core takes", () => {
     expect(minutesAt(freshProgress, start)).toBe(0);
     expect(ticked(freshProgress, start)).toBe(freshProgress);

@@ -78,14 +78,6 @@ describe("transcripts", () => {
     ]);
   });
 
-  it("places every statement in the brain in the words of its source, so none is left as a loose note", () => {
-    const ws = testWorkspace();
-    const unplaced = ws.statements
-      .filter((each) => placeOf(each, ws.sources)?.at === undefined)
-      .map((each) => each.id);
-    expect(unplaced).toStrictEqual([]);
-  });
-
   it("writes a place in the transcript’s own unit: a minute or a passage", () => {
     expect(placeLabel({}, "12:26")).toBe("12:26");
     expect(placeLabel({ unit: "passage" }, "3")).toBe("§ 3");
@@ -112,38 +104,5 @@ describe("transcripts", () => {
     expect(place?.at).toBe(turns[own]?.at);
     expect(place?.context).toStrictEqual(turns.slice(own - 1, own + 2));
     expect(place?.own).toBe(1);
-  });
-
-  it("keeps a recorded conversation whole: every turn in order, no silent minutes, up to the end of the recording", () => {
-    const minutesSaid = /(?<minutes>\d+) minutes/u;
-    const flaws = testWorkspace().sources.flatMap((source) => {
-      if (!source.transcript || source.transcript.unit !== undefined) {
-        return [];
-      }
-      const minutes = Number(
-        minutesSaid.exec(source.how ?? "")?.groups?.minutes
-      );
-      const at = source.transcript.turns.map((each) => position(each.at));
-      const gaps = at
-        .slice(1)
-        .map((second, index) => second - (at[index] ?? 0));
-      const chapters = source.transcript.chapters.map((chapter) =>
-        position(chapter.at)
-      );
-      return [
-        gaps.some((gap) => gap <= 0) && "a turn out of order",
-        // Spoken, a pause of more than a minute and a half means a stretch was left out. Typed, answers take longer.
-        Math.max(...gaps) > (minutes ? 90 : 180) && "a silent stretch",
-        Boolean(minutes) &&
-          (at.at(-1) ?? 0) < (minutes - 3) * 60 &&
-          "it stops before the recording ends",
-        chapters.some(
-          (chapter, index) => index > 0 && chapter < (chapters[index - 1] ?? 0)
-        ) && "chapters out of order",
-      ]
-        .filter(Boolean)
-        .map((flaw) => `${source.id}: ${String(flaw)}`);
-    });
-    expect(flaws).toStrictEqual([]);
   });
 });

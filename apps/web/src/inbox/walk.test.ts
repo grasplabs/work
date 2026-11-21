@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { orderOf, placeIn, skip, stepFrom } from "./walk.ts";
 import type { Turned } from "./walk.ts";
 
-// Going through the dashboard's pile (pile.ts): which card is on top, and
+// Going through the Inbox's pile (walk.ts): which card is on top, and
 // where a skipped one goes.
 
 const ids = ["a", "b", "c", "d"];
@@ -77,7 +77,7 @@ describe("skipping", () => {
   });
 
   it("does nothing with one card, or none", () => {
-    expect(skip(["a"], untouched)).toBe(untouched);
-    expect(skip([], untouched)).toBe(untouched);
+    expect(skip(["a"], untouched)).toStrictEqual(untouched);
+    expect(skip([], untouched)).toStrictEqual(untouched);
   });
 });

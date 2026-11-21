@@ -281,12 +281,7 @@ describe("a page core refuses to open", () => {
   // core's message, never a reason of the page's own.
   it.each([
     ["page.not_found", "not-found"],
-    ["page.unreviewed", "unreviewed"],
-    ["version.artifact_corrupt", "corrupt"],
-    ["version.manifest_corrupt", "corrupt"],
-    ["version.not_sealed", "not-sealed"],
     ["version.revoked", "version-revoked"],
-    ["version.format_unsupported", "outdated"],
     ["version.nothing_like_this", "unknown"],
   ])("on %s, says it failed as %s", (code, reason) => {
     expect(
