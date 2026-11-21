@@ -310,18 +310,20 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
     },
   });
   await page.goto(`/chats/${chatId}`);
-  const forwarded = waiting
-    .getByRole("region", { name: /^Email/u })
-    .filter({ hasText: "dan@acme.test" });
-  await expect(forwarded).toBeVisible();
-  await expect(waiting).toContainText(
+  // With no subject it drafts no email: it stands on the Approval request.
+  const forwarded = waiting.getByRole("region", {
+    name: described,
+    exact: true,
+  });
+  await openDetails(forwarded);
+  await expect(forwarded).toContainText(
     "More will be sent than is shown above. Read exactly what will be sent before you confirm."
   );
-  await expect(waiting).toContainText('"forwardTo": "eve@evil.test"');
+  await expect(forwarded).toContainText('"forwardTo": "eve@evil.test"');
   await expect(
-    waiting.getByRole("button", { name: "Hide exactly what will be sent" })
+    forwarded.getByRole("button", { name: "Hide exactly what will be sent" })
   ).toBeVisible();
-  await forwarded.getByRole("button", { name: "Discard", exact: true }).click();
+  await forwarded.getByRole("button", { name: "Reject", exact: true }).click();
   await expect(waiting).not.toContainText("dan@acme.test");
   await undescribed
     .getByRole("button", { name: "Reject", exact: true })
@@ -608,7 +610,7 @@ test("the chat on every other page carries on the open chat, which opens as its 
   await expect(
     page.getByRole("main").getByRole("article").first()
   ).toContainText(second);
-  await expect(chat).toHaveCount(0);
+  await expect(head).toHaveCount(0);
   await expect(toggle).toHaveCount(0);
   await page.goBack();
   await expect(messages.getByRole("article").first()).toContainText(second);

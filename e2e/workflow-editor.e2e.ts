@@ -274,11 +274,11 @@ test("a builder sees every declared branch of the checked definition, a test run
   const start = page.getByRole("dialog", { name: "Start a run" });
   await start.getByLabel("who").fill("Ada");
   await start.getByRole("button", { name: "Start the run" }).click();
-  await expect(start.getByRole("status")).toHaveText(
-    "The run started. It is listed with the workflow's runs.",
-    pageRead
-  );
+  await expect(
+    start.getByText("The run started. It is listed with the workflow's runs.")
+  ).toBeVisible(pageRead);
   await start.getByRole("button", { name: "Close" }).first().click();
+  await expect(start).toHaveCount(0);
 
   // A second version, published as the first was.
   await save(page, definition("done"));
@@ -290,7 +290,8 @@ test("a builder sees every declared branch of the checked definition, a test run
   // laid over its version's diagram, marking only the tasks it reached.
   await view(page, "Runs");
   await page
-    .getByRole("button", { name: /^Open the run started/u })
+    .getByRole("table", { name: "Runs" })
+    .getByRole("link")
     .last()
     .click();
   const steps = page.getByRole("dialog");
@@ -317,6 +318,7 @@ test("a builder sees every declared branch of the checked definition, a test run
     ran.getByRole("listitem", { name: "greetOther" })
   ).toHaveAttribute("data-state", "none");
   await page.keyboard.press("Escape");
+  await expect(steps).toHaveCount(0);
 
   // Paused once the person says so and the moment to take it back has
   // passed: it says so, and Resume runs it again.

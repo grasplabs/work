@@ -201,16 +201,25 @@ test("a builder makes an App from what they want done, shares it with their team
   ).toBeAttached(built);
   await expect(unreachable).toHaveCount(0);
   expect(uncaught).toStrictEqual([]);
-  // The share held: Share lists them, its one Person. The bar may be folded
-  // by now, Publish an icon of the same name.
-  await page
-    .getByRole("button", { name: "Publish", exact: true })
-    .filter({ visible: true })
-    .click(built);
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Manage" })
-    .click();
+  // The share held: Share lists them, its one Person. The bar folds as the
+  // chat takes its width again, Publish an icon of the same name: pressed
+  // once the bar has settled.
+  const publishing = page.getByRole("dialog", {
+    name: `Publish ${appPlanned}`,
+  });
+  const openPublishing = async (): Promise<void> => {
+    await expect(async () => {
+      if ((await publishing.count()) === 0) {
+        await page
+          .getByRole("button", { name: "Publish", exact: true })
+          .filter({ visible: true })
+          .click({ timeout: 2000 });
+      }
+      await expect(publishing).toBeVisible({ timeout: 2000 });
+    }).toPass(built);
+  };
+  await openPublishing();
+  await publishing.getByRole("button", { name: "Manage" }).click();
   await expect(
     sharing
       .getByRole("list", { name: "Shared with" })
@@ -218,10 +227,10 @@ test("a builder makes an App from what they want done, shares it with their team
       .filter({ hasText: "Person" })
   ).toHaveCount(1, built);
   await sharing.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(sharing).toHaveCount(0);
   // Publish checks the draft and makes it the first version.
-  await page.getByRole("button", { name: "Publish", exact: true }).click(built);
-  await page
-    .getByRole("dialog", { name: `Publish ${appPlanned}` })
+  await openPublishing();
+  await publishing
     .getByRole("button", { name: "Publish", exact: true })
     .click(built);
   await expect(
@@ -253,8 +262,10 @@ test("a builder makes an App from what they want done, shares it with their team
     .getByRole("navigation", { name: /s workspace$/u })
     .getByRole("link", { name: "Data" })
     .click();
-  await expect(page.getByRole("cell", { name: "Grace Hopper" })).toBeVisible(
-    built
-  );
-  await expect(page.getByRole("cell", { name: "Ada Lovelace" })).toHaveCount(0);
+  await expect(
+    page.getByRole("rowheader", { name: "Grace Hopper" })
+  ).toBeVisible(built);
+  await expect(
+    page.getByRole("rowheader", { name: "Ada Lovelace" })
+  ).toHaveCount(0);
 });
