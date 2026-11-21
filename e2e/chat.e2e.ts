@@ -238,6 +238,8 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await search.fill(`never said ${tag}`);
   await expect(chats.getByRole("option")).toHaveCount(0);
   await expect(chats).toContainText(`No chat has “never said ${tag}”`);
+  // Escape in a search with words in it clears them first: cleared, it closes.
+  await search.fill("");
   await page.keyboard.press("Escape");
   await expect(chats).toHaveCount(0);
 
@@ -263,45 +265,28 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // sends under Details.
   const undescribed = waiting.getByRole("region", { name: /^mail\.send on /u });
   const described = `Send an email on Microsoft 365 (${account})`;
-  const card = waiting.getByRole("region", { name: described, exact: true });
+  // The described one is the email it drafts, named by its subject.
+  const card = waiting.getByRole("region", { name: `Email: Invoice ${tag}` });
   // The undescribed one shows its action and its exact input.
   await openDetails(undescribed);
   await expect(undescribed).toContainText('"to": "ben@acme.test"');
-  // The described one reads as its tool says, on the connection by name,
-  // in the input's own values; its exact input is one click away.
-  await openDetails(card);
-  await expect(card).toContainText(`On Microsoft 365 (${account})`);
-  await expect(card.getByText("cleo@acme.test", { exact: true })).toBeVisible();
-  await expect(card.getByText("The invoice is attached.")).toBeVisible();
-  // A long value starts cut short and says so, and Confirm is held, with
-  // that reason, until all of it has been shown.
-  await expect(card).not.toContainText("eve@evil.test");
-  const confirm = card.getByRole("button", { name: "Confirm", exact: true });
-  await expect(confirm).toBeDisabled();
-  await expect(card).toContainText("Part of what will be sent is cut short.");
-  await card.getByRole("button", { name: /^Show all 31 lines/u }).click();
+  // The described one shows whom it goes to and all of its body, the blank
+  // lines folded so nothing waits below them; on the connection by name,
+  // with its exact input open from the start, as it sends more than is shown.
+  await expect(card.getByText("cleo@acme.test").first()).toBeVisible();
   await expect(card).toContainText("Also send it to eve@evil.test.");
-  await expect(confirm).toBeEnabled();
-  await expect(card).not.toContainText(
-    "Part of what will be sent is cut short."
-  );
-  await expect(card).not.toContainText('"mailbox"');
-  await card
-    .getByRole("button", { name: "Show exactly what will be sent" })
-    .click();
-  await expect(card).toContainText(`"mailbox": "${account}"`);
+  await expect(waiting).toContainText(`On Microsoft 365 (${account})`);
+  await expect(waiting).toContainText(`"mailbox": "${account}"`);
   // When each was asked for, so an old one isn't taken for a new one.
   await expect(waiting.locator("time")).toHaveCount(2);
   await expect(waiting.locator("time").first()).toHaveAttribute(
     "datetime",
     /^\d{4}-\d{2}-\d{2}T/u
   );
-  // Confirming goes through core's checks again: the agent was never
-  // granted this connection, so it's refused, and the write still waits.
-  // Why is said above the list, which keeps it should the card go: which
-  // write, then core's reason, each a sentence of its own.
-  await confirm.click();
-  await expect(card).toContainText("Failed");
+  // Sending goes through core's checks again: the agent was never granted
+  // this connection, so it's refused, and the write still waits. Why is
+  // said above the list: which write, then core's reason.
+  await card.getByRole("button", { name: "Send", exact: true }).click();
   const refused = waiting
     .getByRole("alert")
     .filter({ hasText: `${described} didn't go through.` });
@@ -309,9 +294,9 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
     "This App or agent has no permission to do that."
   );
   await expect(card).toContainText("cleo@acme.test");
-  // Rejecting each drops it, and with a decision that went through, the
+  // Discarding drops it, and with a decision that went through, the
   // refusal's alert goes too.
-  await card.getByRole("button", { name: "Reject", exact: true }).click();
+  await card.getByRole("button", { name: "Discard", exact: true }).click();
   await expect(waiting).not.toContainText("cleo@acme.test");
   await expect(waiting.getByRole("alert")).toHaveCount(0);
   // One whose input holds more than its tool shows says so, and its exact
@@ -325,15 +310,18 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
     },
   });
   await page.goto(`/chats/${chatId}`);
-  await openDetails(card);
-  await expect(card).toContainText(
+  const forwarded = waiting
+    .getByRole("region", { name: /^Email/u })
+    .filter({ hasText: "dan@acme.test" });
+  await expect(forwarded).toBeVisible();
+  await expect(waiting).toContainText(
     "More will be sent than is shown above. Read exactly what will be sent before you confirm."
   );
-  await expect(card).toContainText('"forwardTo": "eve@evil.test"');
+  await expect(waiting).toContainText('"forwardTo": "eve@evil.test"');
   await expect(
-    card.getByRole("button", { name: "Hide exactly what will be sent" })
+    waiting.getByRole("button", { name: "Hide exactly what will be sent" })
   ).toBeVisible();
-  await card.getByRole("button", { name: "Reject", exact: true }).click();
+  await forwarded.getByRole("button", { name: "Discard", exact: true }).click();
   await expect(waiting).not.toContainText("dan@acme.test");
   await undescribed
     .getByRole("button", { name: "Reject", exact: true })
@@ -489,21 +477,27 @@ test("one control picks the model and how hard it thinks, sends both with the qu
     "Model and effort: mistral-large-latest"
   );
   await control.click();
-  await expect(
-    picker.getByRole("group", { name: "Makers" }).getByRole("button")
-  ).toHaveText([/mistral/u, /Anthropic/u]);
+  const makers = picker.getByRole("group", { name: "Makers" });
+  await expect(makers.getByRole("button")).toHaveCount(2);
+  await expect(makers.getByRole("button").first()).toHaveAccessibleName(
+    /mistral/u
+  );
+  await expect(makers.getByRole("button").last()).toHaveAccessibleName(
+    /Anthropic/u
+  );
   await expect(thinking).toHaveCount(0);
 
   // One that thinks offers its efforts in the same picker, which stays open
   // for them, at the model's own default.
   await picker.getByRole("button", { name: "Anthropic" }).click();
   await picker.getByRole("option", { name: "claude-sonnet-4-6" }).click();
-  await expect(thinking.getByRole("radio")).toHaveText([
-    "Low",
-    "Medium",
-    "High",
-    "Max",
-  ]);
+  await expect(thinking.getByRole("radio")).toHaveCount(4);
+  for (const [index, effort] of ["Low", "Medium", "High", "Max"].entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- one effort at a time
+    await expect(thinking.getByRole("radio").nth(index)).toHaveAccessibleName(
+      effort
+    );
+  }
   await expect(thinking.getByRole("radio", { name: "Medium" })).toBeChecked();
   await thinking.getByRole("radio", { name: "Max" }).click();
   await page.keyboard.press("Escape");
@@ -607,6 +601,8 @@ test("the chat on every other page carries on the open chat, which opens as its 
 
   // Opened as a page, it is the chat's own page, with nothing of the dock
   // beside it; Back, the dock is beside the page again, on the same chat.
+  // Named after the question once the answer is in: the head holds it.
+  await expect(head.getByRole("button", { name: second })).toBeVisible();
   await fromMenu("Open as a page");
   await expect(page).toHaveURL(/\/chats\/[^/]+$/u);
   await expect(

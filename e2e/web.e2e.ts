@@ -479,6 +479,10 @@ test("shows the members page only to someone signed in, and never signs them out
     "Grasp could not reach its servers. Nothing you saved is lost.",
     { timeout: reconnectMs }
   );
+  // The alert keeps its words while it tries: the first try ends first.
+  await expect(retry).not.toHaveAttribute("aria-busy", "true", {
+    timeout: reconnectMs,
+  });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
 
   // Once core answers again, trying again lets them in.

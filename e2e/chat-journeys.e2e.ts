@@ -205,16 +205,9 @@ test("the chat beside a page floats, moves, docks again, goes full screen and ba
   // A draft, then closed and opened again: in the same place, the draft kept.
   const draft = "Half a question";
   await page.getByRole("textbox", { name: "Ask Grasp" }).fill(draft);
-  // Where it stands once it has settled from full screen.
-  let placed = await head.boundingBox();
-  await expect
-    .poll(async () => {
-      const now = await head.boundingBox();
-      const settled = JSON.stringify(now) === JSON.stringify(placed);
-      placed = now;
-      return settled;
-    })
-    .toBe(true);
+  // Back where it was moved, once it has glided there from full screen.
+  const placed = after;
+  await expect.poll(async () => await head.boundingBox()).toStrictEqual(placed);
   await head.getByRole("button", { name: "Close" }).click();
   await expect(head).toBeHidden();
   await page.getByRole("button", { name: "Show or hide the chat" }).click();

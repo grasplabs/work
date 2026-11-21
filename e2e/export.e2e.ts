@@ -23,20 +23,13 @@ const downloadNote = async (
   await page.getByRole("menuitem", { name: `Download as ${format}` }).click();
 };
 
-/** Chooses `format` from Download in the open chat's menu, in its header. */
+/** Downloads the open chat as `format`, from the "…" menu in its header. */
 const downloadChat = async (
   page: Page,
-  format: "Markdown (.md)" | "PDF"
+  format: "Markdown" | "PDF"
 ): Promise<void> => {
   await page.getByRole("button", { name: "More for this chat" }).click();
-  // By the keyboard: the submenu also opens as the pointer rests on its
-  // item, so a click there may close it again, and the test would race.
-  await page.getByRole("menuitem", { name: "Download" }).focus();
-  await page.keyboard.press("ArrowRight");
-  const item = page.getByRole("menuitem", { name: format });
-  await item.focus();
-  await expect(item).toBeFocused();
-  await page.keyboard.press("Enter");
+  await page.getByRole("menuitem", { name: `Download as ${format}` }).click();
 };
 
 const textOf = async (download: Download): Promise<string> =>
@@ -171,7 +164,7 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
     .getByRole("log", { name: "Messages" });
   await expect(messages.getByRole("article").first()).toContainText(question);
   const chat = page.waitForEvent("download");
-  await downloadChat(page, "Markdown (.md)");
+  await downloadChat(page, "Markdown");
   const chatFile = await chat;
   // Named after the chat, whose title is its first question here.
   expect(chatFile.suggestedFilename()).toBe(`How-long-is-leave-${tag}.md`);
