@@ -74,7 +74,7 @@ import { speechResponse } from "./onboarding/speech.ts";
 import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import { transcriptionResponse } from "./onboarding/transcription.ts";
-import { logoPathPattern, logoResponse } from "./organization-logo.ts";
+import { logoResponse } from "./organization-logo.ts";
 import { pageCallRoute } from "./page-calls.ts";
 import { pageFrameResponse, pageModuleResponse } from "./page-frame.ts";
 import {
@@ -390,22 +390,6 @@ const webhookResponse = async (
     : await sourceEventResponse(request, env, token, requestId, ctx);
 };
 
-/**
- * A file served to signed-in members: the organization's logo; undefined
- * for any other path.
- */
-const memberFileResponse = async (
-  pathname: string,
-  request: Request,
-  env: Env,
-  requestId: string
-): Promise<Response | undefined> => {
-  const logo = logoPathPattern.exec(pathname)?.groups?.hash;
-  return logo === undefined
-    ? undefined
-    : await logoResponse(request, env, logo, requestId);
-};
-
 /** Routes a request that has passed the router-secret check. */
 const route = async (
   request: Request,
@@ -476,9 +460,9 @@ const route = async (
   if (appCall !== undefined) {
     return appCall;
   }
-  const file = await memberFileResponse(pathname, request, env, requestId);
-  if (file !== undefined) {
-    return file;
+  const logo = await logoResponse(pathname, request, env, requestId);
+  if (logo !== undefined) {
+    return logo;
   }
   if (isUnder(pathname, "/api")) {
     return errorResponse(

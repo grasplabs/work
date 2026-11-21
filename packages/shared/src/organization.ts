@@ -34,13 +34,16 @@ export interface Organization {
   /** The email domains people sign in with, from the deployment's config. */
   signInDomains: string[];
   /**
-   * Where its logo is shown from (`organizationLogoPath`), for signed-in
+   * Where its logo is shown from (`organizationLogoPath`), to signed-in
    * members only; null while it has none, and its initials stand in.
    */
   logo: string | null;
 }
 
-/** The image types a logo may be: told by its bytes, never its name. No SVG, which can hold script. */
+/**
+ * The image types a logo may be, told by its first bytes, never by a name
+ * or a type anyone gives. No SVG: it can carry script.
+ */
 export const organizationLogoTypes = [
   "image/png",
   "image/jpeg",
@@ -53,11 +56,21 @@ export type OrganizationLogoType = (typeof organizationLogoTypes)[number];
 export const organizationLogoMaxBytes = 512 * 1024;
 
 /**
- * Where the logo whose content hashes to `hash` is served from. A new logo
- * is a new address, so a browser may keep each for good.
+ * The most pixels a logo may be on either side: every member's browser
+ * decodes it on every page, and a small file can declare a huge image.
+ */
+export const organizationLogoMaxPixels = 4096;
+
+/** The path every logo is served under (`organizationLogoPath`). */
+export const organizationLogoPrefix = "/api/organization/logo/";
+
+/**
+ * Where the logo whose content hashes to `hash` (SHA-256, in hex) is
+ * served from. A new logo is a new address, so a browser may keep each
+ * one for good.
  */
 export const organizationLogoPath = (hash: string): string =>
-  `/api/organization/logo/${hash}`;
+  `${organizationLogoPrefix}${hash}`;
 
 /** What an admin changes; what is left out stays as it is. */
 export interface OrganizationChanges {
@@ -75,10 +88,12 @@ export interface OrganizationApi {
   update: (changes: OrganizationChanges) => Promise<Organization>;
   /**
    * Sets the organization's logo from an image's bytes: a PNG, JPEG or
-   * WebP of at most {@link organizationLogoMaxBytes}. Its own admins only.
+   * WebP of at most {@link organizationLogoMaxBytes} and
+   * {@link organizationLogoMaxPixels} pixels a side, and returns the
+   * result. Its own admins only.
    */
   setLogo: (image: Uint8Array) => Promise<Organization>;
-  /** Takes the logo away: the initials stand in again. Its own admins only. */
+  /** Takes the logo away, so the initials stand in again. Its own admins only. */
   removeLogo: () => Promise<Organization>;
   /**
    * The organization's teams, by name, for choosing one (a collection's,
@@ -94,6 +109,8 @@ export const organizationErrors = defineErrorFamily({
   "organization.time_zone_invalid": "That isn't a time zone Grasp knows.",
   "organization.logo_invalid": "Choose a PNG, JPEG or WebP image.",
   "organization.logo_too_large": "Choose an image of at most 512 KB.",
+  "organization.logo_too_wide":
+    "Choose an image of at most 4096 by 4096 pixels.",
   "organization.changes_invalid":
     "Say what to change: the name, the time zone or both.",
 });

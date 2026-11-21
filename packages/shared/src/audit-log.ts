@@ -357,6 +357,9 @@ const typeRules: readonly {
   { action: "channel_account", type: "permission" },
   { action: "member", type: "config" },
   { action: "team", type: "config" },
+  // An admin changing the organization's name, time zone or logo
+  // (organization.ts, organization-logo.ts).
+  { action: "organization", type: "config" },
   // A decision a run put to people: opened, asked, answered, timed out.
   { action: "workflow.decision", type: "decision" },
   // npm packages asked for an App or a workflow: the request, and another

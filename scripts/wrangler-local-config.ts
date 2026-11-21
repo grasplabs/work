@@ -16,7 +16,8 @@
  * For the same reason connect saw none of its optional secrets: a key in
  * its `.dev.vars` that the config doesn't require (COMPOSIO_API_KEY, the
  * AI providers' keys) never reached it, so Composio was never offered
- * locally. The local config requires every secret its `.dev.vars` sets.
+ * locally. The local config requires every secret its `.dev.vars` sets
+ * that isn't a var. Only the names go into it, never a value.
  *
  * With `CONNECT_DEV_MAIN` set, the local config's `main` is that file
  * instead of the Worker's own: `vp run dev` (scripts/dev.ts) names
@@ -33,30 +34,27 @@ import { parseEnv } from "node:util";
 
 import { parseJsonc } from "./jsonc.ts";
 
-const [config, ...pairs] = process.argv.slice(2);
-if (config === undefined || pairs.length === 0) {
-  throw new Error("Usage: wrangler-local-config.ts <config> NAME:value...");
-}
+const leadingBom = /^\uFEFF/u;
 
-const parsed = parseJsonc(readFileSync(config, "utf-8"));
-if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-  throw new Error(`${config} is not a wrangler config`);
-}
-
-const added = Object.fromEntries(
-  pairs.map((pair) => {
-    const at = pair.indexOf(":");
-    if (at <= 0) {
-      throw new Error(`${pair} is not NAME:value`);
-    }
-    return [pair.slice(0, at), pair.slice(at + 1)];
-  })
-);
-const vars: unknown = Reflect.get(parsed, "vars");
-
-/** The secrets the config requires, and those `.dev.vars` beside it sets. */
-const requiredSecrets = (): string[] => {
-  const secrets: unknown = Reflect.get(parsed, "secrets");
+/**
+ * The secrets `config` requires, and every other key `devVars` sets that
+ * isn't one of its `vars`: wrangler loads a var's value from `.dev.vars`
+ * already, and refuses a name that is both a var and a secret. It refuses
+ * one shared with any other binding too (connect's DB, CLOCK, LOADER,
+ * CF_VERSION_METADATA): such a name in `.dev.vars` stops local dev with
+ * wrangler's own message.
+ *
+ * Wrangler reads `.dev.vars` with dotenv, which isn't a dependency here;
+ * Node's parser lists the same keys once a leading BOM is gone, except a
+ * `KEY: value` line, which wrangler loads and this leaves unbound, and a
+ * name with a space, which this lists and wrangler warns is missing.
+ */
+const requiredSecrets = (
+  config: object,
+  vars: object,
+  devVars: string | undefined
+): string[] => {
+  const secrets: unknown = Reflect.get(config, "secrets");
   const required: unknown =
     typeof secrets === "object" && secrets !== null
       ? Reflect.get(secrets, "required")
@@ -64,29 +62,80 @@ const requiredSecrets = (): string[] => {
   const named = Array.isArray(required)
     ? required.filter((name) => typeof name === "string")
     : [];
-  const devVars = path.join(path.dirname(config), ".dev.vars");
-  const set = existsSync(devVars)
-    ? Object.keys(parseEnv(readFileSync(devVars, "utf-8")))
-    : [];
+  const set =
+    devVars === undefined
+      ? []
+      : Object.keys(parseEnv(devVars.replace(leadingBom, ""))).filter(
+          (name) => !Object.hasOwn(vars, name)
+        );
   return [...new Set([...named, ...set])];
 };
 
-// Never for a stack that brings a config of its own, as the e2e stack
-// does (`CONNECT_WRANGLER_CONFIG`): a variable left in a shell can't swap
-// the connect its tests run against.
-const devMain =
-  process.env.CONNECT_WRANGLER_CONFIG === undefined
-    ? process.env.CONNECT_DEV_MAIN
-    : undefined;
-const local = {
-  ...parsed,
-  ...(devMain === undefined ? {} : { main: devMain }),
-  vars: { ...(typeof vars === "object" ? vars : {}), ...added },
-  secrets: { required: requiredSecrets() },
+/**
+ * The local config for `config`: `added` among its vars, `main` swapped
+ * for `devMain` when there is one, and every secret `devVars` (the text of
+ * the `.dev.vars` beside it, if there is one) sets required.
+ */
+export const localConfig = (
+  config: object,
+  {
+    added,
+    devMain,
+    devVars,
+  }: {
+    added: Record<string, string>;
+    devMain: string | undefined;
+    devVars: string | undefined;
+  }
+): object => {
+  const own: unknown = Reflect.get(config, "vars");
+  const vars = { ...(typeof own === "object" ? own : {}), ...added };
+  return {
+    ...config,
+    ...(devMain === undefined ? {} : { main: devMain }),
+    vars,
+    secrets: { required: requiredSecrets(config, vars, devVars) },
+  };
 };
 
-// Next to the config, so every path in it still resolves the same.
-writeFileSync(
-  path.join(path.dirname(config), "wrangler.local.jsonc"),
-  `${JSON.stringify(local, null, 2)}\n`
-);
+if (import.meta.main) {
+  const [config, ...pairs] = process.argv.slice(2);
+  if (config === undefined || pairs.length === 0) {
+    throw new Error("Usage: wrangler-local-config.ts <config> NAME:value...");
+  }
+
+  const parsed = parseJsonc(readFileSync(config, "utf-8"));
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${config} is not a wrangler config`);
+  }
+
+  const added = Object.fromEntries(
+    pairs.map((pair) => {
+      const at = pair.indexOf(":");
+      if (at <= 0) {
+        throw new Error(`${pair} is not NAME:value`);
+      }
+      return [pair.slice(0, at), pair.slice(at + 1)];
+    })
+  );
+  const devVarsPath = path.join(path.dirname(config), ".dev.vars");
+  const local = localConfig(parsed, {
+    added,
+    // Never for a stack that brings a config of its own, as the e2e stack
+    // does (`CONNECT_WRANGLER_CONFIG`): a variable left in a shell can't
+    // swap the connect its tests run against.
+    devMain:
+      process.env.CONNECT_WRANGLER_CONFIG === undefined
+        ? process.env.CONNECT_DEV_MAIN
+        : undefined,
+    devVars: existsSync(devVarsPath)
+      ? readFileSync(devVarsPath, "utf-8")
+      : undefined,
+  });
+
+  // Next to the config, so every path in it still resolves the same.
+  writeFileSync(
+    path.join(path.dirname(config), "wrangler.local.jsonc"),
+    `${JSON.stringify(local, null, 2)}\n`
+  );
+}

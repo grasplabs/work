@@ -28,6 +28,27 @@
  *   like any App's, its `grasp.config.ts` and `server/schema.ts` exactly
  *   as its definition generates them.
  *
+ * A release may ship none: then apps/core/blueprints/ holds only its
+ * `ids.json`, and the build embeds none, which the install takes as a
+ * release without built-ins, removing those an earlier release
+ * installed. A missing folder fails the build, so none is never shipped
+ * by accident.
+ *
+ * `ids.json` names every id a release ever shipped (`checkShippedIds`):
+ * `"shipped"` while its folder is here, `"retired"` once it is gone, and
+ * the build of the release fails until both hold, so neither can be
+ * forgotten. A retired id never takes new, unrelated code: Apps created
+ * from the built-in keep its id as their origin (`app_origins`), and a
+ * deployment that skips the release that removed it (releases reach
+ * clients channel by channel) never detached them, so another built-in
+ * under the id would be offered to them as an update of code they never
+ * came from. Shipping that same built-in again is safe, and right for
+ * those Apps, whose origin it is: mark its id `"shipped"` again, which
+ * the build refuses until someone does, so it is a decision a review
+ * sees. A list in the repo, not a record the install keeps: a rollback to
+ * a release that ships a removed built-in installs it again, as it
+ * should.
+ *
  * Each is checked here as the install would check it, so a bad one fails
  * the build rather than the install: its ID, its manifest (its
  * permissions as any request's are checked), its definition, and its
@@ -67,6 +88,12 @@ import { blueprintsDigestText } from "./src/builtin-digest.ts";
 
 /** Where the built-ins that ship with each release are. */
 export const blueprintsDir = path.join(import.meta.dirname, "blueprints");
+
+/** Where core's tests' own built-ins are, which only their module embeds. */
+export const testBlueprintsDir = path.join(
+  import.meta.dirname,
+  "test/fixtures/blueprints"
+);
 
 /** The module core imports as `#blueprints`. */
 export const blueprintsModule = path.join(
@@ -174,88 +201,139 @@ export const filesIn = (dir: string): Record<string, string> => {
   );
 };
 
+/**
+ * The folders of the built-ins in `dir`, one each, by name. `dir` must be
+ * there, holding only the release's `ids.json` when it ships none: the
+ * install removes every built-in a release doesn't ship, so a build that
+ * missed the folder must fail, never ship none.
+ */
+export const blueprintFolders = (dir: string): string[] => {
+  if (!existsSync(dir)) {
+    throw new Error(
+      `The built-in blueprints' folder ${dir} isn't there: a release that ships none keeps it, with its ids.json`
+    );
+  }
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map(({ name }) => name);
+};
+
+/** Every id a release ever shipped, as `ids.json` in its folder keeps them. */
+const shippedIdsSchema = z.record(idSchema, z.enum(["shipped", "retired"]));
+
+/**
+ * Checks the release's folder `dir` against its `ids.json` (above): each
+ * built-in's id listed as `"shipped"`, never `"retired"`, and each id
+ * listed as `"shipped"` a folder's. Throws, saying what to change.
+ */
+export const checkShippedIds = (dir: string): void => {
+  const file = path.join(dir, "ids.json");
+  if (!existsSync(file)) {
+    throw new Error(
+      `${file} isn't there: it names every built-in id a release shipped`
+    );
+  }
+  const ids = shippedIdsSchema.parse(JSON.parse(readFileSync(file, "utf-8")));
+  const folders = blueprintFolders(dir);
+  for (const id of folders) {
+    if (!Object.hasOwn(ids, id)) {
+      throw new Error(`Built-in ${id}: add "${id}": "shipped" to ${file}`);
+    }
+    if (ids[id] === "retired") {
+      throw new Error(
+        `Built-in ${id}: an earlier release removed a built-in of this id, which Apps created from it keep as their origin: name new code another way, or, to ship that same built-in again, mark it "shipped" in ${file}`
+      );
+    }
+  }
+  for (const [id, state] of Object.entries(ids)) {
+    if (state === "shipped" && !folders.includes(id)) {
+      throw new Error(
+        `Built-in ${id} is gone: mark it "retired" in ${file}, never delete it`
+      );
+    }
+  }
+};
+
 /** The built-ins in `dir`, one per folder, checked. */
 const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
-  readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map(({ name }) => {
-      const folder = path.join(dir, name);
-      const where = `Built-in blueprint ${folder}`;
-      if (!idSchema.safeParse(name).success) {
-        throw new Error(`${where}: name the folder in lowercase-kebab-case`);
-      }
-      const manifest = manifestSchema.safeParse(
-        JSON.parse(readFileSync(path.join(folder, "blueprint.json"), "utf-8"))
+  blueprintFolders(dir).map((name) => {
+    const folder = path.join(dir, name);
+    const where = `Built-in blueprint ${folder}`;
+    if (!idSchema.safeParse(name).success) {
+      throw new Error(`${where}: name the folder in lowercase-kebab-case`);
+    }
+    const manifest = manifestSchema.safeParse(
+      JSON.parse(readFileSync(path.join(folder, "blueprint.json"), "utf-8"))
+    );
+    if (!manifest.success) {
+      throw new Error(`${where}: blueprint.json ${manifest.error.message}`);
+    }
+    const filesDir = path.join(folder, "files");
+    if (!existsSync(filesDir)) {
+      throw new Error(`${where}: has no files/`);
+    }
+    const files = filesIn(filesDir);
+    const checked = fileChangesSchema.safeParse(files);
+    if (!checked.success) {
+      throw new Error(`${where}: files/ ${checked.error.message}`);
+    }
+    const length = Object.values(files).reduce(
+      (total, text) => total + text.length,
+      0
+    );
+    if (length > appLimits.totalLength) {
+      throw new Error(
+        `${where}: files/ holds ${length} characters, over an App's ${appLimits.totalLength}`
       );
-      if (!manifest.success) {
-        throw new Error(`${where}: blueprint.json ${manifest.error.message}`);
+    }
+    const workflows = manifest.data.workflows.map((workflow) => {
+      const file = path.join(folder, workflow.definition);
+      if (!existsSync(file)) {
+        throw new Error(`${where}: has no ${workflow.definition}`);
       }
-      const filesDir = path.join(folder, "files");
-      if (!existsSync(filesDir)) {
-        throw new Error(`${where}: has no files/`);
-      }
-      const files = filesIn(filesDir);
-      const checked = fileChangesSchema.safeParse(files);
-      if (!checked.success) {
-        throw new Error(`${where}: files/ ${checked.error.message}`);
-      }
-      const length = Object.values(files).reduce(
-        (total, text) => total + text.length,
-        0
-      );
-      if (length > appLimits.totalLength) {
+      const definition = readFileSync(file, "utf-8");
+      // Checked as an install stores it, so the copy can publish it.
+      const shipped = blueprintWorkflowSchema.safeParse({
+        ...workflow,
+        definition,
+      });
+      if (!shipped.success) {
         throw new Error(
-          `${where}: files/ holds ${length} characters, over an App's ${appLimits.totalLength}`
+          `${where}: ${workflow.definition} ${shipped.error.message}`
         );
       }
-      const workflows = manifest.data.workflows.map((workflow) => {
-        const file = path.join(folder, workflow.definition);
-        if (!existsSync(file)) {
-          throw new Error(`${where}: has no ${workflow.definition}`);
-        }
-        const definition = readFileSync(file, "utf-8");
-        // Checked as an install stores it, so the copy can publish it.
-        const shipped = blueprintWorkflowSchema.safeParse({
-          ...workflow,
-          definition,
-        });
-        if (!shipped.success) {
-          throw new Error(
-            `${where}: ${workflow.definition} ${shipped.error.message}`
-          );
-        }
-        try {
-          JSON.parse(definition);
-        } catch {
-          throw new Error(`${where}: ${workflow.definition} isn't JSON`);
-        }
-        return shipped.data;
-      });
-      const definitionFile = path.join(folder, "definition.json");
-      if (!existsSync(definitionFile)) {
-        throw new Error(`${where}: has no definition.json`);
+      try {
+        JSON.parse(definition);
+      } catch {
+        throw new Error(`${where}: ${workflow.definition} isn't JSON`);
       }
-      const definition = readDefinition(
-        JSON.parse(readFileSync(definitionFile, "utf-8"))
-      );
-      // Its code is its definition's, as every version's is (src/apps.ts).
-      for (const [file, source] of Object.entries(
-        definitionSources(definition)
-      )) {
-        if (files[file] !== source) {
-          throw new Error(
-            `${where}: files/${file} isn't what definition.json generates`
-          );
-        }
-      }
-      return {
-        id: name,
-        ...manifest.data,
-        workflows,
-        definition: definitionText(definition),
-        files,
-      };
+      return shipped.data;
     });
+    const definitionFile = path.join(folder, "definition.json");
+    if (!existsSync(definitionFile)) {
+      throw new Error(`${where}: has no definition.json`);
+    }
+    const definition = readDefinition(
+      JSON.parse(readFileSync(definitionFile, "utf-8"))
+    );
+    // Its code is its definition's, as every version's is (src/apps.ts).
+    for (const [file, source] of Object.entries(
+      definitionSources(definition)
+    )) {
+      if (files[file] !== source) {
+        throw new Error(
+          `${where}: files/${file} isn't what definition.json generates`
+        );
+      }
+    }
+    return {
+      id: name,
+      ...manifest.data,
+      workflows,
+      definition: definitionText(definition),
+      files,
+    };
+  });
 
 /**
  * Writes the built-ins in `dirs` into `out`, in id order, and their digest
@@ -291,6 +369,7 @@ export const writeBlueprints = (
 };
 
 if (import.meta.main) {
+  checkShippedIds(blueprintsDir);
   const count = writeBlueprints([blueprintsDir]);
   console.info(`Embedded ${count} built-in blueprint(s)`);
 }

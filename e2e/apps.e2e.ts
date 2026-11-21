@@ -258,6 +258,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
+    // Not "/": an admin just signed in there, with the company's
+    // onboarding still open, lands in /setup instead (landing.ts).
     await page.goto("/workflows");
     const links = page
       .getByRole("navigation", { name: "Main" })

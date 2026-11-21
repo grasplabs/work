@@ -1,7 +1,7 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import { log } from "@grasp-os/shared/log";
 import {
   organizationErrors,
+  organizationLogoPath,
   organizationNameSchema,
   organizationTimeZoneSchema,
 } from "@grasp-os/shared/organization";
@@ -10,7 +10,7 @@ import type {
   OrganizationApi,
   OrganizationChanges,
 } from "@grasp-os/shared/organization";
-import { isAdmin, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
+import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { defaultTimeZone, nextScheduledRun } from "@grasp-os/shared/workflows";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
@@ -21,8 +21,8 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { organizations, teams } from "./db/core/schema.ts";
+import { requireOwnAdmin, stillAdmin } from "./organization-admin.ts";
 import {
-  logoPathOf,
   removeOrganizationLogo,
   setOrganizationLogo,
 } from "./organization-logo.ts";
@@ -69,7 +69,7 @@ export const readOrganization = async (env: Env): Promise<Organization> => {
     timeZone,
     dataRegion: "eu",
     signInDomains: signInConfig(env)?.domains ?? [],
-    logo: logoPathOf(logo),
+    logo: logo === null ? null : organizationLogoPath(logo),
   };
 };
 
@@ -155,14 +155,6 @@ const parseChanges = (
   };
 };
 
-/** Whether `userId` is an admin of the organization now. */
-const stillAdmin = async (env: Env, userId: string): Promise<boolean> => {
-  const row = await drizzle(env.DB).get<{ admin: number }>(
-    sql`SELECT ${activeMember(userId, ["admin"])} AS admin`
-  );
-  return row.admin === 1;
-};
-
 /**
  * Changes the organization's name, time zone or both, in one batch: each
  * one statement that changes it only while it differs and the admin still
@@ -175,10 +167,7 @@ const updateOrganization = async (
   by: Identity,
   changes: unknown
 ): Promise<Organization> => {
-  if (by.staff || !isAdmin(by.role)) {
-    log.warn("organization.refused", { actor: by.userId });
-    throw roleErrors.create("role.forbidden");
-  }
+  requireOwnAdmin(by);
   const { name, timeZone } = parseChanges(changes);
   const db = drizzle(env.DB);
   const admin = activeMember(by.userId, ["admin"]);

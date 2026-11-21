@@ -266,48 +266,55 @@ const monthRunsOf = async (
   );
 };
 
-/** What a chat's turns are called for: a person's, and a guest's. */
-const chatPurposes = ["chat.turn", "guest.turn"];
+/**
+ * What a person's chat turn is called for (chat-harness.ts,
+ * workspace.ts): the month's spend counts chat by it.
+ */
+export const chatTurnPurpose = "chat.turn";
+
+/** Milliseconds in a day. */
+const dayMs = 86_400_000;
 
 /**
  * How many days of UTC month `month` have begun by `now`: up to today in
- * the month it is, all of a month that is over, and all of one to come
- * (tests count in months from 2200).
+ * the month it is, all of one that is over, none of one to come.
  */
 const daysSoFar = (month: string, now: Date): number => {
   const { from, until } = monthBounds(month);
-  const length = Math.round((until.getTime() - from.getTime()) / 86_400_000);
-  return now >= from && now < until ? now.getUTCDate() : length;
+  const length = Math.round((until.getTime() - from.getTime()) / dayMs);
+  const begun = Math.floor((now.getTime() - from.getTime()) / dayMs) + 1;
+  return Math.min(length, Math.max(0, begun));
 };
 
 /**
  * What the models cost in `month` on the organization's keys: the
- * deployment's total, each day's, chat's, and the workflows that spent most (at most
- * `modelSpendListed`), an App's and an independent one's alike, each with
- * its name and its App's where core still has them, and its runs started
- * in the month: for admins to read (models-rpc.ts).
+ * deployment's total, each UTC day's, chat's, and the workflows that spent
+ * most (at most `modelSpendListed`), an App's and an independent one's
+ * alike, each with its name and its App's where core still has them, and
+ * its runs started in the month: for admins to read (models-rpc.ts).
  */
 export const monthSpend = async (
   env: Pick<Env, "DB">,
-  month: string
+  month: string,
+  now = new Date()
 ): Promise<ModelMonthSpend> => {
   const db = drizzle(env.DB);
   const spent = sql<number>`sum(${modelUsage.cost})`;
-  // The UTC day of the month each call was answered on, `01` to `31`.
+  // The UTC day of the month each call was answered on, `01` to `31`:
+  // `created_at` is in milliseconds.
   const day = sql<string>`strftime('%d', ${modelUsage.createdAt} / 1000, 'unixepoch')`;
-  const [totals, byDay, chats, rows] = await Promise.all([
-    db.select({ total: spent }).from(modelUsage).where(organizationIn(month)),
+  const [byDay, rows] = await Promise.all([
+    // One pass over the month's rows: at most 31, each day's spend and
+    // its chat's; the total and chat's are their sums.
     db
-      .select({ day, amount: spent })
+      .select({
+        day,
+        amount: spent,
+        chat: sql<number>`sum(case when ${modelUsage.purpose} = ${chatTurnPurpose} then ${modelUsage.cost} else 0 end)`,
+      })
       .from(modelUsage)
       .where(organizationIn(month))
       .groupBy(day),
-    db
-      .select({ total: spent })
-      .from(modelUsage)
-      .where(
-        and(organizationIn(month), inArray(modelUsage.purpose, chatPurposes))
-      ),
     // One more than are listed, to tell whether any are left out.
     db
       .select({
@@ -332,21 +339,28 @@ export const monthSpend = async (
     workflowNamesOf(db, workflows),
     monthRunsOf(db, workflows, month),
   ]);
+  // Every day so far, and on to the latest a call was recorded on, if
+  // later (a clock ahead of `now`'s), so the days always add up to the
+  // total.
   const days: number[] = Array.from(
-    { length: daysSoFar(month, new Date()) },
+    {
+      length: Math.max(
+        daysSoFar(month, now),
+        ...byDay.map(({ day: of }) => Number(of))
+      ),
+    },
     () => 0
   );
   for (const { day: of, amount } of byDay) {
-    const at = Number(of) - 1;
-    if (at >= 0 && at < days.length) {
-      days[at] = amount;
-    }
+    days[Number(of) - 1] = amount;
   }
   return {
     month,
-    total: totals[0]?.total ?? 0,
+    // Added up from the 1st, as a reader adds the days: the same sum to
+    // the last bit.
+    total: days.reduce((sum, amount) => sum + amount, 0),
     days,
-    chat: chats[0]?.total ?? 0,
+    chat: byDay.reduce((sum, { chat }) => sum + chat, 0),
     workflows: listed.map(({ workflow, amount }) => ({
       ...workflow,
       name: workflowNameOf(workflow, names),

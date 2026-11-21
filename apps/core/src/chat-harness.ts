@@ -73,6 +73,7 @@ import { coreMessageProvider, shownBuiltSchema } from "./chat-messages.ts";
 import type { ShownBuilt } from "./chat-messages.ts";
 import { codeTimeoutMs } from "./code-mode.ts";
 import { callObject, workspace } from "./durable-objects.ts";
+import { chatTurnPurpose } from "./model-spend.ts";
 import { models } from "./models.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { recallForTurn, turnRecallTool } from "./turn-recall.ts";
@@ -1345,7 +1346,7 @@ export class ChatHarness {
       {
         model: request.question.model,
         effort: request.question.effort,
-        purpose: "chat.turn",
+        purpose: chatTurnPurpose,
         trigger: delegateActorOf(authority, scope.via),
         provenance: this.#sources,
         work: { authority, context: chatContext(scope) },

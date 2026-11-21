@@ -47,7 +47,7 @@ export const parityRoutes: readonly ParityRoute[] = [
   {
     name: "settings-models",
     prototype: "/settings/models",
-    grasp: "/settings/ai-providers",
+    grasp: "/settings/models",
   },
   {
     name: "settings-security",
@@ -57,7 +57,7 @@ export const parityRoutes: readonly ParityRoute[] = [
   {
     name: "settings-spend",
     prototype: "/settings/spend",
-    grasp: "/settings/ai-providers",
+    grasp: "/settings/spend",
   },
   {
     name: "settings-audit",

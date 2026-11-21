@@ -263,7 +263,10 @@ const subjectOfBuilt = ({ app, workflow }: ChatBuilt) => {
     : { subject: { kind: "workflow" as const, ...workflow } };
 };
 
-/** A chat just made, as its person's list shows it: nothing running in it yet. */
+/**
+ * A chat just made, or made before for the same key, as its person's list
+ * shows it: nothing running in it yet, and archived if a repeat finds it so.
+ */
 const summaryOfMade = (chat: Chat): ChatSummary => ({
   id: chat.id,
   title: chat.title,
@@ -272,7 +275,7 @@ const summaryOfMade = (chat: Chat): ChatSummary => ({
   lastAt: chat.lastAt.toISOString(),
   running: false,
   make: makeOf(chat),
-  archived: false,
+  archived: chat.archivedAt !== null,
 });
 
 /**
@@ -515,13 +518,19 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async setProject(chatId: string, project: string | null): Promise<void> {
     await withPerson(this.#check, async (person) => {
       const id = chatIdOf(chatId);
-      if (project !== null) {
-        await requireProjectRole(this.#env, person, project, "user");
+      if (project !== null && typeof project !== "string") {
+        throw agentErrors.create("agent.invalid_request");
       }
+      // Only in a project they are in now; out of one, wherever they are.
+      const access =
+        project === null
+          ? undefined
+          : await requireProjectRole(this.#env, person, project, "user");
+      const filed = access?.project.id ?? null;
       await this.#chatsOf(person.userId).setChatProject(
         id,
         person.userId,
-        project,
+        filed,
         actorOf(person)
       );
     });

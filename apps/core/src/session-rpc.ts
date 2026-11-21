@@ -341,5 +341,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     await withPerson(this.#full, async (person) => {
       await setOwnName(this.#env, person, name);
     });
+    // The connection's reading of who they are holds their old name: the
+    // next `whoami` reads them again.
+    this.#full.forget?.();
   }
 }

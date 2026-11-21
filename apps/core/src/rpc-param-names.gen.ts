@@ -462,13 +462,6 @@ export const rpcParamNames: ParamNames = {
   },
   "StephenRequestsRpc": {
     "billed": [],
-    "needs": ["locale"],
-    "report": ["filter"],
-    "setNeedStatus": ["key","status"],
-    "setSummary": ["via"],
-    "settings": [],
-    "summary": [],
-    "updateSettings": ["change"],
     "week": [],
   },
   "Subscription": {

@@ -50,11 +50,11 @@ const selectedSchema = z.object({
 
 const readSchema = z.object({ version: z.number(), text: z.string() });
 
-/** The draw-a-workflow skill as this release ships it. */
-const shippedDrawing = (): string => {
-  const shipped = shippedSkills.find(({ name }) => name === "draw-a-workflow");
+/** The file-an-expense skill as this release ships it. */
+const shippedExpense = (): string => {
+  const shipped = shippedSkills.find(({ name }) => name === "file-an-expense");
   if (shipped === undefined) {
-    throw new Error("The release ships draw-a-workflow");
+    throw new Error("The release ships file-an-expense");
   }
   return shipped.text;
 };
@@ -68,34 +68,34 @@ describe("a chat's skills", setUpTime, () => {
 
   it("selects Grasp's skill for its task with no grant, reads the version it pinned after a release changes it, and records each call without its text", async () => {
     const person = await signedInWithRole(idp, "user");
-    const drawing = shippedDrawing();
+    const expense = shippedExpense();
     const select = (task: string) =>
       calling(`env.skills.select({ task: ${JSON.stringify(task)} })`);
     const read = (version: number) =>
       calling(
-        `env.skills.read({ skill: { scope: "grasp", name: "draw-a-workflow", version: ${version} } })`
+        `env.skills.read({ skill: { scope: "grasp", name: "file-an-expense", version: ${version} } })`
       );
     const { stub, agent, newChat } = await personalChatsOf(
       person.userId,
-      select("Draw how invoices are paid as a workflow"),
+      select("File the expense for the client lunch"),
       select("Bake a sourdough loaf"),
       read(1_000_000),
       says("Selected.")
     );
     const chat = await newChat();
-    await chat.ask("How do I draw our invoice workflow?");
+    await chat.ask("How do I file this expense?");
     const results = await codeResults(stub, chat.chat.id);
-    const [forWorkflow, forBread] = results.map(({ text }) => returned(text));
+    const [forExpense, forBread] = results.map(({ text }) => returned(text));
     const pinned = selectedSchema
-      .parse(forWorkflow)
-      .skills.find(({ name }) => name === "draw-a-workflow");
+      .parse(forExpense)
+      .skills.find(({ name }) => name === "file-an-expense");
     if (pinned === undefined) {
-      throw new Error("draw-a-workflow wasn't selected");
+      throw new Error("file-an-expense wasn't selected");
     }
 
     // The next release changes its text: the pin still reads the old.
     await installShippedSkills(env, [
-      { name: "draw-a-workflow", text: `${drawing}\nA new step.\n` },
+      { name: "file-an-expense", text: `${expense}\nA new step.\n` },
     ]);
     const later = await personalChatsOf(
       person.userId,
@@ -111,7 +111,7 @@ describe("a chat's skills", setUpTime, () => {
     );
     // Put back as shipped, for the file's other tests.
     await installShippedSkills(env, [
-      { name: "draw-a-workflow", text: drawing },
+      { name: "file-an-expense", text: expense },
     ]);
 
     const calls = await vi.waitFor(
@@ -133,17 +133,17 @@ describe("a chat's skills", setUpTime, () => {
     );
 
     expect({
-      first: selectedSchema.parse(forWorkflow).skills[0]?.name,
+      first: selectedSchema.parse(forExpense).skills[0]?.name,
       forBread,
       reads: reads.map(({ version, text }) => ({
         version,
         changed: text.includes("A new step."),
-        whole: text.startsWith("---\nname: draw-a-workflow"),
+        whole: text.startsWith("---\nname: file-an-expense"),
       })),
       calls: calls.map(({ detail }) => detail.method),
       texts: JSON.stringify(calls).includes("A new step."),
     }).toStrictEqual({
-      first: "draw-a-workflow",
+      first: "file-an-expense",
       forBread: { skills: [] },
       reads: [
         { version: pinned.version, changed: false, whole: true },

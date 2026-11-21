@@ -202,12 +202,12 @@ describe("the product's old name", () => {
         ].join("\n"),
       },
       {
-        path: "apps/core/blueprints/intake/files/pages/desk.tsx",
+        path: "apps/core/blueprints/desk/files/pages/desk.tsx",
         text: "<h1>Grasp OS desk</h1>\n",
       },
       {
-        path: "apps/core/blueprints/intake/blueprint.json",
-        text: '{\n  "name": "Intake",\n  "description": "Intake for Grasp OS"\n}\n',
+        path: "apps/core/blueprints/desk/blueprint.json",
+        text: '{\n  "name": "Desk",\n  "description": "Desk for Grasp OS"\n}\n',
       },
       {
         path: "apps/core/src/skills/brief/SKILL.md",
@@ -231,9 +231,9 @@ describe("the product's old name", () => {
       // An octal escape reads as its character; a context is never shown.
       'apps/web/src/locales/de/messages.po:16: "Grasp OS"',
       // A built-in App's page, which the root lint leaves alone.
-      'apps/core/blueprints/intake/files/pages/desk.tsx:1: "Grasp OS"',
+      'apps/core/blueprints/desk/files/pages/desk.tsx:1: "Grasp OS"',
       // The manifest that names and describes a built-in to builders.
-      'apps/core/blueprints/intake/blueprint.json:3: "Grasp OS"',
+      'apps/core/blueprints/desk/blueprint.json:3: "Grasp OS"',
       // Wrapped across lines, named where it starts.
       'apps/core/src/skills/brief/SKILL.md:4: "Grasp\\n  OS"',
     ]);

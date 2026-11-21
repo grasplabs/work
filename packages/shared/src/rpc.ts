@@ -87,7 +87,9 @@ export interface SessionApi {
   whoami: () => Promise<Identity>;
   /**
    * Changes the person's own name (`personNameSchema`), as Grasp shows it
-   * everywhere; their email, role and teams are not theirs to change.
+   * everywhere; `member.name_invalid` for one it doesn't take. Only a
+   * member does, for themselves: never Grasp staff or a guest, and their
+   * email, role and teams are not theirs to change.
    */
   setName: (name: string) => Promise<void>;
   /**
@@ -207,8 +209,8 @@ export interface SessionApi {
    */
   readonly orgSettings: OrgSettingsApi;
   /**
-   * Stephen's requests outside Grasp: the report, what needs fixing, the
-   * weekly summary and his week. Owners and admins only.
+   * Stephen's requests outside Grasp: his week and this month's billed
+   * requests. Owners and admins only.
    */
   readonly stephenRequests: StephenRequestsApi;
   /** The audit log: search, export and chain verification. Admins only. */

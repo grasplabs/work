@@ -17,9 +17,11 @@ import { revokePermission } from "../src/permissions.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import { workflowDefinition } from "../src/workflow-resources.ts";
+import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { standInBinding, standInLive } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import { withQuotas } from "./quota-limits.ts";
@@ -508,6 +510,70 @@ describe("model calls", () => {
         code: "workflow.call_denied",
       })),
       requests: 0,
+    });
+  });
+
+  it("refuses every call of a run an App started for someone with no role in the workflow, sending nothing", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // Uses the App, which may start the workflow; has no role in the workflow.
+    const bob = await person("user");
+    const provider = await providerAnswering(answer('{"line":"Never sent"}'));
+    const { workflow } = await greetingWorkflow(ada, admin);
+    const app = appIdSchema.parse(crypto.randomUUID());
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'App', '', ?, ?)"
+      ).bind(app, ada.userId, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 1, 'tree', 0, ?, 'Version', ?, 1)"
+      ).bind(app, ada.userId, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
+      ).bind(app, bob.userId, ada.userId, Date.now()),
+    ]);
+    await standInBinding(app, "flow", workflow.id, ada);
+    await granted(ada, admin, {
+      subject: { type: "app", appId: app },
+      object: {
+        type: "workflow",
+        workflowId: workflowResourceIdSchema.parse(workflow.id),
+      },
+      actions: ["start"],
+      binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    // Live, so someone who only uses it may start it.
+    await standInLive(app);
+
+    /** The end of a run the App starts for `by`, and the requests sent by then. */
+    const runFor = async (by: Identity) => {
+      const { runId } = await appWorkflowStarts(
+        env,
+        {
+          subject: { type: "app", appId: app },
+          onBehalfOf: by.userId,
+          mode: "interactive",
+          appVersion: 1,
+        },
+        null
+      ).start("flow", { who: "Ada" }, unique());
+      if (runId === null) {
+        throw new Error("The start admitted no run");
+      }
+      const run = await ended(admin, workflow.id, runId);
+      return {
+        status: run.status,
+        code: run.error?.code ?? null,
+        requests: provider.requests.length,
+      };
+    };
+
+    // Bob's run first, then Ada's, who has a role in it: hers calls.
+    const bobs = await runFor(bob);
+    const adas = await runFor(ada);
+    expect({ bobs, adas }).toStrictEqual({
+      bobs: { status: "failed", code: "workflow.call_denied", requests: 0 },
+      adas: { status: "completed", code: null, requests: 1 },
     });
   });
 

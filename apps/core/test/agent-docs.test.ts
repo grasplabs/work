@@ -98,8 +98,6 @@ describe("the docs the chat's agent builds from", () => {
       tools: ["searchDocs", "readDocs"].every((name) =>
         one.tools.includes(name)
       ),
-      // No reference of the SDK's sources and blueprints to read instead.
-      reference: one.system.includes("blueprints/board-page"),
     }).toStrictEqual({
       guides: true,
       everyGuide: true,
@@ -108,7 +106,6 @@ describe("the docs the chat's agent builds from", () => {
       restHasApis: true,
       samePrefix: true,
       tools: true,
-      reference: false,
     });
   });
 

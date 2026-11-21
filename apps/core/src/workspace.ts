@@ -217,6 +217,7 @@ import {
 } from "./history-access.ts";
 import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
+import { chatTurnPurpose } from "./model-spend.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
 import type { WorkContext } from "./restricted.ts";
 import { retireUnseen } from "./unseen-memories.ts";
@@ -2680,7 +2681,7 @@ export class Workspace extends DurableObject<Env> {
         {
           model: asked,
           effort: parsed.data.effort,
-          purpose: "chat.turn",
+          purpose: chatTurnPurpose,
           trigger: delegateActorOf(authority, via),
           provenance: this.#sources(chat.id),
           work: { authority, context: work },
@@ -4975,8 +4976,9 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Files `personId`'s own chat in project `project`, or takes it out of
    * the one it is in (`null`), audited as `by`'s; nothing, and no event,
-   * where it is so already. Whether they may put it in that project is
-   * the caller's to check (`ChatsRpc.setProject`).
+   * where it is so already. A chat moved from one project straight to
+   * another records the one it came `from` too. Whether they may put it
+   * in that project is the caller's to check (`ChatsRpc.setProject`).
    */
   setChatProject(
     chatId: unknown,
@@ -4984,7 +4986,7 @@ export class Workspace extends DurableObject<Env> {
     project: string | null,
     by: AuditActor
   ): void {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#graspChat(chatId, personId);
     if (chat.projectId === project) {
       return;
     }
@@ -4994,12 +4996,16 @@ export class Workspace extends DurableObject<Env> {
         .set({ projectId: project })
         .where(eq(chats.id, chat.id))
         .run();
-      this.#outboxed(
-        by,
-        project === null ? "chat.unfiled" : "chat.filed",
-        chat.id,
-        { project: project ?? chat.projectId }
-      );
+      if (project === null) {
+        this.#outboxed(by, "chat.unfiled", chat.id, {
+          project: chat.projectId,
+        });
+      } else {
+        this.#outboxed(by, "chat.filed", chat.id, {
+          project,
+          ...(chat.projectId === null ? {} : { from: chat.projectId }),
+        });
+      }
     });
     this.#deliverAudit();
   }
@@ -5016,7 +5022,7 @@ export class Workspace extends DurableObject<Env> {
     archived: boolean,
     by: AuditActor
   ): void {
-    const chat = this.#ownChat(chatId, personId);
+    const chat = this.#graspChat(chatId, personId);
     if ((chat.archivedAt !== null) === archived) {
       return;
     }
@@ -5026,10 +5032,13 @@ export class Workspace extends DurableObject<Env> {
         .set({ archivedAt: archived ? new Date() : null })
         .where(eq(chats.id, chat.id))
         .run();
+      // With the project it is filed in then, null for none: the record
+      // shows it after the chat is moved or taken out.
       this.#outboxed(
         by,
         archived ? "chat.archived" : "chat.unarchived",
-        chat.id
+        chat.id,
+        { project: chat.projectId }
       );
     });
     this.#deliverAudit();

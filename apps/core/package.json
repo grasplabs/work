@@ -13,6 +13,7 @@
       "types": "./src/blueprints-digest.d.ts",
       "default": "./dist/blueprints-digest.js"
     },
+    "#shipped-skills": "./src/release-skills.ts",
     "#agent-docs": {
       "types": "./src/agent-docs.d.ts",
       "default": "./dist/agent-docs.js"

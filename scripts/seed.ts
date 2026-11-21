@@ -53,7 +53,6 @@ import {
 import type { Session } from "./seed/local.ts";
 import { boardCsv, boards } from "./seed/pages.ts";
 import type { Board } from "./seed/pages.ts";
-import { projects } from "./seed/projects.ts";
 import { seedRuns } from "./seed/runs.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -149,16 +148,6 @@ const seedPeople = async (): Promise<{
       throw new Error(
         "The core answering at localhost doesn't keep its state in this checkout: run the seed from the checkout `vp run dev` runs from."
       );
-    }
-    // Someone of the seed's removed while the app was tried (Members ›
-    // Remove) can't sign in again, and the product keeps no way back: the
-    // seed brings its own people back, in this checkout's state only.
-    // Their teams are set again below.
-    const comeBack = core.prepare(
-      "DELETE FROM member_removals WHERE user_id IN (SELECT id FROM users WHERE email = ?)"
-    );
-    for (const { email } of people) {
-      comeBack.run(email);
     }
     await mapLimited(people, signInsAtOnce, async ({ email }) => {
       await signInAs(email);
@@ -418,7 +407,7 @@ const seedApp = async (
   seed: AppSeed,
   sessions: ReadonlyMap<PersonKey, Session>,
   teams: ReadonlyMap<TeamName, string>
-): Promise<{ id: string; runs: number }> => {
+): Promise<number> => {
   const adminSession = sessionFor(sessions, admin.key);
   const owner = sessionFor(sessions, seed.owner);
   const all = await adminSession.api.apps.list();
@@ -433,7 +422,7 @@ const seedApp = async (
   // decision. The seed leaves it as it is.
   if (app.archived) {
     console.warn(`${app.name} is archived: the seed leaves it as it is.`);
-    return { id: app.id, runs: 0 };
+    return 0;
   }
   // The process it serves, unless someone set one already.
   if (app.process === null) {
@@ -498,7 +487,7 @@ const seedApp = async (
     // oxlint-disable-next-line no-await-in-loop -- one workflow at a time
     const ran = await owner.api.workflowResources.runs(id);
     if (ran.length > 0) {
-      return { id: app.id, runs: 0 };
+      return 0;
     }
   }
   const runs = await seedRuns({
@@ -508,7 +497,7 @@ const seedApp = async (
     sessions,
     db: core,
   });
-  return { id: app.id, runs };
+  return runs;
 };
 
 /**
@@ -598,9 +587,14 @@ const seedChats = async (
   const now = Date.now();
   for (const chat of chats) {
     const { api } = sessionFor(sessions, chat.by);
+    // One its person archived is still theirs: left as it is, never made
+    // again.
     // oxlint-disable-next-line no-await-in-loop -- one chat at a time
-    const listed = await api.chats.list();
-    if (listed.some(({ title }) => title === chat.title)) {
+    const listed = await Promise.all([
+      api.chats.list(),
+      api.chats.list({ archived: true }),
+    ]);
+    if (listed.flat().some(({ title }) => title === chat.title)) {
       continue;
     }
     const deleted = chat.turns.find(
@@ -626,71 +620,6 @@ const seedChats = async (
     created += 1;
   }
   return created;
-};
-
-/**
- * The demo projects (scripts/seed/projects.ts), made by an admin, with
- * their Apps and people; a project already there is left as it is.
- * Returns how many it made.
- */
-const seedProjects = async (
-  sessions: ReadonlyMap<PersonKey, Session>,
-  teams: ReadonlyMap<TeamName, string>,
-  appIds: ReadonlyMap<string, string>
-): Promise<number> => {
-  const adminSession = sessionFor(sessions, admin.key);
-  const listed = await adminSession.api.projects.list();
-  const existing = new Set(listed.map(({ name }) => name));
-  const missing = projects.filter(({ name }) => !existing.has(name));
-  for (const seed of missing) {
-    // oxlint-disable-next-line no-await-in-loop -- one project at a time
-    const { id } = await adminSession.api.projects.create({
-      name: seed.name,
-      description: seed.description,
-      icon: seed.icon,
-    });
-    const members = [
-      ...seed.people.map(({ person, role }) => ({
-        type: "person" as const,
-        id: sessionFor(sessions, person).userId,
-        role,
-      })),
-      ...seed.teams.map(({ team, role }) => {
-        const teamId = teams.get(team);
-        if (teamId === undefined) {
-          throw new Error(`No team ${team}`);
-        }
-        return { type: "team" as const, id: teamId, role };
-      }),
-    ];
-    for (const member of members) {
-      // oxlint-disable-next-line no-await-in-loop -- one member at a time
-      await adminSession.api.projects.addMember(id, member);
-    }
-    for (const { app, share } of seed.apps) {
-      const appId = appIds.get(app);
-      if (appId === undefined) {
-        throw new Error(`No App ${app}`);
-      }
-      // oxlint-disable-next-line no-await-in-loop -- one item at a time
-      await adminSession.api.projects.file(id, {
-        item: { type: "app", id: appId },
-        share,
-      });
-    }
-    for (const { by, title } of seed.chats) {
-      const session = sessionFor(sessions, by);
-      // oxlint-disable-next-line no-await-in-loop -- one chat at a time
-      const theirs = await session.api.chats.list();
-      const chat = theirs.find((each) => each.title === title);
-      if (chat === undefined) {
-        throw new Error(`${by} has no chat ${title}`);
-      }
-      // oxlint-disable-next-line no-await-in-loop -- one chat at a time
-      await session.api.chats.setProject(chat.id, id);
-    }
-  }
-  return missing.length;
 };
 
 const main = async (): Promise<void> => {
@@ -719,11 +648,9 @@ const main = async (): Promise<void> => {
       `The Brain: ${uploadsAdded} new uploads (${uploadsThere} there already), ${instructionsWritten} new instruction files`
     );
 
-    const appIds = new Map<string, string>();
     for (const seed of apps) {
       // oxlint-disable-next-line no-await-in-loop -- one App at a time
-      const { id, runs } = await seedApp(seed, sessions, teams);
-      appIds.set(seed.name, id);
+      const runs = await seedApp(seed, sessions, teams);
       let ran = `${runs} runs over the last 30 days`;
       if (seed.workflows.length === 0) {
         ran = "no workflows yet";
@@ -735,10 +662,6 @@ const main = async (): Promise<void> => {
 
     const created = await seedChats(sessions, uploadsDeleted);
     console.info(`${created} new chats`);
-
-    // After the chats: a project files some of its people's own.
-    const made = await seedProjects(sessions, teams, appIds);
-    console.info(`${made} new projects`);
     console.info(
       `Done. Sign in at http://localhost:5173 as ${admin.email} (${admin.name}), or as any of its members (people in scripts/seed/company.ts).`
     );
