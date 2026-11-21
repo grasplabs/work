@@ -530,10 +530,6 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Unlinked a chat app account`,
   },
   {
-    action: "dashboard.widget_removed",
-    text: msg`Removed a widget from a dashboard`,
-  },
-  {
     action: "directory.group_mapped",
     text: msg`Matched a directory group to a team`,
   },

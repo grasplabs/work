@@ -285,7 +285,7 @@ const outcomeName = (outcome: UnknownOutcome): string => {
 
 /**
  * A change Grasp sent for the person whose answer was lost: only they say
- * whether it happened (the dashboard's `outcome-card.tsx`).
+ * whether it happened (`OutcomeItem` in item-detail.tsx).
  */
 const outcomeItems = (
   outcomes: readonly UnknownOutcome[],

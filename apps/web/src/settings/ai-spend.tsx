@@ -75,9 +75,8 @@ const leftOverMin = 0.0001;
 
 /**
  * Where the month's spend went: chat, each workflow, each App, and, where
- * those lists are whole, the rest under `names.other` (the Brain, the
- * dashboard's widgets, whatever else calls a model on the organization's
- * key); none that spent nothing.
+ * those lists are whole, the rest under `names.other` (the Brain, whatever
+ * else calls a model on the organization's key); none that spent nothing.
  */
 const whereItWent = (
   spend: ModelMonthSpend,

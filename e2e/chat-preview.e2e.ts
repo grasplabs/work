@@ -112,13 +112,13 @@ test("a chat building an App offers its workspace, whose preview changes none of
     // Opened afresh from its address.
     await page.goto(`/chats/${chat.id}`);
     await expect(
-      thread.getByText("The Apps this chat builds didn't load.")
+      thread.getByText("The Apps this chat builds didn't load")
     ).toBeVisible();
     await expect(building).toHaveCount(0);
     failDrafts = false;
     await thread.getByRole("button", { name: "Try again" }).click();
     await expect(
-      thread.getByText("The Apps this chat builds didn't load.")
+      thread.getByText("The Apps this chat builds didn't load")
     ).toHaveCount(0);
 
     // The App's workspace is the bar's link away.

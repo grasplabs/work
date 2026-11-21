@@ -14664,10 +14664,6 @@ msgstr "Removed a member"
 msgid "Removed a webhook from an App"
 msgstr "Removed a webhook from an App"
 
-#: src/activity/audit-words.ts
-msgid "Removed a widget from a dashboard"
-msgstr "Removed a widget from a dashboard"
-
 #: src/workflows/item-test.tsx
 msgid "Removed after a week"
 msgstr "Removed after a week"

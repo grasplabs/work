@@ -28,7 +28,7 @@ const styles = stylex.create({
  * schedule next runs, the name its code asks under, the version of its App
  * the grant trusts, and who asked. A line with nothing to say is left out,
  * and a schedule's name in code ("START") with it: its title says it
- * starts the workflow. On the dashboard's pile and in the inbox.
+ * starts the workflow.
  */
 export const RequestDetails = ({
   request,

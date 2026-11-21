@@ -24,8 +24,8 @@ import { readWaiting } from "./read-waiting.ts";
 // glance at what waits keeps the page the person is on; a row does.
 //
 // What waits is read where the frame reads its counts (frame/frame-read.ts),
-// without marking a notification read (only the inbox and the dashboard,
-// which show them whole, do that). The counted items (what needs the
+// without marking a notification read (only the inbox, which shows them
+// whole, does that). The counted items (what needs the
 // person) are the bell's dot and the Inbox row's count, so the view and
 // the counts never disagree.
 

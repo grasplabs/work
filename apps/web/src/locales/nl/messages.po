@@ -14664,10 +14664,6 @@ msgstr "Een lid verwijderd"
 msgid "Removed a webhook from an App"
 msgstr "Heeft een webhook uit een app verwijderd"
 
-#: src/activity/audit-words.ts
-msgid "Removed a widget from a dashboard"
-msgstr "Een widget van een dashboard verwijderd"
-
 #: src/workflows/item-test.tsx
 msgid "Removed after a week"
 msgstr "Na een week verwijderd"
