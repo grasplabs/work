@@ -6858,10 +6858,6 @@ msgstr "Termina el flujo de trabajo"
 msgid "Enter a name for the organization."
 msgstr "Escribe un nombre para la organización."
 
-#: src/projects/project-dialog.tsx
-msgid "Enter a name for the project."
-msgstr "Escribe un nombre para el proyecto."
-
 #: src/settings/event-sources.tsx
 msgid "Enter a name for the sender."
 msgstr "Escribe un nombre para el remitente."

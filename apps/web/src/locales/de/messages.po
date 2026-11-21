@@ -6858,10 +6858,6 @@ msgstr "Beendet den Workflow"
 msgid "Enter a name for the organization."
 msgstr "Geben Sie einen Namen für die Organisation ein."
 
-#: src/projects/project-dialog.tsx
-msgid "Enter a name for the project."
-msgstr "Geben Sie einen Namen für das Projekt ein."
-
 #: src/settings/event-sources.tsx
 msgid "Enter a name for the sender."
 msgstr "Geben Sie einen Namen für den Absender ein."
@@ -7555,7 +7551,7 @@ msgstr "Zu sendende Dateien"
 
 #: src/connections/connect-dialog.tsx
 msgid "Fill in {label}."
-msgstr "Füllen Sie {label} aus."
+msgstr "Geben Sie {label} ein."
 
 #: src/workflows/start-run.tsx
 msgid "Fill this in."

@@ -6858,10 +6858,6 @@ msgstr "Termine le workflow"
 msgid "Enter a name for the organization."
 msgstr "Saisissez un nom pour l'organisation."
 
-#: src/projects/project-dialog.tsx
-msgid "Enter a name for the project."
-msgstr "Saisissez un nom pour le projet."
-
 #: src/settings/event-sources.tsx
 msgid "Enter a name for the sender."
 msgstr "Saisissez un nom pour l’expéditeur."

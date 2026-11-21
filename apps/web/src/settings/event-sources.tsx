@@ -797,7 +797,7 @@ const AddSource = ({
               }}
               {...stylex.props(styles.form)}
             >
-              <Field invalid={failure !== undefined}>
+              <Field invalid={failure === undefined ? undefined : true}>
                 <FieldLabel>{t`Name`}</FieldLabel>
                 <Input
                   maxLength={80}
