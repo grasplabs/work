@@ -12,7 +12,7 @@ import type { AgentTemplate } from "./agent-templates.ts";
 // text, Markdown under a heading a part, which is what the agent reads.
 
 /** An agent's instructions, part by part, in the person's own words. */
-export interface Brief {
+interface Brief {
   goal: string;
   look: string[];
   steps: string[];
@@ -20,17 +20,11 @@ export interface Brief {
   deliver: string;
 }
 
-export const briefParts = [
-  "goal",
-  "look",
-  "steps",
-  "rules",
-  "deliver",
-] as const;
-export type BriefPart = (typeof briefParts)[number];
+const briefParts = ["goal", "look", "steps", "rules", "deliver"] as const;
+type BriefPart = (typeof briefParts)[number];
 
 /** Each part's heading in the instructions, in the language they are written in. */
-export const briefHeadings = {
+const briefHeadings = {
   goal: msg`Goal`,
   look: msg`What to look at`,
   steps: msg`Steps`,
@@ -77,13 +71,6 @@ export const ownBrief = (job: string, i18n: I18n): Brief => {
     ),
   };
 };
-
-/** The lines a part holds, one per line, without empty ones. */
-export const linesOf = (text: string): string[] =>
-  text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
 
 /** Lines as a Markdown list. */
 const bullets = (lines: readonly string[]): string =>

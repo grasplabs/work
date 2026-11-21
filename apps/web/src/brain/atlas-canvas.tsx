@@ -51,7 +51,7 @@ import { RegionMarks } from "./region-marks.tsx";
 export type { AtlasControls, AtlasView } from "./atlas-engine.ts";
 
 /** Space kept clear over the canvas, in pixels. */
-export interface AtlasClear {
+interface AtlasClear {
   /** Along its top, and as much along its sides. */
   top: number;
   /** Along its bottom, for the chat's bar. */

@@ -125,7 +125,7 @@ export const lines = (
 ): KeyValueItem[] => all.filter((line) => line !== undefined);
 
 /** The drafted agent as a card, with `actions` while it waits. */
-export const AgentDraftCard = ({
+const AgentDraftCard = ({
   draft,
   actions,
 }: {
@@ -208,7 +208,7 @@ export const AgentDraftCard = ({
 };
 
 /** Which press a card waits on: Make it for a drafted agent, Change it for a change. */
-export type DraftPress = "make" | "change";
+type DraftPress = "make" | "change";
 
 /** Make it or Change it, which lands the person on the agent, and Change something. */
 export const DraftActions = ({

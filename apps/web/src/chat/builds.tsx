@@ -53,7 +53,7 @@ const readBuilds = async (
 type BuildsFailed = Exclude<Loaded<Builds>, { state: "ready" }>;
 
 /** What the chat's builds read. */
-export interface ChatBuildsRead {
+interface ChatBuildsRead {
   /**
    * The latest builds read; undefined until a read succeeds. A read that
    * fails later leaves them, so the App being built stays in view.

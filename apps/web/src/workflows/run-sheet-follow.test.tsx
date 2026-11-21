@@ -149,7 +149,8 @@ describe("an open run sheet, following its run", () => {
       );
       await router.load();
     });
-    const waitingLine = "Waiting for Anthropic, which is refusing the key";
+    const waitingLine =
+      "Waiting for Anthropic, which is refusing the key, since";
     const before = sheetText().includes(waitingLine);
 
     now = { ...running, aiProvider: wait };

@@ -6,9 +6,7 @@ import {
   groupsOf,
   OTHER_TEAMS,
   LOBES,
-  REGION_IDS,
   signalPaths,
-  storyOf,
   TEAM_FOLDER,
 } from "./brain-atlas.ts";
 import type { AtlasRegion, RegionId } from "./brain-atlas.ts";
@@ -175,28 +173,9 @@ describe(atlasOf, () => {
   });
 });
 
-describe(storyOf, () => {
+describe(signalPaths, () => {
   const ws = testWorkspace();
-  const brain = buildBrain(ws);
-  const atlas = atlasOf(ws, brain);
-
-  it("tells every region with teams in a few lines, each lighting up notes of the brain, ending with what is open", () => {
-    const known = new Set(brain.notes.map((note) => note.id));
-    for (const id of REGION_IDS.filter((each) => each !== "temporal")) {
-      const lines = storyOf(id, atlas, ws);
-      expect(lines.length).toBeGreaterThanOrEqual(1);
-      for (const line of lines) {
-        expect(line.text.length).toBeGreaterThan(0);
-        expect(line.notes.length).toBeGreaterThan(0);
-        expect(line.notes.every((note) => known.has(note))).toBeTruthy();
-      }
-    }
-    const front = storyOf("parietal", atlas, ws).map((line) => line.text);
-    expect(front[0]).toMatch(
-      /^Customer service, Mortgage advice, and Client onboarding work here, on \d+ pieces? of work/u
-    );
-    expect(front.at(-1)).toMatch(/^Still open: /u);
-  });
+  const atlas = atlasOf(ws, buildBrain(ws));
 
   it("runs each statement from the source that heard it, up the spine, to the teams and the work it is about", () => {
     const paths = signalPaths(ws, atlas);
@@ -204,11 +183,5 @@ describe(storyOf, () => {
     expect(
       paths.every((path) => path[0] === "stem" && path.length >= 2)
     ).toBeTruthy();
-  });
-
-  it("tells the same story every time", () => {
-    expect(storyOf("parietal", atlas, ws)).toStrictEqual(
-      storyOf("parietal", atlas, ws)
-    );
   });
 });

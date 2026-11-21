@@ -52,7 +52,7 @@ export const classesOf: Partial<Record<Ability, readonly CompanyToolClass[]>> =
   };
 
 /** What it may do from the start: reading on, changing and reaching others off (decision 8). */
-export const startsWith: ReadonlySet<Ability> = new Set([
+const startsWith: ReadonlySet<Ability> = new Set([
   "web",
   "workflows",
   "apps",

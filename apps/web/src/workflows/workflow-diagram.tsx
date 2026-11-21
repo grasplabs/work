@@ -163,7 +163,7 @@ interface Marks {
 export type Layout = "stacked" | "side";
 
 /** The dotted line between two cards on the canvas, as the drawing reads. */
-export const Wire = ({ layout }: { layout: Layout }) => (
+const Wire = ({ layout }: { layout: Layout }) => (
   <span
     aria-hidden="true"
     {...stylex.props(
@@ -307,7 +307,7 @@ const noStates: ReadonlyMap<string, TraceState> = new Map();
 const noAttempts: ReadonlyMap<string, number> = new Map();
 
 /** What the canvas sets of the drawing: how it reads, and what it adds. */
-export interface CanvasOptions {
+interface CanvasOptions {
   layout: Layout;
   /** Before the workflow's first task: where it starts. */
   start: ReactNode;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { answerMeter, atShare } from "./answer-meter.ts";
+import { answerMeter } from "./answer-meter.ts";
 import type { Measured } from "./answer-meter.ts";
 
 // The prototype's `turnMeter` (`lib/interview-telemetry.ts`), as an
@@ -55,17 +55,5 @@ describe("an answer of his", () => {
     meter.voice(2000);
     meter.voice(2600);
     expect(answers.map(({ voice }) => voice)).toStrictEqual([2000]);
-  });
-});
-
-describe("the middle answer", () => {
-  it.each([
-    [[], 0.5, null],
-    [[2300], 0.5, 2300],
-    [[3000, 1000, 2000], 0.5, 2000],
-    [[4000, 1000, 3000, 2000], 0.5, 2000],
-    [[5, 1, 4, 2, 3, 6, 7, 8, 9, 10], 0.9, 9],
-  ])("of %o at %d is %o", (values, share, expected) => {
-    expect(atShare(values, share)).toBe(expected);
   });
 });

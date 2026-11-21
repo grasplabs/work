@@ -53,7 +53,6 @@ export const looks = stylex.create({
     width: "100%",
     minHeight: "4rem",
   },
-  balance: { textWrap: "balance" },
   // One screen of several, faded in as it comes.
   stage: { display: "flex", justifyContent: "center", width: "100%" },
   // The one action of a screen, and what stands with it.

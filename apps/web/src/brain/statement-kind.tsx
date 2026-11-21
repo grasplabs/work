@@ -19,7 +19,7 @@ import { statementKindLabel } from "./brain.ts";
  * (`components/statement-kind.tsx`). Statements keep their one colour from
  * the graph, so the kind is told apart by its icon, not by a second palette.
  */
-export const kindIcon: Record<StatementKind, IconData> = {
+const kindIcon: Record<StatementKind, IconData> = {
   blocker: Failed,
   timeSink: Clock,
   handover: Swap,

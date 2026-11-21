@@ -80,12 +80,12 @@ const styles = stylex.create({
 });
 
 /** One binding that waits. */
-export type PendingBinding = PendingWorkflowBindings["bindings"][number];
+type PendingBinding = PendingWorkflowBindings["bindings"][number];
 
 type Offered = PendingBinding["offered"][number];
 
 /** The names of people and teams, by ID, where they are known. */
-export interface KnownNames {
+interface KnownNames {
   people: ReadonlyMap<string, string>;
   teams: ReadonlyMap<string, string>;
 }

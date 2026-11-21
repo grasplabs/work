@@ -1,30 +1,9 @@
-import { useLingui } from "@lingui/react/macro";
-import { useState } from "react";
-
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
-import {
-  Command,
-  CommandInput,
-  CommandEmpty,
-  CommandList,
-} from "../grasp/command/index.ts";
 import type { CommandEntry } from "../grasp/command/index.ts";
-import { ChevronDown, Icon } from "../grasp/icons/index.ts";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "../grasp/popover/index.ts";
-import { usePeopleApart } from "./people-apart.ts";
-import type { PeopleApart } from "./people-apart.ts";
 
-// Who owns a thing, and the people it can be handed to, as the prototype
-// draws it (`components/owner-picker.tsx`): the owner's portrait, and
-// their name when there is room, as one button that opens a list to
-// search. The platform's one owner control: a workflow's line uses it, and
-// an App's settings are to, so an owner looks and is changed the same way
-// everywhere. Who may be picked is core's to decide; the list is whoever
-// the page offers.
+// The people a picker offers, as entries of the library's list, and how
+// what was typed finds them. Who may be picked is core's to decide; the
+// list is whoever the page offers.
 
 /** Someone who can be picked. */
 export interface Pickable {
@@ -52,7 +31,7 @@ export const matchTyped = (
     : 0;
 
 /** Someone's portrait: their initials. */
-export const PersonAvatar = ({ name }: { name: string }) => (
+const PersonAvatar = ({ name }: { name: string }) => (
   <Avatar decorative name={name} size="xs">
     <AvatarFallback />
   </Avatar>
@@ -87,139 +66,3 @@ export const entriesTyped = (
       matchTyped(entry.label, query, [entry.label, ...(entry.keywords ?? [])]) >
       0
   );
-
-/**
- * The owner as their button names them: told apart from a namesake once
- * the list is read and holds them.
- */
-const ownerNamed = (
-  name: string | null,
-  id: string | null,
-  people: readonly Pickable[] | null,
-  apart: PeopleApart
-): string | null => {
-  const listed = people?.find((each) => each.id === id);
-  return name === null || listed === undefined
-    ? name
-    : apart.named({ ...listed, name });
-};
-
-/** The owner's portrait on the button, or a quiet mark for nobody yet. */
-const OwnerFace = ({ name }: { name: string | null }) =>
-  name === null ? (
-    <Avatar decorative name="?" size="xs">
-      <AvatarFallback>?</AvatarFallback>
-    </Avatar>
-  ) : (
-    <PersonAvatar name={name} />
-  );
-
-/** What the owner's button shows: their portrait, and their name and the chevron when there is room. */
-const ownerButtonWords = (
-  ownerName: string | null,
-  owner: string,
-  compact: boolean,
-  disabled: boolean
-) => {
-  const face = <OwnerFace key="face" name={ownerName} />;
-  if (compact) {
-    return face;
-  }
-  return disabled
-    ? [face, owner]
-    : [face, owner, <Icon icon={ChevronDown} key="chevron" />];
-};
-
-/**
- * The owner's button and its list. `people` is null while they're being
- * read: the list says so, and the page reads them only when it opens.
- */
-export const PersonPicker = ({
-  owner: ownerName,
-  ownerId,
-  people,
-  onOpen,
-  onPick,
-  compact = false,
-  disabled = false,
-  align = "end",
-}: {
-  /** The owner's name; null for nobody yet. */
-  owner: string | null;
-  /** The owner's ID, to tick them in the list. */
-  ownerId: string | null;
-  people: readonly Pickable[] | null;
-  /** When the list opens: the moment to read who can be picked. */
-  onOpen?: () => void;
-  onPick: (person: Pickable) => void;
-  /** Only the portrait, for a line of a list: the name is said when it is pointed at. */
-  compact?: boolean;
-  /** Shown, not to be changed: for someone who may only look. */
-  disabled?: boolean;
-  /** Which side of the button the list lines up with. */
-  align?: "start" | "end";
-}) => {
-  const { t } = useLingui();
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const apart = usePeopleApart(people ?? []);
-  const owner = ownerNamed(ownerName, ownerId, people, apart);
-  const shown = owner ?? t`No owner yet`;
-  const label =
-    owner === null
-      ? t`Owner: nobody yet. Change owner`
-      : t`Owner: ${owner}. Change owner`;
-  const entries = (people ?? []).map((person) => ({
-    ...personEntry(person, apart.hint(person)),
-    current: person.id === ownerId,
-  }));
-  return (
-    <Popover
-      onOpenChange={(next: boolean) => {
-        setOpen(next);
-        if (next) {
-          setQuery("");
-          onOpen?.();
-        }
-      }}
-      open={open}
-    >
-      <PopoverTrigger
-        aria-label={disabled ? shown : label}
-        disabled={disabled}
-        size="sm"
-        tooltip={compact ? shown : undefined}
-        variant="ghost"
-      >
-        {ownerButtonWords(ownerName, shown, compact, disabled)}
-      </PopoverTrigger>
-      <PopoverContent align={align}>
-        <Command
-          bare
-          filter={false}
-          items={entriesTyped(entries, query)}
-          loading={people === null}
-          words={{ loading: t`Reading who can own it…` }}
-          onAction={(value) => {
-            setOpen(false);
-            const person = people?.find(
-              (each) => `person:${each.id}` === value
-            );
-            if (person !== undefined && person.id !== ownerId) {
-              onPick(person);
-            }
-          }}
-          onQueryChange={setQuery}
-          query={query}
-        >
-          <CommandInput
-            aria-label={t`Search people`}
-            placeholder={t`Search people`}
-          />
-          <CommandEmpty>{t`Nobody with that name.`}</CommandEmpty>
-          <CommandList />
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-};

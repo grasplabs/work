@@ -3,15 +3,13 @@ import type {
   DependencyRequest,
 } from "@grasp-os/shared/dependencies";
 import { packageKey } from "@grasp-os/shared/dependencies";
-import { messageOf } from "@grasp-os/shared/errors";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 
-import type { CoreConnection } from "../core-connection.ts";
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import {
   ApprovalRequest,
@@ -22,8 +20,8 @@ import { KeyValueList } from "../grasp/key-value/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { useCore } from "../use-core.ts";
 import { useApprovalWords } from "./approval-words.ts";
+import { useChatRequests } from "./chat-requests.ts";
 
 // The npm packages the chat's agent asked for (core's
 // packages/requests.ts), each on a card: the App's builder
@@ -31,26 +29,11 @@ import { useApprovalWords } from "./approval-words.ts";
 // can't reach. The card shows the request as stored, and a decision names
 // the graph it showed, so what is approved is what was shown.
 
-/** What the page read of the chat's requests. */
-type Requests =
-  | { state: "loading" }
-  | { state: "refused"; message: string }
-  | { state: "ready"; requests: DependencyRequest[] };
-
-/** The chat's requests. Outside the component, as the React Compiler can't compile `try`. */
-const readRequests = async (
-  core: CoreConnection,
+/** The chat's package requests. */
+const listPackageRequests = async (
+  session: Session,
   chatId: string
-): Promise<Requests> => {
-  try {
-    const requests = await core.withSession(
-      async (session) => await session.chats.packageRequests(chatId)
-    );
-    return { state: "ready", requests };
-  } catch (error) {
-    return { state: "refused", message: messageOf(error) };
-  }
-};
+): Promise<DependencyRequest[]> => await session.chats.packageRequests(chatId);
 
 const severities: Record<DependencyFinding["severity"], MessageDescriptor> = {
   critical: msg({ message: "Critical", context: "an advisory's severity" }),
@@ -210,24 +193,7 @@ export const PackageRequests = ({
   onApproved: () => void;
 }) => {
   const { t } = useLingui();
-  const [read, setRead] = useState<Requests>({ state: "loading" });
-  const core = useCore();
-  const [reads, setReads] = useState(0);
-  useEffect(() => {
-    let current = true;
-    const load = async (): Promise<void> => {
-      const found = await readRequests(core, chatId);
-      // A read for another chat, or an older one, doesn't show.
-      if (current) {
-        setRead(found);
-      }
-    };
-    void load();
-    return () => {
-      current = false;
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `version` and `reads` say when to read again
-  }, [core, chatId, version, reads]);
+  const { read, again } = useChatRequests(chatId, version, listPackageRequests);
   if (read.state === "refused") {
     return <ErrorText>{read.message}</ErrorText>;
   }
@@ -240,9 +206,7 @@ export const PackageRequests = ({
         <PackageRequest
           key={request.id}
           onApproved={onApproved}
-          onDecided={() => {
-            setReads(reads + 1);
-          }}
+          onDecided={again}
           request={request}
         />
       ))}

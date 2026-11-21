@@ -149,13 +149,6 @@ export const formatDollars = (value: number): string =>
     currency: "USD",
   }).format(value);
 
-export const formatEuro = (value: number): string =>
-  new Intl.NumberFormat(i18n.locale, {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(value);
-
 /** The ISO week number (1 to 53) of a day kept as an ISO date: week 1 holds the year's first Thursday. */
 export const isoWeek = (iso: string): number => {
   const day = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
@@ -190,39 +183,6 @@ export const formatTime = (value: string | number | Date): string =>
   new Intl.DateTimeFormat(i18n.locale, { timeStyle: "short" }).format(
     new Date(value)
   );
-
-const msPerDay = 24 * 60 * 60 * 1000;
-const daysPerMonth = 30;
-const monthsPerYear = 12;
-
-/** When the day `date` falls on began, where the reader is. */
-const startOfDay = (date: Date): number =>
-  new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-
-/**
- * How long ago a day was, by calendar days where the reader is, as the
- * page's language says it: "today", "yesterday", "4 days ago", then
- * "2 months ago" and "last year". Words to put in a sentence, such as
- * "Updated {when}", never a sentence of its own.
- */
-export const formatDaysAgo = (
-  value: string | number | Date,
-  now: Date = new Date(),
-  locale: string = i18n.locale
-): string => {
-  const days = Math.max(
-    0,
-    Math.round((startOfDay(now) - startOfDay(new Date(value))) / msPerDay)
-  );
-  const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-  if (days < daysPerMonth) {
-    return relative.format(-days, "day");
-  }
-  const months = Math.round(days / daysPerMonth);
-  return months < monthsPerYear
-    ? relative.format(-months, "month")
-    : relative.format(-Math.round(months / monthsPerYear), "year");
-};
 
 /** A value as text: text as it is, anything else as JSON. */
 export const valueText = (value: unknown): string =>

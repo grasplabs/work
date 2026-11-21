@@ -561,7 +561,7 @@ describe(ChatThread, () => {
     ]);
   });
 
-  it("says one thinking line at a time: how long it thought, then that it works on, never Thinking again", async () => {
+  it("says it works on, never Thinking again, once a search answered and no words came yet", async () => {
     // It searched; the search answered and the turn runs on, no words yet: the message's
     // line says how long it thought (Grasp UI times it), so the activity says it works on.
     await thread(
@@ -598,7 +598,12 @@ describe(ChatThread, () => {
       false
     );
 
-    expect(workingLine()).toBe("Working on it");
+    expect({
+      working: workingLine(),
+      thinking: activityLines()
+        .map((line) => said(line))
+        .includes("Thinking"),
+    }).toStrictEqual({ working: "Working on it", thinking: false });
   });
 
   it("says under a code step each widget it made or changed on the dashboard", async () => {
@@ -913,11 +918,14 @@ describe(ChatThread, () => {
   });
 
   it("opens a link out of Grasp from an answer only once the person says so: a web page, an email, even Grasp's own address", async () => {
-    const opened: string[] = [];
-    vi.stubGlobal("open", (url: string) => {
-      opened.push(url);
-      return null;
-    });
+    const opened: { url: string; features: string | undefined }[] = [];
+    vi.stubGlobal(
+      "open",
+      (url: string, _target?: string, features?: string) => {
+        opened.push({ url, features });
+        return null;
+      }
+    );
     const links = [
       "https://example.com/leave",
       "mailto:finance@example.com?subject=Leave",
@@ -978,7 +986,7 @@ describe(ChatThread, () => {
       addresses: 0,
       asked: [true, true, true],
       before: [],
-      after: [links[1]],
+      after: [{ url: links[1], features: "noopener,noreferrer" }],
     });
   });
 });

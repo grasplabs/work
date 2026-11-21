@@ -22,7 +22,7 @@
 export const actLifetimeMs = 5000;
 
 /** The acts of one start of a frame, read from `port`. */
-export interface FrameActs {
+interface FrameActs {
   /** Spends the person's latest act in the frame, if one is unspent. */
   readonly take: () => boolean;
   /** Stops listening and closes the port. */

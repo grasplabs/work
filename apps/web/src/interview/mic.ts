@@ -21,12 +21,12 @@ export interface Microphone {
 export type MicProblem = "blocked" | "missing" | "unsupported";
 
 /** Whoever takes the microphone's sound itself: a batch of numbers from -1 to 1, and how many of them make a second. */
-export type Overhearer = (sound: Float32Array, rate: number) => void;
+type Overhearer = (sound: Float32Array, rate: number) => void;
 
 /** Where the person's own choice of microphone is kept in this browser. */
 const chosenKey = "grasp.microphone";
 /** How often the level is looked at, in ms. */
-export const tickMs = 40;
+const tickMs = 40;
 /** How far back the room's own noise is looked for, in ms. */
 const roomMs = 1500;
 /** How long there must be a voice before it counts as someone speaking, in ms. */
@@ -244,7 +244,7 @@ export const muteMic = (on: boolean): void => {
 };
 
 /** Whether the person muted themselves. */
-export const micMuted = (): boolean => muted;
+const micMuted = (): boolean => muted;
 
 const watchMute = (watcher: () => void): (() => void) => {
   muteWatchers.add(watcher);
@@ -286,7 +286,7 @@ const loudnessNow = (heard: Ears): number => {
 };
 
 /** One look at the microphone: whether someone speaks now, clearly above the room. */
-export interface Heard {
+interface Heard {
   speaks: boolean;
 }
 

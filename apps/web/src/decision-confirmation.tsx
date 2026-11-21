@@ -84,7 +84,7 @@ export const confirmAndAnswer = async (
  * Who wrote the answer's payload: the person, on the decision's page, or
  * an App's page, which asked to answer.
  */
-export type AnswerSource = "page";
+type AnswerSource = "page";
 
 /** A payload that is a comment and nothing else. */
 const commentAlone = z.strictObject({ comment: z.string() });

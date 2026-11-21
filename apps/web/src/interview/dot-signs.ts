@@ -27,7 +27,7 @@ export const dotSigns = [
 export type DotSign = (typeof dotSigns)[number];
 
 /** One dot of a sign. */
-export interface SignDot {
+interface SignDot {
   /** Where it is, in a square from -1 to 1, with y up. */
   x: number;
   y: number;

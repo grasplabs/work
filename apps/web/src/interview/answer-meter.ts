@@ -102,16 +102,3 @@ export const answerMeter = (done: (answer: Measured) => void) => {
     },
   };
 };
-
-/** What a list of numbers comes to a share of the way through it, smallest first: 0.5 is the middle one. */
-export const atShare = (values: number[], share: number): number | null => {
-  if (values.length === 0) {
-    return null;
-  }
-  const sorted = values.toSorted((a, b) => a - b);
-  const at = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.ceil(share * sorted.length) - 1)
-  );
-  return sorted[at] ?? null;
-};

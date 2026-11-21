@@ -686,7 +686,7 @@ const formatAgo = (value: string, now: Date = new Date()): string => {
 };
 
 /** A column of a table's records: the field whose values it shows, and its name in the head. */
-export interface RecordColumn {
+interface RecordColumn {
   field: string;
   header: string;
   /** A number: aligned to the end, as a table's numbers are. */
@@ -826,7 +826,7 @@ const RecordNotes = ({
  * App's draft (`apps.preview.records`), which nothing records,
  * exports or imports.
  */
-export type RecordSource = { kind: "live"; version: number } | { kind: "test" };
+type RecordSource = { kind: "live"; version: number } | { kind: "test" };
 
 /** A table, and where its records are read. */
 interface ReadTable {

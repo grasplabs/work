@@ -33,7 +33,7 @@ const droppedAgainMs = 2000;
 const readyMs = 10_000;
 
 /** What a live line is opened with. */
-export interface LiveLineOptions {
+interface LiveLineOptions {
   locale: Locale;
   /**
    * Someone's interview link, which the line listens for; without one, the

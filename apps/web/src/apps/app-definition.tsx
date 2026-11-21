@@ -31,7 +31,7 @@ const fileName = (name: string, version: number): string => {
 };
 
 /** Whether `identity` may export `app`'s definition. */
-export const exportsDefinition = (
+const exportsDefinition = (
   app: Pick<ViewedApp, "role" | "currentVersion">,
   identity: Pick<Identity, "staff">
 ): boolean => buildsApp(app, identity) && app.currentVersion !== null;

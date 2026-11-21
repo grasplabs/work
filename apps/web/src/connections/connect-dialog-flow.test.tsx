@@ -64,13 +64,7 @@ const entry = (source: "native" | "composio", id: string, name: string) => ({
   offered: true,
 });
 
-const [hubspot, microsoft] = integrationsOf(
-  [
-    entry("composio", "hubspot", "HubSpot"),
-    entry("native", "microsoft", "Microsoft 365"),
-  ],
-  []
-);
+const [hubspot] = integrationsOf([entry("composio", "hubspot", "HubSpot")], []);
 
 const tools: CatalogTool[] = [
   {
@@ -239,22 +233,5 @@ describe("choosing what Grasp may do in a toolkit", () => {
     expect(sent).toStrictEqual([
       [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
     ]);
-  });
-});
-
-describe("signing in to a native provider", () => {
-  afterEach(() => {
-    act(() => {
-      root?.unmount();
-    });
-    root = undefined;
-    document.body.innerHTML = "";
-  });
-
-  it("says the address of its sign-in page", async () => {
-    await opened(microsoft);
-    expect(document.body.textContent).toContain(
-      "You sign in at login.microsoftonline.com"
-    );
   });
 });

@@ -43,7 +43,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 export type PreviewHealth = "working" | "fixing";
 
 /** What the page does for a preview's updates. */
-export interface PreviewUpdatesHost {
+interface PreviewUpdatesHost {
   /**
    * Asks core for the previewed page of the draft at `revision`, the
    * frame showing the App's `appVersion`, if it shows one.

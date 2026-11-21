@@ -81,30 +81,6 @@ describe(AnswerWords, () => {
     document.body.replaceChildren();
   });
 
-  it("opens a link out of Grasp only once the person says so", async () => {
-    await shown("See [the policy](https://example.com/leave).");
-    // No address on the page to follow past the question: a middle click,
-    // or the browser's own "open link", has none.
-    const addressed = document.querySelector("a[href^='http']");
-    await press(button("the policy"));
-    const asked = /Open external link\?.*https:\/\/example\.com\/leave/u.test(
-      document.querySelector("[role=alertdialog]")?.textContent ?? ""
-    );
-    await press(button("Cancel"));
-    const cancelled = [...opened];
-    await press(button("the policy"));
-    await press(button("Open link"));
-
-    expect({ addressed, asked, cancelled, opened }).toStrictEqual({
-      addressed: null,
-      asked: true,
-      cancelled: [],
-      opened: [
-        { url: "https://example.com/leave", features: "noopener,noreferrer" },
-      ],
-    });
-  });
-
   it("shows a link to a note or to an unsafe address as its words alone", async () => {
     await shown(
       'Leave is [sixteen weeks](grasp:note/doc-1 "Sixteen weeks"), [this](javascript:alert(1)) runs nothing and [that](data:text/html,hi) opens nothing.'

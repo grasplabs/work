@@ -511,7 +511,7 @@ const versionToPublish = (
     : undefined;
 
 /** What is shared: the subject, its name, owner and live version. */
-export interface Shared {
+interface Shared {
   subject: Subject;
   name: string;
   /** Its owner, who has it always: never offered. */

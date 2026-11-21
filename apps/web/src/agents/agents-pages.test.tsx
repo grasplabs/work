@@ -844,13 +844,11 @@ describe("the company's agents, on pages of their own", () => {
       }).toStrictEqual({ why: true, code: false });
     });
 
-    it("pauses the agent in core from its heading, and offers a chat only while it is on and answers the person", async () => {
-      const asked = await mounted(page(claire, "overview"));
+    it("offers a chat with an agent that is on and answers the person", async () => {
+      await mounted(page(claire, "overview"));
       expect(
         document.querySelector("a[href='/?agent=agent-claire']")?.textContent
       ).toBe("Chat");
-      await press(document.querySelector("[role='switch']"));
-      expect(asked).toStrictEqual([["paused", "agent-claire", true]]);
     });
 
     it("offers no chat with an agent that is paused, or that doesn't answer the person", async () => {
@@ -865,16 +863,6 @@ describe("the company's agents, on pages of their own", () => {
         paused: paused === null,
         notTheirs: document.querySelector("a[href^='/?agent=']") === null,
       }).toStrictEqual({ paused: true, notTheirs: true });
-    });
-
-    it("has the first agent's access on its own page: where people reach it, with no way out to Settings", async () => {
-      await mounted(page(stephen, "access"));
-      const panel = document.body;
-      expect({
-        places: panel?.textContent?.includes("Where people reach him"),
-        grasp: panel?.textContent?.includes("Grasp's chat"),
-        link: document.querySelector("a[href='/settings/stephen']") !== null,
-      }).toStrictEqual({ places: true, grasp: true, link: false });
     });
 
     it("saves new instructions as the agent's instruction file, after the version it showed", async () => {

@@ -7,7 +7,7 @@ import type { ChatToolEvent } from "@grasp-os/shared/chat";
 // says what was done and leads to the dashboard, where the widget is.
 
 /** A widget a code step made or changed, as its line says it. */
-export interface WidgetLine {
+interface WidgetLine {
   /** The call's event: one line per call. */
   id: number;
   done: "made" | "changed";

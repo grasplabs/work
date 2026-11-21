@@ -15,7 +15,7 @@ import type { SourceName } from "./sources.tsx";
 // came from, for its sources.
 
 /** Where answers came from, by ID. */
-export interface ChatNames {
+interface ChatNames {
   /** The connections' names, by ID, for provenance. */
   sourceNames: ReadonlyMap<string, SourceName>;
 }

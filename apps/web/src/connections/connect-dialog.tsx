@@ -348,7 +348,7 @@ const Actions = ({
  * Where a native provider's sign-in page is, shown as the prototype shows
  * it: the host connect sends the browser to (apps/connect/src/providers.ts).
  */
-export const signInHosts: Readonly<Record<OAuthProvider, string>> = {
+const signInHosts: Readonly<Record<OAuthProvider, string>> = {
   microsoft: "login.microsoftonline.com",
   google: "accounts.google.com",
 };

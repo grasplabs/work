@@ -6,7 +6,7 @@ import type { ChatPlacement } from "./chat-layout.ts";
 // same card throughout, so a draft and a scroll stay; the bar comes and
 // goes in the shell's dock.
 
-export interface ChatStage {
+interface ChatStage {
   bar: boolean;
   card: boolean;
   /** Where the card is. */

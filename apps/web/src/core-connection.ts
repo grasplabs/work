@@ -104,12 +104,12 @@ export type CoreReach = "checking" | "reachable" | "unreachable";
  * App frame is patient: it waits for the next attempt the backoff makes,
  * so however often a page asks during an outage, it never adds one.
  */
-export interface Waiting {
+interface Waiting {
   patient?: boolean;
 }
 
 /** What a tab's connection is made with. */
-export interface CoreConnectionOptions {
+interface CoreConnectionOptions {
   /**
    * Called once the person's session ended under the page, after every
    * App frame on the connection was told (main.tsx loads the page again).
@@ -527,7 +527,7 @@ export class CoreConnection {
 }
 
 /** Whether core answers, how people sign in here, and who is signed in. */
-export interface CoreStatus {
+interface CoreStatus {
   connected: boolean;
   signInOptions: SignInOption[];
   identity?: Identity;

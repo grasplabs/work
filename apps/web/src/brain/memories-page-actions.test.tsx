@@ -1100,12 +1100,13 @@ describe("the Memories page's paged lists, read again", () => {
   it("shares a fact of the person's own exactly as the dialog shows it, with the audience they pick, and reads the page again", async () => {
     const sent: Readonly<Record<string, unknown>>[] = [];
     let reads = 0;
-    await initechOpen([ownFact("m-own")], {
+    const statement = "Initech renews\u200B in March";
+    await initechOpen([ownFact("m-own", { statement })], {
       memories: async () => {
         reads += 1;
         return await Promise.resolve({
           entity: initech,
-          memories: [ownFact("m-own")],
+          memories: [ownFact("m-own", { statement })],
           next: null,
         });
       },
@@ -1125,8 +1126,9 @@ describe("the Memories page's paged lists, read again", () => {
       shows: [
         "About Initech",
         "Status: Renewing",
-        "Initech renews in March",
+        "Initech renews\\u{200B} in March",
       ].map((text) => dialogText.includes(text)),
+      raw: dialogText.includes(statement),
       options,
       // Its id is the opening's own: any text.
       share: { ...share, change: typeof share?.change },
@@ -1136,6 +1138,7 @@ describe("the Memories page's paged lists, read again", () => {
       said: document.body.textContent.includes("Shared."),
     }).toStrictEqual({
       shows: [true, true, true],
+      raw: false,
       options: [
         ["t-sales", "Team Sales"],
         ["everyone", "Everyone"],
@@ -1147,7 +1150,7 @@ describe("the Memories page's paged lists, read again", () => {
           attribute: "status",
           type: "fact",
           value: "Renewing",
-          statement: "Initech renews in March",
+          statement,
           validFrom: null,
           validUntil: null,
         },
@@ -1335,25 +1338,6 @@ describe("the Memories page's paged lists, read again", () => {
       lines: [true, true, true, true],
       takenBack: ["m-left"],
     });
-  });
-
-  it("shows every character nobody sees in what is shared as an escape, and sends the text as stored", async () => {
-    const sent: Readonly<Record<string, unknown>>[] = [];
-    const hidden = "Initech renews\u200B in March";
-    await initechOpen([ownFact("m-own", { statement: hidden })], {
-      publish: async (share: Readonly<Record<string, unknown>>) => {
-        sent.push(share);
-        return await Promise.resolve({ memory: "m-copy", entity: "e-copy" });
-      },
-    });
-    await press(buttons("Share…")[0]);
-    const dialogText = dialogForm()?.textContent ?? "";
-    await shareWith("everyone");
-    expect({
-      escaped: dialogText.includes("Initech renews\\u{200B} in March"),
-      raw: dialogText.includes(hidden),
-      sent: JSON.stringify(sent[0]?.shown).includes(JSON.stringify(hidden)),
-    }).toStrictEqual({ escaped: true, raw: false, sent: true });
   });
 
   it("offers only the teams core lets the person share with, never a team of two", async () => {

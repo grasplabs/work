@@ -387,11 +387,14 @@ describe("the onboarding's AI step", () => {
     await enter(textField("Key"), pastedKey);
     await press(button("Continue"));
 
-    expect(asked.map(([what]) => what)).toStrictEqual([
+    expect(asked).toContainEqual([
       "add",
-      "test",
-      "models",
+      { provider: "anthropic", key: pastedKey },
     ]);
+    expect({
+      graspChosen: asked.some(([what]) => what === "source"),
+      connected: text().includes("Connected: Anthropic"),
+    }).toStrictEqual({ graspChosen: false, connected: true });
   });
 
   it("stays on the step and says why when the provider refuses the key: no model is chosen, and the key isn't kept", async () => {

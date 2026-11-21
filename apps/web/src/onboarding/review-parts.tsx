@@ -24,7 +24,7 @@ import { useEntrance } from "./setup-parts.tsx";
 // doesn't know in spam, and the interview links with it.
 
 /** A way to settle it: the first is the one Stephen would take. */
-export interface ReviewChoice {
+interface ReviewChoice {
   id: string;
   label: string;
 }
@@ -35,7 +35,7 @@ export interface ReviewChoice {
  * button of its own. Once settled it says which way they chose, and that
  * can still be changed.
  */
-export const ReviewItem = ({
+const ReviewItem = ({
   title,
   context,
   children,

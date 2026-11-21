@@ -149,10 +149,10 @@ export const sourcesFor = (
 };
 
 /** How long the interviews run unless planned otherwise, in days. */
-export const listenDays = 14;
+const listenDays = 14;
 
 /** One team as the brain lays it out: its name and head count. */
-export interface SetupTeam {
+interface SetupTeam {
   id: string;
   name: string;
   people: number;
@@ -233,7 +233,7 @@ export const closesOn = (plan: Pick<Plan, "start" | "days">): string =>
   addDays(plan.start, plan.days - 1);
 
 /** What the brain is drawn from on a step. */
-export interface SetupFacts {
+interface SetupFacts {
   roster: Roster | null;
   listening: Listening;
   /** How much Grasp knows, in percent. */

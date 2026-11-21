@@ -93,7 +93,7 @@ export const readCron = (
 };
 
 /** When a wake-up fires, in words. */
-export const useWhen = () => {
+const useWhen = () => {
   const { t } = useLingui();
   return (wake: Pick<AgentWake, "cron">): string => {
     const read = readCron(wake.cron);

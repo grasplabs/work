@@ -92,7 +92,7 @@ export const pagesOf = (files: readonly string[]): string[] =>
  * The pages of what the preview shows: the draft's files while it changes
  * the App (`revision`), else the live version's. None while they are read.
  */
-export const useAppPages = (
+const useAppPages = (
   app: string,
   draft: { revision: number } | undefined,
   version: number | null

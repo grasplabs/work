@@ -113,7 +113,7 @@ const entriesOf = (ws: Workspace, brain: Brain): LogEntry[] => {
 };
 
 /** The log's stretches, newest first: this week, last week, and before. */
-export interface LogStretches {
+interface LogStretches {
   thisWeek: LogEntry[];
   lastWeek: LogEntry[];
   earlier: LogEntry[];

@@ -21,7 +21,7 @@ export interface Learned {
 }
 
 /** What the tab saw of Grasp's thinking; a new one whenever any of it changes. */
-export interface ThinkingLog {
+interface ThinkingLog {
   /** When each step reached the tab, by its call. */
   arrived: ReadonlyMap<string, number>;
   /** The questions whose picture the person put away. */

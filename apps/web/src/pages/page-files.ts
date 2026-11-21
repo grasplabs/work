@@ -214,7 +214,7 @@ const pageActivationEvents = [
 ] as const;
 
 /** What a frame's download gesture is read from, as the browser shows it. */
-export interface GesturePage {
+interface GesturePage {
   /** Where the page's own input arrives: its window. */
   readonly events: EventTarget;
   /** Whether the page has transient activation now. */

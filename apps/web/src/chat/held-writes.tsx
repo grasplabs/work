@@ -147,7 +147,7 @@ const styles = stylex.create({
  * The input an action runs with, laid out to read, every character nobody
  * sees shown as an escape (`shownVisibly`).
  */
-export const inputOf = (input: string): string => {
+const inputOf = (input: string): string => {
   try {
     return shownVisibly(JSON.stringify(JSON.parse(input), null, 2));
   } catch {
@@ -381,7 +381,7 @@ export const useShown = ({
 };
 
 /** A held write's name: what it does, on which connection. */
-export const useHeldName = (action: PendingAction): string => {
+const useHeldName = (action: PendingAction): string => {
   const { t } = useLingui();
   const title = action.description?.title ?? action.action;
   const connection = action.connectionName ?? action.connectionId;
@@ -761,7 +761,7 @@ const HeldCard = ({
  * A held write in the chat: as its draft when it makes one and what it
  * would send is shown, else on Grasp UI's Approval request.
  */
-export const HeldWrite = ({
+const HeldWrite = ({
   action,
   ...decided
 }: Decided & {
