@@ -64,7 +64,7 @@ const securityPaths: readonly RegExp[] = [
  * core.
  */
 const guardedServerCode =
-  /^(?:apps\/(?!web\/)[^/]+|packages\/connectors\/[^/]+|packages\/(?!ui\/|connectors\/)[^/]+)\/src\/(?:.*[-_./])?(?:auth|authori[sz]e|authority|access|permissions?|polic(?:y|ies)|sandbox(?:ed)?|secrets?|tokens?|oauth|egress|isolate|sealed?|grants?|rights|keys?|signing|security|session-check|idp|audit-chain)(?:[-_./]|$)/iu;
+  /^(?:apps\/(?!web\/)[^/]+|packages\/connectors\/[^/]+|packages\/(?!app-kit\/|connectors\/)[^/]+)\/src\/(?:.*[-_./])?(?:auth|authori[sz]e|authority|access|permissions?|polic(?:y|ies)|sandbox(?:ed)?|secrets?|tokens?|oauth|egress|isolate|sealed?|grants?|rights|keys?|signing|security|session-check|idp|audit-chain)(?:[-_./]|$)/iu;
 
 /** Code lines above which a PR is High, and up to which it can be Low. */
 const highLines = 1000;

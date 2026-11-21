@@ -1,9 +1,9 @@
-import type { DecisionView } from "@grasp-os/shared/decisions";
 import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@grasp-os/ui/components/sidebar";
+} from "@grasp-os/app-kit/components/sidebar";
+import type { DecisionView } from "@grasp-os/shared/decisions";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";

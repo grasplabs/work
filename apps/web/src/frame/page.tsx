@@ -1,9 +1,9 @@
-import { Card } from "@grasp-os/ui/components/card";
+import { Card } from "@grasp-os/app-kit/components/card";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
-} from "@grasp-os/ui/components/empty";
+} from "@grasp-os/app-kit/components/empty";
 import {
   PageHeader,
   PageHeaderActions,
@@ -11,7 +11,7 @@ import {
   PageHeaderDescription,
   PageHeaderMeta,
   PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
+} from "@grasp-os/app-kit/components/page-header";
 import type { ReactNode } from "react";
 
 // A page's body and heading, as the prototype has them

@@ -1,8 +1,8 @@
+import { Button } from "@grasp-os/app-kit/components/button";
 import type { App } from "@grasp-os/shared/apps";
 import type { ChatWork } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";

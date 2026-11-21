@@ -73,7 +73,7 @@ const typeDiagnostics = (
 const pageMistakes: Record<string, string> = {
   "src/components/m-assign.tsx": 'export const wrong: number = "x";\n',
   "src/components/m-prop.tsx":
-    'import { Button } from "@grasp-os/ui/components/button";\n\nexport const Wrong = () => <Button nope={1}>x</Button>;\n',
+    'import { Button } from "@grasp-os/app-kit/components/button";\n\nexport const Wrong = () => <Button nope={1}>x</Button>;\n',
   "src/components/m-hook.tsx":
     'import { useQuery } from "@grasp-os/sdk/react";\n\nexport const wrong: number = useQuery;\n',
   "src/components/m-export.tsx":
@@ -100,7 +100,7 @@ const pageMistakes: Record<string, string> = {
   "src/components/m-utf16.tsx":
     'const face = "😀😀"; export const wrong: number = face;\n',
   "src/components/m-child.tsx":
-    'import { Button } from "@grasp-os/ui/components/button";\n\nexport const Wrong = () => <Button>{{ a: 1 }}</Button>;\n',
+    'import { Button } from "@grasp-os/app-kit/components/button";\n\nexport const Wrong = () => <Button>{{ a: 1 }}</Button>;\n',
   "src/components/m-declared.d.ts":
     "export interface Wrong {\n  field: Missing;\n}\n",
   // Modules the kit holds but doesn't give a page, by name and by path.

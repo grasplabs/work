@@ -1,4 +1,3 @@
-import type { App } from "@grasp-os/shared/apps";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -8,7 +7,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import type { App } from "@grasp-os/shared/apps";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 

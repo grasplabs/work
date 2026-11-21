@@ -19,6 +19,22 @@
  * What is fine is said in a line or folded: the queue's one kind, upkeep
  * that got through, the erasure counters, and the engine's rebuilds.
  */
+
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/app-kit/components/collapsible";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
 import {
   brainSearchWays,
   brainSteps,
@@ -35,21 +51,6 @@ import type {
   BrainSyncPhase,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
 import { Await, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 

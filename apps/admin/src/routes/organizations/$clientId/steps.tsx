@@ -1,11 +1,11 @@
-import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
-import type { Stage } from "@grasp-os/shared/admin/onboarding-admin";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
+} from "@grasp-os/app-kit/components/tabs";
+import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
+import type { Stage } from "@grasp-os/shared/admin/onboarding-admin";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { OrgFlow } from "../../../admin/flow.tsx";

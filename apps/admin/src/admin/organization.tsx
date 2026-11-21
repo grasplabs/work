@@ -18,16 +18,15 @@
  * foot (the admin reads a real company, whose day is core's own), and
  * the column folded the way the reader last left it.
  */
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
+
 import {
   Alert,
   AlertAction,
   AlertDescription,
   AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/alert";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
 import {
   Empty,
   EmptyContent,
@@ -35,8 +34,8 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { PageHeader } from "@grasp-os/ui/components/page-header";
+} from "@grasp-os/app-kit/components/empty";
+import { PageHeader } from "@grasp-os/app-kit/components/page-header";
 import {
   PageSidebar,
   PageSidebarBody,
@@ -44,7 +43,7 @@ import {
   PageSidebarRailButton,
   PageSidebarRailDivider,
   PageSidebarRailExpand,
-} from "@grasp-os/ui/components/page-sidebar";
+} from "@grasp-os/app-kit/components/page-sidebar";
 import {
   Select,
   SelectContent,
@@ -53,9 +52,11 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/select";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
 import {
   Link,
   Outlet,

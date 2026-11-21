@@ -14,12 +14,12 @@ import {
   CardRowControl,
   CardRowLabel,
   CardTitle,
-} from "@grasp-os/ui/components/card";
+} from "@grasp-os/app-kit/components/card";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
-} from "@grasp-os/ui/components/empty";
+} from "@grasp-os/app-kit/components/empty";
 import type { ReactNode } from "react";
 
 export const Section = ({

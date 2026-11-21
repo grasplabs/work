@@ -1,5 +1,5 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { DirectoryAccount, Member } from "@grasp-os/shared/members";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Trans } from "@lingui/react/macro";
 import type { ReactElement } from "react";
 

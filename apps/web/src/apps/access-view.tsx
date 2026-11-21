@@ -1,3 +1,21 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import {
+  Field,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@grasp-os/app-kit/components/field";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+} from "@grasp-os/app-kit/components/item";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@grasp-os/app-kit/components/radio-group";
 import {
   accessAfter,
   changeAnswer,
@@ -14,24 +32,6 @@ import type {
   DataModelRule,
   DataModelTable,
 } from "@grasp-os/shared/data-model";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import {
-  Field,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/ui/components/field";
-import {
-  Item,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-} from "@grasp-os/ui/components/item";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { UserIcon } from "lucide-react";
 import { useId, useState } from "react";

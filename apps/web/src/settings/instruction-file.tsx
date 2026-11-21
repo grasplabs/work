@@ -1,14 +1,14 @@
-import type {
-  InstructionFileRef,
-  InstructionFileText,
-} from "@grasp-os/shared/instruction-files";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+} from "@grasp-os/app-kit/components/field";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import type {
+  InstructionFileRef,
+  InstructionFileText,
+} from "@grasp-os/shared/instruction-files";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";

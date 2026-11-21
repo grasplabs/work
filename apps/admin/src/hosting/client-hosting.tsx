@@ -6,9 +6,9 @@
  * Which release it runs once live is its channel's or its pin's, which the
  * reconciler deploys (src/rollout/reconciler.ts): nothing here changes it.
  */
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
 import { rootRouteId, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";

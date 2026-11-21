@@ -27,7 +27,7 @@ import type { Node, Parsed } from "./syntax.ts";
 
 /** Added to every refusal of a restyle: an App uses the kit as it is. */
 const designNote =
-  "Pages can't change the kit (@grasp-os/ui): use what it has, or build the look from plain elements.";
+  "Pages can't change the kit (@grasp-os/app-kit): use what it has, or build the look from plain elements.";
 
 /** Helpers whose string arguments are class lists. */
 const classHelpers = new Set([

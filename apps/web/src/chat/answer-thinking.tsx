@@ -1,9 +1,9 @@
-import type { ChatMessage } from "@grasp-os/shared/chat";
 import {
   TraceIcon,
   TraceLine,
   TraceTitle,
-} from "@grasp-os/ui/components/trace";
+} from "@grasp-os/app-kit/components/trace";
+import type { ChatMessage } from "@grasp-os/shared/chat";
 import { Trans } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { BrainIcon, ClockIcon } from "lucide-react";

@@ -1,6 +1,6 @@
 import "./styles.css";
 import { CSPProvider } from "@base-ui/react/csp-provider";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { i18n } from "@lingui/core";
 import { I18nProvider, useLingui } from "@lingui/react";
 import { createRouter, RouterProvider } from "@tanstack/react-router";

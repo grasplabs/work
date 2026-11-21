@@ -8,9 +8,9 @@ import {
   CardRowControl,
   CardRowLabel,
   CardTitle,
-} from "@grasp-os/ui/components/card";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/card";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";

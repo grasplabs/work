@@ -1,20 +1,20 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   DockablePanel,
   DockablePanelHandle,
   DockablePanelHeader,
   useDockablePanel,
-} from "@grasp-os/ui/components/dockable-panel";
-import type { DockablePlacement } from "@grasp-os/ui/components/dockable-panel";
+} from "@grasp-os/app-kit/components/dockable-panel";
+import type { DockablePlacement } from "@grasp-os/app-kit/components/dockable-panel";
 import {
   Empty,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { Panel } from "@grasp-os/ui/components/panel";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/empty";
+import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
+import { Panel } from "@grasp-os/app-kit/components/panel";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
 import {

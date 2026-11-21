@@ -1,4 +1,4 @@
-import type { DockablePlacement } from "@grasp-os/ui/components/dockable-panel";
+import type { DockablePlacement } from "@grasp-os/app-kit/components/dockable-panel";
 import { useState } from "react";
 
 // What of Grasp's chat shows, step by step (global-chat.tsx): the idle bar,

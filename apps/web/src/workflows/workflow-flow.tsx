@@ -1,3 +1,13 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Label } from "@grasp-os/app-kit/components/label";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@grasp-os/app-kit/components/sheet";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { draftErrors } from "@grasp-os/shared/drafts";
 import { failureText } from "@grasp-os/shared/errors";
 import type {
@@ -5,16 +15,6 @@ import type {
   WorkflowDiagram,
 } from "@grasp-os/shared/workflow-diagrams";
 import type { WorkflowDraft } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
-import { Label } from "@grasp-os/ui/components/label";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "@grasp-os/ui/components/sheet";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
   BracesIcon,

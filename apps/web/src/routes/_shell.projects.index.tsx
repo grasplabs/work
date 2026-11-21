@@ -1,7 +1,9 @@
-import type { ProjectSummary } from "@grasp-os/shared/projects";
-import { canBuild } from "@grasp-os/shared/roles";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent, CardHeader } from "@grasp-os/ui/components/card";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+} from "@grasp-os/app-kit/components/card";
 import {
   Empty,
   EmptyContent,
@@ -9,7 +11,9 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
+} from "@grasp-os/app-kit/components/empty";
+import type { ProjectSummary } from "@grasp-os/shared/projects";
+import { canBuild } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { FolderIcon, PlusIcon } from "lucide-react";

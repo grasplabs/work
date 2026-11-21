@@ -1,18 +1,18 @@
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@grasp-os/app-kit/components/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/app-kit/components/tooltip";
 import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type {
   ConnectionWorkflow,
   ConnectionWorkflows,
 } from "@grasp-os/shared/workflows";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";

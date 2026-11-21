@@ -52,7 +52,7 @@ const pageCode = (
   attacker: string
 ) => `import { createFileRoute } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { useEffect, useState } from "react";
 import { api } from "@server/_generated/api";
 

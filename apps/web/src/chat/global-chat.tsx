@@ -1,7 +1,7 @@
+import { useIsMobile } from "@grasp-os/app-kit/hooks/use-mobile";
 import type { ChatAgent } from "@grasp-os/shared/chat";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import type { Subject } from "@grasp-os/shared/subject";
-import { useIsMobile } from "@grasp-os/ui/hooks/use-mobile";
 import { useLingui } from "@lingui/react/macro";
 import { useLocation, useRouteContext } from "@tanstack/react-router";
 import { createContext, use, useEffect, useEffectEvent, useRef } from "react";

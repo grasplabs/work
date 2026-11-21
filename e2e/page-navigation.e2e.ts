@@ -70,8 +70,8 @@ test("a new version made current switches a clean page at once, and asks an edit
   files = withFiles(files, {
     "src/routes/notes.$id.tsx": (files.files["src/routes/notes.$id.tsx"] ?? "")
       .replace(
-        'import { Form, TextField } from "@grasp-os/ui/form";',
-        'import { Form, SubmitButton, TextField } from "@grasp-os/ui/form";'
+        'import { Form, TextField } from "@grasp-os/app-kit/form";',
+        'import { Form, SubmitButton, TextField } from "@grasp-os/app-kit/form";'
       )
       .replace(
         '{ defaultValues: { title: "", body: "" } }',

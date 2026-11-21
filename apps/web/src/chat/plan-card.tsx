@@ -1,10 +1,5 @@
-import type {
-  ChatPlanKind,
-  ChatPlanned,
-  ChatPlanNeed,
-} from "@grasp-os/shared/chat";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { buttonVariants } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import {
   Item,
   ItemContent,
@@ -12,7 +7,12 @@ import {
   ItemGroup,
   ItemMedia,
   ItemTitle,
-} from "@grasp-os/ui/components/item";
+} from "@grasp-os/app-kit/components/item";
+import type {
+  ChatPlanKind,
+  ChatPlanned,
+  ChatPlanNeed,
+} from "@grasp-os/shared/chat";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { LayoutGridIcon, RepeatIcon, UsersIcon } from "lucide-react";

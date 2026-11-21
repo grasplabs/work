@@ -1,11 +1,5 @@
-import { failureText } from "@grasp-os/shared/errors";
-import { maxItemTestItems } from "@grasp-os/shared/workflow-resources";
-import type {
-  WorkflowItemTest,
-  WorkflowItemTestItem,
-} from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
-import { Label } from "@grasp-os/ui/components/label";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Label } from "@grasp-os/app-kit/components/label";
 import {
   Table,
   TableBody,
@@ -13,8 +7,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+} from "@grasp-os/app-kit/components/table";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import { failureText } from "@grasp-os/shared/errors";
+import { maxItemTestItems } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowItemTest,
+  WorkflowItemTestItem,
+} from "@grasp-os/shared/workflow-resources";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useId, useState } from "react";
 

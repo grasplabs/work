@@ -1,5 +1,5 @@
+import { Button } from "@grasp-os/app-kit/components/button";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
 import { Trans } from "@lingui/react/macro";
 
 // A start core refused because an admin hasn't approved what the version

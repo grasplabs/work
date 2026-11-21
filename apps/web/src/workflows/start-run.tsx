@@ -1,7 +1,5 @@
-import { failureText } from "@grasp-os/shared/errors";
-import type { WorkflowStartForm } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -10,14 +8,16 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import { Input } from "@grasp-os/ui/components/input";
-import { Label } from "@grasp-os/ui/components/label";
+} from "@grasp-os/app-kit/components/dialog";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Label } from "@grasp-os/app-kit/components/label";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+} from "@grasp-os/app-kit/components/native-select";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
+import { failureText } from "@grasp-os/shared/errors";
+import type { WorkflowStartForm } from "@grasp-os/shared/workflow-resources";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { PlayIcon, XIcon } from "lucide-react";

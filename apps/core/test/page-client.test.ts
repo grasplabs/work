@@ -833,7 +833,7 @@ export const Route = createFileRoute("/")({ component: Notes });
 import { v } from "@grasp-os/sdk";
 import type { FunctionReturn } from "@grasp-os/sdk";
 import { useForm } from "@grasp-os/sdk/react";
-import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
+import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/app-kit/form";
 import { api } from "@server/_generated/api";
 
 type Note = NonNullable<FunctionReturn<typeof api.notes.get>>;
@@ -975,9 +975,9 @@ export const rename = mutation({
     );
     const tasksPage = `import { createFileRoute } from "@tanstack/react-router";
 import { useForm, useMutation } from "@grasp-os/sdk/react";
-import { DataGrid } from "@grasp-os/ui/components/data-grid";
-import { RichText } from "@grasp-os/ui/components/rich-text";
-import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, RichTextField, SelectField, SubmitButton, TextField } from "@grasp-os/ui/form";
+import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
+import { RichText } from "@grasp-os/app-kit/components/rich-text";
+import { CheckboxField, DateField, FileField, Form, FormError, MultiSelectField, NumberField, RelationField, RichTextField, SelectField, SubmitButton, TextField } from "@grasp-os/app-kit/form";
 import { api, permissions } from "@server/_generated/api";
 
 function Tasks() {

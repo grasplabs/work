@@ -1,5 +1,5 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { ChatProvenance } from "@grasp-os/shared/chat";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Plural, Trans } from "@lingui/react/macro";
 import { BookOpenIcon, CableIcon, ChevronDownIcon } from "lucide-react";
 

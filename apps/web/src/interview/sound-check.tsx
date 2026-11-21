@@ -1,13 +1,13 @@
-import { interviewerNames } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+} from "@grasp-os/app-kit/components/dropdown-menu";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";

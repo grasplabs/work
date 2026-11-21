@@ -1,5 +1,5 @@
+import { Button } from "@grasp-os/app-kit/components/button";
 import type { SignInOption } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
 import { Trans } from "@lingui/react/macro";
 
 import { signIn } from "./core.ts";

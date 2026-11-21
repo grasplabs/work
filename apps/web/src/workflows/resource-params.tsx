@@ -1,12 +1,12 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Switch } from "@grasp-os/app-kit/components/switch";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import type {
   WorkflowParamSetting,
   WorkflowParams,
 } from "@grasp-os/shared/workflow-resources";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import { Switch } from "@grasp-os/ui/components/switch";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 

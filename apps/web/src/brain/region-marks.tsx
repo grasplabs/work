@@ -1,4 +1,4 @@
-import { cn } from "@grasp-os/ui/lib/utils";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { Plural } from "@lingui/react/macro";
 
 import type { AtlasRegion } from "./brain-atlas.ts";

@@ -1,3 +1,12 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { hrErrors, hrPlatformNames } from "@grasp-os/shared/hr";
 import type { HrPlatform, OnboardingHr } from "@grasp-os/shared/hr";
 import {
@@ -5,15 +14,6 @@ import {
   onboardingTeamsMax,
 } from "@grasp-os/shared/onboarding";
 import type { Roster } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";

@@ -1,7 +1,7 @@
+import { Card } from "@grasp-os/app-kit/components/card";
+import { Switch } from "@grasp-os/app-kit/components/switch";
 import type { OwnAgentsUsage } from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
-import { Card } from "@grasp-os/ui/components/card";
-import { Switch } from "@grasp-os/ui/components/switch";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { useId } from "react";

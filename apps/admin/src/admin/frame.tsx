@@ -17,8 +17,8 @@ import {
   AppShell,
   AppShellContent,
   AppShellMain,
-} from "@grasp-os/ui/components/app-shell";
-import { BrandHeader } from "@grasp-os/ui/components/brand-header";
+} from "@grasp-os/app-kit/components/app-shell";
+import { BrandHeader } from "@grasp-os/app-kit/components/brand-header";
 import {
   Sidebar,
   SidebarContent,
@@ -31,13 +31,13 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@grasp-os/ui/components/sidebar";
+} from "@grasp-os/app-kit/components/sidebar";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
 import { Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
   BuildingIcon,

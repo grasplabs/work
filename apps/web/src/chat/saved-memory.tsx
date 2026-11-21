@@ -1,15 +1,15 @@
-import type {
-  BrainMemoryOutcome,
-  ChatSavedMemory,
-} from "@grasp-os/shared/brain-memories";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   TraceDescription,
   TraceIcon,
   TraceLine,
   TraceTitle,
-} from "@grasp-os/ui/components/trace";
+} from "@grasp-os/app-kit/components/trace";
+import type {
+  BrainMemoryOutcome,
+  ChatSavedMemory,
+} from "@grasp-os/shared/brain-memories";
 import { Trans } from "@lingui/react/macro";
 import { BrainIcon } from "lucide-react";
 import { useState } from "react";

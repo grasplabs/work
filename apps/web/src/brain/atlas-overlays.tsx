@@ -1,5 +1,5 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { cn } from "@grasp-os/ui/lib/utils";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
   ArrowLeftIcon,

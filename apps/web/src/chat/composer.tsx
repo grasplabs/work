@@ -1,4 +1,3 @@
-import type { ModelEffort } from "@grasp-os/shared/models";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,18 +7,18 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "@grasp-os/app-kit/components/dropdown-menu";
 import {
   InputGroup,
   InputGroupAddon,
-} from "@grasp-os/ui/components/input-group";
-import { PromptEditor } from "@grasp-os/ui/components/prompt-editor";
+} from "@grasp-os/app-kit/components/input-group";
+import { PromptEditor } from "@grasp-os/app-kit/components/prompt-editor";
 import type {
   PromptEditorHandle,
   PromptMention,
   PromptMentionKind,
   PromptTrigger,
-} from "@grasp-os/ui/components/prompt-editor";
+} from "@grasp-os/app-kit/components/prompt-editor";
 import {
   PromptInputSubjectBar,
   PromptInputBody,
@@ -29,8 +28,9 @@ import {
   PromptInputHeader,
   PromptInputSubmit,
   PromptInputTools,
-} from "@grasp-os/ui/components/prompt-input";
-import { Separator } from "@grasp-os/ui/components/separator";
+} from "@grasp-os/app-kit/components/prompt-input";
+import { Separator } from "@grasp-os/app-kit/components/separator";
+import type { ModelEffort } from "@grasp-os/shared/models";
 import { msg, select } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon } from "lucide-react";

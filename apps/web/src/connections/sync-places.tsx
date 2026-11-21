@@ -1,18 +1,11 @@
-import type {
-  ConnectionBrainAudience,
-  ListedConnection,
-  SharedSyncPlaces,
-} from "@grasp-os/shared/connect";
-import { failureText } from "@grasp-os/shared/errors";
-import { syncErrors } from "@grasp-os/shared/sync";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
+} from "@grasp-os/app-kit/components/empty";
 import {
   Field,
   FieldContent,
@@ -20,8 +13,15 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
-} from "@grasp-os/ui/components/field";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/field";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import type {
+  ConnectionBrainAudience,
+  ListedConnection,
+  SharedSyncPlaces,
+} from "@grasp-os/shared/connect";
+import { failureText } from "@grasp-os/shared/errors";
+import { syncErrors } from "@grasp-os/shared/sync";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useId, useState } from "react";
 
