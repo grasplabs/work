@@ -1,7 +1,7 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Card } from "@grasp-os/app-kit/components/card";
 import type { Agent } from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card } from "@grasp-os/ui/components/card";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 

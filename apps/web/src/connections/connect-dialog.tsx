@@ -1,3 +1,19 @@
+import { AutoHeight, FadeIn } from "@grasp-os/app-kit/components/auto-height";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@grasp-os/app-kit/components/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import {
   canSignInAgain,
   composioConsentText,
@@ -14,22 +30,6 @@ import type {
 import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { AutoHeight, FadeIn } from "@grasp-os/ui/components/auto-height";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { CheckIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";

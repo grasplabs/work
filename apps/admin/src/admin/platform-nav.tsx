@@ -9,7 +9,7 @@ import {
   NavigationMenuItem,
   NavigationMenuLink,
   NavigationMenuList,
-} from "@grasp-os/ui/components/navigation-menu";
+} from "@grasp-os/app-kit/components/navigation-menu";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 
 import type { Crumb } from "./page.tsx";

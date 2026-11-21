@@ -1,4 +1,4 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { Trans } from "@lingui/react/macro";
 import { useCanGoBack, useRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "lucide-react";

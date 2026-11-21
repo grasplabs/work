@@ -1,16 +1,16 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@grasp-os/app-kit/components/popover";
+import { Progress } from "@grasp-os/app-kit/components/progress";
 import { minTalkedShown } from "@grasp-os/shared/onboarding";
 import type {
   LinkToSend,
   OnboardingView,
   TeamProgress,
 } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Progress } from "@grasp-os/ui/components/progress";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";

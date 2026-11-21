@@ -1,8 +1,3 @@
-import { workflowStateMaxBytes } from "@grasp-os/shared/workflow-resources";
-import type {
-  WorkflowState,
-  WorkflowStateEntry,
-} from "@grasp-os/shared/workflow-resources";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,8 +8,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Table,
   TableBody,
@@ -22,7 +17,12 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
+import { workflowStateMaxBytes } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowState,
+  WorkflowStateEntry,
+} from "@grasp-os/shared/workflow-resources";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 

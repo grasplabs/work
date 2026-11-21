@@ -1,4 +1,3 @@
-import { chatFileTypes } from "@grasp-os/shared/chat";
 import {
   Attachment,
   AttachmentAction,
@@ -8,7 +7,8 @@ import {
   AttachmentGroup,
   AttachmentMedia,
   AttachmentTitle,
-} from "@grasp-os/ui/components/attachment";
+} from "@grasp-os/app-kit/components/attachment";
+import { chatFileTypes } from "@grasp-os/shared/chat";
 import { useLingui } from "@lingui/react/macro";
 import { FileTextIcon, XIcon } from "lucide-react";
 import type { Ref } from "react";

@@ -4,7 +4,7 @@
  * What Secrets Store holds reaches every company by itself: the reconciler
  * deploys it, as it deploys a release.
  */
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { useState } from "react";
 
 import { checkRevocationFn } from "../rollout/functions.ts";

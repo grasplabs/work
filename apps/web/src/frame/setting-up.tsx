@@ -1,5 +1,5 @@
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Empty,
   EmptyContent,
@@ -7,13 +7,13 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+} from "@grasp-os/app-kit/components/empty";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { TriangleAlertIcon, UsersIcon } from "lucide-react";
 

@@ -4,7 +4,7 @@
  * quiet line, facts as rows, and an error's code; its sections are
  * the admin's (src/admin/section.tsx).
  */
-import { cn } from "@grasp-os/ui/lib/utils";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { ReactNode } from "react";
 
 /** An error code as the section says it: the code alone, as the admin keeps it. */

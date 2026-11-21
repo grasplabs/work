@@ -1,11 +1,11 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import { Input } from "@grasp-os/ui/components/input";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   ToggleGroup,
   ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/toggle-group";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { Plural, useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";

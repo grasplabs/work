@@ -7,10 +7,10 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { Progress } from "@grasp-os/ui/components/progress";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Progress } from "@grasp-os/app-kit/components/progress";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {

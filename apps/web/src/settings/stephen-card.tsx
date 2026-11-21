@@ -1,6 +1,3 @@
-import type { ToolClassAudience } from "@grasp-os/shared/connect";
-import type { StephenReach } from "@grasp-os/shared/stephen-reach";
-import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,15 +7,18 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { Switch } from "@grasp-os/ui/components/switch";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Switch } from "@grasp-os/app-kit/components/switch";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/tooltip";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { ToolClassAudience } from "@grasp-os/shared/connect";
+import type { StephenReach } from "@grasp-os/shared/stephen-reach";
+import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { useState } from "react";

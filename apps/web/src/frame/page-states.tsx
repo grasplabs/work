@@ -1,4 +1,4 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Empty,
   EmptyContent,
@@ -6,8 +6,8 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
+} from "@grasp-os/app-kit/components/empty";
+import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { RotateCcwIcon, SearchXIcon, TriangleAlertIcon } from "lucide-react";

@@ -1,9 +1,9 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
 import type {
   SignInProvider,
   SignInSettings,
 } from "@grasp-os/shared/org-settings";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { useEffect, useState } from "react";

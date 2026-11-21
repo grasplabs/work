@@ -1,5 +1,5 @@
+import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import type { ChatPlanKind } from "@grasp-os/shared/chat";
-import { buttonVariants } from "@grasp-os/ui/components/button";
 import { Trans } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";

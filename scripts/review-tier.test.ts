@@ -38,7 +38,7 @@ describe("ranking a pull request's complexity", () => {
   it("calls a change across four apps or packages High, however small", () => {
     expect(
       assess(
-        ["apps/core", "apps/web", "packages/runtime", "packages/ui"].map(
+        ["apps/core", "apps/web", "packages/runtime", "packages/app-kit"].map(
           (area) => changed(`${area}/src/name.ts`, 2)
         )
       ).complexity
@@ -128,7 +128,7 @@ describe("the Security floor", () => {
 
   it("leaves the theme's tokens, the frontend, tests and ordinary code alone", () => {
     for (const filename of [
-      "packages/ui/src/styles/tokens.css",
+      "packages/app-kit/src/styles/tokens.css",
       "apps/web/src/brain/brain.ts",
       "apps/core/test/permission-probing.ts",
       "apps/core/test/permissions.test.ts",

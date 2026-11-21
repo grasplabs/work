@@ -1,5 +1,3 @@
-import { workflowLabel } from "@grasp-os/shared/workflow-resources";
-import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,10 +8,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import { Label } from "@grasp-os/ui/components/label";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import { Label } from "@grasp-os/app-kit/components/label";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
+import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";

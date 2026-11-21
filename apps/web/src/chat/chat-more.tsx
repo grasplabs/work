@@ -1,5 +1,3 @@
-import type { ChatSummary } from "@grasp-os/shared/chat";
-import { chatTitleMaxLength, chatTitleSchema } from "@grasp-os/shared/chat";
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -7,15 +5,17 @@ import {
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "@grasp-os/app-kit/components/dropdown-menu";
 import {
   EditableTitle,
   EditableTitleField,
   EditableTitleMenuContent,
   EditableTitleRenameItem,
   EditableTitleTrigger,
-} from "@grasp-os/ui/components/editable-title";
-import { toast } from "@grasp-os/ui/components/toast";
+} from "@grasp-os/app-kit/components/editable-title";
+import { toast } from "@grasp-os/app-kit/components/toast";
+import type { ChatSummary } from "@grasp-os/shared/chat";
+import { chatTitleMaxLength, chatTitleSchema } from "@grasp-os/shared/chat";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import {

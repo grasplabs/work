@@ -456,7 +456,7 @@ export const graspRulesOf = (files: Record<string, string>): string[] =>
  * parameter, and one only a type predicate reads (oxlint reports it; it
  * passes a name only a type query reads).
  */
-export const unusedNames = `import { Badge } from "@grasp-os/ui/components/badge";
+export const unusedNames = `import { Badge } from "@grasp-os/app-kit/components/badge";
 
 const row = { id: 1 };
 export type Row = typeof row;

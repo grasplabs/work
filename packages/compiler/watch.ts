@@ -1,7 +1,7 @@
 /**
  * `vp run dev`: builds the compiler again whenever what it is built from
  * changes, into the assets the dev server serves. Core's own build runs
- * once, when the server starts; without this a change to `@grasp-os/ui`
+ * once, when the server starts; without this a change to `@grasp-os/app-kit`
  * shows in the frontend, which Vite reloads, but not in App pages,
  * which the compiler goes on checking and building against the kit as it
  * was when the server started.
@@ -43,9 +43,9 @@ const buildModule = (file: string): boolean =>
 
 /** What the kit and the compiler are built from, besides their dependencies. */
 const watched: Watched[] = [
-  { dir: path.join(packages, "ui/src") },
+  { dir: path.join(packages, "app-kit/src") },
   {
-    dir: path.join(packages, "ui"),
+    dir: path.join(packages, "app-kit"),
     only: oneOf("components.json", "package.json"),
   },
   { dir: path.join(packages, "sdk/src") },

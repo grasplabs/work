@@ -1,6 +1,4 @@
-import { isAdmin } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
+import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,14 +12,16 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "@grasp-os/app-kit/components/dropdown-menu";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@grasp-os/ui/components/sidebar";
-import { toast } from "@grasp-os/ui/components/toast";
+} from "@grasp-os/app-kit/components/sidebar";
+import { toast } from "@grasp-os/app-kit/components/toast";
+import { isAdmin } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";

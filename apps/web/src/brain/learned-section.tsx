@@ -1,3 +1,11 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+} from "@grasp-os/app-kit/components/item";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import type {
   BrainEntityListed,
   BrainMemoryShown,
@@ -8,10 +16,6 @@ import type {
   BrainSourceRef,
 } from "@grasp-os/shared/brain-sources";
 import { failureText } from "@grasp-os/shared/errors";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Item, ItemContent, ItemGroup } from "@grasp-os/ui/components/item";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Plural, Trans } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";

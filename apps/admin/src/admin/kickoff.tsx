@@ -1,3 +1,16 @@
+import { Button } from "@grasp-os/app-kit/components/button";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/app-kit/components/native-select";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 /**
  * The kickoff in an organization's Steps (GRA-1099): bringing in Grasp's
  * first conversation with the sponsor, pasted or as a file, and the
@@ -23,19 +36,6 @@ import {
 } from "@grasp-os/shared/kickoff";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { useRouter } from "@tanstack/react-router";
 import { CircleCheckIcon, CircleHelpIcon, UploadIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";

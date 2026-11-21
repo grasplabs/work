@@ -1,6 +1,6 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { LaptopIcon, SmartphoneIcon } from "lucide-react";

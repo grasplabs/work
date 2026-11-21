@@ -32,8 +32,8 @@ const files = testApp(
     // An App of spec 8's layout with nothing to call: what is measured is
     // the pages, which call nothing of it.
     "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent } from "@grasp-os/ui/components/card";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Card, CardContent } from "@grasp-os/app-kit/components/card";
 import { useState } from "react";
 
 function Small() {
@@ -49,10 +49,10 @@ function Small() {
 export const Route = createFileRoute("/")({ component: Small });
 `,
     "src/routes/heavy.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@grasp-os/ui/components/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@grasp-os/ui/components/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@grasp-os/ui/components/select";
-import { Sidebar, SidebarContent, SidebarProvider } from "@grasp-os/ui/components/sidebar";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@grasp-os/app-kit/components/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@grasp-os/app-kit/components/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@grasp-os/app-kit/components/select";
+import { Sidebar, SidebarContent, SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 
 function Heavy() {
   return (
@@ -107,10 +107,10 @@ const kitNames = (frame: LoadedFrame, names: string[]): boolean[] =>
 
 /** Components a small screen has no use for. */
 const specialist = [
-  "@grasp-os/ui/components/dialog",
-  "@grasp-os/ui/components/dropdown-menu",
-  "@grasp-os/ui/components/select",
-  "@grasp-os/ui/components/sidebar",
+  "@grasp-os/app-kit/components/dialog",
+  "@grasp-os/app-kit/components/dropdown-menu",
+  "@grasp-os/app-kit/components/select",
+  "@grasp-os/app-kit/components/sidebar",
 ];
 
 /** One of the App's pages, as its frame loads it. */

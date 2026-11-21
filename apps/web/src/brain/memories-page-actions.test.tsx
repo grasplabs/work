@@ -1,3 +1,4 @@
+import { Toaster } from "@grasp-os/app-kit/components/toast";
 // @vitest-environment happy-dom
 import type {
   BrainContestedPage,
@@ -6,7 +7,6 @@ import type {
   BrainMemoryPlace,
   BrainMemoryShown,
 } from "@grasp-os/shared/brain-memories";
-import { Toaster } from "@grasp-os/ui/components/toast";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {

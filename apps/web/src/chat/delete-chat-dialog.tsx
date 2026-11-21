@@ -1,12 +1,12 @@
-import type { ChatSummary } from "@grasp-os/shared/chat";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "@grasp-os/app-kit/components/dialog";
+import type { ChatSummary } from "@grasp-os/shared/chat";
 import { Trans } from "@lingui/react/macro";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 

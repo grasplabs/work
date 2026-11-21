@@ -1,6 +1,6 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Switch } from "@grasp-os/app-kit/components/switch";
 import type { CatalogTool } from "@grasp-os/shared/connect";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Switch } from "@grasp-os/ui/components/switch";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { EyeIcon, LockIcon, PenLineIcon } from "lucide-react";
 

@@ -1,10 +1,10 @@
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { Tabs, TabsList, TabsTrigger } from "@grasp-os/app-kit/components/tabs";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
+} from "@grasp-os/app-kit/components/tooltip";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";

@@ -1,12 +1,3 @@
-/**
- * Steering a client's onboarding from its pages in the admin: each button
- * gives one command (src/clients/commands.ts), which the company's core
- * applies once and audits under the staff member's name, then reads the
- * organization again, so the page shows where it stands either way.
- */
-import type { AdminCommand } from "@grasp-os/shared/admin-command";
-import { gateThresholds } from "@grasp-os/shared/onboarding-gate";
-import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,12 +8,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
+} from "@grasp-os/app-kit/components/alert-dialog";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
+} from "@grasp-os/app-kit/components/native-select";
+/**
+ * Steering a client's onboarding from its pages in the admin: each button
+ * gives one command (src/clients/commands.ts), which the company's core
+ * applies once and audits under the staff member's name, then reads the
+ * organization again, so the page shows where it stands either way.
+ */
+import type { AdminCommand } from "@grasp-os/shared/admin-command";
+import { gateThresholds } from "@grasp-os/shared/onboarding-gate";
+import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
 import { useRouter } from "@tanstack/react-router";
 import type { ComponentProps, ReactNode } from "react";
 import { useId, useRef } from "react";

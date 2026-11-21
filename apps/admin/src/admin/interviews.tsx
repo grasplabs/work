@@ -1,3 +1,19 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@grasp-os/app-kit/components/input-group";
+import { Progress } from "@grasp-os/app-kit/components/progress";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 /**
  * The interviews of one organization, by team and by name, ported from
  * the prototype (grasplabs/prototype `components/admin/org-progress.tsx`,
@@ -25,22 +41,6 @@ import type {
   OrgView,
   PersonView,
 } from "@grasp-os/shared/admin/onboarding-admin";
-import { Badge } from "@grasp-os/ui/components/badge";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import { Progress } from "@grasp-os/ui/components/progress";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { SearchIcon } from "lucide-react";
 import { useState } from "react";
 

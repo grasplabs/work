@@ -1,8 +1,8 @@
+import { Stat } from "@grasp-os/app-kit/components/stat";
 import type {
   ModelMonthSpend,
   SpendingWorkflow,
 } from "@grasp-os/shared/models";
-import { Stat } from "@grasp-os/ui/components/stat";
 import type { I18n } from "@lingui/core";
 import { msg, ph, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

@@ -1,3 +1,18 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
+import { Card, CardContent } from "@grasp-os/app-kit/components/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/app-kit/components/empty";
+import {
+  PageHeader,
+  PageHeaderDescription,
+  PageHeaderTitle,
+} from "@grasp-os/app-kit/components/page-header";
+import { Stat } from "@grasp-os/app-kit/components/stat";
 import { failureText } from "@grasp-os/shared/errors";
 import type {
   Opportunity,
@@ -6,21 +21,6 @@ import type {
   SeenRoutine,
   SeenStep,
 } from "@grasp-os/shared/opportunities";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
-import { Card, CardContent } from "@grasp-os/ui/components/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import {
-  PageHeader,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
-import { Stat } from "@grasp-os/ui/components/stat";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";

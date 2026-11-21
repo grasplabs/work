@@ -1,5 +1,5 @@
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { cn } from "@grasp-os/ui/lib/utils";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 

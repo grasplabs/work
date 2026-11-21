@@ -6,8 +6,8 @@ import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
 
 import { signInProblem } from "../deploy/core-config.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";

@@ -1,5 +1,5 @@
-import { Input } from "@grasp-os/ui/components/input";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import { useState } from "react";
 
 // A setting's text, saved as the person leaves the field (or presses

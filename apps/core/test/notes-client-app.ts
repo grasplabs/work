@@ -140,7 +140,7 @@ export const big = action({
 
   "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { api } from "@server/_generated/api";
 
 const Notes = () => {

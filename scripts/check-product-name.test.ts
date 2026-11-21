@@ -131,12 +131,15 @@ describe("the product's old name", () => {
     expect(findOldProductName(text)).toBe(found);
   });
 
-  it.each(["grasp-os", "@grasp-os/ui", "Grasp Work", "Grasp OSes", "graspos"])(
-    "is not found in %j",
-    (text) => {
-      expect(findOldProductName(text)).toBeUndefined();
-    }
-  );
+  it.each([
+    "grasp-os",
+    "@grasp-os/app-kit",
+    "Grasp Work",
+    "Grasp OSes",
+    "graspos",
+  ])("is not found in %j", (text) => {
+    expect(findOldProductName(text)).toBeUndefined();
+  });
 
   it(
     "fails the lint in a string or JSX text people read, never in a comment, a code name or a test",

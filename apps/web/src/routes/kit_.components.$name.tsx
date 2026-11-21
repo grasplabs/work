@@ -1,9 +1,9 @@
-import { demos } from "@grasp-os/ui/catalog/demos";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import { demos } from "@grasp-os/app-kit/catalog/demos";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import { createFileRoute, notFound, useParams } from "@tanstack/react-router";
 
 // Local gallery of the UI kit: one component's demo per page, the same
-// demos the kit's component tests check (packages/ui/test/kit.browser.test.tsx);
+// demos the kit's component tests check (packages/app-kit/test/kit.browser.test.tsx);
 // e2e/catalog.e2e.ts loads each page under core's Content Security Policy.
 // Not product UI: like /kit, builds in production mode answer not found.
 //
@@ -33,7 +33,7 @@ export const Route = createFileRoute("/kit_/components/$name")({
     if (import.meta.env.MODE === "production") {
       throw notFound();
     }
-    const catalog = await import("@grasp-os/ui/catalog/demos");
+    const catalog = await import("@grasp-os/app-kit/catalog/demos");
     if (!Object.hasOwn(catalog.demos, params.name)) {
       throw notFound();
     }

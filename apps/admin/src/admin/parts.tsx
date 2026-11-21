@@ -1,3 +1,11 @@
+import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
+import { Progress } from "@grasp-os/app-kit/components/progress";
+/**
+ * Small marks the admin's pages draw what the model counts with, ported
+ * from the prototype (grasplabs/prototype `components/admin/admin-parts.tsx`).
+ */
+import { Stat } from "@grasp-os/app-kit/components/stat";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   LinkState,
@@ -6,14 +14,6 @@ import type {
   Stage,
   StageStatus,
 } from "@grasp-os/shared/admin/onboarding-admin";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import { Progress } from "@grasp-os/ui/components/progress";
-/**
- * Small marks the admin's pages draw what the model counts with, ported
- * from the prototype (grasplabs/prototype `components/admin/admin-parts.tsx`).
- */
-import { Stat } from "@grasp-os/ui/components/stat";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { CheckIcon } from "lucide-react";
 import { Fragment } from "react";
 import type { ReactNode } from "react";

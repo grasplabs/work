@@ -1,3 +1,5 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowTitleMaxLength } from "@grasp-os/shared/workflow-resources";
 import type {
@@ -8,8 +10,6 @@ import type {
   WorkflowResourceVersion,
   WorkflowState,
 } from "@grasp-os/shared/workflow-resources";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { buttonVariants } from "@grasp-os/ui/components/button";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

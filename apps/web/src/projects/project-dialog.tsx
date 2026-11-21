@@ -1,11 +1,4 @@
-import {
-  newProjectSchema,
-  projectDescriptionMaxLength,
-  projectIcons,
-  projectNameMaxLength,
-} from "@grasp-os/shared/projects";
-import type { ProjectIcon, ProjectSummary } from "@grasp-os/shared/projects";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Dialog,
   DialogClose,
@@ -14,14 +7,21 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+} from "@grasp-os/app-kit/components/dialog";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import {
   ToggleGroup,
   ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
+} from "@grasp-os/app-kit/components/toggle-group";
+import {
+  newProjectSchema,
+  projectDescriptionMaxLength,
+  projectIcons,
+  projectNameMaxLength,
+} from "@grasp-os/shared/projects";
+import type { ProjectIcon, ProjectSummary } from "@grasp-os/shared/projects";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

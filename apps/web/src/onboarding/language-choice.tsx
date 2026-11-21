@@ -1,7 +1,7 @@
 import {
   ToggleGroup,
   ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
+} from "@grasp-os/app-kit/components/toggle-group";
 import { useLingui } from "@lingui/react/macro";
 
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";

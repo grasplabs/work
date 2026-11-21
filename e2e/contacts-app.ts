@@ -38,8 +38,8 @@ export const add = mutation({
 `,
     "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Input } from "@grasp-os/app-kit/components/input";
 import { useState } from "react";
 import { api } from "@server/_generated/api";
 

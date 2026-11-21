@@ -1,3 +1,5 @@
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 /**
  * What a company connected, and what its workflows and chats still need,
  * as its core's snapshot says it (`integrations`), ported from the
@@ -12,8 +14,6 @@ import type {
   AdminIntegrations,
   AdminNeeded,
 } from "@grasp-os/shared/admin-snapshot";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
 import { Link } from "@tanstack/react-router";
 import { ArrowRightIcon } from "lucide-react";
 

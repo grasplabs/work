@@ -1,3 +1,13 @@
+import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
+import { Input } from "@grasp-os/app-kit/components/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/app-kit/components/select";
+import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import type {
   App,
@@ -10,16 +20,6 @@ import type { SurfaceSummary } from "@grasp-os/shared/pages";
 import { canBuild, isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { SubjectMember } from "@grasp-os/shared/subject-members";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";

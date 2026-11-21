@@ -1,20 +1,20 @@
-import type { AppIntegration } from "@grasp-os/shared/apps";
-import { catalogEntryRefSchema } from "@grasp-os/shared/connect";
-import type { CatalogEntryRef, OfferedCatalog } from "@grasp-os/shared/connect";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Command,
   CommandEmpty,
   CommandInput,
   CommandItem,
   CommandList,
-} from "@grasp-os/ui/components/command";
+} from "@grasp-os/app-kit/components/command";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
+} from "@grasp-os/app-kit/components/popover";
+import type { AppIntegration } from "@grasp-os/shared/apps";
+import { catalogEntryRefSchema } from "@grasp-os/shared/connect";
+import type { CatalogEntryRef, OfferedCatalog } from "@grasp-os/shared/connect";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";

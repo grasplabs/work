@@ -1,10 +1,10 @@
-import { brainOf } from "@grasp-os/shared/admin/admin-health";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
+} from "@grasp-os/app-kit/components/tabs";
+import { brainOf } from "@grasp-os/shared/admin/admin-health";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { BrainHealth } from "../../../admin/brain-health.tsx";

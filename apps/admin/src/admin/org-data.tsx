@@ -1,3 +1,12 @@
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
 /**
  * What Grasp keeps of the interviews at one company, ported from the
  * prototype (grasplabs/prototype `components/admin/org-data.tsx`): how much
@@ -18,15 +27,6 @@ import {
   companySees,
   keptOf,
 } from "@grasp-os/shared/admin/onboarding-admin-record";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
 
 import { Section, SectionRow } from "./section.tsx";
 

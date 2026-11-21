@@ -1,22 +1,10 @@
-import type {
-  ChartTeam,
-  Organization,
-  TeamFlag,
-} from "@grasp-os/shared/admin/admin-organization";
-import { MIN_GROUP } from "@grasp-os/shared/admin/interviews";
-import { dateOn } from "@grasp-os/shared/admin/onboarding-admin";
-import type {
-  OrgView,
-  PersonView,
-  WorkEvidence,
-} from "@grasp-os/shared/admin/onboarding-admin";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
+} from "@grasp-os/app-kit/components/input-group";
 /**
  * The company's teams as Grasp knows them, ported from the prototype
  * (grasplabs/prototype `components/admin/org-organization.tsx`,
@@ -33,13 +21,25 @@ import {
  * admin never shows. Nor is where a piece of work goes said in the words
  * of whoever said it, when it isn't one of the company's own teams.
  */
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { Progress } from "@grasp-os/ui/components/progress";
+import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { Progress } from "@grasp-os/app-kit/components/progress";
 import {
   ToggleGroup,
   ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/toggle-group";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type {
+  ChartTeam,
+  Organization,
+  TeamFlag,
+} from "@grasp-os/shared/admin/admin-organization";
+import { MIN_GROUP } from "@grasp-os/shared/admin/interviews";
+import { dateOn } from "@grasp-os/shared/admin/onboarding-admin";
+import type {
+  OrgView,
+  PersonView,
+  WorkEvidence,
+} from "@grasp-os/shared/admin/onboarding-admin";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
