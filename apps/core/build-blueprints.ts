@@ -28,6 +28,10 @@
  *   like any App's, its `grasp.config.ts` and `server/schema.ts` exactly
  *   as its definition generates them.
  *
+ * A release may ship none: then apps/core/blueprints/ isn't there (git
+ * keeps no empty folder), and the build embeds none, with the digest of
+ * none, which the install takes as a release without built-ins.
+ *
  * Each is checked here as the install would check it, so a bad one fails
  * the build rather than the install: its ID, its manifest (its
  * permissions as any request's are checked), its definition, and its
@@ -67,6 +71,12 @@ import { blueprintsDigestText } from "./src/builtin-digest.ts";
 
 /** Where the built-ins that ship with each release are. */
 export const blueprintsDir = path.join(import.meta.dirname, "blueprints");
+
+/** Where core's tests' own built-ins are, which only their module embeds. */
+export const testBlueprintsDir = path.join(
+  import.meta.dirname,
+  "test/fixtures/blueprints"
+);
 
 /** The module core imports as `#blueprints`. */
 export const blueprintsModule = path.join(
@@ -174,88 +184,98 @@ export const filesIn = (dir: string): Record<string, string> => {
   );
 };
 
+/**
+ * The folders of the built-ins in `dir`, one each, by name: none when
+ * `dir` isn't there, as when a release ships no built-in (git keeps no
+ * empty folder).
+ */
+export const blueprintFolders = (dir: string): string[] =>
+  existsSync(dir)
+    ? readdirSync(dir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map(({ name }) => name)
+    : [];
+
 /** The built-ins in `dir`, one per folder, checked. */
 const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
-  readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map(({ name }) => {
-      const folder = path.join(dir, name);
-      const where = `Built-in blueprint ${folder}`;
-      if (!idSchema.safeParse(name).success) {
-        throw new Error(`${where}: name the folder in lowercase-kebab-case`);
-      }
-      const manifest = manifestSchema.safeParse(
-        JSON.parse(readFileSync(path.join(folder, "blueprint.json"), "utf-8"))
+  blueprintFolders(dir).map((name) => {
+    const folder = path.join(dir, name);
+    const where = `Built-in blueprint ${folder}`;
+    if (!idSchema.safeParse(name).success) {
+      throw new Error(`${where}: name the folder in lowercase-kebab-case`);
+    }
+    const manifest = manifestSchema.safeParse(
+      JSON.parse(readFileSync(path.join(folder, "blueprint.json"), "utf-8"))
+    );
+    if (!manifest.success) {
+      throw new Error(`${where}: blueprint.json ${manifest.error.message}`);
+    }
+    const filesDir = path.join(folder, "files");
+    if (!existsSync(filesDir)) {
+      throw new Error(`${where}: has no files/`);
+    }
+    const files = filesIn(filesDir);
+    const checked = fileChangesSchema.safeParse(files);
+    if (!checked.success) {
+      throw new Error(`${where}: files/ ${checked.error.message}`);
+    }
+    const length = Object.values(files).reduce(
+      (total, text) => total + text.length,
+      0
+    );
+    if (length > appLimits.totalLength) {
+      throw new Error(
+        `${where}: files/ holds ${length} characters, over an App's ${appLimits.totalLength}`
       );
-      if (!manifest.success) {
-        throw new Error(`${where}: blueprint.json ${manifest.error.message}`);
+    }
+    const workflows = manifest.data.workflows.map((workflow) => {
+      const file = path.join(folder, workflow.definition);
+      if (!existsSync(file)) {
+        throw new Error(`${where}: has no ${workflow.definition}`);
       }
-      const filesDir = path.join(folder, "files");
-      if (!existsSync(filesDir)) {
-        throw new Error(`${where}: has no files/`);
-      }
-      const files = filesIn(filesDir);
-      const checked = fileChangesSchema.safeParse(files);
-      if (!checked.success) {
-        throw new Error(`${where}: files/ ${checked.error.message}`);
-      }
-      const length = Object.values(files).reduce(
-        (total, text) => total + text.length,
-        0
-      );
-      if (length > appLimits.totalLength) {
+      const definition = readFileSync(file, "utf-8");
+      // Checked as an install stores it, so the copy can publish it.
+      const shipped = blueprintWorkflowSchema.safeParse({
+        ...workflow,
+        definition,
+      });
+      if (!shipped.success) {
         throw new Error(
-          `${where}: files/ holds ${length} characters, over an App's ${appLimits.totalLength}`
+          `${where}: ${workflow.definition} ${shipped.error.message}`
         );
       }
-      const workflows = manifest.data.workflows.map((workflow) => {
-        const file = path.join(folder, workflow.definition);
-        if (!existsSync(file)) {
-          throw new Error(`${where}: has no ${workflow.definition}`);
-        }
-        const definition = readFileSync(file, "utf-8");
-        // Checked as an install stores it, so the copy can publish it.
-        const shipped = blueprintWorkflowSchema.safeParse({
-          ...workflow,
-          definition,
-        });
-        if (!shipped.success) {
-          throw new Error(
-            `${where}: ${workflow.definition} ${shipped.error.message}`
-          );
-        }
-        try {
-          JSON.parse(definition);
-        } catch {
-          throw new Error(`${where}: ${workflow.definition} isn't JSON`);
-        }
-        return shipped.data;
-      });
-      const definitionFile = path.join(folder, "definition.json");
-      if (!existsSync(definitionFile)) {
-        throw new Error(`${where}: has no definition.json`);
+      try {
+        JSON.parse(definition);
+      } catch {
+        throw new Error(`${where}: ${workflow.definition} isn't JSON`);
       }
-      const definition = readDefinition(
-        JSON.parse(readFileSync(definitionFile, "utf-8"))
-      );
-      // Its code is its definition's, as every version's is (src/apps.ts).
-      for (const [file, source] of Object.entries(
-        definitionSources(definition)
-      )) {
-        if (files[file] !== source) {
-          throw new Error(
-            `${where}: files/${file} isn't what definition.json generates`
-          );
-        }
-      }
-      return {
-        id: name,
-        ...manifest.data,
-        workflows,
-        definition: definitionText(definition),
-        files,
-      };
+      return shipped.data;
     });
+    const definitionFile = path.join(folder, "definition.json");
+    if (!existsSync(definitionFile)) {
+      throw new Error(`${where}: has no definition.json`);
+    }
+    const definition = readDefinition(
+      JSON.parse(readFileSync(definitionFile, "utf-8"))
+    );
+    // Its code is its definition's, as every version's is (src/apps.ts).
+    for (const [file, source] of Object.entries(
+      definitionSources(definition)
+    )) {
+      if (files[file] !== source) {
+        throw new Error(
+          `${where}: files/${file} isn't what definition.json generates`
+        );
+      }
+    }
+    return {
+      id: name,
+      ...manifest.data,
+      workflows,
+      definition: definitionText(definition),
+      files,
+    };
+  });
 
 /**
  * Writes the built-ins in `dirs` into `out`, in id order, and their digest

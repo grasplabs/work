@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -17,7 +18,8 @@ import {
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { writeBlueprints } from "./build-blueprints.ts";
+import { digestModuleOf, writeBlueprints } from "./build-blueprints.ts";
+import { blueprintsDigestText } from "./src/builtin-digest.ts";
 
 // The build step's checks, in Node (the root config's "scripts" project):
 // each built-in that the install would refuse fails the build instead.
@@ -124,6 +126,24 @@ describe("the built-in blueprints' build", () => {
         files: schema,
       },
     ]);
+  });
+
+  it("embeds none, with the digest of none, from a release that ships none and so has no folder", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprints-"));
+    made.push(dir);
+    const out = path.join(dir, "blueprints.js");
+    const count = writeBlueprints([path.join(dir, "blueprints")], out);
+    expect({
+      count,
+      embedded: embedded(out),
+      digest: readFileSync(digestModuleOf(out), "utf-8"),
+    }).toStrictEqual({
+      count: 0,
+      embedded: [],
+      digest: `export default ${JSON.stringify(
+        createHash("sha256").update(blueprintsDigestText([])).digest("hex")
+      )};\n`,
+    });
   });
 
   it.each([

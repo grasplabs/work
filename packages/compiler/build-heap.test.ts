@@ -13,10 +13,12 @@ import {
 } from "./build-harness.ts";
 import { compilerAssets } from "./src/kit.ts";
 
-// Every built-in blueprint's pages, its preview and its server code,
-// built one after another in one release's compiler, as a shared isolate
-// builds them (build-heap.ts), under Node, whose V8 is workerd's, in a
-// heap of `heapMb`; then each type-checked in the release's checker alone,
+// Every built-in blueprint's pages, its preview and its server code, and
+// those of core's tests' own (apps/core/test/fixtures/blueprints/), so
+// there is one to build while the release ships none, built one after
+// another in one release's compiler, as a shared isolate builds them
+// (build-heap.ts), under Node, whose V8 is workerd's, in a heap of
+// `heapMb`; then each type-checked in the release's checker alone,
 // as its own isolate checks them. The type chunks took what the compiler
 // needs from 289–320 MB to 193–208 MB, and moving the check to its own
 // isolate took it to 66–105 MB. The checker's memory is mostly tsrs's
@@ -24,7 +26,11 @@ import { compilerAssets } from "./src/kit.ts";
 // here beside the heap.
 
 const harness = path.join(import.meta.dirname, "build-heap.ts");
-const blueprints = path.join(import.meta.dirname, "../../apps/core/blueprints");
+/** Where core's built-ins are, and its tests' own. */
+const folders = [
+  "../../apps/core/blueprints",
+  "../../apps/core/test/fixtures/blueprints",
+].map((folder) => path.join(import.meta.dirname, folder));
 
 /** The heap the compiler's builds must fit in, in MB: a Cloudflare isolate's. */
 const heapMb = 128;
@@ -34,7 +40,8 @@ const heapMb = 128;
  * 128 MB past which Cloudflare replaces an isolate after its call (the
  * checker keeps nothing, so a replaced one costs a start), well below the
  * about 256 MB at which it ends one mid-call. Measured 136–162 MB on the
- * blueprints, tsrs's 80 MiB shadow stack included.
+ * six built-ins the release shipped until November 2026, tsrs's 80 MiB
+ * shadow stack included.
  */
 const checkMb = 192;
 
@@ -57,14 +64,18 @@ const harnessRun = (args: string[]): string =>
     { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }
   );
 
-/** Every built-in core ships: each folder of `blueprints` with its manifest, by name. */
-const builtIns = readdirSync(blueprints, { withFileTypes: true })
-  .filter(
-    (entry) =>
-      entry.isDirectory() &&
-      existsSync(path.join(blueprints, entry.name, "blueprint.json"))
+/** Every built-in core ships, and its tests' own: each folder with its manifest, by name. */
+const builtIns = folders
+  .filter((folder) => existsSync(folder))
+  .flatMap((folder) =>
+    readdirSync(folder, { withFileTypes: true })
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          existsSync(path.join(folder, entry.name, "blueprint.json"))
+      )
+      .map(({ name }) => name)
   )
-  .map(({ name }) => name)
   .toSorted();
 
 const every = <T>(each: (blueprint: string, target: string) => T): T[] =>
@@ -83,7 +94,7 @@ describe("a release's compiler and type checker", { timeout: 300_000 }, () => {
     );
     files = path.join(dir, "blueprints.json");
     answers = path.join(dir, "answers.json");
-    execFileSync(process.execPath, [harness, "files", blueprints, files], {
+    execFileSync(process.execPath, [harness, "files", files, ...folders], {
       stdio: "pipe",
     });
   }, 300_000);

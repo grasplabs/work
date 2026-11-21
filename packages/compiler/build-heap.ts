@@ -1,11 +1,13 @@
 /**
- * Builds core's built-in blueprints with a release's compiler, as its
- * isolate runs it, under Node: the same V8 as workerd, so a heap cap
- * (`--max-heap-size`) holds the compiler to what an isolate may use.
+ * Builds core's built-in blueprints, and its tests' own, with a release's
+ * compiler, as its isolate runs it, under Node: the same V8 as workerd,
+ * so a heap cap (`--max-heap-size`) holds the compiler to what an isolate
+ * may use.
  * build-heap.test.ts runs it, in two processes:
  *
- * - `node build-heap.ts files <blueprints> <out.json>` writes each
- *   blueprint's files with the modules the host generates for it
+ * - `node build-heap.ts files <out.json> <blueprints>...` writes the files
+ *   of each blueprint in those of the folders `<blueprints>` that are
+ *   there, with the modules the host generates for it
  *   (`server/_generated/`), as core's save does
  *   (apps/core/src/draft-references.ts).
  *   It loads the SDK and the App's code, so it runs without the cap.
@@ -50,7 +52,7 @@ const blueprintsSchema = z.record(z.string(), z.record(z.string(), z.string()));
  * committed `files/server/_generated/server.ts`, as its tsconfig maps it.
  */
 const blueprintFiles = async (
-  blueprints: string
+  folders: readonly string[]
 ): Promise<z.infer<typeof blueprintsSchema>> => {
   registerHooks({
     resolve: (specifier, context, next) => {
@@ -74,9 +76,16 @@ const blueprintFiles = async (
   const { serverFunctionsIn } = await import("@grasp-os/runtime/definition");
   const { serverModuleOf } = await import("@grasp-os/runtime/server-modules");
   const all: z.infer<typeof blueprintsSchema> = {};
-  const names = readdirSync(blueprints).filter((name) =>
-    existsSync(path.join(blueprints, name, "files", configPath))
-  );
+  const blueprints = folders
+    .filter((folder) => existsSync(folder))
+    .flatMap((folder) =>
+      readdirSync(folder)
+        .filter((name) =>
+          existsSync(path.join(folder, name, "files", configPath))
+        )
+        .map((name) => ({ name, dir: path.join(folder, name, "files") }))
+    )
+    .toSorted((one, other) => one.name.localeCompare(other.name));
   /** A blueprint's file's default export, or undefined without the file. */
   const defaultOf = async (dir: string, file: string): Promise<unknown> =>
     existsSync(path.join(dir, file))
@@ -84,8 +93,7 @@ const blueprintFiles = async (
           await import(pathToFileURL(path.join(dir, file)).href)
         ).default
       : undefined;
-  for (const name of names.toSorted()) {
-    const dir = path.join(blueprints, name, "files");
+  for (const { name, dir } of blueprints) {
     const files: Record<string, string> = {};
     for (const file of readdirSync(dir, {
       recursive: true,
@@ -378,15 +386,18 @@ const checkAll = async (
   }
 };
 
-const [mode, from = "", to = "", out = ""] = process.argv.slice(2);
+const [mode, ...args] = process.argv.slice(2);
 if (mode === "files") {
-  writeFileSync(to, JSON.stringify(await blueprintFiles(from)));
+  const [out = "", ...folders] = args;
+  writeFileSync(out, JSON.stringify(await blueprintFiles(folders)));
 } else if (mode === "build") {
-  await buildAll(from, to, out);
+  const [release = "", files = "", answers = ""] = args;
+  await buildAll(release, files, answers);
 } else if (mode === "check") {
-  await checkAll(from, to);
+  const [release = "", answers = ""] = args;
+  await checkAll(release, answers);
 } else {
   throw new Error(
-    "Usage: build-heap.ts files <blueprints> <out.json> | build <release> <files.json> <answers.json> | check <release> <answers.json>"
+    "Usage: build-heap.ts files <out.json> <blueprints>... | build <release> <files.json> <answers.json> | check <release> <answers.json>"
   );
 }

@@ -46,7 +46,7 @@ describe(
       // classes Tailwind's sorter would reorder, which neither sorts; and
       // a GraphQL template, whose query both leave as written.
       const written = tidy({
-        ...blueprintFiles("workflow-map"),
+        ...blueprintFiles(),
         "src/components/count.tsx": `import type { ReactNode } from "react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { api } from "@server/_generated/api";

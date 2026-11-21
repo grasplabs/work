@@ -25,6 +25,7 @@ const generated = [
   "apps/core/blueprints/*/files/server/_generated/**",
   "apps/core/test/fixtures/blueprints/*/files/grasp.config.ts",
   "apps/core/test/fixtures/blueprints/*/files/server/schema.ts",
+  "apps/core/test/fixtures/blueprints/*/files/server/_generated/**",
   // The SDK's connector catalog, from the release's connectors
   // (apps/core/build-connector-catalog.ts).
   "packages/runtime/src/connector-catalog.gen.ts",
