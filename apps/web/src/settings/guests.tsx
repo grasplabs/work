@@ -1,24 +1,30 @@
 import type { Guest } from "@grasp-os/shared/members";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { UserIcon } from "lucide-react";
-import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Person } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 
 // The organization's guests, for its admins (Settings › Members): people
 // outside the company invited by address, who reach nothing but what is
@@ -27,77 +33,58 @@ import { useCoreAction } from "../use-core-action.ts";
 
 const GuestRow = ({ guest }: { guest: Guest }) => {
   const { t } = useLingui();
+  const core = useCore();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
-  const [confirming, setConfirming] = useState(false);
   const { email } = guest;
   const date = formatDate(guest.invitedAt);
-  const remove = (): void => {
-    setConfirming(false);
-    void run(async (session) => {
-      await changeThenRefresh(
-        async () => {
-          await session.members.remove(guest.userId);
-        },
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    });
+  // A refusal throws, so the dialog stays open and its button says so.
+  const remove = async (): Promise<void> => {
+    await changeThenRefresh(
+      async () => {
+        await core.withSession(
+          async (session) => await session.members.remove(guest.userId)
+        );
+      },
+      async () => {
+        await router.invalidate({ sync: true });
+      }
+    );
   };
   return (
-    <div className="flex items-center gap-3 border-t px-5 py-3">
-      <span
-        aria-hidden="true"
-        className="bg-muted flex size-8 flex-none items-center justify-center rounded-full"
-      >
-        <UserIcon className="text-muted-foreground size-4" />
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="flex items-center gap-2">
-          <span className="truncate">{email}</span>
-          <Badge variant="outline">
-            <Trans>Guest</Trans>
-          </Badge>
-        </span>
-        <span className="text-muted-foreground truncate">
-          <Trans>Invited on {date}</Trans>
-        </span>
-      </div>
-      <div className="flex flex-col items-end gap-1">
-        <Button
-          aria-label={t`Remove the guest ${email}`}
-          disabled={busy}
-          onClick={() => {
-            setConfirming(true);
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          <Trans>Remove</Trans>
-        </Button>
-        <ErrorText>{failure}</ErrorText>
-      </div>
-      <Dialog open={confirming} onOpenChange={setConfirming}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>Remove {email}?</Trans>
-            </DialogTitle>
-            <DialogDescription>
-              <Trans>
-                They are signed out everywhere and cannot sign in again.
-              </Trans>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter showCloseButton>
-            <Button disabled={busy} onClick={remove} variant="destructive">
-              <Trans>Remove</Trans>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+    <Item size="sm">
+      <ItemMedia icon={Person} />
+      <ItemContent>
+        <ItemTitle>{email}</ItemTitle>
+        <ItemDescription>{t`Invited on ${date}`}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <AlertDialog>
+          <AlertDialogTrigger
+            aria-label={t`Remove the guest ${email}`}
+            size="sm"
+            variant="ghost"
+          >
+            {t`Remove`}
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogTitle>{t`Remove ${email}?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t`They are signed out everywhere and cannot sign in again.`}
+            </AlertDialogDescription>
+            <AlertDialogFooter>
+              <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+              <AlertDialogAction
+                action={remove}
+                failedLabel={t`Not removed`}
+                variant="danger"
+              >
+                {t`Remove`}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -114,9 +101,11 @@ export const Guests = ({ guests }: { guests: Guest[] }) => {
       description={t`People outside your organization, invited to what is shared with them. They reach nothing else.`}
       title={t`Guests`}
     >
-      {guests.map((guest) => (
-        <GuestRow guest={guest} key={guest.userId} />
-      ))}
+      <ItemGroup separated>
+        {guests.map((guest) => (
+          <GuestRow guest={guest} key={guest.userId} />
+        ))}
+      </ItemGroup>
     </SectionCard>
   );
 };
