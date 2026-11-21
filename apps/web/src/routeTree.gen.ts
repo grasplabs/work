@@ -21,7 +21,6 @@ import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellBrainRouteImport } from './routes/_shell.brain'
 import { Route as ShellConnectMicrosoftRouteImport } from './routes/_shell.connect-microsoft'
-import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
 import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
@@ -127,11 +126,6 @@ const ShellBrainRoute = ShellBrainRouteImport.update({
 const ShellConnectMicrosoftRoute = ShellConnectMicrosoftRouteImport.update({
   id: '/connect-microsoft',
   path: '/connect-microsoft',
-  getParentRoute: () => ShellRoute,
-} as any)
-const ShellDashboardRoute = ShellDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellInboxRoute = ShellInboxRouteImport.update({
@@ -386,7 +380,6 @@ export interface FileRoutesByFullPath {
   '/$': typeof ShellSplatRoute
   '/brain': typeof ShellBrainRouteWithChildren
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
-  '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
   '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
@@ -445,7 +438,6 @@ export interface FileRoutesByTo {
   '/staff': typeof StaffRoute
   '/$': typeof ShellSplatRoute
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
-  '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/': typeof ShellIndexRoute
@@ -507,7 +499,6 @@ export interface FileRoutesById {
   '/_shell/$': typeof ShellSplatRoute
   '/_shell/brain': typeof ShellBrainRouteWithChildren
   '/_shell/connect-microsoft': typeof ShellConnectMicrosoftRoute
-  '/_shell/dashboard': typeof ShellDashboardRoute
   '/_shell/inbox': typeof ShellInboxRoute
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
@@ -571,7 +562,6 @@ export interface FileRouteTypes {
     | '/$'
     | '/brain'
     | '/connect-microsoft'
-    | '/dashboard'
     | '/inbox'
     | '/settings'
     | '/decisions/$decision'
@@ -630,7 +620,6 @@ export interface FileRouteTypes {
     | '/staff'
     | '/$'
     | '/connect-microsoft'
-    | '/dashboard'
     | '/inbox'
     | '/decisions/$decision'
     | '/'
@@ -691,7 +680,6 @@ export interface FileRouteTypes {
     | '/_shell/$'
     | '/_shell/brain'
     | '/_shell/connect-microsoft'
-    | '/_shell/dashboard'
     | '/_shell/inbox'
     | '/_shell/settings'
     | '/decisions/$decision'
@@ -842,13 +830,6 @@ declare module '@tanstack/react-router' {
       path: '/connect-microsoft'
       fullPath: '/connect-microsoft'
       preLoaderRoute: typeof ShellConnectMicrosoftRouteImport
-      parentRoute: typeof ShellRoute
-    }
-    '/_shell/dashboard': {
-      id: '/_shell/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof ShellDashboardRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/inbox': {
@@ -1269,7 +1250,6 @@ interface ShellRouteChildren {
   ShellSplatRoute: typeof ShellSplatRoute
   ShellBrainRoute: typeof ShellBrainRouteWithChildren
   ShellConnectMicrosoftRoute: typeof ShellConnectMicrosoftRoute
-  ShellDashboardRoute: typeof ShellDashboardRoute
   ShellInboxRoute: typeof ShellInboxRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
@@ -1291,7 +1271,6 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellSplatRoute: ShellSplatRoute,
   ShellBrainRoute: ShellBrainRouteWithChildren,
   ShellConnectMicrosoftRoute: ShellConnectMicrosoftRoute,
-  ShellDashboardRoute: ShellDashboardRoute,
   ShellInboxRoute: ShellInboxRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,

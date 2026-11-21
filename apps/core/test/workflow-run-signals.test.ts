@@ -19,8 +19,8 @@ import {
 
 // The improvement signals of independent workflows' runs (signals.ts):
 // which task their failed runs failed at, and what their runs cost in
-// model calls, by lineage. Read as the dashboard reads them, through the
-// `signals` API as an admin.
+// model calls, by lineage. Read as the weekly report reads them, through
+// the `signals` API as an admin.
 
 const idp = mockIdp();
 

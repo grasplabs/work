@@ -73,7 +73,7 @@ export const asPerson = async <T>(
             : await grantedPermissions(env, chatAuthority(scope));
         // What an API declares a write is refused in a turn nobody was
         // there for, here, whatever the write goes on to check: an offer on
-        // a card, a held start, a widget (`AgentScope.unattended`).
+        // a card, a held start (`AgentScope.unattended`).
         if (action === "write" && scope.unattended === true) {
           throw agentErrors.create("agent.unattended");
         }

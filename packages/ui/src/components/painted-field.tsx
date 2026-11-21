@@ -29,7 +29,7 @@ type Pattern =
 const paintedFieldVariants = cva("painted-field", {
   variants: {
     shape: {
-      // A field that stands as a card, such as the dashboard's pile.
+      // A field that stands as a card.
       card: "rounded-xl",
       // A band across the top of a page, such as Integrations'.
       band: "rounded-lg",

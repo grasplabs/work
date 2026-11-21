@@ -2,7 +2,7 @@ import type {
   BoardReport,
   BoardReportPart,
   SignalCount,
-} from "@grasp-os/shared/dashboard";
+} from "@grasp-os/shared/board-report";
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import type {
   NextReport,
@@ -17,11 +17,9 @@ import { plainText } from "../chat/chat-markdown.ts";
 import type { ExportFigure } from "../export/figure-tiles.tsx";
 import { formatDate } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
-import { byKindOrder } from "./board.ts";
-import { signalKindLooks } from "./signals.tsx";
 
 // The weekly report, as the prototype's (`lib/report.ts`) where core has
-// what it says: core reads it in one call (`dashboard.report()`), on the
+// what it says: core reads it in one call (`boardReport.read()`), on the
 // week its own count says, and this words it, as it stands when it is
 // exported. What ran, the decisions runs asked for, each
 // workflow, what could be better, and, for admins, how many people the
@@ -72,11 +70,8 @@ export const readsOf = (report: Loaded<BoardReport>): ReportReads => {
   };
 };
 
-/** Each stage of the onboarding, as the dashboard's line says it. */
-export const stageNames: Record<
-  NonNullable<Programme["stage"]>,
-  MessageDescriptor
-> = {
+/** Each stage of the onboarding, as the programme's line says it. */
+const stageNames: Record<NonNullable<Programme["stage"]>, MessageDescriptor> = {
   preparing: msg({ message: "Getting ready", context: "programme stage" }),
   interviews: msg({ message: "Interviews", context: "programme stage" }),
   waiting: msg({ message: "Waiting for the go", context: "programme stage" }),
@@ -267,6 +262,31 @@ const workflowsSection = (
   ];
 };
 
+/** What each kind of signal is called. */
+const signalKindNames: Record<SignalCount["kind"], MessageDescriptor> = {
+  failing_step: msg`Keeps failing`,
+  waiting_for_person: msg`Waiting for a person`,
+  correction: msg`Often corrected`,
+  cost_per_run: msg`Model cost`,
+};
+
+/** The order kinds with as many signals come in: what a run waits or fails on first. */
+const kindOrder: readonly SignalCount["kind"][] = [
+  "failing_step",
+  "waiting_for_person",
+  "correction",
+  "cost_per_run",
+];
+
+/** Counts of kinds, the most first, those with as many in {@link kindOrder}. */
+const byKindOrder = (counts: readonly SignalCount[]): SignalCount[] => {
+  const of = new Map(counts.map(({ kind, count }) => [kind, count]));
+  return kindOrder
+    .filter((kind) => of.has(kind))
+    .map((kind) => ({ kind, count: of.get(kind) ?? 0 }))
+    .toSorted((a, b) => b.count - a.count);
+};
+
 /** How many signals of each kind there are; none for someone who reads none. */
 const betterSection = (
   better: Loaded<SignalCount[] | null>,
@@ -287,7 +307,7 @@ const betterSection = (
     heading,
     counts
       .map(({ kind, count }) => {
-        const name = i18n._(signalKindLooks[kind].name);
+        const name = i18n._(signalKindNames[kind]);
         return item(i18n._(msg`${name}: ${count}`));
       })
       .join("\n"),

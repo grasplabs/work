@@ -62,7 +62,7 @@ const tabsListVariants = cva(
         default: "bg-card ring-foreground/10 ring-1",
         line: "gap-1 bg-transparent",
       },
-      // A row of tabs inside a dashboard block, where every line of height counts.
+      // A row of tabs inside a small block, where every line of height counts.
       size: {
         default: "",
         sm: "group-data-horizontal/tabs:h-8",

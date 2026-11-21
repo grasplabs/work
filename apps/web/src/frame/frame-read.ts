@@ -11,7 +11,7 @@ const readers = new Set<() => void>();
 /**
  * Has every frame read read again now: for a page whose own read changed
  * what the frame shows, with no change for the router to read again after
- * (the dashboard marks the failures it shows read, and the nav's count
+ * (the inbox marks the notifications it shows read, and the nav's count
  * goes with them).
  */
 export const frameChanged = (): void => {
