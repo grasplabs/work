@@ -37,9 +37,10 @@ describe("the admin's frame in the browser", () => {
 
     expect({
       title: main().includes("This page is not here"),
+      says: main().includes("There's no such page."),
       back: main().includes("Back to the admin"),
       sidebar: text().includes("Organizations"),
-    }).toStrictEqual({ title: true, back: true, sidebar: true });
+    }).toStrictEqual({ title: true, says: true, back: true, sidebar: true });
   });
 
   it("says an organization the admin doesn't know isn't there", async () => {

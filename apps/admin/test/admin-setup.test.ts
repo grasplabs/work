@@ -16,10 +16,10 @@ import { setClientChannel } from "../src/rollout/channels.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { onChannel } from "./hosting.ts";
-import { page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
+import { setupPage } from "./setup-page.ts";
 import { aiStatusOf, emptyAdminSnapshot } from "./snapshots.ts";
 
 const token = "test-deployer-token-admin-setup-5c1e90";
@@ -73,19 +73,19 @@ describe("an organization's Setup", () => {
 
   it("shows a company's own platform as the admin runs it, tab by tab", async () => {
     const acme = await liveClient(emptyAdminSnapshot("Acme"));
-    const base = `/organizations/${acme.clientId}/setup`;
 
-    const status = await page(base);
-    const history = await page(`${base}?tab=history`);
-    const releases = await page(`${base}?tab=releases`);
-    const settings = await page(`${base}?tab=settings`);
+    const status = { html: (await setupPage(acme.clientId)) ?? "" };
+    const history = { html: (await setupPage(acme.clientId, "history")) ?? "" };
+    const releases = {
+      html: (await setupPage(acme.clientId, "releases")) ?? "",
+    };
+    const settings = {
+      html: (await setupPage(acme.clientId, "settings")) ?? "",
+    };
     const header = textOf(sectionOf(status.html, "How it stands"));
     const workers = textOf(sectionOf(status.html, "Its Workers"));
 
     expect({
-      statuses: [status, history, releases, settings].map(
-        (each) => each.status
-      ),
       header: [
         `${acme.clientId}.`,
         "Healthy",
@@ -134,7 +134,6 @@ describe("an organization's Setup", () => {
         "Generation1Last rotatedNeverLiveYes"
       ),
     }).toStrictEqual({
-      statuses: [200, 200, 200, 200],
       header: [true, true, true, true, true, true],
       activity: true,
       toOldPages: false,
@@ -176,11 +175,11 @@ describe("an organization's Setup", () => {
       startedAt: now,
       endedAt: now,
     });
-    const base = `/organizations/${acme.clientId}/setup`;
-
-    const status = await page(base);
-    const history = await page(`${base}?tab=history`);
-    const settings = await page(`${base}?tab=settings`);
+    const status = { html: (await setupPage(acme.clientId)) ?? "" };
+    const history = { html: (await setupPage(acme.clientId, "history")) ?? "" };
+    const settings = {
+      html: (await setupPage(acme.clientId, "settings")) ?? "",
+    };
     const needs = textOf(sectionOf(status.html, "What needs a look"));
     const lines = [
       `Its deploy of ${beta.id} failed`,
@@ -328,10 +327,8 @@ describe("an organization's Setup", () => {
       await liveClient(emptyAdminSnapshot("Acme")),
     ];
 
-    const sectionFor = async (clientId: string): Promise<string> => {
-      const { html } = await page(`/organizations/${clientId}/setup`);
-      return sectionOf(html, "AI");
-    };
+    const sectionFor = async (clientId: string): Promise<string> =>
+      sectionOf((await setupPage(clientId)) ?? "", "AI");
     const sections: string[] = [];
     for (const { clientId } of shown) {
       // oxlint-disable-next-line no-await-in-loop -- one page at a time
@@ -374,7 +371,7 @@ describe("an organization's Setup", () => {
       ],
     };
 
-    const { html } = await page(`/organizations/${client.clientId}/setup`);
+    const html = (await setupPage(client.clientId)) ?? "";
 
     expect(textOf(sectionOf(html, "AI"))).toContain(
       "AI: OpenAI connected · working · last used 5 min ago"
@@ -385,34 +382,27 @@ describe("an organization's Setup", () => {
     const client = await liveClient(emptyAdminSnapshot("Acme"));
     client.core.aiRedirect = true;
 
-    const { html } = await page(`/organizations/${client.clientId}/setup`);
+    const html = (await setupPage(client.clientId)) ?? "";
 
     expect(textOf(sectionOf(html, "AI"))).toContain(
       "AI: couldn’t be read just now."
     );
   });
 
-  it("opens on how it stands for a tab it doesn't have, and has no Setup for a client the admin doesn't know", async () => {
+  // A tab it doesn't have opens on how it stands: src/admin/setup.test.tsx.
+  it("reads the channel it is on now, and no Setup for a client the admin doesn't know", async () => {
     const acme = await liveClient(emptyAdminSnapshot("Acme"));
-    const base = `/organizations/${acme.clientId}/setup`;
     await db
       .update(clients)
       .set({ channel: "edge" })
       .where(eq(clients.id, acme.clientId));
 
-    const odd = await page(`${base}?tab=nothing`);
-    const unknown = await page("/organizations/client-unknown/setup");
+    const shown = (await setupPage(acme.clientId)) ?? "";
+    const unknown = await setupPage("client-unknown");
 
     expect({
-      status: odd.status,
-      onStatus: odd.html.includes('aria-label="Its Workers"'),
-      channel: textOf(sectionOf(odd.html, "How it stands")).includes("Edge"),
-      unknown: unknown.status,
-    }).toStrictEqual({
-      status: 200,
-      onStatus: true,
-      channel: true,
-      unknown: 404,
-    });
+      channel: textOf(sectionOf(shown, "How it stands")).includes("Edge"),
+      unknown,
+    }).toStrictEqual({ channel: true, unknown: null });
   });
 });

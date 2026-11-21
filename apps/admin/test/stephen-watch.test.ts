@@ -24,7 +24,7 @@ import worker from "../src/server.ts";
 import { mockAccess } from "./access.ts";
 import type { CoreState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { callServerFn, page } from "./pages.ts";
+import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 import { emptyAdminSnapshot } from "./snapshots.ts";
@@ -82,17 +82,18 @@ const watch = async (): Promise<void> => {
   );
 };
 
-/** The needs client `clientId`'s Setup lists, as staff see the page. */
-const needsOf = async (clientId: string): Promise<string> => {
-  const { html } = await page(`/organizations/${clientId}/setup`, staff.email);
-  return html.replaceAll("&#x27;", "'");
+/**
+ * How many of Stephen's signals client `clientId`'s Setup reads as over
+ * their bar (src/admin/setup.test.tsx shows what it says of them).
+ */
+const overOf = async (clientId: string): Promise<number> => {
+  const setup = await callServerFn(
+    fetchClientSetup,
+    { clientId },
+    { email: staff.email }
+  );
+  return setup?.watched ? overBars(setup.watched.signals).size : 0;
 };
-
-/** What Stephen's need says, with `over` signals over their bar. */
-const overWords = (over: number): string =>
-  over === 1
-    ? "One of Stephen's signals is over its bar"
-    : `${over} of Stephen's signals are over its bar`;
 
 describe("the watch of Stephen", () => {
   useStoreSecrets({ deployer: token });
@@ -103,24 +104,24 @@ describe("the watch of Stephen", () => {
       .where(eq(clients.status, "active"));
   });
 
-  it("says on the client's Setup that a signal is over its bar, until it's back under", async () => {
+  it("reads for the client's Setup that a signal is over its bar, until it's back under", async () => {
     const acme = await liveClient();
     const calm = await liveClient();
     answering(acme.core, { ...quiet, failed: 10 });
     answering(calm.core, quiet);
 
     await watch();
-    const whileOver = await needsOf(acme.clientId);
-    const calmPage = await needsOf(calm.clientId);
+    const whileOver = await overOf(acme.clientId);
+    const calmOver = await overOf(calm.clientId);
     answering(acme.core, quiet);
     await watch();
-    const onceUnder = await needsOf(acme.clientId);
+    const onceUnder = await overOf(acme.clientId);
 
-    expect({
-      whileOver: whileOver.includes(overWords(1)),
-      calm: calmPage.includes("over its bar:"),
-      onceUnder: onceUnder.includes("over its bar:"),
-    }).toStrictEqual({ whileOver: true, calm: false, onceUnder: false });
+    expect({ whileOver, calm: calmOver, onceUnder }).toStrictEqual({
+      whileOver: 1,
+      calm: 0,
+      onceUnder: 0,
+    });
   });
 
   it("puts what it read on the client's page, a line a signal, and leaves a client whose core doesn't count Stephen yet unwatched", async () => {
