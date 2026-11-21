@@ -12,6 +12,23 @@
  * sending a failed mail again and giving someone a new start. The invitation and the list of links to send aren't here: a
  * link is a credential, which core never sends.
  */
+
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@grasp-os/app-kit/components/input-group";
+import { Progress } from "@grasp-os/app-kit/components/progress";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/app-kit/components/table";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { AdminLink } from "@grasp-os/shared/admin-snapshot";
 import type { Funnel } from "@grasp-os/shared/admin/admin-interviews";
 import { funnelOf, talkedByDay } from "@grasp-os/shared/admin/admin-interviews";
@@ -25,22 +42,6 @@ import type {
   OrgView,
   PersonView,
 } from "@grasp-os/shared/admin/onboarding-admin";
-import { Badge } from "@grasp-os/ui/components/badge";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import { Progress } from "@grasp-os/ui/components/progress";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { SearchIcon } from "lucide-react";
 import { useState } from "react";
 

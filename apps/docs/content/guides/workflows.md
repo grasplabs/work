@@ -96,8 +96,8 @@ Grasp checks every start's args against the workflow's, so a start the workflow 
 
 ```tsx src/routes/index.tsx
 import { useQuery, useWorkflow } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
-import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Spinner } from "@grasp-os/app-kit/components/spinner";
 import { api, workflows } from "@server/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 

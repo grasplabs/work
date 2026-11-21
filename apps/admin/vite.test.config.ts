@@ -49,7 +49,7 @@ export default defineProject({
       optimizer: {
         ssr: {
           enabled: true,
-          include: ["@grasp-os/ui > lucide-react"],
+          include: ["@grasp-os/app-kit > lucide-react"],
         },
       },
     },

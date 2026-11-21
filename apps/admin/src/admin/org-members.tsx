@@ -1,6 +1,6 @@
+import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
 import type { MemberView } from "@grasp-os/shared/admin/admin-account";
 import type { MemberRole } from "@grasp-os/shared/admin/onboarding-admin";
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { MailIcon } from "lucide-react";
 
 import { useOrganization } from "./organization.tsx";

@@ -1,9 +1,9 @@
-import { DataGrid } from "@grasp-os/ui/components/data-grid";
+import { DataGrid } from "@grasp-os/app-kit/components/data-grid";
 import {
   PageHeader,
   PageHeaderContent,
   PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
+} from "@grasp-os/app-kit/components/page-header";
 import { api } from "@server/_generated/api";
 import { createFileRoute, Link } from "@tanstack/react-router";
 

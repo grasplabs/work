@@ -415,7 +415,7 @@ const isRelative = (specifier: string): boolean =>
 
 /**
  * The SDK's entries (`@grasp-os/sdk`): of the platform's own packages,
- * all App code imports besides `@grasp-os/ui`'s modules. Which of them
+ * all App code imports besides `@grasp-os/app-kit`'s modules. Which of them
  * a kind of file may import its own rules say (`platformImports`, the
  * kit's page imports).
  */
@@ -432,14 +432,14 @@ const sdkEntrySet: ReadonlySet<string> = new Set(sdkEntries);
 /** The scope of the platform's own packages. */
 const platformScope = "@grasp-os/";
 
-/** The scope of `@grasp-os/ui`'s modules, which pages import. */
-const uiScope = "@grasp-os/ui/";
+/** The scope of `@grasp-os/app-kit`'s modules, which pages import. */
+const appKitScope = "@grasp-os/app-kit/";
 
-/** Whether `specifier` is one of `@grasp-os/ui`'s modules, by plain names alone. */
-const isUiModule = (specifier: string): boolean =>
-  specifier.startsWith(uiScope) &&
+/** Whether `specifier` is one of `@grasp-os/app-kit`'s modules, by plain names alone. */
+const isAppKitModule = (specifier: string): boolean =>
+  specifier.startsWith(appKitScope) &&
   specifier
-    .slice(uiScope.length)
+    .slice(appKitScope.length)
     .split("/")
     .every((segment) => segment !== "" && segment !== "." && segment !== "..");
 
@@ -447,7 +447,7 @@ const isUiModule = (specifier: string): boolean =>
  * Why App code may not import `specifier`, for its values or its types
  * alike, or undefined when it may: an allowlist of the platform's own
  * packages. App code imports the SDK's entries (`sdkEntries`) and
- * `@grasp-os/ui`'s modules, never anything else of the platform: not
+ * `@grasp-os/app-kit`'s modules, never anything else of the platform: not
  * `@grasp-os/runtime`, which implements the SDK and holds what only the
  * platform calls (the session client a host makes, the frame's runtime,
  * the run host), nor any other path of the SDK. A type names what its
@@ -458,9 +458,9 @@ const isUiModule = (specifier: string): boolean =>
 export const platformImportError = (specifier: string): string | undefined =>
   !specifier.startsWith(platformScope) ||
   sdkEntrySet.has(specifier) ||
-  isUiModule(specifier)
+  isAppKitModule(specifier)
     ? undefined
-    : `"${specifier}" is the platform's own, which App code never imports, not even for its types. App code imports ${sdkEntries.join(", ")}, @grasp-os/ui, the npm packages its builder approved and its own files.`;
+    : `"${specifier}" is the platform's own, which App code never imports, not even for its types. App code imports ${sdkEntries.join(", ")}, @grasp-os/app-kit, the npm packages its builder approved and its own files.`;
 
 /**
  * The flat module name `specifier`, imported by `file`, loads, or why it
@@ -553,7 +553,7 @@ const serverPath = (
 
 /**
  * Why a page may not import `specifier`, or undefined when it may: the
- * platform's own modules but the SDK's entries and `@grasp-os/ui`'s
+ * platform's own modules but the SDK's entries and `@grasp-os/app-kit`'s
  * (`platformImportError`), or the App's server code: a server
  * constructor, an internal reference, the schema, the registration or a
  * function. Pages get the App's server only through the references the

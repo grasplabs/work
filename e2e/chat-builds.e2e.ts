@@ -47,7 +47,7 @@ export const book = mutation({
  * version's own included.
  */
 const appPage = `import { createFileRoute } from "@tanstack/react-router";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 
 const Desk = () => (
   <main className="flex flex-col gap-4 p-6">

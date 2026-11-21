@@ -16,10 +16,10 @@ import { designCases, designFindings } from "./design-cases.ts";
 
 /** A typical page: a list with a filter, on the kit, with its own component. */
 const typicalApp: Record<string, string> = {
-  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@grasp-os/ui/components/card";
-import { Input } from "@grasp-os/ui/components/input";
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@grasp-os/app-kit/components/card";
+import { Input } from "@grasp-os/app-kit/components/input";
 import {
   Table,
   TableBody,
@@ -27,7 +27,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
+} from "@grasp-os/app-kit/components/table";
 import { PlusIcon, SearchIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -92,7 +92,7 @@ function Tickets() {
 }
 export const Route = createFileRoute("/")({ component: Tickets });
 `,
-  "src/components/status.tsx": `import { Badge } from "@grasp-os/ui/components/badge";
+  "src/components/status.tsx": `import { Badge } from "@grasp-os/app-kit/components/badge";
 
 import type { Ticket } from "../../server";
 
@@ -318,7 +318,7 @@ export const Route = createFileRoute("/server")({ component: Server });
         ),
         // A hook called on a condition, which the React Compiler refuses.
         "src/routes/when.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { useState } from "react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 
 const nothing = (): void => undefined;
 
@@ -365,7 +365,7 @@ export const Route = createFileRoute("/when")({ component: When });
       app({
         [generatedPaths.api]: symbolicModules()[generatedPaths.api] ?? "",
         "src/routes/writer.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { useMutation, usePaginatedQuery, useQuery, useStream } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 
 import { api } from "@server/_generated/api";
 
@@ -499,7 +499,7 @@ describe("the design system's class checks", { timeout: 60_000 }, () => {
   it("knows the kit's own classes, and names the nearest of a misspelt one", async () => {
     const checked = await classChecks(
       app({
-        "src/components/kit-classes.tsx": `import { cn } from "@grasp-os/ui/lib/utils";
+        "src/components/kit-classes.tsx": `import { cn } from "@grasp-os/app-kit/lib/utils";
 
 export const KitClasses = ({ on }: { on: boolean }) => (
   <p className={cn("flex animate-in fade-in ease-house type-display group", on && "itmes-center")}>
@@ -513,7 +513,7 @@ export const KitClasses = ({ on }: { on: boolean }) => (
     // keys, a template's text and its branches.
     const elsewhere = await classChecks(
       app({
-        "src/components/tones.tsx": `import { cn } from "@grasp-os/ui/lib/utils";
+        "src/components/tones.tsx": `import { cn } from "@grasp-os/app-kit/lib/utils";
 
 const tone = cn("flex no-such-base", { "no-such-key": true });
 
@@ -611,7 +611,7 @@ export const Tone = ({ on }: { on: boolean }) => (
   it("passes classes that only look like a page's own, and strings that aren't classes", async () => {
     const checked = await classChecks(
       app({
-        "src/routes/lookalikes.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { cn } from "@grasp-os/ui/lib/utils";
+        "src/routes/lookalikes.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { cn } from "@grasp-os/app-kit/lib/utils";
 
 function Lookalikes() {
   const notice = window.location.hash === "#saved";
@@ -690,7 +690,7 @@ export const Route = createFileRoute("/peers")({ component: Peers });
   it("fails a plain form and an inline style, naming the kit's form and its classes", async () => {
     const linted = await designLint(
       app({
-        "src/routes/ask.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Button } from "@grasp-os/ui/components/button";
+        "src/routes/ask.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Button } from "@grasp-os/app-kit/components/button";
 
 function Ask() {
   return (
@@ -712,7 +712,7 @@ export const Route = createFileRoute("/ask")({ component: Ask });
         rule,
         says: `${message} ${fix ?? ""}`.includes(
           rule === "react/forbid-elements"
-            ? "@grasp-os/ui/form"
+            ? "@grasp-os/app-kit/form"
             : "theme classes"
         ),
       })),

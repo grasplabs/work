@@ -1,8 +1,4 @@
-import { ADMIN_PHASES, phaseOf } from "@grasp-os/shared/admin/admin-health";
-import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
-import { portfolioOf } from "@grasp-os/shared/admin/admin-view";
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Table,
   TableBody,
@@ -10,9 +6,13 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/table";
+import { Tabs, TabsList, TabsTrigger } from "@grasp-os/app-kit/components/tabs";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import { ADMIN_PHASES, phaseOf } from "@grasp-os/shared/admin/admin-health";
+import type { AdminPhase } from "@grasp-os/shared/admin/admin-health";
+import { portfolioOf } from "@grasp-os/shared/admin/admin-view";
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, ChevronRightIcon, PlusIcon } from "lucide-react";
 

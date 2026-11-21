@@ -107,7 +107,7 @@ export const followUp = permissions.followUp;
 
       "src/components/review.tsx": `import type { WorkflowDecisionInboxItem } from "@grasp-os/sdk";
 import { useForm, useWorkflow } from "@grasp-os/sdk/react";
-import { Form, FormError, SubmitButton, TextField } from "@grasp-os/ui/form";
+import { Form, FormError, SubmitButton, TextField } from "@grasp-os/app-kit/form";
 import { workflows } from "@server/_generated/api";
 
 /** One waiting decision, answered through its own form, mounted per item. */
@@ -166,7 +166,7 @@ export const Watched = ({ runId }: { runId: string }) => {
 `,
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useWorkflow } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import { useState } from "react";
 import { workflows } from "@server/_generated/api";
 import { Review } from "../components/review.tsx";

@@ -5,20 +5,20 @@
  * channel may make. Then the latest changes of a channel's release, from the
  * audit log.
  */
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+} from "@grasp-os/app-kit/components/collapsible";
+import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
 import {
   NativeSelect,
   NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import { Progress } from "@grasp-os/ui/components/progress";
-import { cn } from "@grasp-os/ui/lib/utils";
+} from "@grasp-os/app-kit/components/native-select";
+import { Progress } from "@grasp-os/app-kit/components/progress";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 import { Link, useRouter } from "@tanstack/react-router";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useState } from "react";

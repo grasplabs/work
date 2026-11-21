@@ -1,4 +1,4 @@
-import { cn } from "@grasp-os/ui/lib/utils";
+import { cn } from "@grasp-os/app-kit/lib/utils";
 
 /**
  * The parts and words of the admin's Platform page, ported from the

@@ -21,7 +21,7 @@ const insteadOfOut =
 
 /** What to do instead of styling a page outside the kit. */
 const insteadOfStyle =
-  "Style pages with the kit's components and theme classes (@grasp-os/ui); for a value only known at run time, pick among classes.";
+  "Style pages with the kit's components and theme classes (@grasp-os/app-kit); for a value only known at run time, pick among classes.";
 
 /** An inline style's refusal. */
 const styleMessage = `An inline style styles the page outside the design system. ${insteadOfStyle}`;
@@ -35,7 +35,7 @@ export const pageRules = {
         {
           element: "form",
           message:
-            "A plain <form> never submits in a page: its frame doesn't allow forms, so its onSubmit never runs. Use Form from @grasp-os/ui/form (with useForm, the form's fields and SubmitButton), which submits itself.",
+            "A plain <form> never submits in a page: its frame doesn't allow forms, so its onSubmit never runs. Use Form from @grasp-os/app-kit/form (with useForm, the form's fields and SubmitButton), which submits itself.",
         },
         {
           element: "style",

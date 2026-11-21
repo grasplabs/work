@@ -1,8 +1,8 @@
-// `@grasp-os/runtime/forms`: what `@grasp-os/ui`'s form field helpers and
+// `@grasp-os/runtime/forms`: what `@grasp-os/app-kit`'s form field helpers and
 // grids read beside their TanStack state: a form's submission status, how
 // to subscribe to it, what its validator declares of each field, and what
 // a query declares it answers. Not an App's import: pages get `useForm`
-// from `@grasp-os/sdk/react` and the components from `@grasp-os/ui`.
+// from `@grasp-os/sdk/react` and the components from `@grasp-os/app-kit`.
 import { clientInternals } from "./client-core.ts";
 import type { GraspClient } from "./client-core.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";

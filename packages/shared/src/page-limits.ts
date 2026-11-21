@@ -14,7 +14,7 @@ export const pageFramePath = "/page-frame";
 /**
  * The languages a page's frame may be told the page speaks (its `lang`
  * query): the frontend's own. Its document says it, so the kit's helpers
- * (@grasp-os/ui) speak it too; anything else is English.
+ * (@grasp-os/app-kit) speak it too; anything else is English.
  */
 export const pageLanguages = ["en", "de", "nl", "es", "fr"] as const;
 

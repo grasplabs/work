@@ -5,13 +5,13 @@
  * domain (src/crm/link.ts). Saved, audited, and the admin read again, so
  * Details shows what Attio says of the company just linked.
  */
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Field,
   FieldDescription,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "@grasp-os/app-kit/components/field";
+import { Input } from "@grasp-os/app-kit/components/input";
 import { useRouter } from "@tanstack/react-router";
 
 import { setAttioCompanyFn } from "../crm/functions.ts";

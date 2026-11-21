@@ -1,13 +1,9 @@
-import type { AgreementView } from "@grasp-os/shared/admin/admin-account";
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import type { Agreed } from "@grasp-os/shared/admin/onboarding-admin";
-import { present } from "@grasp-os/shared/admin/present";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/app-kit/components/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
+} from "@grasp-os/app-kit/components/collapsible";
 /**
  * An organization's Contract, ported from the prototype (grasplabs/prototype
  * `components/admin/org-contract.tsx`), a tab of its Details: the
@@ -21,7 +17,11 @@ import {
  * and its invoices as Stripe has them, once someone at Grasp linked it to
  * its customer there; until then, or without Stripe's key, it says so.
  */
-import { cn } from "@grasp-os/ui/lib/utils";
+import { cn } from "@grasp-os/app-kit/lib/utils";
+import type { AgreementView } from "@grasp-os/shared/admin/admin-account";
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import type { Agreed } from "@grasp-os/shared/admin/onboarding-admin";
+import { present } from "@grasp-os/shared/admin/present";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import type { ReactNode } from "react";
 

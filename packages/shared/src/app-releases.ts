@@ -125,6 +125,7 @@ export const releaseManifestSchema = z.strictObject({
   schemaHash: sha256Schema,
   contractHash: sha256Schema,
   sdkVersion: z.string().min(1).max(128),
+  /** The version of the kit App pages are built with (`@grasp-os/app-kit`). */
   uiVersion: z.string().min(1).max(128),
   compilerVersion: z.string().min(1).max(128),
   dependencyLockHash: sha256Schema,

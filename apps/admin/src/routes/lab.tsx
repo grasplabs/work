@@ -1,7 +1,7 @@
 import {
   ToggleGroup,
   ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
+} from "@grasp-os/app-kit/components/toggle-group";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { WithAdmins } from "../admin/admins.tsx";
