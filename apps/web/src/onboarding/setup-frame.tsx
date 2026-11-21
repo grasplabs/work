@@ -64,6 +64,13 @@ const styles = stylex.create({
     paddingInline: { default: grasp.space10, [media.belowPhone]: grasp.space4 },
     backgroundColor: grasp.paper,
   },
+  // On a phone the steps take what the mark and the controls leave, so the controls stay whole.
+  foot: {
+    gridTemplateColumns: {
+      default: "1fr auto 1fr",
+      [media.belowPhone]: "auto minmax(0, 1fr) auto",
+    },
+  },
   ways: { display: "flex", alignItems: "center", gap: grasp.space1 },
   main: {
     display: "flex",
@@ -293,7 +300,7 @@ export const SetupFrame = ({
       <main {...stylex.props(styles.main)}>
         <div {...stylex.props(styles.column)}>{children}</div>
       </main>
-      <footer {...stylex.props(styles.bar)}>
+      <footer {...stylex.props(styles.bar, styles.foot)}>
         {/* The mark bottom left, across from the language. */}
         <span {...stylex.props(styles.mark)}>
           <Icon icon={BrandGrasp} label="Grasp" />
