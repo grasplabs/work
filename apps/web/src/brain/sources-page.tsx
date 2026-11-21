@@ -41,6 +41,7 @@ import { formatBytes, formatDate, formatDay, formatList } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -947,7 +948,7 @@ const UploadActions = ({
                 : t`Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it.`}
             </AlertDialogDescription>
             <AlertDialogFooter>
-              <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+              <AlertDialogCancel />
               <AlertDialogAction
                 // It closes at once and confirms nothing while the delete
                 // runs; what goes wrong shows under the actions.
@@ -1706,7 +1707,7 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
                         {t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`}
                       </AlertDialogDescription>
                       <AlertDialogFooter>
-                        <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                        <AlertDialogCancel />
                         <AlertDialogAction
                           // It closes at once; what goes wrong shows under the list.
                           action={() => {

@@ -16,6 +16,7 @@ import { Stepper } from "../grasp/stepper/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { LanguageButton } from "../language-picker.tsx";
+import { useNarrow } from "../use-narrow.ts";
 import { SoundControls } from "../voice/sound-controls.tsx";
 import { KnowledgeCorner } from "./knowledge-bar.tsx";
 import type { Knowledge } from "./knowledge-bar.tsx";
@@ -63,6 +64,13 @@ const styles = stylex.create({
     paddingInline: { default: grasp.space10, [media.belowPhone]: grasp.space4 },
     backgroundColor: grasp.paper,
   },
+  // On a phone the steps take what the mark and the controls leave, so the controls stay whole.
+  foot: {
+    gridTemplateColumns: {
+      default: "1fr auto 1fr",
+      [media.belowPhone]: "auto minmax(0, 1fr) auto",
+    },
+  },
   ways: { display: "flex", alignItems: "center", gap: grasp.space1 },
   main: {
     display: "flex",
@@ -104,6 +112,7 @@ const StepDots = ({
   onGo: (step: SetupStep) => void;
 }) => {
   const { t } = useLingui();
+  const narrow = useNarrow();
   const names: Record<SetupStep, string> = {
     welcome: t`Welcome`,
     ai: t`AI`,
@@ -122,6 +131,7 @@ const StepDots = ({
   return (
     <Stepper
       aria-label={t`Onboarding steps`}
+      {...(narrow ? { countLabel: (step: number) => t`Step ${step}` } : {})}
       onValueChange={(at) => {
         const step = wizard[at];
         if (step !== undefined) {
@@ -189,6 +199,7 @@ export const SetupFrame = ({
   children: ReactNode;
 }) => {
   const { t } = useLingui();
+  const narrow = useNarrow();
   const index = stepIndex(step, path);
   const words: Partial<Record<SetupStep, string>> = {
     listening: t`Talking to your team`,
@@ -225,31 +236,55 @@ export const SetupFrame = ({
         <nav aria-label={t`Back and forward`} {...stylex.props(styles.ways)}>
           {back === undefined ? null : (
             <Arriving settled={settled}>
-              <Button
-                icon={ArrowLeft}
-                onClick={() => {
-                  onGo(back);
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                {t`Back`}
-              </Button>
+              {narrow ? (
+                <Button
+                  aria-label={t`Back`}
+                  icon={ArrowLeft}
+                  onClick={() => {
+                    onGo(back);
+                  }}
+                  size="sm"
+                  variant="ghost"
+                />
+              ) : (
+                <Button
+                  icon={ArrowLeft}
+                  onClick={() => {
+                    onGo(back);
+                  }}
+                  size="sm"
+                  variant="ghost"
+                >
+                  {t`Back`}
+                </Button>
+              )}
             </Arriving>
           )}
           {/* On only as far as they have been: on the furthest step there is nowhere further to go. */}
           {on === undefined ? null : (
             <Arriving settled={settled}>
-              <Button
-                iconEnd={ArrowRight}
-                onClick={() => {
-                  onGo(on);
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                {t`Forward`}
-              </Button>
+              {narrow ? (
+                <Button
+                  aria-label={t`Forward`}
+                  icon={ArrowRight}
+                  onClick={() => {
+                    onGo(on);
+                  }}
+                  size="sm"
+                  variant="ghost"
+                />
+              ) : (
+                <Button
+                  iconEnd={ArrowRight}
+                  onClick={() => {
+                    onGo(on);
+                  }}
+                  size="sm"
+                  variant="ghost"
+                >
+                  {t`Forward`}
+                </Button>
+              )}
             </Arriving>
           )}
         </nav>
@@ -265,7 +300,7 @@ export const SetupFrame = ({
       <main {...stylex.props(styles.main)}>
         <div {...stylex.props(styles.column)}>{children}</div>
       </main>
-      <footer {...stylex.props(styles.bar)}>
+      <footer {...stylex.props(styles.bar, styles.foot)}>
         {/* The mark bottom left, across from the language. */}
         <span {...stylex.props(styles.mark)}>
           <Icon icon={BrandGrasp} label="Grasp" />

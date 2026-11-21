@@ -26,6 +26,7 @@ import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -185,7 +186,7 @@ export const ConfirmChange = ({
             : t`Your changes go back to how they were then, for everyone who builds it. What came after stays in its history.`}
         </AlertDialogDescription>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             action={() => {
               if (asked !== undefined) {
@@ -526,7 +527,7 @@ const MoveDialog = ({
             : t`Its pages and workflows run on it from now on. Grasp checks and builds it first.`}
         </AlertDialogDescription>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             action={() => {
               if (move !== null) {

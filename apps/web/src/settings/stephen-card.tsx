@@ -14,6 +14,7 @@ import { formatNumber, formatPercent } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -307,7 +308,7 @@ export const StephenCard = ({
             </Trans>
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               onClick={() => {
                 void onReach(false, reach.audience);

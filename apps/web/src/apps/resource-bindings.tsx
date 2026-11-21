@@ -19,6 +19,7 @@ import { formatList } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -341,7 +342,7 @@ const Revoke = ({
           {t`The App's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again.`}
         </AlertDialogDescription>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             onClick={() => {
               void decide(

@@ -4,6 +4,7 @@ import * as stylex from "@stylexjs/stylex";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -89,7 +90,7 @@ export const LinkConfirmDialog = ({
           <p {...stylex.props(styles.url)}>{pending.url}</p>
         )}
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             disabled={!enabled}
             onClick={(event) => {

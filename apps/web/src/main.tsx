@@ -1,5 +1,4 @@
 import "./styles.css";
-import { CSPProvider } from "@base-ui/react/csp-provider";
 import { i18n } from "@lingui/core";
 import { I18nProvider, useLingui } from "@lingui/react";
 import * as stylex from "@stylexjs/stylex";
@@ -149,18 +148,14 @@ const start = async (): Promise<void> => {
     },
   }).render(
     <StrictMode>
-      {/* Base UI renders no <style> of its own: the kit's styles.css
-          carries the rule it held. */}
-      <CSPProvider disableStyleElements>
-        {/* Lingui draws nothing until a language is active. */}
-        {worded ? (
-          <I18nProvider i18n={i18n}>
-            <Routes />
-          </I18nProvider>
-        ) : (
-          <NoWords />
-        )}
-      </CSPProvider>
+      {/* Lingui draws nothing until a language is active. */}
+      {worded ? (
+        <I18nProvider i18n={i18n}>
+          <Routes />
+        </I18nProvider>
+      ) : (
+        <NoWords />
+      )}
     </StrictMode>
   );
 };

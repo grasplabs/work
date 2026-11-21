@@ -986,9 +986,6 @@ importers:
 
   apps/web:
     dependencies:
-      '@base-ui/react':
-        specifier: 'catalog:'
-        version: 1.8.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@fontsource-variable/geist':
         specifier: 'catalog:'
         version: 5.2.8
@@ -1004,9 +1001,6 @@ importers:
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@grasp-os/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@hugeicons/core-free-icons':
         specifier: 'catalog:'
         version: 4.4.0
@@ -1128,9 +1122,6 @@ importers:
       '@stylexjs/unplugin':
         specifier: 'catalog:'
         version: 0.19.2(supports-color@10.2.2)(unplugin@2.3.11)
-      '@tailwindcss/vite':
-        specifier: 'catalog:'
-        version: 4.3.3(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))
       '@tanstack/router-plugin':
         specifier: 'catalog:'
         version: 1.168.48(@tanstack/react-router@1.170.46(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(esbuild@0.28.2)(rolldown@1.2.16)(supports-color@10.2.2)
@@ -1155,9 +1146,6 @@ importers:
       lightningcss:
         specifier: 'catalog:'
         version: 1.33.0
-      tailwindcss:
-        specifier: 'catalog:'
-        version: 4.3.3
       vite-plus:
         specifier: 'catalog:'
         version: 0.3.3(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/browser-playwright@4.1.11)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)

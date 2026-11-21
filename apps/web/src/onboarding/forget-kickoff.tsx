@@ -8,6 +8,7 @@ import { ErrorText } from "../error-text.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -109,7 +110,7 @@ export const ForgetKickoff = ({
             {t`I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogCancel />
             <AlertDialogAction
               action={() => {
                 void forget();

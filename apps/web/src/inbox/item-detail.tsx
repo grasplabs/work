@@ -20,9 +20,10 @@ import { formatDate, formatDateTime } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogContent,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
@@ -169,7 +170,7 @@ const ActButton = ({
         <AlertDialogTitle>{confirm.title}</AlertDialogTitle>
         <AlertDialogDescription>{confirm.description}</AlertDialogDescription>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             action={press}
             failedLabel={t`Not done`}

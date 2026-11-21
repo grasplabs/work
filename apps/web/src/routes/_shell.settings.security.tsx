@@ -10,6 +10,7 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogFooter,
   AlertDialogTitle,
@@ -132,7 +133,7 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
             <AlertDialogContent>
               <AlertDialogTitle>{t`Sign out this device?`}</AlertDialogTitle>
               <AlertDialogFooter>
-                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogCancel />
                 <AlertDialogAction
                   action={signOut}
                   failedLabel={t`Not signed out`}

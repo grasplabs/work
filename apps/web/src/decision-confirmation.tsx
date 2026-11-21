@@ -13,6 +13,7 @@ import { formatDateTime } from "./format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -260,7 +261,7 @@ export const DecisionConfirmDialog = ({
           </>
         )}
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             disabled={!enabled}
             onClick={(event) => {

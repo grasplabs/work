@@ -16,6 +16,7 @@ import { formatList } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -221,7 +222,7 @@ const RemoveWebhook = ({
           {t`Grasp stops sending the App's events there. Its secret can't be used again.`}
         </AlertDialogDescription>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction onClick={onRemove} variant="danger">
             {t`Remove`}
           </AlertDialogAction>

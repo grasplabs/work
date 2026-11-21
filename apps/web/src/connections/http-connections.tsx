@@ -26,6 +26,7 @@ import {
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -388,7 +389,7 @@ const Revoke = ({
         </AlertDialogDescription>
         {failure === undefined ? null : <Alert title={failure} tone="danger" />}
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             action={async () => {
               let revoked = false;

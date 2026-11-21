@@ -9,9 +9,10 @@ import { formatDateTime } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogContent,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
@@ -77,7 +78,7 @@ const EndStaffAccess = ({
           {t`Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened.`}
         </AlertDialogDescription>
         <AlertDialogFooter>
-          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogCancel />
           <AlertDialogAction
             action={end}
             agentConfirm={t`Signs everyone from Grasp out of this workspace`}
