@@ -9,7 +9,6 @@ import type {
 import { blueprintIdSchema } from "@grasp-os/shared/ids";
 import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -185,11 +184,9 @@ const shown = async (
     id: "_shell",
     beforeLoad: () => ({ identity }),
     component: () => (
-      <SidebarProvider>
-        <GlobalChatProvider>
-          <Outlet />
-        </GlobalChatProvider>
-      </SidebarProvider>
+      <GlobalChatProvider>
+        <Outlet />
+      </GlobalChatProvider>
     ),
   });
   const read: Promise<Loaded<MakeIdeas>> | undefined =

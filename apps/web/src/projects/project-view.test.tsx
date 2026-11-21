@@ -11,7 +11,6 @@ import type {
   ProjectMemberRef,
   ProjectShareCandidates,
 } from "@grasp-os/shared/projects";
-import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -228,9 +227,7 @@ const shown = async (
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <SidebarProvider>
-          <RouterProvider router={router} />
-        </SidebarProvider>
+        <RouterProvider router={router} />
       </I18nProvider>
     );
     await router.load();

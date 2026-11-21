@@ -79,9 +79,22 @@ const until = async (ready: () => boolean, what: string): Promise<void> => {
   );
 };
 
+/** An element's words as a person reads them: none of what it hides (`aria-hidden`). */
+const shownText = (element: Element): string =>
+  [...element.childNodes]
+    .map((node) => {
+      if (node instanceof Element) {
+        return node.getAttribute("aria-hidden") === "true"
+          ? ""
+          : shownText(node);
+      }
+      return node.textContent ?? "";
+    })
+    .join("");
+
 const buttonNamed = (label: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent === label
+    (each) => shownText(each) === label
   );
 
 const text = (): string => document.body.textContent ?? "";
@@ -142,6 +155,11 @@ const shown = async (
     () => buttonNamed("Delete my interview") !== undefined,
     "the delete button"
   );
+  // The button's hold loads as the page shows, as in a browser long before
+  // anyone's press: a press while it loads only asks, without the hold.
+  await act(async () => {
+    await import("../grasp/button/hold.tsx");
+  });
 };
 
 /** Opened again, as a reload does, after they withdrew: as core says now. */

@@ -150,10 +150,6 @@ export const useArrives = (key: string): boolean => {
   return asLeft === null;
 };
 
-/** The same, as the old kit's classes: until every step is on the library. */
-export const useEntrance = (key: string, classes: string): string =>
-  useArrives(key) ? classes : "";
-
 /**
  * Whether, on a phone, the step does not fit beside even the smallest
  * brain: its sentence then makes way once read and tells how much room that

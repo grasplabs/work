@@ -5,6 +5,13 @@
 export const datePickerWords = {
   /** The calendar button's name, when the field gives it none. */
   choose: "Choose date",
+  /** The name of a range's group of preset ranges. */
+  presets: "Presets",
+  /** The four default preset ranges' names, in order (`presetLabels` gives all four at once). */
+  today: "Today",
+  last7: "Last 7 days",
+  last30: "Last 30 days",
+  thisMonth: "This month",
 };
 
 export type DatePickerWords = typeof datePickerWords;

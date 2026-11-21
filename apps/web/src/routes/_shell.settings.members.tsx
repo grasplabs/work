@@ -1,12 +1,13 @@
 import { failureText } from "@grasp-os/shared/errors";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
+  Guest,
   Invitation,
   Member,
   RemovedPeoplePage,
   RemovedPerson,
 } from "@grasp-os/shared/members";
-import { isMemberAdmin, roleSchema } from "@grasp-os/shared/roles";
+import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -70,7 +71,7 @@ import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { DirectoryReads } from "../settings/directory-reads.tsx";
 import { RemovedActions, useRemovedPeople } from "../settings/erasures.tsx";
-import { Guests } from "../settings/guests.tsx";
+import { GuestActions } from "../settings/guests.tsx";
 import {
   copyEmail,
   InvitationActions,
@@ -79,7 +80,6 @@ import {
 import { MemberSuspension } from "../settings/member-suspension.tsx";
 import { roleItems, roleLines } from "../settings/roles.ts";
 import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
-import { TeamsPanel } from "../settings/teams.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useNarrow } from "../use-narrow.ts";
@@ -90,9 +90,11 @@ import { useNarrow } from "../use-narrow.ts";
 // (settings/member-suspension.tsx), their role on one edge and a menu to
 // end their sessions or remove them for good; the invitations nobody has taken up yet; and at its foot
 // the people removed, quiet, and a way to erase them
-// (settings/erasures.tsx). Then where the directory's daily read stands,
-// once one was tried (settings/directory-reads.tsx), the teams, for the organization's own
-// admins (settings/teams.tsx), and, last, what each role may do. Core checks the role on every call; anyone else
+// (settings/erasures.tsx). Guests, people outside the company invited to
+// what is shared with them, are rows of the same table with a menu of
+// their own (settings/guests.tsx). Then where the directory's daily read
+// stands, once one was tried (settings/directory-reads.tsx). The teams
+// have their own page (settings/teams.tsx). Core checks the role on every call; anyone else
 // sees why they can't. The admin's own row has no actions: core refuses
 // removing yourself or ending your own sessions, and demoting yourself
 // (which core allows while another admin exists) is left out so nobody
@@ -364,6 +366,12 @@ const RolesButton = () => {
               </dd>
             </div>
           ))}
+          <div>
+            <dt {...stylex.props(styles.roleName)}>{t`Guest`}</dt>
+            <dd {...stylex.props(styles.roleText)}>
+              {t`People outside your organization, invited to what is shared with them. They reach nothing else.`}
+            </dd>
+          </div>
         </dl>
       </PopoverContent>
     </Popover>
@@ -384,16 +392,17 @@ const OwnRole = ({ role, label }: { role: Role; label: string }) => (
   </Select>
 );
 
-/** One row of the people's table: a member, an invitation or someone removed, with its date. */
+/** One row of the people's table: a member, a guest, an invitation or someone removed, with its date. */
 interface PersonRow {
   key: string;
-  kind: "member" | "invited" | "removed";
+  kind: "member" | "guest" | "invited" | "removed";
   name: string;
   email: string;
   /** When they joined, were invited or were removed. */
   at: string;
   invitedBy?: string;
   member?: Member;
+  guest?: Guest;
   invitation?: Invitation;
   removed?: RemovedPerson;
 }
@@ -403,6 +412,7 @@ interface PeopleWords {
   name: string;
   since: string;
   role: string;
+  guest: string;
   invited: string;
   yourRole: string;
   roleOf: (name: string) => string;
@@ -425,6 +435,7 @@ const usePeopleWords = (): PeopleWords => {
     name: t`Name`,
     since: t`Since`,
     role: t`Role`,
+    guest: t`Guest`,
     invited: t`Invited`,
     yourRole: t`Your role`,
     roleOf: (name) => t`Role of ${name}`,
@@ -512,7 +523,8 @@ const peopleColumns = ({
             </Text>
           );
         }
-        // Joined is what Since means: a member's cell is the date alone.
+        // Joined is what Since means: a member's cell is the date alone, and a
+        // guest's the day they were invited, when they were let in.
         return date;
       },
     },
@@ -521,8 +533,27 @@ const peopleColumns = ({
       header: words.role,
       align: "end",
       control: true,
-      value: (row) => roleOf(row),
+      value: (row) => (row.kind === "guest" ? words.guest : roleOf(row)),
       cell: (row) => {
+        if (row.kind === "guest") {
+          // Nobody changes a guest's role: it reads as one's own does.
+          return (
+            <Select
+              disabled
+              items={[{ label: words.guest, value: "guest" }]}
+              value="guest"
+            >
+              <SelectTrigger
+                aria-label={words.roleOf(row.name)}
+                size="sm"
+                variant="text"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          );
+        }
         if (row.invitation !== undefined) {
           // What they join as, which nobody changes here: as one's own role reads.
           return (
@@ -562,6 +593,9 @@ const peopleColumns = ({
         if (row.removed !== undefined) {
           return <RemovedActions person={row.removed} />;
         }
+        if (row.guest !== undefined) {
+          return <GuestActions guest={row.guest} />;
+        }
         if (row.member === undefined || row.member.userId === me) {
           return null;
         }
@@ -586,16 +620,18 @@ const peopleColumns = ({
  * (with headers): Name with the face and email, Since with the date each
  * joined, was invited (and by whom) or was removed, and Role with what can
  * be done; the count, the search and Invite on the head's one line; paged
- * twenty at a time, the search over everyone. Invited and removed people
- * are states of a row.
+ * twenty at a time, the search over everyone. Guests, invited and removed
+ * people are states of a row.
  */
 const PeopleTable = ({
   members,
+  guests,
   invitations,
   removed,
   me,
 }: {
   members: Member[];
+  guests: Guest[];
   invitations: Invitation[];
   removed: RemovedPeoplePage;
   me: string;
@@ -614,6 +650,15 @@ const PeopleTable = ({
       email: member.email,
       at: member.joinedAt,
       member,
+    })),
+    // A guest's name is their address: it stands alone, without a second line.
+    ...guests.map((guest) => ({
+      key: guest.userId,
+      kind: "guest" as const,
+      name: guest.email,
+      email: "",
+      at: guest.invitedAt,
+      guest,
     })),
     ...invitations.map((invitation) => ({
       key: invitation.id,
@@ -714,9 +759,8 @@ const PeopleTable = ({
 };
 
 /**
- * Settings › Members and roles on one page: the people, with what each
- * role may do over them, then (for the organization's own admins) their
- * teams.
+ * Settings › Members and roles on one page: the people and guests, with
+ * what each role may do over them.
  */
 const MembersPage = () => {
   const { t } = useLingui();
@@ -725,15 +769,13 @@ const MembersPage = () => {
   return (
     <div {...stylex.props(styles.page)}>
       {page.state === "ready" ? (
-        <>
-          <PeopleTable
-            invitations={page.data.invitations}
-            me={identity.userId}
-            members={page.data.members}
-            removed={page.data.removed}
-          />
-          <Guests guests={page.data.guests} />
-        </>
+        <PeopleTable
+          guests={page.data.guests}
+          invitations={page.data.invitations}
+          me={identity.userId}
+          members={page.data.members}
+          removed={page.data.removed}
+        />
       ) : (
         <SectionCard variant="grouped" density="compact" title={t`Members`}>
           <SectionNotLoaded page={page} />
@@ -741,17 +783,6 @@ const MembersPage = () => {
       )}
       {/* Nothing before a read was tried, or for anyone core refuses it. */}
       <DirectoryReads />
-      {/* Core refuses the teams to anyone else. */}
-      {/* Read again whenever the people change, so a removed person leaves the teams' faces too. */}
-      {isMemberAdmin(identity) ? (
-        <TeamsPanel
-          key={
-            page.state === "ready"
-              ? page.data.members.map(({ userId }) => userId).join(" ")
-              : "unread"
-          }
-        />
-      ) : null}
     </div>
   );
 };

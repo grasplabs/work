@@ -1,7 +1,6 @@
 import type { FunctionReference, ValueSchema } from "@grasp-os/runtime/app";
 import { GraspClient } from "@grasp-os/runtime/page";
 import { GraspProvider } from "@grasp-os/runtime/react";
-import { isRecord } from "@grasp-os/shared/json";
 import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -15,6 +14,10 @@ import { afterEach } from "vite-plus/test";
 // real ones.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+
+/** Whether `value` is a plain record of keys, as a host's JSON gives one. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** A page a paginated list's query asks for (`paginationOptionsValidator`). */
 export interface PageAsked {

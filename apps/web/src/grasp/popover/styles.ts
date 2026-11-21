@@ -70,6 +70,17 @@ export const popoverStyles = stylex.create({
     borderRadius: grasp.corner,
     cornerShape: grasp.cornerShape,
     fontFamily: grasp.fontSans,
+    // A panel that opens inside its trigger's parent (it is not portalled) would take that parent's
+    // text: an end-aligned table cell would line its words up on the right. It sets its own, and
+    // keeps only the direction, which follows the page.
+    textAlign: "start",
+    whiteSpace: "normal",
+    fontWeight: "normal",
+    fontStyle: "normal",
+    textTransform: "none",
+    letterSpacing: "normal",
+    wordSpacing: "normal",
+    textIndent: 0,
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
     overflowWrap: "anywhere",

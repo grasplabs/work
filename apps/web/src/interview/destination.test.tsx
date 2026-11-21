@@ -180,9 +180,22 @@ const until = async (ready: () => boolean, what: string): Promise<void> => {
   );
 };
 
+/** An element's words as a person reads them: none of what it hides (`aria-hidden`). */
+const shownText = (element: Element): string =>
+  [...element.childNodes]
+    .map((node) => {
+      if (node instanceof Element) {
+        return node.getAttribute("aria-hidden") === "true"
+          ? ""
+          : shownText(node);
+      }
+      return node.textContent ?? "";
+    })
+    .join("");
+
 const buttonNamed = (label: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent === label
+    (each) => shownText(each) === label
   );
 
 const press = async (label: string): Promise<void> => {

@@ -1,7 +1,7 @@
 import type { ContextWords } from "@grasp-os/shared/onboarding-context";
 import type { KnownPart } from "@grasp-os/shared/onboarding-gate";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
   useContext,
   useEffect,
@@ -12,6 +12,9 @@ import {
 
 import type { BrainScene } from "../brain/dot-brain.tsx";
 import type { ShapeKey, Teammate } from "../brain/dot-shapes.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { isLocale } from "../i18n.ts";
 import { SpokenText } from "../voice/spoken-text.tsx";
 import {
@@ -25,15 +28,53 @@ import {
 } from "../voice/voice.ts";
 import type { Tone } from "../voice/voice.ts";
 import { KnowledgeBar } from "./knowledge-bar.tsx";
-import {
-  Explained,
-  Primary,
-  Seen,
-  tones,
-  useEntrance,
-} from "./setup-parts.tsx";
+import { comeIn, motion } from "./motion.ts";
+import { Explained, Primary, Seen, tones, useArrives } from "./setup-parts.tsx";
 import type { StepProps } from "./setup-steps.tsx";
 import { readingSeconds } from "./setup.ts";
+
+const styles = stylex.create({
+  // A line of the story, alone in the middle: what Grasp says, in the display face.
+  said: {
+    margin: 0,
+    color: grasp.ink,
+    fontFamily: grasp.fontSerif,
+    fontWeight: grasp.weightRegular,
+    fontSize: { default: grasp.titleLg, [media.belowPhone]: grasp.titleMd },
+    lineHeight: {
+      default: grasp.titleLgLine,
+      [media.belowPhone]: grasp.titleMdLine,
+    },
+    letterSpacing: grasp.trackingTitle,
+    textWrap: "balance",
+  },
+  speaking: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space3,
+  },
+  who: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  name: { color: grasp.ink },
+  line: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space5,
+    width: "100%",
+  },
+  told: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  summary: { margin: 0, color: grasp.muted, textWrap: "balance" },
+  stage: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    minHeight: "10rem",
+  },
+  bar: { width: "100%" },
+  away: { opacity: 0 },
+});
 
 // "How this works" (prototype `About` in
 // `components/onboarding/onboarding-steps.tsx`): what the onboarding is
@@ -217,10 +258,10 @@ const storyBar = (
 const lessMotion = "(prefers-reduced-motion: reduce)";
 
 const onMotionChange = (listener: () => void): (() => void) => {
-  const media = window.matchMedia(lessMotion);
-  media.addEventListener("change", listener);
+  const query = window.matchMedia(lessMotion);
+  query.addEventListener("change", listener);
   return () => {
-    media.removeEventListener("change", listener);
+    query.removeEventListener("change", listener);
   };
 };
 
@@ -403,17 +444,19 @@ const useStory = (script: Script): Told => {
 
 /** Whoever is speaking in the conversation, their words lighting up as they say them. */
 const Speaking = ({ turn }: { turn: Turn }) => (
-  <div className="animate-in fade-in slide-in-from-bottom-2 flex flex-col items-center gap-3 duration-500">
-    <span className="text-muted-foreground flex items-center gap-2">
-      <span className="text-foreground">{turn.name}</span>
-      {turn.role === "" ? null : (
-        <>
-          <span aria-hidden="true">·</span>
-          {turn.role}
-        </>
-      )}
-    </span>
-    <p className="type-display">
+  <div {...comeIn(true, motion.rise, styles.speaking)}>
+    <Text element="span" size="sm" tone="muted">
+      <span {...stylex.props(styles.who)}>
+        <span {...stylex.props(styles.name)}>{turn.name}</span>
+        {turn.role === "" ? null : (
+          <>
+            <span aria-hidden="true">·</span>
+            {turn.role}
+          </>
+        )}
+      </span>
+    </Text>
+    <p {...stylex.props(styles.said)}>
       <SpokenText from={0} line={turn.text} text={turn.text} />
     </p>
   </div>
@@ -588,25 +631,19 @@ export const About = ({ data, parts, percent, onward, onStory }: StepProps) => {
 
   const line = lines[beat]?.text ?? "";
   // Told before, the plan is there summed up at once.
-  const toldEntrance = useEntrance(
-    told ? "told" : "",
-    "animate-in fade-in duration-800"
-  );
+  const toldArrives = useArrives(told ? "told" : "");
   let shownLine = (
-    <div
-      className="animate-in fade-in slide-in-from-bottom-2 flex w-full flex-col items-center gap-5 duration-600"
-      key={beat}
-    >
-      <p className="type-display">
+    <div key={beat} {...comeIn(true, motion.rise, styles.line)}>
+      <p {...stylex.props(styles.said)}>
         <SpokenText from={0} line={line} text={line} />
       </p>
     </div>
   );
   if (told) {
     shownLine = (
-      <div className={cn("flex flex-col gap-2", toldEntrance)} key="told">
-        <p className="type-display">{t`Here’s the plan`}</p>
-        <p className="text-muted-foreground text-balance">
+      <div key="told" {...comeIn(toldArrives, motion.fade, styles.told)}>
+        <p {...stylex.props(styles.said)}>{t`Here’s the plan`}</p>
+        <p {...stylex.props(styles.summary)}>
           {t`Your people, documents and tools first. Then two weeks of short conversations with your team. At ${threshold}%, your team can start.`}
         </p>
       </div>
@@ -623,20 +660,12 @@ export const About = ({ data, parts, percent, onward, onStory }: StepProps) => {
         : [...lines, ...conversation].map((each) => (
             <Prepared key={each.text} {...each} />
           ))}
-      <h1 className="sr-only">{t`Here’s the plan`}</h1>
-      <div
-        aria-live="polite"
-        className="flex min-h-40 w-full items-center justify-center"
-      >
+      <h1 {...stylex.props(visuallyHidden)}>{t`Here’s the plan`}</h1>
+      <div aria-live="polite" {...stylex.props(styles.stage)}>
         {shownLine}
       </div>
       {/* The bar waits for the share where the team can start: before that, the brain shows what is told. */}
-      <div
-        className={cn(
-          "w-full transition-opacity duration-600",
-          !gate && "opacity-0"
-        )}
-      >
+      <div {...stylex.props(styles.bar, motion.change, !gate && styles.away)}>
         <KnowledgeBar
           caption={told ? t`${percent}% known now` : undefined}
           gate={gate}

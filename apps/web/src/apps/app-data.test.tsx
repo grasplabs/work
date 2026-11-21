@@ -204,13 +204,14 @@ const pick = async (name: string) => {
   await settled();
 };
 
-/** Presses the button whose text, or name, is `name`. */
+/** Presses the button whose text, name or title (its own or its words') is `name`. */
 const press = async (name: string) => {
   const button = [...document.querySelectorAll("button")].find(
     (each) =>
       each.textContent?.trim() === name ||
       each.getAttribute("aria-label") === name ||
-      each.getAttribute("title") === name
+      each.getAttribute("title") === name ||
+      each.querySelector(`[title="${name}"]`) !== null
   );
   if (button === undefined) {
     throw new Error(`No button ${name}`);

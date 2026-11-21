@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import type { LinksReference } from "@grasp-os/runtime/app";
-import { RichText } from "@grasp-os/ui/components/rich-text";
 import { describe, expect, it } from "vite-plus/test";
 
+import { RichText } from "../../src/components/rich-text.tsx";
 import { click, find, rendered, testHost } from "./test-host.tsx";
 
 // Formatted text on an App's page, whose links open only through one of

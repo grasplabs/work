@@ -29,7 +29,7 @@ import { useWorkHoursText } from "../brain/thinking/work-hours.tsx";
 import { focus } from "../grasp/focus/focus.ts";
 import { ArrowRight, Brain, Icon } from "../grasp/icons/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 
 // Grasp's thinking where the question was asked (GRA-1283; grasplabs/
 // prototype `components/chat/thinking-card.tsx`): on any page but the
@@ -39,6 +39,11 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 // are the brain's own dots under dotted dendrites, and the camera is
 // fitted to the shape and follows it. Once the thinking is done it shows
 // the finding; the whole card opens the brain, where it plays again.
+
+const drawThread = stylex.keyframes({
+  from: { strokeDashoffset: 1 },
+  to: { strokeDashoffset: 0 },
+});
 
 const styles = stylex.create({
   // The card around the drawing: a link to the brain.
@@ -92,6 +97,35 @@ const styles = stylex.create({
     color: grasp.muted,
   },
   grow: { flexGrow: 1 },
+  // The picture as wide as the card, its height from its view box.
+  picture: { display: "block", width: "100%", height: "auto" },
+  // A neuron's ink: plain, warm (the beat on it), or open (still being thought).
+  neuron: {
+    color: grasp.ink,
+    transitionProperty: { default: "opacity", [media.reduced]: "none" },
+    transitionDuration: grasp.durationUi,
+    transitionTimingFunction: grasp.ease,
+  },
+  warm: { color: grasp.brainHeat },
+  open: { color: grasp.muted },
+  faint: { opacity: 0.3 },
+  // What moves as the shape moves on: the camera, a neuron growing where it stands.
+  moving: {
+    transitionProperty: { default: "transform", [media.reduced]: "none" },
+    transitionDuration: grasp.durationUi,
+    transitionTimingFunction: grasp.ease,
+  },
+  name: { fill: grasp.ink, fontWeight: grasp.weightMedium },
+  hours: { fill: grasp.muted, fontWeight: grasp.weightRegular },
+  nerve: { fill: grasp.brainHeat },
+  // The thread from one step to the next, drawn once.
+  thread: {
+    stroke: grasp.brainHeat,
+    animationName: { default: drawThread, [media.reduced]: "none" },
+    animationDuration: grasp.durationUi,
+    animationTimingFunction: grasp.ease,
+    animationFillMode: "both",
+  },
 });
 /**
  * A workflow's hours in the card, as text for its SVG: in full, or only
@@ -159,26 +193,20 @@ const ShapeNeuron = ({
   const onPage = Math.round((neuron.r * text) / 3) * 3;
   const dots = printed(neuron, onPage);
   const { hours } = neuron;
-  let tone = "text-foreground";
-  if (warm) {
-    tone = "text-brain-heat";
-  } else if (neuron.state === "open") {
-    tone = "text-muted-foreground";
-  }
   return (
     <g
-      // The drawing's own classes (styles.css), kept as it is drawn.
-      className={[
-        tone,
-        "transition-opacity duration-300 motion-reduce:transition-none",
-        faint ? "opacity-30" : "",
-      ].join(" ")}
+      {...stylex.props(
+        styles.neuron,
+        !warm && neuron.state === "open" && styles.open,
+        warm && styles.warm,
+        faint && styles.faint
+      )}
     >
       <title>{neuron.label}</title>
       {/* Its soma and dendrites, in its own radius, so it grows where it stands when the shape moves on: the transform is an SVG attribute, which the class's transition eases as it changes. */}
       <g
-        className="transition-transform duration-300 ease-out motion-reduce:transition-none"
         fill="currentColor"
+        {...stylex.props(styles.moving)}
         transform={`translate(${neuron.x} ${-neuron.y}) scale(${neuron.r})`}
       >
         {dots.map((dot, at) => (
@@ -188,7 +216,7 @@ const ShapeNeuron = ({
       {named && neuron.bare !== true ? (
         // The words keep their size on screen however close the card looks.
         <text
-          className="fill-foreground font-medium"
+          {...stylex.props(styles.name)}
           fontSize={12 / text}
           textAnchor="middle"
           x={neuron.x}
@@ -203,7 +231,7 @@ const ShapeNeuron = ({
             : null}
           {hours === undefined ? null : (
             <tspan
-              className="fill-muted-foreground font-normal"
+              {...stylex.props(styles.hours)}
               dy={letters > 0 ? 15 / text : 0}
               x={neuron.x}
             >
@@ -278,16 +306,13 @@ const Card = ({
       </span>
       <svg
         aria-hidden="true"
-        className="h-auto w-full"
         ref={setPicture}
         viewBox={`0 0 ${VIEW.width} ${VIEW.height}`}
+        {...stylex.props(styles.picture)}
       >
-        <g
-          className="transition-transform duration-300 ease-out motion-reduce:transition-none"
-          transform={view.camera}
-        >
+        <g transform={view.camera} {...stylex.props(styles.moving)}>
           {nervesOf(map, view.text).map(({ id, dots }) => (
-            <g className="fill-brain-heat" key={id}>
+            <g key={id} {...stylex.props(styles.nerve)}>
               {dots.map((dot, at) => (
                 <circle
                   cx={dot.x}
@@ -301,7 +326,6 @@ const Card = ({
           ))}
           {from === undefined || to === undefined ? null : (
             <path
-              className="draw-thread stroke-brain-heat"
               d={threadPath(from, to, SAG)}
               fill="none"
               key={`${played.beat?.since}:${from.id}`}
@@ -310,6 +334,7 @@ const Card = ({
               strokeLinecap="round"
               strokeWidth={1.5}
               vectorEffect="non-scaling-stroke"
+              {...stylex.props(styles.thread)}
             />
           )}
           {map.neurons.map((neuron) => (

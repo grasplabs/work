@@ -14,6 +14,7 @@ import {
   Note,
   People,
   Person,
+  Workflow,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 
@@ -27,6 +28,7 @@ import type { IconData } from "../grasp/icons/index.ts";
 type SettingsHref =
   | "/settings/workspace"
   | "/settings/members"
+  | "/settings/teams"
   | "/settings/ai-providers"
   | "/settings/audit"
   | "/settings/webhooks"
@@ -127,6 +129,14 @@ const settingsSections: readonly SettingsSection[] = [
     href: "/settings/members",
     group: "workspace",
     icon: People,
+    audience: "own-admins",
+  },
+  {
+    id: "teams",
+    label: msg`Teams`,
+    href: "/settings/teams",
+    group: "workspace",
+    icon: Workflow,
     audience: "own-admins",
   },
   {

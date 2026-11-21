@@ -19,22 +19,22 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { groupOf, kindLabel, statementWords } from "./brain.ts";
 import type { Group, Note, NoteKind } from "./brain.ts";
+import { graph } from "./graph.stylex.ts";
 
 // Notes named on a page, and rows of them, as the prototype draws them
 // (`components/brain-chips.tsx`).
 
 /**
- * The brain's own hue for each group: the `--graph-*` colours the atlas draws with. The library has no token for them, as they are the brain's alone; the page reads the
- * same variables, so a name on a page has the colour of its part on the map, light and dark.
+ * The brain's own hue for each group (graph.stylex.ts), light and dark.
  */
 const hue = {
-  vision: "var(--graph-vision)",
-  teams: "var(--graph-teams)",
-  tools: "var(--graph-tools)",
-  statements: "var(--graph-statements)",
-  candidates: "var(--graph-candidates)",
-  gaps: "var(--graph-gaps)",
-  sources: "var(--graph-sources)",
+  vision: graph.vision,
+  teams: graph.teams,
+  tools: graph.tools,
+  statements: graph.statements,
+  candidates: graph.candidates,
+  gaps: graph.gaps,
+  sources: graph.sources,
 } as const;
 
 /** A group's hue as a soft fill behind words, so a name shows what it is before it is read. */

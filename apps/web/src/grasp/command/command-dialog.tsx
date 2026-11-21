@@ -15,6 +15,7 @@ import type { ReactNode } from "react";
 
 import { DialogTrigger } from "../dialog";
 import { dialogStyles } from "../dialog/styles";
+import { watchPalette } from "../dialog/sure-close";
 import { visuallyHidden } from "../hidden/hidden";
 import { Search } from "../icons";
 import { simply } from "../motion/simply.stylex";
@@ -91,11 +92,13 @@ export interface CommandDialogProps extends Passed {
 const MOVING = ":is([data-starting-style], [data-ending-style])";
 
 const styles = stylex.create({
-  // In and out: a fade alone, at most 150ms in and faster out, the shade with it. A palette is
-  // opened from the keyboard many times a day: it answers at once, it does not travel or grow.
+  // In and out: a fade, at most 150ms in and faster out, the shade with it. A palette is opened from
+  // the keyboard many times a day: then it answers at once and does not travel or grow. Opened by a
+  // press, it grows from that trigger as a dialog does (--palette-grow, set by watchPalette).
   fade: {
     opacity: { default: 1, [MOVING]: 0 },
-    transitionProperty: "opacity",
+    transform: { default: "none", [MOVING]: "var(--palette-grow, none)" },
+    transitionProperty: "opacity, transform",
     transitionDuration: {
       default: simply.searchOpen,
       ":is([data-ending-style])": simply.searchClose,
@@ -245,6 +248,7 @@ export const CommandDialog = ({
       )}
       <DialogBackdrop {...stylex.props(dialogStyles.scrim, styles.fade)} />
       <DialogContent
+        ref={watchPalette}
         {...stylex.props(
           dialogStyles.panel,
           dialogStyles.placed,

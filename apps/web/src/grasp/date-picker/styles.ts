@@ -2,6 +2,7 @@
 // end; open, Calendar in a popup with the popup tokens Popover and Select share.
 import * as stylex from "@stylexjs/stylex";
 
+import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 
@@ -98,11 +99,21 @@ export const datePickerStyles = stylex.create({
     borderStyle: { default: "solid", [media.forced]: "dashed" },
   },
   // Settled, as Input's: its words stay ink, no fill of its own, no lift. Disabled is the weaker look.
+  // A range with presets (Date range picker's look) is wider than one date's field: two dates. On a phone the dates are 16px
+  // (media.typing) and two must fit a narrow field whole: the start's inset is a step less there.
+  // Its calendar opens as a sheet there, so nothing lines up with that inset.
+  rangeField: {
+    maxWidth: grasp.dateRangeWidth,
+    paddingInlineStart: {
+      default: grasp.dateFieldInset,
+      [media.typing]: grasp.space2,
+    },
+  },
   readOnly: {
     backgroundColor: grasp.fieldFillRead,
     boxShadow: {
       default: `inset 0 0 0 1px ${grasp.fieldEdge}`,
-      ":has(input:focus-visible)": grasp.fieldFocus,
+      ":has(input:focus-visible)": grasp.fieldFocusRead,
     },
   },
   disabled: { opacity: grasp.dim, cursor: "not-allowed" },
@@ -224,5 +235,87 @@ export const datePickerStyles = stylex.create({
     fontFamily: grasp.fontSans,
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
+  },
+  // A range with presets: the presets beside the months; under them on a phone, the month centred under
+  // the presets.
+  rangeInner: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
+    justifyContent: { default: null, [media.belowPhone]: "center" },
+    gap: grasp.space4,
+  },
+  // A fieldset, with the browser's own border, padding, margin and minimum width taken off. On a
+  // phone the presets stand in two equal columns over the month, so none is left alone on a line
+  // and the popup is as wide as its month, not the window.
+  presets: {
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    minWidth: 0,
+    display: { default: "flex", [media.belowPhone]: "grid" },
+    flexDirection: "column",
+    flexWrap: "wrap",
+    gridTemplateColumns: {
+      default: null,
+      [media.belowPhone]: "repeat(2, minmax(0, 1fr))",
+    },
+    gap: grasp.space1,
+    width: { default: grasp.dateRangePresets, [media.belowPhone]: "100%" },
+    flexShrink: 0,
+  },
+  // A preset: a row the height of a small control, its words at the start, the tick at the end.
+  preset: {
+    [iconVars.size]: grasp.iconSm,
+    [iconVars.stroke]: grasp.iconStroke,
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    boxSizing: "border-box",
+    minHeight: { default: grasp.controlSm, [media.coarse]: grasp.tap },
+    margin: 0,
+    paddingBlock: 0,
+    paddingInline: grasp.space2,
+    borderWidth: { default: 0, [media.forced]: 1 },
+    borderStyle: "solid",
+    borderColor: "transparent",
+    borderRadius: `min(${grasp.corner}, calc(${grasp.controlSm} / 2))`,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: {
+      default: "transparent",
+      ":hover": { default: null, [media.hover]: grasp.ghostFillHover },
+    },
+    color: grasp.ink,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightMedium,
+    textAlign: "start",
+    cursor: "pointer",
+    WebkitTapHighlightColor: "transparent",
+    transitionProperty: "background-color",
+    transitionDuration: grasp.durationHover,
+    transitionTimingFunction: grasp.ease,
+  },
+  presetChosen: {
+    backgroundColor: {
+      default: grasp.treeFillChosen,
+      ":hover": {
+        default: grasp.treeFillChosen,
+        [media.hover]: grasp.treeFillChosen,
+      },
+      [media.forced]: "Highlight",
+    },
+    color: { default: grasp.ink, [media.forced]: "HighlightText" },
+  },
+  presetWords: {
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  calendar: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    minWidth: 0,
   },
 });

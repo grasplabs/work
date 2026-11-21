@@ -2095,6 +2095,7 @@ msgstr "Actions pour {name}"
 
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
+#: src/settings/guests.tsx
 msgid "Actions for {who}"
 msgstr "Actions pour {who}"
 
@@ -4149,6 +4150,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/settings/chat-accounts.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 #: src/settings/org-card.tsx
 #: src/settings/staff-access.tsx
@@ -5368,11 +5370,11 @@ msgstr "Copenhague"
 #: src/chat/thread.tsx
 #: src/frame/page-failed.tsx
 #: src/frame/part-words.tsx
-#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/pages/frame-failure.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 msgid "Copied"
 msgstr "Copié"
@@ -5421,6 +5423,7 @@ msgid "Copy code"
 msgstr "Copier le code"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 #: src/settings/invitations.tsx
 msgid "Copy email"
 msgstr "Copier l’e-mail"
@@ -5478,6 +5481,7 @@ msgstr "Copier l’URL de {name}"
 #: src/copy.ts
 #: src/drafts/share-with-team.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 msgid "Copying didn't work"
 msgstr "La copie n’a pas fonctionné"
 
@@ -8475,8 +8479,8 @@ msgid "Grid"
 msgstr "Grille"
 
 #: src/drafts/sharing.tsx
+#: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
-#: src/settings/guests.tsx
 msgid "Guest"
 msgstr "Invité"
 
@@ -8487,10 +8491,6 @@ msgstr "Les comptes invités ne peuvent pas se connecter."
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Les comptes invités ne peuvent pas se connecter. Utilisez un compte propre à votre organisation."
-
-#: src/settings/guests.tsx
-msgid "Guests"
-msgstr "Invités"
 
 #: src/activity/audit-words.ts
 msgid "Had the Brain forget a record"
@@ -8687,10 +8687,6 @@ msgstr "Historique"
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Historique"
-
-#: src/interview/closed.tsx
-msgid "Hold for 4 seconds"
-msgstr "Maintenez 4 secondes"
 
 #: src/frame/part-words.tsx
 msgid "Hold to confirm: {words}"
@@ -9346,10 +9342,6 @@ msgstr "Vous êtes invité ?"
 msgid "Invited for step 2"
 msgstr "Équipes invitées à l’étape 2"
 
-#: src/settings/guests.tsx
-msgid "Invited on {date}"
-msgstr "Invité le {date}"
-
 #: src/activity/audit-words.ts
 msgid "Invited someone"
 msgstr "A invité quelqu’un"
@@ -9891,10 +9883,6 @@ msgstr "Continuer à modifier"
 #: src/make/examples.ts
 msgid "Keep every client question in one place, and remind us when one waits too long for an answer."
 msgstr "Garde chaque question client au même endroit, et préviens-nous quand l’une attend trop longtemps une réponse."
-
-#: src/interview/closed.tsx
-msgid "Keep holding"
-msgstr "Maintenez appuyé"
 
 #: src/brain/forget.tsx
 #: src/frame/part-words.tsx
@@ -12123,6 +12111,7 @@ msgid "Not read: no connection"
 msgstr "Non lu : pas de connexion"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/guests.tsx
 msgid "Not removed"
 msgstr "Non supprimé"
 
@@ -12139,6 +12128,7 @@ msgid "Not revoked"
 msgstr "Non révoqué"
 
 #: src/brain/goals-editor.tsx
+#: src/interview/destination.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
 #: src/settings/team-members-dialog.tsx
@@ -13556,7 +13546,7 @@ msgstr "Personnes dedans : {count}"
 msgid "People in these teams: {named}"
 msgstr "Les personnes de ces équipes : {named}"
 
-#: src/settings/guests.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "People outside your organization, invited to what is shared with them. They reach nothing else."
 msgstr "Des personnes extérieures à votre organisation, invitées à ce qui est partagé avec elles. Elles n’accèdent à rien d’autre."
 
@@ -14526,10 +14516,6 @@ msgstr "Supprimer les espaces au début et à la fin"
 #: src/apps/app-data-model.tsx
 msgid "Remove table"
 msgstr "Supprimer la table"
-
-#: src/settings/guests.tsx
-msgid "Remove the guest {email}"
-msgstr "Retirer l’invité {email}"
 
 #: src/apps/indexes-view.tsx
 msgid "Remove the index {indexName}"
@@ -16290,7 +16276,6 @@ msgstr "Se connecter"
 
 #: src/connections/connection-list.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/integrations-banner.tsx
 #: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 msgid "Sign in again"
@@ -17337,6 +17322,7 @@ msgstr "Taille de l’équipe inconnue."
 
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
+#: src/settings/sections.ts
 #: src/settings/teams.tsx
 msgid "Teams"
 msgstr "Équipes"

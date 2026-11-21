@@ -1,5 +1,5 @@
-// Dates as ISO strings ("2026-11-20"), worked on in the local calendar: the presets of a date range
-// picker (date-range-picker.tsx). No time and no time zone, as UI SDK's calendar takes them.
+// Dates as ISO strings ("2026-11-20"), worked on in the local calendar: a range's default presets
+// (date-picker.tsx). No time and no time zone, as UI SDK's calendar takes them.
 
 const pad = (value: number) => String(value).padStart(2, "0");
 

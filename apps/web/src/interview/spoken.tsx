@@ -1,5 +1,7 @@
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { readingSeconds } from "../onboarding/setup.ts";
 
 // Stephen's words lighting up as he says them (prototype
@@ -9,12 +11,20 @@ import { readingSeconds } from "../onboarding/setup.ts";
 // words light up as they are said; a line he says without it here, at the
 // pace of speech.
 
-const looks = {
-  rest: "transition-colors duration-700",
-  said: "text-foreground transition-colors duration-300",
-  saying: "text-brain-heat transition-colors duration-150",
-  waiting: "text-muted-foreground/60 transition-colors duration-300",
-} as const;
+const looks = stylex.create({
+  // Back to the text around it, slowly, once the line is over.
+  rest: { transitionDuration: grasp.durationLean },
+  said: { color: grasp.ink, transitionDuration: grasp.durationUi },
+  saying: { color: grasp.brainHeat, transitionDuration: grasp.durationHover },
+  waiting: { color: grasp.quiet, transitionDuration: grasp.durationUi },
+});
+
+const styles = stylex.create({
+  word: {
+    transitionProperty: { default: "color", [media.reduced]: "none" },
+    transitionTimingFunction: grasp.ease,
+  },
+});
 
 const wordPattern = /\S+\s*/gu;
 
@@ -110,7 +120,11 @@ export const SpokenText = ({
         look = "saying";
       }
       return (
-        <span className={looks[look]} data-said={look} key={start}>
+        <span
+          data-said={look}
+          key={start}
+          {...stylex.props(styles.word, looks[look])}
+        >
           {word}
         </span>
       );

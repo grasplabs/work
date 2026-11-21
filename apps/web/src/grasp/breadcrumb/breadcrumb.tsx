@@ -12,6 +12,9 @@
 //     </BreadcrumbList>
 //   </Breadcrumb>
 //
+// A step that acts in place, as a folder opened again inside a dialog, is drawn as a button, the
+// way a Link is drawn as a router's: `<BreadcrumbLink render={<button type="button" onClick={open} />}>`.
+//
 // The list reads its items as written and draws them itself, with the chevrons between them: the
 // one after the parent turns into the back chevron and the "…" comes and goes with the room, so
 // neither is a part. The older shape keeps working until step 9:
@@ -30,6 +33,8 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
+import { renderElement } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import {
   createContext,
   isValidElement,
@@ -110,6 +115,7 @@ export interface BreadcrumbProps {
  */
 interface Step extends BreadcrumbEntry {
   page?: boolean;
+  render?: RenderProp;
 }
 
 /** Every prop a BreadcrumbList takes. */
@@ -133,6 +139,13 @@ export interface BreadcrumbLinkProps {
    * folder of a file's path is. Last on the path, a plain step is not the page you are on.
    */
   href?: string;
+  /**
+   * The element it is drawn as, as a Link's `render`: a button for a step that acts in place
+   * (`render={<button type="button" onClick={open} />}`, a folder opened again inside a dialog), or a
+   * router's own link that carries where it goes. It gets the look, the words and the focus ring, and
+   * keeps its own props. Without it, an `<a href>`; without either, the name alone.
+   */
+  render?: RenderProp;
 }
 
 /**
@@ -232,6 +245,19 @@ const styles = stylex.create({
         [COARSE]: `calc((${grasp.textSmLine} - ${grasp.tap}) / 2)`,
       },
     },
+  },
+  // A step drawn as a button: none of a button's own look, so it reads as the links beside it.
+  press: {
+    appearance: "none",
+    margin: 0,
+    paddingBlock: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    lineHeight: "inherit",
+    textAlign: "start",
+    cursor: "pointer",
   },
   words: {
     display: "block",
@@ -390,11 +416,19 @@ const measureLine = (
 
 const seen = (element: HTMLElement) => element.getClientRects().length > 0;
 
-// Focus on a level that just folded moves to the "…", or to the first level shown in its place.
-const keepFocus = (ol: HTMLOListElement | null) => {
+// Focus on a level that just folded moves to the "…", or to the first level shown in its place. A
+// step pressed in place that became the page (`within`: focus was in the path and is now nowhere)
+// hands its focus to the page, so the keyboard stays where it was.
+const keepFocus = (ol: HTMLOListElement | null, within: boolean) => {
   const active = document.activeElement;
+  if (ol === null) {
+    return;
+  }
+  if (within && (active === null || active === document.body)) {
+    ol.querySelector<HTMLElement>("[data-slot=breadcrumb-current]")?.focus();
+    return;
+  }
   if (
-    ol === null ||
     !(active instanceof HTMLElement) ||
     !ol.contains(active) ||
     seen(active)
@@ -403,13 +437,58 @@ const keepFocus = (ol: HTMLOListElement | null) => {
   }
   const next = [
     "[data-ellipsis] button",
-    "li[data-fold] a",
-    "a",
+    "li[data-fold] :is(a, button)",
+    "li:not([data-ellipsis]) :is(a, button)",
     "[data-slot=breadcrumb-current]",
   ]
     .map((query) => [...ol.querySelectorAll<HTMLElement>(query)].find(seen))
     .find((element) => element !== undefined);
   next?.focus();
+};
+
+// Keeps `within` true while focus is on the path or in its open "…" menu, and false once it goes
+// anywhere else, nowhere included. A focused step that leaves the page takes no event, so it stays true.
+const watchFocus = (
+  ol: HTMLOListElement | null,
+  within: { current: boolean }
+) => {
+  if (ol === null) {
+    return unsubscribe;
+  }
+  const onPath = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+    const menu = ol
+      .querySelector("[data-ellipsis] button")
+      ?.getAttribute("aria-controls");
+    return (
+      ol.contains(target) ||
+      (menu !== null &&
+        menu !== undefined &&
+        target.closest("[role=menu]")?.id === menu)
+    );
+  };
+  const focusIn = (event: FocusEvent) => {
+    within.current = onPath(event.target);
+  };
+  // Focus going nowhere: unless its step is leaving the page, which is told once the render is done.
+  const focusOut = (event: FocusEvent) => {
+    const { target } = event;
+    if (event.relatedTarget === null && target instanceof Node) {
+      queueMicrotask(() => {
+        if (target.isConnected) {
+          within.current = false;
+        }
+      });
+    }
+  };
+  document.addEventListener("focusin", focusIn);
+  document.addEventListener("focusout", focusOut);
+  return () => {
+    document.removeEventListener("focusin", focusIn);
+    document.removeEventListener("focusout", focusOut);
+  };
 };
 
 // Measures again once the type has loaded, when the words change width, unless the line has gone.
@@ -495,7 +574,7 @@ const Level = ({
   back,
   whole,
 }: {
-  item: BreadcrumbEntry;
+  item: Step;
   isParent: boolean;
   back: boolean;
   whole: boolean;
@@ -523,16 +602,30 @@ const Level = ({
   );
   return (
     <>
-      {item.href === undefined ? (
+      {item.href === undefined && item.render === undefined ? (
         <span {...stylex.props(styles.link)}>
           {chevron}
           {words}
         </span>
       ) : (
-        <a href={item.href} {...stylex.props(styles.link, focus.words)}>
-          {chevron}
-          {words}
-        </a>
+        renderElement(
+          "a",
+          {
+            href: item.href,
+            ...stylex.props(
+              styles.link,
+              item.render !== undefined && styles.press,
+              focus.words
+            ),
+            children: (
+              <>
+                {chevron}
+                {words}
+              </>
+            ),
+          },
+          item.render
+        )
       )}
       <span
         aria-hidden="true"
@@ -593,9 +686,13 @@ const Trail = ({ items }: { items: Step[] }) => {
     [back]
   );
 
+  // Whether focus is on the path, its "…" menu included: a step that leaves the page takes no blur.
+  const within = useRef(false);
+  useLayoutEffect(() => watchFocus(list.current, within), []);
+
   // After a fold, focus on a level that left the line moves to what took its place.
   useLayoutEffect(() => {
-    keepFocus(list.current);
+    keepFocus(list.current, within.current);
   });
 
   const hidden = items.slice(1, 1 + Math.min(state.fold, middle));
@@ -688,14 +785,14 @@ const stepsOf = (children: ReactNode): Step[] =>
         isValidElement<BreadcrumbLinkProps>(part) &&
         part.type === BreadcrumbLink
       ) {
+        const { children: label, href, render } = part.props;
         return [
-          part.props.href === undefined
-            ? { label: part.props.children, page: false }
-            : {
-                label: part.props.children,
-                href: part.props.href,
-                page: false,
-              },
+          {
+            label,
+            page: false,
+            ...(href === undefined ? {} : { href }),
+            ...(render === undefined ? {} : { render }),
+          },
         ];
       }
       if (

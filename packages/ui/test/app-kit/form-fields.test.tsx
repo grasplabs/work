@@ -2,6 +2,9 @@
 import { v } from "@grasp-os/runtime/app";
 import type { FilesReference, Id, InferInput } from "@grasp-os/runtime/app";
 import { useForm } from "@grasp-os/runtime/react";
+import { act } from "react";
+import { describe, expect, it } from "vite-plus/test";
+
 import {
   CheckboxField,
   DateField,
@@ -17,10 +20,7 @@ import {
   SwitchField,
   TextareaField,
   TextField,
-} from "@grasp-os/ui/form";
-import { act } from "react";
-import { describe, expect, it } from "vite-plus/test";
-
+} from "../../src/form.tsx";
 import {
   click,
   find,

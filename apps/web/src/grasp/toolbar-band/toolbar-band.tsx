@@ -1,24 +1,19 @@
-// Toolbar band: the row under a page's header that holds what changes the list below, as the Grasp
-// product lays out its outputs and blueprints. The way to browse (chips for the kinds of thing)
-// stands at the start; what narrows it (a scope, a search) and the page's own actions at the end.
-// When it is narrow the two stack, the start above the end, and the chips scroll sideways rather
-// than wrap.
+// Toolbar band, now PageHeader's toolbar (`PageHeaderToolbar`, given as a PageHeader's `toolbar`):
+// a thin wrapper for one step, so nothing breaks. It draws the same row. The codemod moves each use:
 //
-//   <ToolbarBand label="Outputs" start={<>chips</>} end={<>scope and search</>} />
-//
-// It narrows by its own width, not the window's, so it stacks in a side panel too. Leave it out when
-// there is nothing to browse or narrow yet. Every value is a token (src/tokens).
-/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
-import * as stylex from "@stylexjs/stylex";
+//   <ToolbarBand aria-label="Outputs" start={chips} end={search} />
+//   becomes <PageHeaderToolbar aria-label="Outputs" start={chips} end={search} />, from `page-header`,
+//   best given as the page's PageHeader `toolbar`.
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 3: Toolbar band stays a wrapper over PageHeader's toolbar until step 9 removes it (handover/audit/RELEASE.md §7). */
 import type { ReactNode } from "react";
 
-import type { LayoutStyle } from "../layout/layout";
-import { grasp, media } from "../tokens/tokens.stylex";
+import { PageHeaderToolbar } from "../page-header";
+import type { PageHeaderToolbarLayoutStyle } from "../page-header";
 
-/** What a caller may style: where it sits, how wide it is, and its padding at the sides. */
-export type ToolbarBandLayoutStyle = LayoutStyle;
+/** @deprecated Use `PageHeaderToolbarLayoutStyle`, from `@/components/grasp/page-header`. */
+export type ToolbarBandLayoutStyle = PageHeaderToolbarLayoutStyle;
 
-/** Every prop a ToolbarBand takes. */
+/** @deprecated Use `PageHeaderToolbarProps`, from `@/components/grasp/page-header`. */
 export interface ToolbarBandProps {
   /** The way to browse: chips for the kinds of thing, at the start. They scroll sideways when they do not fit. */
   start?: ReactNode;
@@ -34,75 +29,7 @@ export interface ToolbarBandProps {
   layout?: ToolbarBandLayoutStyle;
 }
 
-// The width under which the start and end stack: the phone breakpoint, measured on the band itself.
-const NARROW = "@container (width < 40rem)";
-
-const styles = stylex.create({
-  // The container the band measures; the band itself is laid out inside it.
-  frame: {
-    containerType: "inline-size",
-    minWidth: 0,
-  },
-  band: {
-    display: "flex",
-    flexDirection: { default: "row", [NARROW]: "column" },
-    alignItems: { default: "center", [NARROW]: "stretch" },
-    justifyContent: "space-between",
-    gap: grasp.space3,
-    minWidth: 0,
-    paddingBlockEnd: grasp.space3,
-    fontFamily: grasp.fontSans,
-  },
-  // The chips: one line that scrolls, with room for their focus rings at the ends. A box that
-  // scrolls clips what reaches past it, so on a touch screen it also makes room above and below
-  // for each chip's 44px touch area, and takes that room back from the band so nothing moves.
-  start: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space1,
-    minWidth: 0,
-    overflowX: "auto",
-    scrollbarWidth: "none",
-    marginInline: `calc(-1 * ${grasp.space1})`,
-    paddingInline: grasp.space1,
-    paddingBlock: {
-      default: grasp.space1,
-      [media.coarse]: `calc((${grasp.tap} - ${grasp.toggleHeightSm}) / 2)`,
-    },
-    marginBlock: {
-      default: 0,
-      [media.coarse]: `calc(${grasp.space1} - (${grasp.tap} - ${grasp.toggleHeightSm}) / 2)`,
-    },
-  },
-  // The narrowing controls: the room the start leaves, beside it, and the row when stacked. Their
-  // width is the band's, not their content's, so a field that gains its clear button as you type
-  // moves nothing: a growing field (a search) takes the room, the rest keep their own width at the
-  // end. Where even a row to themselves is too narrow for them whole, they take a line each, rather
-  // than squeeze a label onto two lines or cut a field's hint. Beside the start its basis is 0, not
-  // its content: a content basis grows with the clear button, and just above the stacking width the
-  // chips would give way to it as you type. Its least width is its fields' own minimum, which no
-  // query changes.
-  end: {
-    display: "flex",
-    flexGrow: 1,
-    flexBasis: { default: 0, [NARROW]: "auto" },
-    justifyContent: "flex-end",
-    flexWrap: { default: "nowrap", [NARROW]: "wrap" },
-    alignItems: "center",
-    gap: grasp.space2,
-    minWidth: 0,
-    flexShrink: { default: 0, [NARROW]: 1 },
-  },
-});
-
-/** Whether a slot is given: the same test as plain truthiness, written out. */
-const shows = (node: ReactNode): boolean =>
-  node !== undefined &&
-  node !== null &&
-  node !== false &&
-  node !== "" &&
-  node !== 0;
-
+/** @deprecated Use `PageHeaderToolbar`, from `@/components/grasp/page-header`, as a PageHeader's `toolbar`. */
 export const ToolbarBand = ({
   start,
   end,
@@ -111,19 +38,10 @@ export const ToolbarBand = ({
   style: styleProp,
   layout,
 }: ToolbarBandProps) => (
-  <div {...stylex.props(styles.frame, layout ?? styleProp)}>
-    <div
-      data-slot="toolbar-band"
-      role={label !== undefined && label !== "" ? "group" : undefined}
-      aria-label={label}
-      {...stylex.props(styles.band)}
-    >
-      {shows(start) ? (
-        <div {...stylex.props(styles.start)}>{start}</div>
-      ) : (
-        <span />
-      )}
-      {shows(end) ? <div {...stylex.props(styles.end)}>{end}</div> : null}
-    </div>
-  </div>
+  <PageHeaderToolbar
+    start={start}
+    end={end}
+    aria-label={label}
+    layout={layout ?? styleProp}
+  />
 );

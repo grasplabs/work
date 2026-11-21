@@ -43,8 +43,9 @@ export const Current = ({
     <Tooltip disabled={!cut}>
       <TriggerPrimitive
         // It takes focus while cut off, so the keyboard reaches its tooltip, and keeps it after.
+        // Otherwise only from script: a step pressed in place that became the page hands it focus.
         // The trigger merges these with its own focus handlers.
-        tabIndex={cut || held ? 0 : undefined}
+        tabIndex={cut || held ? 0 : -1}
         onFocus={() => {
           setHeld(true);
         }}
