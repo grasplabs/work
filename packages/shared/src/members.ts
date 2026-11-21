@@ -349,12 +349,18 @@ export interface MembersApi {
 export const personNameSchema = z
   .string()
   .trim()
-  .min(1)
-  .max(100)
+  // At most 100 characters, counted in code points (`u`), as the error
+  // says, not in the UTF-16 units `max` counts: a rare CJK character is
+  // one. Not in graphemes, which combining marks make any length.
+  .regex(/^.{0,100}$/su)
   // Shown as one line beside what others write, so no control characters,
   // no line or paragraph separators, and no bidi controls, which could
   // turn the text around it (a name that reads as someone else's).
-  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}\p{Bidi_C}]*$/u);
+  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}\p{Bidi_C}]*$/u)
+  // At least one letter or digit that is drawn, so a name is never blank
+  // to the eye (a zero-width space, a Hangul filler). Format characters
+  // stay allowed beside one: emoji, Persian and Indic text need joiners.
+  .regex(/(?!\p{Default_Ignorable_Code_Point})[\p{L}\p{N}]/u);
 
 /** Why an admin's change to a member was refused or not finished. */
 export const memberErrors = defineErrorFamily({

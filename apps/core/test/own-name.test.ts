@@ -1,6 +1,6 @@
 import { guestRole } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
 import {
@@ -88,14 +88,14 @@ describe("a person's own name", { timeout: 60_000 }, () => {
     });
   });
 
-  it("takes a name of up to 100 characters on one line, and nothing else", async () => {
+  it("takes a name of up to 100 characters on one line that shows, and nothing else", async () => {
     const me = await signedInApi(idp, "user");
-    const longest = "x".repeat(100);
     const refused = await Promise.all(
       [
         "",
         " \t ",
         "x".repeat(101),
+        "\u{20000}".repeat(101),
         "Sam\nde Vries",
         "Sam\u2028de Vries",
         "Sam\u0000",
@@ -103,21 +103,58 @@ describe("a person's own name", { timeout: 60_000 }, () => {
         // backwards, or carry the text after it along.
         "\u202Eseirv ed maS",
         "Sam\u2067de Vries",
+        // Blank to the eye: a zero-width space, a word joiner, a soft
+        // hyphen, a Hangul filler.
+        "\u200B",
+        "\u2060",
+        "\u00AD",
+        "\u3164",
       ].map(async (name) => await outcome(me.api.setName(name)))
     );
     const kept = await storedName(me.userId);
-    await me.api.setName(longest);
-    // A name in a right-to-left script needs no bidi control.
-    await me.api.setName("سام دي فريس");
+    const accepted = [
+      "x".repeat(100),
+      // 100 characters, though each (a rare CJK one) is two UTF-16 units.
+      "\u{20000}".repeat(100),
+      // A zero-width joiner inside an emoji beside a name.
+      "Sam \u{1F469}\u200D\u{1F4BB}",
+      // A name in a right-to-left script needs no bidi control.
+      "\u0633\u0627\u0645 \u062F\u064A \u0641\u0631\u064A\u0633",
+    ];
+    const stored: (string | null)[] = [];
+    for (const name of accepted) {
+      // One after another: each is the name the next one replaces.
+      // oxlint-disable-next-line no-await-in-loop
+      await me.api.setName(name);
+      // oxlint-disable-next-line no-await-in-loop
+      stored.push(await storedName(me.userId));
+    }
 
-    expect({
-      refused: new Set(refused),
-      kept,
-      rightToLeft: await storedName(me.userId),
-    }).toStrictEqual({
+    expect({ refused: new Set(refused), kept, stored }).toStrictEqual({
       refused: new Set(["member.name_invalid"]),
       kept: me.person.name,
-      rightToLeft: "سام دي فريس",
+      stored: accepted,
+    });
+  });
+
+  it("is refused to a member removed since their session was read, and their name stays", async () => {
+    const me = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    // Their connection reads who they are now, and holds that reading on
+    // a held clock, so the call below is answered from it, removed or not.
+    await me.api.whoami();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let renamed: string;
+    try {
+      await admin.api.members.remove(me.userId);
+      renamed = await outcome(me.api.setName("Still Here"));
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect({ renamed, name: await storedName(me.userId) }).toStrictEqual({
+      renamed: "auth.unauthenticated",
+      name: me.person.name,
     });
   });
 
