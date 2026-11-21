@@ -377,12 +377,20 @@ const ApprovalFrame = ({
   const core = useCore();
   const words = useApprovalWords();
   const { item } = frame;
+  // Read again whatever core answered: a refused grant shows the version
+  // there is now, to review that one instead.
   const answer =
     (change: (session: Session) => Promise<unknown>, said: string) =>
     async () => {
-      await core.withSession(change);
-      frame.onSaid(said);
-      await router.invalidate({ sync: true });
+      await changeThenRefresh(
+        async () => {
+          await core.withSession(change);
+          frame.onSaid(said);
+        },
+        async () => {
+          await router.invalidate({ sync: true });
+        }
+      );
     };
   const { title } = item;
   return (
