@@ -31,6 +31,7 @@ const organizationNamed = (name: string): Organization => ({
   timeZone: "Europe/Amsterdam",
   dataRegion: "eu",
   signInDomains: [],
+  logo: null,
 });
 
 /** Lets everything already settled run: core's answer, and React's render of it. */
