@@ -4,6 +4,7 @@
  * hasn't verified itself: every request must carry an Access JWT signed by
  * the team's keys, for the admin's application, or it is refused.
  */
+import "@tanstack/react-start/server-only";
 import { loopbackHosts } from "@grasp-os/shared/router";
 import { createLocalJWKSet, errors, jwtVerify } from "jose";
 import type { JSONWebKeySet } from "jose";

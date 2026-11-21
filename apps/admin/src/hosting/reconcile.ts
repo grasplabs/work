@@ -30,6 +30,7 @@
  * read from its own audit events (`provision.auto_resume`): no state of
  * its own to drift.
  */
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 import { eq } from "drizzle-orm";
 

@@ -28,6 +28,7 @@
  * (`GET /notes`). A workspace that renamed or removed an attribute simply
  * shows it as not known.
  */
+import "@tanstack/react-start/server-only";
 import { z } from "zod";
 
 import { eachLimited } from "../live-reads.ts";

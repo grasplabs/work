@@ -3,6 +3,7 @@
  * what the admin derives for it (src/deploy/core-config.ts) and the change
  * core records, checked as core would take them.
  */
+import "@tanstack/react-start/server-only";
 import type { PlatformChange } from "@grasp-os/shared/platform-change";
 
 import { checkDeployedConfig, onboardingSender } from "./core-config.ts";

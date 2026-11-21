@@ -5,6 +5,7 @@
  * signed with the key both derive from the client's auth secret, and goes through
  * the router's route with the router secret, as the health check does.
  */
+import "@tanstack/react-start/server-only";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { toHex } from "@grasp-os/shared/encoding";
 import {

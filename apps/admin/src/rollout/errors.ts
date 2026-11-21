@@ -1,4 +1,6 @@
 /** Why staff's action on a channel or a client's release was refused, as the page words it. */
+import "@tanstack/react-start/server-only";
+
 export const rolloutErrorCodes = [
   /** The release isn't imported. */
   "release_not_imported",

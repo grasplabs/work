@@ -17,6 +17,7 @@
  * package is made from this file alone and the same bot always gets the
  * same bytes.
  */
+import "@tanstack/react-start/server-only";
 import { toBase64Url } from "@grasp-os/shared/encoding";
 import { eq } from "drizzle-orm";
 import { strToU8, zipSync, zlibSync } from "fflate";

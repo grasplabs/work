@@ -8,6 +8,7 @@
  * on-prem organization is placed nowhere: its install sets itself up
  * (GRA-1291).
  */
+import "@tanstack/react-start/server-only";
 import {
   clientsNamespace,
   platformAccountId,

@@ -23,6 +23,7 @@
  * `BETTER_AUTH_SECRET`, which has no previous value: everyone is signed
  * out and signs in again.
  */
+import "@tanstack/react-start/server-only";
 import { deriveClientSecret } from "@grasp-os/shared/client-secrets";
 import type { SecretEncoding } from "@grasp-os/shared/client-secrets";
 import type { WorkerEntry } from "@grasp-os/shared/release";

@@ -15,6 +15,7 @@
  * (src/deploy/), which doesn't read it yet: the real-account qualification
  * comes first.
  */
+import "@tanstack/react-start/server-only";
 import type { ConnectGatewayProps } from "@grasp-os/shared/connect-gateway";
 import {
   clientResourceName,

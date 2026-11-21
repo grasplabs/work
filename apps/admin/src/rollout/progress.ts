@@ -4,6 +4,7 @@
  * release, how many of its clients run it, each client's state, and the
  * moves it may make. Nothing here is stored.
  */
+import "@tanstack/react-start/server-only";
 import { eq } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";

@@ -7,6 +7,7 @@
  * admin itself recorded in D1, read with the client pages' own queries
  * where they have one; nothing here asks its account or its core.
  */
+import "@tanstack/react-start/server-only";
 import { eq } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";

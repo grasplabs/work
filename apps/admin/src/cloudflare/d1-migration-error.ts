@@ -1,4 +1,6 @@
 /** A migration D1 refused, by its file's name, with why (`cause`). */
+import "@tanstack/react-start/server-only";
+
 export class D1MigrationError extends Error {
   readonly migration: string;
 

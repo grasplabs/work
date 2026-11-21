@@ -6,6 +6,7 @@
  * of a manifest replaced since included; and,
  * for a release imported before these were kept, by retention itself.
  */
+import "@tanstack/react-start/server-only";
 import { blobKeys } from "@grasp-os/shared/release";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { eq, sql } from "drizzle-orm";

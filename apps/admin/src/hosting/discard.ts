@@ -16,6 +16,7 @@
  *   discard included, by its id. Nothing was ever released for it, so
  *   nothing else needs keeping.
  */
+import "@tanstack/react-start/server-only";
 import { and, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 

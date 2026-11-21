@@ -29,6 +29,7 @@
  *   that fails): run again, it goes on; what's gone counts as deleted.
  * - Anyone but staff: the server functions are behind Access.
  */
+import "@tanstack/react-start/server-only";
 import { deploymentPrefix } from "@grasp-os/shared/names";
 import { and, asc, count, eq, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";

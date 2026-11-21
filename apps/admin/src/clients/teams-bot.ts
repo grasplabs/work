@@ -13,6 +13,7 @@
  * request Teams sends it (core's src/channels/teams.ts). A client without
  * a bot gets neither, and deploys as before.
  */
+import "@tanstack/react-start/server-only";
 import { z } from "zod";
 
 /** A bot as its client's record keeps it. */
